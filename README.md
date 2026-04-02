@@ -109,10 +109,11 @@ for src in resp.grounding_sources:
 ```bash
 pip install lazybridge
 
-# Provider extras
-pip install anthropic          # Anthropic
-pip install openai             # OpenAI
-pip install google-genai       # Google Gemini
+# Provider extras (choose what you need)
+pip install lazybridge[anthropic]   # Anthropic / Claude
+pip install lazybridge[openai]      # OpenAI / GPT
+pip install lazybridge[google]      # Google / Gemini
+pip install lazybridge[all]         # all providers
 ```
 
 ## Project structure
