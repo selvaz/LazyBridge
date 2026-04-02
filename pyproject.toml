@@ -20,10 +20,20 @@ yaml      = ["pyyaml>=6.0"]
 all       = ["anthropic>=0.49.0", "openai>=1.70.0", "google-genai>=1.10.0", "pyyaml>=6.0"]
 
 [project.urls]
-Changelog = "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
+Homepage      = "https://github.com/selvaz/LazyBridge"
+Repository    = "https://github.com/selvaz/LazyBridge"
+Documentation = "https://github.com/selvaz/LazyBridge/tree/main/lazy_wiki"
+Changelog     = "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/selvaz/LazyBridge/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lazybridge"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "MESSAGES.md",
+    "setup_spyder_paths.py",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["lazybridge"]

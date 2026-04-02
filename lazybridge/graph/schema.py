@@ -6,13 +6,12 @@ A GraphSchema is a directed graph where:
 
 The schema is auto-built as agents and tools are created, and can be:
   - Serialised to JSON/YAML for storage or GUI loading
-  - Deserialised back into a descriptor (not live agents — that is future work)
+  - Deserialised back into a descriptor via from_json() / from_file()
   - Inspected programmatically (for debugging or visualisation)
 
-GUI integration (future):
-  The GUI will load the JSON, render the graph, allow edits, and POST it back.
-  The backend (graph/backend.py) will reconstruct the pipeline from the schema.
-  For now, the schema captures structure but reconstruction from JSON is a stub.
+Note: deserialisation reconstructs the graph descriptor (nodes, edges, metadata)
+but not live agent instances. Recreating runnable LazyAgent objects from the
+schema is the caller's responsibility.
 """
 
 from __future__ import annotations
