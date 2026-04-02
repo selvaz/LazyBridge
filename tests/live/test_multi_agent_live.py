@@ -111,6 +111,7 @@ def test_lazystore_shared_state():
 @pytest.mark.live
 def test_session_chain_two_agents():
     """Researcher produces findings; writer receives them via chain context."""
+    require_live_provider(_PROVIDER)
     sess = LazySession(tracking=TrackLevel.BASIC, console=True)
     researcher = LazyAgent(_PROVIDER, model=_MODEL, name="researcher", session=sess)
     writer = LazyAgent(_PROVIDER, model=_MODEL, name="writer", session=sess)
@@ -137,6 +138,7 @@ def test_session_chain_two_agents():
 @pytest.mark.live
 def test_session_parallel_two_agents():
     """Both parallel agents must be called and their outputs concatenated."""
+    require_live_provider(_PROVIDER)
     sess = LazySession(console=True)
     alpha = LazyAgent(_PROVIDER, model=_MODEL, name="alpha", session=sess)
     beta  = LazyAgent(_PROVIDER, model=_MODEL, name="beta",  session=sess)
@@ -160,6 +162,7 @@ def test_session_parallel_two_agents():
 @pytest.mark.live
 def test_session_parallel_partial_failure():
     """If one participant raises, the other's output must still appear."""
+    require_live_provider(_PROVIDER)
     from unittest.mock import MagicMock
     import asyncio
 
@@ -190,6 +193,7 @@ def test_session_parallel_partial_failure():
 @pytest.mark.live
 def test_nested_pipeline_as_tool_for_orchestrator():
     """Orchestrator calls a two-agent chain pipeline via tool use."""
+    require_live_provider(_PROVIDER)
     # Inner session: two-agent chain
     inner_sess = LazySession(console=True)
     step1 = LazyAgent(_PROVIDER, model=_MODEL, name="step1", session=inner_sess)
@@ -221,6 +225,7 @@ def test_nested_pipeline_as_tool_for_orchestrator():
 @pytest.mark.live
 def test_session_tracking_events():
     """TrackLevel.FULL must record model_request and model_response for each agent."""
+    require_live_provider(_PROVIDER)
     sess = LazySession(tracking=TrackLevel.FULL, console=True)
     a = LazyAgent(_PROVIDER, model=_MODEL, name="agent_a", session=sess)
     b = LazyAgent(_PROVIDER, model=_MODEL, name="agent_b", session=sess)
