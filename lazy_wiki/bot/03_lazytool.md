@@ -33,7 +33,7 @@ def from_function(
 `name` defaults to `func.__name__`. `description` defaults to the first line of `func`'s docstring (or `func.__name__` if there is no docstring).
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def search_web(query: str, max_results: int = 5) -> str:
     """Search the web for a query. Returns top results as text."""
@@ -90,7 +90,7 @@ def from_agent(
 Schema is always `{"task": str}`. The orchestrator passes a task string; the delegate's `loop()` or `chat()` receives it.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 from pydantic import BaseModel
 
 class AnalysisResult(BaseModel):
@@ -119,7 +119,7 @@ analyst_tool = LazyTool.from_agent(
 ## 4. Schema modes
 
 ```python
-from lazybridgeframework.lazy_tool import ToolSchemaMode
+from lazybridge.lazy_tool import ToolSchemaMode
 
 ToolSchemaMode.SIGNATURE   # default — introspect type hints at tool creation time
 ToolSchemaMode.LLM         # an LLM generates the full schema; requires schema_llm=
@@ -127,8 +127,8 @@ ToolSchemaMode.HYBRID      # type hints for types, LLM fills in descriptions
 ```
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
-from lazybridgeframework.lazy_tool import ToolSchemaMode
+from lazybridge import LazyAgent, LazyTool
+from lazybridge.lazy_tool import ToolSchemaMode
 
 schema_agent = LazyAgent("anthropic")
 
@@ -171,7 +171,7 @@ result = await tool.arun({"query": "AI news"})
 `guidance` is appended to the calling agent's system prompt (not to the tool's JSON Schema). It appears as `[tool_name]\n<guidance text>` in the assembled system string.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -194,7 +194,7 @@ result = ai.loop("What's the weather like?", tools=[tool])
 Returns a copy of the tool with selective overrides. The cached schema (`_compiled`) is cleared for function-backed tools so it is rebuilt with the new `name`/`description`. Delegate tools keep their fixed `{"task": str}` schema.
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def query_db(region: str, table: str) -> str:
     """Query the database."""
@@ -223,9 +223,9 @@ us_tool = base_tool.specialize(
 `LazyAgent.loop()` normalizes the combined tool list automatically. Accepts mixed `LazyTool | ToolDefinition | dict`.
 
 ```python
-from lazybridgeframework import LazyTool
-from lazybridgeframework.lazy_tool import NormalizedToolSet
-from lazybridgeframework.core.types import ToolDefinition
+from lazybridge import LazyTool
+from lazybridge.lazy_tool import NormalizedToolSet
+from lazybridge.core.types import ToolDefinition
 
 def search(query: str) -> str:
     """Search."""

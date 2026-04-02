@@ -6,7 +6,7 @@ Force the model to return valid JSON matching a schema. Use a Pydantic model or 
 
 ```python
 from pydantic import BaseModel
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 class ArticleIdeas(BaseModel):
     title: str
@@ -44,7 +44,7 @@ print(result["sentiment"])  # "positive"
 On parse failure: `resp.validated == False`, `resp.validation_error` contains the error string. Call `resp.raise_if_failed()` to surface it as an exception.
 
 ```python
-from lazybridgeframework import LazyAgent, StructuredOutputError
+from lazybridge import LazyAgent, StructuredOutputError
 
 ai = LazyAgent("anthropic")
 
@@ -72,7 +72,7 @@ except StructuredOutputError as exc:
 Enable chain-of-thought reasoning before answering.
 
 ```python
-from lazybridgeframework.core.types import ThinkingConfig
+from lazybridge.core.types import ThinkingConfig
 
 ai = LazyAgent("anthropic", model="claude-sonnet-4-6")
 
@@ -124,7 +124,7 @@ async for chunk in await ai.achat("Tell me a story", stream=True):
 Provider-managed tools (e.g. web search, code execution). Run on the provider's infrastructure — no local callable needed.
 
 ```python
-from lazybridgeframework.core.types import NativeTool
+from lazybridge.core.types import NativeTool
 
 ai = LazyAgent("anthropic")
 resp = ai.chat("What is the current price of Bitcoin?", native_tools=[NativeTool.WEB_SEARCH])
@@ -198,7 +198,7 @@ for ai in [ai_claude, ai_gpt, ai_gemini, ai_deepseek]:
 ## tool.specialize() — role-specific tool variants
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def search(query: str, max_results: int = 5) -> str:
     """Search the web."""

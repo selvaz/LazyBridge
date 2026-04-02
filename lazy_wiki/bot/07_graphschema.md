@@ -88,7 +88,7 @@ Note: deserialization reconstructs the graph descriptor only — not live agent 
 ### Usage
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 a1 = LazyAgent("anthropic", name="researcher", session=sess)

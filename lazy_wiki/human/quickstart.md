@@ -7,7 +7,7 @@ Get from zero to a running pipeline in 5 minutes.
 ## Install
 
 ```bash
-pip install lazybridgeframework
+pip install lazybridge
 ```
 
 ---
@@ -29,7 +29,7 @@ export DEEPSEEK_API_KEY="..."
 ## Example 1 — Single call (one line)
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 ai = LazyAgent("anthropic")
 
@@ -58,7 +58,7 @@ ai_deepseek = LazyAgent("deepseek")
 Give the agent a Python function. It will call it automatically when needed.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -86,7 +86,7 @@ That's it. `loop()` handles the full tool-call cycle automatically:
 Two agents, one session, shared state and tracking.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 # Shared container (tracking, store, graph)
 sess = LazySession()

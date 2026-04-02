@@ -9,7 +9,7 @@ End-to-end pipeline examples. Each example is self-contained and runnable.
 An orchestrator calls a researcher and an analyst as tools. Produces a structured report.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 # Sub-agents
 researcher = LazyAgent(
@@ -52,7 +52,7 @@ Three agents run concurrently and their results are combined by an editor.
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess = LazySession()
 
@@ -91,7 +91,7 @@ asyncio.run(main())
 Three agents that don't know about each other. Communication flows through `LazyStore`.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext, LazyStore
+from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore(db="analysis.db")  # persistent
 
@@ -125,7 +125,7 @@ print(report.content)
 A drafter and reviewer work in a loop until the content is approved.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter, LazySession
+from lazybridge import LazyAgent, LazyRouter, LazySession
 
 sess = LazySession(tracking="verbose")
 
@@ -168,7 +168,7 @@ for revision in range(4):   # max 4 revision cycles
 An outer orchestrator manages two inner pipelines, each exposed as a single tool.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 # Inner pipeline A: research
 sess_a = LazySession()
@@ -181,7 +181,7 @@ def research_pipeline(task: str) -> str:
     summary = summariser.chat("Summarise:", context=ctx)
     return summary.content
 
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 research_tool = LazyTool.from_function(
     research_pipeline,
     name="research",

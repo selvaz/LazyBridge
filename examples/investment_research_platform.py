@@ -40,7 +40,7 @@ Key features demonstrated
 - Fully typed Pydantic pipeline without a single def (Variant 4)
 
 Run: python investment_research_platform.py [1|2|3|4]
-Install:  pip install lazybridgeframework pydantic
+Install:  pip install lazybridge pydantic
 API keys: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY
 """
 
@@ -49,7 +49,7 @@ from __future__ import annotations
 import sys
 from pydantic import BaseModel, Field
 
-from lazybridgeframework import (
+from lazybridge import (
     LazyAgent,
     LazySession,
     LazyTool,
@@ -83,12 +83,18 @@ class RiskProfile(BaseModel):
     rationale: str
 
 
+class SectorAllocation(BaseModel):
+    sector: str
+    allocation_pct: str = Field(description="e.g. '25%'")
+    rationale: str
+
+
 class InvestmentReport(BaseModel):
     title: str
     executive_summary: str
     top_opportunities: list[str] = Field(description="Top 3 opportunities")
     top_risks: list[str] = Field(description="Top 3 risks to monitor")
-    sector_allocations: dict[str, str] = Field(description="% allocation per sector")
+    sector_allocations: list[SectorAllocation] = Field(description="Allocation per sector")
     conclusion: str
 
 
@@ -117,7 +123,7 @@ def run_variant_1() -> None:
     print("\n── Variant 1: Three-Tier Orchestrator ──\n")
 
     # Layer 1: three parallel Google researchers, each owns WEB_SEARCH
-    market_sess = LazySession(tracking="basic")
+    market_sess = LazySession(tracking="basic", console=True)
     LazyAgent("google", name="tech_researcher",    session=market_sess,
               native_tools=[NativeTool.WEB_SEARCH],
               system="Technology analyst — AI, semiconductors, cloud. "
@@ -139,15 +145,17 @@ def run_variant_1() -> None:
     )
 
     # Layer 2: chain — agents own their output_schema, no def needed
-    analysis_sess = LazySession(tracking="basic")
+    analysis_sess = LazySession(tracking="basic", console=True)
     LazyAgent("anthropic", name="risk_analyst",  session=analysis_sess,
               output_schema=RiskProfile,
-              system="Senior risk analyst. Given market research, "
-                     "produce a structured risk assessment.")
+              system="Senior risk analyst. Given market research, produce a concise "
+                     "structured risk profile. Output ONLY valid JSON matching the schema — "
+                     "no markdown, no explanation.")
     LazyAgent("openai",    name="report_writer", session=analysis_sess,
               output_schema=InvestmentReport,
-              system="CFA-level report writer. Given a risk profile, "
-                     "produce a comprehensive structured investment report.")
+              system="CFA-level report writer. Given a risk profile, produce a concise "
+                     "structured investment report. Output ONLY valid JSON matching the schema — "
+                     "no markdown, no explanation.")
 
     analysis_chain_tool = analysis_sess.as_tool(
         "analysis_chain",
@@ -158,11 +166,18 @@ def run_variant_1() -> None:
     # Layer 3: orchestrator sees only two black-box tools
     orchestrator = LazyAgent(
         "anthropic", name="orchestrator",
-        system="Investment strategy coordinator. Use market_intelligence to gather "
-               "live sector data, then pass those findings to analysis_chain to "
-               "produce the final report. Present the key conclusions clearly.",
+        verbose=True,
+        system=(
+            "Investment strategy coordinator. Follow these steps exactly:\n"
+            "1. Call market_intelligence ONCE with the full task as-is. "
+            "It will fan out to three specialists internally — do NOT split by sector.\n"
+            "2. Take the combined briefing returned and call analysis_chain ONCE "
+            "with those findings to produce the final structured report.\n"
+            "3. Present the key conclusions from the report clearly."
+        ),
     )
-    orchestrator.loop(TASK, tools=[market_intel_tool, analysis_chain_tool])
+    result = orchestrator.loop(TASK, tools=[market_intel_tool, analysis_chain_tool])
+    print(result.content)
 
 
 # =============================================================================
@@ -179,7 +194,7 @@ def run_variant_2() -> None:
     print("\n── Variant 2: Nested Pipeline (no orchestrator) ──\n")
 
     # Parallel tier
-    market_sess = LazySession(tracking="basic")
+    market_sess = LazySession(tracking="basic", console=True)
     for name, system in [
         ("tech_researcher",
          "Technology analyst — AI, semiconductors, cloud. Web search, concise briefing."),
@@ -197,16 +212,18 @@ def run_variant_2() -> None:
     )
 
     # Sequential tier — output_schema drives automatic json() calls
-    analysis_sess = LazySession(tracking="basic")
+    analysis_sess = LazySession(tracking="basic", console=True)
     risk_analyst  = LazyAgent("anthropic", name="risk_analyst",  session=analysis_sess,
                                output_schema=RiskProfile,
-                               system="Senior risk analyst. Produce a structured risk profile.")
+                               system="Senior risk analyst. Produce a concise structured risk profile. "
+                                      "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
     report_writer = LazyAgent("openai",    name="report_writer", session=analysis_sess,
                                output_schema=InvestmentReport,
-                               system="CFA report writer. Produce a structured investment report.")
+                               system="CFA report writer. Produce a concise structured investment report. "
+                                      "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
 
     # Full pipeline: LazyTool → LazyAgent → LazyAgent, zero extra code
-    full_pipeline = LazySession(tracking="basic").as_tool(
+    full_pipeline = LazySession(tracking="basic", console=True).as_tool(
         "full_investment_pipeline",
         "End-to-end: parallel web research → risk assessment → structured report.",
         mode="chain",
@@ -236,18 +253,19 @@ def run_variant_3() -> None:
     # Step 1: generalist does a broad sweep with the DB tool
     generalist = LazyAgent(
         "anthropic", name="generalist",
+        verbose=True,
         tools=[db_tool],
         system="Generalist researcher. Fetch tech, energy, and biotech data "
                "and summarise the key cross-sector investment themes.",
     )
 
     # Step 2: three sector specialists run in parallel on the generalist's findings
-    specialist_sess = LazySession(tracking="basic")
-    LazyAgent("anthropic", name="tech_specialist",   session=specialist_sess,
+    specialist_sess = LazySession(tracking="basic", console=True)
+    LazyAgent("GEMINI", name="tech_specialist",native_tools=[NativeTool.WEB_SEARCH],   session=specialist_sess,
               system="Deep-tech specialist. Analyse AI and semiconductor opportunities.")
-    LazyAgent("anthropic", name="energy_specialist", session=specialist_sess,
+    LazyAgent("GEMINI", name="energy_specialist",native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess,
               system="Energy transition specialist. Evaluate renewables and grid plays.")
-    LazyAgent("openai",    name="macro_specialist",  session=specialist_sess,
+    LazyAgent("GEMINI",    name="macro_specialist", native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess,
               system="Macro strategist. Assess cross-sector risks and portfolio implications.")
 
     sector_intel_tool = specialist_sess.as_tool(
@@ -258,13 +276,15 @@ def run_variant_3() -> None:
     # Step 3: synthesizer chains after the combined parallel briefings
     synthesizer = LazyAgent(
         "openai", name="synthesizer",
+        verbose=True,
         output_schema=InvestmentReport,
         system="Senior portfolio strategist. Synthesise specialist briefings "
-               "into a structured investment report with allocation recommendations.",
+               "into a structured investment report. "
+               "Output ONLY valid JSON matching the schema — no markdown, no explanation.",
     )
 
     # Chain: LazyAgent → LazyTool → LazyAgent — zero glue code
-    full_pipeline = LazySession(tracking="basic").as_tool(
+    full_pipeline = LazySession(tracking="basic", console=True).as_tool(
         "fan_out_pipeline",
         "Broad sweep → parallel specialisation → structured synthesis.",
         mode="chain",
@@ -290,22 +310,25 @@ def run_variant_4() -> None:
     print("\n── Variant 4: Fully Structured Multi-Provider Pipeline ──\n")
 
     # Layer 1: three Google agents run in parallel, each produces a MarketBriefing
-    market_sess = LazySession(tracking="basic")
+    market_sess = LazySession(tracking="basic", console=True)
     LazyAgent("google", name="tech_researcher",    session=market_sess,
               native_tools=[NativeTool.WEB_SEARCH],
               output_schema=MarketBriefing,
-              system="Technology analyst — AI, semiconductors, cloud. "
-                     "Use web search and produce a structured market briefing.")
+              system="Technology analyst — AI, semiconductors, cloud. Use web search and "
+                     "produce a structured market briefing. "
+                     "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
     LazyAgent("google", name="energy_researcher",  session=market_sess,
               native_tools=[NativeTool.WEB_SEARCH],
               output_schema=MarketBriefing,
-              system="Energy analyst — renewables, oil & gas, grid. "
-                     "Use web search and produce a structured market briefing.")
+              system="Energy analyst — renewables, oil & gas, grid. Use web search and "
+                     "produce a structured market briefing. "
+                     "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
     LazyAgent("google", name="biotech_researcher", session=market_sess,
               native_tools=[NativeTool.WEB_SEARCH],
               output_schema=MarketBriefing,
-              system="Biotech analyst — pharma, genomics, medical devices. "
-                     "Use web search and produce a structured market briefing.")
+              system="Biotech analyst — pharma, genomics, medical devices. Use web search and "
+                     "produce a structured market briefing. "
+                     "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
 
     parallel_market_tool = market_sess.as_tool(
         "parallel_market_research",
@@ -315,19 +338,21 @@ def run_variant_4() -> None:
     )
 
     # Layer 2 + 3: risk analyst and report writer chain after the parallel output
-    analysis_sess = LazySession(tracking="basic")
+    analysis_sess = LazySession(tracking="basic", console=True)
     risk_analyst  = LazyAgent("anthropic", name="risk_analyst",  session=analysis_sess,
                                output_schema=RiskProfile,
-                               system="Senior risk analyst. Given structured market briefings, "
-                                      "produce a structured risk profile per sector.")
+                               system="Senior risk analyst. Given structured market briefings, produce a "
+                                      "concise structured risk profile. "
+                                      "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
     report_writer = LazyAgent("openai",    name="report_writer", session=analysis_sess,
                                output_schema=InvestmentReport,
-                               system="CFA report writer. Given a structured risk profile, "
-                                      "produce a comprehensive structured investment report.")
+                               system="CFA report writer. Given a structured risk profile, produce a "
+                                      "concise structured investment report. "
+                                      "Output ONLY valid JSON matching the schema — no markdown, no explanation.")
 
     # Full pipeline: parallel LazyTool → LazyAgent(RiskProfile) → LazyAgent(InvestmentReport)
     # Three providers, three Pydantic models, one call — zero def
-    pipeline = LazySession(tracking="basic").as_tool(
+    pipeline = LazySession(tracking="basic", console=True).as_tool(
         "fully_structured_pipeline",
         "Parallel Google research → Anthropic risk assessment → OpenAI report.",
         mode="chain",
@@ -350,7 +375,7 @@ _VARIANTS = {
 }
 
 if __name__ == "__main__":
-    choice = sys.argv[1] if len(sys.argv) > 1 else "1"
+    choice = sys.argv[1] if len(sys.argv) > 1 else "4"
     fn = _VARIANTS.get(choice)
     if fn is None:
         print("Usage: python investment_research_platform.py [1|2|3|4]")

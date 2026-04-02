@@ -7,7 +7,7 @@
 ## Creating an agent
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 # Minimal — just pick a provider
 ai = LazyAgent("anthropic")
@@ -49,7 +49,7 @@ print(resp.stop_reason)   # "end_turn"
 Pass a `Memory` object to `chat()` to keep conversation history automatically — no manual list management:
 
 ```python
-from lazybridgeframework import LazyAgent, Memory
+from lazybridge import LazyAgent, Memory
 
 ai  = LazyAgent("anthropic")
 mem = Memory()
@@ -79,7 +79,7 @@ For cross-session persistence (remembering conversations between program restart
 
 ```python
 import json
-from lazybridgeframework import LazyAgent, Memory, LazySession
+from lazybridge import LazyAgent, Memory, LazySession
 
 sess = LazySession(db="chat.db")
 ai  = LazyAgent("anthropic", session=sess)
@@ -99,7 +99,7 @@ sess.store.write("history", json.dumps(mem.history))
 ### Passing conversation history manually
 
 ```python
-from lazybridgeframework.core.types import Message, Role
+from lazybridge.core.types import Message, Role
 
 history = [
     Message(role=Role.USER,      content="My name is Alice."),
@@ -127,7 +127,7 @@ resp = ai.chat(history)
 `loop()` repeatedly calls the LLM until it stops requesting tools or `max_steps` is reached.
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def search_web(query: str) -> str:
     """Search the web and return results."""
@@ -211,7 +211,7 @@ resp = ai.chat("Show me a list", system="Use bullet points.")
 Activate built-in server-side tools (web search, code execution, etc.) with `native_tools`:
 
 ```python
-from lazybridgeframework.core.types import NativeTool
+from lazybridge.core.types import NativeTool
 
 resp = ai.chat(
     "What happened in AI this week?",
@@ -243,7 +243,7 @@ print(resp.content)    # final answer
 For fine-grained control:
 
 ```python
-from lazybridgeframework.core.types import ThinkingConfig
+from lazybridge.core.types import ThinkingConfig
 
 resp = ai.chat(
     "Design a distributed caching system",

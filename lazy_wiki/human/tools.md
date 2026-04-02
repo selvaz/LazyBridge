@@ -7,7 +7,7 @@ Tools let the LLM call your code. `LazyTool` handles schema generation, executio
 ## Wrapping a Python function
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def get_weather(city: str, unit: str = "celsius") -> str:
     """Get current weather for a city."""
@@ -136,7 +136,7 @@ By default LazyBridge uses `SIGNATURE` mode: it reads your type annotations. Two
 ### SIGNATURE (default) — fast, deterministic
 
 ```python
-from lazybridgeframework import LazyTool, ToolSchemaMode
+from lazybridge import LazyTool, ToolSchemaMode
 
 tool = LazyTool.from_function(search_web)                          # implicit
 tool = LazyTool.from_function(search_web, schema_mode=ToolSchemaMode.SIGNATURE)  # explicit
@@ -147,7 +147,7 @@ Use when: you have good type hints and/or docstrings.
 ### HYBRID — types from code, descriptions from LLM
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 llm  = LazyAgent("anthropic")
 tool = LazyTool.from_function(
@@ -196,7 +196,7 @@ tool = LazyTool.from_function(
 Before your function is called, arguments from the LLM are automatically validated:
 
 ```python
-from lazybridgeframework import ToolArgumentValidationError
+from lazybridge import ToolArgumentValidationError
 
 def divide(a: int, b: int) -> float:
     return a / b
@@ -233,7 +233,7 @@ This text appears in the orchestrator's system prompt, not in the tool schema. U
 ## Using tools in a loop
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 ai = LazyAgent("anthropic")
 result = ai.loop(
@@ -281,7 +281,7 @@ The schema is always `{"task": str}`. The orchestrator passes a task string; the
 ## Using a session's pipeline as a tool
 
 ```python
-from lazybridgeframework import LazySession
+from lazybridge import LazySession
 
 sess = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
@@ -334,8 +334,8 @@ Some LLM providers expose **built-in server-side tools** that run on their infra
 Use `NativeTool` to activate them:
 
 ```python
-from lazybridgeframework import LazyAgent
-from lazybridgeframework.core.types import NativeTool
+from lazybridge import LazyAgent
+from lazybridge.core.types import NativeTool
 
 ai = LazyAgent("anthropic")
 resp = ai.chat(
@@ -415,7 +415,7 @@ You do not need to configure any of this — LazyBridge handles the provider-spe
 You can mix `LazyTool`, raw `ToolDefinition`, and dicts in the same list:
 
 ```python
-from lazybridgeframework.core.types import ToolDefinition
+from lazybridge.core.types import ToolDefinition
 
 raw = ToolDefinition(
     name="legacy_api",

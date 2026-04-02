@@ -28,7 +28,7 @@ print(answer)
 ### LazyBridgeFramework
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 answer = LazyAgent("anthropic").text("What is the capital of France?")
 print(answer)
@@ -108,7 +108,7 @@ while True:
 ### LazyBridgeFramework
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -170,7 +170,7 @@ print(message_item.content[0].text)
 ### LazyBridgeFramework
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext
+from lazybridge import LazyAgent, LazyContext
 
 researcher = LazyAgent("anthropic", name="researcher")
 writer     = LazyAgent("openai",    name="writer")
@@ -235,7 +235,7 @@ for attempt in range(3):   # manual retry loop
 ### LazyBridgeFramework
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 from pydantic import BaseModel
 
 class Article(BaseModel):
@@ -305,7 +305,7 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess = LazySession()
 agents = [LazyAgent("openai", name=n, session=sess) for n in ["us", "eu", "asia"]]

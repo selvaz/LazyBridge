@@ -21,7 +21,7 @@ A `LazySession` is the shared container for a multi-agent pipeline. Create one w
 ## Creating a session
 
 ```python
-from lazybridgeframework import LazySession
+from lazybridge import LazySession
 
 # In-memory (default) — data lost when process exits
 sess = LazySession()
@@ -38,7 +38,7 @@ sess = LazySession(tracking="verbose")  # everything including stream chunks
 Attach agents to the session via `session=`:
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
 writer     = LazyAgent("openai",    name="writer",     session=sess)
@@ -57,7 +57,7 @@ researcher.loop("find top AI news")
 sess.store.write("ai_news", researcher._last_output, agent_id=researcher.id)
 
 # Another agent reads without needing a reference to researcher
-from lazybridgeframework import LazyContext
+from lazybridge import LazyContext
 ctx = LazyContext.from_store(sess.store, keys=["ai_news"])
 writer.chat("write a newsletter section", context=ctx)
 
@@ -77,7 +77,7 @@ See [context.md](context.md) for how `LazyContext.from_store` works.
 Every LLM call, tool invocation, and loop step is automatically logged.
 
 ```python
-from lazybridgeframework import Event
+from lazybridge import Event
 
 # All events
 all_events = sess.events.get()
@@ -113,7 +113,7 @@ Run multiple agents at the same time:
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 agent_a = LazyAgent("anthropic", name="news_a", session=sess)

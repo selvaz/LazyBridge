@@ -7,13 +7,13 @@ This file covers the full pipeline that converts a Python function into a provid
 ## Import
 
 ```python
-from lazybridgeframework import (
+from lazybridge import (
     ToolSchemaMode,
     ToolSchemaBuilder,
     ToolArgumentValidationError,
     ToolSchemaBuildError,
 )
-from lazybridgeframework.core.tool_schema import (
+from lazybridge.core.tool_schema import (
     ToolCompileArtifact,
     ToolSourceStatus,
     ArtifactStore,
@@ -55,7 +55,7 @@ Three modes control how the `ToolDefinition` is built:
 ### SIGNATURE (default)
 
 ```python
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 
 def search(query: str, max_results: int = 10) -> list[str]:
     """Search the web for results.
@@ -241,7 +241,7 @@ Before your function is called, arguments from the LLM are validated via a Pydan
 - Extra unexpected arguments (raises if function has no `**kwargs`)
 
 ```python
-from lazybridgeframework import ToolArgumentValidationError
+from lazybridge import ToolArgumentValidationError
 
 def divide(a: int, b: int) -> float:
     """Divide a by b."""
@@ -273,8 +273,8 @@ Use it directly when you need:
 - Auditing which parameters were LLM-enriched
 
 ```python
-from lazybridgeframework import ToolSchemaBuilder
-from lazybridgeframework.core.tool_schema import InMemoryArtifactStore
+from lazybridge import ToolSchemaBuilder
+from lazybridge.core.tool_schema import InMemoryArtifactStore
 
 # Build with artifact caching
 store   = InMemoryArtifactStore()
@@ -306,8 +306,8 @@ tool = LazyTool.from_function(my_fn_with_pydantic_args, schema_builder=builder)
 `build_artifact()` returns a rich object instead of just the definition:
 
 ```python
-from lazybridgeframework import ToolSchemaBuilder
-from lazybridgeframework.core.tool_schema import ToolSchemaMode
+from lazybridge import ToolSchemaBuilder
+from lazybridge.core.tool_schema import ToolSchemaMode
 
 builder  = ToolSchemaBuilder()
 artifact = builder.build_artifact(
@@ -369,7 +369,7 @@ If any of these change (including the function's source code), the fingerprint c
 Implement `ArtifactStore` for a persistent (e.g. SQLite-backed) cache:
 
 ```python
-from lazybridgeframework.core.tool_schema import ArtifactStore, ToolCompileArtifact
+from lazybridge.core.tool_schema import ArtifactStore, ToolCompileArtifact
 
 class MyPersistentStore:
     def get(self, fingerprint: str) -> ToolCompileArtifact | None:

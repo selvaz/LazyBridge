@@ -23,7 +23,7 @@
 ### `from_text(text)` — static string
 
 ```python
-from lazybridgeframework import LazyContext, LazyAgent
+from lazybridge import LazyContext, LazyAgent
 
 ctx = LazyContext.from_text("You are a senior data analyst. Always cite sources.")
 agent = LazyAgent("anthropic", context=ctx)
@@ -36,7 +36,7 @@ The string is captured at construction time and returned verbatim on every `buil
 ### `from_function(fn)` — called at execution time
 
 ```python
-from lazybridgeframework import LazyContext
+from lazybridge import LazyContext
 
 def get_current_user() -> str:
     return f"Current user: {database.get_user()}"
@@ -53,7 +53,7 @@ ctx = LazyContext.from_function(get_current_user)
 ### `from_store(store, *, keys, prefix)` — reads `LazyStore`
 
 ```python
-from lazybridgeframework import LazyContext
+from lazybridge import LazyContext
 
 ctx = LazyContext.from_store(sess.store)                     # all keys
 ctx = LazyContext.from_store(sess.store, keys=["findings"])  # specific keys only
@@ -73,7 +73,7 @@ This uses `store.to_text(keys=keys)` internally. If the store is empty (or all r
 ### `from_agent(agent, *, prefix)` — reads `agent._last_output`
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext
+from lazybridge import LazyAgent, LazyContext
 
 researcher = LazyAgent("anthropic", name="researcher")
 researcher.loop("find the latest AI news")    # sets researcher._last_output
@@ -136,7 +136,7 @@ ctx()          # identical — __call__ delegates to build()
 Each source is called in registration order. Sources that raise exceptions or return empty/whitespace-only strings are silently skipped. Non-empty results are stripped and joined with `"\n\n"`.
 
 ```python
-from lazybridgeframework import LazyContext
+from lazybridge import LazyContext
 
 ctx = LazyContext.from_text("Hello") + LazyContext.from_text("World")
 print(ctx())        # "Hello\n\nWorld"
@@ -168,7 +168,7 @@ The call-level `context` parameter **replaces** (does not append to) the agent-l
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)

@@ -26,7 +26,7 @@ Use `LazyRouter` when:
 ## Basic usage
 
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter
+from lazybridge import LazyAgent, LazyRouter
 
 writer   = LazyAgent("anthropic", name="writer")
 reviewer = LazyAgent("openai",    name="reviewer")
@@ -125,7 +125,7 @@ next_agent = asyncio.run(router.aroute("What are the latest GPU benchmark number
 ## Full pipeline example
 
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter, LazySession
+from lazybridge import LazyAgent, LazyRouter, LazySession
 
 sess = LazySession()
 

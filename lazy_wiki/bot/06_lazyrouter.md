@@ -45,7 +45,7 @@ Use plain Python `if/else` when:
 
 **Basic binary routing:**
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter
+from lazybridge import LazyAgent, LazyRouter
 
 writer   = LazyAgent("anthropic", name="writer")
 reviewer = LazyAgent("openai",    name="reviewer")
@@ -96,7 +96,7 @@ next_agent = asyncio.run(router.aroute("what is the capital of France?"))
 
 **Full pipeline with router:**
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter, LazySession
+from lazybridge import LazyAgent, LazyRouter, LazySession
 
 sess = LazySession()
 planner  = LazyAgent("anthropic", name="planner",  session=sess)

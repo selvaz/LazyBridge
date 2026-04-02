@@ -26,7 +26,7 @@ Problems:
 **LazyContext**: sources are evaluated *at execution time*, not at construction time.
 
 ```python
-from lazybridgeframework import LazyContext
+from lazybridge import LazyContext
 
 ctx = (
     LazyContext.from_text("You are a professional writer.")
@@ -66,7 +66,7 @@ Use for: dynamic data (current date, user profile, database lookup).
 ### 3. From the shared store
 
 ```python
-from lazybridgeframework import LazyStore
+from lazybridge import LazyStore
 
 store = LazyStore()
 
@@ -165,7 +165,7 @@ writer.chat("What is Python?", context=LazyContext.from_text("Write in German.")
 ## Full example
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext, LazyStore
+from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore()
 

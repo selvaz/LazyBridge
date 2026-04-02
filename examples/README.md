@@ -11,7 +11,7 @@ Three implementations of the same pipeline:
 |---|---|---|---|
 | `research_pipeline_raw_sdk.py` | Anthropic + OpenAI SDK, fully manual | ~110 | 2 packages |
 | `research_pipeline_langgraph.py` | LangGraph + LangChain | ~65 | 4 packages |
-| `research_pipeline_lazybridgeframework.py` | LazyBridgeFramework | ~35 | 1 package |
+| `research_pipeline_lazybridge.py` | LazyBridgeFramework | ~35 | 1 package |
 
 ### What the comparison shows
 
@@ -31,5 +31,5 @@ Each file is self-contained. Set your API keys and run:
 export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
 
-python examples/research_pipeline_lazybridgeframework.py
+python examples/research_pipeline_lazybridge.py
 ```

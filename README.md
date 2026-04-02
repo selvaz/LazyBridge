@@ -5,7 +5,7 @@ Zero-boilerplate multi-provider LLM agent framework. One class for every LLM int
 ## Quick start
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 ai = LazyAgent("anthropic")
 print(ai.text("What is the capital of France?"))
@@ -22,7 +22,7 @@ LazyAgent("deepseek")
 ## Tool loop
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -40,7 +40,7 @@ Schema generated automatically from type hints and docstring. No JSON dict, no d
 ## Conversational memory
 
 ```python
-from lazybridgeframework import LazyAgent, Memory
+from lazybridge import LazyAgent, Memory
 
 ai  = LazyAgent("anthropic")
 mem = Memory()
@@ -67,7 +67,7 @@ print(article.title)
 ## Multi-agent pipeline
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess       = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
@@ -85,7 +85,7 @@ print(sess.graph.to_json())   # serializable pipeline topology for GUI
 ## Native provider tools (web search, code execution, …)
 
 ```python
-from lazybridgeframework.core.types import NativeTool
+from lazybridge.core.types import NativeTool
 
 resp = ai.chat(
     "What happened in AI this week?",
@@ -107,7 +107,7 @@ for src in resp.grounding_sources:
 ## Installation
 
 ```bash
-pip install lazybridgeframework
+pip install lazybridge
 
 # Provider extras
 pip install anthropic          # Anthropic
@@ -119,7 +119,7 @@ pip install google-genai       # Google Gemini
 
 ```
 LazyBridgeFramework/
-├── lazybridgeframework/      # Main package
+├── lazybridge/      # Main package
 │   ├── lazy_agent.py         # LazyAgent — single entry point for LLM calls
 │   ├── lazy_session.py       # LazySession — shared store, events, graph
 │   ├── lazy_tool.py          # LazyTool — tool schema + execution

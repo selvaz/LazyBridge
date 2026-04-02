@@ -8,7 +8,7 @@ An orchestrator agent calls sub-agents as tools via `loop()`. Sub-agents are wra
 **State**: each agent has its own conversation history; no shared session needed.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 # Sub-agents
 researcher = LazyAgent(
@@ -84,7 +84,7 @@ Multiple agents run concurrently within the same session. Results are collected 
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess = LazySession(tracking="verbose")
 
@@ -129,7 +129,7 @@ Agents communicate via `LazyStore` (state) and `LazyContext.from_store()` (conte
 **Use case**: long-running pipelines, agents in separate loops, decoupled modules.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext, LazyStore
+from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore(db="pipeline.db")   # persistent SQLite
 
@@ -158,7 +158,7 @@ print(report.content)
 A `LazyRouter` inspects a result and routes to one of several agents.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyRouter, LazySession
+from lazybridge import LazyAgent, LazyRouter, LazySession
 
 sess = LazySession()
 drafter  = LazyAgent("anthropic", name="drafter",  session=sess)
@@ -186,7 +186,7 @@ print(result.content)
 A full pipeline (LazySession) is exposed as a single tool to an external orchestrator.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
 # Inner pipeline
 inner_sess  = LazySession()
@@ -200,7 +200,7 @@ def run_pipeline(task: str) -> str:
     return summary.content
 
 # Expose via LazyTool.from_function for full control:
-from lazybridgeframework import LazyTool
+from lazybridge import LazyTool
 pipeline_tool = LazyTool.from_function(
     run_pipeline,
     name="research_and_summarise",

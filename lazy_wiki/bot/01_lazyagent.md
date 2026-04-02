@@ -5,14 +5,14 @@
 `LazyAgent` is the single entry point for all LLM interaction. The only difference between a stateless and a stateful agent is the `session` parameter. With no session the agent is self-contained; with a session it participates in a shared store, event log, and graph topology.
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 # Stateless
 ai = LazyAgent("anthropic")
 print(ai.chat("hello").content)
 
 # Stateful
-from lazybridgeframework import LazySession
+from lazybridge import LazySession
 sess = LazySession()
 ai = LazyAgent("anthropic", session=sess)
 ```
@@ -32,6 +32,7 @@ LazyAgent(
     context: LazyContext | Callable[[], str] | None = None,
     tools: list[LazyTool | ToolDefinition | dict] | None = None,
     session: LazySession | None = None,
+    verbose: bool = False,
     max_retries: int = 0,
     api_key: str | None = None,
     **kwargs,
@@ -81,6 +82,30 @@ If set:
 - activates event tracking scoped to this agent
 - gives the agent access to `sess.store` (shared blackboard)
 - registers the agent in `sess.graph` on construction
+
+### `verbose: bool = False`
+Prints all tracked events to stdout in real-time as the agent runs — no DB, no extra setup.
+
+- **Standalone agent** (no `session`): creates a private `EventLog` with `console=True`. Events are printed but not stored.
+- **Session agent** (`session=sess`): enables `console=True` on the shared `EventLog`. All agents in that session will print events (including other agents already registered).
+
+```python
+# Standalone — see what a single agent is doing
+ai = LazyAgent("anthropic", verbose=True)
+ai.loop("research AI trends")
+
+# Session — verbose on any agent activates console for the whole session
+sess = LazySession(tracking="basic")
+researcher = LazyAgent("anthropic", name="researcher", session=sess, verbose=True)
+analyst    = LazyAgent("openai",    name="analyst",    session=sess)
+# Both agents will print events
+```
+
+Alternatively, enable console on the session directly:
+
+```python
+sess = LazySession(tracking="basic", console=True)
+```
 
 ### `max_retries: int = 0`
 Retry on HTTP 429 / 5xx. Uses exponential backoff with ±10% jitter.
@@ -163,7 +188,7 @@ def chat(
 ### Memory — stateful conversation
 
 ```python
-from lazybridgeframework import Memory
+from lazybridge import Memory
 
 mem = Memory()
 ai.chat("my name is Marco", memory=mem)
@@ -186,7 +211,7 @@ agent_b.chat("what's the deadline?", memory=mem)
 ### Examples
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext
+from lazybridge import LazyAgent, LazyContext
 from pydantic import BaseModel
 
 ai = LazyAgent("anthropic")
@@ -221,7 +246,7 @@ print(resp.thinking)                  # reasoning trace
 print(resp.content)                   # final answer
 
 # Native provider tools (server-side, no Python callable required)
-from lazybridgeframework.core.types import NativeTool
+from lazybridge.core.types import NativeTool
 resp = ai.chat("What happened in AI this week?", native_tools=[NativeTool.WEB_SEARCH])
 ```
 
@@ -281,7 +306,7 @@ Call-level `tools` are merged with agent-level `self.tools`. `**chat_kwargs` are
 Events fired: `"step"`, `"tool_call"`, `"tool_result"`, `"done"`.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 
 def get_weather(city: str) -> str:
     """Get current weather for a city."""
@@ -310,7 +335,7 @@ print(result.content)
 Use `tool_runner` when tools have no Python callable — e.g. raw `ToolDefinition` items or externally handled tools. The runner receives `(name: str, args: dict)` and returns any value.
 
 ```python
-from lazybridgeframework.core.types import ToolDefinition
+from lazybridge.core.types import ToolDefinition
 
 lookup_def = ToolDefinition(
     name="lookup_price",
@@ -341,7 +366,7 @@ If a tool name is in neither the LazyTool registry nor `tool_runner`, a `Runtime
 `text()` and `json()` call `chat()` and unwrap the result directly.
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 from pydantic import BaseModel
 
 ai = LazyAgent("anthropic")
@@ -359,6 +384,18 @@ print(data.cities)      # ["Paris", "Berlin", "Madrid"]
 ```
 
 Both accept the same `**kwargs` as `chat()`.
+
+### JSON enforcement
+
+`json()` and `ajson()` use a belt-and-suspenders approach to guarantee clean JSON output:
+
+1. **Native structured output API** — passes `output_schema` to the provider (Anthropic constrained sampling, OpenAI strict mode, etc.)
+2. **System prompt injection** — appends the following suffix to the system prompt on every call:
+   > "Respond with a single valid JSON object matching the required schema. No preamble, no explanation, no markdown — JSON only."
+
+This dual enforcement prevents long or complex responses from drifting into markdown or prose wrapping, which some models produce even with native structured output enabled. The suffix is applied automatically — no action needed from the caller.
+
+When an agent is declared with `output_schema=` and participates in a `mode="chain"` pipeline, the chain calls `json()` / `ajson()` automatically at each step.
 
 ---
 
@@ -387,7 +424,7 @@ def as_tool(
 ### Example
 
 ```python
-from lazybridgeframework import LazyAgent
+from lazybridge import LazyAgent
 
 researcher = LazyAgent("anthropic", name="researcher", description="Searches the web")
 
@@ -418,7 +455,7 @@ When the orchestrator calls the tool, `task` is forwarded to `researcher`. If `r
 - Read by `LazyContext.from_agent(agent)` to inject the agent's result into another agent's system prompt.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext
+from lazybridge import LazyAgent, LazyContext
 
 researcher = LazyAgent("anthropic", name="researcher")
 researcher.loop("Summarize latest AI papers")
@@ -441,7 +478,7 @@ All four methods have async equivalents with identical signatures.
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazyTool
+from lazybridge import LazyAgent, LazyTool
 from pydantic import BaseModel
 
 async def main():

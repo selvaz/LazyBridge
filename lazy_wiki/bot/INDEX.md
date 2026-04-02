@@ -53,13 +53,13 @@ Env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API
 ## Import
 
 ```python
-from lazybridgeframework import (
+from lazybridge import (
     LazyAgent, LazySession, LazyTool, LazyContext,
     LazyStore, LazyRouter, GraphSchema,
     TrackLevel, Event,
 )
 # Advanced types:
-from lazybridgeframework.core.types import (
+from lazybridge.core.types import (
     CompletionResponse, CompletionRequest, StreamChunk,
     NativeTool, ThinkingConfig, SkillsConfig,
     StructuredOutputConfig, Message, Role,

@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.1] — 2026-04-02
+
+### Added
+- `verbose: bool = False` on `LazyAgent` — prints all tracked events to stdout in real-time. For standalone agents (no session), creates a private `EventLog(console=True)`. For session agents, enables `console=True` on the shared `EventLog`.
+- `console: bool = False` on `LazySession` — prints events to stdout from the session's `EventLog`.
+- `TrackLevel.FULL` — synonym for `TrackLevel.VERBOSE`.
+- `LazyStore.awrite()` / `aread()` / `aread_all()` / `akeys()` — async wrappers that offload SQLite I/O to the thread-pool executor, preventing event loop blocking in async agent contexts.
+- `Memory.from_history(messages: list[dict])` — classmethod to restore a `Memory` instance from a serialised history list.
+- `LazySession.as_tool()` — new `mode="parallel"` and `mode="chain"` paths with optional `participants=` list. All registered session agents are used by default. Participants can mix `LazyAgent` and `LazyTool` instances (nested pipelines). The `entry_agent=` path is retained for backward compatibility.
+- `_JSON_SYSTEM_SUFFIX` injected into system prompt by `json()` / `ajson()` — belt-and-suspenders JSON enforcement alongside native structured output API.
+
+### Fixed
+- `MODEL_REQUEST` tracking: `model` field used `request.model` (often `None` for default-model calls); now falls back to `self._model_name`.
+- `MODEL_RESPONSE` tracking: added `model` and `content` fields to the event data.
+- `_run_suppressed()` in `lazy_run.py`: custom event loop runner that installs an exception handler suppressing "Event loop is closed" errors from httpx GC-time cleanup tasks, then cancels pending tasks and calls `shutdown_asyncgens()` before closing.
+- Asyncio logging filter in test `conftest.py` — suppresses "Task exception was never retrieved: Event loop is closed" cosmetic warnings from the asyncio logger.
+- `investment_research_platform.py` example: removed invalid `.loop()` call on `LazyTool`; added `SectorAllocation` Pydantic model replacing unsupported `dict[str, str]` for OpenAI structured output; added explicit JSON-only instructions to all schema agents; updated orchestrator system prompt to prevent redundant parallel tool calls.
+
+---
+
 ## [0.3.0] — 2026-03-31
 
 ### Added

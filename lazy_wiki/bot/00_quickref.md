@@ -13,6 +13,7 @@ LazyAgent(
     context: LazyContext | Callable[[], str] | None = None,  # injected into system at execution time
     tools: list[LazyTool | ToolDefinition | dict] | None = None,  # agent-level tools
     session: LazySession | None = None,    # enables tracking, store, graph
+    verbose: bool = False,                 # print events to stdout in real-time (standalone agents)
     max_retries: int = 0,                  # retry on 429/5xx
     api_key: str | None = None,            # overrides env var
     **kwargs,                              # forwarded to provider constructor
@@ -80,7 +81,8 @@ LazyAgent._last_output: str | None  # set after each chat()/loop() call; read by
 LazySession(
     *,
     db: str | None = None,                 # SQLite path; None = in-memory
-    tracking: TrackLevel | str = TrackLevel.BASIC,  # OFF | BASIC | VERBOSE
+    tracking: TrackLevel | str = TrackLevel.BASIC,  # OFF | BASIC | VERBOSE | FULL
+    console: bool = False,                 # print events to stdout in real-time
 )
 
 LazySession.id: str
@@ -93,9 +95,12 @@ LazySession.as_tool(
     name: str,
     description: str,
     *,
-    entry_agent: LazyAgent,
+    mode: str | None = None,               # "parallel" | "chain" (required unless using entry_agent=)
+    participants: list[LazyAgent | LazyTool] | None = None,  # explicit order; defaults to session agents
+    combiner: str = "concat",              # parallel only: "concat" | "last"
+    entry_agent: LazyAgent | None = None,  # legacy single-agent delegation
     guidance: str | None = None,
-) -> LazyTool  # thin wrapper over LazyTool.from_agent(entry_agent, ...)
+) -> LazyTool
 
 LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
@@ -115,6 +120,7 @@ EventLog.agent_log(agent_id: str, agent_name: str | None) -> _AgentLog
 TrackLevel.OFF      # no events logged
 TrackLevel.BASIC    # all events except MESSAGES, SYSTEM_CONTEXT, STREAM_CHUNK
 TrackLevel.VERBOSE  # all events
+TrackLevel.FULL     # synonym for VERBOSE
 ```
 
 ### Event (StrEnum)
@@ -218,6 +224,12 @@ LazyStore.clear() -> None
 LazyStore.to_text(keys: list[str] | None = None) -> str   # for LazyContext.from_store
 LazyStore.__contains__(key) / __getitem__(key) / __setitem__(key, value)
 
+# Async API — non-blocking wrappers for use inside async agent code
+LazyStore.awrite(key: str, value: Any, *, agent_id: str | None = None) -> None
+LazyStore.aread(key: str, default: Any = None) -> Any
+LazyStore.aread_all() -> dict[str, Any]
+LazyStore.akeys() -> list[str]
+
 # StoreEntry fields: key, value, agent_id, written_at (datetime, UTC)
 ```
 
@@ -300,6 +312,7 @@ GraphSchema.from_file(path: str) -> GraphSchema    # classmethod
 
 ```python
 Memory()                          # create empty
+Memory.from_history(messages: list[dict]) -> Memory  # restore from serialised history
 mem.history                       # list[dict] — read-only copy of messages
 len(mem)                          # total messages (user + assistant)
 mem.clear()                       # reset
@@ -331,8 +344,8 @@ StructuredOutputConfig(schema, strict=True, max_retries=1, enable_fallback=True,
 ## ToolSchemaBuilder
 
 ```python
-from lazybridgeframework import ToolSchemaBuilder
-from lazybridgeframework.core.tool_schema import (
+from lazybridge import ToolSchemaBuilder
+from lazybridge.core.tool_schema import (
     InMemoryArtifactStore, ArtifactStore,
     ToolCompileArtifact, ToolSourceStatus,
 )

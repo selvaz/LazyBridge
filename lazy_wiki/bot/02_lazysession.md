@@ -18,19 +18,23 @@ LazySession(
     *,
     db: str | None = None,
     tracking: TrackLevel | str = TrackLevel.BASIC,
+    console: bool = False,
 )
 ```
 
 ```python
-from lazybridgeframework import LazySession
+from lazybridge import LazySession
 
-sess = LazySession()                              # in-memory, BASIC tracking
-sess = LazySession(db="pipeline.db")              # SQLite-backed store + events
-sess = LazySession(tracking="verbose")            # in-memory, VERBOSE tracking
-sess = LazySession(db="run.db", tracking="off")   # SQLite, no tracking
+sess = LazySession()                                          # in-memory, BASIC tracking
+sess = LazySession(db="pipeline.db")                          # SQLite-backed store + events
+sess = LazySession(tracking="verbose")                        # in-memory, VERBOSE tracking
+sess = LazySession(db="run.db", tracking="off")               # SQLite, no tracking
+sess = LazySession(tracking="basic", console=True)            # print events to stdout in real-time
 ```
 
-`db` is a file path. Both `LazyStore` and `EventLog` use the same SQLite file when `db` is set. `tracking` accepts `TrackLevel` enum values or their string equivalents (`"off"`, `"basic"`, `"verbose"`).
+`db` is a file path. Both `LazyStore` and `EventLog` use the same SQLite file when `db` is set. `tracking` accepts `TrackLevel` enum values or their string equivalents (`"off"`, `"basic"`, `"verbose"`, `"full"`).
+
+`console=True` prints all tracked events to stdout in real-time as agents run — useful for debugging pipelines without opening the DB. When `verbose=True` is passed to a `LazyAgent` that belongs to this session, `console` is automatically enabled on the session.
 
 ---
 
@@ -39,7 +43,7 @@ sess = LazySession(db="run.db", tracking="off")   # SQLite, no tracking
 Shared key-value blackboard. See `05_lazystore.md` for the full API. Key pattern: one agent writes results, another reads them via `LazyContext.from_store()` — neither agent needs to know about the other directly.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext
 
 sess = LazySession()
 agent_a = LazyAgent("anthropic", name="researcher", session=sess)
@@ -71,8 +75,8 @@ EventLog.get(
 ```
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession
-from lazybridgeframework.lazy_session import Event
+from lazybridge import LazyAgent, LazySession
+from lazybridge.lazy_session import Event
 
 sess = LazySession()
 agent_a = LazyAgent("anthropic", name="a", session=sess)
@@ -99,6 +103,7 @@ Each event dict has keys: `timestamp`, `agent_id`, `agent_name`, `event_type`, `
 | `TrackLevel.OFF` | Nothing — log calls are no-ops |
 | `TrackLevel.BASIC` | All events except `MESSAGES`, `SYSTEM_CONTEXT`, `STREAM_CHUNK` |
 | `TrackLevel.VERBOSE` | Everything, including high-volume stream chunks |
+| `TrackLevel.FULL` | Synonym for `VERBOSE` |
 
 ### `Event` types
 
@@ -130,7 +135,7 @@ Event.STREAM_CHUNK     # each streaming delta chunk
 The graph is populated automatically as agents are constructed with `session=sess`. No manual registration calls are needed.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 a = LazyAgent("anthropic", name="researcher", session=sess)
@@ -162,7 +167,7 @@ Thin wrapper over `asyncio.gather()`. Runs multiple agent coroutines in parallel
 
 ```python
 import asyncio
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 agent_a = LazyAgent("anthropic", name="researcher", session=sess)
@@ -192,28 +197,118 @@ def as_tool(
     name: str,
     description: str,
     *,
-    entry_agent: LazyAgent,
+    mode: str | None = None,
+    participants: list[LazyAgent | LazyTool] | None = None,
+    combiner: str = "concat",
+    entry_agent: LazyAgent | None = None,
     guidance: str | None = None,
 ) -> LazyTool:
 ```
 
-Wraps `entry_agent` as a `LazyTool` (thin call to `LazyTool.from_agent(entry_agent, ...)`). The tool schema is always `{"task": str}`. The orchestrator passes a task string; `entry_agent` receives it and drives the rest of the pipeline.
+Wraps one or more agents (and/or nested `LazyTool`s) as a single `LazyTool`. The tool schema is always `{"task": str}`. The orchestrator passes a task string; the participants receive it.
+
+### `mode="parallel"` — all agents receive the same task concurrently
+
+All participants run in parallel on the same input task. Their outputs are combined (default: concatenated with agent-name headers) and returned as a single string.
 
 ```python
-from lazybridgeframework import LazyAgent, LazySession
+from lazybridge import LazyAgent, LazySession
 
-sess = LazySession()
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-analyst    = LazyAgent("openai",    name="analyst",    session=sess)
+sess = LazySession(tracking="basic", console=True)
+LazyAgent("anthropic", name="us_analyst",     session=sess, system="US market analyst")
+LazyAgent("openai",    name="europe_analyst",  session=sess, system="European market analyst")
+LazyAgent("google",    name="asia_analyst",    session=sess, system="Asian market analyst")
 
-pipeline_tool = sess.as_tool(
-    "research_pipeline",
-    "Full research and analysis pipeline",
-    entry_agent=researcher,
+news_tool = sess.as_tool(
+    "global_market_news",
+    "Parallel market analysis across US, Europe, and Asia",
+    mode="parallel",
 )
 
 orchestrator = LazyAgent("anthropic")
-orchestrator.loop("prepare a market analysis on EVs", tools=[pipeline_tool])
+orchestrator.loop("Prepare a global market brief", tools=[news_tool])
+```
+
+`participants` defaults to all agents registered in the session (in registration order). Pass an explicit list to control order or include `LazyTool` instances.
+
+`combiner="concat"` (default) joins outputs as:
+```
+[us_analyst]
+<output>
+
+[europe_analyst]
+<output>
+```
+`combiner="last"` returns only the last participant's output.
+
+### `mode="chain"` — agents run sequentially, each receives the previous output
+
+Participants execute in order. The first receives the original task; each subsequent participant receives the previous one's output as its context. The final participant's output is returned.
+
+```python
+from lazybridge import LazyAgent, LazySession
+
+sess = LazySession(tracking="basic", console=True)
+researcher = LazyAgent("anthropic", name="researcher", session=sess,
+                        system="Research analyst. Gather findings.")
+analyst    = LazyAgent("openai",    name="analyst",    session=sess,
+                        system="Risk analyst. Evaluate the findings.")
+writer     = LazyAgent("anthropic", name="writer",     session=sess,
+                        system="Report writer. Produce a final report.")
+
+pipeline_tool = sess.as_tool(
+    "research_pipeline",
+    "Full research → analysis → report pipeline",
+    mode="chain",
+)
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Analyse the EV market", tools=[pipeline_tool])
+```
+
+### Mixing `LazyTool` and `LazyAgent` participants
+
+`participants` can mix `LazyAgent` instances and `LazyTool` instances (including tools created by other sessions). This enables nested pipelines — for example a parallel tier as the first step of a chain:
+
+```python
+# Inner session: three parallel researchers
+market_sess = LazySession(tracking="basic", console=True)
+LazyAgent("google", name="tech_researcher",    session=market_sess,
+          native_tools=[NativeTool.WEB_SEARCH], system="Technology analyst")
+LazyAgent("google", name="energy_researcher",  session=market_sess,
+          native_tools=[NativeTool.WEB_SEARCH], system="Energy analyst")
+
+market_tool = market_sess.as_tool(
+    "market_research", "Parallel web research across tech and energy", mode="parallel"
+)
+
+# Outer session: chain starts with the parallel tool
+analysis_sess = LazySession(tracking="basic", console=True)
+risk_analyst  = LazyAgent("anthropic", name="risk_analyst",  session=analysis_sess,
+                           output_schema=RiskProfile)
+report_writer = LazyAgent("openai",    name="report_writer", session=analysis_sess,
+                           output_schema=InvestmentReport)
+
+pipeline = LazySession(tracking="basic", console=True).as_tool(
+    "full_pipeline",
+    "Parallel research → risk assessment → report",
+    mode="chain",
+    participants=[market_tool, risk_analyst, report_writer],
+)
+
+result = pipeline.run({"task": TASK})
+```
+
+### Legacy: `entry_agent=` (backward-compatible)
+
+For single-agent delegation, pass `entry_agent=` without `mode`. This is a thin wrapper over `LazyTool.from_agent(entry_agent, ...)`.
+
+```python
+pipeline_tool = sess.as_tool(
+    "research_pipeline",
+    "Single-agent research pipeline",
+    entry_agent=researcher,
+)
 ```
 
 ---

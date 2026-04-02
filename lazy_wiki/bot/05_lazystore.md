@@ -84,6 +84,31 @@ Returns a formatted string suitable for injection into a system prompt. Used int
 
 ---
 
+## Async API
+
+Use the async methods when writing to or reading from the store inside `async def` agent code. The synchronous SQLite backend would otherwise block the event loop and starve parallel agents running in the same loop (e.g. via `asyncio.gather` or `LazySession.gather()`).
+
+```python
+store.awrite(key: str, value: Any, *, agent_id: str | None = None) -> None
+store.aread(key: str, default: Any = None) -> Any
+store.aread_all() -> dict[str, Any]
+store.akeys() -> list[str]
+```
+
+Each method offloads the synchronous call to the default thread-pool executor so the loop stays free during the I/O wait.
+
+```python
+async def run():
+    sess = LazySession(db="pipeline.db")
+    await sess.store.awrite("result", {"status": "ok"}, agent_id="agent-1")
+    value = await sess.store.aread("result")
+    all_data = await sess.store.aread_all()
+```
+
+The in-memory backend benefits from thread-pool offloading too (lock contention under `asyncio.gather`). Use the async API consistently in all async contexts.
+
+---
+
 ## StoreEntry
 
 ```python
@@ -112,7 +137,7 @@ class StoreEntry:
 Agent A writes results; Agent B reads them without any direct reference to Agent A.
 
 ```python
-from lazybridgeframework import LazyAgent, LazyContext, LazyStore
+from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore()
 
