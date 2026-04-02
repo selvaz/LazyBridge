@@ -20,7 +20,7 @@ yaml      = ["pyyaml>=6.0"]
 all       = ["anthropic>=0.49.0", "openai>=1.70.0", "google-genai>=1.10.0", "pyyaml>=6.0"]
 
 [project.urls]
-Changelog = "https://github.com/YOUR_USERNAME/lazybridge/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lazybridge"]
