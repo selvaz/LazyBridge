@@ -100,11 +100,16 @@ Without `default`, an unknown key raises `KeyError`.
 
 ## Async condition
 
-Your condition can be an async function:
+Your condition can be an async function. Create the classifier agent once at setup time — not inside the condition, which runs on every route call:
 
 ```python
+import asyncio
+from lazybridge import LazyAgent, LazyRouter
+
+# Create once — reused for every routing decision
+classifier = LazyAgent("anthropic")
+
 async def classify_with_llm(text: str) -> str:
-    classifier = LazyAgent("anthropic")
     label = await classifier.atext(
         f"Classify this task as one of: research / analyse / write. Task: {text}. Return only the label."
     )
@@ -116,7 +121,6 @@ router = LazyRouter(
     default="write",
 )
 
-import asyncio
 next_agent = asyncio.run(router.aroute("What are the latest GPU benchmark numbers?"))
 ```
 

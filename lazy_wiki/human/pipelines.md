@@ -48,40 +48,32 @@ print(result.content)
 
 ## Pipeline 2 — News Aggregator (Parallel, Pattern B)
 
-Three agents run concurrently and their results are combined by an editor.
+Three agents run concurrently and their results are combined by an editor. The parallel gathering is exposed as a single tool — no asyncio boilerplate, no manual store writes, no context wiring.
 
 ```python
-import asyncio
-from lazybridge import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 
-us_agent  = LazyAgent("anthropic", name="us_news",  session=sess)
-eu_agent  = LazyAgent("openai",    name="eu_news",  session=sess)
-asia_agent = LazyAgent("google",   name="asia_news", session=sess)
+# Parallel tool: all three agents receive the same task and results are concatenated
+gather_news = sess.as_tool(
+    "gather_global_news",
+    "Simultaneously gather AI news from the US, Europe, and Asia",
+    mode="parallel",
+    participants=[
+        LazyAgent("anthropic", name="us_news",   session=sess),
+        LazyAgent("openai",    name="eu_news",   session=sess),
+        LazyAgent("google",    name="asia_news", session=sess),
+    ],
+    combiner="concat",
+)
 
-async def main():
-    # Concurrent research
-    results = await sess.gather(
-        us_agent.aloop("Summarise the most important AI news from the US this week."),
-        eu_agent.aloop("Summarise the most important AI news from Europe this week."),
-        asia_agent.aloop("Summarise the most important AI news from Asia this week."),
-    )
-
-    # Store results
-    sess.store.write("us",   results[0].content, agent_id=us_agent.id)
-    sess.store.write("eu",   results[1].content, agent_id=eu_agent.id)
-    sess.store.write("asia", results[2].content, agent_id=asia_agent.id)
-
-    # Editor combines all three
-    ctx = LazyContext.from_store(sess.store, keys=["us", "eu", "asia"])
-    editor = LazyAgent("anthropic", name="editor", context=ctx, session=sess)
-    newsletter = editor.chat(
-        "Write a 400-word global AI news digest combining all three regional summaries."
-    )
-    print(newsletter.content)
-
-asyncio.run(main())
+editor = LazyAgent("anthropic", name="editor", session=sess)
+newsletter = editor.loop(
+    "Gather today's AI news from the US, Europe, and Asia, then write a 400-word global digest.",
+    tools=[gather_news],
+)
+print(newsletter.content)
 ```
 
 ---
@@ -165,34 +157,26 @@ for revision in range(4):   # max 4 revision cycles
 
 ## Pipeline 5 — Nested Pipelines (Pipeline as Tool)
 
-An outer orchestrator manages two inner pipelines, each exposed as a single tool.
+An outer orchestrator manages two inner pipelines, each exposed as a single tool. Inner pipelines are declared with `as_tool(mode="chain")` — no wrapper functions, no manual context wiring.
 
 ```python
-from lazybridge import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession
 
-# Inner pipeline A: research
+# Inner pipeline A: research → summarise (chain: summariser receives researcher's output)
 sess_a = LazySession()
-researcher = LazyAgent("anthropic", name="researcher", session=sess_a)
-summariser = LazyAgent("openai",    name="summariser", session=sess_a)
-
-def research_pipeline(task: str) -> str:
-    researcher.loop(task)
-    ctx = LazyContext.from_agent(researcher)
-    summary = summariser.chat("Summarise:", context=ctx)
-    return summary.content
-
-from lazybridge import LazyTool
-research_tool = LazyTool.from_function(
-    research_pipeline,
-    name="research",
-    description="Deep-research any topic and return a summary.",
+research_tool = sess_a.as_tool(
+    "research",
+    "Deep-research any topic and return a concise summary.",
+    mode="chain",
+    participants=[
+        LazyAgent("anthropic", name="researcher", session=sess_a),
+        LazyAgent("openai",    name="summariser", session=sess_a),
+    ],
 )
 
-# Inner pipeline B: fact-checking
+# Inner pipeline B: fact-checking (single agent, exposed as tool)
 sess_b = LazySession()
-checker = LazyAgent("anthropic", name="checker", session=sess_b)
-fact_tool = LazyTool.from_agent(
-    checker,
+fact_tool = LazyAgent("anthropic", name="checker", session=sess_b).as_tool(
     name="fact_check",
     description="Verify claims and return a fact-check report.",
 )

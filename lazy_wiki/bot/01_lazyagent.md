@@ -31,6 +31,8 @@ LazyAgent(
     system: str | None = None,
     context: LazyContext | Callable[[], str] | None = None,
     tools: list[LazyTool | ToolDefinition | dict] | None = None,
+    native_tools: list[NativeTool | str] | None = None,
+    output_schema: type | dict | None = None,
     session: LazySession | None = None,
     verbose: bool = False,
     max_retries: int = 0,
@@ -76,6 +78,12 @@ Agent-level context. Evaluated and injected into the system prompt at every call
 
 ### `tools: list[LazyTool | ToolDefinition | dict] | None = None`
 Agent-level tools. Merged with per-call tools in `loop()` / `chat()`. These are the tools used when this agent is invoked as a delegated tool (via `as_tool()`).
+
+### `native_tools: list[NativeTool | str] | None = None`
+Provider-managed tools (e.g. `NativeTool.WEB_SEARCH`, `NativeTool.CODE_EXECUTION`). No Python callable needed — executed server-side by the provider. Merged with per-call `native_tools`. Accepts both `NativeTool` enum values and plain strings.
+
+### `output_schema: type | dict | None = None`
+Agent-level structured output schema. If set, every `chat()` / `loop()` call returns `resp.parsed` as a validated Pydantic instance (or dict). Can be overridden per-call. When this agent is used in a `mode="chain"` pipeline, `json()` is called automatically instead of `chat()`.
 
 ### `session: LazySession | None = None`
 If set:
@@ -174,6 +182,7 @@ def chat(
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    tool_choice: str | None = None,        # "auto"|"none"|"required"|"<tool_name>"
     context: LazyContext | Callable[[], str] | None = None,
     **kwargs,
 ) -> CompletionResponse | Iterator[StreamChunk]:

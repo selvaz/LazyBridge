@@ -1,5 +1,68 @@
 # Pipeline Patterns — Complete Runnable Code
 
+## Choosing the right pattern
+
+```
+Do you need one agent to drive others, deciding what to call and when?
+│
+├─ YES → Pattern A (Hierarchy)
+│         orchestrator.loop(..., tools=[agent_a.as_tool(), agent_b.as_tool()])
+│
+└─ NO
+   │
+   ├─ Do agents run independently on the same task, in parallel?
+   │   │
+   │   ├─ YES, and you want automatic wiring → Pattern B via sess.as_tool(mode="parallel")
+   │   │                                        or manual: await sess.gather(a.achat(...), b.achat(...))
+   │   │
+   │   └─ YES, but decoupled (different loops, different scripts, persistent state)
+   │             → Pattern C (Network via LazyStore)
+   │
+   ├─ Do agents run sequentially, each feeding output to the next?
+   │   │
+   │   └─ YES → Pattern B via sess.as_tool(mode="chain")
+   │             or manual: result = a.chat(task); b.chat(result.content)
+   │
+   ├─ Do you need to branch to different agents based on a condition?
+   │   │
+   │   └─ YES → Pattern D (LazyRouter)
+   │             router = LazyRouter(condition=fn, routes={...})
+   │             next_agent = router.route(result)
+   │
+   └─ Do you need to expose a whole pipeline as a single tool to an outer orchestrator?
+             → Pattern E (Pipeline as Tool)
+               pipeline_tool = LazyTool.from_function(run_pipeline, ...)
+```
+
+### Which method to call on a single agent?
+
+```
+Do you need tool use (the agent calls Python functions)?
+│
+├─ YES → agent.loop() / agent.aloop()
+│
+└─ NO
+   │
+   ├─ Do you need structured output (Pydantic/JSON schema)?
+   │   │
+   │   ├─ YES → agent.json(msg, schema=MyModel) / agent.ajson(...)
+   │   │         (native structured output + JSON enforcement in system prompt)
+   │   │
+   │   └─ NO
+   │       │
+   │       ├─ Do you need just the text string, not the full CompletionResponse?
+   │       │   └─ YES → agent.text(msg) / agent.atext(...)
+   │       │
+   │       └─ NO → agent.chat(msg) / agent.achat(...)
+   │                (returns CompletionResponse with .content, .usage, .tool_calls, etc.)
+   │
+   └─ Do you need streaming output?
+               └─ agent.chat(msg, stream=True)  →  Iterator[StreamChunk]
+                  agent.achat(msg, stream=True) →  AsyncIterator[StreamChunk]
+```
+
+---
+
 ## Pattern A — Hierarchy (Orchestrator + Sub-agents)
 
 An orchestrator agent calls sub-agents as tools via `loop()`. Sub-agents are wrapped with `as_tool()` or `LazyTool.from_agent()`.
@@ -77,45 +140,53 @@ result = orchestrator.loop(
 
 ## Pattern B — Parallel (Concurrent Agents, Shared Session)
 
-Multiple agents run concurrently within the same session. Results are collected by `gather()`.
+Multiple agents run concurrently. Expose them as a single `mode="parallel"` tool — no asyncio boilerplate, no manual store writes, no context wiring.
 
-**Communication**: each agent works independently; side effects via `LazyStore`.
+**Communication**: the parallel tool concatenates outputs and returns them as a tool result.
 **Use case**: fan-out research, parallel processing of different topics.
 
 ```python
-import asyncio
-from lazybridge import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession(tracking="verbose")
 
-agent_tech   = LazyAgent("anthropic", name="tech_researcher",   session=sess)
-agent_market = LazyAgent("openai",    name="market_researcher", session=sess)
-agent_legal  = LazyAgent("anthropic", name="legal_researcher",  session=sess)
+research_tool = sess.as_tool(
+    "multi_domain_research",
+    "Simultaneously research transformer architecture, market trends, and AI regulation",
+    mode="parallel",
+    participants=[
+        LazyAgent("anthropic", name="tech_researcher",   session=sess),
+        LazyAgent("openai",    name="market_researcher", session=sess),
+        LazyAgent("anthropic", name="legal_researcher",  session=sess),
+    ],
+    combiner="concat",
+)
+
+editor = LazyAgent("anthropic", name="editor", session=sess)
+report = editor.loop(
+    "Research the current state of AI across technology, market, and regulation. Write an executive summary.",
+    tools=[research_tool],
+)
+print(report.content)
+```
+
+**When you need the raw concurrent results** (e.g. to store them individually or inspect per-agent output), use `sess.gather()` directly:
+
+```python
+import asyncio
+from lazybridge import LazyAgent, LazySession
+
+sess = LazySession()
+agent_tech   = LazyAgent("anthropic", name="tech",   session=sess)
+agent_market = LazyAgent("openai",    name="market", session=sess)
 
 async def main():
-    results = await sess.gather(
-        agent_tech.aloop("Summarise the latest advances in transformer architectures."),
-        agent_market.aloop("Summarise the latest AI market trends and funding rounds."),
-        agent_legal.aloop("Summarise recent AI regulation developments in the EU and US."),
+    tech, market = await sess.gather(
+        agent_tech.aloop("Summarise transformer advances"),
+        agent_market.aloop("Summarise AI market trends"),
     )
-
-    # Each result is a CompletionResponse
-    tech_result, market_result, legal_result = results
-
-    # Store for cross-agent use
-    sess.store.write("tech",   tech_result.content,   agent_id=agent_tech.id)
-    sess.store.write("market", market_result.content, agent_id=agent_market.id)
-    sess.store.write("legal",  legal_result.content,  agent_id=agent_legal.id)
-
-    # Combine into a final report
-    ctx = (
-        LazyContext.from_store(sess.store, keys=["tech"])
-        + LazyContext.from_store(sess.store, keys=["market"])
-        + LazyContext.from_store(sess.store, keys=["legal"])
-    )
-    editor = LazyAgent("anthropic", name="editor", context=ctx, session=sess)
-    report = editor.chat("Write an executive summary combining all three sections.")
-    print(report.content)
+    sess.store.write("tech",   tech.content,   agent_id=agent_tech.id)
+    sess.store.write("market", market.content, agent_id=agent_market.id)
 
 asyncio.run(main())
 ```
@@ -124,29 +195,29 @@ asyncio.run(main())
 
 ## Pattern C — Network (Cross-loop, No Direct References)
 
-Agents communicate via `LazyStore` (state) and `LazyContext.from_store()` (context injection). Agents don't need to know about each other.
+Agents communicate via `LazyStore` (state) and `LazyContext.from_store()` (context injection). Agents don't need to know about each other. Declare contexts at construction — they are evaluated lazily when the agent actually runs.
 
-**Use case**: long-running pipelines, agents in separate loops, decoupled modules.
+**Use case**: long-running pipelines, agents in separate loops, persistent state across restarts.
 
 ```python
 from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore(db="pipeline.db")   # persistent SQLite
 
-# --- Loop 1: Data Collection ---
+# Declare contexts upfront — LazyContext.from_store reads the store at call time
 collector = LazyAgent("anthropic", name="collector")
-result = collector.loop("collect the top 5 AI papers published this week")
-store.write("papers", result.content, agent_id=collector.id)
+analyst   = LazyAgent("openai",    name="analyst",
+                      context=LazyContext.from_store(store, keys=["papers"]))
+writer    = LazyAgent("anthropic", name="writer",
+                      context=LazyContext.from_store(store, keys=["papers", "analysis"]))
 
-# --- Loop 2: Analysis (no reference to collector) ---
-ctx = LazyContext.from_store(store, keys=["papers"])
-analyst = LazyAgent("openai", name="analyst", context=ctx)
-analysis = analyst.chat("Identify the 3 most impactful findings from these papers.")
-store.write("analysis", analysis.content, agent_id=analyst.id)
+# Pipeline: each step writes to store; the next step's context picks it up automatically
+collector.loop("Collect the top 5 AI papers published this week")
+store.write("papers", collector._last_output, agent_id=collector.id)
 
-# --- Loop 3: Report Writing (no reference to analyst or collector) ---
-ctx2 = LazyContext.from_store(store, keys=["papers", "analysis"])
-writer = LazyAgent("anthropic", name="writer", context=ctx2)
+analyst.chat("Identify the 3 most impactful findings from these papers.")
+store.write("analysis", analyst._last_output, agent_id=analyst.id)
+
 report = writer.chat("Write a professional newsletter section from this material.")
 print(report.content)
 ```
@@ -183,35 +254,21 @@ print(result.content)
 
 ## Pattern E — Pipeline as Tool (Nested Orchestration)
 
-A full pipeline (LazySession) is exposed as a single tool to an external orchestrator.
+A full pipeline (LazySession) is exposed as a single tool to an external orchestrator. Use `as_tool(mode="chain")` — no wrapper functions, no manual context wiring.
 
 ```python
 from lazybridge import LazyAgent, LazySession
 
-# Inner pipeline
-inner_sess  = LazySession()
-researcher  = LazyAgent("anthropic", name="researcher",  session=inner_sess)
-summariser  = LazyAgent("openai",    name="summariser",  session=inner_sess)
-
-def run_pipeline(task: str) -> str:
-    res = researcher.loop(task)
-    summariser_ctx = LazyContext.from_agent(researcher)
-    summary = summariser.chat("summarise", context=summariser_ctx)
-    return summary.content
-
-# Expose via LazyTool.from_function for full control:
-from lazybridge import LazyTool
-pipeline_tool = LazyTool.from_function(
-    run_pipeline,
-    name="research_and_summarise",
-    description="Researches a topic and returns a summary.",
-)
-
-# Or via sess.as_tool (entry_agent drives the rest):
-pipeline_tool2 = inner_sess.as_tool(
-    "research_pipeline",
-    "Run full research pipeline",
-    entry_agent=researcher,
+# Inner pipeline: researcher feeds output directly to summariser
+inner_sess = LazySession()
+pipeline_tool = inner_sess.as_tool(
+    "research_and_summarise",
+    "Researches a topic and returns a concise summary.",
+    mode="chain",
+    participants=[
+        LazyAgent("anthropic", name="researcher", session=inner_sess),
+        LazyAgent("openai",    name="summariser", session=inner_sess),
+    ],
 )
 
 # External orchestrator

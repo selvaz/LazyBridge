@@ -280,17 +280,21 @@ The schema is always `{"task": str}`. The orchestrator passes a task string; the
 
 ## Using a session's pipeline as a tool
 
+Expose an entire multi-agent pipeline as a single callable tool using `mode="chain"` (agents run sequentially, each receiving the previous output) or `mode="parallel"` (all agents receive the same task and results are combined):
+
 ```python
-from lazybridge import LazySession
+from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
 analyst    = LazyAgent("openai",    name="analyst",    session=sess)
 
+# Chain: researcher runs first, analyst receives researcher's output
 pipeline_tool = sess.as_tool(
     "research_and_analyse",
-    "Runs research and analysis pipeline, returns final report",
-    entry_agent=researcher,
+    "Researches a topic and produces an analysis. Returns the analyst's report.",
+    mode="chain",
+    participants=[researcher, analyst],
 )
 
 master = LazyAgent("anthropic")
@@ -415,22 +419,40 @@ You do not need to configure any of this — LazyBridge handles the provider-spe
 You can mix `LazyTool`, raw `ToolDefinition`, and dicts in the same list:
 
 ```python
+from lazybridge import LazyAgent, LazyTool
 from lazybridge.core.types import ToolDefinition
 
+# A normal LazyTool with a Python callable
+def search_web(query: str) -> str:
+    """Search the web."""
+    return f"Results for: {query}"
+
+my_lazy_tool = LazyTool.from_function(search_web)
+
+# A raw ToolDefinition for a tool handled externally (no Python callable)
 raw = ToolDefinition(
     name="legacy_api",
-    description="Query our legacy API",
+    description="Query our legacy internal API",
     parameters={"type": "object", "properties": {"endpoint": {"type": "string"}}, "required": ["endpoint"]},
 )
 
+def call_legacy_api(endpoint: str) -> str:
+    return f"Response from {endpoint}"
+
+def tool_runner(name: str, args: dict):
+    if name == "legacy_api":
+        return call_legacy_api(args["endpoint"])
+    raise RuntimeError(f"Unknown tool: {name}")
+
+ai = LazyAgent("anthropic")
 result = ai.loop(
-    "Query the system",
+    "Search for AI news and then query the /ai-index endpoint",
     tools=[my_lazy_tool, raw],
-    tool_runner=lambda name, args: my_legacy_api(args["endpoint"]),  # handles raw tools
+    tool_runner=tool_runner,   # called for tools without a LazyTool callable
 )
 ```
 
-`tool_runner` is a fallback for tools that don't have a LazyTool callable.
+`tool_runner` receives `(name: str, args: dict)` and is called only for tools that don't have a registered Python callable. `LazyTool` instances are always called directly and never reach `tool_runner`.
 
 ---
 

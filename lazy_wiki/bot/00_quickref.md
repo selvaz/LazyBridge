@@ -12,6 +12,8 @@ LazyAgent(
     system: str | None = None,             # base system prompt
     context: LazyContext | Callable[[], str] | None = None,  # injected into system at execution time
     tools: list[LazyTool | ToolDefinition | dict] | None = None,  # agent-level tools
+    native_tools: list[NativeTool | str] | None = None,         # provider-managed tools (web search, etc.)
+    output_schema: type | dict | None = None,                   # agent-level structured output schema
     session: LazySession | None = None,    # enables tracking, store, graph
     verbose: bool = False,                 # print events to stdout in real-time (standalone agents)
     max_retries: int = 0,                  # retry on 429/5xx
@@ -255,7 +257,7 @@ GraphSchema(session_id: str)  # auto-created by LazySession
 
 GraphSchema.add_agent(agent: LazyAgent) -> None
 GraphSchema.add_router(router: LazyRouter) -> None
-GraphSchema.add_edge(src_id: str, dst_id: str, *, type: EdgeType, label: str | None = None) -> None
+GraphSchema.add_edge(src_id: str, dst_id: str, *, kind: EdgeType | str = EdgeType.TOOL, label: str | None = None) -> None
 GraphSchema.to_dict() -> dict
 GraphSchema.to_json() -> str
 GraphSchema.to_yaml() -> str               # requires PyYAML

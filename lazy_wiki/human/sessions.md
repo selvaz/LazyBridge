@@ -139,18 +139,18 @@ All three run concurrently. `gather()` waits for all to finish and returns resul
 
 ## Exposing the whole pipeline as a tool
 
-A pipeline (session) can itself be used as a tool by an external orchestrator:
+A pipeline (session) can itself be used as a tool by an external orchestrator. Use `mode="chain"` so each agent's output flows into the next automatically — no manual context wiring:
 
 ```python
 sess = LazySession()
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-analyst    = LazyAgent("openai",    name="analyst",    session=sess)
-
-# researcher drives the pipeline; analyst reads researcher's output separately
 pipeline_tool = sess.as_tool(
     "research_pipeline",
-    "Runs the full research pipeline and returns a summary",
-    entry_agent=researcher,
+    "Researches a topic, then produces an analysis. Returns the analyst's report.",
+    mode="chain",
+    participants=[
+        LazyAgent("anthropic", name="researcher", session=sess),
+        LazyAgent("openai",    name="analyst",    session=sess),
+    ],
 )
 
 # External orchestrator
@@ -189,8 +189,9 @@ sess.store.write("phase1", researcher._last_output)
 # process exits — data saved to project.db
 
 # Run 2 — pick up where you left off
+from lazybridge import LazyAgent, LazySession, LazyContext  # agents must be reconstructed each run
+
 sess2 = LazySession(db="project.db")
-phase1_data = sess2.store.read("phase1")
 writer = LazyAgent("openai", session=sess2)
 ctx = LazyContext.from_store(sess2.store, keys=["phase1"])
 writer.chat("continue from this research", context=ctx)

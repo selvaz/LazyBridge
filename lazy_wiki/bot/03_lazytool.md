@@ -110,9 +110,14 @@ analyst_tool = LazyTool.from_agent(
 
 ### Dispatch logic when the tool is called
 
-1. If `output_schema` is set: `agent.chat(task, output_schema=...)` is called; `resp.parsed` is returned (falls back to `resp.content` if `parsed` is `None`).
-2. If the agent has bound tools (`agent.tools`) or `native_tools` is set: `agent.loop(task, tools=agent.tools, native_tools=...)` is called.
-3. Otherwise: `agent.chat(task)` is called; `resp.content` is returned.
+| `output_schema` | tools / native_tools | Method called | Returns |
+|---|---|---|---|
+| set | set | `agent.loop(task, tools=..., output_schema=...)` | `resp.parsed` (fallback: `resp.content`) |
+| set | — | `agent.chat(task, output_schema=...)` | `resp.parsed` (fallback: `resp.content`) |
+| — | set | `agent.loop(task, tools=..., native_tools=...)` | `resp.content` |
+| — | — | `agent.chat(task)` | `resp.content` |
+
+If `output_schema` is set and the result fails schema validation, a `ValueError` is raised with the validation error message.
 
 ---
 

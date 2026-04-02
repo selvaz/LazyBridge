@@ -165,29 +165,27 @@ message_item = next(item for item in writer_resp.output if item.type == "message
 print(message_item.content[0].text)
 ```
 
-**~22 lines, 5 concepts** (two clients, two different APIs, two different response formats, manual output bridging, two different content extraction patterns)
+**~20 lines, 5 concepts** (two clients, two different APIs, two different response formats, manual output bridging, two different content extraction patterns)
 
 ### LazyBridgeFramework
+
+Bind the writer's context to the researcher at construction — it's evaluated lazily when the writer actually runs:
 
 ```python
 from lazybridge import LazyAgent, LazyContext
 
-researcher = LazyAgent("anthropic", name="researcher")
-writer     = LazyAgent("openai",    name="writer")
+researcher = LazyAgent("anthropic")
+writer     = LazyAgent("openai", context=LazyContext.from_agent(researcher))
 
-researcher.loop("Find AI news this week")
-result = writer.chat(
-    "Write a newsletter section",
-    context=LazyContext.from_agent(researcher),
-)
-print(result.content)
+researcher.chat("Find AI news this week")
+print(writer.text("Write a newsletter section"))
 ```
 
-**6 lines, 2 concepts** (create agents, pipe output)
+**4 lines, 2 concepts** (create agents, run in order)
 
 Key benefits:
 - Single unified API across providers
-- Output bridging handled by `LazyContext.from_agent`
+- Context declared upfront — no mid-pipeline wiring
 - No format translation between SDK response types
 - Adding a third provider = adding one line
 
@@ -304,26 +302,172 @@ asyncio.run(main())
 ### LazyBridgeFramework
 
 ```python
-import asyncio
-from lazybridge import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession
 
-sess = LazySession()
-agents = [LazyAgent("openai", name=n, session=sess) for n in ["us", "eu", "asia"]]
-tasks  = ["US AI news", "Europe AI news", "Asia AI news"]
+sess    = LazySession()
+regions = ["the United States", "Europe", "Asia"]
 
-async def main():
-    results = await sess.gather(*[a.aloop(t) for a, t in zip(agents, tasks)])
-    for agent, result in zip(agents, results):
-        sess.store.write(agent.name, result.content)
+news_tool = sess.as_tool(
+    "gather_news", "Simultaneously gather AI news from three regions",
+    mode="parallel",
+    participants=[
+        LazyAgent("openai", system=f"Report AI news from {r} only.", session=sess)
+        for r in regions
+    ],
+    combiner="concat",
+)
 
-    editor = LazyAgent("openai", context=LazyContext.from_store(sess.store), session=sess)
-    digest = await editor.achat("Write a global AI digest")
-    print(digest.content)
-
-asyncio.run(main())
+digest = LazyAgent("openai", session=sess).loop(
+    "Gather regional AI news summaries. Write a 200-word global digest.",
+    tools=[news_tool],
+)
+print(digest.content)
 ```
 
-**~12 lines** — and gains event tracking, graph visualization, and a shared store for free.
+**~14 lines, no asyncio, no output-item parsing** — and gains event tracking, graph visualization, and a shared store for free.
+
+---
+
+## Task 6 — Stateful conversation (memory)
+
+Without memory, every turn starts from scratch. The raw SDK requires you to maintain the message list manually.
+
+### Raw Anthropic SDK
+
+```python
+import anthropic
+
+client   = anthropic.Anthropic()
+messages = []   # you own this list — you must append every turn correctly
+
+def chat(user_msg: str) -> str:
+    messages.append({"role": "user", "content": user_msg})
+    resp = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=512,
+        messages=messages,
+    )
+    assistant_msg = resp.content[0].text
+    messages.append({"role": "assistant", "content": assistant_msg})
+    return assistant_msg
+
+print(chat("My name is Marco"))
+print(chat("What is my name?"))
+print(chat("What did we discuss so far?"))
+```
+
+**~18 lines** — manual list ownership, mutation risk, no built-in persistence, breaks if you forget to append
+
+### LazyBridgeFramework
+
+```python
+from lazybridge import LazyAgent, Memory
+
+ai  = LazyAgent("anthropic")
+mem = Memory()
+
+print(ai.text("My name is Marco",          memory=mem))
+print(ai.text("What is my name?",          memory=mem))
+print(ai.text("What did we discuss so far?", memory=mem))
+```
+
+**4 lines, 1 concept** — `Memory` manages history automatically. Thread-safe, cross-agent, serialisable via `mem.history`.
+
+Key benefits:
+- No list management — `Memory._build_input()` constructs the message list read-only, never mutates
+- Same `Memory` object works across agents from different providers
+- Persist and restore: `json.dumps(mem.history)` / `Memory.from_history(data)`
+
+---
+
+## Task 7 — Native web search (no Python function needed)
+
+Provider-side tools (web search, code execution) normally require beta headers, specific tool schemas, and non-trivial response parsing.
+
+### Raw Anthropic SDK
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+resp = client.beta.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    betas=["web-search-2026-03-05"],          # beta header required — changes without notice
+    tools=[{"type": "web_search_20260209"}],   # provider-specific tool type string
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+)
+# Filter content blocks — response mixes TextBlock and ToolResultBlock
+text    = next(b.text for b in resp.content if hasattr(b, "text"))
+sources = [b for b in resp.content if b.type == "web_search_result"]
+print(text)
+for s in sources:
+    print(s.url, s.title)
+```
+
+**~14 lines** — beta opt-in, provider-specific type strings, content block filtering, breaks when beta graduates
+
+### LazyBridgeFramework
+
+```python
+from lazybridge import LazyAgent
+from lazybridge.core.types import NativeTool
+
+resp = LazyAgent("anthropic").chat(
+    "What happened in AI this week?",
+    native_tools=[NativeTool.WEB_SEARCH],
+)
+print(resp.content)
+for src in resp.grounding_sources:
+    print(src.url, src.title)
+```
+
+**6 lines, 1 concept** — same code works on OpenAI and Google (change `"anthropic"`)
+
+Key benefits:
+- Beta headers managed automatically — updated as providers graduate from beta
+- Unified `NativeTool` enum across all providers
+- Citations always in `resp.grounding_sources` regardless of provider response format
+- Can combine with your own `LazyTool` functions in the same call
+
+---
+
+## Task 8 — Streaming output
+
+### Raw Anthropic SDK
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+with client.messages.stream(
+    model="claude-sonnet-4-6",
+    max_tokens=512,
+    messages=[{"role": "user", "content": "Write a haiku about Python."}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+print()
+```
+
+**~10 lines** — Anthropic uses a context manager; OpenAI uses a different iteration API; Google uses yet another pattern. Switching providers requires rewriting the streaming code.
+
+### LazyBridgeFramework
+
+```python
+from lazybridge import LazyAgent
+
+for chunk in LazyAgent("anthropic").chat("Write a haiku about Python.", stream=True):
+    print(chunk.delta, end="", flush=True)
+print()
+```
+
+**3 lines, 1 concept** — identical pattern on every provider
+
+Key benefits:
+- Unified `StreamChunk` interface: `.delta`, `.thinking_delta`, `.is_final`, `.usage`, `.parsed`
+- Final chunk carries token usage and structured output — no second call needed
+- Async version: `async for chunk in await agent.achat(..., stream=True)`
 
 ---
 
@@ -333,9 +477,14 @@ asyncio.run(main())
 |------|:---:|:---:|:---:|
 | Single call | 8 | 2 | **75%** |
 | Tool loop (Responses API) | 45 | 6 | **87%** |
-| Multi-provider pipeline | 22 | 6 | **73%** |
+| Multi-provider pipeline | 20 | 4 | **80%** |
 | Structured output | 25 | 5 | **80%** |
-| Concurrent agents (Responses API) | 30 | 12 | **60%** |
+| Concurrent agents (Responses API) | 30 | 14 | **53%** ¹ |
+| Stateful conversation | 18 | 4 | **78%** |
+| Native web search | 14 | 6 | **57%** |
+| Streaming | 10 | 3 | **70%** |
+
+¹ Line count understates the improvement: the raw SDK version requires asyncio knowledge, two levels of output-item iteration, and manual result joining. The LazyBridge version is fully synchronous.
 
 Note: raw OpenAI examples use the **Responses API** (OpenAI's recommended default since 2025). It introduces a different response format (`response.output` item iteration instead of `response.choices[0].message`) and a different tool result format (`function_call_output` with `call_id`). LazyBridge handles all provider-specific formats transparently.
 
@@ -345,8 +494,11 @@ Beyond line count:
 |---------|---------|---------------------|
 | Provider switch | Rewrite client, format, extraction | Change one string |
 | Tool schema | Write JSON dict manually | Type hints → automatic |
-| Output bridging | Manual string passing | `LazyContext.from_agent` |
-| Concurrent execution | Manual asyncio + gather | `sess.gather()` |
+| Output bridging | Manual string passing + f-strings | `LazyContext.from_agent` (lazy, testable) |
+| Concurrent execution | Manual asyncio + output iteration | `as_tool(mode="parallel")` — no asyncio needed |
+| Stateful memory | Manual message list + mutation risk | `Memory` object — immutable, cross-agent |
+| Native tools | Beta headers + provider-specific schemas | `native_tools=[NativeTool.WEB_SEARCH]` |
+| Streaming | Different API per provider | Unified `StreamChunk` — same code everywhere |
 | Event tracking | Build your own logging | Built-in `sess.events` |
 | Pipeline topology | Not captured | `sess.graph.to_json()` for GUI |
 | Testing context | Baked into prompt strings | `ctx()` → testable string |

@@ -164,27 +164,29 @@ writer.chat("What is Python?", context=LazyContext.from_text("Write in German.")
 
 ## Full example
 
+Declare each agent's context upfront — LazyContext is evaluated at call time, so you can reference store keys that don't exist yet. The pipeline body becomes pure data flow.
+
 ```python
 from lazybridge import LazyAgent, LazyContext, LazyStore
 
 store = LazyStore()
 
-# Step 1: collect data
+# Contexts declared once — evaluated lazily when each agent actually runs
 collector = LazyAgent("anthropic", name="collector")
+analyst   = LazyAgent("anthropic", name="analyst",
+                      context=LazyContext.from_store(store, keys=["papers"]))
+writer    = LazyAgent("openai",
+                      context=(
+                          LazyContext.from_text("Write for a non-technical audience.")
+                          + LazyContext.from_store(store, keys=["findings"])
+                      ))
+
+# Pipeline: pure execution + store handoffs
 collector.loop("Collect the top 5 AI papers this month")
 store.write("papers", collector._last_output)
 
-# Step 2: analyse (no reference to collector)
-analyst = LazyAgent("anthropic", name="analyst")
-ctx_a = LazyContext.from_store(store, keys=["papers"])
-analyst.chat("Identify the 3 most impactful findings", context=ctx_a)
+analyst.chat("Identify the 3 most impactful findings")
 store.write("findings", analyst._last_output)
 
-# Step 3: write (no reference to collector or analyst)
-ctx_w = (
-    LazyContext.from_text("You write for a non-technical audience.")
-    + LazyContext.from_store(store, keys=["findings"])
-)
-writer = LazyAgent("openai", context=ctx_w)
 writer.chat("Write a blog post from these findings")
 ```

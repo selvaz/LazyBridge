@@ -83,12 +83,10 @@ from lazybridge import LazyAgent, Memory, LazySession
 
 sess = LazySession(db="chat.db")
 ai  = LazyAgent("anthropic", session=sess)
-mem = Memory()
 
 # Restore previous session
 raw = sess.store.read("history")
-if raw:
-    mem._messages = json.loads(raw)
+mem = Memory.from_history(json.loads(raw)) if raw else Memory()
 
 ai.chat("continue from where we left off", memory=mem)
 
