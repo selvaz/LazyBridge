@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LazyBridge — Examples</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-one-dark.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="container nav-inner">
+    <a href="index.html" class="nav-logo"><span>Lazy</span>Bridge</a>
+    <div class="nav-links">
+      <a href="docs.html">Docs</a>
+      <a href="examples.html" class="active">Examples</a>
+      <a href="https://github.com/selvaz/LazyBridge" target="_blank">GitHub</a>
+    </div>
+    <button class="nav-install">pip install lazybridge</button>
+  </div>
+</nav>
+
+<section class="section" style="padding-top:5rem;padding-bottom:2rem">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">Examples</span>
+      <h1 style="font-size:2.5rem">See it in action</h1>
+      <p style="color:var(--text-muted);max-width:600px;margin:1rem auto 0">Real examples showing how LazyBridge simplifies complex multi-agent systems. Compare approaches, explore the full investment research platform.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── SDK COMPARISON ──────────────────────────────────────────────────── -->
+<section class="section" id="comparison">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">SDK Comparison</span>
+      <h2>One task. Three ways to write it.</h2>
+      <p style="color:var(--text-muted)">Tool loop: the model searches the web and summarises results.</p>
+    </div>
+
+    <div class="tabs-container compare-wrap" style="margin-top:2rem">
+      <div class="tab-bar">
+        <button class="tab-btn">Raw OpenAI SDK</button>
+        <button class="tab-btn">LangChain</button>
+        <button class="tab-btn">LazyBridge</button>
+      </div>
+
+      <!-- Tab 1: Raw SDK -->
+      <div class="tab-panel">
+        <div class="compare-grid">
+          <div class="compare-col">
+            <div class="line-count">~45 lines</div>
+            <div class="code-block-wrap">
+              <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+              <pre><code class="language-python">import json
+import openai
+
+client = openai.OpenAI()
+
+# 1. Define schema manually
+tools = [{
+    "type": "function",
+    "name": "search_web",
+    "description": "Search the web for information",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query"
+            }
+        },
+        "required": ["query"],
+    },
+}]
+
+def search_web(query: str) -> str:
+    return f"Results for '{query}': [article1, article2, ...]"
+
+input_messages = [{"role": "user",
+    "content": "Find top 3 AI papers this week"}]
+
+# 2. Manual tool-call loop
+while True:
+    response = client.responses.create(
+        model="gpt-4o",
+        input=input_messages,
+        tools=tools,
+    )
+    fn_calls = [i for i in response.output
+                if i.type == "function_call"]
+
+    if fn_calls:
+        input_messages.extend(
+            [i.model_dump() for i in response.output])
+        for fc in fn_calls:
+            args = json.loads(fc.arguments)
+            result = search_web(**args)
+            input_messages.append({
+                "type": "function_call_output",
+                "call_id": fc.call_id,
+                "output": result,
+            })
+    else:
+        text_item = next(i for i in response.output
+                         if i.type == "message")
+        print(text_item.content[0].text)
+        break</code></pre>
+            </div>
+          </div>
+          <div class="compare-col" style="padding:2rem">
+            <h4 style="color:var(--text);margin-bottom:1rem">What you're dealing with:</h4>
+            <ul style="color:var(--text-muted);line-height:2;list-style:none;padding:0">
+              <li>❌ Manual JSON schema dict</li>
+              <li>❌ While loop with output item iteration</li>
+              <li>❌ Provider-specific message formats</li>
+              <li>❌ Manual message list accumulation</li>
+              <li>❌ Content block extraction per provider</li>
+              <li>❌ Rewrite for every provider switch</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: LangChain -->
+      <div class="tab-panel">
+        <div class="compare-grid">
+          <div class="compare-col">
+            <div class="line-count">~30 lines</div>
+            <div class="code-block-wrap">
+              <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+              <pre><code class="language-python">from langchain_openai import ChatOpenAI
+from langchain.agents import (
+    AgentExecutor,
+    create_tool_calling_agent,
+)
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
+
+@tool
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for '{query}': [article1, ...]"
+
+llm   = ChatOpenAI(model="gpt-4o")
+tools = [search_web]
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant"),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}"),
+])
+
+agent = create_tool_calling_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools)
+
+result = agent_executor.invoke({
+    "input": "Find top 3 AI papers this week"
+})
+print(result["output"])</code></pre>
+            </div>
+          </div>
+          <div class="compare-col" style="padding:2rem">
+            <h4 style="color:var(--text);margin-bottom:1rem">Trade-offs:</h4>
+            <ul style="color:var(--text-muted);line-height:2;list-style:none;padding:0">
+              <li>⚠️ @tool decorator + schema wiring</li>
+              <li>⚠️ AgentExecutor boilerplate</li>
+              <li>⚠️ LCEL prompt template required</li>
+              <li>⚠️ Import chain: 5+ modules</li>
+              <li>⚠️ Frequent breaking changes</li>
+              <li>✓ Broad ecosystem (RAG, vector DBs)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: LazyBridge -->
+      <div class="tab-panel">
+        <div class="compare-grid">
+          <div class="compare-col">
+            <div class="line-count" style="background:rgba(124,58,237,.2);color:#a78bfa">6 lines</div>
+            <div class="code-block-wrap">
+              <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+              <pre><code class="language-python">from lazybridge import LazyAgent, LazyTool
+
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for '{query}': [article1, ...]"
+
+result = LazyAgent("openai").loop(
+    "Find top 3 AI papers this week and summarise",
+    tools=[LazyTool.from_function(search_web)],
+)
+print(result.content)</code></pre>
+            </div>
+          </div>
+          <div class="compare-col" style="padding:2rem">
+            <h4 style="color:var(--text);margin-bottom:1rem">What you get:</h4>
+            <ul style="color:var(--text-muted);line-height:2;list-style:none;padding:0">
+              <li>✅ Schema from type hints automatically</li>
+              <li>✅ Tool-call loop handled internally</li>
+              <li>✅ Message accumulation handled</li>
+              <li>✅ Change <code>"openai"</code> → any provider</li>
+              <li>✅ Event tracking for free</li>
+              <li>✅ No format translation needed</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrics strip -->
+    <div class="stats" style="margin-top:3rem">
+      <div class="stat"><div class="stat-num">87%</div><div class="stat-label">fewer lines — tool loop</div></div>
+      <div class="stat"><div class="stat-num">80%</div><div class="stat-label">fewer lines — multi-provider</div></div>
+      <div class="stat"><div class="stat-num">78%</div><div class="stat-label">fewer lines — stateful memory</div></div>
+      <div class="stat"><div class="stat-num">1</div><div class="stat-label">string to switch provider</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── INVESTMENT PLATFORM — VARIANTS 1 & 2 ──────────────────────────── -->
+<section class="section" id="investment-platform">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">Investment Research Platform</span>
+      <h2>Four architectures, one outcome</h2>
+      <p style="color:var(--text-muted);max-width:680px;margin:1rem auto 0">Market data → risk analysis → investment report. The same workflow in four different patterns — from LLM-orchestrated to fully typed end-to-end.</p>
+    </div>
+
+    <div class="variants-container" style="margin-top:2.5rem">
+      <div class="tab-bar variant-tabs">
+        <button class="variant-btn">Variant 1: Orchestrator</button>
+        <button class="variant-btn">Variant 2: Pipeline as Tool</button>
+        <button class="variant-btn">Variant 3: Fan-Out</button>
+        <button class="variant-btn">Variant 4: Fully Typed</button>
+      </div>
+
+      <!-- VARIANT 1 -->
+      <div class="variant-panel">
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:2rem;align-items:start">
+          <div class="code-block-wrap">
+            <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+            <pre><code class="language-python">from pydantic import BaseModel, Field
+from lazybridge import LazyAgent, LazySession, NativeTool
+
+TASK = ("Conduct a full investment analysis for Q2 2025. "
+        "Focus on AI infrastructure, energy transition, and CRISPR therapeutics.")
+
+class MarketBriefing(BaseModel):
+    sectors: list[str]
+    summaries: dict[str, str]
+    overall_outlook: str
+
+class RiskProfile(BaseModel):
+    overall_sentiment: str
+    recommended_action: str
+    rationale: str
+
+class InvestmentReport(BaseModel):
+    title: str
+    executive_summary: str
+    top_opportunities: list[str]
+    conclusion: str
+
+def run_variant_1():
+    # ── Layer 1: 3 Google agents research in parallel ──
+    market_sess = LazySession(tracking="basic", console=True)
+    LazyAgent("google", name="tech_researcher",    session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Technology analyst. Output ONLY valid JSON.")
+    LazyAgent("google", name="energy_researcher",  session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Energy analyst. Output ONLY valid JSON.")
+    LazyAgent("google", name="biotech_researcher", session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Biotech analyst. Output ONLY valid JSON.")
+
+    market_tool = market_sess.as_tool(
+        "market_intelligence",
+        "Three Google agents research tech, energy, and biotech in parallel.",
+        mode="parallel",
+    )
+
+    # ── Layer 2: chain — risk analyst → report writer ──
+    analysis_sess = LazySession(tracking="basic", console=True)
+    analysis_chain = analysis_sess.as_tool(
+        "analysis_chain",
+        "Risk analysis then investment report generation.",
+        mode="chain",
+        participants=[
+            LazyAgent("anthropic", name="risk_analyst",  session=analysis_sess,
+                      output_schema=RiskProfile,
+                      system="Senior risk analyst. Output ONLY valid JSON."),
+            LazyAgent("openai",    name="report_writer", session=analysis_sess,
+                      output_schema=InvestmentReport,
+                      system="CFA report writer. Output ONLY valid JSON."),
+        ],
+    )
+
+    # ── Layer 3: orchestrator drives both tools ──
+    orchestrator = LazyAgent(
+        "anthropic",
+        system="Investment research coordinator. Use both tools to produce a full report.",
+    )
+    result = orchestrator.loop(TASK, tools=[market_tool, analysis_chain], max_steps=6)
+    print(result.content)
+
+run_variant_1()</code></pre>
+          </div>
+          <div class="arch-diagram">
+            <h3>Three-Tier Orchestrator</h3>
+            <p style="color:var(--text-muted);font-size:.9rem">The LLM decides when to call each tool and in what order. Full orchestration intelligence.</p>
+            <div style="font-family:var(--font-mono);font-size:.8rem;color:var(--text-muted);line-height:1.8;margin:1.5rem 0;padding:1rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+              orchestrator (Anthropic)<br>
+              ├── market_intelligence_tool<br>
+              │&nbsp;&nbsp;&nbsp;├── tech_researcher (Google)<br>
+              │&nbsp;&nbsp;&nbsp;├── energy_researcher (Google)<br>
+              │&nbsp;&nbsp;&nbsp;└── biotech_researcher (Google)<br>
+              └── analysis_chain_tool<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;├── risk_analyst (Anthropic)<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;└── report_writer (OpenAI)
+            </div>
+            <h4 style="color:var(--text);margin-bottom:.5rem">Key pattern</h4>
+            <p style="color:var(--text-muted);font-size:.9rem">Two <code>LazySession.as_tool()</code> calls expose multi-agent pipelines as single tools. The orchestrator calls them via <code>loop()</code> — it decides order and iteration.</p>
+            <div class="badge" style="margin-top:1rem">Pattern A + E</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VARIANT 2 -->
+      <div class="variant-panel">
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:2rem;align-items:start">
+          <div class="code-block-wrap">
+            <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+            <pre><code class="language-python">from pydantic import BaseModel
+from lazybridge import LazyAgent, LazySession, LazyTool, NativeTool
+
+TASK = ("Conduct a full investment analysis for Q2 2025. "
+        "Focus on AI infrastructure, energy transition, and CRISPR therapeutics.")
+
+class MarketBriefing(BaseModel):
+    sectors: list[str]
+    summaries: dict[str, str]
+    overall_outlook: str
+
+class RiskProfile(BaseModel):
+    overall_sentiment: str
+    recommended_action: str
+    rationale: str
+
+class InvestmentReport(BaseModel):
+    title: str
+    executive_summary: str
+    top_opportunities: list[str]
+    conclusion: str
+
+def run_variant_2():
+    # ── Parallel market research ──
+    market_sess = LazySession(tracking="basic")
+    LazyAgent("google", name="tech_researcher",    session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Technology analyst. Output ONLY valid JSON.")
+    LazyAgent("google", name="energy_researcher",  session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Energy analyst. Output ONLY valid JSON.")
+    LazyAgent("google", name="biotech_researcher", session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH], output_schema=MarketBriefing,
+              system="Biotech analyst. Output ONLY valid JSON.")
+
+    market_tool = market_sess.as_tool(
+        "market_research", "Three parallel researchers — tech, energy, biotech.",
+        mode="parallel",
+    )
+
+    # ── Full pipeline: market_tool → risk_analyst → report_writer ──
+    # LazyTool as participant — no orchestrator needed
+    pipeline_sess = LazySession(tracking="basic", console=True)
+    risk_analyst  = LazyAgent("anthropic", name="risk_analyst",
+                               session=pipeline_sess, output_schema=RiskProfile,
+                               system="Senior risk analyst. Output ONLY valid JSON.")
+    report_writer = LazyAgent("openai",    name="report_writer",
+                               session=pipeline_sess, output_schema=InvestmentReport,
+                               system="CFA report writer. Output ONLY valid JSON.")
+
+    # chain: market_tool output → risk_analyst → report_writer
+    full_pipeline = pipeline_sess.as_tool(
+        "investment_pipeline",
+        "Full investment research pipeline — market → risk → report.",
+        mode="chain",
+        participants=[market_tool, risk_analyst, report_writer],
+    )
+
+    result = full_pipeline.run({"task": TASK})
+    print(result)
+
+run_variant_2()</code></pre>
+          </div>
+          <div class="arch-diagram">
+            <h3>Nested Pipeline, No Orchestrator</h3>
+            <p style="color:var(--text-muted);font-size:.9rem">The entire pipeline runs as a single tool call. No orchestrator LLM — the framework drives execution.</p>
+            <div style="font-family:var(--font-mono);font-size:.8rem;color:var(--text-muted);line-height:1.8;margin:1.5rem 0;padding:1rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+              full_pipeline (chain)<br>
+              ├── market_tool (parallel LazyTool)<br>
+              │&nbsp;&nbsp;&nbsp;├── tech_researcher<br>
+              │&nbsp;&nbsp;&nbsp;├── energy_researcher<br>
+              │&nbsp;&nbsp;&nbsp;└── biotech_researcher<br>
+              ├── risk_analyst (Anthropic)<br>
+              └── report_writer (OpenAI)
+            </div>
+            <h4 style="color:var(--text);margin-bottom:.5rem">Key pattern</h4>
+            <p style="color:var(--text-muted);font-size:.9rem">A <code>LazyTool</code> is a valid participant in <code>as_tool(mode="chain")</code>. The chain calls <code>.run({"task": ...})</code> on it and passes the output to the next participant.</p>
+            <div class="badge" style="margin-top:1rem">Pattern E (nested)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VARIANT 3 -->
+      <div class="variant-panel">
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:2rem;align-items:start">
+          <div class="code-block-wrap">
+            <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+            <pre><code class="language-python">from pydantic import BaseModel
+from lazybridge import LazyAgent, LazySession, LazyTool, NativeTool
+
+TASK = ("Conduct a full investment analysis for Q2 2025. "
+        "Focus on AI infrastructure, energy transition, and CRISPR therapeutics.")
+
+class InvestmentReport(BaseModel):
+    title: str
+    executive_summary: str
+    top_opportunities: list[str]
+    top_risks: list[str]
+    conclusion: str
+
+def fake_database_query(sector: str) -> str:
+    """Query the internal investment database for a sector."""
+    return f"[DB] {sector}: PE 24.5, YoY +18%, institutional ownership 67%"
+
+def run_variant_3():
+    # ── Generalist: broad sweep with custom tool ──
+    generalist = LazyAgent(
+        "anthropic", name="generalist",
+        system="Investment researcher with database access. Gather broad market intelligence.",
+        tools=[LazyTool.from_function(fake_database_query)],
+    )
+
+    # ── Sector specialists: run in parallel ──
+    sector_sess = LazySession(tracking="basic")
+    LazyAgent("google", name="tech_specialist",    session=sector_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              system="Technology sector specialist. Focus on AI, semiconductors, cloud.")
+    LazyAgent("google", name="energy_specialist",  session=sector_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              system="Energy sector specialist. Focus on renewables, oil, grid.")
+    LazyAgent("google", name="biotech_specialist", session=sector_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              system="Biotech sector specialist. Focus on pharma, genomics, medtech.")
+
+    sector_intel_tool = sector_sess.as_tool(
+        "sector_intelligence",
+        "Parallel sector research: tech, energy, biotech.",
+        mode="parallel",
+        combiner="concat",
+    )
+
+    # ── Synthesizer: combines all inputs into final report ──
+    synthesizer = LazyAgent(
+        "openai", name="synthesizer",
+        system="Senior portfolio strategist. Synthesise research into an investment report.",
+        output_schema=InvestmentReport,
+    )
+
+    # ── Full pipeline: generalist → parallel sectors → synthesizer ──
+    pipeline_sess = LazySession(tracking="basic", console=True)
+    full_pipeline = pipeline_sess.as_tool(
+        "fan_out_pipeline",
+        "Generalist broad sweep → parallel sector specialists → synthesis.",
+        mode="chain",
+        participants=[generalist, sector_intel_tool, synthesizer],
+    )
+
+    result = full_pipeline.run({"task": TASK})
+    print(result)
+
+run_variant_3()</code></pre>
+          </div>
+          <div class="arch-diagram">
+            <h3>Fan-Out then Synthesize</h3>
+            <p style="color:var(--text-muted);font-size:.9rem">Generalist gathers broad context, then specialists run in parallel for deep sector intelligence, synthesizer produces the final report.</p>
+            <div style="font-family:var(--font-mono);font-size:.8rem;color:var(--text-muted);line-height:1.8;margin:1.5rem 0;padding:1rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+              full_pipeline (chain)<br>
+              ├── generalist (Anthropic + DB tool)<br>
+              ├── sector_intel_tool (parallel)<br>
+              │&nbsp;&nbsp;&nbsp;├── tech_specialist (Google)<br>
+              │&nbsp;&nbsp;&nbsp;├── energy_specialist (Google)<br>
+              │&nbsp;&nbsp;&nbsp;└── biotech_specialist (Google)<br>
+              └── synthesizer (OpenAI)
+            </div>
+            <h4 style="color:var(--text);margin-bottom:.5rem">Key pattern</h4>
+            <p style="color:var(--text-muted);font-size:.9rem">Mix custom tools (<code>LazyTool.from_function</code>) on the generalist, native tools on specialists. Different tool types, same chain.</p>
+            <div class="badge" style="margin-top:1rem">Pattern B + E mixed</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VARIANT 4 -->
+      <div class="variant-panel">
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:2rem;align-items:start">
+          <div class="code-block-wrap">
+            <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+            <pre><code class="language-python">from pydantic import BaseModel, Field
+from lazybridge import LazyAgent, LazySession
+from lazybridge.core.types import NativeTool
+
+TASK = ("Conduct a full investment analysis for Q2 2025. "
+        "Focus on AI infrastructure, energy transition, and CRISPR therapeutics.")
+
+class MarketBriefing(BaseModel):
+    sectors: list[str] = Field(description="Sectors analysed")
+    summaries: dict[str, str] = Field(description="Key findings per sector")
+    overall_outlook: str = Field(description="One-sentence macro outlook")
+
+class RiskProfile(BaseModel):
+    overall_sentiment: str = Field(description="bullish | neutral | bearish")
+    recommended_action: str = Field(description="invest | hold | avoid | monitor")
+    rationale: str
+
+class InvestmentReport(BaseModel):
+    title: str
+    executive_summary: str
+    top_opportunities: list[str] = Field(description="Top 3 opportunities")
+    top_risks: list[str] = Field(description="Top 3 risks")
+    conclusion: str
+
+def run_variant_4():
+    # ── Layer 1: three Google agents in parallel, each → MarketBriefing ──
+    market_sess = LazySession(tracking="basic", console=True)
+    LazyAgent("google", name="tech_researcher",    session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              output_schema=MarketBriefing,
+              system="Technology analyst — AI, semiconductors, cloud. "
+                     "Output ONLY valid JSON matching the schema.")
+    LazyAgent("google", name="energy_researcher",  session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              output_schema=MarketBriefing,
+              system="Energy analyst — renewables, oil & gas, grid. "
+                     "Output ONLY valid JSON matching the schema.")
+    LazyAgent("google", name="biotech_researcher", session=market_sess,
+              native_tools=[NativeTool.WEB_SEARCH],
+              output_schema=MarketBriefing,
+              system="Biotech analyst — pharma, genomics, medical devices. "
+                     "Output ONLY valid JSON matching the schema.")
+
+    parallel_market_tool = market_sess.as_tool(
+        "parallel_market_research",
+        "Three Google agents research tech, energy, and biotech in parallel.",
+        mode="parallel",
+    )
+
+    # ── Layers 2 + 3: risk analyst (Anthropic) → report writer (OpenAI) ──
+    analysis_sess = LazySession(tracking="basic", console=True)
+    risk_analyst  = LazyAgent("anthropic", name="risk_analyst",
+                               session=analysis_sess,
+                               output_schema=RiskProfile,
+                               system="Senior risk analyst. "
+                                      "Output ONLY valid JSON matching the schema.")
+    report_writer = LazyAgent("openai",    name="report_writer",
+                               session=analysis_sess,
+                               output_schema=InvestmentReport,
+                               system="CFA report writer. "
+                                      "Output ONLY valid JSON matching the schema.")
+
+    # ── Full pipeline: parallel research → risk → report — zero def ──
+    pipeline = LazySession(tracking="basic", console=True).as_tool(
+        "fully_structured_pipeline",
+        "Parallel Google research → Anthropic risk assessment → OpenAI report.",
+        mode="chain",
+        participants=[parallel_market_tool, risk_analyst, report_writer],
+    )
+
+    result = pipeline.run({"task": TASK})
+    print(result)
+
+run_variant_4()</code></pre>
+          </div>
+          <div class="arch-diagram">
+            <h3>Fully Typed Multi-Provider</h3>
+            <p style="color:var(--text-muted);font-size:.9rem">Every agent owns <code>output_schema</code>. The chain calls <code>json()</code> automatically. Three providers, three Pydantic models, zero manual conversion.</p>
+            <div style="font-family:var(--font-mono);font-size:.8rem;color:var(--text-muted);line-height:1.8;margin:1.5rem 0;padding:1rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+              pipeline (chain)<br>
+              ├── parallel_market_tool<br>
+              │&nbsp;&nbsp;&nbsp;├── tech → MarketBriefing<br>
+              │&nbsp;&nbsp;&nbsp;├── energy → MarketBriefing<br>
+              │&nbsp;&nbsp;&nbsp;└── biotech → MarketBriefing<br>
+              ├── risk_analyst → RiskProfile<br>
+              └── report_writer → InvestmentReport
+            </div>
+            <h4 style="color:var(--text);margin-bottom:.5rem">Key pattern</h4>
+            <p style="color:var(--text-muted);font-size:.9rem"><code>output_schema</code> on the agent makes the chain call <code>json()</code> at each step and pass the serialized Pydantic result to the next participant automatically.</p>
+            <div class="badge" style="margin-top:1rem">Pattern B + E, fully typed</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end variants-container -->
+  </div>
+</section>
+
+<!-- ── FOOTER ──────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="container footer-inner">
+    <div class="nav-logo"><span>Lazy</span>Bridge</div>
+    <div class="footer-links">
+      <a href="https://pypi.org/project/lazybridge/" target="_blank">PyPI</a>
+      <a href="https://github.com/selvaz/LazyBridge" target="_blank">GitHub</a>
+      <a href="docs.html">Docs</a>
+      <a href="llms.txt">llms.txt</a>
+    </div>
+    <div style="color:var(--text-muted);font-size:.85rem">MIT License &middot; v0.3.1</div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

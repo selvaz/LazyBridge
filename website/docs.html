@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LazyBridge — Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-one-dark.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="container nav-inner">
+    <a href="index.html" class="nav-logo"><span>Lazy</span>Bridge</a>
+    <div class="nav-links">
+      <a href="docs.html" class="active">Docs</a>
+      <a href="examples.html">Examples</a>
+      <a href="https://github.com/selvaz/LazyBridge" target="_blank">GitHub</a>
+    </div>
+    <button class="nav-install">pip install lazybridge</button>
+  </div>
+</nav>
+
+<div class="docs-layout container">
+
+  <!-- Sidebar -->
+  <aside class="docs-sidebar">
+    <nav>
+      <a href="#quickstart">Quick Start</a>
+      <a href="#lazyagent">LazyAgent</a>
+      <a href="#memory">Memory</a>
+      <a href="#tools">Tools</a>
+      <a href="#sessions">Sessions</a>
+      <a href="#context">Context</a>
+      <a href="#routing">Routing</a>
+      <a href="#api-reference">API Reference</a>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <main class="docs-content">
+
+    <!-- ── QUICKSTART ─────────────────────────────────────────────── -->
+    <section id="quickstart" class="docs-section">
+      <h2>Quick Start</h2>
+      <p>Get from zero to a running pipeline in 5 minutes.</p>
+
+      <h3>Install</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>bash</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-bash">pip install lazybridge[anthropic]   # Anthropic / Claude
+pip install lazybridge[openai]      # OpenAI / GPT
+pip install lazybridge[google]      # Google / Gemini
+pip install lazybridge[all]         # all providers</code></pre>
+      </div>
+
+      <h3>Set your API key</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>bash</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-bash">export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+export GOOGLE_API_KEY="..."
+export DEEPSEEK_API_KEY="..."</code></pre>
+      </div>
+
+      <h3>Example 1 — Single call</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent
+
+ai = LazyAgent("anthropic")
+
+# Simple text response
+answer = ai.text("What is the capital of France?")
+print(answer)  # "Paris"
+
+# Full response object (tokens, stop reason, etc.)
+resp = ai.chat("Explain quantum entanglement in one sentence.")
+print(resp.content)
+print(f"Tokens: {resp.usage.input_tokens} in / {resp.usage.output_tokens} out")</code></pre>
+      </div>
+      <p>Switch provider by changing one string:</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">ai_openai   = LazyAgent("openai")
+ai_google   = LazyAgent("google")
+ai_deepseek = LazyAgent("deepseek")</code></pre>
+      </div>
+
+      <h3>Example 2 — Tool loop</h3>
+      <p>Give the agent a Python function. It will call it automatically when needed.</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazyTool
+
+def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    return f"Weather in {city}: 22°C, partly cloudy"
+
+ai = LazyAgent("anthropic")
+result = ai.loop("What's the weather in Rome and Paris?",
+                 tools=[LazyTool.from_function(get_weather)])
+print(result.content)</code></pre>
+      </div>
+      <p><code>loop()</code> handles the full tool-call cycle: sends message → detects tool call → runs your function → feeds result back → repeats until done.</p>
+
+      <h3>Example 3 — Multi-agent pipeline</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazySession, LazyContext
+
+sess       = LazySession()
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer     = LazyAgent("openai",    name="writer",     session=sess)
+
+researcher.loop("Find the top 3 developments in AI this week.")
+
+writer.chat(
+    "Write a short newsletter section from this research.",
+    context=LazyContext.from_agent(researcher),
+)
+
+print(sess.events.get())     # full event log
+print(sess.store.read_all()) # shared state</code></pre>
+      </div>
+    </section>
+
+    <!-- ── LAZYAGENT ──────────────────────────────────────────────── -->
+    <section id="lazyagent" class="docs-section">
+      <h2>LazyAgent</h2>
+      <p><code>LazyAgent</code> is the only class you interact with directly for LLM calls. Everything else (sessions, tools, context) is optional.</p>
+
+      <h3>Creating an agent</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent
+
+# Minimal — just pick a provider
+ai = LazyAgent("anthropic")
+
+# With options
+ai = LazyAgent(
+    "anthropic",
+    name="my_assistant",
+    model="claude-sonnet-4-6",
+    system="You are a terse assistant. Answer in one sentence.",
+    max_retries=3,
+)</code></pre>
+      </div>
+
+      <table class="provider-table">
+        <thead><tr><th>String</th><th>Provider</th><th>Default model</th></tr></thead>
+        <tbody>
+          <tr><td><code>"anthropic"</code> / <code>"claude"</code></td><td>Anthropic Claude</td><td>claude-sonnet-4-6</td></tr>
+          <tr><td><code>"openai"</code> / <code>"gpt"</code></td><td>OpenAI</td><td>gpt-4o</td></tr>
+          <tr><td><code>"google"</code> / <code>"gemini"</code></td><td>Google Gemini</td><td>gemini-2.5-flash</td></tr>
+          <tr><td><code>"deepseek"</code></td><td>DeepSeek</td><td>deepseek-chat</td></tr>
+        </tbody>
+      </table>
+
+      <h3>chat() — single turn</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">resp = ai.chat("What is 2 + 2?")
+print(resp.content)            # "4"
+print(resp.usage.input_tokens)
+print(resp.stop_reason)        # "end_turn"</code></pre>
+      </div>
+
+      <h3>loop() — agentic tool calls</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">result = ai.loop(
+    "Find the latest news about fusion energy and summarise it.",
+    tools=[search_tool],
+    max_steps=8,
+)
+print(result.content)</code></pre>
+      </div>
+
+      <h3>text() and json() shortcuts</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from pydantic import BaseModel
+
+class Summary(BaseModel):
+    headline: str
+    bullets: list[str]
+
+# Returns str directly
+answer = ai.text("What is the speed of light?")
+
+# Returns typed object
+summary = ai.json("Summarise AI in 2024", Summary)
+print(summary.headline)
+print(summary.bullets)</code></pre>
+      </div>
+
+      <h3>Streaming</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">for chunk in ai.chat("Write me a haiku about Python.", stream=True):
+    print(chunk.delta, end="", flush=True)
+print()</code></pre>
+      </div>
+
+      <h3>Native provider tools</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge.core.types import NativeTool
+
+resp = ai.chat(
+    "What happened in AI this week?",
+    native_tools=[NativeTool.WEB_SEARCH],
+)
+print(resp.content)
+for src in resp.grounding_sources:
+    print(src.url, src.title)</code></pre>
+      </div>
+
+      <h3>Extended thinking</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">resp = ai.chat("Design a distributed caching system", thinking=True)
+print(resp.thinking)  # internal reasoning
+print(resp.content)   # final answer</code></pre>
+      </div>
+
+      <h3>as_tool() — expose this agent to another</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">researcher = LazyAgent("anthropic", name="researcher",
+                       description="Researches any topic online")
+research_tool = researcher.as_tool(
+    guidance="Use this whenever fresh external information is needed.",
+)
+
+orchestrator = LazyAgent("anthropic")
+result = orchestrator.loop("Write a report on climate tech startups",
+                           tools=[research_tool])</code></pre>
+      </div>
+
+      <h3>Async</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import asyncio
+
+async def main():
+    resp   = await ai.achat("Hello")
+    result = await ai.aloop("Find news", tools=[...])
+    text   = await ai.atext("Hello")
+    data   = await ai.ajson("...", MyModel)
+
+asyncio.run(main())</code></pre>
+      </div>
+    </section>
+
+    <!-- ── MEMORY ────────────────────────────────────────────────── -->
+    <section id="memory" class="docs-section">
+      <h2>Memory &amp; Conversations</h2>
+      <p>Pass a <code>Memory</code> object to keep conversation history automatically. No manual list management.</p>
+
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, Memory
+
+ai  = LazyAgent("anthropic")
+mem = Memory()
+
+ai.chat("My name is Marco", memory=mem)
+resp = ai.chat("What's my name?", memory=mem)
+print(resp.content)   # "Marco"
+
+print(len(mem))        # 4 — 2 user + 2 assistant messages
+print(mem.history)     # list of {"role": ..., "content": ...} dicts
+mem.clear()            # reset</code></pre>
+      </div>
+
+      <p>The same <code>Memory</code> instance can be shared across multiple agents:</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">mem = Memory()
+agent_a.chat("Remember: the project deadline is Friday", memory=mem)
+agent_b.chat("What's the deadline?", memory=mem)   # answers "Friday"</code></pre>
+      </div>
+
+      <h3>Persistence across restarts</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import json
+from lazybridge import LazyAgent, Memory, LazySession
+
+sess = LazySession(db="chat.db")
+ai   = LazyAgent("anthropic", session=sess)
+
+# Restore previous session
+raw = sess.store.read("history")
+mem = Memory.from_history(json.loads(raw)) if raw else Memory()
+
+ai.chat("continue from where we left off", memory=mem)
+
+# Save at the end
+sess.store.write("history", json.dumps(mem.history))</code></pre>
+      </div>
+    </section>
+
+    <!-- ── TOOLS ──────────────────────────────────────────────────── -->
+    <section id="tools" class="docs-section">
+      <h2>Tools</h2>
+      <p>Tools let the LLM call your code. <code>LazyTool</code> handles schema generation, execution, and validation automatically.</p>
+
+      <h3>Wrapping a Python function</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyTool
+
+def get_weather(city: str, unit: str = "celsius") -> str:
+    """Get current weather for a city."""
+    return f"Weather in {city}: 22°C, sunny"
+
+tool = LazyTool.from_function(get_weather)
+# Name from function name, description from docstring, schema from type hints</code></pre>
+      </div>
+
+      <h3>Type hint → JSON Schema</h3>
+      <table class="provider-table">
+        <thead><tr><th>Python annotation</th><th>JSON Schema</th></tr></thead>
+        <tbody>
+          <tr><td><code>str</code></td><td><code>{"type":"string"}</code></td></tr>
+          <tr><td><code>int</code></td><td><code>{"type":"integer"}</code></td></tr>
+          <tr><td><code>float</code></td><td><code>{"type":"number"}</code></td></tr>
+          <tr><td><code>bool</code></td><td><code>{"type":"boolean"}</code></td></tr>
+          <tr><td><code>list[X]</code></td><td><code>{"type":"array","items":&lt;X&gt;}</code></td></tr>
+          <tr><td><code>dict</code></td><td><code>{"type":"object"}</code></td></tr>
+          <tr><td><code>Optional[X]</code> / <code>X | None</code></td><td><code>{"anyOf":[&lt;X&gt;,{"type":"null"}]}</code></td></tr>
+          <tr><td><code>Literal["a","b"]</code></td><td><code>{"enum":["a","b"]}</code></td></tr>
+          <tr><td><code>MyModel</code> (Pydantic)</td><td>Full JSON Schema</td></tr>
+          <tr><td><code>Annotated[X, "desc"]</code></td><td><code>{&lt;X&gt;, "description":"desc"}</code></td></tr>
+        </tbody>
+      </table>
+      <p>Parameters are <strong>required</strong> when no default; optional when <code>param=default</code>.</p>
+
+      <h3>Adding descriptions with Annotated</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from typing import Annotated
+
+def search_web(
+    query: Annotated[str, "The search query. Be specific, use keywords."],
+    language: Annotated[str, "ISO 639-1 language code, e.g. 'en', 'it'"] = "en",
+    max_results: Annotated[int, "Maximum results (1–50)"] = 10,
+) -> list[str]:
+    ...
+
+tool = LazyTool.from_function(search_web)</code></pre>
+      </div>
+
+      <h3>Schema modes</h3>
+      <p><code>SIGNATURE</code> (default): reads type hints. <code>HYBRID</code>: types from code, descriptions from LLM. <code>LLM</code>: full schema inferred by LLM (for legacy code without annotations).</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyTool, ToolSchemaMode, LazyAgent
+
+llm  = LazyAgent("anthropic")
+tool = LazyTool.from_function(
+    search_web,
+    schema_mode=ToolSchemaMode.HYBRID,
+    schema_llm=llm,
+).compile()   # LLM call happens here, not at first loop step</code></pre>
+      </div>
+
+      <h3>Guidance — hints for the calling model</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">tool = LazyTool.from_function(
+    get_weather,
+    guidance="Call this before answering any weather question. Always ask for the city if not provided.",
+)</code></pre>
+      </div>
+
+      <h3>Delegating to another agent</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">researcher = LazyAgent("anthropic", name="researcher",
+                       description="Researches any topic and returns a detailed summary.")
+
+research_tool = researcher.as_tool()
+# or explicitly:
+research_tool = LazyTool.from_agent(
+    researcher,
+    guidance="Use this for any question that requires current information.",
+)
+
+orchestrator = LazyAgent("anthropic")
+result = orchestrator.loop(
+    "Prepare a brief on open-source AI models released this year",
+    tools=[research_tool],
+)</code></pre>
+      </div>
+
+      <h3>Native provider tools</h3>
+      <table class="provider-table">
+        <thead><tr><th>NativeTool</th><th>Anthropic</th><th>OpenAI</th><th>Google</th></tr></thead>
+        <tbody>
+          <tr><td><code>WEB_SEARCH</code></td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td><code>CODE_EXECUTION</code></td><td>✓</td><td>✓</td><td>—</td></tr>
+          <tr><td><code>FILE_SEARCH</code></td><td>—</td><td>✓</td><td>—</td></tr>
+          <tr><td><code>COMPUTER_USE</code></td><td>✓</td><td>✓</td><td>—</td></tr>
+          <tr><td><code>GOOGLE_SEARCH</code></td><td>—</td><td>—</td><td>✓</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Tool variants with specialize()</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">base = LazyTool.from_function(search_web)
+
+eu_search = base.specialize(
+    name="search_eu",
+    description="Search European news sources",
+    guidance="Always filter to European sources published in the last 48 hours.",
+)
+us_search = base.specialize(
+    name="search_us",
+    description="Search US news sources",
+)
+
+orchestrator.loop("Compare AI news coverage EU vs US", tools=[eu_search, us_search])</code></pre>
+      </div>
+    </section>
+
+    <!-- ── SESSIONS ───────────────────────────────────────────────── -->
+    <section id="sessions" class="docs-section">
+      <h2>Sessions &amp; Pipelines</h2>
+      <p>A <code>LazySession</code> is the shared container for a multi-agent pipeline. Create one when you have more than one agent that needs to share state, tracking, or a graph.</p>
+
+      <table class="provider-table">
+        <thead><tr><th>Scenario</th><th>Session needed?</th></tr></thead>
+        <tbody>
+          <tr><td>Single agent, one-off question</td><td>No</td></tr>
+          <tr><td>Two agents sharing results</td><td>Yes</td></tr>
+          <tr><td>Agents running concurrently</td><td>Yes</td></tr>
+          <tr><td>Persistent state across runs</td><td>Yes</td></tr>
+          <tr><td>GUI pipeline visualization</td><td>Yes</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Creating a session</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazySession
+
+sess = LazySession()                        # in-memory
+sess = LazySession(db="my_pipeline.db")    # persistent SQLite
+sess = LazySession(tracking="verbose")     # all events including stream chunks</code></pre>
+      </div>
+
+      <h3>Event tracking</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import Event
+
+all_events = sess.events.get()
+tool_calls = sess.events.get(event_type=Event.TOOL_CALL)
+writer_events = sess.events.get(agent_id=writer.id)
+
+for ev in all_events:
+    print(ev["timestamp"], ev["agent_name"], ev["event_type"])</code></pre>
+      </div>
+
+      <h3>Concurrent agents with gather()</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import asyncio
+from lazybridge import LazyAgent, LazySession
+
+sess    = LazySession()
+agent_a = LazyAgent("anthropic", name="news_a", session=sess)
+agent_b = LazyAgent("openai",    name="news_b", session=sess)
+agent_c = LazyAgent("google",    name="news_c", session=sess)
+
+async def run():
+    results = await sess.gather(
+        agent_a.aloop("Summarise AI news from the US"),
+        agent_b.aloop("Summarise AI news from Europe"),
+        agent_c.aloop("Summarise AI news from Asia"),
+    )
+    for r in results:
+        print(r.content[:200])
+
+asyncio.run(run())</code></pre>
+      </div>
+
+      <h3>Pipeline as tool — chain and parallel</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">sess = LazySession()
+
+# Chain: researcher output → analyst input automatically
+pipeline_tool = sess.as_tool(
+    "research_and_analyse",
+    "Researches a topic and produces an analysis.",
+    mode="chain",
+    participants=[
+        LazyAgent("anthropic", name="researcher", session=sess),
+        LazyAgent("openai",    name="analyst",    session=sess),
+    ],
+)
+
+# Parallel: all agents receive the same task, outputs concatenated
+parallel_tool = sess.as_tool(
+    "multi_research",
+    "Research in parallel across three domains.",
+    mode="parallel",
+    participants=[
+        LazyAgent("anthropic", name="tech",   session=sess),
+        LazyAgent("openai",    name="market", session=sess),
+        LazyAgent("google",    name="legal",  session=sess),
+    ],
+)
+
+master = LazyAgent("anthropic")
+master.loop("Analyse three topics", tools=[pipeline_tool])</code></pre>
+      </div>
+
+      <h3>Graph serialization</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">print(sess.graph.to_json())        # pipeline topology for GUI
+sess.graph.save("pipeline.yaml")   # requires pip install pyyaml</code></pre>
+      </div>
+    </section>
+
+    <!-- ── CONTEXT ───────────────────────────────────────────────── -->
+    <section id="context" class="docs-section">
+      <h2>Context Injection</h2>
+      <p><code>LazyContext</code> lets you inject dynamic content into an agent's system prompt — evaluated at call time, not at construction time.</p>
+
+      <h3>Four source types</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyContext, LazyStore
+from datetime import date
+
+# 1. Static text
+ctx = LazyContext.from_text("Always answer in formal English.")
+
+# 2. Function (called at execution time)
+ctx = LazyContext.from_function(lambda: f"Today is {date.today().isoformat()}")
+
+# 3. From shared store
+store = LazyStore()
+ctx = LazyContext.from_store(store, keys=["research", "style_guide"])
+
+# 4. From another agent's last output
+researcher = LazyAgent("anthropic", name="researcher")
+ctx = LazyContext.from_agent(researcher)
+# Reads researcher._last_output when invoked; "" if agent not yet run</code></pre>
+      </div>
+
+      <h3>Composing contexts</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">ctx = (
+    LazyContext.from_text("You are a senior analyst.")
+    + LazyContext.from_agent(data_collector)
+    + LazyContext.from_store(sess.store, keys=["market_data"])
+    + LazyContext.from_function(lambda: f"Today: {date.today()}")
+)
+# Sources evaluated in order, joined with blank lines</code></pre>
+      </div>
+
+      <h3>Agent-level vs call-level</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python"># Context applied to every call on this agent
+writer = LazyAgent("openai", context=LazyContext.from_text("Write in Italian."))
+writer.chat("What is Python?")   # "Python è un linguaggio..."
+
+# Override for a single call
+writer.chat("What is Python?", context=LazyContext.from_text("Write in German."))</code></pre>
+      </div>
+
+      <h3>Full pipeline example</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazyContext, LazyStore
+
+store = LazyStore()
+
+# Contexts declared once — evaluated lazily when each agent runs
+collector = LazyAgent("anthropic", name="collector")
+analyst   = LazyAgent("anthropic", name="analyst",
+                      context=LazyContext.from_store(store, keys=["papers"]))
+writer    = LazyAgent("openai",
+                      context=(
+                          LazyContext.from_text("Write for a non-technical audience.")
+                          + LazyContext.from_store(store, keys=["findings"])
+                      ))
+
+# Pure execution + store handoffs
+collector.loop("Collect the top 5 AI papers this month")
+store.write("papers", collector._last_output)
+
+analyst.chat("Identify the 3 most impactful findings")
+store.write("findings", analyst._last_output)
+
+writer.chat("Write a blog post from these findings")</code></pre>
+      </div>
+
+      <h3>Testing your context</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python"># ctx() returns a plain string — testable independently
+print(ctx())              # before agents run: only static parts
+researcher.loop("find data")
+print(ctx())              # now includes researcher's output</code></pre>
+      </div>
+    </section>
+
+    <!-- ── ROUTING ────────────────────────────────────────────────── -->
+    <section id="routing" class="docs-section">
+      <h2>Routing</h2>
+      <p><code>LazyRouter</code> routes the result of one agent to one of several agents based on a condition. For simple branching, a plain Python <code>if/else</code> is fine — use <code>LazyRouter</code> when you want the branching to appear in the graph schema or have 3+ named routes.</p>
+
+      <h3>Basic usage</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazyRouter
+
+writer   = LazyAgent("anthropic", name="writer")
+reviewer = LazyAgent("openai",    name="reviewer")
+
+router = LazyRouter(
+    condition=lambda response: "writer" if "APPROVED" in response.upper() else "reviewer",
+    routes={"writer": writer, "reviewer": reviewer},
+    name="approval_gate",
+)
+
+checker = LazyAgent("anthropic", name="checker")
+result  = checker.chat("Evaluate this draft: [...]")
+next_agent = router.route(result.content)
+final = next_agent.chat("Proceed with: " + result.content)</code></pre>
+      </div>
+
+      <h3>Multiple routes with fallback</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">def pick_route(response: str) -> str:
+    r = response.strip().lower()
+    if "research" in r:   return "research"
+    if "analyse"  in r:   return "analyse"
+    if "write"    in r:   return "write"
+    return "review"
+
+router = LazyRouter(
+    condition=pick_route,
+    routes={"research": researcher, "analyse": analyst,
+            "write": writer, "review": reviewer},
+    name="task_router",
+    default="review",  # fallback if condition returns unknown key
+)</code></pre>
+      </div>
+
+      <h3>Async condition (LLM-based routing)</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import asyncio
+from lazybridge import LazyAgent, LazyRouter
+
+classifier = LazyAgent("anthropic")  # created once, reused
+
+async def classify_with_llm(text: str) -> str:
+    label = await classifier.atext(
+        f"Classify as: research / analyse / write. Task: {text}. Return only the label."
+    )
+    return label.strip().lower()
+
+router = LazyRouter(
+    condition=classify_with_llm,
+    routes={"research": researcher, "analyse": analyst, "write": writer},
+    default="write",
+)
+
+next_agent = asyncio.run(router.aroute("What are the latest GPU benchmark numbers?"))</code></pre>
+      </div>
+
+      <h3>Full pipeline with revision loop</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazyRouter, LazySession
+
+sess = LazySession()
+drafter   = LazyAgent("anthropic", name="drafter",   session=sess)
+reviewer  = LazyAgent("openai",    name="reviewer",  session=sess)
+publisher = LazyAgent("anthropic", name="publisher", session=sess)
+
+router = LazyRouter(
+    condition=lambda r: "publisher" if "APPROVED" in r.upper() else "reviewer",
+    routes={"publisher": publisher, "reviewer": reviewer},
+    default="reviewer",
+)
+
+content = "Write a blog post about AI safety."
+for _ in range(3):   # up to 3 revision cycles
+    draft = drafter.chat(content)
+    check = reviewer.chat(f"Review and say APPROVED or REJECTED with reason: {draft.content}")
+    next_agent = router.route(check.content)
+    if next_agent is publisher:
+        result = publisher.chat(f"Publish: {draft.content}")
+        print("Published:", result.content[:200])
+        break
+    else:
+        content = f"Revise based on: {check.content}\n\nOriginal: {draft.content}"</code></pre>
+      </div>
+    </section>
+
+    <!-- ── API REFERENCE ──────────────────────────────────────────── -->
+    <section id="api-reference" class="docs-section">
+      <h2>API Reference</h2>
+      <p>Quick reference for all key classes. For the full machine-readable reference see <a href="llms.txt">llms.txt</a>.</p>
+
+      <table class="provider-table">
+        <thead><tr><th>Class</th><th>Key methods</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>LazyAgent</code></td>
+            <td><code>chat()</code>, <code>loop()</code>, <code>text()</code>, <code>json()</code>, <code>as_tool()</code>, <code>achat()</code>, <code>aloop()</code>, <code>atext()</code>, <code>ajson()</code></td>
+          </tr>
+          <tr>
+            <td><code>LazySession</code></td>
+            <td><code>gather()</code>, <code>as_tool()</code>, <code>to_json()</code> · attrs: <code>.store</code>, <code>.events</code>, <code>.graph</code></td>
+          </tr>
+          <tr>
+            <td><code>LazyTool</code></td>
+            <td><code>from_function()</code>, <code>from_agent()</code>, <code>run()</code>, <code>arun()</code>, <code>compile()</code>, <code>specialize()</code></td>
+          </tr>
+          <tr>
+            <td><code>LazyContext</code></td>
+            <td><code>from_text()</code>, <code>from_agent()</code>, <code>from_store()</code>, <code>from_function()</code>, <code>merge()</code>, <code>build()</code>, <code>+</code> operator</td>
+          </tr>
+          <tr>
+            <td><code>LazyStore</code></td>
+            <td><code>write()</code>, <code>read()</code>, <code>read_all()</code>, <code>read_by_agent()</code>, <code>awrite()</code>, <code>aread()</code></td>
+          </tr>
+          <tr>
+            <td><code>LazyRouter</code></td>
+            <td><code>route()</code>, <code>aroute()</code></td>
+          </tr>
+          <tr>
+            <td><code>Memory</code></td>
+            <td><code>Memory()</code>, <code>from_history()</code>, <code>.history</code>, <code>.clear()</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>CompletionResponse</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">resp.content            # str
+resp.thinking           # str | None
+resp.tool_calls         # list[ToolCall]
+resp.stop_reason        # "end_turn" | "tool_use" | "max_tokens"
+resp.usage              # .input_tokens, .output_tokens, .cost_usd
+resp.parsed             # populated when output_schema is set
+resp.validated          # bool | None
+resp.grounding_sources  # list[GroundingSource] — .url, .title, .snippet
+resp.raise_if_failed()  # raises on schema validation failure</code></pre>
+      </div>
+
+      <h3>Install</h3>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>bash</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-bash">pip install lazybridge[anthropic]   # Anthropic / Claude
+pip install lazybridge[openai]      # OpenAI / GPT
+pip install lazybridge[google]      # Google / Gemini
+pip install lazybridge[all]         # all providers</code></pre>
+      </div>
+
+      <p>Full machine-readable API reference: <a href="llms.txt">llms.txt</a> — designed to be pasted directly into a Claude / GPT / Gemini context window.</p>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="container footer-inner">
+    <div class="nav-logo"><span>Lazy</span>Bridge</div>
+    <div class="footer-links">
+      <a href="https://pypi.org/project/lazybridge/" target="_blank">PyPI</a>
+      <a href="https://github.com/selvaz/LazyBridge" target="_blank">GitHub</a>
+      <a href="examples.html">Examples</a>
+      <a href="llms.txt">llms.txt</a>
+    </div>
+    <div style="color:var(--text-muted);font-size:.85rem">MIT License &middot; v0.3.1</div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
