@@ -345,3 +345,52 @@ def test_verbose_agent_enables_session_console():
 
     # verbose=True on a session agent should flip console to True
     assert sess.events._console is True
+
+
+# ── T4.18 — chain: last agent with output_schema returns Pydantic object ──────
+
+def test_chain_last_agent_output_schema_returns_pydantic(tmp_path):
+    """pipeline.run() must return the Pydantic object, not a JSON string."""
+    from pydantic import BaseModel
+
+    class Report(BaseModel):
+        title: str
+        body: str
+
+    sess = LazySession()
+    agent = _mock_agent("reporter", "ignored")
+    agent.output_schema = Report
+    expected = Report(title="AI Today", body="Some content")
+    agent.json = MagicMock(return_value=expected)
+
+    tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
+    result = tool.run({"task": "write a report"})
+
+    # Must be the Pydantic object, not a string
+    assert isinstance(result, Report)
+    assert result.title == "AI Today"
+    assert result.body == "Some content"
+
+
+# ── T4.19 — chain: intermediate agent with output_schema, last without ────────
+
+def test_chain_intermediate_schema_last_plain():
+    """When only an intermediate agent has output_schema, return is a plain string."""
+    from pydantic import BaseModel
+
+    class Mid(BaseModel):
+        data: str
+
+    sess = LazySession()
+    mid_agent = _mock_agent("mid", "ignored")
+    mid_agent.output_schema = Mid
+    mid_agent.json = MagicMock(return_value=Mid(data="mid_result"))
+
+    last_agent = _mock_agent("last", "final_text")
+    last_agent.output_schema = None
+
+    tool = sess.as_tool("t", "d", mode="chain", participants=[mid_agent, last_agent])
+    result = tool.run({"task": "go"})
+
+    assert isinstance(result, str)
+    assert result == "final_text"

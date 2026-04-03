@@ -531,11 +531,12 @@ class LazySession:
 
         # ── Chain mode ─────────────────────────────────────────────────────
         if mode == "chain":
-            def _run_chain(task: str) -> str:
+            def _run_chain(task: str) -> Any:
                 from lazybridge.lazy_context import LazyContext
 
                 last_agent: Any = None
                 last_output: str = ""
+                _last_parsed: Any = None   # preserve Pydantic object from last step
 
                 for p in _parts:
                     if hasattr(p, "chat"):               # LazyAgent
@@ -543,7 +544,8 @@ class LazySession:
                         if _native:
                             kw["native_tools"] = _native
                         if last_agent is not None:
-                            # Previous step was an agent: inject its output as context.
+                            # Previous step was an agent: inject its output as context
+                            # so the current agent sees it alongside the original task.
                             kw["context"] = LazyContext.from_agent(last_agent)
                             current_task = task
                         elif last_output:
@@ -555,6 +557,8 @@ class LazySession:
                         schema = getattr(p, "output_schema", None)
                         if schema is not None:
                             result = p.json(current_task, schema, **kw)
+                            if result is not None:
+                                _last_parsed = result      # preserve Pydantic object
                             last_output = (
                                 result.model_dump_json()
                                 if hasattr(result, "model_dump_json")
@@ -563,13 +567,19 @@ class LazySession:
                         else:
                             resp = p.chat(current_task, **kw)
                             last_output = resp.content if hasattr(resp, "content") else str(resp)
+                            _last_parsed = None            # this step has no parsed object
                         last_agent = p
                     else:                                # LazyTool (nested pipeline)
                         result = p.run({"task": last_output or task})
                         last_output = str(result)
+                        _last_parsed = None
                         last_agent = None
 
-                return last_output
+                # If the last step produced a Pydantic object, return it directly.
+                # This allows pipeline.run() to return the structured type to the caller.
+                # When this chain is used as a tool inside loop(), the executor
+                # serialises the result via str() — Pydantic models render as JSON.
+                return _last_parsed if _last_parsed is not None else last_output
 
             return LazyTool.from_function(_run_chain, name=name, description=description)
 
