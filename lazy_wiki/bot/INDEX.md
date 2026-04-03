@@ -6,7 +6,7 @@
 |---|---|---|---|
 | LazyAgent | 01_lazyagent.md | Single LLM agent: chat, loop, tools, context | A, B, C |
 | LazySession | 02_lazysession.md | Multi-agent container: store, events, graph, concurrency | B, C |
-| LazyTool | 03_lazytool.md | Tool abstraction: function or agent-backed, auto-schema | A, B, C |
+| LazyTool | 03_lazytool.md | Tool abstraction: function or agent-backed, auto-schema, save/load persistence | A, B, C |
 | LazyContext | 04_lazycontext.md | Lazily-evaluated context injection into system prompt | A, B, C |
 | LazyStore | 05_lazystore.md | Shared key-value blackboard for cross-agent state | B, C |
 | LazyRouter | 06_lazyrouter.md | Conditional branching: condition → agent selection | A |

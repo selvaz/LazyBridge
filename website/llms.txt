@@ -245,6 +245,56 @@ LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.arun(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.definition() -> ToolDefinition
 LazyTool.specialize(name: str|None=None, description: str|None=None, guidance: str|None=None, schema_mode: ToolSchemaMode|None=None, strict: bool|None=None) -> LazyTool
+
+# Persistence — serialize tools to portable .py files
+LazyTool.save(path: str) -> None          # generate human-readable .py file; creates parent dirs
+LazyTool.load(path: str) -> LazyTool      # classmethod; reload tool from .py file
+```
+
+### Tool persistence — save() / load()
+
+Tools serialize to plain human-readable Python files. Reload across processes, machines, or sessions.
+
+```python
+# Save
+tool = LazyTool.from_function(search_web, guidance="Use for current data.")
+tool.save("auto_tool/search_web.py")
+
+# Reload in a different script or process — fully operational
+tool = LazyTool.load("auto_tool/search_web.py")
+result = tool.run({"query": "AI news"})
+```
+
+Generated file format (from_function):
+```python
+# LAZYBRIDGE_GENERATED_TOOL v1
+# source: /path/to/tools.py::search_web (line 12)
+
+import requests   # ← imports from original module
+
+from lazybridge import LazyTool
+
+
+def search_web(query: str, max_results: int = 5) -> str:
+    """Search the web for a query."""
+    ...
+
+
+tool = LazyTool.from_function(
+    search_web,
+    description="Search the web for a query.",
+    guidance="Use for any question requiring current data or facts.",
+)
+```
+
+For from_agent() tools: generates LazyAgent constructor + agent.as_tool(). API keys are never serialized.
+
+Security model:
+- load() checks for `# LAZYBRIDGE_GENERATED_TOOL v1` sentinel before executing — rejects arbitrary .py files
+- Both save() and load() reject paths with `..` components (path traversal protection)
+- NEVER expose LazyTool.load as an agent tool — it executes the file (code execution risk)
+
+Limitations: lambdas, REPL-defined functions, and closures with captured variables cannot be saved (ValueError with clear message). Define the function in a .py file first.
 ```
 
 ---

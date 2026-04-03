@@ -429,6 +429,51 @@ us_search = base.specialize(
 
 orchestrator.loop("Compare AI news coverage EU vs US", tools=[eu_search, us_search])</code></pre>
       </div>
+
+      <h3>Persistence — save() / load()</h3>
+      <p>Tools serialize to plain Python files. Reload across processes, machines, or CI environments — no shared codebase required.</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python"># Save — generates a human-readable, editable .py file
+tool = LazyTool.from_function(search_web, guidance="Use for current data.")
+tool.save("auto_tool/search_web.py")
+
+# Reload in a different script, process, or machine
+tool = LazyTool.load("auto_tool/search_web.py")
+result = tool.run({"query": "AI news"})  # fully operational</code></pre>
+      </div>
+      <p>The generated file looks like this:</p>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Generated file</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python"># LAZYBRIDGE_GENERATED_TOOL v1
+# source: /path/to/tools.py::search_web (line 12)
+
+import requests
+
+from lazybridge import LazyTool
+
+
+def search_web(query: str, max_results: int = 5) -> str:
+    """Search the web for a query. Returns top results as text."""
+    ...
+
+
+tool = LazyTool.from_function(
+    search_web,
+    description="Search the web for a query. Returns top results as text.",
+    guidance="Use for current data.",
+)</code></pre>
+      </div>
+      <p>Works for both <code>from_function()</code> and <code>from_agent()</code> tools. Agent files include the <code>LazyAgent</code> constructor — API keys are never serialized.</p>
+      <table class="provider-table" style="margin-top:16px">
+        <thead><tr><th>Safeguard</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Sentinel header</td><td><code>load()</code> checks for <code># LAZYBRIDGE_GENERATED_TOOL v1</code> before executing — rejects arbitrary <code>.py</code> files</td></tr>
+          <tr><td>Path validation</td><td>Both <code>save()</code> and <code>load()</code> reject paths with <code>..</code> components</td></tr>
+          <tr><td>No API key</td><td>Agent files never contain the actual key value</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px;font-size:.875rem;color:var(--text-2)"><strong>Note:</strong> Never expose <code>LazyTool.load</code> as an agent tool — it executes the file, making an LLM-controlled path a code-execution vulnerability. Lambdas and REPL-defined functions cannot be saved (<code>ValueError</code> with clear message).</p>
     </section>
 
     <!-- ── SESSIONS ───────────────────────────────────────────────── -->

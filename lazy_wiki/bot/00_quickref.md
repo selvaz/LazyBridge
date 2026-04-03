@@ -175,6 +175,13 @@ LazyTool.specialize(
     schema_mode: ToolSchemaMode | None = None,
     strict: bool | None = None,
 ) -> LazyTool  # new LazyTool with overrides, same callable
+
+# Persistence — save to .py file, reload across processes / machines
+LazyTool.save(path: str) -> None          # generate human-readable .py file
+LazyTool.load(path: str) -> LazyTool      # classmethod; only loads LazyBridge-generated files
+# save() works for from_function() and from_agent() tools
+# load() requires sentinel header — rejects arbitrary .py files (security)
+# NEVER expose LazyTool.load as an agent tool — it executes the file
 ```
 
 ### NormalizedToolSet
