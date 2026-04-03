@@ -453,3 +453,69 @@ async def test_aloop_verify_async_callable():
     resp = await agent.aloop("async question", verify=async_judge, max_verify=3)
     assert resp.content == "async answer"
     assert call_count == 2
+
+
+# ── T2.21 — on_event("verify_rejected") fires on each rejection ───────────────
+
+def test_loop_verify_rejected_event_fires():
+    """on_event("verify_rejected") fires with attempt and verdict on each rejection."""
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("correct answer")
+    verdicts = ["RETRY: needs more detail", "APPROVED: good enough"]
+
+    def judge(q, a):
+        return verdicts.pop(0)
+
+    events = []
+
+    def on_event(event_type, data):
+        events.append((event_type, data))
+
+    resp = agent.loop("question", verify=judge, max_verify=3, on_event=on_event)
+    assert resp.content == "correct answer"
+
+    rejected = [(t, d) for t, d in events if t == "verify_rejected"]
+    assert len(rejected) == 1
+    assert rejected[0][1]["attempt"] == 1
+    assert rejected[0][1]["verdict"] == "RETRY: needs more detail"
+
+
+# ── T2.22 — on_event("verify_rejected") NOT fired when approved first try ─────
+
+def test_loop_verify_no_rejected_event_on_first_approval():
+    """No verify_rejected event when the judge approves on the first attempt."""
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("correct answer")
+
+    def judge(q, a):
+        return "APPROVED: perfect"
+
+    events = []
+    agent.loop("question", verify=judge, on_event=lambda t, d: events.append(t))
+
+    assert "verify_rejected" not in events
+
+
+# ── T2.23 — resp.verify_log contains all rejected verdicts in order ───────────
+
+def test_loop_verify_log_collects_rejections():
+    """verify_log on the returned CompletionResponse holds every rejected verdict."""
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("correct answer")
+    verdicts = ["RETRY: too short", "RETRY: missing sources", "APPROVED: ok"]
+
+    def judge(q, a):
+        return verdicts.pop(0)
+
+    resp = agent.loop("question", verify=judge, max_verify=5)
+    assert resp.verify_log == ["RETRY: too short", "RETRY: missing sources"]
+
+
+# ── T2.24 — resp.verify_log is empty when verify=None ────────────────────────
+
+def test_loop_verify_log_empty_when_no_verify():
+    """verify_log is [] when verify is not set."""
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("correct answer")
+    resp = agent.loop("question")
+    assert resp.verify_log == []

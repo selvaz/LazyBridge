@@ -575,6 +575,7 @@ class LazyAgent:
         _current_messages: str | list = messages
         _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
 
         for _attempt in range(_attempts):
             # Build tool_set once for the execution registry used in _execute_tool().
@@ -647,10 +648,14 @@ class LazyAgent:
             if _verdict[:30].lower().startswith("approved"):
                 break
 
+            _verify_log.append(_verdict)
+            if on_event:
+                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = (
                 f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
+        resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
         return resp  # type: ignore[return-value]
 
@@ -687,6 +692,7 @@ class LazyAgent:
         _current_messages: str | list = messages
         _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
 
         for _attempt in range(_attempts):
             tool_set = self._build_tool_set(tools)
@@ -757,10 +763,14 @@ class LazyAgent:
             if _verdict[:30].lower().startswith("approved"):
                 break
 
+            _verify_log.append(_verdict)
+            if on_event:
+                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = (
                 f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
+        resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
         return resp  # type: ignore[return-value]
 

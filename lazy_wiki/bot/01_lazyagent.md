@@ -312,7 +312,15 @@ Call-level `tools` are merged with agent-level `self.tools`. `**chat_kwargs` are
 
 ### `on_event` callback
 
-Events fired: `"step"`, `"tool_call"`, `"tool_result"`, `"done"`.
+Events fired during `loop()` / `aloop()`:
+
+| Event | Payload | When |
+|---|---|---|
+| `"step"` | `{"step": int, "response": CompletionResponse}` | After every LLM call |
+| `"tool_call"` | `ToolCall` | Before each tool is executed |
+| `"tool_result"` | `{"call": ToolCall, "result": Any}` | After each tool returns |
+| `"done"` | `CompletionResponse` | When the worker loop finishes a full attempt |
+| `"verify_rejected"` | `{"attempt": int, "verdict": str}` | When the judge rejects — includes full feedback |
 
 ```python
 from lazybridge import LazyAgent, LazyTool
@@ -326,18 +334,19 @@ ai = LazyAgent("anthropic")
 
 def watch(event: str, payload):
     if event == "tool_call":
-        # payload is a ToolCall: .name, .arguments, .id
         print(f"Calling: {payload.name}({payload.arguments})")
     elif event == "tool_result":
-        # payload is {"call": ToolCall, "result": Any}
         print(f"Result: {payload['result']}")
+    elif event == "verify_rejected":
+        print(f"Attempt {payload['attempt']} rejected: {payload['verdict']}")
     elif event == "done":
-        # payload is the final CompletionResponse
         print(f"Final: {payload.content}")
 
 result = ai.loop("What is the weather in Rome?", tools=[weather_tool], on_event=watch)
 print(result.content)
 ```
+
+The returned `CompletionResponse` also exposes all judge feedback via `.verify_log: list[str]` — one entry per rejection, in order. Empty if `verify=None` or approved on the first attempt.
 
 ### `tool_runner` for tools without a callable
 
