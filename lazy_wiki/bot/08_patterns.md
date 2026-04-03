@@ -280,3 +280,72 @@ result = orchestrator.loop(
 )
 print(result.content)
 ```
+
+---
+
+## Pattern F — Lazy Context Chaining (from_agent)
+
+Agents read each other's outputs through `LazyContext.from_agent()`. The entire topology — who sees what — is declared at construction time. No agent runs until you explicitly call it.
+
+**Key properties:**
+- **Pull, not push.** Agent A does not send anything. Agent B reads `A._last_output` when B is called.
+- **Safe before execution.** If A hasn't run yet, context is `""` — no crash, just a debug log.
+- **Composable.** Combine with `from_store()`, `from_text()`, `from_function()` using `+`.
+- **Inspectable.** Call `agent.context()` to see exactly what the LLM will receive before running.
+
+```python
+from lazybridge import LazyAgent, LazyContext, LazyStore
+
+store = LazyStore()
+store.write("style_guide", "Formal tone. Max 300 words. Cite all sources.")
+
+# ── Declare topology — zero side effects ──────────────────────────────────
+researcher = LazyAgent("anthropic", name="researcher")
+
+fact_checker = LazyAgent("openai", name="fact_checker",
+    context=LazyContext.from_agent(researcher))
+
+writer = LazyAgent("anthropic", name="writer",
+    context=(
+        LazyContext.from_agent(researcher,    prefix="[Research]")
+        + LazyContext.from_agent(fact_checker, prefix="[Fact-check]")
+        + LazyContext.from_store(store, keys=["style_guide"])
+    ))
+
+# ── Execute in order ──────────────────────────────────────────────────────
+researcher.loop("Key findings in fusion energy research this year?")
+fact_checker.chat("Verify the claims. Flag any missing citations.")
+result = writer.chat("Write the briefing using your context.")
+print(result.content)
+```
+
+**When to use this pattern:**
+- Linear pipelines where each step enriches the next
+- Any time you want "agent B sees what agent A said" without passing return values manually
+- Declaring complex topologies in config or session constructors — agents are wired before any call
+
+**When to prefer return values instead:**
+- The downstream agent needs to *act on* the data (branch, transform, validate)
+- You need strong typing — use `output_schema` + `from_agent()` together
+- The pipeline is non-linear (fan-out/fan-in) — use `LazySession.as_tool(mode="parallel")` + store
+
+**Combining with from_store for decoupled pipelines:**
+
+```python
+# Agent A writes to store; Agent B reads from store via context
+# They never reference each other — fully decoupled
+from lazybridge import LazyAgent, LazyContext, LazyStore
+
+store = LazyStore()
+
+a = LazyAgent("anthropic", name="extractor", session_store=store)
+b = LazyAgent("openai", name="summariser",
+    context=LazyContext.from_store(store, keys=["extraction"]))
+
+# A runs and writes to store
+extraction = a.chat("Extract all named entities from the document.")
+store.write("extraction", extraction.content)
+
+# B reads from store — never knew about A
+result = b.chat("Summarise the extracted entities.")
+```

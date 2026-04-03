@@ -166,3 +166,40 @@ def test_thread_safety_concurrent_writes():
     assert len(result) == n
     for i in range(n):
         assert result[f"key_{i}"] == i
+
+
+# ── T2.11 — async methods: awrite / aread / aread_all / akeys ────────────────
+
+import asyncio
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_async_write_read():
+    store = LazyStore()
+    await store.awrite("x", 99)
+    assert await store.aread("x") == 99
+
+
+@pytest.mark.asyncio
+async def test_async_read_default():
+    store = LazyStore()
+    assert await store.aread("missing", "default") == "default"
+
+
+@pytest.mark.asyncio
+async def test_async_read_all():
+    store = LazyStore()
+    await store.awrite("a", 1)
+    await store.awrite("b", 2)
+    result = await store.aread_all()
+    assert result == {"a": 1, "b": 2}
+
+
+@pytest.mark.asyncio
+async def test_async_keys():
+    store = LazyStore()
+    await store.awrite("k1", "v1")
+    await store.awrite("k2", "v2")
+    keys = await store.akeys()
+    assert sorted(keys) == ["k1", "k2"]

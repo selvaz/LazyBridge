@@ -223,6 +223,112 @@ print(result.content)</code></pre>
   </div>
 </section>
 
+<!-- ── LAZY CONTEXT CHAINING ─────────────────────────────────────────── -->
+<section class="section" id="context-chaining" style="background:var(--surface)">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">Context Chaining</span>
+      <h2>Wire agents together — before they run</h2>
+      <p style="color:var(--text-muted);max-width:680px;margin:1rem auto 0"><code>LazyContext.from_agent()</code> reads an agent's last output and injects it into another agent's system prompt at execution time. Declare the entire topology upfront — no side effects, no coupling.</p>
+    </div>
+
+    <div style="margin-top:2.5rem;display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
+
+      <!-- Code panel -->
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from lazybridge import LazyAgent, LazyContext
+
+# 1. Declare agents and wire context — nothing runs yet
+researcher = LazyAgent("anthropic", name="researcher")
+
+fact_checker = LazyAgent("openai", name="fact_checker",
+    context=LazyContext.from_agent(researcher))
+
+writer = LazyAgent("anthropic", name="writer",
+    context=(
+        LazyContext.from_agent(researcher,   prefix="[Research]")
+        + LazyContext.from_agent(fact_checker, prefix="[Fact-check]")
+        + LazyContext.from_text("Write in plain English, max 300 words.")
+    ))
+
+# 2. Execute in order — each agent's _last_output feeds the next
+researcher.loop("Key climate research findings this month?")
+fact_checker.chat("Verify the claims above. Flag unsourced ones.")
+result = writer.chat("Write a briefing based on your context.")
+print(result.content)</code></pre>
+      </div>
+
+      <!-- Explanation panel -->
+      <div style="padding:1rem 0">
+        <h4 style="color:var(--text);margin-bottom:1.5rem;font-size:1rem">How it works</h4>
+
+        <div style="display:flex;flex-direction:column;gap:1.2rem">
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <span style="background:var(--accent);color:#000;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">1</span>
+            <div>
+              <strong style="color:var(--text)">Lazy declaration</strong>
+              <p style="color:var(--text-muted);margin:.3rem 0 0;font-size:.9rem">Contexts are wired at construction time. No agent has run. No LLM calls, no side effects — just a dependency graph.</p>
+            </div>
+          </div>
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <span style="background:var(--accent);color:#000;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">2</span>
+            <div>
+              <strong style="color:var(--text)">Pull, not push</strong>
+              <p style="color:var(--text-muted);margin:.3rem 0 0;font-size:.9rem"><code>researcher</code> doesn't send anything. <code>fact_checker</code> pulls <code>researcher._last_output</code> when it runs. If the agent hasn't run yet, context is <code>""</code> — no crash.</p>
+            </div>
+          </div>
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <span style="background:var(--accent);color:#000;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">3</span>
+            <div>
+              <strong style="color:var(--text)">Composable with <code>+</code></strong>
+              <p style="color:var(--text-muted);margin:.3rem 0 0;font-size:.9rem"><code>writer</code> sees both agents' outputs plus a static instruction — all joined with <code>\n\n</code> and injected as one system prompt block.</p>
+            </div>
+          </div>
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <span style="background:var(--accent);color:#000;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">4</span>
+            <div>
+              <strong style="color:var(--text)">All sources</strong>
+              <p style="color:var(--text-muted);margin:.3rem 0 0;font-size:.9rem">Mix freely: <code>from_agent()</code> + <code>from_store()</code> + <code>from_text()</code> + <code>from_function()</code>. Any combination works.</p>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:2rem;padding:1rem;background:var(--code-bg);border-radius:6px;border-left:3px solid var(--accent)">
+          <p style="color:var(--text-muted);font-size:.85rem;margin:0">You can inspect any context without running an agent:<br><code style="color:var(--accent)">print(writer.context())</code> → shows exactly what the LLM will receive</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Multi-source variant -->
+    <div style="margin-top:2.5rem">
+      <h4 style="color:var(--text);margin-bottom:1rem;font-size:.95rem;text-transform:uppercase;letter-spacing:.08em;opacity:.6">With store + function — all sources combined</h4>
+      <div class="code-block-wrap">
+        <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from datetime import date
+from lazybridge import LazyAgent, LazyContext, LazyStore
+
+store = LazyStore()
+store.write("style_guide", "Formal tone. No bullet points. Max 400 words.")
+
+analyst = LazyAgent("anthropic", name="analyst")
+reporter = LazyAgent("openai", name="reporter",
+    context=(
+        LazyContext.from_agent(analyst)                          # previous agent's output
+        + LazyContext.from_store(store, keys=["style_guide"])    # shared rules
+        + LazyContext.from_function(lambda: f"Date: {date.today()}")  # live data
+    ))
+
+analyst.chat("Analyse Q3 earnings for the top 5 tech companies.")
+result = reporter.chat("Write the investor briefing.")
+print(result.content)</code></pre>
+      </div>
+    </div>
+
+  </div>
+</section>
+
 <!-- ── INVESTMENT PLATFORM — VARIANTS 1 & 2 ──────────────────────────── -->
 <section class="section" id="investment-platform">
   <div class="container">

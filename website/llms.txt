@@ -40,7 +40,7 @@ from lazybridge.core.types import (
 | Alias | Default model | Env var |
 |---|---|---|
 | `anthropic` / `claude` | claude-sonnet-4-6 | ANTHROPIC_API_KEY |
-| `openai` / `gpt` | gpt-4o | OPENAI_API_KEY |
+| `openai` / `gpt` | gpt-5.4 | OPENAI_API_KEY |
 | `google` / `gemini` | gemini-2.5-flash | GOOGLE_API_KEY |
 | `deepseek` | deepseek-chat | DEEPSEEK_API_KEY |
 
@@ -108,11 +108,13 @@ LazyAgent.loop(
     native_tools: list[NativeTool | str] | None = None,
     max_steps: int = 8,
     tool_runner: Callable[[str, dict], Any] | None = None,
-    on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"
+    on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
+    verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
+    max_verify: int = 3,                   # max retry attempts when verify is set
     **chat_kwargs,
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async → CompletionResponse
+LazyAgent.aloop(...)  # async → CompletionResponse; verify callable may be async
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
@@ -171,7 +173,9 @@ LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
 ```
 
-### TrackLevel / Event
+### TrackLevel / Event — embedded observability
+
+LazyBridge ships with a built-in SQLite event log. **No external infrastructure required** — no cloud account, no OTel collector, no API key. Works offline. Zero cost.
 
 ```python
 TrackLevel.OFF | BASIC | VERBOSE | FULL
@@ -179,6 +183,33 @@ Event.MODEL_REQUEST | MODEL_RESPONSE | TOOL_CALL | TOOL_RESULT | TOOL_ERROR
 Event.AGENT_START | AGENT_FINISH | LOOP_STEP
 Event.MESSAGES | SYSTEM_CONTEXT | STREAM_CHUNK  # VERBOSE only
 ```
+
+Query the log from Python:
+
+```python
+from lazybridge import LazySession, Event
+
+sess = LazySession(db="pipeline.db", tracking="verbose")
+# ... run pipeline ...
+
+all_events    = sess.events.get()                               # all rows
+tool_calls    = sess.events.get(event_type=Event.TOOL_CALL)    # filter by type
+agent_events  = sess.events.get(agent_id=agent.id)             # filter by agent
+recent        = sess.events.get(limit=50)                      # latest N
+
+for ev in tool_calls:
+    print(ev["timestamp"], ev["agent_name"], ev["event_type"], ev["data_json"])
+```
+
+Each row: `id`, `timestamp` (ISO UTC), `session_id`, `agent_id`, `agent_name`, `event_type`, `data_json`.
+SQLite indexes on `session_id`, `agent_id`, `event_type` — fast queries on large logs.
+
+`console=True` on `LazySession` → live print every event to stdout during execution.
+
+**Comparison with alternatives:**
+- LangSmith: cloud account + per-event billing → LazyBridge: one local SQLite file, always free
+- PydanticAI OTel: requires an OTel collector and exporter infrastructure → LazyBridge: zero external dependencies
+- LangChain callbacks: manual wiring per chain → LazyBridge: automatic, embedded in every `LazySession`
 
 ---
 
@@ -213,7 +244,7 @@ LazyTool.compile(schema_llm: Any = None) -> LazyTool
 LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.arun(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.definition() -> ToolDefinition
-LazyTool.specialize(name, description, guidance, system_prompt, output_schema, strict) -> LazyTool
+LazyTool.specialize(name: str|None=None, description: str|None=None, guidance: str|None=None, schema_mode: ToolSchemaMode|None=None, strict: bool|None=None) -> LazyTool
 ```
 
 ---
@@ -240,6 +271,31 @@ LazyContext.__add__(other) -> LazyContext   # ctx1 + ctx2
 LazyContext.build() -> str
 LazyContext.__call__() -> str              # alias for build()
 ```
+
+**Lazy context chaining — wire topology before execution:**
+```python
+# Declare agents and contexts — nothing runs yet, zero side effects
+researcher   = LazyAgent("anthropic", name="researcher")
+fact_checker = LazyAgent("openai",    name="fact_checker",
+    context=LazyContext.from_agent(researcher))
+writer       = LazyAgent("anthropic", name="writer",
+    context=(
+        LazyContext.from_agent(researcher,    prefix="[Research]")
+        + LazyContext.from_agent(fact_checker, prefix="[Fact-check]")
+        + LazyContext.from_text("Write in plain English, max 300 words.")
+    ))
+
+# Execute in order — from_agent() pulls _last_output at call time
+researcher.loop("Climate research findings this month?")
+fact_checker.chat("Verify. Flag unsourced claims.")
+result = writer.chat("Write the briefing.")   # sees both agents' outputs
+```
+
+Key properties:
+- **Pull model**: Agent A never sends anything. Agent B reads A._last_output when B runs.
+- **Safe before run**: `from_agent()` returns `""` if agent hasn't run yet — no exception.
+- **Composable**: `from_agent() + from_store() + from_text() + from_function()` all work together.
+- **Inspectable**: `writer.context()` shows exactly what the LLM will receive.
 
 ---
 
@@ -298,6 +354,7 @@ LazyRouter.agent_names -> list[str]
 .validation_error: str | None
 .grounding_sources: list[GroundingSource]  # .url, .title, .snippet
 .web_search_queries: list[str]
+.verify_log: list[str]             # judge verdicts that rejected, in order; [] if verify=None or approved first try
 .raise_if_failed() -> None
 ```
 
@@ -580,7 +637,69 @@ g = GraphSchema.from_file("pipeline.yaml")
 
 ---
 
+## Custom Providers (stable extension point)
+
+Subclass `BaseProvider` to integrate any LLM backend. The interface is **stable**.
+
+```python
+from lazybridge.core.providers.base import BaseProvider
+from lazybridge.core.types import CompletionRequest, CompletionResponse, StreamChunk, UsageStats
+
+class MyProvider(BaseProvider):
+    default_model = "my-model-v1"
+
+    def _init_client(self, **kwargs) -> None:
+        import my_sdk
+        self._client = my_sdk.Client(api_key=self.api_key)
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        resp = self._client.generate(
+            model=self._resolve_model(request),
+            messages=...,           # convert request.messages
+            system=request.system,
+        )
+        return CompletionResponse(
+            content=resp.text,
+            model=self._resolve_model(request),
+            usage=UsageStats(input_tokens=resp.in_tokens, output_tokens=resp.out_tokens),
+            raw=resp,
+        )
+
+    def stream(self, request: CompletionRequest):
+        for chunk in self._client.stream(...):
+            yield StreamChunk(delta=chunk.text)
+        yield StreamChunk(stop_reason="end_turn", is_final=True,
+                          usage=UsageStats(output_tokens=...))
+
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        ...   # async version of complete()
+
+    async def astream(self, request: CompletionRequest):
+        ...   # async generator version of stream()
+```
+
+```python
+from lazybridge import LazyAgent
+agent = LazyAgent(MyProvider(api_key="..."))
+print(agent.chat("hello").content)
+```
+
+Stable helpers available in all subclasses:
+- `_resolve_model(request)` — request.model → self.model → default_model
+- `_check_native_tools(tools)` — filter unsupported NativeTool values with warning
+- `_compute_cost(model, input_tokens, output_tokens)` — override for cost tracking
+
+Rules:
+- Return `CompletionResponse` with `content` always set (even if empty string).
+- Final `StreamChunk` must have `is_final=True` and `stop_reason` set.
+- Never mutate `request`. Never block inside `acomplete`/`astream`.
+- Let exceptions propagate — the `Executor` retry layer handles them.
+
+Full example with Ollama: `lazy_wiki/bot/11_custom_provider.md`
+
+---
+
 ## Source
 
 LazyBridge v0.3.1 — https://github.com/selvaz/LazyBridge
-Wiki: lazy_wiki/bot/ (00_quickref.md, 08_patterns.md, INDEX.md)
+Wiki: lazy_wiki/bot/ (00_quickref.md, 08_patterns.md, 11_custom_provider.md, INDEX.md)

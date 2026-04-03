@@ -95,6 +95,18 @@ def _normalise_messages(messages: str | list) -> list[Message]:
     return result
 
 
+def _messages_to_str(messages: str | list) -> str:
+    """Extract a plain-text question string from messages for verify prompts."""
+    if isinstance(messages, str):
+        return messages
+    for m in messages:
+        if isinstance(m, Message) and str(m.role) in ("user", "Role.USER"):
+            return m.content if isinstance(m.content, str) else str(m.content)
+        if isinstance(m, dict) and m.get("role") == "user":
+            return str(m.get("content", ""))
+    return str(messages)
+
+
 def _tool_result_message(call: ToolCall, result: Any, *, is_error: bool = False) -> Message:
     return Message(
         role=Role.TOOL,
@@ -523,6 +535,8 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
+        verify: "LazyAgent | Callable[[str, str], str] | None" = None,
+        max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -543,71 +557,107 @@ class LazyAgent:
             Events: ``"step"``, ``"tool_call"``, ``"tool_result"``, ``"done"``.
         max_steps:
             Hard cap on loop iterations.
+        verify:
+            Optional judge.  A ``LazyAgent`` (calls ``.text()``) or a
+            ``Callable[[question, answer], verdict]``.  Return a string
+            starting with ``"approved"`` (case-insensitive) to accept the
+            answer; anything else triggers a retry with the feedback.
+        max_verify:
+            Maximum verify attempts.  If exceeded the last worker result is
+            returned unchanged — no exception is raised.
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in loop(). Use chat() for streaming.")
 
-        # Build tool_set once for the execution registry used in _execute_tool().
-        # Do NOT pass tool_set.bridges to chat() — chat() calls _build_tool_set()
-        # internally and would add self.tools a second time, causing duplicate names.
-        tool_set = self._build_tool_set(tools)
-        convo = _normalise_messages(messages)
+        _orig_q = _messages_to_str(messages)
+        _current_messages: str | list = messages
+        _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
 
-        for step in range(max_steps):
-            resp = self.chat(
-                convo,
-                tools=tools,  # pass originals; chat() merges with self.tools once
-                native_tools=native_tools,
-                **chat_kwargs,
-            )  # type: ignore[assignment]
+        for _attempt in range(_attempts):
+            # Build tool_set once for the execution registry used in _execute_tool().
+            # Do NOT pass tool_set.bridges to chat() — chat() calls _build_tool_set()
+            # internally and would add self.tools a second time, causing duplicate names.
+            tool_set = self._build_tool_set(tools)
+            convo = _normalise_messages(_current_messages)
+
+            for step in range(max_steps):
+                resp = self.chat(
+                    convo,
+                    tools=tools,  # pass originals; chat() merges with self.tools once
+                    native_tools=native_tools,
+                    **chat_kwargs,
+                )  # type: ignore[assignment]
+
+                if on_event:
+                    on_event("step", {"step": step, "response": resp})
+
+                if not resp.tool_calls:
+                    break
+
+                # Append the assistant's turn (with tool-use blocks).
+                # Build content list explicitly so text + thinking + tool blocks are never lost.
+                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
+                              for tc in resp.tool_calls]
+                _thinking_blocks: list[Any] = (
+                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
+                )
+                if resp.tool_calls:
+                    _text_blocks: list[Any] = (
+                        [TextContent(text=resp.content)] if resp.content else []
+                    )
+                    _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
+                else:
+                    _asst_content = resp.content or ""
+                convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
+
+                # Execute each tool call and append the result
+                for tc in resp.tool_calls:
+                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
+                    if on_event:
+                        on_event("tool_call", tc)
+                    try:
+                        result = self._execute_tool(tc, tool_set.registry, tool_runner)
+                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                        if on_event:
+                            on_event("tool_result", {"call": tc, "result": result})
+                        convo.append(_tool_result_message(tc, result))
+                    except Exception as exc:
+                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
+                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
+                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+
+            if resp is None:  # pragma: no cover
+                raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
 
             if on_event:
-                on_event("step", {"step": step, "response": resp})
+                on_event("done", resp)
 
-            if not resp.tool_calls:
+            if verify is None:
                 break
 
-            # Append the assistant's turn (with tool-use blocks).
-            # Build content list explicitly so text + thinking + tool blocks are never lost.
-            _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
-                          for tc in resp.tool_calls]
-            _thinking_blocks: list[Any] = (
-                [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
+            _raw = (
+                verify.text(f"Question: {_orig_q}\nAnswer: {resp.content}")
+                if hasattr(verify, "text")
+                else verify(_orig_q, resp.content)
             )
-            if resp.tool_calls:
-                _text_blocks: list[Any] = (
-                    [TextContent(text=resp.content)] if resp.content else []
-                )
-                _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
-            else:
-                _asst_content = resp.content or ""
-            convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
+            _verdict: str = str(_raw) if _raw is not None else ""
+            if _verdict[:30].lower().startswith("approved"):
+                break
 
-            # Execute each tool call and append the result
-            for tc in resp.tool_calls:
-                self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                if on_event:
-                    on_event("tool_call", tc)
-                try:
-                    result = self._execute_tool(tc, tool_set.registry, tool_runner)
-                    self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                    if on_event:
-                        on_event("tool_result", {"call": tc, "result": result})
-                    convo.append(_tool_result_message(tc, result))
-                except Exception as exc:
-                    _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                    self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                    convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+            _verify_log.append(_verdict)
+            if on_event:
+                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
+            _current_messages = (
+                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
+            )
 
-        if resp is None:  # pragma: no cover
-            raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
-        if on_event:
-            on_event("done", resp)
-        self._last_output = resp.content
-        return resp
+        resp.verify_log = _verify_log  # type: ignore[union-attr]
+        self._last_output = resp.content  # type: ignore[union-attr]
+        return resp  # type: ignore[return-value]
 
     async def aloop(
         self,
@@ -618,67 +668,111 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
+        verify: "LazyAgent | Callable[..., Any] | None" = None,
+        max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
-        """Async version of loop()."""
+        """Async version of loop().
+
+        Parameters
+        ----------
+        verify:
+            Optional judge.  A ``LazyAgent`` (calls ``.atext()``) or a
+            callable ``(question, answer) → verdict`` (may be a coroutine).
+            Return a string starting with ``"approved"`` to accept the answer.
+        max_verify:
+            Maximum verify attempts before returning the last result as-is.
+        """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
-        tool_set = self._build_tool_set(tools)
-        convo = _normalise_messages(messages)
+        _orig_q = _messages_to_str(messages)
+        _current_messages: str | list = messages
+        _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
 
-        for step in range(max_steps):
-            resp = await self.achat(
-                convo,
-                tools=tools,  # pass originals; achat() merges with self.tools once
-                native_tools=native_tools,
-                **chat_kwargs,
-            )  # type: ignore[assignment]
+        for _attempt in range(_attempts):
+            tool_set = self._build_tool_set(tools)
+            convo = _normalise_messages(_current_messages)
+
+            for step in range(max_steps):
+                resp = await self.achat(
+                    convo,
+                    tools=tools,  # pass originals; achat() merges with self.tools once
+                    native_tools=native_tools,
+                    **chat_kwargs,
+                )  # type: ignore[assignment]
+
+                if on_event:
+                    on_event("step", {"step": step, "response": resp})
+
+                if not resp.tool_calls:
+                    break
+
+                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
+                              for tc in resp.tool_calls]
+                _thinking_blocks: list[Any] = (
+                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
+                )
+                if resp.tool_calls:
+                    _text_blocks: list[Any] = (
+                        [TextContent(text=resp.content)] if resp.content else []
+                    )
+                    _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
+                else:
+                    _asst_content = resp.content or ""
+                convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
+
+                for tc in resp.tool_calls:
+                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
+                    if on_event:
+                        on_event("tool_call", tc)
+                    try:
+                        result = await self._aexecute_tool(tc, tool_set.registry, tool_runner)
+                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                        if on_event:
+                            on_event("tool_result", {"call": tc, "result": result})
+                        convo.append(_tool_result_message(tc, result))
+                    except Exception as exc:
+                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
+                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
+                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+
+            if resp is None:  # pragma: no cover
+                raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
 
             if on_event:
-                on_event("step", {"step": step, "response": resp})
+                on_event("done", resp)
 
-            if not resp.tool_calls:
+            if verify is None:
                 break
 
-            _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
-                          for tc in resp.tool_calls]
-            _thinking_blocks: list[Any] = (
-                [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
-            )
-            if resp.tool_calls:
-                _text_blocks: list[Any] = (
-                    [TextContent(text=resp.content)] if resp.content else []
+            if hasattr(verify, "atext"):
+                _raw = await verify.atext(
+                    f"Question: {_orig_q}\nAnswer: {resp.content}"
                 )
-                _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
+            elif inspect.iscoroutinefunction(verify):
+                _raw = await verify(_orig_q, resp.content)
             else:
-                _asst_content = resp.content or ""
-            convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
+                _raw = verify(_orig_q, resp.content)
+            _verdict: str = str(_raw) if _raw is not None else ""
 
-            for tc in resp.tool_calls:
-                self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                if on_event:
-                    on_event("tool_call", tc)
-                try:
-                    result = await self._aexecute_tool(tc, tool_set.registry, tool_runner)
-                    self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                    if on_event:
-                        on_event("tool_result", {"call": tc, "result": result})
-                    convo.append(_tool_result_message(tc, result))
-                except Exception as exc:
-                    _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                    self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                    convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+            if _verdict[:30].lower().startswith("approved"):
+                break
 
-        if resp is None:  # pragma: no cover
-            raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
-        if on_event:
-            on_event("done", resp)
-        self._last_output = resp.content
-        return resp
+            _verify_log.append(_verdict)
+            if on_event:
+                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
+            _current_messages = (
+                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
+            )
+
+        resp.verify_log = _verify_log  # type: ignore[union-attr]
+        self._last_output = resp.content  # type: ignore[union-attr]
+        return resp  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Tool execution helpers

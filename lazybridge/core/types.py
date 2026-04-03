@@ -216,6 +216,7 @@ class CompletionResponse:
     grounding_sources: list[GroundingSource] = field(default_factory=list)  # Web search citations
     web_search_queries: list[str] = field(default_factory=list)  # Queries issued by the grounding tool
     search_entry_point: str | None = None  # Google's rendered HTML attribution widget (required by ToS when displaying grounded results)
+    verify_log: list[str] = field(default_factory=list)  # Judge verdicts that rejected (in order); empty if approved first try or verify=None
 
     def raise_if_failed(self) -> None:
         """Raise an exception if structured output validation failed.

@@ -282,7 +282,7 @@ class GraphSchema:
 
     @classmethod
     def from_file(cls, path: str) -> GraphSchema:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             text = f.read()
         if _is_yaml_path(path):
             yaml = _require_yaml()
@@ -291,7 +291,7 @@ class GraphSchema:
 
     def save(self, path: str) -> None:
         """Save schema to JSON or YAML depending on file extension."""
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(self.to_yaml() if _is_yaml_path(path) else self.to_json())
 
     def __repr__(self) -> str:

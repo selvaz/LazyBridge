@@ -138,7 +138,7 @@ class Executor:
                     UserWarning, stacklevel=2,
                 )
                 time.sleep(delay)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
         """Stream a completion request (no retry — streaming is not idempotent)."""
@@ -166,7 +166,7 @@ class Executor:
                     UserWarning, stacklevel=2,
                 )
                 await asyncio.sleep(delay)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         """Async streaming version (no retry — streaming is not idempotent)."""

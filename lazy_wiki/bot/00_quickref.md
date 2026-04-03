@@ -49,11 +49,13 @@ LazyAgent.loop(
     native_tools: list[NativeTool | str] | None = None,
     max_steps: int = 8,                    # hard cap; raises ValueError if < 1
     tool_runner: Callable[[str, dict], Any] | None = None,  # fallback for tools not in registry
-    on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"
+    on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
+    verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
+    max_verify: int = 3,                   # max retry attempts when verify is set
     **chat_kwargs,                         # forwarded to chat() on each step
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async version → CompletionResponse
+LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
@@ -170,8 +172,7 @@ LazyTool.specialize(
     name: str | None = None,
     description: str | None = None,
     guidance: str | None = None,
-    system_prompt: str | None = None,
-    output_schema: type | dict | None = None,
+    schema_mode: ToolSchemaMode | None = None,
     strict: bool | None = None,
 ) -> LazyTool  # new LazyTool with overrides, same callable
 ```
