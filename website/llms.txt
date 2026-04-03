@@ -608,7 +608,69 @@ g = GraphSchema.from_file("pipeline.yaml")
 
 ---
 
+## Custom Providers (stable extension point)
+
+Subclass `BaseProvider` to integrate any LLM backend. The interface is **stable**.
+
+```python
+from lazybridge.core.providers.base import BaseProvider
+from lazybridge.core.types import CompletionRequest, CompletionResponse, StreamChunk, UsageStats
+
+class MyProvider(BaseProvider):
+    default_model = "my-model-v1"
+
+    def _init_client(self, **kwargs) -> None:
+        import my_sdk
+        self._client = my_sdk.Client(api_key=self.api_key)
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        resp = self._client.generate(
+            model=self._resolve_model(request),
+            messages=...,           # convert request.messages
+            system=request.system,
+        )
+        return CompletionResponse(
+            content=resp.text,
+            model=self._resolve_model(request),
+            usage=UsageStats(input_tokens=resp.in_tokens, output_tokens=resp.out_tokens),
+            raw=resp,
+        )
+
+    def stream(self, request: CompletionRequest):
+        for chunk in self._client.stream(...):
+            yield StreamChunk(delta=chunk.text)
+        yield StreamChunk(stop_reason="end_turn", is_final=True,
+                          usage=UsageStats(output_tokens=...))
+
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        ...   # async version of complete()
+
+    async def astream(self, request: CompletionRequest):
+        ...   # async generator version of stream()
+```
+
+```python
+from lazybridge import LazyAgent
+agent = LazyAgent(MyProvider(api_key="..."))
+print(agent.chat("hello").content)
+```
+
+Stable helpers available in all subclasses:
+- `_resolve_model(request)` — request.model → self.model → default_model
+- `_check_native_tools(tools)` — filter unsupported NativeTool values with warning
+- `_compute_cost(model, input_tokens, output_tokens)` — override for cost tracking
+
+Rules:
+- Return `CompletionResponse` with `content` always set (even if empty string).
+- Final `StreamChunk` must have `is_final=True` and `stop_reason` set.
+- Never mutate `request`. Never block inside `acomplete`/`astream`.
+- Let exceptions propagate — the `Executor` retry layer handles them.
+
+Full example with Ollama: `lazy_wiki/bot/11_custom_provider.md`
+
+---
+
 ## Source
 
 LazyBridge v0.3.1 — https://github.com/selvaz/LazyBridge
-Wiki: lazy_wiki/bot/ (00_quickref.md, 08_patterns.md, INDEX.md)
+Wiki: lazy_wiki/bot/ (00_quickref.md, 08_patterns.md, 11_custom_provider.md, INDEX.md)

@@ -38,9 +38,10 @@ exclude = [
 [tool.pytest.ini_options]
 pythonpath = ["lazybridge"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten; anyio:pytest.PytestAssertRewriteWarning",
 ]
 markers = [
-    "live: opt-in live tests that call real provider APIs",
+    "live: opt-in live tests that call real provider APIs (run with: pytest -m live)",
 ]

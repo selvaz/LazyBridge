@@ -13,6 +13,7 @@
 | GraphSchema | 07_graphschema.md | Serializable pipeline topology for GUI | all |
 | TrackLevel/Event | 02_lazysession.md | Tracking levels and event types | all |
 | ToolSchemaBuilder | 10_tool_schema.md | Schema pipeline: type mapping, LLM modes, artifact caching | all |
+| BaseProvider | 11_custom_provider.md | **Stable** extension point — integrate any LLM backend | all |
 
 ## Communication rules (critical)
 
@@ -38,6 +39,7 @@
 | All patterns with full code | `08_patterns.md` |
 | Advanced features | `09_advanced.md` |
 | Schema generation (type mapping, LLM modes, artifacts) | `10_tool_schema.md` |
+| Custom provider integration | `11_custom_provider.md` |
 
 ## Providers supported
 
@@ -64,4 +66,6 @@ from lazybridge.core.types import (
     NativeTool, ThinkingConfig, SkillsConfig,
     StructuredOutputConfig, Message, Role,
 )
+# Custom provider extension point (stable):
+from lazybridge.core.providers.base import BaseProvider
 ```
