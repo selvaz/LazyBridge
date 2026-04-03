@@ -717,6 +717,168 @@ run_variant_4()</code></pre>
   </div>
 </section>
 
+<!-- ── NESTED PIPELINE ─────────────────────────────────────────────────── -->
+<section class="section" id="nested-pipeline">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">Nested Pipeline</span>
+      <h2>Parallel research → editorial chain</h2>
+      <p style="color:var(--text-muted);max-width:700px;margin:1rem auto 0">
+        You want to publish a blog post on a topic. You need parallel web research from three angles,
+        then a writer to synthesise it, then an editor to produce a clean structured result.
+        This is a two-level pipeline: a parallel session nested inside a sequential chain.
+        One call. One return value.
+      </p>
+    </div>
+
+    <!-- Architecture diagram -->
+    <div style="margin:2rem 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.5rem 2rem">
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1rem;font-weight:600">Pipeline architecture</div>
+      <pre style="font-family:'JetBrains Mono',monospace;font-size:.82rem;color:var(--text-2);margin:0;line-height:1.8;background:none;padding:0">research_sess  (parallel — all three run concurrently)
+├── tech_scout    → WEB_SEARCH → latest tech developments, citations, dates
+├── market_scout  → WEB_SEARCH → market trends, statistics, key players
+└── media_scout   → WEB_SEARCH → public debates, criticism, community reactions
+          │
+          ▼  outputs concatenated into a single research block
+editorial_sess (chain — sequential)
+├── writer  → synthesises the three-domain research into a draft
+└── editor  → refines the draft, returns a typed BlogPost
+          │
+          ▼
+BlogPost(title, intro, body, conclusion, tags)</pre>
+    </div>
+
+    <!-- Code -->
+    <div class="code-block-wrap" style="margin-bottom:2rem">
+      <div class="code-header"><span class="code-lang">Python</span><button class="copy-btn">Copy</button></div>
+<pre><code class="language-python">from pydantic import BaseModel
+from lazybridge import LazyAgent, LazySession
+from lazybridge.core.types import NativeTool
+
+
+class BlogPost(BaseModel):
+    title:      str
+    intro:      str
+    body:       str
+    conclusion: str
+    tags:       list[str]
+
+
+# ── Layer 1: parallel research ────────────────────────────────────────────────
+# Three agents run concurrently. Each searches the web for a different angle.
+# native_tools=[WEB_SEARCH] automatically triggers loop() for each agent.
+
+research_sess = LazySession(tracking="basic", console=True)
+
+LazyAgent("anthropic", name="tech_scout",    session=research_sess,
+          native_tools=[NativeTool.WEB_SEARCH], max_retries=2,
+          system="Technology researcher. Find the latest developments on the topic. "
+                 "Cite sources, include dates and concrete data.")
+
+LazyAgent("anthropic", name="market_scout",  session=research_sess,
+          native_tools=[NativeTool.WEB_SEARCH], max_retries=2,
+          system="Market analyst. Find trends, statistics, forecasts, and key players. "
+                 "Include numbers and percentages.")
+
+LazyAgent("anthropic", name="media_scout",   session=research_sess,
+          native_tools=[NativeTool.WEB_SEARCH], max_retries=2,
+          system="Media analyst. Find public debates, criticism, and community reactions "
+                 "on the topic. Surface contrarian views.")
+
+research_tool = research_sess.as_tool(
+    "multi_domain_research",
+    "Parallel web research across tech, market, and media. Returns concatenated results.",
+    mode="parallel",
+)
+
+
+# ── Layer 2: editorial chain ──────────────────────────────────────────────────
+# research_tool feeds its output to the writer, writer's draft feeds the editor.
+# The editor's output_schema means pipeline.run() returns a BlogPost directly.
+
+editorial_sess = LazySession(tracking="basic")
+
+pipeline = editorial_sess.as_tool(
+    "blog_pipeline",
+    "Research → write → edit: produces a structured, publication-ready blog post.",
+    mode="chain",
+    participants=[
+        research_tool,   # ← the entire parallel layer, opaque to the chain
+        LazyAgent(
+            "anthropic", name="writer", session=editorial_sess,
+            system="Copywriter. You receive multi-domain research and synthesise it "
+                   "into a compelling draft. Tone: engaging, professional. "
+                   "Structure: intro → body → conclusion.",
+        ),
+        LazyAgent(
+            "anthropic", name="editor", session=editorial_sess,
+            system="Senior editor. Refine the draft: cut filler, sharpen the conclusion, "
+                   "improve flow. Return the final result as structured JSON.",
+            output_schema=BlogPost,
+        ),
+    ],
+)
+
+
+# ── Run ───────────────────────────────────────────────────────────────────────
+# Everything above was declaration. This line triggers all six agents.
+
+post: BlogPost = pipeline.run({
+    "task": "The impact of open-source models on OpenAI's competitive position in 2025"
+})
+
+print(post.title)
+print(post.tags)
+print(post.intro)</code></pre>
+    </div>
+
+    <!-- Output sample + key points side by side -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
+
+      <div>
+        <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;font-weight:600">Sample output</div>
+        <div class="code-block-wrap">
+          <div class="code-header"><span class="code-lang">Output</span></div>
+<pre><code class="language-text">Open Source vs OpenAI: The Competitive
+Shift Reshaping AI in 2025
+
+['open-source AI', 'OpenAI', 'LLaMA',
+ 'Mistral', 'competitive analysis', '2025']
+
+The AI landscape shifted decisively in 2025.
+Open-source models from Meta, Mistral, and a
+growing ecosystem of independents matched
+GPT-4-class performance on most benchmarks —
+at a fraction of the inference cost...</code></pre>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;font-weight:600">What this demonstrates</div>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.75rem">
+          <li style="font-size:.875rem;color:var(--text-2);display:flex;gap:.75rem;align-items:flex-start">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">Nested sessions</span>
+            <span>Two <code>LazySession</code>s with independent tracking and graphs. The inner session is completely invisible to the outer one.</span>
+          </li>
+          <li style="font-size:.875rem;color:var(--text-2);display:flex;gap:.75rem;align-items:flex-start">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">Auto loop</span>
+            <span><code>native_tools=[WEB_SEARCH]</code> automatically runs each research agent in ReAct loop mode — no explicit <code>loop()</code> call needed.</span>
+          </li>
+          <li style="font-size:.875rem;color:var(--text-2);display:flex;gap:.75rem;align-items:flex-start">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">Typed return</span>
+            <span><code>output_schema=BlogPost</code> on the editor means <code>pipeline.run()</code> returns a <code>BlogPost</code> object — not a string, not a dict.</span>
+          </li>
+          <li style="font-size:.875rem;color:var(--text-2);display:flex;gap:.75rem;align-items:flex-start">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">Declarative</span>
+            <span>Every line above the <code>pipeline.run()</code> call is pure topology declaration. No callbacks, no manual passing of results between agents.</span>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
 <!-- ── FOOTER ──────────────────────────────────────────────────────────── -->
 <footer>
   <div class="container footer-inner">
