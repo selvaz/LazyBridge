@@ -104,8 +104,9 @@ def _now() -> str:
 def _safe_json(data: Any) -> str:
     try:
         return json.dumps(data, default=str)
-    except Exception:
-        return json.dumps({"_error": "not serialisable"})
+    except Exception as exc:
+        _logger.debug("_safe_json: could not serialise %s: %s", type(data).__name__, exc)
+        return json.dumps({"_error": "not serialisable", "_type": type(data).__name__})
 
 
 class EventLog:

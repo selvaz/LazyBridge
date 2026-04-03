@@ -638,16 +638,17 @@ class LazyAgent:
             if verify is None:
                 break
 
-            _verdict: str = (
+            _raw = (
                 verify.text(f"Question: {_orig_q}\nAnswer: {resp.content}")
                 if hasattr(verify, "text")
                 else verify(_orig_q, resp.content)
             )
+            _verdict: str = str(_raw) if _raw is not None else ""
             if _verdict[:30].lower().startswith("approved"):
                 break
 
             _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict}\nTry again."
+                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
         self._last_output = resp.content  # type: ignore[union-attr]
@@ -744,19 +745,20 @@ class LazyAgent:
                 break
 
             if hasattr(verify, "atext"):
-                _verdict: str = await verify.atext(
+                _raw = await verify.atext(
                     f"Question: {_orig_q}\nAnswer: {resp.content}"
                 )
             elif inspect.iscoroutinefunction(verify):
-                _verdict = await verify(_orig_q, resp.content)
+                _raw = await verify(_orig_q, resp.content)
             else:
-                _verdict = verify(_orig_q, resp.content)
+                _raw = verify(_orig_q, resp.content)
+            _verdict: str = str(_raw) if _raw is not None else ""
 
             if _verdict[:30].lower().startswith("approved"):
                 break
 
             _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict}\nTry again."
+                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
         self._last_output = resp.content  # type: ignore[union-attr]

@@ -315,7 +315,7 @@ class AnthropicProvider(BaseProvider):
         # the model was run in thinking/reasoning mode.  getattr with None as the
         # default avoids AttributeError on SDK versions that predate this field.
         _tt = getattr(response.usage, "reasoning_tokens", None)
-        if _tt:
+        if _tt is not None:
             usage.thinking_tokens = _tt
         # Price lookup by substring match — see _compute_cost for ordering notes.
         usage.cost_usd = self._compute_cost(response.model, usage.input_tokens, usage.output_tokens)
