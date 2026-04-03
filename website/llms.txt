@@ -243,6 +243,31 @@ LazyContext.build() -> str
 LazyContext.__call__() -> str              # alias for build()
 ```
 
+**Lazy context chaining — wire topology before execution:**
+```python
+# Declare agents and contexts — nothing runs yet, zero side effects
+researcher   = LazyAgent("anthropic", name="researcher")
+fact_checker = LazyAgent("openai",    name="fact_checker",
+    context=LazyContext.from_agent(researcher))
+writer       = LazyAgent("anthropic", name="writer",
+    context=(
+        LazyContext.from_agent(researcher,    prefix="[Research]")
+        + LazyContext.from_agent(fact_checker, prefix="[Fact-check]")
+        + LazyContext.from_text("Write in plain English, max 300 words.")
+    ))
+
+# Execute in order — from_agent() pulls _last_output at call time
+researcher.loop("Climate research findings this month?")
+fact_checker.chat("Verify. Flag unsourced claims.")
+result = writer.chat("Write the briefing.")   # sees both agents' outputs
+```
+
+Key properties:
+- **Pull model**: Agent A never sends anything. Agent B reads A._last_output when B runs.
+- **Safe before run**: `from_agent()` returns `""` if agent hasn't run yet — no exception.
+- **Composable**: `from_agent() + from_store() + from_text() + from_function()` all work together.
+- **Inspectable**: `writer.context()` shows exactly what the LLM will receive.
+
 ---
 
 ## LazyStore
