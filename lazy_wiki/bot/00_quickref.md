@@ -172,8 +172,7 @@ LazyTool.specialize(
     name: str | None = None,
     description: str | None = None,
     guidance: str | None = None,
-    system_prompt: str | None = None,
-    output_schema: type | dict | None = None,
+    schema_mode: ToolSchemaMode | None = None,
     strict: bool | None = None,
 ) -> LazyTool  # new LazyTool with overrides, same callable
 ```

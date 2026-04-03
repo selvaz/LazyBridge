@@ -40,7 +40,7 @@ from lazybridge.core.types import (
 | Alias | Default model | Env var |
 |---|---|---|
 | `anthropic` / `claude` | claude-sonnet-4-6 | ANTHROPIC_API_KEY |
-| `openai` / `gpt` | gpt-4o | OPENAI_API_KEY |
+| `openai` / `gpt` | gpt-5.4 | OPENAI_API_KEY |
 | `google` / `gemini` | gemini-2.5-flash | GOOGLE_API_KEY |
 | `deepseek` | deepseek-chat | DEEPSEEK_API_KEY |
 
@@ -215,7 +215,7 @@ LazyTool.compile(schema_llm: Any = None) -> LazyTool
 LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.arun(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.definition() -> ToolDefinition
-LazyTool.specialize(name, description, guidance, system_prompt, output_schema, strict) -> LazyTool
+LazyTool.specialize(name: str|None=None, description: str|None=None, guidance: str|None=None, schema_mode: ToolSchemaMode|None=None, strict: bool|None=None) -> LazyTool
 ```
 
 ---
