@@ -457,18 +457,38 @@ sess = LazySession(db="my_pipeline.db")    # persistent SQLite
 sess = LazySession(tracking="verbose")     # all events including stream chunks</code></pre>
       </div>
 
-      <h3>Event tracking</h3>
+      <h3>Event tracking — embedded, zero infra</h3>
+      <p>Every <code>LazySession</code> automatically records every model request, tool call, loop step, and response in a built-in SQLite event log. No cloud account. No OTel collector. No configuration beyond the <code>tracking=</code> level.</p>
+      <table class="provider-table" style="margin-bottom:16px">
+        <thead><tr><th>Level</th><th>Events recorded</th></tr></thead>
+        <tbody>
+          <tr><td><code>OFF</code></td><td>Nothing logged</td></tr>
+          <tr><td><code>BASIC</code> (default)</td><td>model_request, model_response, tool_call, tool_result, tool_error, agent_start, agent_finish, loop_step</td></tr>
+          <tr><td><code>VERBOSE</code> / <code>FULL</code></td><td>All of the above + messages, system_context, stream_chunk</td></tr>
+        </tbody>
+      </table>
       <div class="code-block-wrap">
         <div class="code-header"><span>Python</span><button class="copy-btn">Copy</button></div>
-        <pre><code class="language-python">from lazybridge import Event
+        <pre><code class="language-python">from lazybridge import LazySession, Event
 
-all_events = sess.events.get()
-tool_calls = sess.events.get(event_type=Event.TOOL_CALL)
+sess = LazySession(db="pipeline.db", tracking="verbose", console=True)
+
+# ... run your pipeline ...
+
+# Query from Python — SQLite indexes on agent_id + event_type
+all_events    = sess.events.get()
+tool_calls    = sess.events.get(event_type=Event.TOOL_CALL)
 writer_events = sess.events.get(agent_id=writer.id)
+recent_50     = sess.events.get(limit=50)
 
-for ev in all_events:
-    print(ev["timestamp"], ev["agent_name"], ev["event_type"])</code></pre>
+for ev in tool_calls:
+    print(ev["timestamp"], ev["agent_name"], ev["event_type"], ev["data_json"])</code></pre>
       </div>
+      <p style="margin-top:12px;font-size:.875rem;color:var(--text-2)">
+        <strong>vs LangSmith</strong>: cloud account + per-event pricing &mdash; LazyBridge uses a local SQLite file, always free.<br>
+        <strong>vs OTel</strong>: requires a collector and exporter infrastructure &mdash; LazyBridge has zero external dependencies, works offline.<br>
+        <strong>vs LangChain callbacks</strong>: manual wiring per chain &mdash; LazyBridge tracking is automatic on every <code>LazySession</code>.
+      </p>
 
       <h3>Concurrent agents with gather()</h3>
       <div class="code-block-wrap">

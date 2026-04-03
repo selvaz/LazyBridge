@@ -479,6 +479,56 @@ result = pipeline.run({"task": TASK})</code></pre>
   </div>
 </section>
 
+<!-- ═══════════════════════════════════════════ OBSERVABILITY CALLOUT -->
+<section class="section" id="observability">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center">
+      <div>
+        <div class="section-tag" style="margin-bottom:16px">Observability</div>
+        <h2 style="margin-bottom:20px">Full tracing. Zero infrastructure.</h2>
+        <p style="color:var(--text-2);line-height:1.7;margin-bottom:20px">Every model call, tool invocation, and loop step is recorded in an embedded SQLite event log — automatically, with no setup. Query it from Python. Export it. Filter by agent, event type, or timestamp.</p>
+        <p style="color:var(--text-2);line-height:1.7;margin-bottom:24px">No cloud account. No OTel collector. No API key. No per-event billing. The event log lives next to your code, works offline, and costs nothing.</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:12px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">vs LangSmith</span>
+            <span style="color:var(--text-2)">Cloud account + per-event pricing. LazyBridge: one SQLite file, always free.</span>
+          </div>
+          <div style="display:flex;gap:12px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--accent);font-weight:700;flex-shrink:0">vs OTel</span>
+            <span style="color:var(--text-2)">Requires a collector infrastructure. LazyBridge: zero external dependencies.</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="code-block-wrap">
+          <div class="code-header"><span class="code-lang">Python</span><button class="copy-btn">Copy</button></div>
+<pre><code class="language-python">from lazybridge import LazyAgent, LazySession, Event
+
+# tracking is on by default — nothing to configure
+sess = LazySession(db="pipeline.db", tracking="verbose")
+
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer     = LazyAgent("openai",    name="writer",     session=sess)
+
+# ... run your pipeline ...
+
+# Query the log from Python
+all_events    = sess.events.get()
+tool_calls    = sess.events.get(event_type=Event.TOOL_CALL)
+writer_events = sess.events.get(agent_id=writer.id)
+
+for ev in tool_calls:
+    print(ev["timestamp"], ev["agent_name"], ev["data_json"])</code></pre>
+        </div>
+        <div style="margin-top:12px;font-size:.8rem;color:var(--text-3)">
+          4 levels: <code>OFF</code> &mdash; <code>BASIC</code> &mdash; <code>VERBOSE</code> &mdash; <code>FULL</code> &nbsp;&bull;&nbsp;
+          9 event types &nbsp;&bull;&nbsp; SQLite indexes on agent_id + event_type &nbsp;&bull;&nbsp; thread-safe WAL mode
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ═══════════════════════════════════════════════════ PROVIDER TABLE -->
 <section class="section" id="providers">
   <div class="container">

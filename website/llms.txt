@@ -173,7 +173,9 @@ LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
 ```
 
-### TrackLevel / Event
+### TrackLevel / Event — embedded observability
+
+LazyBridge ships with a built-in SQLite event log. **No external infrastructure required** — no cloud account, no OTel collector, no API key. Works offline. Zero cost.
 
 ```python
 TrackLevel.OFF | BASIC | VERBOSE | FULL
@@ -181,6 +183,33 @@ Event.MODEL_REQUEST | MODEL_RESPONSE | TOOL_CALL | TOOL_RESULT | TOOL_ERROR
 Event.AGENT_START | AGENT_FINISH | LOOP_STEP
 Event.MESSAGES | SYSTEM_CONTEXT | STREAM_CHUNK  # VERBOSE only
 ```
+
+Query the log from Python:
+
+```python
+from lazybridge import LazySession, Event
+
+sess = LazySession(db="pipeline.db", tracking="verbose")
+# ... run pipeline ...
+
+all_events    = sess.events.get()                               # all rows
+tool_calls    = sess.events.get(event_type=Event.TOOL_CALL)    # filter by type
+agent_events  = sess.events.get(agent_id=agent.id)             # filter by agent
+recent        = sess.events.get(limit=50)                      # latest N
+
+for ev in tool_calls:
+    print(ev["timestamp"], ev["agent_name"], ev["event_type"], ev["data_json"])
+```
+
+Each row: `id`, `timestamp` (ISO UTC), `session_id`, `agent_id`, `agent_name`, `event_type`, `data_json`.
+SQLite indexes on `session_id`, `agent_id`, `event_type` — fast queries on large logs.
+
+`console=True` on `LazySession` → live print every event to stdout during execution.
+
+**Comparison with alternatives:**
+- LangSmith: cloud account + per-event billing → LazyBridge: one local SQLite file, always free
+- PydanticAI OTel: requires an OTel collector and exporter infrastructure → LazyBridge: zero external dependencies
+- LangChain callbacks: manual wiring per chain → LazyBridge: automatic, embedded in every `LazySession`
 
 ---
 
