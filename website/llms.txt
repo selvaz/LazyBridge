@@ -109,10 +109,12 @@ LazyAgent.loop(
     max_steps: int = 8,
     tool_runner: Callable[[str, dict], Any] | None = None,
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"
+    verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
+    max_verify: int = 3,                   # max retry attempts when verify is set
     **chat_kwargs,
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async → CompletionResponse
+LazyAgent.aloop(...)  # async → CompletionResponse; verify callable may be async
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
