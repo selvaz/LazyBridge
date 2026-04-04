@@ -178,6 +178,17 @@ class LazyAgent:
         API key override. Falls back to the provider's standard env var.
     **kwargs:
         Forwarded to the provider constructor.
+
+    State after execution
+    ---------------------
+    ``_last_output : str | None``
+        Plain text of the last response. Read by ``LazyContext.from_agent()``
+        for agent-to-agent context injection — the stable, public access path.
+    ``_last_response : CompletionResponse | None``
+        Full response object of the last call. Not yet a stable public API;
+        use ``agent._last_response.parsed`` to access a typed Pydantic object
+        when the agent was called with ``output_schema``.
+        ``agent._last_response.usage`` gives token counts.
     """
 
     def __init__(
@@ -669,7 +680,7 @@ class LazyAgent:
                         convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
 
             if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
+                raise AssertionError("loop produced no response — this is a bug, please report it")
 
             if on_event:
                 on_event("done", resp)
@@ -789,7 +800,7 @@ class LazyAgent:
                         convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
 
             if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
+                raise AssertionError("loop produced no response — this is a bug, please report it")
 
             if on_event:
                 await _call_event_async(on_event, "done", resp)

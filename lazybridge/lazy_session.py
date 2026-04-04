@@ -534,6 +534,23 @@ class LazySession:
             def _run_chain(task: str) -> Any:
                 from lazybridge.lazy_context import LazyContext
 
+                # Chain dispatch contract (in priority order per step):
+                #
+                # Input routing:
+                #   agent → agent : previous agent's output injected as LazyContext;
+                #                   current_task stays as the original task string.
+                #   tool  → agent : tool's return value becomes the agent's task string.
+                #   first step    : receives the original task string unchanged.
+                #
+                # Call dispatch per agent:
+                #   output_schema set  → json()  (structured output, highest priority)
+                #   tools/native_tools → loop()  (tool-calling loop needed)
+                #   else               → chat()  (single turn, no tools)
+                #
+                # Return value:
+                #   Last step returned a Pydantic object → returned as-is (typed).
+                #   Otherwise                            → last text output (str).
+
                 last_agent: Any = None
                 last_output: str = ""
                 _last_parsed: Any = None   # preserve Pydantic object from last step
@@ -578,11 +595,17 @@ class LazySession:
                             last_output = resp.content if hasattr(resp, "content") else str(resp)
                             _last_parsed = None            # this step has no parsed object
                         last_agent = p
-                    else:                                # LazyTool (nested pipeline)
+                    elif hasattr(p, "run"):              # LazyTool (nested pipeline)
                         result = p.run({"task": last_output or task})
                         last_output = str(result)
                         _last_parsed = None
                         last_agent = None
+                    else:
+                        raise TypeError(
+                            f"Chain participant {p!r} is not a LazyAgent (needs .chat()) "
+                            f"or a LazyTool (needs .run()). "
+                            f"Participants must be LazyAgent instances or LazyTool objects."
+                        )
 
                 # If the last step produced a Pydantic object, return it directly.
                 # This allows pipeline.run() to return the structured type to the caller.

@@ -1,4 +1,4 @@
-"""OpenAI provider for LazyBridgeFramework.
+"""OpenAI provider for LazyBridge.
 
 Routes all requests through the Responses API (OpenAI's recommended path since 2025).
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
