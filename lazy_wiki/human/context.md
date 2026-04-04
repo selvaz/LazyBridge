@@ -30,7 +30,7 @@ from lazybridge import LazyContext
 
 ctx = (
     LazyContext.from_text("You are a professional writer.")
-    + LazyContext.from_agent(researcher)        # reads researcher._last_output when invoked
+    + LazyContext.from_agent(researcher)        # evaluates researcher's output when invoked
     + LazyContext.from_function(get_style_guide) # calls get_style_guide() when invoked
 )
 
@@ -95,7 +95,7 @@ ctx = LazyContext.from_agent(researcher)
 
 When `ctx` is evaluated:
 - If `researcher` has run and returned text → injects `[researcher output]\n{output}`
-- If `researcher` hasn't run yet (`_last_output is None`) → injects nothing, logs at DEBUG
+- If `researcher` hasn't run yet → injects nothing, logs at DEBUG
 - If `researcher` ran but returned empty output → injects nothing, logs at DEBUG
 
 No exception is raised in any case. Enable `DEBUG` logging to diagnose silent context gaps.
@@ -164,6 +164,8 @@ writer.chat("What is Python?", context=LazyContext.from_text("Write in German.")
 
 ## Full example
 
+> **When to use manual store writes:** This pattern (explicit store writes between agents) is the right choice when agents are intentionally decoupled — running in separate processes, persisting results for inspection, or when any agent may be skipped. For tightly coupled sequential agents where every output feeds the next, `sess.as_tool(mode="chain")` handles the wiring automatically with no store writes at all.
+
 Declare each agent's context upfront — LazyContext is evaluated at call time, so you can reference store keys that don't exist yet. The pipeline body becomes pure data flow.
 
 ```python
@@ -183,10 +185,10 @@ writer    = LazyAgent("openai",
 
 # Pipeline: pure execution + store handoffs
 collector.loop("Collect the top 5 AI papers this month")
-store.write("papers", collector._last_output)
+store.write("papers", collector.result)
 
 analyst.chat("Identify the 3 most impactful findings")
-store.write("findings", analyst._last_output)
+store.write("findings", analyst.result)
 
 writer.chat("Write a blog post from these findings")
 ```

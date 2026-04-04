@@ -54,7 +54,7 @@ writer     = LazyAgent("openai",    name="writer",     session=sess)
 ```python
 # Agent writes results
 researcher.loop("find top AI news")
-sess.store.write("ai_news", researcher._last_output, agent_id=researcher.id)
+sess.store.write("ai_news", researcher.result, agent_id=researcher.id)
 
 # Another agent reads without needing a reference to researcher
 from lazybridge import LazyContext
@@ -107,9 +107,63 @@ Event types you'll see at `BASIC` level:
 
 ---
 
-## Concurrent agents with gather()
+## Exposing the pipeline as a tool
 
-Run multiple agents at the same time:
+The cleanest way to run agents together — as a parallel fan-out or a sequential chain — is `sess.as_tool()`. This composes the entire pipeline into a single callable that an orchestrator can invoke by name, with no asyncio boilerplate and no manual context wiring.
+
+### mode="parallel" — all agents receive the same task, results combined
+
+```python
+from lazybridge import LazyAgent, LazySession
+
+sess = LazySession()
+
+gather_news = sess.as_tool(
+    "gather_global_news",
+    "Simultaneously gather AI news from the US, Europe, and Asia. Returns combined results.",
+    mode="parallel",
+    participants=[
+        LazyAgent("anthropic", name="us_news",   session=sess),
+        LazyAgent("openai",    name="eu_news",   session=sess),
+        LazyAgent("google",    name="asia_news", session=sess),
+    ],
+    combiner="concat",   # join outputs with newlines (default)
+)
+
+editor = LazyAgent("anthropic", name="editor", session=sess)
+editor.loop(
+    "Gather today's AI news from the US, Europe, and Asia, then write a 400-word global digest.",
+    tools=[gather_news],
+)
+```
+
+All three agents run concurrently. The combined output is returned to the orchestrator as a single string.
+
+### mode="chain" — each agent's output flows into the next
+
+```python
+sess = LazySession()
+pipeline_tool = sess.as_tool(
+    "research_pipeline",
+    "Researches a topic, then produces an analysis. Returns the analyst's report.",
+    mode="chain",
+    participants=[
+        LazyAgent("anthropic", name="researcher", session=sess),
+        LazyAgent("openai",    name="analyst",    session=sess),
+    ],
+)
+
+master = LazyAgent("anthropic")
+master.loop("Analyse these 3 topics: fusion energy, quantum computing, biotech", tools=[pipeline_tool])
+```
+
+No `LazyContext` wiring needed — the chain passes each agent's output to the next automatically.
+
+---
+
+## Lower-level concurrency with gather()
+
+Use `gather()` directly when you need the raw `CompletionResponse` from each agent rather than a combined string — for example, to inspect token usage or tool calls per agent before merging results yourself.
 
 ```python
 import asyncio
@@ -126,37 +180,15 @@ async def run():
         agent_b.aloop("Summarise AI news from Europe this week"),
         agent_c.aloop("Summarise AI news from Asia this week"),
     )
-    # results[0], results[1], results[2] are CompletionResponse objects
+    # results[i] are CompletionResponse objects — full access to usage, tool_calls, etc.
     for r in results:
         print(r.content[:200])
+        print(f"  tokens: {r.usage.input_tokens}in / {r.usage.output_tokens}out")
 
 asyncio.run(run())
 ```
 
-All three run concurrently. `gather()` waits for all to finish and returns results in the same order.
-
----
-
-## Exposing the whole pipeline as a tool
-
-A pipeline (session) can itself be used as a tool by an external orchestrator. Use `mode="chain"` so each agent's output flows into the next automatically — no manual context wiring:
-
-```python
-sess = LazySession()
-pipeline_tool = sess.as_tool(
-    "research_pipeline",
-    "Researches a topic, then produces an analysis. Returns the analyst's report.",
-    mode="chain",
-    participants=[
-        LazyAgent("anthropic", name="researcher", session=sess),
-        LazyAgent("openai",    name="analyst",    session=sess),
-    ],
-)
-
-# External orchestrator
-master = LazyAgent("anthropic")
-master.loop("Analyse these 3 topics: fusion energy, quantum computing, biotech", tools=[pipeline_tool])
-```
+For most cases where you just want concurrent agents and a combined result, `sess.as_tool(mode="parallel")` is simpler.
 
 ---
 
@@ -185,7 +217,7 @@ Use `db=` to persist both the event log and the store across runs:
 sess = LazySession(db="project.db")
 researcher = LazyAgent("anthropic", session=sess)
 researcher.loop("research phase 1")
-sess.store.write("phase1", researcher._last_output)
+sess.store.write("phase1", researcher.result)
 # process exits — data saved to project.db
 
 # Run 2 — pick up where you left off

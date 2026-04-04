@@ -90,7 +90,7 @@ store = LazyStore(db="analysis.db")  # persistent
 # --- Phase 1: Data Collection ---
 collector = LazyAgent("anthropic", name="collector")
 collector.loop("List the top 10 Python packages by GitHub stars in 2024.")
-store.write("raw_data", collector._last_output, agent_id=collector.id)
+store.write("raw_data", collector.result, agent_id=collector.id)
 print("Phase 1 done:", len(store.read("raw_data")), "chars")
 
 # --- Phase 2: Analysis (no reference to collector) ---
@@ -112,9 +112,38 @@ print(report.content)
 
 ---
 
-## Pipeline 4 — Iterative Review Loop (Router)
+## Pipeline 4a — Self-checking Loop (verify=)
 
-A drafter and reviewer work in a loop until the content is approved.
+The simplest review pattern: `loop()` retries automatically when the output doesn't pass a quality check. No reviewer agent, no router, no loop management.
+
+```python
+from lazybridge import LazyAgent
+
+drafter = LazyAgent(
+    "anthropic",
+    system="You are a precise technical writer. Be accurate and concise.",
+)
+
+result = drafter.loop(
+    "Write a 200-word intro to transformer architecture.",
+    verify=(
+        "Check this text: is it accurate, clearly written, and under 200 words? "
+        "Reply with PASS or FAIL and a one-sentence reason."
+    ),
+    max_verify=3,   # retry up to 3 times before accepting as-is
+)
+print(result.content)
+```
+
+The judge sees each draft and replies `PASS` or `FAIL`. On `FAIL`, `loop()` re-runs with the judge's reason appended as feedback. On `PASS` (or after `max_verify` attempts), returns the current output.
+
+*Use this when*: the review is a quality gate on a single agent's output — accuracy, length, format, policy compliance.
+
+---
+
+## Pipeline 4b — Multi-destination Router
+
+Use `LazyRouter` when the review determines *which downstream agent runs next*, not just pass/fail. Here a reviewer routes to either a publisher (approved) or back to the drafter (needs revision).
 
 ```python
 from lazybridge import LazyAgent, LazyRouter, LazySession
@@ -132,10 +161,9 @@ router = LazyRouter(
     default="revise",
 )
 
-# Initial draft
 draft = drafter.chat("Write a 200-word intro to transformer architecture.")
 
-for revision in range(4):   # max 4 revision cycles
+for revision in range(4):
     review = reviewer.chat(
         f"Review this text critically. End your response with APPROVED or REJECTED.\n\n{draft.content}"
     )
@@ -152,6 +180,8 @@ for revision in range(4):   # max 4 revision cycles
             f"Rewrite based on this feedback: {review.content}\n\nOriginal: {draft.content}"
         )
 ```
+
+*Use this when*: different review outcomes send the task to different agents — not just retry vs. accept.
 
 ---
 
