@@ -22,6 +22,7 @@ def _mock_agent(name: str, response_content: str) -> MagicMock:
     agent.name = name
     agent._last_output = None
     agent.output_schema = None
+    agent.tools = []
     agent.native_tools = []
     resp = _fake_response(response_content)
 
@@ -394,3 +395,39 @@ def test_chain_intermediate_schema_last_plain():
 
     assert isinstance(result, str)
     assert result == "final_text"
+
+
+# =============================================================================
+# T_CH — _run_chain uses loop() for agents with tools (P1.3)
+# =============================================================================
+
+def test_chain_agent_with_tools_uses_loop():
+    """T_CH.1: agent with self.tools in chain → loop() called, not chat()."""
+    sess = LazySession()
+
+    agent = _mock_agent("worker", "tool result")
+    agent.tools = [MagicMock()]  # non-empty tools list → _has_tools = True
+
+    resp_mock = MagicMock()
+    resp_mock.content = "tool result"
+    agent.loop = MagicMock(return_value=resp_mock)
+
+    tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
+    tool.run({"task": "do something"})
+
+    agent.loop.assert_called_once()
+    agent.chat.assert_not_called()
+
+
+def test_chain_agent_without_tools_uses_chat():
+    """T_CH.2: agent without tools in chain → chat() called (regression guard)."""
+    sess = LazySession()
+
+    agent = _mock_agent("worker", "plain result")
+    # tools=[] already set by _mock_agent
+
+    tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
+    tool.run({"task": "do something"})
+
+    agent.chat.assert_called_once()
+    agent.loop.assert_not_called()

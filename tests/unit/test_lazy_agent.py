@@ -35,6 +35,7 @@ def _make_agent(provider="anthropic"):
     agent.native_tools = []
     agent.output_schema = None
     agent._last_output = None
+    agent._last_response = None
     agent.session = None
     agent._log = None
     return agent
@@ -519,3 +520,267 @@ def test_loop_verify_log_empty_when_no_verify():
     agent._executor.execute.return_value = _final_response("correct answer")
     resp = agent.loop("question")
     assert resp.verify_log == []
+
+
+# =============================================================================
+# T_TR — tool result serialization (P1.5)
+# =============================================================================
+
+def test_tool_result_pydantic_serialised_as_json():
+    """T_TR.1: Pydantic model returned by a tool is serialised with model_dump_json()."""
+    from pydantic import BaseModel
+    from lazybridge.lazy_agent import _serialise_tool_result
+
+    class BlogPost(BaseModel):
+        title: str
+        intro: str
+
+    post = BlogPost(title="AI News", intro="Big week for AI")
+    result = _serialise_tool_result(post)
+    import json
+    parsed = json.loads(result)
+    assert parsed["title"] == "AI News"
+    assert parsed["intro"] == "Big week for AI"
+
+
+def test_tool_result_dict_serialised_as_json():
+    """T_TR.2: dict returned by a tool is serialised with json.dumps()."""
+    from lazybridge.lazy_agent import _serialise_tool_result
+    import json
+
+    d = {"key": "value", "count": 42}
+    result = _serialise_tool_result(d)
+    parsed = json.loads(result)
+    assert parsed == d
+
+
+def test_tool_result_str_unchanged():
+    """T_TR.3: str returned by a tool passes through as-is."""
+    from lazybridge.lazy_agent import _serialise_tool_result
+
+    result = _serialise_tool_result("plain text result")
+    assert result == "plain text result"
+
+
+# =============================================================================
+# T_OS — output_schema as true default (P1.1)
+# =============================================================================
+
+def test_chat_uses_agent_level_output_schema():
+    """T_OS.1: agent.chat() without call-level output_schema applies self.output_schema."""
+    from pydantic import BaseModel
+
+    class BlogPost(BaseModel):
+        title: str
+
+    agent = _make_agent()
+    agent.output_schema = BlogPost
+
+    resp = CompletionResponse(
+        content='{"title": "Test"}',
+        parsed=BlogPost(title="Test"),
+        usage=UsageStats(),
+    )
+    agent._executor.execute.return_value = resp
+
+    result = agent.chat("write something")
+    # Verify the request was built with the schema
+    call_args = agent._executor.execute.call_args[0][0]
+    assert call_args.structured_output is not None
+    assert call_args.structured_output.schema is BlogPost
+
+
+def test_chat_call_level_schema_overrides_agent_level():
+    """T_OS.2: call-level output_schema overrides agent-level."""
+    from pydantic import BaseModel
+
+    class AgentSchema(BaseModel):
+        a: str
+
+    class CallSchema(BaseModel):
+        b: str
+
+    agent = _make_agent()
+    agent.output_schema = AgentSchema
+
+    resp = CompletionResponse(content="{}", usage=UsageStats())
+    agent._executor.execute.return_value = resp
+
+    agent.chat("msg", output_schema=CallSchema)
+    call_args = agent._executor.execute.call_args[0][0]
+    assert call_args.structured_output.schema is CallSchema
+
+
+def test_chat_no_schema_no_structured_output():
+    """T_OS.3: Without any output_schema, structured_output is None."""
+    agent = _make_agent()
+    agent.output_schema = None
+
+    resp = CompletionResponse(content="hello", usage=UsageStats())
+    agent._executor.execute.return_value = resp
+
+    agent.chat("msg")
+    call_args = agent._executor.execute.call_args[0][0]
+    assert call_args.structured_output is None
+
+
+# =============================================================================
+# T_EV — AGENT_START / AGENT_FINISH / LOOP_STEP events (P1.2)
+# =============================================================================
+
+def test_loop_emits_agent_start_and_finish():
+    """T_EV.1: loop() emits AGENT_START before and AGENT_FINISH after the loop."""
+    from lazybridge.lazy_session import Event
+
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("done")
+
+    emitted = []
+
+    def capture(event_type, **data):
+        emitted.append(event_type)
+
+    agent._log = MagicMock()
+    agent._log.log = MagicMock(side_effect=capture)
+
+    agent.loop("task")
+
+    assert Event.AGENT_START in emitted
+    assert Event.AGENT_FINISH in emitted
+    # START must come before FINISH
+    assert emitted.index(Event.AGENT_START) < emitted.index(Event.AGENT_FINISH)
+
+
+def test_loop_emits_loop_step_for_tool_calls():
+    """T_EV.2: loop() emits LOOP_STEP for each step that produces tool calls."""
+    from lazybridge.lazy_session import Event
+
+    agent = _make_agent()
+    tool_resp = _tool_response()
+    final_resp = _final_response("done")
+    agent._executor.execute.side_effect = [tool_resp, final_resp]
+
+    emitted = []
+
+    def capture(event_type, **data):
+        emitted.append(event_type)
+
+    agent._log = MagicMock()
+    agent._log.log = MagicMock(side_effect=capture)
+
+    mock_tool = MagicMock()
+    mock_tool.name = "calc"
+    mock_tool.run = MagicMock(return_value=42)
+    from lazybridge.lazy_tool import LazyTool
+    agent.tools = [mock_tool]
+
+    # Provide a tool in the registry via tools= param
+    from lazybridge.lazy_tool import NormalizedToolSet
+    from lazybridge.core.types import ToolDefinition
+
+    fake_lazy_tool = MagicMock(spec=LazyTool)
+    fake_lazy_tool.name = "calc"
+    fake_lazy_tool.run = MagicMock(return_value=42)
+
+    with patch.object(agent, "_build_tool_set") as mock_bts:
+        ns = NormalizedToolSet.__new__(NormalizedToolSet)
+        ns.definitions = []
+        ns.bridges = []
+        ns.registry = {"calc": fake_lazy_tool}
+        mock_bts.return_value = ns
+        agent.loop("task")
+
+    assert Event.LOOP_STEP in emitted
+
+
+def test_loop_no_loop_step_when_no_tool_calls():
+    """T_EV.3: loop() does NOT emit LOOP_STEP when the model produces no tool calls."""
+    from lazybridge.lazy_session import Event
+
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("done")
+
+    emitted = []
+
+    def capture(event_type, **data):
+        emitted.append(event_type)
+
+    agent._log = MagicMock()
+    agent._log.log = MagicMock(side_effect=capture)
+
+    agent.loop("task")
+
+    assert Event.LOOP_STEP not in emitted
+
+
+# =============================================================================
+# T_AE — async-aware on_event in aloop() (P1.4)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_aloop_awaits_async_on_event():
+    """T_AE.1: aloop() with an async callback — the coroutine is awaited."""
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=_final_response("done"))
+
+    calls = []
+
+    async def async_handler(event_name, payload):
+        calls.append(event_name)
+
+    await agent.aloop("task", on_event=async_handler)
+
+    assert "step" in calls
+    assert "done" in calls
+
+
+@pytest.mark.asyncio
+async def test_aloop_sync_on_event_still_works():
+    """T_AE.2: aloop() with a sync callback — works without error."""
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=_final_response("done"))
+
+    calls = []
+
+    def sync_handler(event_name, payload):
+        calls.append(event_name)
+
+    await agent.aloop("task", on_event=sync_handler)
+
+    assert "step" in calls
+    assert "done" in calls
+
+
+# =============================================================================
+# T_LR — _last_response stores full CompletionResponse (P2.1)
+# =============================================================================
+
+def test_chat_sets_last_response():
+    """_last_response is set after chat()."""
+    agent = _make_agent()
+    resp = CompletionResponse(content="hello", usage=UsageStats())
+    agent._executor.execute.return_value = resp
+
+    agent.chat("msg")
+    assert agent._last_response is resp
+
+
+def test_loop_sets_last_response():
+    """_last_response is set after loop()."""
+    agent = _make_agent()
+    agent._executor.execute.return_value = _final_response("done")
+
+    agent.loop("task")
+    assert agent._last_response is not None
+    assert agent._last_response.content == "done"
+
+
+@pytest.mark.asyncio
+async def test_aloop_sets_last_response():
+    """_last_response is set after aloop()."""
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=_final_response("async done"))
+
+    await agent.aloop("task")
+    assert agent._last_response is not None
+    assert agent._last_response.content == "async done"

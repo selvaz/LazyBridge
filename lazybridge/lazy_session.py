@@ -555,6 +555,11 @@ class LazySession:
                         else:
                             current_task = task
                         schema = getattr(p, "output_schema", None)
+                        _has_tools = bool(
+                            getattr(p, "tools", None) or
+                            getattr(p, "native_tools", None) or
+                            kw.get("native_tools")
+                        )
                         if schema is not None:
                             result = p.json(current_task, schema, **kw)
                             if result is not None:
@@ -564,6 +569,10 @@ class LazySession:
                                 if hasattr(result, "model_dump_json")
                                 else str(result)
                             )
+                        elif _has_tools:
+                            resp = p.loop(current_task, **kw)
+                            last_output = resp.content if hasattr(resp, "content") else str(resp)
+                            _last_parsed = None
                         else:
                             resp = p.chat(current_task, **kw)
                             last_output = resp.content if hasattr(resp, "content") else str(resp)

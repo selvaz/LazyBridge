@@ -107,18 +107,41 @@ def _messages_to_str(messages: str | list) -> str:
     return str(messages)
 
 
+def _serialise_tool_result(result: Any) -> str:
+    """Serialise a tool return value to a string for the model.
+
+    Pydantic models → model_dump_json(); dicts → json.dumps(); everything else → str().
+    """
+    if hasattr(result, "model_dump_json"):  # Pydantic model
+        return result.model_dump_json()
+    if isinstance(result, dict):
+        import json
+        try:
+            return json.dumps(result)
+        except (TypeError, ValueError):
+            pass
+    return str(result)
+
+
 def _tool_result_message(call: ToolCall, result: Any, *, is_error: bool = False) -> Message:
     return Message(
         role=Role.TOOL,
         content=[
             ToolResultContent(
                 tool_use_id=call.id,
-                content=str(result),
+                content=_serialise_tool_result(result),
                 tool_name=call.name,
                 is_error=is_error,
             )
         ],
     )
+
+
+async def _call_event_async(callback: Callable, name: str, payload: Any) -> None:
+    """Call an on_event callback, awaiting it if it is a coroutine."""
+    result = callback(name, payload)
+    if inspect.iscoroutine(result):
+        await result
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +220,9 @@ class LazyAgent:
         # Stores the last text output; read by LazyContext.from_agent() when
         # another agent wants to use this agent's result as context.
         self._last_output: str | None = None
+        # Full response of the last call — includes .parsed, .usage, .grounding_sources.
+        # Not a stable public API yet; access via agent._last_response.parsed for typed output.
+        self._last_response: CompletionResponse | None = None
 
         # Tracking — scoped to this agent.
         # If a session is provided, use its EventLog.  Otherwise, when verbose=True,
@@ -415,13 +441,15 @@ class LazyAgent:
         msgs = _normalise_messages(messages)
         tool_set = self._build_tool_set(tools)
         effective_system = self._build_effective_system(system, context, tool_set)
+        # Agent-level output_schema is the default; call-level takes precedence.
+        effective_schema = output_schema if output_schema is not None else self.output_schema
 
         request = self._build_request(
             msgs,
             system=effective_system,
             tools=tool_set.definitions,
             native_tools=self._merge_native_tools(native_tools),
-            output_schema=output_schema,
+            output_schema=effective_schema,
             thinking=thinking,
             skills=skills,
             stream=stream,
@@ -438,6 +466,7 @@ class LazyAgent:
 
         resp = self._executor.execute(request)
         self._last_output = resp.content
+        self._last_response = resp
         self._track(Event.MODEL_RESPONSE,
                     model=resp.model or self._model_name,
                     stop_reason=resp.stop_reason,
@@ -491,13 +520,15 @@ class LazyAgent:
         msgs = _normalise_messages(messages)
         tool_set = self._build_tool_set(tools)
         effective_system = self._build_effective_system(system, context, tool_set)
+        # Agent-level output_schema is the default; call-level takes precedence.
+        effective_schema = output_schema if output_schema is not None else self.output_schema
 
         request = self._build_request(
             msgs,
             system=effective_system,
             tools=tool_set.definitions,
             native_tools=self._merge_native_tools(native_tools),
-            output_schema=output_schema,
+            output_schema=effective_schema,
             thinking=thinking,
             skills=skills,
             stream=stream,
@@ -514,6 +545,7 @@ class LazyAgent:
 
         resp = await self._executor.aexecute(request)
         self._last_output = resp.content
+        self._last_response = resp
         self._track(Event.MODEL_RESPONSE,
                     model=resp.model or self._model_name,
                     stop_reason=resp.stop_reason,
@@ -554,7 +586,8 @@ class LazyAgent:
             the registry (e.g. raw ToolDefinition without a LazyTool).
         on_event:
             Optional callback ``(event_name, payload)`` called on each step.
-            Events: ``"step"``, ``"tool_call"``, ``"tool_result"``, ``"done"``.
+            Events: ``"step"``, ``"tool_call"``, ``"tool_result"``, ``"done"``,
+            ``"verify_rejected"``.
         max_steps:
             Hard cap on loop iterations.
         verify:
@@ -576,6 +609,9 @@ class LazyAgent:
         _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
         _verify_log: list[str] = []
+        step = 0
+
+        self._track(Event.AGENT_START, method="loop", task=_orig_q[:200])
 
         for _attempt in range(_attempts):
             # Build tool_set once for the execution registry used in _execute_tool().
@@ -597,6 +633,8 @@ class LazyAgent:
 
                 if not resp.tool_calls:
                     break
+
+                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
 
                 # Append the assistant's turn (with tool-use blocks).
                 # Build content list explicitly so text + thinking + tool blocks are never lost.
@@ -657,6 +695,10 @@ class LazyAgent:
 
         resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
+        self._last_response = resp  # type: ignore[union-attr]
+        self._track(Event.AGENT_FINISH, method="loop",
+                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
+                    n_steps=step + 1)
         return resp  # type: ignore[return-value]
 
     async def aloop(
@@ -693,6 +735,9 @@ class LazyAgent:
         _attempts = max(1, max_verify) if verify is not None else 1
         resp: CompletionResponse | None = None
         _verify_log: list[str] = []
+        step = 0
+
+        self._track(Event.AGENT_START, method="aloop", task=_orig_q[:200])
 
         for _attempt in range(_attempts):
             tool_set = self._build_tool_set(tools)
@@ -707,10 +752,12 @@ class LazyAgent:
                 )  # type: ignore[assignment]
 
                 if on_event:
-                    on_event("step", {"step": step, "response": resp})
+                    await _call_event_async(on_event, "step", {"step": step, "response": resp})
 
                 if not resp.tool_calls:
                     break
+
+                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
 
                 _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
                               for tc in resp.tool_calls]
@@ -729,12 +776,12 @@ class LazyAgent:
                 for tc in resp.tool_calls:
                     self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
                     if on_event:
-                        on_event("tool_call", tc)
+                        await _call_event_async(on_event, "tool_call", tc)
                     try:
                         result = await self._aexecute_tool(tc, tool_set.registry, tool_runner)
                         self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
                         if on_event:
-                            on_event("tool_result", {"call": tc, "result": result})
+                            await _call_event_async(on_event, "tool_result", {"call": tc, "result": result})
                         convo.append(_tool_result_message(tc, result))
                     except Exception as exc:
                         _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
@@ -745,7 +792,7 @@ class LazyAgent:
                 raise AssertionError("loop produced no response — this is a bug in LazyBridgeFramework")
 
             if on_event:
-                on_event("done", resp)
+                await _call_event_async(on_event, "done", resp)
 
             if verify is None:
                 break
@@ -765,13 +812,17 @@ class LazyAgent:
 
             _verify_log.append(_verdict)
             if on_event:
-                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
+                await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = (
                 f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
         resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
+        self._last_response = resp  # type: ignore[union-attr]
+        self._track(Event.AGENT_FINISH, method="aloop",
+                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
+                    n_steps=step + 1)
         return resp  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
