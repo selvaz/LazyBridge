@@ -149,6 +149,28 @@ print(result.content)
 | Need the model to call your functions | `loop()` |
 | Complex task that may require multiple tool calls | `loop()` |
 
+### Built-in self-checking with verify=
+
+Pass a judge prompt to `verify=` and `loop()` retries automatically if the output is rejected — no manual retry code needed:
+
+```python
+result = ai.loop(
+    "Write a 200-word summary of transformer architecture.",
+    tools=[search],
+    verify="Check the summary is accurate, self-contained, and exactly 200 words. "
+           "Reply with PASS or FAIL and a reason.",
+    max_verify=2,   # retry up to 2 times (default: 1)
+)
+print(result.content)
+```
+
+The verify prompt sees the output and returns `PASS` or `FAIL`. On `FAIL`, `loop()` re-runs with the judge's feedback appended. On `PASS` (or after `max_verify` attempts), returns the result normally.
+
+Use this for:
+- Output length or format constraints
+- Factual plausibility checks before passing output to the next agent
+- Policy compliance (e.g. "does not contain PII")
+
 ---
 
 ## text() and json() shortcuts
@@ -288,6 +310,50 @@ result = orchestrator.loop("Write a report on climate tech startups", tools=[res
 ```
 
 The orchestrator passes a `task` string; the researcher's `loop()` receives it.
+
+---
+
+## Reading the result
+
+After any call, three fields are available:
+
+| Field | Type | Contains |
+|---|---|---|
+| `agent.result` | `Any` | Best available result: parsed Pydantic object → text content → `None` |
+| `agent._last_output` | `str \| None` | Always plain text (used for context injection between agents) |
+| `agent._last_response` | `CompletionResponse \| None` | Full response: `.parsed`, `.usage`, `.tool_calls`, `.grounding_sources` |
+
+`agent.result` is the recommended accessor for pipeline code — it automatically surfaces the typed output if the agent had an `output_schema`, otherwise falls back to text:
+
+```python
+from pydantic import BaseModel
+from lazybridge import LazyAgent
+
+class Summary(BaseModel):
+    headline: str
+    bullets: list[str]
+
+ai = LazyAgent("anthropic", output_schema=Summary)
+ai.chat("Summarise the state of AI in 2024")
+
+# result is a Summary instance (typed), not a string
+s = ai.result
+print(s.headline)
+print(s.bullets)
+
+# For agents without output_schema, result is plain text:
+plain = LazyAgent("openai")
+plain.chat("Hello")
+print(plain.result)   # "Hello! How can I help you today?"
+```
+
+For raw token counts and stop reason, use `_last_response`:
+
+```python
+resp = ai._last_response
+print(resp.usage.input_tokens, resp.usage.output_tokens)
+print(resp.stop_reason)
+```
 
 ---
 

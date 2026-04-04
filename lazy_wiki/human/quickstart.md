@@ -104,8 +104,11 @@ writer.chat(
     context=LazyContext.from_agent(researcher),
 )
 
+# Read the writer's result
+print(writer.result)          # plain text output
+
 # Inspect what happened
-print(sess.events.get())   # full event log
+print(sess.events.get())      # full event log
 print(sess.store.read_all())  # shared state
 ```
 

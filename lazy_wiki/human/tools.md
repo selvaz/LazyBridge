@@ -475,3 +475,38 @@ research_tool = LazyTool.from_agent(
 ```
 
 The orchestrator receives a `ResearchResult` instance as the tool result.
+
+---
+
+## Saving and loading tools
+
+Save a fully configured `LazyTool` to disk and reload it later — useful for caching LLM-generated schemas or sharing tools across projects.
+
+```python
+# Save
+tool = LazyTool.from_function(
+    search_web,
+    schema_mode=ToolSchemaMode.HYBRID,
+    schema_llm=llm,
+).compile()   # generate the schema now
+
+tool.save("search_tool.json")
+
+# Load in a different process or later run
+from lazybridge import LazyTool
+
+tool = LazyTool.load("search_tool.json")
+# Ready to use immediately — no LLM schema call needed
+result = tool.run({"query": "latest AI news"})
+```
+
+The saved file stores the tool name, description, schema, and guidance. The Python callable is **not** serialised — `load()` restores the schema but the callable must be re-attached if you need `run()`:
+
+```python
+tool = LazyTool.load("search_tool.json", fn=search_web)
+result = tool.run({"query": "fusion energy"})
+```
+
+Without `fn=`, the loaded tool can be passed to agents for its schema (the LLM sees the correct tool definition) but `run()` will raise if the model actually calls it. This is intentional — a tool loaded in a different codebase where the function is available separately.
+
+**Security note**: `LazyTool.load()` validates that the file contains only the expected fields and does not deserialise arbitrary Python objects — it is safe to load files from trusted storage. Never load tool files from untrusted sources.
