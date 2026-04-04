@@ -547,6 +547,77 @@ def should_run(snippet, mode: str) -> bool:
 # Part 5/5 — Reporting + CLI + main
 # ---------------------------------------------------------------------------
 
+def dump_snippets(snippets: list, dump_root: Path,
+                  provider: Optional[str], model: Optional[str]) -> None:
+    """
+    Save each snippet as a standalone .py file under dump_root.
+
+    Layout:
+        dump_root/
+          agents.md/
+            00_creating-an-agent.py
+            01_chat-single-turn.py
+            ...
+          sessions.md/
+            00_creating-a-session.py
+            ...
+
+    Skippable snippets (testability==skip) get a .py.skip extension and
+    contain the raw code plus a comment explaining why they were skipped.
+
+    Each file has a header comment with: source, heading, kind, testability.
+    """
+    dump_root.mkdir(parents=True, exist_ok=True)
+    counters: dict[str, int] = {}  # per source-file counter for numbering
+
+    written = skipped_dumped = 0
+
+    for s in snippets:
+        # Build sub-directory from source filename (e.g. "agents.md")
+        src_file = Path(s.file).name          # "agents.md"
+        subdir = dump_root / src_file
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Per-file sequential index
+        key = s.file
+        idx = counters.get(key, 0)
+        counters[key] = idx + 1
+
+        slug = slugify(s.heading)[:50]        # cap length for filesystem
+        stem = f"{idx:02d}_{slug}"
+
+        # Build header comment
+        header_lines = [
+            f"# Source   : {s.file}",
+            f"# Heading  : {s.heading}",
+            f"# ID       : {s.id}",
+            f"# Kind     : {s.snippet_kind}",
+            f"# Testable : {s.testability}",
+        ]
+        if s.testability == "skip":
+            header_lines.append(f"# Skip     : {s.reason}")
+
+        header = "\n".join(header_lines) + "\n\n"
+
+        if s.testability == "skip":
+            # Save raw code with .skip extension so it's visible but won't
+            # be picked up accidentally by test runners
+            out_path = subdir / f"{stem}.py.skip"
+            out_path.write_text(header + s.raw_code, encoding="utf-8")
+            skipped_dumped += 1
+        else:
+            # Save prepared code (imports injected, provider overridden)
+            out_path = subdir / f"{stem}.py"
+            try:
+                prepared = prepare_snippet(s, provider, model)
+            except Exception:
+                prepared = s.raw_code   # fallback: raw
+            out_path.write_text(header + prepared, encoding="utf-8")
+            written += 1
+
+    print(f"[dump] {written} runnable + {skipped_dumped} skip files → {dump_root}")
+
+
 def build_json_report(snippets: list, mode: str) -> dict:
     results = []
     for s in snippets:
@@ -700,6 +771,11 @@ Examples:
                    help="Only process snippets whose ID contains this substring")
     p.add_argument("--max-examples", type=int, default=None,
                    help="Cap number of snippets processed (for quick runs)")
+    p.add_argument("--dump-dir", default=None, metavar="DIR",
+                   help="Dump each snippet as a standalone .py file under DIR "
+                        "(e.g. --dump-dir artifacts/examples). "
+                        "Files are named <source_file>/<index>_<slug>.py. "
+                        "Skipped snippets get a .py.skip extension instead.")
     return p.parse_args()
 
 
@@ -774,6 +850,10 @@ def main() -> int:
     # Classify
     for s in all_snippets:
         classify_snippet(s)
+
+    # Dump snippets to individual .py files if requested
+    if args.dump_dir:
+        dump_snippets(all_snippets, Path(args.dump_dir), provider, args.model)
 
     # Process each snippet
     n = len(all_snippets)

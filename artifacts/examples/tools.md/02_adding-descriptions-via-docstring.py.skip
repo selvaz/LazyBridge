@@ -1,0 +1,16 @@
+# Source   : lazy_wiki/human/tools.md
+# Heading  : Adding descriptions via docstring
+# ID       : lazy_wiki/human/tools.md::adding-descriptions-via-docstring::00
+# Kind     : unknown
+# Testable : skip
+# Skip     : Contains ellipsis / placeholder — not complete code
+
+def search_web(query: str, language: str = "en", max_results: int = 10) -> list[str]:
+    """Search the web and return a list of result URLs.
+
+    Args:
+        query: The search query. Be specific, use keywords.
+        language: ISO 639-1 language code, e.g. 'en', 'it'.
+        max_results: Maximum results to return (1–50).
+    """
+    ...

@@ -1,0 +1,18 @@
+# Source   : lazy_wiki/human/tools.md
+# Heading  : Adding descriptions with Annotated
+# ID       : lazy_wiki/human/tools.md::adding-descriptions-with-annotated::00
+# Kind     : unknown
+# Testable : skip
+# Skip     : Contains ellipsis / placeholder — not complete code
+
+from typing import Annotated
+
+def search_web(
+    query: Annotated[str, "The search query. Be specific, use keywords."],
+    language: Annotated[str, "ISO 639-1 language code, e.g. 'en', 'it'"] = "en",
+    max_results: Annotated[int, "Maximum results (1–50)"] = 10,
+) -> list[str]:
+    ...
+
+tool = LazyTool.from_function(search_web)
+# Each parameter's description is included in the tool schema automatically

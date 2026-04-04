@@ -388,7 +388,7 @@
       "triage": "unknown",
       "stdout": "",
       "stderr": "",
-      "duration_sec": 0.0
+      "duration_sec": 0.001
     },
     {
       "id": "lazy_wiki/human/comparison.md::lazybridge::01",

@@ -1,0 +1,19 @@
+# Source   : lazy_wiki/human/comparison.md
+# Heading  : Raw Anthropic SDK
+# ID       : lazy_wiki/human/comparison.md::raw-anthropic-sdk::00
+# Kind     : unknown
+# Testable : skip
+# Skip     : Contains ellipsis / placeholder — not complete code
+
+import anthropic
+
+client = anthropic.Anthropic(api_key="sk-ant-...")
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": "What is the capital of France?"}
+    ]
+)
+answer = message.content[0].text
+print(answer)

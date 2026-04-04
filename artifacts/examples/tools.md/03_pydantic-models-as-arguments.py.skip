@@ -1,0 +1,21 @@
+# Source   : lazy_wiki/human/tools.md
+# Heading  : Pydantic models as arguments
+# ID       : lazy_wiki/human/tools.md::pydantic-models-as-arguments::00
+# Kind     : unknown
+# Testable : skip
+# Skip     : Contains ellipsis / placeholder — not complete code
+
+from pydantic import BaseModel
+
+class SearchOptions(BaseModel):
+    query: str
+    language: str = "en"
+    max_results: int = 10
+    safe_search: bool = True
+
+def advanced_search(options: SearchOptions) -> list[str]:
+    """Run an advanced web search."""
+    ...
+
+tool = LazyTool.from_function(advanced_search)
+# The LLM sees the full SearchOptions schema including all its fields
