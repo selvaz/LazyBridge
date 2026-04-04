@@ -76,9 +76,9 @@ LazyAgent.as_tool(
 LazyAgent.id: str           # UUID, set at construction
 LazyAgent.name: str         # human-readable name
 LazyAgent.description: str | None
-LazyAgent.result: Any               # canonical result: Pydantic object if output_schema active, else str, else None
-LazyAgent._last_output: str | None  # always plain text; read by LazyContext.from_agent()
-LazyAgent._last_response: CompletionResponse | None  # full response (.parsed, .usage, .tool_calls)
+LazyAgent.result: Any               # PUBLIC   — canonical last-value accessor: Pydantic if output_schema set, else str, else None. Always use this in pipeline code.
+LazyAgent._last_output: str | None  # INTERNAL — plain text read by LazyContext.from_agent(). Do not use directly in user code; use agent.result instead.
+LazyAgent._last_response: CompletionResponse | None  # ADVANCED — full response (.parsed, .usage, .tool_calls, .grounding_sources). Use when you need token counts or structured fields.
 ```
 
 ## LazySession
@@ -96,8 +96,8 @@ LazySession.store: LazyStore
 LazySession.events: EventLog
 LazySession.graph: GraphSchema
 
-LazySession.gather(*coros: Awaitable) -> list[Any]  # asyncio.gather wrapper
-LazySession.as_tool(
+LazySession.gather(*coros: Awaitable) -> list[Any]  # FALLBACK — low-level async fan-out; prefer as_tool(mode="parallel") unless you need raw CompletionResponse per agent
+LazySession.as_tool(                                 # CANONICAL — compose pipeline into a single tool
     name: str,
     description: str,
     *,

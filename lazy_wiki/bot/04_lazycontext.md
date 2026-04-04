@@ -6,15 +6,27 @@
 
 ---
 
-## 2. Key principle
+## 2. Key principles
 
-`LazyContext` is NOT a communication channel between agents. It injects strings into system prompts. Agent-to-agent data transfer happens via return values; `LazyContext` only makes those results *visible* in another agent's context at execution time.
+**`LazyContext` is NOT a communication channel between agents.** It injects strings into system prompts. Agent-to-agent data transfer happens via return values or the store; `LazyContext` only makes those results *visible* in another agent's context at execution time.
 
 ```python
 # Wrong mental model: "LazyContext sends data from agent A to agent B"
-# Correct mental model: "LazyContext reads agent A's _last_output and injects it
+# Correct mental model: "LazyContext reads agent A's result and injects it
 #                        into agent B's system prompt when agent B is called"
 ```
+
+**Where `LazyContext.from_agent()` sits in the preference hierarchy:**
+
+| Scenario | Preferred pattern |
+|---|---|
+| Tightly coupled sequential agents, all steps always run | `sess.as_tool(mode="chain")` — no context wiring needed |
+| Sequential agents that must remain independently callable, or topology more complex than a linear chain | `LazyContext.from_agent()` — pull-based, lazy, zero side effects at construction |
+| Agents in separate processes, persistent state, or any step may be skipped | `LazyStore` + `LazyContext.from_store()` — decoupled, queryable |
+
+Use `LazyContext.from_agent()` when `mode="chain"` doesn't fit the shape — for example, when an agent has multiple predecessors, when you need to compose contexts from different sources, or when the agents must be callable independently outside the chain.
+
+**Always declare context at construction time.** Creating a `LazyContext.from_agent(agent)` before the agent runs is safe and correct — it evaluates lazily when the call is made. Never build context strings with f-strings that embed agent output at construction time; that bakes the value before the agent runs.
 
 ---
 

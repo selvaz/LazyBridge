@@ -40,7 +40,9 @@ sess = LazySession(tracking="basic", console=True)            # print events to 
 
 ## 3. `sess.store: LazyStore`
 
-Shared key-value blackboard. See `05_lazystore.md` for the full API. Key pattern: one agent writes results, another reads them via `LazyContext.from_store()` — neither agent needs to know about the other directly.
+Shared key-value blackboard. See `05_lazystore.md` for the full API.
+
+**When to use `LazyStore`:** prefer it when agents are **intentionally decoupled** — running at different times, in separate processes, or when any step may be skipped. For tightly coupled sequential agents where every output feeds the next, `sess.as_tool(mode="chain")` is simpler — no store writes, no explicit context wiring needed.
 
 ```python
 from lazybridge import LazyAgent, LazySession, LazyContext
@@ -51,8 +53,8 @@ agent_b = LazyAgent("openai",    name="writer",     session=sess)
 
 agent_a.loop("research the topic of quantum computing")
 
-# Write agent_a's output to the store explicitly
-sess.store.write("research", agent_a._last_output, agent_id=agent_a.id)
+# Use agent.result (canonical accessor), not _last_output
+sess.store.write("research", agent_a.result, agent_id=agent_a.id)
 
 # agent_b reads it without knowing about agent_a
 ctx = LazyContext.from_store(sess.store, keys=["research"])
@@ -157,39 +159,7 @@ Edges are added manually via `sess.graph.add_edge(from_id, to_id, kind=EdgeType.
 
 ---
 
-## 6. `gather()` — concurrent execution
-
-```python
-async def gather(self, *coros: Awaitable) -> list[Any]:
-```
-
-Thin wrapper over `asyncio.gather()`. Runs multiple agent coroutines in parallel; results are returned in the same order as the arguments.
-
-```python
-import asyncio
-from lazybridge import LazyAgent, LazySession
-
-sess = LazySession()
-agent_a = LazyAgent("anthropic", name="researcher", session=sess)
-agent_b = LazyAgent("openai",    name="analyst",    session=sess)
-
-async def run():
-    results = await sess.gather(
-        agent_a.aloop("research topic X"),
-        agent_b.aloop("research topic Y"),
-    )
-    # results[0] = agent_a's CompletionResponse
-    # results[1] = agent_b's CompletionResponse
-    print(sess.store.read_all())
-
-asyncio.run(run())
-```
-
-Use `gather()` for independent parallel agents. Agents that depend on each other's output must be sequenced: `await agent_a.aloop(...)` then `await agent_b.aloop(...)`.
-
----
-
-## 7. `as_tool()` — expose the pipeline to an external orchestrator
+## 6. `as_tool()` — expose the pipeline to an external orchestrator — CANONICAL
 
 ```python
 def as_tool(
@@ -434,6 +404,41 @@ pipeline_tool = sess.as_tool(
     entry_agent=researcher,
 )
 ```
+
+---
+
+## 7. `gather()` — low-level concurrent execution — FALLBACK
+
+**Prefer `sess.as_tool(mode="parallel")` for most fan-out pipelines.** Use `gather()` only when you need the raw `CompletionResponse` from each agent — for example, to inspect per-agent token usage, tool call sequences, or grounding sources before merging results yourself.
+
+```python
+async def gather(self, *coros: Awaitable) -> list[Any]:
+```
+
+Thin wrapper over `asyncio.gather()`. Results are returned in the same order as arguments.
+
+```python
+import asyncio
+from lazybridge import LazyAgent, LazySession
+
+sess = LazySession()
+agent_a = LazyAgent("anthropic", name="researcher", session=sess)
+agent_b = LazyAgent("openai",    name="analyst",    session=sess)
+
+async def run():
+    results = await sess.gather(
+        agent_a.aloop("research topic X"),
+        agent_b.aloop("research topic Y"),
+    )
+    # results[0] = agent_a's CompletionResponse — full access to .usage, .tool_calls, etc.
+    # results[1] = agent_b's CompletionResponse
+    print(f"Agent A: {results[0].usage.output_tokens} tokens")
+    print(f"Agent B: {results[1].usage.output_tokens} tokens")
+
+asyncio.run(run())
+```
+
+If you only need the combined text (not per-agent response objects), `sess.as_tool(mode="parallel")` is canonical — no asyncio, no manual result wiring.
 
 ---
 

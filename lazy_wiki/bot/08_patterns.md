@@ -1,5 +1,44 @@
 # Pipeline Patterns — Complete Runnable Code
 
+## LazyBridge pattern hierarchy
+
+LazyBridge has an explicit preference order. **Always start at the top and descend only when the higher level doesn't fit your use case.**
+
+```
+LEVEL 1 — Composition  (try this first — no plumbing, no asyncio, no context wiring)
+├─ agent.as_tool()                       CANONICAL  one agent becomes a Lego brick for another
+├─ sess.as_tool(mode="parallel")         CANONICAL  fan-out to N agents; results combined automatically
+└─ sess.as_tool(mode="chain")            CANONICAL  sequential pipeline; context wired automatically
+   └─ loop(verify=...)                   CANONICAL  quality gate / self-check inside a single agent
+
+LEVEL 2 — Declared topology  (when composition doesn't fit the shape)
+└─ LazyContext.from_agent()              STANDARD   pull-based: agent B sees agent A's output
+                                                    declare topology at construction; execute in order
+                                                    use when: tightly coupled, sequential, not tool-shaped
+
+LEVEL 3 — Decoupled coordination  (when agents are intentionally independent)
+└─ LazyStore + LazyContext.from_store()  STANDARD   blackboard model; agents write, others read
+                                                    use when: cross-process, persistent, or agents skip steps
+
+LEVEL 4 — Escape hatches  (use only when the above do not fit)
+├─ sess.gather()                         FALLBACK   raw async fan-out → CompletionResponse per agent
+│                                                   use when: you need per-agent .usage / .tool_calls
+├─ LazyRouter                            ADVANCED   multi-destination conditional routing
+│                                                   use when: review outcome → different downstream agents
+│                                                   NOT when: quality gate — use verify= instead
+└─ Manual orchestration loops            ESCAPE     explicit for-loops with manual context passing
+                                                    use only when topology is fully dynamic at runtime
+```
+
+**Descend to the next level only when:**
+- L1→L2: the pipeline is sequential and agents must remain independently callable
+- L2→L3: agents run in separate processes, at different times, or any step may be skipped
+- L3→L4: you need raw response objects, multi-destination routing, or a truly dynamic graph
+
+**`agent.result` is always the canonical accessor for an agent's last value.** Never use `agent._last_output` in user-facing pipeline code — it is an internal field read by `LazyContext.from_agent()`.
+
+---
+
 ## Choosing the right pattern
 
 ```
@@ -12,20 +51,31 @@ Do you need one agent to drive others, deciding what to call and when?
    │
    ├─ Do agents run independently on the same task, in parallel?
    │   │
-   │   ├─ YES, and you want automatic wiring → Pattern B via sess.as_tool(mode="parallel")
-   │   │                                        or manual: await sess.gather(a.achat(...), b.achat(...))
+   │   ├─ YES, and you want the combined result as a tool return value
+   │   │   → CANONICAL: Pattern B via sess.as_tool(mode="parallel")
+   │   │     (no asyncio, no manual result wiring, orchestrator calls it by name)
+   │   │
+   │   ├─ YES, but you need raw CompletionResponse per agent (.usage, .tool_calls, etc.)
+   │   │   → FALLBACK: sess.gather() — lower-level, requires async/await
    │   │
    │   └─ YES, but decoupled (different loops, different scripts, persistent state)
    │             → Pattern C (Network via LazyStore)
    │
    ├─ Do agents run sequentially, each feeding output to the next?
    │   │
-   │   └─ YES → Pattern B via sess.as_tool(mode="chain")
-   │             or manual: result = a.chat(task); b.chat(result.content)
+   │   └─ YES → CANONICAL: sess.as_tool(mode="chain")
+   │             (context wired automatically; no LazyContext boilerplate)
+   │             FALLBACK: LazyContext.from_agent() when agents must stay independently callable
    │
-   ├─ Do you need to branch to different agents based on a condition?
+   ├─ Do you need the output to pass a quality gate or self-check?
    │   │
-   │   └─ YES → Pattern D (LazyRouter)
+   │   └─ YES → CANONICAL: loop(verify="...", max_verify=N)
+   │             (built-in retry; no reviewer agent, no router, no loop management)
+   │             ADVANCED: Pattern D-b (LazyRouter) only when review routes to different agents
+   │
+   ├─ Do you need to branch to different downstream agents based on a condition?
+   │   │
+   │   └─ YES → Pattern D-b (LazyRouter)
    │             router = LazyRouter(condition=fn, routes={...})
    │             next_agent = router.route(result)
    │
@@ -193,11 +243,15 @@ asyncio.run(main())
 
 ---
 
-## Pattern C — Network (Cross-loop, No Direct References)
+## Pattern C — Network (Cross-loop, No Direct References) — STANDARD
 
-Agents communicate via `LazyStore` (state) and `LazyContext.from_store()` (context injection). Agents don't need to know about each other. Declare contexts at construction — they are evaluated lazily when the agent actually runs.
+**Use `LazyStore` only when agents are intentionally decoupled** — running in separate processes, at different times, or when any step may be skipped. For tightly coupled sequential agents where every output feeds the next, `sess.as_tool(mode="chain")` is simpler and more idiomatic (no store writes, no explicit context wiring).
 
-**Use case**: long-running pipelines, agents in separate loops, persistent state across restarts.
+`LazyStore` is the right model when:
+- Agents run in separate Python processes or scripts
+- Results must persist across restarts
+- Some agents may be conditionally skipped
+- You want a queryable audit trail of intermediate results per-agent
 
 ```python
 from lazybridge import LazyAgent, LazyContext, LazyStore
@@ -213,27 +267,58 @@ writer    = LazyAgent("anthropic", name="writer",
 
 # Pipeline: each step writes to store; the next step's context picks it up automatically
 collector.loop("Collect the top 5 AI papers published this week")
-store.write("papers", collector._last_output, agent_id=collector.id)
+store.write("papers", collector.result, agent_id=collector.id)
 
 analyst.chat("Identify the 3 most impactful findings from these papers.")
-store.write("analysis", analyst._last_output, agent_id=analyst.id)
+store.write("analysis", analyst.result, agent_id=analyst.id)
 
 report = writer.chat("Write a professional newsletter section from this material.")
 print(report.content)
 ```
 
+Note: `collector.result` (not `_last_output`) is the canonical accessor. Use `agent.result` whenever you need an agent's last value in pipeline code.
+
 ---
 
-## Pattern D — Router (Conditional Branching)
+## Pattern D-a — Self-checking Loop (verify=) — CANONICAL
 
-A `LazyRouter` inspects a result and routes to one of several agents.
+**Reach for `verify=` first.** If the review only determines pass/fail on a single agent's output, `loop(verify=...)` is canonical — no reviewer agent, no router, no loop management.
+
+```python
+from lazybridge import LazyAgent
+
+drafter = LazyAgent(
+    "anthropic",
+    system="You are a precise technical writer. Be accurate and concise.",
+)
+
+result = drafter.loop(
+    "Write a 200-word intro to transformer architecture.",
+    verify=(
+        "Check this text: is it accurate, clearly written, and under 200 words? "
+        "Reply with PASS or FAIL and a one-sentence reason."
+    ),
+    max_verify=3,
+)
+print(result.content)
+```
+
+The verify prompt receives each draft and returns `PASS` or `FAIL`. On `FAIL`, `loop()` reruns with the judge's reason appended as feedback. On `PASS` (or after `max_verify` attempts), the current output is returned.
+
+**Use `verify=` for:** accuracy checks, length constraints, format compliance, policy gates — anything where the review is a binary accept/retry on one agent's output.
+
+---
+
+## Pattern D-b — Router (Multi-destination Conditional Branching) — ADVANCED
+
+Use `LazyRouter` **only** when the review determines *which downstream agent runs next*, not just pass/fail. This is the right tool when different outcomes send the task to structurally different agents (e.g. "approve → publisher", "needs data → researcher", "needs legal → compliance").
 
 ```python
 from lazybridge import LazyAgent, LazyRouter, LazySession
 
 sess = LazySession()
-drafter  = LazyAgent("anthropic", name="drafter",  session=sess)
-reviewer = LazyAgent("openai",    name="reviewer", session=sess)
+drafter   = LazyAgent("anthropic", name="drafter",   session=sess)
+reviewer  = LazyAgent("openai",    name="reviewer",  session=sess)
 publisher = LazyAgent("anthropic", name="publisher", session=sess)
 
 router = LazyRouter(
@@ -243,12 +328,13 @@ router = LazyRouter(
     default="reviewer",
 )
 
-# Pipeline
 draft = drafter.chat("Write a short blog post about AI safety.")
 next_agent = router.route(draft.content)
 result = next_agent.chat("Process this content: " + draft.content)
 print(result.content)
 ```
+
+**Use `LazyRouter` for:** routing to different agents based on classification, topic, language, or any condition where the destination changes — not just whether to retry.
 
 ---
 
@@ -349,3 +435,40 @@ store.write("extraction", extraction.content)
 # B reads from store — never knew about A
 result = b.chat("Summarise the extracted entities.")
 ```
+
+---
+
+## LazyBridge-native style — what idiomatic code looks like
+
+Use this as a checklist when generating or reviewing pipeline code.
+
+### Canonical patterns — prefer these
+
+| Goal | Canonical form |
+|---|---|
+| One agent calls another | `orchestrator.loop(..., tools=[agent.as_tool()])` |
+| N agents run in parallel, result combined | `sess.as_tool(mode="parallel", participants=[...])` |
+| Agents run sequentially, each feeds the next | `sess.as_tool(mode="chain", participants=[...])` |
+| Quality gate / self-check on output | `agent.loop(..., verify="...", max_verify=N)` |
+| Read an agent's last value | `agent.result` |
+| Pass agent output to the next agent in a custom flow | `LazyContext.from_agent(agent)` |
+| Dynamic context (date, user, config) | `LazyContext.from_function(fn)` |
+| Decoupled / cross-process coordination | `LazyStore` + `LazyContext.from_store()` |
+
+### Anti-patterns — avoid these
+
+| Anti-pattern | Problem | Preferred alternative |
+|---|---|---|
+| `agent._last_output` in pipeline code | Internal field; bypasses result unification | `agent.result` |
+| `store.write("k", agent._last_output)` | Same — teaches _last_output as public API | `store.write("k", agent.result)` |
+| `resp.content` when result may be typed | Loses Pydantic object if output_schema set | `agent.result` |
+| Manual `for` loop with reviewer agent for pass/fail | 30+ lines vs 3 | `loop(verify=...)` |
+| `LazyRouter` for a binary approve/reject gate | Wrong abstraction level | `loop(verify=...)` |
+| `sess.gather()` when you only want combined text | Requires asyncio, more code | `sess.as_tool(mode="parallel")` |
+| `f"system: {agent._last_output}"` | Baked at construction time; breaks lazy eval | `LazyContext.from_agent(agent)` |
+| Creating `LazyContext` after agents run | Defeats lazy evaluation | Declare context at construction time |
+| `LazyStore` for tightly coupled sequential agents | Unnecessary plumbing | `sess.as_tool(mode="chain")` |
+
+### The mental model in one sentence
+
+> Declare topology first. Compose agents into tools. Let the framework wire the plumbing. Descend to lower-level APIs only when you need something the composition layer cannot express.
