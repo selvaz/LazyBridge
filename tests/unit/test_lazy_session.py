@@ -431,3 +431,42 @@ def test_chain_agent_without_tools_uses_chat():
 
     agent.chat.assert_called_once()
     agent.loop.assert_not_called()
+
+
+# =============================================================================
+# T_CS — _ChainState contract
+# =============================================================================
+
+def test_chain_state_ctx_none_means_tool_handoff():
+    """T_CS.1: _ChainState with ctx=None signals tool→agent handoff (text as task)."""
+    from lazybridge.lazy_session import _ChainState
+
+    state = _ChainState(text="tool output", typed=None, ctx=None)
+    assert state.ctx is None
+    assert state.text == "tool output"
+    assert state.typed is None
+
+
+def test_chain_state_ctx_set_means_agent_handoff():
+    """T_CS.2: _ChainState with ctx set signals agent→agent handoff (context injection)."""
+    from lazybridge.lazy_session import _ChainState
+    from lazybridge.lazy_context import LazyContext
+
+    ctx = LazyContext.from_text("previous agent output")
+    state = _ChainState(text="serialised text", typed=None, ctx=ctx)
+    assert state.ctx is ctx
+    assert state.text == "serialised text"
+
+
+def test_chain_state_typed_carries_pydantic_object():
+    """T_CS.3: _ChainState.typed carries the Pydantic object from a schema step."""
+    from pydantic import BaseModel
+    from lazybridge.lazy_session import _ChainState
+
+    class Report(BaseModel):
+        title: str
+
+    report = Report(title="Q1 Analysis")
+    state = _ChainState(text=report.model_dump_json(), typed=report, ctx=None)
+    assert isinstance(state.typed, Report)
+    assert state.typed.title == "Q1 Analysis"

@@ -784,3 +784,49 @@ async def test_aloop_sets_last_response():
     await agent.aloop("task")
     assert agent._last_response is not None
     assert agent._last_response.content == "async done"
+
+
+# =============================================================================
+# T_RESULT — agent.result property
+# =============================================================================
+
+def test_result_returns_none_before_any_call():
+    """T_RESULT.1: agent.result is None before the agent has been called."""
+    agent = _make_agent()
+    assert agent.result is None
+
+
+def test_result_returns_text_after_chat_without_schema():
+    """T_RESULT.2: agent.result returns plain text when no output_schema is active."""
+    agent = _make_agent()
+    resp = CompletionResponse(content="hello world", usage=UsageStats())
+    agent._executor.execute.return_value = resp
+
+    agent.chat("msg")
+    assert agent.result == "hello world"
+    assert isinstance(agent.result, str)
+
+
+def test_result_returns_pydantic_when_output_schema_active():
+    """T_RESULT.3: agent.result returns the Pydantic object when output_schema is set."""
+    from pydantic import BaseModel
+
+    class BlogPost(BaseModel):
+        title: str
+        intro: str
+
+    agent = _make_agent()
+    agent.output_schema = BlogPost
+    post = BlogPost(title="AI in 2025", intro="It was a big year.")
+    resp = CompletionResponse(
+        content=post.model_dump_json(),
+        parsed=post,
+        usage=UsageStats(),
+    )
+    agent._executor.execute.return_value = resp
+
+    agent.chat("write something")
+    result = agent.result
+    assert isinstance(result, BlogPost)
+    assert result.title == "AI in 2025"
+    assert result.intro == "It was a big year."

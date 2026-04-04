@@ -909,6 +909,59 @@ class LazyAgent:
         )
 
     # ------------------------------------------------------------------
+    # result — canonical accessor for the last call's output
+    # ------------------------------------------------------------------
+
+    @property
+    def result(self) -> Any:
+        """Canonical result of the last call.
+
+        Returns the typed Pydantic object when the last call had an active
+        ``output_schema`` (agent-level or call-level) and parsing succeeded.
+        Returns the text content string otherwise.  Returns ``None`` if the
+        agent has never been called.
+
+        This is the recommended accessor for pipeline code that needs the
+        "final value" of an agent without caring about the internal
+        representation::
+
+            report_writer = LazyAgent("openai", output_schema=InvestmentReport)
+            report_writer.loop("Analyse this data", tools=[...])
+
+            report = report_writer.result   # InvestmentReport instance
+            print(report.title)
+
+        For text-only output::
+
+            researcher = LazyAgent("anthropic")
+            researcher.chat("Find AI news this week")
+            print(researcher.result)        # plain string
+
+        Implementation note
+        -------------------
+        Internally LazyBridge keeps two complementary fields:
+
+        * ``_last_output : str | None``
+          Always a plain string.  Read by ``LazyContext.from_agent()`` for
+          agent-to-agent context injection.  Stays text-first deliberately —
+          injecting structured objects into a system prompt would require
+          explicit serialisation at the call site.
+
+        * ``_last_response : CompletionResponse | None``
+          The full provider response, including ``.parsed`` (Pydantic object),
+          ``.usage``, ``.tool_calls``, and ``.grounding_sources``.
+          Not yet a stable public API; prefer ``agent.result`` for the value
+          and ``agent._last_response`` for advanced introspection.
+
+        ``result`` unifies both: typed when available, text otherwise.
+        """
+        if self._last_response is None:
+            return self._last_output
+        if self._last_response.parsed is not None:
+            return self._last_response.parsed
+        return self._last_response.content
+
+    # ------------------------------------------------------------------
     # Convenience text/json shortcuts
     # ------------------------------------------------------------------
 

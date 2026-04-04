@@ -241,9 +241,57 @@ orchestrator.loop("Prepare a global market brief", tools=[news_tool])
 ```
 `combiner="last"` returns only the last participant's output.
 
-### `mode="chain"` — agents run sequentially, each receives the previous output
+### `mode="chain"` — sequential pipeline with explicit handoff semantics
 
-Participants execute in order. The first receives the original task; each subsequent participant receives the previous one's output as its context. The final participant's output is returned.
+Participants execute in order. Each step receives the result of the previous step, but **the handoff mechanism differs depending on whether the previous step was an agent or a tool**. Understanding this contract is important when mixing agents and tools in the same chain.
+
+---
+
+#### Chain handoff contract
+
+**Input routing — what the current step receives:**
+
+| Previous step | Current step receives |
+|---|---|
+| Nothing (first step) | Original task string as message |
+| `LazyAgent` | Original task string as message **+ previous agent's output injected via `LazyContext`** |
+| `LazyTool` | Previous tool's output **as the new task string** (replaces original task) |
+
+This asymmetry is intentional and maps to real semantic intent:
+
+- When an **agent** precedes another agent, its output is *contextual and interpretive* — it belongs in the system prompt alongside the original goal. The next agent still "knows what it needs to do" (original task) while also "knowing what was found" (context).
+- When a **tool** precedes an agent, its output is *raw data to process* — it is the new input, not supplementary context. The original task no longer makes sense as the message; the tool result does.
+
+```
+LazyAgent → LazyAgent:
+  message  = original task        ("Analyse the EV market")
+  context  = previous agent output (injected into system prompt via LazyContext)
+
+LazyTool → LazyAgent:
+  message  = tool's return value   ("Market data: EV sales up 40% in Q3...")
+  context  = none
+```
+
+**Call dispatch — how the current agent is invoked:**
+
+| Agent has | Method called |
+|---|---|
+| `output_schema` set | `p.json(task, schema)` — structured output + JSON suffix enforcement |
+| `tools` or `native_tools` | `p.loop(task)` — tool-calling loop required |
+| Neither | `p.chat(task)` — single turn |
+
+**Return value:**
+
+| Last step produced | Chain returns |
+|---|---|
+| Pydantic object (agent with `output_schema`) | The typed Pydantic object directly |
+| Text (agent without schema, or tool) | Plain string |
+
+When the chain is used as a tool inside another agent's `loop()`, the executor serialises Pydantic objects via `model_dump_json()` automatically.
+
+---
+
+#### Basic example — three agents
 
 ```python
 from lazybridge import LazyAgent, LazySession
@@ -265,6 +313,82 @@ pipeline_tool = sess.as_tool(
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Analyse the EV market", tools=[pipeline_tool])
 ```
+
+Flow (all agent → agent steps):
+1. `researcher` receives `"Analyse the EV market"` as message, no prior context.
+2. `analyst` receives `"Analyse the EV market"` as message + researcher's findings via `LazyContext`.
+3. `writer` receives `"Analyse the EV market"` as message + analyst's risk profile via `LazyContext`.
+
+---
+
+#### Typed chain — Pydantic schemas between steps
+
+```python
+from pydantic import BaseModel
+from lazybridge import LazyAgent, LazySession
+
+class RiskProfile(BaseModel):
+    risks: list[str]
+    severity: str
+
+class InvestmentReport(BaseModel):
+    title: str
+    recommendation: str
+    risk_summary: str
+
+sess         = LazySession()
+risk_analyst = LazyAgent("anthropic", name="risk_analyst",
+                          output_schema=RiskProfile, session=sess)
+report_writer = LazyAgent("openai",   name="report_writer",
+                           output_schema=InvestmentReport, session=sess)
+
+pipeline = sess.as_tool("typed_pipeline", "Risk → Report", mode="chain")
+result = pipeline.run({"task": "Analyse the EV market"})
+
+# result is an InvestmentReport instance (typed, not a string)
+print(result.title)
+print(result.recommendation)
+```
+
+`risk_analyst` runs `json(task, RiskProfile)` → produces a `RiskProfile`.
+`report_writer` runs `json(task, InvestmentReport)` with `risk_analyst`'s output as context → produces an `InvestmentReport`.
+The chain returns the `InvestmentReport` directly — no `json.loads`, no `.parsed`.
+
+---
+
+#### Mixed tool + agent chain
+
+```python
+# Tool step followed by agent step — tool output becomes agent's message
+
+market_tool   = market_sess.as_tool("market_research", "...", mode="parallel")
+risk_analyst  = LazyAgent("anthropic", output_schema=RiskProfile,  session=analysis_sess)
+report_writer = LazyAgent("openai",    output_schema=InvestmentReport, session=analysis_sess)
+
+pipeline = LazySession().as_tool(
+    "full_pipeline", "...",
+    mode="chain",
+    participants=[market_tool, risk_analyst, report_writer],
+)
+result = pipeline.run({"task": TASK})
+```
+
+Flow (tool → agent → agent):
+1. `market_tool.run({"task": TASK})` → returns combined parallel research as a string.
+2. `risk_analyst` receives the tool's string output as its **message** (not as context). No `LazyContext` injection.
+3. `report_writer` receives `TASK` as message + `risk_analyst`'s `RiskProfile` JSON as context.
+
+This is the **only asymmetry in the chain**: a tool's output replaces the task, while an agent's output becomes context. If you want tool output to be treated as context (not task replacement), wrap the tool inside an agent (`agent.as_tool()`) and add a thin pass-through agent step before the next consumer.
+
+---
+
+#### Participant type validation
+
+Chain participants must be either:
+- A `LazyAgent` instance (has `.chat()`)
+- A `LazyTool` instance (has `.run()`)
+
+Passing any other object raises `TypeError` immediately with a descriptive message.
 
 ### Mixing `LazyTool` and `LazyAgent` participants
 

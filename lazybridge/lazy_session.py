@@ -58,6 +58,49 @@ _logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# _ChainState — internal state propagated between chain steps
+# ---------------------------------------------------------------------------
+
+class _ChainState:
+    """Immutable-per-step state object for the chain pipeline.
+
+    Each step in a chain produces a new _ChainState that is passed to the
+    next step.  Separating state from logic makes the handoff contract
+    explicit and the loop body readable.
+
+    Attributes
+    ----------
+    text : str
+        Text representation of this step's output.  Always available.
+        Used as the next agent's task when ``ctx`` is None (tool → agent),
+        and by the final return when no typed object is available.
+    typed : Any | None
+        Typed Pydantic object produced by this step, or None.
+        Only set when the step was an agent with ``output_schema`` active.
+        The chain returns this directly if the *last* step set it.
+    ctx : LazyContext | None
+        If not None, the previous step was an agent and its output should
+        be injected as context into the next step.  The next agent then
+        receives the *original* task string as its message, with this
+        context merged into its system prompt.
+
+        If None, the previous step was a tool (or this is the first step),
+        and ``text`` is passed directly as the next agent's task.
+
+    Handoff semantics (decided by ``ctx``):
+        ctx is not None  →  agent → agent  →  inject context, keep original task
+        ctx is None      →  tool  → agent  →  use ``text`` as new task
+    """
+
+    __slots__ = ("text", "typed", "ctx")
+
+    def __init__(self, text: str, typed: Any, ctx: Any) -> None:
+        self.text = text
+        self.typed = typed
+        self.ctx = ctx
+
+
+# ---------------------------------------------------------------------------
 # TrackLevel
 # ---------------------------------------------------------------------------
 
@@ -534,72 +577,87 @@ class LazySession:
             def _run_chain(task: str) -> Any:
                 from lazybridge.lazy_context import LazyContext
 
-                # Chain dispatch contract (in priority order per step):
+                # _ChainState carries the result of each step to the next.
+                # See _ChainState docstring for the full handoff contract.
                 #
-                # Input routing:
-                #   agent → agent : previous agent's output injected as LazyContext;
-                #                   current_task stays as the original task string.
-                #   tool  → agent : tool's return value becomes the agent's task string.
-                #   first step    : receives the original task string unchanged.
+                # Short version:
+                #   state.ctx is not None  →  previous step was an agent
+                #                              inject ctx into next agent's system prompt
+                #                              keep original task as the message
+                #   state.ctx is None      →  previous step was a tool (or first step)
+                #                              use state.text directly as next agent's message
                 #
-                # Call dispatch per agent:
-                #   output_schema set  → json()  (structured output, highest priority)
-                #   tools/native_tools → loop()  (tool-calling loop needed)
-                #   else               → chat()  (single turn, no tools)
+                # Call dispatch (per agent step, in priority order):
+                #   output_schema set  → json()  — structured output + JSON suffix enforcement
+                #   tools/native_tools → loop()  — tool-calling loop required
+                #   else               → chat()  — single turn, no tools
                 #
-                # Return value:
-                #   Last step returned a Pydantic object → returned as-is (typed).
-                #   Otherwise                            → last text output (str).
+                # Final return:
+                #   state.typed  →  Pydantic object if last step had output_schema
+                #   state.text   →  plain string otherwise
 
-                last_agent: Any = None
-                last_output: str = ""
-                _last_parsed: Any = None   # preserve Pydantic object from last step
+                state = _ChainState(text=task, typed=None, ctx=None)
 
                 for p in _parts:
-                    if hasattr(p, "chat"):               # LazyAgent
+                    if hasattr(p, "chat"):                      # LazyAgent
                         kw: dict[str, Any] = {}
                         if _native:
                             kw["native_tools"] = _native
-                        if last_agent is not None:
-                            # Previous step was an agent: inject its output as context
-                            # so the current agent sees it alongside the original task.
-                            kw["context"] = LazyContext.from_agent(last_agent)
+
+                        if state.ctx is not None:
+                            # Previous step was an agent: inject its context so the
+                            # current agent sees prior results in its system prompt,
+                            # while still receiving the *original* task as its message.
+                            # Keeping the original task preserves the pipeline's goal
+                            # across all agent steps — the context is additive, not
+                            # a replacement.
+                            kw["context"] = state.ctx
                             current_task = task
-                        elif last_output:
-                            # Previous step was a tool: its output becomes the task so
-                            # the agent actually sees what the tool produced.
-                            current_task = last_output
                         else:
-                            current_task = task
+                            # Previous step was a tool (or first step): the tool's
+                            # output is the raw material to process, so it becomes
+                            # the agent's message directly.
+                            current_task = state.text
+
                         schema = getattr(p, "output_schema", None)
                         _has_tools = bool(
                             getattr(p, "tools", None) or
                             getattr(p, "native_tools", None) or
                             kw.get("native_tools")
                         )
+
                         if schema is not None:
                             result = p.json(current_task, schema, **kw)
-                            if result is not None:
-                                _last_parsed = result      # preserve Pydantic object
-                            last_output = (
-                                result.model_dump_json()
-                                if hasattr(result, "model_dump_json")
-                                else str(result)
+                            state = _ChainState(
+                                text=(
+                                    result.model_dump_json()
+                                    if hasattr(result, "model_dump_json")
+                                    else str(result)
+                                ),
+                                typed=result,
+                                ctx=LazyContext.from_agent(p),
                             )
                         elif _has_tools:
                             resp = p.loop(current_task, **kw)
-                            last_output = resp.content if hasattr(resp, "content") else str(resp)
-                            _last_parsed = None
+                            state = _ChainState(
+                                text=resp.content if hasattr(resp, "content") else str(resp),
+                                typed=None,
+                                ctx=LazyContext.from_agent(p),
+                            )
                         else:
                             resp = p.chat(current_task, **kw)
-                            last_output = resp.content if hasattr(resp, "content") else str(resp)
-                            _last_parsed = None            # this step has no parsed object
-                        last_agent = p
-                    elif hasattr(p, "run"):              # LazyTool (nested pipeline)
-                        result = p.run({"task": last_output or task})
-                        last_output = str(result)
-                        _last_parsed = None
-                        last_agent = None
+                            state = _ChainState(
+                                text=resp.content if hasattr(resp, "content") else str(resp),
+                                typed=None,
+                                ctx=LazyContext.from_agent(p),
+                            )
+
+                    elif hasattr(p, "run"):                     # LazyTool (nested pipeline)
+                        result = p.run({"task": state.text})
+                        # ctx=None signals to the next agent: use text as task,
+                        # not as context — tool output is data, not interpretation.
+                        state = _ChainState(text=str(result), typed=None, ctx=None)
+
                     else:
                         raise TypeError(
                             f"Chain participant {p!r} is not a LazyAgent (needs .chat()) "
@@ -607,11 +665,11 @@ class LazySession:
                             f"Participants must be LazyAgent instances or LazyTool objects."
                         )
 
-                # If the last step produced a Pydantic object, return it directly.
-                # This allows pipeline.run() to return the structured type to the caller.
+                # Return the typed Pydantic object if the last step produced one,
+                # otherwise the plain text output.
                 # When this chain is used as a tool inside loop(), the executor
-                # serialises the result via str() — Pydantic models render as JSON.
-                return _last_parsed if _last_parsed is not None else last_output
+                # serialises Pydantic objects via model_dump_json() automatically.
+                return state.typed if state.typed is not None else state.text
 
             return LazyTool.from_function(_run_chain, name=name, description=description)
 

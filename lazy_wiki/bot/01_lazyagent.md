@@ -465,28 +465,105 @@ When the orchestrator calls the tool, `task` is forwarded to `researcher`. If `r
 
 ---
 
-## 8. `_last_output` — behavior
+## 8. Agent result state — `result`, `_last_output`, `_last_response`
 
-- Set to `resp.content` after every successful `chat()` or `loop()` call.
-- `None` before the first call.
-- On a streaming `chat()` call (which returns an iterator, not a response), `_last_output` is **not** updated automatically — you must read the stream and set it manually if needed.
-- Read by `LazyContext.from_agent(agent)` to inject the agent's result into another agent's system prompt.
+LazyBridge keeps three complementary fields after every call. Understanding their distinct roles prevents confusion when building pipelines.
+
+---
+
+### `agent.result` — recommended accessor (public)
+
+Returns the canonical output of the last call:
+
+- **Typed Pydantic object** — when `output_schema` was active (agent-level or call-level) and parsing succeeded.
+- **Plain string** — text content otherwise.
+- **`None`** — if the agent has never been called.
 
 ```python
-from lazybridge import LazyAgent, LazyContext
+from lazybridge import LazyAgent
+from pydantic import BaseModel
 
-researcher = LazyAgent("anthropic", name="researcher")
+class BlogPost(BaseModel):
+    title: str
+    intro: str
+    tags: list[str]
+
+writer = LazyAgent("anthropic", output_schema=BlogPost)
+writer.chat("Write a post about AI agents")
+
+post = writer.result          # BlogPost instance
+print(post.title)             # typed access — no .parsed, no json.loads
+print(post.tags)
+
+# Without output_schema — result is a plain string
+researcher = LazyAgent("anthropic")
+researcher.chat("Find AI news this week")
+print(researcher.result)      # str
+```
+
+`agent.result` is the recommended access point for pipeline code that needs the final value without caring about the internal representation.
+
+---
+
+### `agent._last_output: str | None` — text-first, for context injection
+
+Always a plain string (`resp.content`). Set after every `chat()`, `loop()`, `achat()`, and `aloop()` call. `None` before the first call.
+
+**Primary consumer:** `LazyContext.from_agent(agent)` reads this field to inject an agent's output into the next agent's system prompt. It is intentionally text-first — system prompts are strings, and injecting a Pydantic object would require explicit serialisation at the call site.
+
+```python
+researcher = LazyAgent("anthropic")
 researcher.loop("Summarize latest AI papers")
 
-print(researcher._last_output)    # the summary text
+print(researcher._last_output)    # plain text summary
 
 ctx = LazyContext.from_agent(researcher)
-# ctx.build() produces:
-# "[researcher output]\n<summary text>"
+# ctx.build() → "[researcher output]\n<summary text>"
 
 writer = LazyAgent("openai", context=ctx)
 writer.chat("Write an article based on the research")
 ```
+
+**Streaming caveat:** on a `chat(stream=True)` call (which returns an iterator, not a `CompletionResponse`), `_last_output` is set *only after the iterator is fully consumed*. If you break out of the loop early, `_last_output` may be incomplete.
+
+---
+
+### `agent._last_response: CompletionResponse | None` — full response (semi-internal)
+
+The complete provider response. Not yet a stable public API — use `agent.result` for the value. Useful for advanced introspection:
+
+| Field | Description |
+|---|---|
+| `_last_response.content` | Text content (same as `_last_output`) |
+| `_last_response.parsed` | Pydantic object (`None` if no output_schema) |
+| `_last_response.usage` | `UsageStats(input_tokens, output_tokens)` |
+| `_last_response.tool_calls` | List of `ToolCall` objects from the last step |
+| `_last_response.grounding_sources` | Citations from native web search |
+| `_last_response.thinking` | Extended thinking text (Anthropic only) |
+
+```python
+agent = LazyAgent("anthropic", output_schema=BlogPost)
+agent.chat("Write a post")
+
+# Use result for the value:
+post = agent.result                           # BlogPost
+
+# Use _last_response for metadata:
+print(agent._last_response.usage.input_tokens)
+print(agent._last_response.usage.output_tokens)
+```
+
+---
+
+### Summary — which field to use
+
+| Need | Use |
+|---|---|
+| The typed or text output of the last call | `agent.result` |
+| Inject previous output into next agent's context | `LazyContext.from_agent(agent)` (reads `_last_output`) |
+| Token usage / cost accounting | `agent._last_response.usage` |
+| Citations from web search | `agent._last_response.grounding_sources` |
+| Raw text always | `agent._last_output` |
 
 ---
 

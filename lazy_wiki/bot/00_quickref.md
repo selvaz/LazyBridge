@@ -76,7 +76,9 @@ LazyAgent.as_tool(
 LazyAgent.id: str           # UUID, set at construction
 LazyAgent.name: str         # human-readable name
 LazyAgent.description: str | None
-LazyAgent._last_output: str | None  # set after each chat()/loop() call; read by LazyContext.from_agent()
+LazyAgent.result: Any               # canonical result: Pydantic object if output_schema active, else str, else None
+LazyAgent._last_output: str | None  # always plain text; read by LazyContext.from_agent()
+LazyAgent._last_response: CompletionResponse | None  # full response (.parsed, .usage, .tool_calls)
 ```
 
 ## LazySession

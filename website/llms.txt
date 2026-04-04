@@ -136,7 +136,9 @@ LazyAgent.as_tool(
 LazyAgent.id: str           # UUID
 LazyAgent.name: str
 LazyAgent.description: str | None
-LazyAgent._last_output: str | None  # set after each chat()/loop(); read by LazyContext.from_agent()
+LazyAgent.result: Any               # canonical result after last call: Pydantic object (if output_schema active) or str or None
+LazyAgent._last_output: str | None  # always plain text; read by LazyContext.from_agent()
+LazyAgent._last_response: CompletionResponse | None  # full response object (.parsed, .usage, .tool_calls)
 ```
 
 ---
@@ -168,6 +170,29 @@ LazySession.as_tool(
     entry_agent: LazyAgent | None = None,
     guidance: str | None = None,
 ) -> LazyTool
+
+# mode="chain" — handoff contract (critical — read before composing mixed pipelines)
+#
+# Input routing to each step:
+#   first step         → receives original task string as message
+#   LazyAgent → next   → next receives original task string as message
+#                         + previous agent output injected via LazyContext (system prompt)
+#   LazyTool  → next   → next receives tool output as new task string (replaces original task)
+#
+# WHY the asymmetry:
+#   Agent output is interpretive (findings, analysis) → belongs as context alongside the goal
+#   Tool output is raw data to process               → IS the new input, original task is irrelevant
+#
+# Call dispatch per agent step (priority order):
+#   agent.output_schema set  → p.json(task, schema)   structured output + JSON suffix
+#   agent has tools          → p.loop(task)            tool-calling loop
+#   neither                  → p.chat(task)            single turn
+#
+# Return value:
+#   last step had output_schema → returns Pydantic object directly (not a string)
+#   otherwise                   → returns plain text string
+#
+# Participants must be LazyAgent (has .chat()) or LazyTool (has .run()) — TypeError otherwise.
 
 LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
