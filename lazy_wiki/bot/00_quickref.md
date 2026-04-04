@@ -1,4 +1,4 @@
-# LazyBridgeFramework — Complete API Quick Reference
+# LazyBridge — Complete API Quick Reference
 
 ## LazyAgent
 

@@ -1,6 +1,6 @@
 """Intensive live tests — multi-agent, memory, context, tracking, nested pipelines.
 
-All tests use the LazyBridgeFramework public API exclusively (LazyAgent,
+All tests use the LazyBridge public API exclusively (LazyAgent,
 LazySession, LazyContext, LazyStore, Memory, LazyTool).  No raw SDK calls.
 
 Cheapest capable model used throughout to minimise API costs.

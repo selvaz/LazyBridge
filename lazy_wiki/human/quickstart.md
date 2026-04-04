@@ -1,4 +1,4 @@
-# LazyBridgeFramework — Quick Start
+# LazyBridge — Quick Start
 
 Get from zero to a running pipeline in 5 minutes.
 

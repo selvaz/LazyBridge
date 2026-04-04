@@ -11,11 +11,11 @@ Three implementations of the same pipeline:
 |---|---|---|---|
 | `research_pipeline_raw_sdk.py` | Anthropic + OpenAI SDK, fully manual | ~110 | 2 packages |
 | `research_pipeline_langgraph.py` | LangGraph + LangChain | ~65 | 4 packages |
-| `research_pipeline_lazybridge.py` | LazyBridgeFramework | ~35 | 1 package |
+| `research_pipeline_lazybridge.py` | LazyBridge | ~35 | 1 package |
 
 ### What the comparison shows
 
-| | Raw SDK | LangGraph | LazyBridgeFramework |
+| | Raw SDK | LangGraph | LazyBridge |
 |---|---|---|---|
 | Manual tool loops | 3 `while` loops | 0 | 0 |
 | Explicit state declaration | no | yes (TypedDict) | no |

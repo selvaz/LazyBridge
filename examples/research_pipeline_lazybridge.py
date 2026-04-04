@@ -1,5 +1,5 @@
 """
-Research Pipeline — LazyBridgeFramework
+Research Pipeline — LazyBridge
 ========================================
 Same pipeline as the raw SDK and LangGraph examples.
 

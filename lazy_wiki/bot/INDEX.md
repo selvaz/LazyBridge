@@ -1,4 +1,4 @@
-# LazyBridgeFramework — LLM Reference Index
+# LazyBridge — LLM Reference Index
 
 ## What each class does
 

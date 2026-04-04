@@ -1,4 +1,4 @@
-# LazyBridgeFramework
+# LazyBridge
 
 Zero-boilerplate multi-provider LLM agent framework. One class for every LLM interaction, automatic tool schema generation, composable context injection, and serializable multi-agent pipelines.
 
@@ -119,7 +119,7 @@ pip install lazybridge[all]         # all providers
 ## Project structure
 
 ```
-LazyBridgeFramework/
+LazyBridge/
 ├── lazybridge/      # Main package
 │   ├── lazy_agent.py         # LazyAgent — single entry point for LLM calls
 │   ├── lazy_session.py       # LazySession — shared store, events, graph

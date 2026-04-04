@@ -1,6 +1,6 @@
-# LazyBridgeFramework vs Raw SDK — Comparison
+# LazyBridge vs Raw SDK — Comparison
 
-Side-by-side comparison of the same tasks done with the raw provider SDK and with LazyBridgeFramework.
+Side-by-side comparison of the same tasks done with the raw provider SDK and with LazyBridge.
 
 ---
 
@@ -25,7 +25,7 @@ print(answer)
 
 **8 lines, 3 concepts** (client, messages format, content extraction)
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent
@@ -105,7 +105,7 @@ while True:
 
 **~45 lines, 7+ concepts** (flattened schema format, output item types, call_id vs tool_call_id, model_dump for history, function_call_output format, output item iteration, content block extraction)
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent, LazyTool
@@ -167,7 +167,7 @@ print(message_item.content[0].text)
 
 **~20 lines, 5 concepts** (two clients, two different APIs, two different response formats, manual output bridging, two different content extraction patterns)
 
-### LazyBridgeFramework
+### LazyBridge
 
 Bind the writer's context to the researcher at construction — it's evaluated lazily when the writer actually runs:
 
@@ -230,7 +230,7 @@ for attempt in range(3):   # manual retry loop
 
 **~25 lines, 5 concepts** (manual JSON mode, json.loads, try/except, Pydantic validation, retry loop)
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent
@@ -299,7 +299,7 @@ asyncio.run(main())
 
 **~30 lines** (each response requires output-item iteration; no shared state, event tracking, or graph topology)
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent, LazySession
@@ -358,7 +358,7 @@ print(chat("What did we discuss so far?"))
 
 **~18 lines** — manual list ownership, mutation risk, no built-in persistence, breaks if you forget to append
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent, Memory
@@ -407,7 +407,7 @@ for s in sources:
 
 **~14 lines** — beta opt-in, provider-specific type strings, content block filtering, breaks when beta graduates
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent
@@ -452,7 +452,7 @@ print()
 
 **~10 lines** — Anthropic uses a context manager; OpenAI uses a different iteration API; Google uses yet another pattern. Switching providers requires rewriting the streaming code.
 
-### LazyBridgeFramework
+### LazyBridge
 
 ```python
 from lazybridge import LazyAgent
@@ -490,7 +490,7 @@ Note: raw OpenAI examples use the **Responses API** (OpenAI's recommended defaul
 
 Beyond line count:
 
-| Concern | Raw SDK | LazyBridgeFramework |
+| Concern | Raw SDK | LazyBridge |
 |---------|---------|---------------------|
 | Provider switch | Rewrite client, format, extraction | Change one string |
 | Tool schema | Write JSON dict manually | Type hints → automatic |
@@ -509,11 +509,11 @@ The core design principle: **write what you want to happen, not how to make it h
 
 ---
 
-## Framework Comparison — LazyBridgeFramework vs LLM Orchestration Frameworks
+## Framework Comparison — LazyBridge vs LLM Orchestration Frameworks
 
 ### TL;DR
 
-LazyBridgeFramework sits between raw SDKs (too much boilerplate) and heavy orchestration frameworks (too much abstraction). Its differentiator is a minimal, composable API with production-grade features (Memory, LazyContext, LazyStore, EventLog, native tools) that doesn't impose a paradigm on the developer.
+LazyBridge sits between raw SDKs (too much boilerplate) and heavy orchestration frameworks (too much abstraction). Its differentiator is a minimal, composable API with production-grade features (Memory, LazyContext, LazyStore, EventLog, native tools) that doesn't impose a paradigm on the developer.
 
 ---
 
@@ -521,7 +521,7 @@ LazyBridgeFramework sits between raw SDKs (too much boilerplate) and heavy orche
 
 LangChain is the most widely used framework (~100k+ LOC, hundreds of integrations). It solves everything but at the cost of complexity: LCEL chain DSL, multiple abstraction layers, frequent breaking changes, and a steep learning curve even for simple use cases.
 
-| Concern | LangChain | LazyBridgeFramework |
+| Concern | LangChain | LazyBridge |
 |---------|-----------|---------------------|
 | Simple call boilerplate | ~10 lines (ChatOpenAI, HumanMessage, invoke) | 2 lines |
 | Tool loop | Chain + AgentExecutor + tool wrappers | `agent.loop(task, tools=[...])` |
@@ -543,7 +543,7 @@ LangChain is the most widely used framework (~100k+ LOC, hundreds of integration
 
 The closest competitor in philosophy (launched late 2024). PydanticAI is type-safe, Python-first, with clean dependency injection. Supports OpenAI, Anthropic, Google, Groq, Mistral.
 
-| Concern | PydanticAI | LazyBridgeFramework |
+| Concern | PydanticAI | LazyBridge |
 |---------|------------|---------------------|
 | Type safety | ✅ Strong (typed agents, typed deps) | ✅ Good (Pydantic structured output, typed responses) |
 | Multi-provider | ✅ | ✅ |
@@ -565,7 +565,7 @@ The closest competitor in philosophy (launched late 2024). PydanticAI is type-sa
 
 CrewAI popularised the "crew of agents" metaphor: you declare Agent roles, Task descriptions, and a Process (sequential or hierarchical). Very readable for structured multi-agent workflows.
 
-| Concern | CrewAI | LazyBridgeFramework |
+| Concern | CrewAI | LazyBridge |
 |---------|--------|---------------------|
 | Multi-agent | ✅ First-class (Crew, Task, Process) | ✅ Composable (LazySession, LazyRouter) |
 | Flexibility | ❌ Crew metaphor required | ✅ No imposed paradigm |
@@ -585,7 +585,7 @@ CrewAI popularised the "crew of agents" metaphor: you declare Agent roles, Task 
 
 Microsoft's framework models agents as conversational participants that message each other. Powerful for human-in-the-loop and complex agent debates. Complex to configure for straightforward pipelines.
 
-| Concern | Autogen | LazyBridgeFramework |
+| Concern | Autogen | LazyBridge |
 |---------|---------|---------------------|
 | Human-in-the-loop | ✅ First-class | ⚠️ Manual |
 | Simple pipeline | ❌ ConversableAgent + GroupChat overhead | ✅ |
@@ -613,6 +613,6 @@ Microsoft's framework models agents as conversational participants that message 
 | Ecosystem / integrations | ✅ | ✅ Best | ⚠️ | ⚠️ | ❌ Minimal |
 | Learning curve | Low (SDK) | ❌ High | ✅ Low | ✅ Low | ✅ Low |
 
-LazyBridgeFramework's unique position: **the only framework that combines a minimal API with a full pipeline ecosystem (Memory + LazyContext + LazyStore + EventLog + native tools) without imposing a metaphor**.
+LazyBridge's unique position: **the only framework that combines a minimal API with a full pipeline ecosystem (Memory + LazyContext + LazyStore + EventLog + native tools) without imposing a metaphor**.
 
 The gap to close: external integrations (vector stores, document loaders). Everything else is a strength.

@@ -75,7 +75,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `AgentMemory._get_lineage()` replaced N+1 loop with single recursive CTE — better performance and no open connection across loop iterations
 - SQLite busy timeout increased to 30s (`timeout=30` + `PRAGMA busy_timeout=30000`) in `AgentMemory` and `AgentTrack` — handles lock contention in multi-process pipelines
 - `test_toolbridge.py` — all `_make_ai()` helpers now set `_agent_memory=None` and `_agent_track=None` (bypassed by `__new__`, caused 10+ test failures)
-- `test_lazylayer_providers.py` — removed hardcoded Windows path `D:/LazyBridgeFramework`
+- `test_lazylayer_providers.py` — removed hardcoded Windows path `D:/LazyBridge`
 - `modelbridge/pyproject.toml` — legacy `setuptools.backends.legacy:build` replaced with `setuptools.build_meta`
 - Google provider: `thought_signature` preserved as raw Part objects to avoid 400 INVALID_ARGUMENT on follow-up requests
 - `thinking-mode` detection uses `"-4-6"` prefix to avoid false match on `claude-sonnet-4-5`

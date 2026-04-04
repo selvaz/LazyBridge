@@ -1,7 +1,7 @@
 """
 Investment Research Platform — Four Variants
 =============================================
-The same investment research workflow in four different LazyBridgeFramework patterns.
+The same investment research workflow in four different LazyBridge patterns.
 No def, no loops — only agent declarations and framework composition.
 
 Architecture map
