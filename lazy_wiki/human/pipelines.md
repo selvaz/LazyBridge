@@ -231,13 +231,10 @@ print(result.content)
 Index a folder of local documentation once, then query it from any agent using
 BM25 retrieval. No vector database, no embeddings API — everything runs locally.
 
-Uses [`tools/doc_skills/doc_skills_tool.py`](../../tools/doc_skills/).
+See [`lazy_wiki/human/tools.md`](tools.md) for the full guide.
 
 ```python
-import sys
-sys.path.insert(0, "tools/doc_skills")
-
-from doc_skills_tool import build_skill, skill_tool, skill_pipeline
+from lazybridge.tools.doc_skills import build_skill, skill_tool, skill_pipeline
 from lazybridge import LazyAgent
 
 # Step 1 — build the skill bundle (run once, or when docs change)
@@ -278,4 +275,4 @@ skill_executor — calls skill tool (BM25, local) → synthesises grounded answe
 orchestrator
 ```
 
-See [`tools/doc_skills/README.md`](../../tools/doc_skills/README.md) for the full API reference.
+See [`lazy_wiki/human/tools.md`](tools.md) for the full API reference.

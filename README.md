@@ -121,30 +121,30 @@ pip install lazybridge[all]         # all providers
 
 Drop-in tools for common agent tasks — each in its own folder with a README and tests.
 
-| Tool | Folder | What it does |
-|---|---|---|
-| **doc_skills_tool** | [`tools/doc_skills/`](tools/doc_skills/) | Index local docs with BM25, query them from any agent. No vector DB, no embeddings API. |
-| **read_docs_tool** | [`tools/read_docs/`](tools/read_docs/) | Read `.txt .md .pdf .docx .html` files from a folder or single file and return LLM-ready text. |
+| Module | What it does |
+|---|---|
+| `lazybridge.tools.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
+| `lazybridge.tools.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
 
-### doc_skills_tool — example
+### doc_skills — example
 
 ```python
-from doc_skills_tool import build_skill, skill_tool
+from lazybridge.tools.doc_skills import build_skill, skill_tool
 from lazybridge import LazyAgent
 
-# Index your docs once
+# Index your docs once — bundle persists to disk
 meta = build_skill(["./docs"], "my-project")
 
-# Use from any agent
+# Load and use — works across restarts, no re-indexing
 tool = skill_tool(meta["skill_dir"])
 resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
 print(resp.content)
 ```
 
-### read_docs_tool — example
+### read_docs — example
 
 ```python
-from read_docs_tool import read_folder_docs
+from lazybridge.tools.read_docs import read_folder_docs
 from lazybridge import LazyAgent, LazyTool
 
 docs_tool = LazyTool.from_function(read_folder_docs)
@@ -171,9 +171,9 @@ LazyBridge/
 │   ├── memory.py             # Memory — stateful conversation history
 │   ├── graph/                # GraphSchema — serializable pipeline topology
 │   └── core/                 # Provider adapters, executor, tool schema builder
-├── tools/           # Ready-made LazyBridge-compatible tools (not in pip package)
-│   ├── doc_skills/           # BM25 documentation skill runtime
-│   └── read_docs/            # Multi-format document reader
+├── tools/           # Tests and READMEs for lazybridge.tools
+│   ├── doc_skills/           # test_doc_skills.py + README
+│   └── read_docs/            # README
 └── lazy_wiki/
     ├── bot/                  # LLM-optimised reference (exhaustive, structured)
     └── human/                # Human-readable guides and SDK comparison
