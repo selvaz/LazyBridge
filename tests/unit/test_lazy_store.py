@@ -203,3 +203,117 @@ async def test_async_keys():
     await store.awrite("k2", "v2")
     keys = await store.akeys()
     assert sorted(keys) == ["k1", "k2"]
+
+
+@pytest.mark.asyncio
+async def test_async_read_entry():
+    store = LazyStore()
+    await store.awrite("x", 42, agent_id="ag")
+    entry = await store.aread_entry("x")
+    assert entry is not None
+    assert entry.value == 42
+    assert entry.agent_id == "ag"
+    assert await store.aread_entry("missing") is None
+
+
+@pytest.mark.asyncio
+async def test_async_read_by_agent():
+    store = LazyStore()
+    await store.awrite("a", 1, agent_id="ag1")
+    await store.awrite("b", 2, agent_id="ag2")
+    result = await store.aread_by_agent("ag1")
+    assert result == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_async_delete():
+    store = LazyStore()
+    await store.awrite("key", "val")
+    await store.adelete("key")
+    assert await store.aread("key") is None
+
+
+@pytest.mark.asyncio
+async def test_async_clear():
+    store = LazyStore()
+    await store.awrite("a", 1)
+    await store.awrite("b", 2)
+    await store.aclear()
+    assert await store.aread_all() == {}
+
+
+# ── T2.12 — SQLite backend: basic persistence ─────────────────────────────────
+
+def test_sqlite_write_read(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("key", {"x": 1})
+    assert store.read("key") == {"x": 1}
+
+
+def test_sqlite_persistence_across_instances(tmp_path):
+    """Data written by one instance is visible to a new instance on the same file."""
+    db = str(tmp_path / "p.db")
+    LazyStore(db=db).write("k", "v")
+    assert LazyStore(db=db).read("k") == "v"
+
+
+def test_sqlite_overwrite(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("k", "first")
+    store.write("k", "second")
+    assert store.read("k") == "second"
+
+
+def test_sqlite_read_all(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("a", 1)
+    store.write("b", 2)
+    assert store.read_all() == {"a": 1, "b": 2}
+
+
+def test_sqlite_agent_id_filtering(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("x", 10, agent_id="ag1")
+    store.write("y", 20, agent_id="ag2")
+    assert store.read_by_agent("ag1") == {"x": 10}
+    assert store.read_by_agent("ag2") == {"y": 20}
+
+
+def test_sqlite_delete(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("k", "v")
+    store.delete("k")
+    assert store.read("k") is None
+
+
+def test_sqlite_clear(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("a", 1)
+    store.write("b", 2)
+    store.clear()
+    assert store.read_all() == {}
+
+
+def test_sqlite_read_entry_metadata(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("k", "v", agent_id="myagent")
+    entry = store.read_entry("k")
+    assert entry is not None
+    assert entry.value == "v"
+    assert entry.agent_id == "myagent"
+    assert entry.written_at is not None
+
+
+def test_sqlite_contains(tmp_path):
+    db = str(tmp_path / "test.db")
+    store = LazyStore(db=db)
+    store.write("present", True)
+    assert "present" in store
+    assert "absent" not in store

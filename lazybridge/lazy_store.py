@@ -336,3 +336,23 @@ class LazyStore:
         """Async-safe keys."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.keys)
+
+    async def aread_entry(self, key: str) -> "StoreEntry | None":
+        """Async-safe read_entry."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self.read_entry(key))
+
+    async def aread_by_agent(self, agent_id: str) -> dict[str, Any]:
+        """Async-safe read_by_agent."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self.read_by_agent(agent_id))
+
+    async def adelete(self, key: str) -> None:
+        """Async-safe delete."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: self.delete(key))
+
+    async def aclear(self) -> None:
+        """Async-safe clear."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.clear)

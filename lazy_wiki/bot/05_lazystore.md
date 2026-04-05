@@ -92,7 +92,11 @@ Use the async methods when writing to or reading from the store inside `async de
 store.awrite(key: str, value: Any, *, agent_id: str | None = None) -> None
 store.aread(key: str, default: Any = None) -> Any
 store.aread_all() -> dict[str, Any]
+store.aread_entry(key: str) -> StoreEntry | None
+store.aread_by_agent(agent_id: str) -> dict[str, Any]
 store.akeys() -> list[str]
+store.adelete(key: str) -> None
+store.aclear() -> None
 ```
 
 Each method offloads the synchronous call to the default thread-pool executor so the loop stays free during the I/O wait.
@@ -112,12 +116,11 @@ The in-memory backend benefits from thread-pool offloading too (lock contention 
 ## StoreEntry
 
 ```python
-@dataclass
 class StoreEntry:
     key:        str
     value:      Any
     agent_id:   str | None
-    written_at: datetime    # UTC
+    written_at: datetime    # UTC, set automatically on write
 ```
 
 ---
@@ -144,7 +147,7 @@ store = LazyStore()
 # Agent A writes results
 agent_a = LazyAgent("anthropic", name="analyst")
 agent_a.loop("analyse market data for Q4")
-store.write("q4_analysis", agent_a._last_output, agent_id=agent_a.id)
+store.write("q4_analysis", agent_a.result, agent_id=agent_a.id)
 
 # Agent B reads without knowing about agent A
 ctx = LazyContext.from_store(store, keys=["q4_analysis"])

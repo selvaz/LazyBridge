@@ -27,14 +27,14 @@ By snippet kind:
   persistence                   1
 
 By file:
-  lazy_wiki/human/agents.md                         22
-  lazy_wiki/human/comparison.md                     16
-  lazy_wiki/human/context.md                        11
-  lazy_wiki/human/pipelines.md                       6
-  lazy_wiki/human/quickstart.md                      4
-  lazy_wiki/human/routing.md                         6
-  lazy_wiki/human/sessions.md                        9
-  lazy_wiki/human/tools.md                          24
+  lazy_wiki\human\agents.md                         22
+  lazy_wiki\human\comparison.md                     16
+  lazy_wiki\human\context.md                        11
+  lazy_wiki\human\pipelines.md                       6
+  lazy_wiki\human\quickstart.md                      4
+  lazy_wiki\human\routing.md                         6
+  lazy_wiki\human\sessions.md                        9
+  lazy_wiki\human\tools.md                          24
 
 Skip reasons (top 10):
   [  5x] Contains ellipsis / placeholder — not complete code

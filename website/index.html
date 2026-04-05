@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LazyBridge &#x2014; Build LLM systems without orchestration overhead.</title>
-  <meta name="description" content="LazyBridge eliminates orchestration overhead from LLM system design. One class, composable units, any provider &#x2014; Anthropic, OpenAI, Google, DeepSeek." />
+  <title>LazyBridge &#x2014; Functions, agents, and pipelines. One primitive.</title>
+  <meta name="description" content="LazyBridge collapses functions, tools, agents, and pipelines into one composable unit. No adapter layers, no orchestration DSL, no rewrite cost as complexity grows." />
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,15 +13,15 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-one-dark.min.css" />
   <!-- Tailwind (utilities) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Custom design system -->
-  <link rel="stylesheet" href="css/style.css" />
+  <!-- Carbon + Sky design system -->
+  <link rel="stylesheet" href="css/style-carbon-sky.css" />
 </head>
 <body>
 
 <!-- ═══════════════════════════════════════════════════════════ NAV -->
 <nav>
   <div class="nav-inner">
-    <a href="index.html" class="nav-logo">Lazy<span>Bridge</span></a>
+    <a href="index.html" class="nav-logo" style="gap:0;font-size:1.3rem">Lazy<span>Bridge</span></a>
     <div class="nav-links">
       <a href="docs.html">Docs</a>
       <a href="examples.html">Examples</a>
@@ -34,213 +34,185 @@
 <!-- ═══════════════════════════════════════════════════════════ HERO -->
 <section class="hero">
   <div class="container">
-    <h1>Build LLM systems without <em>orchestration overhead.</em></h1>
-    <p class="hero-sub">One composable model. No glue code. Functions, agents, and pipelines all compose the same way &mdash; across any provider.</p>
+    <div class="hero-label">&#x25B8;&nbsp; Python framework &nbsp;&middot;&nbsp; multi-provider LLM pipelines &nbsp;&middot;&nbsp; open source</div>
+    <h1>Functions, agents, and pipelines. <em>One primitive.</em></h1>
+    <p class="hero-sub">Turn functions, tools, agents, and whole pipelines into the same composable unit &mdash; so you can nest complex systems without adding new patterns or glue code.</p>
     <div class="hero-actions">
       <button class="install-pill" data-cmd="pip install lazybridge[anthropic]">
         <span class="prompt">$</span>
         <span class="cmd">pip install lazybridge[anthropic]</span>
         <span class="copy-icon">&#x2398;</span>
       </button>
-      <a href="docs.html" class="btn btn-primary">Read the docs</a>
+      <a href="#proof" class="btn btn-primary">See the code</a>
       <a href="https://github.com/selvaz/LazyBridge" class="btn btn-ghost" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════ PROBLEM FRAME -->
-<section class="section-sm" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+<!-- ══════════════════════════════════════ FOUR-STATE CODE PROOF -->
+<section class="section" id="proof">
   <div class="container">
     <div class="section-head">
-      <div class="section-tag">The real problem</div>
-      <h2>Frameworks solve the wrong complexity.</h2>
-      <p style="max-width:680px;margin:0 auto">Most LLM frameworks wrap provider APIs but add orchestration overhead in the process &mdash; manual dispatch loops, message list wrangling, glue code between agents. The mental model grows with every feature you add. LazyBridge is built to reverse that.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════════════════════ CODE SHOWCASE -->
-<section class="section" id="showcase">
-  <div class="container">
-    <div class="section-head">
-      <div class="section-tag">Zero noise in practice</div>
-      <h2>The same model, from a single call to a full pipeline.</h2>
-      <p>One class. One API. Regardless of complexity or provider.</p>
+      <div class="section-tag">The primitive</div>
+      <h2>One interface. Four levels of complexity.</h2>
+      <p>The same contract holds whether you are calling a function, an agent, or a nested multi-agent pipeline. What changes is only what is inside.</p>
     </div>
 
-    <div class="tabs-container">
-      <!-- Tab bar -->
-      <div class="tab-bar">
-        <button class="tab-btn active">Single call</button>
-        <button class="tab-btn">Tool loop</button>
-        <button class="tab-btn">Multi-agent</button>
-        <button class="tab-btn">Production pipeline</button>
+    <!-- Flow diagram: the key visual claim -->
+    <div class="flow-diagram">
+      <div class="flow-step">
+        <div class="flow-type">1 &middot; Function</div>
+        <div class="flow-name">summarize(docs)</div>
+        <div class="flow-iface">&#x2192; str</div>
       </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <div class="flow-type">2 &middot; Tool</div>
+        <div class="flow-name">LazyTool</div>
+        <div class="flow-iface">.run(input)</div>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <div class="flow-type">3 &middot; Agent Loop</div>
+        <div class="flow-name">agent.loop()</div>
+        <div class="flow-iface">.run(input)</div>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <div class="flow-type">4 &middot; Pipeline</div>
+        <div class="flow-name">session.as_tool()</div>
+        <div class="flow-iface">.run(input)</div>
+      </div>
+      <div class="flow-same-bar">&#x2190;&#x2014; same interface at every level: &nbsp;<code style="color:var(--green);font-size:0.8rem">.run(input)</code> &nbsp;&#x2014;&#x2192;</div>
+    </div>
 
-      <!-- Tab 1: Single call -->
-      <div class="tab-panel active">
-        <div style="display:grid;grid-template-columns:3fr 2fr;gap:32px;align-items:start">
-          <div class="code-block-wrap no-top-radius">
-            <div class="code-header">
-              <span class="code-lang">Python</span>
-              <button class="copy-btn">Copy</button>
-            </div>
-<pre><code class="language-python">from lazybridge import LazyAgent
-
-answer = LazyAgent("anthropic").text("What is the capital of France?")
-print(answer)</code></pre>
-          </div>
-          <div class="showcase-desc">
-            <h3>2 lines. No setup.</h3>
-            <p>No client, no message list, no content extraction. Swap <code>"anthropic"</code> for <code>"openai"</code> &mdash; nothing else changes.</p>
-          </div>
+    <!-- Code + callouts -->
+    <div style="display:grid;grid-template-columns:3fr 2fr;gap:32px;align-items:start;margin-top:40px">
+      <div class="code-block-wrap">
+        <div class="code-header">
+          <span class="code-lang">Python</span>
+          <button class="copy-btn">Copy</button>
         </div>
-      </div>
+<pre><code class="language-python"># 1. A plain function
+def summarize(docs: str) -> str:
+    """Summarize a collection of documents."""
+    return LazyAgent("anthropic").text(f"Summarize: {docs}")
 
-      <!-- Tab 2: Tool loop -->
-      <div class="tab-panel">
-        <div style="display:grid;grid-template-columns:3fr 2fr;gap:32px;align-items:start">
-          <div class="code-block-wrap no-top-radius">
-            <div class="code-header">
-              <span class="code-lang">Python</span>
-              <button class="copy-btn">Copy</button>
-            </div>
-<pre><code class="language-python">from lazybridge import LazyAgent, LazyTool
+# 2. Wrap as a tool — no changes to the function
+tool = LazyTool.from_function(summarize)
 
-def get_weather(city: str) -> str:
-    """Get current weather for a city."""
-    return f"{city}: 22°C, sunny"
+# 3. Compose into an agent loop — tool is a first-class argument
+agent = LazyAgent("anthropic")
+result = agent.loop("Summarize these three research papers", tools=[tool])
 
-result = LazyAgent("anthropic").loop(
-    "What's the weather in Rome and Paris?",
-    tools=[LazyTool.from_function(get_weather)],
-)
-print(result.content)</code></pre>
-          </div>
-          <div class="showcase-desc">
-            <h3>Schema generated automatically from type hints + docstring. No JSON dict.</h3>
-            <p><code>LazyTool.from_function()</code> introspects the signature and docstring at call time. No decorator, no schema class, no manual parameter mapping.</p>
-            <p style="margin-top:12px">Raw SDK equivalent: ~45 lines, including a <code>while True</code> loop you have to write yourself.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab 3: Multi-agent -->
-      <div class="tab-panel">
-        <div style="display:grid;grid-template-columns:3fr 2fr;gap:32px;align-items:start">
-          <div class="code-block-wrap no-top-radius">
-            <div class="code-header">
-              <span class="code-lang">Python</span>
-              <button class="copy-btn">Copy</button>
-            </div>
-<pre><code class="language-python">from lazybridge import LazyAgent, LazySession, LazyContext
-
-sess       = LazySession(tracking="basic")
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-writer     = LazyAgent("openai",    name="writer",     session=sess)
-
-researcher.loop("Find top 3 AI papers this week", tools=[search_tool])
-result = writer.chat(
-    "Write a blog post",
-    context=LazyContext.from_agent(researcher),
-)</code></pre>
-          </div>
-          <div class="showcase-desc">
-            <h3>Two providers. One session.</h3>
-            <p><code>LazyContext.from_agent()</code> injects the researcher's output into the writer's context &mdash; evaluated lazily at execution time, not at declaration.</p>
-            <p style="margin-top:12px">Session tracking, event log, and pipeline graph topology all included automatically.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab 4: Production pipeline -->
-      <div class="tab-panel">
-        <div style="display:grid;grid-template-columns:3fr 2fr;gap:32px;align-items:start">
-          <div class="code-block-wrap no-top-radius">
-            <div class="code-header">
-              <span class="code-lang">Python</span>
-              <button class="copy-btn">Copy</button>
-            </div>
-<pre><code class="language-python"># Three providers. Three Pydantic schemas. One call.
+# 4. Expose the agent as a tool — nest it into a pipeline
+agent_tool = agent.as_tool("summarizer", "Summarizes a set of documents")
 pipeline = LazySession().as_tool(
-    "investment_pipeline",
-    "Parallel research → risk assessment → structured report",
+    "research_pipeline", "Fetch → summarize → report",
     mode="chain",
-    participants=[parallel_market_tool, risk_analyst, report_writer],
-)
-result = pipeline.run({"task": TASK})</code></pre>
-          </div>
-          <div class="showcase-desc">
-            <h3>From the investment research platform.</h3>
-            <p>4 architectural variants &rarr; <a href="examples.html">See examples</a></p>
-            <p style="margin-top:12px">Nested parallel + chain pipeline. Three providers, three Pydantic schemas, automatic serialisation between steps. No glue code.</p>
-          </div>
+    participants=[fetch_tool, agent_tool, report_writer],
+)</code></pre>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <h3>What stays the same</h3>
+          <p><code>summarize</code>, <code>tool</code>, <code>agent_tool</code>, and <code>pipeline</code> all look identical to their consumers. Pass to <code>tools=[...]</code> or call <code>.run()</code> &mdash; the shape never changes.</p>
+        </div>
+        <div class="card">
+          <h3>What changes</h3>
+          <p>Only the contents of each unit. Step 1 is a function. Step 4 is three nested components across two providers. The calling convention is unchanged throughout.</p>
+        </div>
+        <div class="card">
+          <h3>No rewrite cost</h3>
+          <p>Upgrading a function to an agent to a pipeline does not require rewriting the callers. The interface is the same at every level.</p>
         </div>
       </div>
-    </div><!-- /tabs-container -->
-
+    </div>
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════════════ COMPARISON STRIP -->
+<!-- ════════════════════════════════════ STRUCTURAL COMPARISON -->
 <section class="section-sm" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)" id="compare">
   <div class="container">
     <div class="section-head" style="margin-bottom:40px">
-      <div class="section-tag">vs Raw SDK</div>
-      <h2>Less orchestration overhead. Same depth.</h2>
+      <div class="section-tag">vs Explicit orchestration</div>
+      <h2>What you have to hold in your head.</h2>
+      <p>Same pipeline. Left: a graph-based orchestration framework. Right: LazyBridge. The difference is not line count &mdash; it is cognitive surface area.</p>
     </div>
 
-    <div class="cards-3">
+    <div class="cards-2" style="align-items:start">
 
-      <!-- Card 1: Tool loop -->
-      <div class="card">
-        <h3 style="margin-bottom:16px">Tool loop</h3>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">Raw SDK</span>
-            <span class="line-count bad">45 lines</span>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">LazyBridge</span>
-            <span class="line-count good">6 lines</span>
+      <!-- LEFT: explicit orchestration -->
+      <div>
+        <div class="compare-label bad" style="margin-bottom:12px">Graph-based orchestration</div>
+        <div class="struct-diagram">
+          <div class="struct-heading">Elements you must author</div>
+          <div class="struct-elements">
+            <div class="struct-element"><div class="struct-dot red"></div><span>State schema (TypedDict)</span></div>
+            <div class="struct-element"><div class="struct-dot red"></div><span>Node functions &times;3 (fetch, risk, report)</span></div>
+            <div class="struct-element"><div class="struct-dot red"></div><span>graph.add_node() &times;3</span></div>
+            <div class="struct-element"><div class="struct-dot red"></div><span>graph.add_edge() &times;3</span></div>
+            <div class="struct-element"><div class="struct-dot red"></div><span>graph.set_entry_point()</span></div>
+            <div class="struct-element"><div class="struct-dot red"></div><span>graph.compile()</span></div>
           </div>
         </div>
-        <div style="font-size:1.4rem;font-weight:800;color:var(--green);letter-spacing:-.02em">&minus;87%</div>
-        <p style="font-size:.82rem;margin-top:4px">No while loop, no message list, no manual tool dispatch.</p>
+        <div class="code-block-wrap">
+          <div class="code-header">
+            <span class="code-lang">Python</span>
+          </div>
+<pre><code class="language-python">from langgraph.graph import StateGraph, END
+from typing import TypedDict
+
+class State(TypedDict):
+    messages: list
+    market_data: str
+    risk_profile: dict
+
+def fetch_node(state: State) -> State: ...
+def risk_node(state: State) -> State: ...
+def report_node(state: State) -> State: ...
+
+graph = StateGraph(State)
+graph.add_node("fetch",  fetch_node)
+graph.add_node("risk",   risk_node)
+graph.add_node("report", report_node)
+graph.add_edge("fetch",  "risk")
+graph.add_edge("risk",   "report")
+graph.add_edge("report", END)
+graph.set_entry_point("fetch")
+app = graph.compile()</code></pre>
+        </div>
+        <div class="arch-diagram" style="border-color:rgba(239,68,68,0.2)">
+          Hold in your head: node types &nbsp;&middot;&nbsp; edge definitions<br>
+          state schema &nbsp;&middot;&nbsp; entry point &nbsp;&middot;&nbsp; compile step
+        </div>
       </div>
 
-      <!-- Card 2: Multi-provider pipeline -->
-      <div class="card">
-        <h3 style="margin-bottom:16px">Multi-provider pipeline</h3>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">Raw SDK</span>
-            <span class="line-count bad">20 lines</span>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">LazyBridge</span>
-            <span class="line-count good">4 lines</span>
+      <!-- RIGHT: LazyBridge -->
+      <div>
+        <div class="compare-label good" style="margin-bottom:12px">LazyBridge</div>
+        <div class="struct-diagram">
+          <div class="struct-heading">Elements you must author</div>
+          <div class="struct-elements">
+            <div class="struct-element"><div class="struct-dot green"></div><span>participants=[fetch_agent, risk_analyst, report_writer]</span></div>
           </div>
         </div>
-        <div style="font-size:1.4rem;font-weight:800;color:var(--green);letter-spacing:-.02em">&minus;80%</div>
-        <p style="font-size:.82rem;margin-top:4px">No separate clients. No format translation between providers.</p>
-      </div>
-
-      <!-- Card 3: Structured output -->
-      <div class="card">
-        <h3 style="margin-bottom:16px">Structured output</h3>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">Raw SDK</span>
-            <span class="line-count bad">25 lines</span>
+        <div class="code-block-wrap">
+          <div class="code-header">
+            <span class="code-lang">Python</span>
+            <button class="copy-btn">Copy</button>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:.82rem;color:var(--text-2)">LazyBridge</span>
-            <span class="line-count good">5 lines</span>
-          </div>
+<pre><code class="language-python">pipeline = LazySession().as_tool(
+    "research_pipeline", "...",
+    mode="chain",
+    participants=[fetch_agent, risk_analyst, report_writer],
+)
+result = pipeline.run({"task": TASK})</code></pre>
         </div>
-        <div style="font-size:1.4rem;font-weight:800;color:var(--green);letter-spacing:-.02em">&minus;80%</div>
-        <p style="font-size:.82rem;margin-top:4px">Pass a Pydantic model. Parsing and validation handled automatically.</p>
+        <div class="arch-diagram" style="border-color:rgba(16,185,129,0.2)">
+          Hold in your head: the participant list
+        </div>
       </div>
 
     </div>
@@ -248,54 +220,135 @@ result = pipeline.run({"task": TASK})</code></pre>
     <div style="margin-top:28px">
       <a href="docs.html#comparison">Full comparison vs LangChain, PydanticAI, CrewAI &rarr;</a>
     </div>
-
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════════════ CORE PRINCIPLE -->
-<section class="section">
+<!-- ══════════════════════════════════════ COMPOSITION DIAGRAM -->
+<section class="section" id="composition">
   <div class="container">
     <div class="section-head">
       <div class="section-tag">The composition model</div>
-      <h2>Everything becomes a tool.</h2>
-      <p>LazyBridge has one unifying rule. Every unit of work &mdash; a function, an agent, a session, a full pipeline &mdash; can become a tool. This is the composition model.</p>
+      <h2>Every node has the same shape, regardless of what is inside.</h2>
+      <p>A single agent, a parallel session of three agents, and a full nested pipeline all expose the same interface. From outside the box: indistinguishable.</p>
     </div>
-    <div class="cards-2">
 
-      <div class="code-block-wrap">
-        <div class="code-header">
-          <span class="code-lang">Python</span>
-          <button class="copy-btn">Copy</button>
+    <div class="cards-2" style="align-items:start">
+
+      <!-- Visual composition diagram -->
+      <div class="comp-diagram">
+        <div class="comp-outer-label">research_pipeline &mdash; LazySession &middot; as_tool("chain")</div>
+        <div class="comp-chain">
+          <div class="comp-node">
+            <span class="comp-node-name">fetch_agent</span>
+            <span class="comp-node-meta">LazyAgent</span>
+          </div>
+          <div class="comp-connector"></div>
+          <div class="comp-node comp-node-expanded">
+            <div class="comp-node-header">
+              <span class="comp-node-name">market_intel</span>
+              <span class="comp-node-meta">LazySession &middot; parallel &middot; 3 agents inside</span>
+            </div>
+            <div class="comp-inner-nodes">
+              <div class="comp-inner-node">tech_researcher</div>
+              <div class="comp-inner-node">energy_researcher</div>
+              <div class="comp-inner-node">biotech_researcher</div>
+            </div>
+          </div>
+          <div class="comp-connector"></div>
+          <div class="comp-node">
+            <span class="comp-node-name">risk_analyst</span>
+            <span class="comp-node-meta">LazyAgent &middot; RiskProfile</span>
+          </div>
+          <div class="comp-connector"></div>
+          <div class="comp-node">
+            <span class="comp-node-name">report_writer</span>
+            <span class="comp-node-meta">LazyAgent &middot; InvestmentReport</span>
+          </div>
         </div>
-<pre><code class="language-python"># A function
-tool = LazyTool.from_function(my_fn)
-
-# An agent
-tool = agent.as_tool("researcher", "researches a topic")
-
-# A session of agents (parallel)
-tool = session.as_tool("market_intel", "...", mode="parallel")
-
-# A pipeline (chain)
-tool = session.as_tool("pipeline", "...", mode="chain")</code></pre>
       </div>
 
-      <div class="card">
-        <h3>One rule. Infinite composition.</h3>
-        <p>Compose a tool into another agent's loop. Nest a pipeline inside a chain. Wrap a parallel research session as a single callable. The unit is always the same &mdash; which means the mental model never grows.</p>
-        <p style="margin-top:12px">No special orchestration classes. No pipeline DSL. No graph builder.</p>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <h3>Same shape at every level</h3>
+          <p><code>market_intel</code> contains three parallel agents. From outside it is indistinguishable from <code>fetch_agent</code>, which is a single LazyAgent. Both are called the same way.</p>
+        </div>
+        <div class="card">
+          <h3>Nesting is free</h3>
+          <p>Any node can become a participant in any chain or parallel session. No adapter layer, no wrapping class, no DSL change when promoting a unit to a higher level.</p>
+        </div>
+        <div class="card">
+          <h3>One rule. No cap.</h3>
+          <p>Every unit of work &mdash; function, agent, session, full pipeline &mdash; exposes the same interface. The mental model does not grow as complexity grows.</p>
+        </div>
       </div>
 
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════ PITCH CARDS -->
+<!-- ════════════════════════════════ WHAT LAZYBRIDGE REMOVES -->
 <section class="section-sm" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
   <div class="container">
+    <div class="cards-2" style="align-items:start;gap:48px">
+      <div>
+        <div class="section-tag" style="margin-bottom:16px">What it removes</div>
+        <h2 style="margin-bottom:20px">The overhead, not the capability.</h2>
+        <p style="color:var(--text-2);line-height:1.7">These are the layers LazyBridge eliminates. Removing them does not reduce what you can build &mdash; it reduces what you have to carry while building it.</p>
+      </div>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:18px;padding-top:8px">
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Adapter layers between providers</strong>
+            <p style="font-size:.82rem;margin-top:3px">One string switches provider. No format translation, no separate client instances.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Orchestration-specific DSLs</strong>
+            <p style="font-size:.82rem;margin-top:3px">No graph builders, no node type declarations, no edge definitions, no compile steps.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Heterogeneous abstraction levels</strong>
+            <p style="font-size:.82rem;margin-top:3px">Functions, agents, and pipelines are the same unit. One abstraction level throughout.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Manual dispatch loops and message wrangling</strong>
+            <p style="font-size:.82rem;margin-top:3px">No <code>while True</code> loops, no manual tool dispatch, no message list management.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Rewrite cost when upgrading a component</strong>
+            <p style="font-size:.82rem;margin-top:3px">A function promoted to an agent to a pipeline does not require rewriting its callers.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:14px;align-items:flex-start">
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px">&#x2714;</span>
+          <div>
+            <strong style="color:var(--text);font-size:.9rem">Translation logic between providers</strong>
+            <p style="font-size:.82rem;margin-top:3px">Mix Anthropic, OpenAI, and Google in one pipeline. No serialization glue between steps.</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ PITCH CARDS -->
+<section class="section-sm" style="border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="container">
     <div class="section-head" style="margin-bottom:40px">
-      <div class="section-tag">Designed to be read</div>
-      <h2>The framework should not be louder than the system.</h2>
+      <div class="section-tag">Built for both authors</div>
+      <h2>Code that reads the same whether a human or an LLM wrote it.</h2>
     </div>
     <div class="cards-3">
 
@@ -327,7 +380,76 @@ tool = session.as_tool("pipeline", "...", mode="chain")</code></pre>
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════ COMPLEX EXAMPLE SHOWCASE -->
+<!-- ══════════════════════════════════════════════════ FIT SECTION -->
+<section class="section" id="fit">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-tag">Is this right for you?</div>
+      <h2>LazyBridge is not for every problem.</h2>
+      <p>These are honest answers to when to use it and when not to.</p>
+    </div>
+
+    <div class="cards-2">
+
+      <div class="card" style="border-color:rgba(16,185,129,0.3)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+          <span style="color:var(--green);font-size:1rem;font-weight:700">&#x2714;</span>
+          <h3 style="margin:0;font-size:1rem">LazyBridge is right for you if&hellip;</h3>
+        </div>
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:12px">
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--green);flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <span style="color:var(--text-2)">You are building multi-agent systems with nested composition.</span>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--green);flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <span style="color:var(--text-2)">You are mixing providers (Anthropic, OpenAI, Google) in one pipeline.</span>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--green);flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <span style="color:var(--text-2)">You want components that compose without adapter layers.</span>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--green);flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <span style="color:var(--text-2)">You want LLM-generated code to be as readable as human-written code.</span>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:var(--green);flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <span style="color:var(--text-2)">You want the mental model to stay constant as complexity grows.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="card" style="border-color:rgba(239,68,68,0.2)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+          <span style="color:#f87171;font-size:1rem;font-weight:700">&#x2192;</span>
+          <h3 style="margin:0;font-size:1rem">Use something else if&hellip;</h3>
+        </div>
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:16px">
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:#f87171;flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <div><span style="color:var(--text-2)">You need durable execution and fault tolerance &rarr; </span><strong style="color:var(--text)">use Temporal</strong></div>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:#f87171;flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <div><span style="color:var(--text-2)">You need retries, checkpointing, or exactly-once guarantees &rarr; </span><strong style="color:var(--text)">use Temporal</strong></div>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:#f87171;flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <div><span style="color:var(--text-2)">Your team needs a visual workflow editor &rarr; </span><strong style="color:var(--text)">use LangGraph Studio or similar</strong></div>
+          </li>
+          <li style="display:flex;gap:10px;align-items:flex-start;font-size:.875rem">
+            <span style="color:#f87171;flex-shrink:0;margin-top:3px">&#x25B8;</span>
+            <div><span style="color:var(--text-2)">You need enterprise runtime guarantees or SLA-backed infrastructure &rarr; </span><strong style="color:var(--text)">use a managed orchestration platform</strong></div>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════ COMPLEX EXAMPLE SHOWCASE -->
 <section class="section" id="examples">
   <div class="container">
     <div class="section-head">
@@ -359,7 +481,7 @@ tool = session.as_tool("pipeline", "...", mode="chain")</code></pre>
           <div style="font-size:.75rem;color:var(--text-3);font-family:'JetBrains Mono',monospace">generalist → sector_intel (parallel) → synthesizer</div>
         </div>
 
-        <div class="card" style="cursor:pointer;border-color:rgba(124,58,237,0.5)" onclick="this.closest('.variants-container').querySelectorAll('.variant-btn')[3].click()">
+        <div class="card" style="cursor:pointer;border-color:rgba(56,189,248,0.3)" onclick="this.closest('.variants-container').querySelectorAll('.variant-btn')[3].click()">
           <h3>Fully Typed <span class="badge badge-green" style="margin-left:6px;vertical-align:middle">Production-ready</span></h3>
           <p>Google→Anthropic→OpenAI, three Pydantic schemas</p>
           <div style="font-size:.75rem;color:var(--text-3);font-family:'JetBrains Mono',monospace">MarketBriefing → RiskProfile → InvestmentReport</div>
@@ -417,14 +539,20 @@ result = orchestrator.loop(TASK, tools=[market_intel_tool, analysis_chain_tool])
 # No orchestrator, no glue code.
 
 market_sess = LazySession()
-for name, system in [("tech_researcher", "..."), ("energy_researcher", "..."), ("biotech_researcher", "...")]:
+for name, system in [
+    ("tech_researcher",    "..."),
+    ("energy_researcher",  "..."),
+    ("biotech_researcher", "..."),
+]:
     LazyAgent("google", name=name, session=market_sess,
               native_tools=[NativeTool.WEB_SEARCH], system=system)
 market_tool = market_sess.as_tool("market_research", "...", mode="parallel")
 
 analysis_sess = LazySession()
-risk_analyst  = LazyAgent("anthropic", name="risk_analyst",  output_schema=RiskProfile,  session=analysis_sess)
-report_writer = LazyAgent("openai",    name="report_writer", output_schema=InvestmentReport, session=analysis_sess)
+risk_analyst  = LazyAgent("anthropic", name="risk_analyst",
+                           output_schema=RiskProfile, session=analysis_sess)
+report_writer = LazyAgent("openai",    name="report_writer",
+                           output_schema=InvestmentReport, session=analysis_sess)
 
 full_pipeline = LazySession().as_tool(
     "full_investment_pipeline", "...",
@@ -447,17 +575,24 @@ result = full_pipeline.run({"task": TASK})</code></pre>
 # Fan-out: one agent primes context, three run in parallel, one synthesizes.
 
 db_tool    = LazyTool.from_function(fetch_sector_data)
-generalist = LazyAgent("anthropic", tools=[db_tool],
-                       system="Fetch tech, energy, biotech data and summarise cross-sector themes.")
+generalist = LazyAgent(
+    "anthropic", tools=[db_tool],
+    system="Fetch tech, energy, biotech data and summarise cross-sector themes.",
+)
 
 specialist_sess = LazySession()
-LazyAgent("google", name="tech_specialist",   native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
-LazyAgent("google", name="energy_specialist", native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
-LazyAgent("google", name="macro_specialist",  native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
+LazyAgent("google", name="tech_specialist",
+          native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
+LazyAgent("google", name="energy_specialist",
+          native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
+LazyAgent("google", name="macro_specialist",
+          native_tools=[NativeTool.WEB_SEARCH], session=specialist_sess)
 sector_intel_tool = specialist_sess.as_tool("sector_intel", "...", mode="parallel")
 
-synthesizer = LazyAgent("openai", output_schema=InvestmentReport,
-                        system="Synthesise specialist briefings into a structured report.")
+synthesizer = LazyAgent(
+    "openai", output_schema=InvestmentReport,
+    system="Synthesise specialist briefings into a structured report.",
+)
 
 full_pipeline = LazySession().as_tool(
     "fan_out_pipeline", "...",
@@ -477,7 +612,7 @@ result = full_pipeline.run({"task": TASK})</code></pre>
         <div class="code-block-wrap">
           <div class="code-header"><span class="code-lang">Python</span><button class="copy-btn">Copy</button></div>
 <pre><code class="language-python"># Google(MarketBriefing) → Anthropic(RiskProfile) → OpenAI(InvestmentReport)
-# Three providers. Three Pydantic schemas. Zero def.
+# Three providers. Three Pydantic schemas. Zero glue.
 
 market_sess = LazySession(tracking="basic")
 LazyAgent("google", name="tech_researcher",    session=market_sess,
@@ -498,7 +633,7 @@ parallel_market_tool = market_sess.as_tool(
 
 analysis_sess = LazySession(tracking="basic")
 risk_analyst  = LazyAgent("anthropic", name="risk_analyst",
-                           output_schema=RiskProfile,  session=analysis_sess,
+                           output_schema=RiskProfile, session=analysis_sess,
                            system="Senior risk analyst. Produce a structured risk profile.")
 report_writer = LazyAgent("openai",    name="report_writer",
                            output_schema=InvestmentReport, session=analysis_sess,
@@ -510,7 +645,6 @@ pipeline = LazySession().as_tool(
     mode="chain",
     participants=[parallel_market_tool, risk_analyst, report_writer],
 )
-
 result = pipeline.run({"task": TASK})</code></pre>
         </div>
       </div>
@@ -526,10 +660,24 @@ result = pipeline.run({"task": TASK})</code></pre>
 <!-- ═══════════════════════════════════════════ OBSERVABILITY CALLOUT -->
 <section class="section" id="observability">
   <div class="container">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start">
       <div>
         <div class="section-tag" style="margin-bottom:16px">Observability</div>
         <h2 style="margin-bottom:20px">Full tracing. Zero infrastructure.</h2>
+
+        <!-- Observability flow diagram -->
+        <div class="obs-flow">
+          <div class="obs-node">model call</div>
+          <div class="obs-arrow">&#x2192;</div>
+          <div class="obs-node">tool invoke</div>
+          <div class="obs-arrow">&#x2192;</div>
+          <div class="obs-node">loop step</div>
+          <div class="obs-arrow">&#x2192;</div>
+          <div class="obs-node hl">SQLite log</div>
+          <div class="obs-arrow">&#x2192;</div>
+          <div class="obs-node">sess.events.get()</div>
+        </div>
+
         <p style="color:var(--text-2);line-height:1.7;margin-bottom:20px">Every model call, tool invocation, and loop step is recorded in an embedded SQLite event log &mdash; automatically, with no setup. Query it from Python. Export it. Filter by agent, event type, or timestamp.</p>
         <p style="color:var(--text-2);line-height:1.7;margin-bottom:24px">No cloud account. No OTel collector. No API key. No per-event billing. The event log lives next to your code, works offline, and costs nothing.</p>
         <div style="display:flex;flex-direction:column;gap:10px">
@@ -573,20 +721,6 @@ for ev in tool_calls:
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════════════ MANIFESTO LINK -->
-<section class="section-sm" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-  <div class="container">
-    <div class="section-head">
-      <div class="section-tag">What we believe</div>
-      <h2>Composition should replace control flow.</h2>
-      <p style="max-width:640px;margin:0 auto">LazyBridge is built around a simple belief: LLM systems should be assembled from focused, interchangeable units &mdash; not wired together with orchestration logic. The code should read like the system design. The framework should disappear.</p>
-      <div style="margin-top:24px">
-        <a href="docs.html#philosophy" class="btn btn-ghost">&rarr; Read the design philosophy</a>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ══════════════════════════════════════════════════════ FINAL CTA -->
 <section class="section">
   <div class="container">
@@ -602,6 +736,7 @@ for ev in tool_calls:
       </div>
       <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <a href="docs.html" class="btn btn-primary">Read the docs</a>
+        <a href="examples.html" class="btn btn-ghost">See examples</a>
         <a href="https://github.com/selvaz/LazyBridge" class="btn btn-ghost" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
