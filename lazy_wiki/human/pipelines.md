@@ -223,3 +223,59 @@ result = master.loop(
 )
 print(result.content)
 ```
+
+---
+
+## Pipeline 6 — Local Documentation Skill
+
+Index a folder of local documentation once, then query it from any agent using
+BM25 retrieval. No vector database, no embeddings API — everything runs locally.
+
+Uses [`tools/doc_skills/doc_skills_tool.py`](../../tools/doc_skills/).
+
+```python
+import sys
+sys.path.insert(0, "tools/doc_skills")
+
+from doc_skills_tool import build_skill, skill_tool, skill_pipeline
+from lazybridge import LazyAgent
+
+# Step 1 — build the skill bundle (run once, or when docs change)
+meta = build_skill(
+    source_dirs=["./docs", "./reference"],
+    skill_name="my-project",
+    description="API reference and guides for MyProject.",
+)
+
+# Step 2a — single-step: agent calls the skill tool directly
+tool  = skill_tool(meta["skill_dir"])
+agent = LazyAgent("anthropic")
+resp  = agent.loop("How do I configure retry behaviour?", tools=[tool])
+print(resp.content)
+
+# Step 2b — two-step pipeline: router sharpens the query, executor synthesises
+pipeline     = skill_pipeline(skill_dir=meta["skill_dir"], provider="anthropic")
+orchestrator = LazyAgent("anthropic")
+resp = orchestrator.loop(
+    "What is the canonical pattern for a sequential pipeline?",
+    tools=[pipeline],
+)
+print(resp.content)
+```
+
+The pipeline is wired as `sess.as_tool(mode="chain")`:
+
+```
+user task
+    │
+    ▼
+skill_router   — rewrites query for optimal BM25 retrieval; preserves technical names
+    │
+    ▼
+skill_executor — calls skill tool (BM25, local) → synthesises grounded answer
+    │
+    ▼
+orchestrator
+```
+
+See [`tools/doc_skills/README.md`](../../tools/doc_skills/README.md) for the full API reference.

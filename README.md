@@ -117,11 +117,51 @@ pip install lazybridge[google]      # Google / Gemini
 pip install lazybridge[all]         # all providers
 ```
 
+## Ready-made tools
+
+Drop-in tools for common agent tasks — each in its own folder with a README and tests.
+
+| Tool | Folder | What it does |
+|---|---|---|
+| **doc_skills_tool** | [`tools/doc_skills/`](tools/doc_skills/) | Index local docs with BM25, query them from any agent. No vector DB, no embeddings API. |
+| **read_docs_tool** | [`tools/read_docs/`](tools/read_docs/) | Read `.txt .md .pdf .docx .html` files from a folder or single file and return LLM-ready text. |
+
+### doc_skills_tool — example
+
+```python
+from doc_skills_tool import build_skill, skill_tool
+from lazybridge import LazyAgent
+
+# Index your docs once
+meta = build_skill(["./docs"], "my-project")
+
+# Use from any agent
+tool = skill_tool(meta["skill_dir"])
+resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
+print(resp.content)
+```
+
+### read_docs_tool — example
+
+```python
+from read_docs_tool import read_folder_docs
+from lazybridge import LazyAgent, LazyTool
+
+docs_tool = LazyTool.from_function(read_folder_docs)
+resp = LazyAgent("anthropic").loop(
+    "Summarise all PDFs in /reports",
+    tools=[docs_tool],
+)
+print(resp.content)
+```
+
+---
+
 ## Project structure
 
 ```
 LazyBridge/
-├── lazybridge/      # Main package
+├── lazybridge/      # Installable package (pip install lazybridge)
 │   ├── lazy_agent.py         # LazyAgent — single entry point for LLM calls
 │   ├── lazy_session.py       # LazySession — shared store, events, graph
 │   ├── lazy_tool.py          # LazyTool — tool schema + execution
@@ -131,6 +171,9 @@ LazyBridge/
 │   ├── memory.py             # Memory — stateful conversation history
 │   ├── graph/                # GraphSchema — serializable pipeline topology
 │   └── core/                 # Provider adapters, executor, tool schema builder
+├── tools/           # Ready-made LazyBridge-compatible tools (not in pip package)
+│   ├── doc_skills/           # BM25 documentation skill runtime
+│   └── read_docs/            # Multi-format document reader
 └── lazy_wiki/
     ├── bot/                  # LLM-optimised reference (exhaustive, structured)
     └── human/                # Human-readable guides and SDK comparison
@@ -147,4 +190,4 @@ LazyBridge/
 
 ## License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE)
