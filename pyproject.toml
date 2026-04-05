@@ -55,6 +55,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 pythonpath = ["lazybridge"]
+testpaths  = ["tests"]
 asyncio_mode = "auto"
 addopts = "-m 'not live'"
 filterwarnings = [

@@ -213,3 +213,38 @@ def read_folder_docs(
         f"{'─' * 72}\n\n"
     )
     return summary + "\n\n".join(parts)
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Read documents from a file or folder and print their text content.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m lazybridge.tools.read_docs /path/to/folder
+  python -m lazybridge.tools.read_docs /path/to/file.pdf
+  python -m lazybridge.tools.read_docs /path/to/folder --extensions pdf,docx --recursive
+  python -m lazybridge.tools.read_docs /path/to/folder --format json
+""",
+    )
+    parser.add_argument("path", help="File or folder to read")
+    parser.add_argument("--extensions", default="txt,md,pdf,docx,html",
+                        help="Comma-separated extensions (folder mode only)")
+    parser.add_argument("--html-mode", default="parsed", dest="html_mode",
+                        choices=["parsed", "full", "both"])
+    parser.add_argument("--recursive", action="store_true")
+    parser.add_argument("--format", default="text", dest="output_format",
+                        choices=["text", "json"])
+    args = parser.parse_args()
+
+    print(read_folder_docs(
+        path=args.path,
+        extensions=args.extensions,
+        html_mode=args.html_mode,
+        recursive=args.recursive,
+        output_format=args.output_format,
+    ))
