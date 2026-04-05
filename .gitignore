@@ -21,6 +21,12 @@ env/
 # Pipeline run artifacts
 pipeline_runs/
 
+# Generated doc artifacts
+artifacts/
+
+# Dev tooling (personal)
+setup_spyder_paths.py
+
 # Test / coverage
 .pytest_cache/
 .coverage
