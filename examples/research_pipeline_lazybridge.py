@@ -46,11 +46,12 @@ writer     = LazyAgent("openai",    name="writer",     session=sess)
 def run_pipeline(task: str) -> str:
     """Research companies and produce a structured report."""
     researcher.loop(task, tools=[search])
-    return str(writer.json(
+    report = writer.json(
         "Write a structured report based on the research.",
         Report,
         context=LazyContext.from_agent(researcher),  # injects researcher's last output
-    ))
+    )
+    return report.model_dump_json()
 
 
 pipeline = LazyTool.from_function(run_pipeline)

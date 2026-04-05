@@ -67,12 +67,13 @@ print(article.title)
 ## Multi-agent pipeline
 
 ```python
-from lazybridge import LazyAgent, LazySession, LazyContext
+from lazybridge import LazyAgent, LazySession, LazyContext, LazyTool
 
 sess       = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
 writer     = LazyAgent("openai",    name="writer",     session=sess)
 
+search_tool = LazyTool.from_function(lambda query: f"Papers about {query}")
 researcher.loop("Find top 3 AI papers this week", tools=[search_tool])
 result = writer.chat(
     "Write a blog post",

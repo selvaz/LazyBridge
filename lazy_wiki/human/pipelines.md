@@ -128,14 +128,14 @@ result = drafter.loop(
     "Write a 200-word intro to transformer architecture.",
     verify=(
         "Check this text: is it accurate, clearly written, and under 200 words? "
-        "Reply with PASS or FAIL and a one-sentence reason."
+        "Reply with APPROVED or REJECTED and a one-sentence reason."
     ),
     max_verify=3,   # retry up to 3 times before accepting as-is
 )
 print(result.content)
 ```
 
-The judge sees each draft and replies `PASS` or `FAIL`. On `FAIL`, `loop()` re-runs with the judge's reason appended as feedback. On `PASS` (or after `max_verify` attempts), returns the current output.
+The judge sees each draft and replies `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), returns the current output.
 
 *Use this when*: the review is a quality gate on a single agent's output — accuracy, length, format, policy compliance.
 

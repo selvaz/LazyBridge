@@ -44,7 +44,7 @@ print(resp.usage.input_tokens)
 print(resp.stop_reason)   # "end_turn"
 ```
 
-### Conversazione con memoria
+### Conversation with memory
 
 Pass a `Memory` object to `chat()` to keep conversation history automatically — no manual list management:
 
@@ -158,13 +158,13 @@ result = ai.loop(
     "Write a 200-word summary of transformer architecture.",
     tools=[search],
     verify="Check the summary is accurate, self-contained, and exactly 200 words. "
-           "Reply with PASS or FAIL and a reason.",
+           "Reply with APPROVED or REJECTED and a reason.",
     max_verify=2,   # retry up to 2 times (default: 1)
 )
 print(result.content)
 ```
 
-The verify prompt sees the output and returns `PASS` or `FAIL`. On `FAIL`, `loop()` re-runs with the judge's feedback appended. On `PASS` (or after `max_verify` attempts), returns the result normally.
+The verify prompt sees the output and returns `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's feedback appended. On `APPROVED` (or after `max_verify` attempts), returns the result normally.
 
 Use this for:
 - Output length or format constraints

@@ -296,14 +296,14 @@ result = drafter.loop(
     "Write a 200-word intro to transformer architecture.",
     verify=(
         "Check this text: is it accurate, clearly written, and under 200 words? "
-        "Reply with PASS or FAIL and a one-sentence reason."
+        "Reply with APPROVED or REJECTED and a one-sentence reason."
     ),
     max_verify=3,
 )
 print(result.content)
 ```
 
-The verify prompt receives each draft and returns `PASS` or `FAIL`. On `FAIL`, `loop()` reruns with the judge's reason appended as feedback. On `PASS` (or after `max_verify` attempts), the current output is returned.
+The verify prompt receives each draft and returns `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` reruns with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), the current output is returned.
 
 **Use `verify=` for:** accuracy checks, length constraints, format compliance, policy gates — anything where the review is a binary accept/retry on one agent's output.
 
