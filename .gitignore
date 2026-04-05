@@ -21,6 +21,9 @@ env/
 # Pipeline run artifacts
 pipeline_runs/
 
+# Generated skill bundles (produced by doc_skills_tool.build_skill)
+generated_skills/
+
 # Generated doc artifacts
 artifacts/
 
