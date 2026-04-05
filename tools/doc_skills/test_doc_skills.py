@@ -11,7 +11,7 @@ from pathlib import Path
 # tools/doc_skills/test_doc_skills.py  →  up two levels  →  repo root
 REPO_ROOT  = Path(__file__).resolve().parent.parent.parent
 TOOL_DIR   = REPO_ROOT / "tools" / "doc_skills"
-sys.path.insert(0, str(TOOL_DIR))
+sys.path.insert(0, str(REPO_ROOT))   # makes lazybridge importable
 
 # ── Load .env (no extra dependencies) ─────────────────────────────────────────
 _env = REPO_ROOT / ".env"
@@ -31,7 +31,7 @@ if _env.exists():
 else:
     print(f"[.env] file not found at {_env}")
 
-from doc_skills_tool import build_skill, query_skill, skill_tool, skill_pipeline
+from lazybridge.tools.doc_skills import build_skill, query_skill, skill_tool, skill_pipeline
 
 WIKI_DIR   = str(REPO_ROOT / "lazy_wiki" / "bot")
 SKILL_ROOT = str(REPO_ROOT / "generated_skills")
@@ -84,7 +84,7 @@ print(query_skill(
 # The agent calls the skill tool automatically when the question matches.
 # query_skill() runs locally — no extra API call for retrieval.
 
-from lazybridge import LazyAgent
+from lazybridge import LazyAgent  # noqa: E402
 
 tool  = skill_tool(meta["skill_dir"])
 agent = LazyAgent("anthropic")

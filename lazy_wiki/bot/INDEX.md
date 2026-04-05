@@ -14,6 +14,8 @@
 | TrackLevel/Event | 02_lazysession.md | Tracking levels and event types | all |
 | ToolSchemaBuilder | 10_tool_schema.md | Schema pipeline: type mapping, LLM modes, artifact caching | all |
 | BaseProvider | 11_custom_provider.md | **Stable** extension point — integrate any LLM backend | all |
+| tools.doc_skills | 12_tools.md | BM25 local documentation skill — build_skill, skill_tool, skill_pipeline | A, B |
+| tools.read_docs | 12_tools.md | Multi-format document reader — .txt .md .pdf .docx .html | A, B |
 
 ## Communication rules (critical)
 
@@ -40,6 +42,7 @@
 | Advanced features | `09_advanced.md` |
 | Schema generation (type mapping, LLM modes, artifacts) | `10_tool_schema.md` |
 | Custom provider integration | `11_custom_provider.md` |
+| Ready-made tools (doc_skills, read_docs) | `12_tools.md` |
 
 ## Providers supported
 

@@ -50,7 +50,7 @@ Pipeline as tool (expose a session to an orchestrator)::
     orchestrator.loop("coordinate the work", tools=[pipeline])
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from lazybridge.core.providers import BaseProvider
 from lazybridge.core.structured import StructuredOutputError
