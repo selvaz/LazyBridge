@@ -12,7 +12,7 @@ Install: pip install lazybridge pydantic
 
 from pydantic import BaseModel
 
-from lazybridge import LazyAgent, LazyContext, LazySession, LazyTool
+from lazybridge import LazyAgent, LazySession, LazyTool
 
 # ── Mock tool ──────────────────────────────────────────────────────────────────
 
@@ -34,27 +34,25 @@ class Report(BaseModel):
 
 # ── Session and agents ─────────────────────────────────────────────────────────
 
-sess       = LazySession(tracking="basic")
-search     = LazyTool.from_function(search_company)
+sess   = LazySession(tracking="basic")
+search = LazyTool.from_function(search_company)
 
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-writer     = LazyAgent("openai",    name="writer",     session=sess)
-
-
-# ── Pipeline as tool ──────────────────────────────────────────────────────────
-
-def run_pipeline(task: str) -> str:
-    """Research companies and produce a structured report."""
-    researcher.loop(task, tools=[search])
-    report = writer.json(
-        "Write a structured report based on the research.",
-        Report,
-        context=LazyContext.from_agent(researcher),  # injects researcher's last output
-    )
-    return report.model_dump_json()
+researcher = LazyAgent("anthropic", name="researcher", session=sess, tools=[search])
+writer     = LazyAgent("openai",    name="writer",     session=sess, output_schema=Report)
 
 
-pipeline = LazyTool.from_function(run_pipeline)
+# ── Pipeline as declarative chain ─────────────────────────────────────────────
+#
+# researcher  →  writer
+#   loop() (has tools)    json() (has output_schema)
+#   researcher context injected into writer's system prompt automatically
+
+pipeline = sess.as_tool(
+    "run_pipeline",
+    "Research a company and produce a structured report.",
+    mode="chain",
+    participants=[researcher, writer],
+)
 
 
 # ── Orchestrator ───────────────────────────────────────────────────────────────
