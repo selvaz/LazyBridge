@@ -120,10 +120,14 @@ res_philosophy = LazyAgent(
     tools=[doc_tool],
     system=(
         "You are a software architecture researcher. Be specific, technical, honest. "
-        "Write a detailed analysis of the LazyBridge framework — its architectural "
-        "philosophy, the one-primitive thesis, composability model, and what complexity "
-        "it removes. Use the query_lazybridge_docs tool to look up accurate details. "
-        "Minimum 500 words. Include concrete code examples from the docs."
+        "Write a 500+ word analysis of the LazyBridge framework: its composability model, "
+        "what complexity it removes vs raw SDK usage, and how LazySession.as_tool() enables "
+        "declarative pipeline composition. "
+        "IMPORTANT — the doc tool contains API reference only (class definitions, method "
+        "signatures, code examples). Query it with specific API terms like 'LazyAgent loop', "
+        "'LazySession as_tool chain parallel', 'output_schema participants'. "
+        "Do NOT query for 'philosophy', 'thesis', or other conceptual terms — they are not "
+        "indexed. Use your own knowledge for narrative framing; use the tool to verify code."
     ),
 )
 
@@ -134,11 +138,13 @@ res_competitive = LazyAgent(
     tools=[doc_tool],
     system=(
         "You are a comparative framework analyst. Be concrete with code. "
-        "Write a detailed comparison of LazyBridge vs LangChain. "
-        "Show the same multi-provider sequential pipeline in both frameworks side by side. "
-        "Count lines, abstractions, concepts. Be fair about LangChain strengths (ecosystem, "
-        "community, maturity). Use the query_lazybridge_docs tool for accurate LazyBridge details. "
-        "Minimum 500 words."
+        "Write a 500+ word comparison of LazyBridge vs LangChain. Show the same "
+        "multi-provider sequential pipeline in both frameworks side by side. Count lines, "
+        "abstractions, concepts. Be fair about LangChain strengths. "
+        "IMPORTANT — the doc tool contains LazyBridge API reference only; it has NO LangChain "
+        "content. Use your general knowledge for LangChain code. Query the tool only for "
+        "LazyBridge specifics: 'LazyAgent chat loop', 'LazySession as_tool', 'LazyTool "
+        "from_function', 'output_schema', 'verify'. Do NOT query 'LangChain' or 'comparison'."
     ),
 )
 
@@ -150,10 +156,12 @@ res_llm_first = LazyAgent(
     system=(
         "You are a developer-experience researcher focused on LLM tooling. "
         "Analyse three specific LazyBridge features: "
-        "(1) the LLM-facing bot wiki, "
-        "(2) the verify= quality gate parameter, "
+        "(1) the LLM-facing bot wiki (the lazy_wiki/bot/ directory), "
+        "(2) the verify= quality gate parameter on loop(), "
         "(3) the lazybridge.tools subpackage. "
-        "Use the query_lazybridge_docs tool to look up accurate details for each feature. "
+        "IMPORTANT — the doc tool contains API reference. Query with specific terms: "
+        "'verify quality gate loop', 'doc_skills build_skill skill_tool', 'INDEX bot wiki'. "
+        "Do NOT query vague terms like 'philosophy' or 'feature' — they return nothing. "
         "Minimum 500 words."
     ),
 )
@@ -301,11 +309,17 @@ if __name__ == "__main__":
 
     print("\n[Phases 1–3] Research → Debate → Synthesis…")
     outline = pipeline.run({"task": TASK})
-    print(f"  ✓ outline produced ({len(str(outline)):,} chars)")
+    # pipeline.run() returns the synthesizer's typed output (PaperOutline) — serialize to JSON
+    outline_str = (
+        outline.model_dump_json(indent=2)
+        if hasattr(outline, "model_dump_json")
+        else str(outline)
+    )
+    print(f"  ✓ outline produced ({len(outline_str):,} chars)")
 
     print("\n[Phase 4] Writing paper with verify= quality gate (max 2 retries)…")
     paper_result = writer.loop(
-        f"Write the complete, publish-ready Markdown technical paper based on this outline:\n\n{outline}",
+        f"Write the complete, publish-ready Markdown technical paper based on this outline:\n\n{outline_str}",
         verify=verifier,
         max_verify=2,
     )
