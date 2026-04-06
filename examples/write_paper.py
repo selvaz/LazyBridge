@@ -59,8 +59,8 @@ if _env.exists():
 else:
     print("[.env] not found — API keys must be set in environment")
 
-from lazybridge import LazyAgent, LazySession                          # noqa: E402
-from lazybridge.tools.doc_skills import build_skill, skill_tool        # noqa: E402
+from lazybridge import LazyAgent, LazySession                                    # noqa: E402
+from lazybridge.tools.doc_skills import build_skill, query_skill, skill_tool     # noqa: E402
 
 
 # ── Output schema for Phase 3 ─────────────────────────────────────────────────
@@ -117,17 +117,12 @@ res_philosophy = LazyAgent(
     "google",
     name="res_philosophy",
     session=sess_research,
-    tools=[doc_tool],
     system=(
         "You are a software architecture researcher. Be specific, technical, honest. "
         "Write a 500+ word analysis of the LazyBridge framework: its composability model, "
         "what complexity it removes vs raw SDK usage, and how LazySession.as_tool() enables "
-        "declarative pipeline composition. "
-        "IMPORTANT — the doc tool contains API reference only (class definitions, method "
-        "signatures, code examples). Query it with specific API terms like 'LazyAgent loop', "
-        "'LazySession as_tool chain parallel', 'output_schema participants'. "
-        "Do NOT query for 'philosophy', 'thesis', or other conceptual terms — they are not "
-        "indexed. Use your own knowledge for narrative framing; use the tool to verify code."
+        "declarative pipeline composition. Include concrete code examples from the "
+        "DOCUMENTATION provided in your task message. Minimum 500 words."
     ),
 )
 
@@ -135,16 +130,13 @@ res_competitive = LazyAgent(
     "google",
     name="res_competitive",
     session=sess_research,
-    tools=[doc_tool],
     system=(
         "You are a comparative framework analyst. Be concrete with code. "
         "Write a 500+ word comparison of LazyBridge vs LangChain. Show the same "
         "multi-provider sequential pipeline in both frameworks side by side. Count lines, "
-        "abstractions, concepts. Be fair about LangChain strengths. "
-        "IMPORTANT — the doc tool contains LazyBridge API reference only; it has NO LangChain "
-        "content. Use your general knowledge for LangChain code. Query the tool only for "
-        "LazyBridge specifics: 'LazyAgent chat loop', 'LazySession as_tool', 'LazyTool "
-        "from_function', 'output_schema', 'verify'. Do NOT query 'LangChain' or 'comparison'."
+        "abstractions, concepts. Be fair about LangChain strengths (ecosystem, community, "
+        "maturity). Use the DOCUMENTATION in your task message for LazyBridge API details. "
+        "Use your general knowledge for LangChain. Minimum 500 words."
     ),
 )
 
@@ -152,16 +144,12 @@ res_llm_first = LazyAgent(
     "google",
     name="res_llm_first",
     session=sess_research,
-    tools=[doc_tool],
     system=(
         "You are a developer-experience researcher focused on LLM tooling. "
-        "Analyse three specific LazyBridge features: "
+        "Analyse three specific LazyBridge features based on the DOCUMENTATION in your task: "
         "(1) the LLM-facing bot wiki (the lazy_wiki/bot/ directory), "
         "(2) the verify= quality gate parameter on loop(), "
         "(3) the lazybridge.tools subpackage. "
-        "IMPORTANT — the doc tool contains API reference. Query with specific terms: "
-        "'verify quality gate loop', 'doc_skills build_skill skill_tool', 'INDEX bot wiki'. "
-        "Do NOT query vague terms like 'philosophy' or 'feature' — they return nothing. "
         "Minimum 500 words."
     ),
 )
@@ -308,7 +296,23 @@ if __name__ == "__main__":
     print(f"\n[Phase 0] Doc skill ready — {n_files} files / {_skill_meta['total_chunks']} chunks indexed")
 
     print("\n[Phases 1–3] Research → Debate → Synthesis…")
-    outline = pipeline.run({"task": TASK})
+    print("  Fetching doc context (BM25)…")
+    _sdir = _skill_meta["skill_dir"]
+    docs_composability = query_skill(_sdir,
+        "LazyAgent loop chat LazySession as_tool chain parallel output_schema participants", top_k=6)
+    docs_verify_tools  = query_skill(_sdir,
+        "verify quality gate max_verify doc_skills build_skill skill_tool INDEX bot wiki", top_k=6)
+    docs_api           = query_skill(_sdir,
+        "LazyTool from_function provider model system tools native_tools session", top_k=5)
+
+    task_with_docs = (
+        f"{TASK}\n\n"
+        f"DOCUMENTATION — use for accurate API details and code examples:\n\n"
+        f"[Composability & Pipeline API]\n{docs_composability}\n\n"
+        f"[verify= & lazybridge.tools]\n{docs_verify_tools}\n\n"
+        f"[Agent & Tool API]\n{docs_api}"
+    )
+    outline = pipeline.run({"task": task_with_docs})
     # pipeline.run() returns the synthesizer's typed output (PaperOutline) — serialize to JSON
     outline_str = (
         outline.model_dump_json(indent=2)
