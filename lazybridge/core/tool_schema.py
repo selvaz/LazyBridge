@@ -295,9 +295,15 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
                     return {**base, "description": desc}
         return base
 
-    # Literal["a", "b"] -> {"enum": ["a", "b"]}
+    # Literal["a", "b"] -> {"type": "string", "enum": ["a", "b"]}
+    # type must be declared alongside enum — required by Gemini and OpenAI strict mode.
     if origin is typing.Literal:
-        return {"enum": list(args)}
+        enum_vals = list(args)
+        if all(isinstance(v, str) for v in enum_vals):
+            return {"type": "string", "enum": enum_vals}
+        if all(isinstance(v, int) for v in enum_vals):
+            return {"type": "integer", "enum": enum_vals}
+        return {"enum": enum_vals}
 
     # list[X]
     if origin is list:
@@ -330,9 +336,14 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     if annotation in _PY_TO_JSON:
         return {"type": _PY_TO_JSON[annotation]}
 
-    # Enum subclass -> {"enum": [e.value for e in annotation]}
+    # Enum subclass -> {"type": "string"/"integer", "enum": [...]}
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
-        return {"enum": [e.value for e in annotation]}
+        enum_vals = [e.value for e in annotation]
+        if all(isinstance(v, str) for v in enum_vals):
+            return {"type": "string", "enum": enum_vals}
+        if all(isinstance(v, int) for v in enum_vals):
+            return {"type": "integer", "enum": enum_vals}
+        return {"enum": enum_vals}
 
     # Pydantic BaseModel subclass — use its JSON Schema directly.
     # $defs produced by nested models are preserved as-is: Anthropic and
