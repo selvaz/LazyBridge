@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] — Unreleased
+
+### Added
+- `LazyTool.parallel(*participants, name, description, combiner="concat", native_tools=None, session=None, guidance=None)` — session-free fan-out pipeline tool. All participants run concurrently on the same task; results are concatenated or the last result is returned depending on `combiner`.
+- `LazyTool.chain(*participants, name, description, native_tools=None, session=None, guidance=None)` — session-free sequential pipeline tool. Each participant receives the previous output as its task (tool→agent) or as injected context (agent→agent).
+- `lazybridge/pipeline_builders.py` — neutral module extracted from `lazy_session.py`. Contains `build_parallel_func`, `build_chain_func`, `_ChainState`, `_clone_for_invocation`, `_resolve_participant`, `_validate_session_compatibility`. No circular imports — all cross-module imports are deferred inside function bodies.
+- `LazyTool._is_pipeline_tool: bool` — dataclass field set to `True` by `parallel()` and `chain()`. Prevents accidental `save()` calls on runtime-only pipeline tools.
+- `_clone_delegate_tool_for_invocation()` in `lazy_tool.py` — friend-module helper for cloning `LazyTool.from_agent()` participants in pipeline execution.
+
+### Changed
+- `LazySession.as_tool()` parallel and chain paths now delegate to `pipeline_builders.build_parallel_func` / `build_chain_func`. Behavior is identical; code is no longer duplicated.
+- `_ChainState` moved to `pipeline_builders.py`; re-exported from `lazy_session.py` for backward compatibility.
+
+### Fixed
+- `LazyTool.save()` now raises `ValueError` for pipeline tools (chain/parallel) that cannot be serialized to disk.
+
+---
+
 ## [0.3.1] — 2026-04-02
 
 ### Added

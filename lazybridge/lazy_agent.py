@@ -609,6 +609,11 @@ class LazyAgent:
         max_verify:
             Maximum verify attempts.  If exceeded the last worker result is
             returned unchanged — no exception is raised.
+
+        Note — concurrent use (``LazyTool.parallel`` / ``LazyTool.chain``):
+            Pipeline builders clone the agent per invocation.  Read the return
+            value or ``resp.parsed``; ``agent.result`` reflects the **clone**,
+            not the original agent.
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")

@@ -284,6 +284,8 @@ Note: `collector.result` (not `_last_output`) is the canonical accessor. Use `ag
 
 **Reach for `verify=` first.** If the review only determines pass/fail on a single agent's output, `loop(verify=...)` is canonical — no reviewer agent, no router, no loop management.
 
+**Option A — LazyAgent as judge (recommended):**
+
 ```python
 from lazybridge import LazyAgent
 
@@ -292,18 +294,40 @@ drafter = LazyAgent(
     system="You are a precise technical writer. Be accurate and concise.",
 )
 
+judge = LazyAgent(
+    "anthropic",
+    system=(
+        "You are a quality reviewer. "
+        "Reply 'approved' if the text is accurate, clearly written, and under 200 words. "
+        "Otherwise reply 'rejected: <one-sentence reason>'."
+    ),
+)
+
 result = drafter.loop(
     "Write a 200-word intro to transformer architecture.",
-    verify=(
-        "Check this text: is it accurate, clearly written, and under 200 words? "
-        "Reply with APPROVED or REJECTED and a one-sentence reason."
-    ),
+    verify=judge,
     max_verify=3,
 )
 print(result.content)
 ```
 
-The verify prompt receives each draft and returns `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` reruns with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), the current output is returned.
+**Option B — callable judge:**
+
+```python
+def judge(question: str, answer: str) -> str:
+    words = len(answer.split())
+    if words > 200:
+        return f"rejected: too long ({words} words, max 200)"
+    return "approved"
+
+result = drafter.loop(
+    "Write a 200-word intro to transformer architecture.",
+    verify=judge,
+    max_verify=3,
+)
+```
+
+`verify=` accepts a **LazyAgent** or a **callable** `(question: str, answer: str) -> str`. It does **not** accept a plain string. The verdict must start with `"approved"` (case-insensitive prefix) to pass; anything else is treated as rejection with the judge's message appended as feedback. On `"approved"` (or after `max_verify` attempts), the current output is returned.
 
 **Use `verify=` for:** accuracy checks, length constraints, format compliance, policy gates — anything where the review is a binary accept/retry on one agent's output.
 
@@ -449,7 +473,7 @@ Use this as a checklist when generating or reviewing pipeline code.
 | One agent calls another | `orchestrator.loop(..., tools=[agent.as_tool()])` |
 | N agents run in parallel, result combined | `sess.as_tool(mode="parallel", participants=[...])` |
 | Agents run sequentially, each feeds the next | `sess.as_tool(mode="chain", participants=[...])` |
-| Quality gate / self-check on output | `agent.loop(..., verify="...", max_verify=N)` |
+| Quality gate / self-check on output | `agent.loop(..., verify=judge_agent, max_verify=N)` |
 | Read an agent's last value | `agent.result` |
 | Pass agent output to the next agent in a custom flow | `LazyContext.from_agent(agent)` |
 | Dynamic context (date, user, config) | `LazyContext.from_function(fn)` |

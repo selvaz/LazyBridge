@@ -373,3 +373,121 @@ tool_set = NormalizedToolSet.from_list([search_tool, calc_def, lookup_dict])
 ```
 
 `ToolDefinition` and `dict` items have no callable — they rely on the `tool_runner` fallback in `loop()` or native provider handling. Duplicate tool names raise `ValueError`.
+
+---
+
+## 5. `parallel()` — fan-out pipeline tool
+
+Runs all participants concurrently on the same task. No `LazySession` required.
+Participants are **cloned per invocation** — `participant._last_output` on the
+original is `None` after the run. Use the tool's return value.
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+us     = LazyAgent("anthropic", name="us",     system="Report AI news from the US.")
+europe = LazyAgent("openai",    name="europe",  system="Report AI news from Europe.")
+asia   = LazyAgent("google",    name="asia",    system="Report AI news from Asia.")
+
+news_tool = LazyTool.parallel(
+    us, europe, asia,
+    name="world_news",
+    description="Parallel AI news summary from US, Europe, and Asia",
+    combiner="concat",   # default — outputs joined with [agent_name] headers
+)
+
+# Pass to an orchestrator agent
+orchestrator.loop("Summarise today's AI news", tools=[news_tool])
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `*participants` | — | LazyAgent or LazyTool instances |
+| `name` | required | Tool name |
+| `description` | required | Tool description |
+| `combiner` | `"concat"` | `"concat"` joins outputs with agent headers; `"last"` returns only the last |
+| `native_tools` | `None` | NativeTool list passed to all agent participants |
+| `session` | `None` | Validation-only: raises ValueError if any agent is bound to a conflicting session |
+| `guidance` | `None` | Hint injected into the tool description |
+
+---
+
+## 6. `chain()` — sequential pipeline tool
+
+Runs participants in order. Each agent receives the previous step's output
+as context (agent→agent) or as its task (tool→agent). No `LazySession` required.
+Participants are **cloned per invocation** — `participant._last_output` on the
+original is `None` after the run. Use the return value of `tool.run()` or
+set `output_schema` on the last step.
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+researcher = LazyAgent("anthropic", name="researcher",
+                       system="Find and summarise research on the given topic.")
+analyst    = LazyAgent("openai",    name="analyst",
+                       system="Analyse the research and draw conclusions.")
+
+pipeline = LazyTool.chain(
+    researcher, analyst,
+    name="research_pipeline",
+    description="Research then analyse — returns analyst's conclusions",
+)
+
+orchestrator.loop("Analyse fusion energy breakthroughs", tools=[pipeline])
+```
+
+**Handoff semantics:**
+
+| Previous step | Next step receives |
+|---|---|
+| LazyAgent | Original task + previous agent's output injected as context |
+| LazyTool | Tool's output becomes the new task |
+
+**Parameters:** same as `parallel()` minus `combiner`.
+
+---
+
+## 7. `save()` and pipeline tools
+
+`save()` raises `ValueError` on `chain()` / `parallel()` tools — they are
+runtime compositions (closures over participant references) and cannot be
+serialised to a static file.
+
+```python
+pipeline = LazyTool.chain(researcher, analyst, name="p", description="t")
+pipeline.save("pipeline.py")
+# ValueError: LazyTool 'p' is a chain or parallel pipeline tool and
+#   cannot be serialized — it is a runtime composition.
+#   Save individual participants via agent.as_tool().save() instead.
+```
+
+To persist the pipeline, save each participant's agent tool instead:
+
+```python
+researcher.as_tool(name="researcher_tool", description="...").save("researcher.py")
+analyst.as_tool(name="analyst_tool", description="...").save("analyst.py")
+```
+
+---
+
+## 8. Clone behaviour — `participant._last_output` after run
+
+`LazyTool.parallel()` and `LazyTool.chain()` clone participants per invocation.
+The **original** participant's `_last_output` is `None` after the call.
+
+```python
+researcher = LazyAgent("anthropic", name="researcher")
+pipeline = LazyTool.chain(researcher, analyst, name="p", description="t")
+
+result = pipeline.run({"task": "Analyse X"})
+
+print(researcher._last_output)   # None — clone ran, not the original
+print(result)                    # "..." — analyst's conclusion (use this)
+```
+
+If you need the intermediate agent's output, use `output_schema` on the chain
+step and read the returned Pydantic object, or restructure the pipeline so the
+intermediate result is returned directly.

@@ -230,6 +230,9 @@ class LazyStore:
         list, or dict with JSON-compatible contents).  Non-serializable objects
         are rejected so behaviour is consistent between in-memory and SQLite
         backends.
+
+        Warning: the key namespace is **global** across all agents in a session.
+        Use namespaced keys (e.g. ``"agent_name:key"``) to avoid collisions.
         """
         try:
             json.dumps(value)
