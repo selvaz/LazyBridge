@@ -240,6 +240,8 @@ async def test_parallel_tool_partial_failure_does_not_raise():
     bad = MagicMock()
     bad.name = "bad_agent"
     bad.output_schema = None
+    bad.tools = []
+    bad.native_tools = []
 
     async def _fail(task, **kwargs):
         raise RuntimeError("agent exploded")
@@ -266,6 +268,8 @@ async def test_parallel_tool_failure_produces_error_marker():
     bad = MagicMock()
     bad.name = "bad_agent"
     bad.output_schema = None
+    bad.tools = []
+    bad.native_tools = []
 
     async def _fail(task, **kwargs):
         raise ValueError("something went wrong")
