@@ -474,3 +474,75 @@ def test_chain_state_typed_carries_pydantic_object():
     state = _ChainState(text=report.model_dump_json(), typed=report, ctx=None)
     assert isinstance(state.typed, Report)
     assert state.typed.title == "Q1 Analysis"
+
+
+# ── R-G: as_tool() guidance + _is_pipeline_tool consistency ───────────────────
+
+def _mock_session_agent(name: str = "ag") -> MagicMock:
+    import uuid as _uuid
+    a = MagicMock()
+    a.id = str(_uuid.uuid4())
+    a.name = name
+    a.description = None
+    a.system = None
+    a.context = None
+    a.tools = []
+    a.native_tools = []
+    a.output_schema = None
+    a._last_output = None
+    a._executor = MagicMock()
+    a._log = None
+    return a
+
+
+def _sess_with_agent(name: str = "ag") -> tuple:
+    """Return (sess, agent) with agent registered in session."""
+    sess = LazySession()
+    ag = _mock_session_agent(name)
+    ag.session = sess
+    sess._register_agent(ag)
+    return sess, ag
+
+
+def test_as_tool_parallel_guidance_propagated():
+    """R-G1: guidance kwarg is forwarded to the tool returned by as_tool(mode='parallel')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="parallel", name="p", description="d", guidance="be concise")
+    assert tool.guidance == "be concise"
+
+
+def test_as_tool_chain_guidance_propagated():
+    """R-G2: guidance kwarg is forwarded to the tool returned by as_tool(mode='chain')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="chain", name="c", description="d", guidance="step by step")
+    assert tool.guidance == "step by step"
+
+
+def test_as_tool_parallel_is_pipeline_tool():
+    """R-G3: tool._is_pipeline_tool is True for as_tool(mode='parallel')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="parallel", name="p", description="d")
+    assert tool._is_pipeline_tool is True
+
+
+def test_as_tool_chain_is_pipeline_tool():
+    """R-G4: tool._is_pipeline_tool is True for as_tool(mode='chain')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="chain", name="c", description="d")
+    assert tool._is_pipeline_tool is True
+
+
+def test_as_tool_parallel_save_raises(tmp_path):
+    """R-G5: save() raises ValueError on pipeline tool created via as_tool(mode='parallel')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="parallel", name="p", description="d")
+    with pytest.raises(ValueError, match="pipeline tool"):
+        tool.save(str(tmp_path / "p.json"))
+
+
+def test_as_tool_chain_save_raises(tmp_path):
+    """R-G6: save() raises ValueError on pipeline tool created via as_tool(mode='chain')."""
+    sess, _ = _sess_with_agent()
+    tool = sess.as_tool(mode="chain", name="c", description="d")
+    with pytest.raises(ValueError, match="pipeline tool"):
+        tool.save(str(tmp_path / "c.json"))

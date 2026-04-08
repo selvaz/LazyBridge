@@ -494,13 +494,17 @@ class LazySession:
 
             from lazybridge.pipeline_builders import build_parallel_func
             func = build_parallel_func(_parts, _native, combiner)
-            return LazyTool.from_function(func, name=name, description=description)
+            tool = LazyTool.from_function(func, name=name, description=description, guidance=guidance)
+            tool._is_pipeline_tool = True
+            return tool
 
         # ── Chain mode ─────────────────────────────────────────────────────
         if mode == "chain":
             from lazybridge.pipeline_builders import build_chain_func
             func = build_chain_func(_parts, _native)
-            return LazyTool.from_function(func, name=name, description=description)
+            tool = LazyTool.from_function(func, name=name, description=description, guidance=guidance)
+            tool._is_pipeline_tool = True
+            return tool
 
         raise ValueError(f"Unknown mode {mode!r}. Use 'parallel' or 'chain'.")
 
