@@ -52,10 +52,11 @@ LazyAgent.loop(
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
     verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
     max_verify: int = 3,                   # max retry attempts when verify is set
+                                           # exhausting all attempts emits UserWarning and returns last result
     **chat_kwargs,                         # forwarded to chat() on each step
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async
+LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async; same UserWarning on exhaustion
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
@@ -174,8 +175,11 @@ LazyTool.parallel(
     native_tools: list | None = None,
     session: LazySession | None = None,   # validation-only; raises on cross-session conflict
     guidance: str | None = None,
+    concurrency_limit: int | None = None, # max simultaneous participants; None = all at once
+    step_timeout: float | None = None,    # per-participant timeout (seconds); None = no timeout
 ) -> LazyTool  # all participants run concurrently; cloned per invocation
                # original agent._last_output is None after run — use return value
+               # timed-out participants appear as "[ERROR: TimeoutError: ...]" in concat output
 
 LazyTool.chain(
     *participants: LazyAgent | LazyTool,  # at least one required
@@ -184,7 +188,9 @@ LazyTool.chain(
     native_tools: list | None = None,
     session: LazySession | None = None,   # validation-only; raises on cross-session conflict
     guidance: str | None = None,
+    step_timeout: float | None = None,    # per-step timeout (seconds); asyncio.TimeoutError raised on breach
 ) -> LazyTool  # participants run sequentially; each receives previous output
+               # async-under-the-hood: uses achat/aloop/ajson — never blocks the event loop
                # cloned per invocation — original agent._last_output is None after run
 
 LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any

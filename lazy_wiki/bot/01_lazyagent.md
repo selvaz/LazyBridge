@@ -304,11 +304,15 @@ def loop(
     max_steps: int = 8,
     tool_runner: Callable[[str, dict], Any] | None = None,
     on_event: Callable[[str, Any], None] | None = None,
+    verify: LazyAgent | Callable[[str, str], str] | None = None,
+    max_verify: int = 3,
     **chat_kwargs,
 ) -> CompletionResponse:
 ```
 
 Call-level `tools` are merged with agent-level `self.tools`. `**chat_kwargs` are forwarded to every internal `chat()` call (e.g. `system`, `context`, `temperature`). `max_steps` must be >= 1 or `ValueError` is raised.
+
+**`verify` / `max_verify`:** optional quality gate. Pass a `LazyAgent` (calls `.text()`) or a callable `(question, answer) → verdict`. Return a string starting with `"approved"` (case-insensitive) to accept; anything else triggers a retry with the feedback appended. If all `max_verify` attempts are rejected, `loop()` emits a `UserWarning` and returns the last result unchanged — no exception is raised.
 
 ### `on_event` callback
 
@@ -347,6 +351,13 @@ print(result.content)
 ```
 
 The returned `CompletionResponse` also exposes all judge feedback via `.verify_log: list[str]` — one entry per rejection, in order. Empty if `verify=None` or approved on the first attempt.
+
+**Exhaustion warning:** if all `max_verify` attempts are rejected, `loop()` (and `aloop()`) emit a `UserWarning`:
+```
+UserWarning: loop() verify exhausted after N attempt(s) without approval.
+Returning last result unchanged. Increase max_verify= or review your verify function.
+```
+Catch or filter it with `warnings.catch_warnings()` if you handle exhaustion programmatically.
 
 ### `tool_runner` for tools without a callable
 

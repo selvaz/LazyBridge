@@ -241,18 +241,26 @@ news_tool = LazyTool.parallel(
     us, europe, asia,
     name="world_news",
     description="Parallel AI news summary from US, Europe, and Asia",
-    combiner="concat",  # "concat" (default) | "last"
+    combiner="concat",          # "concat" (default) | "last"
+    concurrency_limit=3,        # max simultaneous API calls; None = all at once
+    step_timeout=30.0,          # per-participant timeout in seconds; None = no timeout
 )
 
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Produce a global AI news digest.", tools=[news_tool])
 ```
 
+**`concurrency_limit`:** caps the number of participants running at the same time using `asyncio.Semaphore`. Use this when hitting API rate limits or when participants share a scarce resource. `None` (default) fires all coroutines simultaneously.
+
+**`step_timeout`:** wraps each participant coroutine with `asyncio.wait_for(coro, timeout=step_timeout)`. Timed-out participants return `"[ERROR: TimeoutError: ...]"` in `concat` mode (captured via `return_exceptions=True` in `asyncio.gather`). In `last` mode they propagate as `TimeoutError`.
+
 **Cloning:** participants are cloned per invocation. After the run, `us._last_output` is `None` — use the tool's return value or the orchestrator's response.
 
 ### `chain()` — sequential handoff
 
 Participants run in order. Each step passes its output to the next.
+
+**Async-under-the-hood:** `chain()` uses `build_achain_func` — every step calls `achat()` / `aloop()` / `ajson()`, so the event loop is never blocked. `run()` drives it via `run_async()`; `arun()` awaits it directly.
 
 ```python
 from lazybridge import LazyAgent, LazyTool
@@ -265,20 +273,21 @@ pipeline = LazyTool.chain(
     researcher, summariser, fact_checker,
     name="research_pipeline",
     description="Research, summarise, and fact-check a topic.",
+    step_timeout=60.0,          # per-step timeout in seconds; asyncio.TimeoutError raised on breach
 )
 
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Produce a verified report on fusion energy.", tools=[pipeline])
 ```
 
+**`step_timeout`:** wraps each step with `asyncio.wait_for(step_coro, timeout=step_timeout)`. Unlike parallel, a timeout in chain raises `asyncio.TimeoutError` immediately (no gathering). Use to prevent a hanging step from blocking the whole pipeline.
+
 **Handoff semantics:**
 
-| Previous step | Next step | What changes |
-|---|---|---|
-| Agent | Agent | Output injected as `context=` (original task preserved) |
-| Agent | Tool | Output becomes the tool's `task` argument |
-| Tool | Agent | Tool's return value becomes next agent's task |
-| Tool | Tool | Tool's return value becomes next tool's `task` argument |
+| Previous step | Next step receives |
+|---|---|
+| Agent | Original task + previous agent's output injected as context |
+| Tool | Tool's output becomes the new task directly |
 
 ### Cross-session validation
 

@@ -88,11 +88,24 @@ For concurrent or sequential pipelines without a session, use `LazyTool.parallel
 ```python
 from lazybridge import LazyAgent, LazyTool
 
+# Fan-out: all agents run in parallel; concurrency_limit prevents rate-limit storms
+gather = LazyTool.parallel(
+    LazyAgent("anthropic", name="us"),
+    LazyAgent("openai",    name="eu"),
+    LazyAgent("google",    name="asia"),
+    name="gather_news",
+    description="Gather AI news from US, EU, and Asia simultaneously",
+    concurrency_limit=3,   # max 3 simultaneous API calls
+    step_timeout=30.0,     # per-agent timeout in seconds
+)
+
+# Sequential: async-under-the-hood — never blocks the event loop
 pipeline = LazyTool.chain(
     LazyAgent("anthropic", name="researcher"),
     LazyAgent("openai",    name="summariser"),
     name="research_pipeline",
     description="Research a topic and return a concise summary.",
+    step_timeout=60.0,     # per-step timeout in seconds
 )
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Summarise AI advances in 2024.", tools=[pipeline])

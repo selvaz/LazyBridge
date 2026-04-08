@@ -411,6 +411,19 @@ orchestrator.loop("Summarise today's AI news", tools=[news_tool])
 | `native_tools` | `None` | NativeTool list passed to all agent participants |
 | `session` | `None` | Validation-only: raises ValueError if any agent is bound to a conflicting session |
 | `guidance` | `None` | Hint injected into the tool description |
+| `concurrency_limit` | `None` | Max number of participants running simultaneously. `None` = all at once. Use when API rate limits apply. |
+| `step_timeout` | `None` | Per-participant timeout in seconds. Timed-out participants return `"[ERROR: TimeoutError: ...]"` in concat mode. `None` = no timeout. |
+
+```python
+# Rate-limit-safe: max 3 simultaneous API calls, 30 s timeout each
+news_tool = LazyTool.parallel(
+    us, europe, asia,
+    name="world_news",
+    description="Parallel AI news summary from US, Europe, and Asia",
+    concurrency_limit=3,
+    step_timeout=30.0,
+)
+```
 
 **Equivalence with `LazySession.as_tool()`:**
 `sess.as_tool(mode="parallel", ...)` is a thin wrapper over `LazyTool.parallel()`.
@@ -456,7 +469,25 @@ orchestrator.loop("Analyse fusion energy breakthroughs", tools=[pipeline])
 | LazyAgent | Original task + previous agent's output injected as context |
 | LazyTool | Tool's output becomes the new task |
 
-**Parameters:** same as `parallel()` minus `combiner`.
+**Async-under-the-hood:** `chain()` uses `build_achain_func` internally — each step calls
+`achat()` / `aloop()` / `ajson()`, so the event loop is never blocked. `run()` drives it
+via `run_async()`; `arun()` awaits it directly. This is the same pattern as `parallel()`.
+
+**Parameters:** same as `parallel()` minus `combiner`, plus:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `step_timeout` | `None` | Per-step timeout in seconds. `asyncio.TimeoutError` is raised if a step exceeds the limit. `None` = no timeout. |
+
+```python
+# Timeout each step at 60 s to prevent a hanging agent from blocking the pipeline
+pipeline = LazyTool.chain(
+    researcher, analyst,
+    name="research_pipeline",
+    description="Research then analyse",
+    step_timeout=60.0,
+)
+```
 
 ---
 

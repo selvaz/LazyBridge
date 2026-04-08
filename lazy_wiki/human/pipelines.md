@@ -88,6 +88,8 @@ gather_news = LazyTool.parallel(
     name="gather_global_news",
     description="Simultaneously gather AI news from US, Europe, and Asia",
     combiner="concat",
+    concurrency_limit=3,   # optional: max simultaneous API calls (useful against rate limits)
+    step_timeout=30.0,     # optional: per-agent timeout in seconds
 )
 # same tool, no session required
 ```
@@ -154,6 +156,8 @@ print(result.content)
 ```
 
 The judge sees each draft and replies `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), returns the current output.
+
+> **Exhaustion warning:** if all `max_verify` attempts are rejected, `loop()` emits a `UserWarning` — `"loop() verify exhausted after N attempt(s) without approval."` — and returns the last result unchanged. No exception is raised.
 
 *Use this when*: the review is a quality gate on a single agent's output — accuracy, length, format, policy compliance.
 
@@ -229,7 +233,9 @@ research_tool = sess_a.as_tool(
 #     LazyAgent("openai",    name="summariser"),
 #     name="research",
 #     description="Deep-research any topic and return a concise summary.",
+#     step_timeout=60.0,   # optional: per-step timeout in seconds
 # )
+# chain() is async-under-the-hood — uses achat/aloop, never blocks the event loop
 
 # Inner pipeline B: fact-checking (single agent, exposed as tool)
 sess_b = LazySession()
