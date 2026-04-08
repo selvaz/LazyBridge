@@ -1,0 +1,281 @@
+"""lazybridge/pipeline_builders.py
+
+Pipeline execution logic extracted from lazy_session.py.
+Neutral module to break circular imports.
+
+Import topology (no cycles):
+  lazy_session.py   → pipeline_builders  (as_tool delegates here)
+  lazy_tool.py      → pipeline_builders  (parallel/chain use builders — lazy import)
+  pipeline_builders → lazy_run           (lazy import inside closures)
+  pipeline_builders → lazy_context       (lazy import inside closures)
+  pipeline_builders → lazy_tool          (lazy import inside _resolve_participant)
+
+NOTE: This module must NOT import from lazy_agent, lazy_session, or lazy_tool
+at module load time. All cross-module imports are deferred inside function bodies.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+from collections.abc import Callable
+
+
+# ---------------------------------------------------------------------------
+# _ChainState — moved from lazy_session.py
+# ---------------------------------------------------------------------------
+
+class _ChainState:
+    """Internal state propagated between chain steps.
+
+    Moved from lazy_session.py. lazy_session re-exports this class for
+    backward compatibility (existing test imports remain valid).
+
+    Attributes
+    ----------
+    text : str
+        Text representation of this step's output. Always available.
+        Used as the next agent's task when ctx is None (tool → agent).
+    typed : Any | None
+        Typed Pydantic object produced by this step, or None.
+        Only set when the step was an agent with output_schema active.
+    ctx : LazyContext | None
+        Not None when the previous step was an agent — inject context
+        into the next agent's system prompt, keep original task.
+        None when the previous step was a tool (or first step) — use
+        text directly as the next agent's task.
+
+    Handoff semantics (decided by ctx):
+        ctx is not None  →  agent → agent  →  inject context, keep original task
+        ctx is None      →  tool  → agent  →  use text as new task
+    """
+
+    __slots__ = ("text", "typed", "ctx")
+
+    def __init__(self, text: str, typed: Any, ctx: Any) -> None:
+        self.text = text
+        self.typed = typed
+        self.ctx = ctx
+
+
+# ---------------------------------------------------------------------------
+# Pipeline builders
+# ---------------------------------------------------------------------------
+
+def build_parallel_func(
+    parts: list,
+    native_tools: list,
+    combiner: str,
+) -> Callable[[str], str]:
+    """Return a closure that runs parts concurrently when called with (task).
+
+    Dispatch is character-for-character identical to LazySession.as_tool(mode='parallel'):
+      output_schema set       → ajson
+      has_tools/native_tools  → aloop
+      bare agent              → achat
+      LazyTool                → arun({"task": task})
+    """
+    def _run_parallel(task: str) -> str:
+        from lazybridge.lazy_run import run_async
+
+        async def _gather() -> str:
+            coros = []
+            for p in parts:
+                if hasattr(p, "achat"):                    # LazyAgent
+                    kw = {"native_tools": native_tools} if native_tools else {}
+                    schema = getattr(p, "output_schema", None)
+                    has_tools = bool(
+                        getattr(p, "tools", None) or
+                        getattr(p, "native_tools", None) or
+                        kw.get("native_tools")
+                    )
+                    if schema is not None:
+                        coros.append(p.ajson(task, schema, **kw))
+                    elif has_tools:
+                        coros.append(p.aloop(task, **kw))
+                    else:
+                        coros.append(p.achat(task, **kw))
+                else:                                      # LazyTool
+                    coros.append(p.arun({"task": task}))
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            if not results:
+                return ""
+
+            def _to_text(r: Any) -> str:
+                if isinstance(r, BaseException):
+                    return f"[ERROR: {type(r).__name__}: {r}]"
+                if hasattr(r, "model_dump_json"):
+                    return r.model_dump_json(indent=2)
+                if hasattr(r, "content"):
+                    return r.content
+                return str(r)
+
+            if combiner == "last":
+                return _to_text(results[-1])
+            return "\n\n".join(
+                f"[{getattr(p, 'name', '?')}]\n{_to_text(r)}"
+                for p, r in zip(parts, results)
+            )
+
+        return run_async(_gather())
+
+    return _run_parallel
+
+
+def build_chain_func(
+    parts: list,
+    native_tools: list,
+) -> Callable[[str], Any]:
+    """Return a closure that runs parts sequentially when called with (task).
+
+    Handoff semantics identical to LazySession.as_tool(mode='chain'):
+      prev = agent (ctx is not None) → inject context, keep original task
+      prev = tool  (ctx is None)     → state.text becomes task
+    """
+    def _run_chain(task: str) -> Any:
+        from lazybridge.lazy_context import LazyContext
+
+        state = _ChainState(text=task, typed=None, ctx=None)
+
+        for p in parts:
+            if hasattr(p, "chat"):                         # LazyAgent
+                kw: dict = {}
+                if native_tools:
+                    kw["native_tools"] = native_tools
+                if state.ctx is not None:
+                    kw["context"] = state.ctx
+                    current_task = task
+                else:
+                    current_task = state.text
+                schema = getattr(p, "output_schema", None)
+                has_tools = bool(
+                    getattr(p, "tools", None) or
+                    getattr(p, "native_tools", None) or
+                    kw.get("native_tools")
+                )
+                if schema is not None:
+                    result = p.json(current_task, schema, **kw)
+                    state = _ChainState(
+                        text=result.model_dump_json() if hasattr(result, "model_dump_json") else str(result),
+                        typed=result,
+                        ctx=LazyContext.from_agent(p),
+                    )
+                elif has_tools:
+                    resp = p.loop(current_task, **kw)
+                    state = _ChainState(
+                        text=resp.content if hasattr(resp, "content") else str(resp),
+                        typed=None,
+                        ctx=LazyContext.from_agent(p),
+                    )
+                else:
+                    resp = p.chat(current_task, **kw)
+                    state = _ChainState(
+                        text=resp.content if hasattr(resp, "content") else str(resp),
+                        typed=None,
+                        ctx=LazyContext.from_agent(p),
+                    )
+            elif hasattr(p, "run"):                        # LazyTool (nested pipeline)
+                result = p.run({"task": state.text})
+                state = _ChainState(text=str(result), typed=None, ctx=None)
+            else:
+                raise TypeError(
+                    f"Participant {p!r} must be a LazyAgent (has .chat) or LazyTool (has .run)."
+                )
+
+        return state.typed if state.typed is not None else state.text
+
+    return _run_chain
+
+
+# ---------------------------------------------------------------------------
+# Type discriminators (no circular imports — attribute checks only)
+# ---------------------------------------------------------------------------
+
+def _is_agent_instance(p: Any) -> bool:
+    """True if p is a LazyAgent instance.
+    Discriminator: _last_output is set in LazyAgent.__init__ (line 233).
+    Not present on LazyTool — no circular import needed.
+    """
+    return hasattr(p, "_last_output")
+
+
+def _is_delegate_tool(p: Any) -> bool:
+    """True if p is a LazyTool.from_agent() instance (has a non-None delegate).
+    Discriminator: _delegate is a LazyTool dataclass field, not present on LazyAgent.
+    """
+    return hasattr(p, "_delegate") and getattr(p, "_delegate", None) is not None
+
+
+def _clone_for_invocation(agent: Any) -> Any:
+    """Shallow-copy agent with call-state reset for per-invocation isolation.
+
+    Tracking policy (source-verified lazy_agent.py line 366):
+      _track() gates on self._log, NOT self.session.
+      Clone gets _log bound to original session EventLog under a new agent_id.
+      clone.session = None: clone is not registered in session._agents.
+      If original had no session: clone._log = None (tracking OFF).
+
+    Shares (safe — never mutated during execution):
+      _executor, system, context, tools, output_schema, native_tools
+
+    Resets (mutable call state):
+      id → new UUID
+      _last_output → None
+      _last_response → None
+      session → None
+      _log → rebound to original session EventLog under new id, or None
+    """
+    import copy
+    import uuid as _uuid
+    clone = copy.copy(agent)
+    clone.id = str(_uuid.uuid4())
+    clone._last_output = None
+    clone._last_response = None
+    clone.session = None
+    original_session = getattr(agent, "session", None)
+    clone._log = (
+        original_session.events.agent_log(clone.id, agent.name)
+        if original_session is not None else None
+    )
+    return clone
+
+
+def _resolve_participant(p: Any) -> Any:
+    """Return invocation-isolated version of p.
+
+    Dispatch:
+      LazyAgent (_last_output present)            → _clone_for_invocation(p)
+      LazyTool.from_agent() (_delegate not None)  → _clone_delegate_tool_for_invocation(p)
+      LazyTool.from_function() or pipeline tool   → p unchanged (stateless)
+      Unknown type                                → TypeError
+
+    Note: _clone_delegate_tool_for_invocation lives in lazy_tool.py (friend module)
+    to avoid accessing _DelegateConfig from outside its home module.
+    """
+    if _is_agent_instance(p):
+        return _clone_for_invocation(p)
+    if _is_delegate_tool(p):
+        from lazybridge.lazy_tool import _clone_delegate_tool_for_invocation
+        return _clone_delegate_tool_for_invocation(p)
+    if hasattr(p, "run") and hasattr(p, "arun"):
+        return p           # LazyTool.from_function or pipeline tool — stateless
+    raise TypeError(
+        f"Participant {p!r} is not a LazyAgent or LazyTool. "
+        "Chain/parallel participants must be LazyAgent or LazyTool instances."
+    )
+
+
+def _validate_session_compatibility(participants: tuple, session: Any) -> None:
+    """Validation-only: raises ValueError on cross-session conflict. No registration."""
+    if session is None:
+        return
+    for p in participants:
+        if not _is_agent_instance(p):
+            continue
+        agent_session = getattr(p, "session", None)
+        if agent_session is not None and agent_session is not session:
+            raise ValueError(
+                f"Agent '{getattr(p, 'name', repr(p))}' is bound to a different session. "
+                "Pass the same session= to both the LazyAgent constructor and factory method, "
+                "or omit session= from the factory."
+            )

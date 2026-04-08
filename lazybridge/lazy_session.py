@@ -56,48 +56,9 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# _ChainState — internal state propagated between chain steps
-# ---------------------------------------------------------------------------
-
-class _ChainState:
-    """Immutable-per-step state object for the chain pipeline.
-
-    Each step in a chain produces a new _ChainState that is passed to the
-    next step.  Separating state from logic makes the handoff contract
-    explicit and the loop body readable.
-
-    Attributes
-    ----------
-    text : str
-        Text representation of this step's output.  Always available.
-        Used as the next agent's task when ``ctx`` is None (tool → agent),
-        and by the final return when no typed object is available.
-    typed : Any | None
-        Typed Pydantic object produced by this step, or None.
-        Only set when the step was an agent with ``output_schema`` active.
-        The chain returns this directly if the *last* step set it.
-    ctx : LazyContext | None
-        If not None, the previous step was an agent and its output should
-        be injected as context into the next step.  The next agent then
-        receives the *original* task string as its message, with this
-        context merged into its system prompt.
-
-        If None, the previous step was a tool (or this is the first step),
-        and ``text`` is passed directly as the next agent's task.
-
-    Handoff semantics (decided by ``ctx``):
-        ctx is not None  →  agent → agent  →  inject context, keep original task
-        ctx is None      →  tool  → agent  →  use ``text`` as new task
-    """
-
-    __slots__ = ("text", "typed", "ctx")
-
-    def __init__(self, text: str, typed: Any, ctx: Any) -> None:
-        self.text = text
-        self.typed = typed
-        self.ctx = ctx
+# _ChainState lives in pipeline_builders.py; re-exported here for backward compatibility.
+# (Existing test imports like `from lazybridge.lazy_session import _ChainState` remain valid.)
+from lazybridge.pipeline_builders import _ChainState  # noqa: E402, F401
 
 
 # ---------------------------------------------------------------------------
@@ -531,156 +492,15 @@ class LazySession:
                     f"Invalid combiner {combiner!r} for parallel mode. Use 'concat' or 'last'."
                 )
 
-            def _run_parallel(task: str) -> str:
-                from lazybridge.lazy_run import run_async
-
-                async def _gather() -> str:
-                    coros = []
-                    for p in _parts:
-                        if hasattr(p, "achat"):          # LazyAgent
-                            kw = {"native_tools": _native} if _native else {}
-                            schema = getattr(p, "output_schema", None)
-                            _has_tools = bool(
-                                getattr(p, "tools", None) or
-                                getattr(p, "native_tools", None) or
-                                kw.get("native_tools")
-                            )
-                            if schema is not None:
-                                coros.append(p.ajson(task, schema, **kw))
-                            elif _has_tools:
-                                # Agent has tools — use aloop() so it can invoke them.
-                                # Mirrors the same check in _run_chain.
-                                coros.append(p.aloop(task, **kw))
-                            else:
-                                coros.append(p.achat(task, **kw))
-                        else:                            # LazyTool
-                            coros.append(p.arun({"task": task}))
-                    results = await asyncio.gather(*coros, return_exceptions=True)
-                    if not results:
-                        return ""
-
-                    def _to_text(r: Any) -> str:
-                        if isinstance(r, BaseException):
-                            return f"[ERROR: {type(r).__name__}: {r}]"
-                        if hasattr(r, "model_dump_json"):  # Pydantic model
-                            return r.model_dump_json(indent=2)
-                        if hasattr(r, "content"):          # CompletionResponse
-                            return r.content
-                        return str(r)
-
-                    if combiner == "last":
-                        return _to_text(results[-1])
-                    # combiner == "concat" (validated at creation time)
-                    parts_out = []
-                    for p, r in zip(_parts, results):
-                        pname = getattr(p, "name", "?")
-                        parts_out.append(f"[{pname}]\n{_to_text(r)}")
-                    return "\n\n".join(parts_out)
-
-                return run_async(_gather())
-
-            return LazyTool.from_function(_run_parallel, name=name, description=description)
+            from lazybridge.pipeline_builders import build_parallel_func
+            func = build_parallel_func(_parts, _native, combiner)
+            return LazyTool.from_function(func, name=name, description=description)
 
         # ── Chain mode ─────────────────────────────────────────────────────
         if mode == "chain":
-            def _run_chain(task: str) -> Any:
-                from lazybridge.lazy_context import LazyContext
-
-                # _ChainState carries the result of each step to the next.
-                # See _ChainState docstring for the full handoff contract.
-                #
-                # Short version:
-                #   state.ctx is not None  →  previous step was an agent
-                #                              inject ctx into next agent's system prompt
-                #                              keep original task as the message
-                #   state.ctx is None      →  previous step was a tool (or first step)
-                #                              use state.text directly as next agent's message
-                #
-                # Call dispatch (per agent step, in priority order):
-                #   output_schema set  → json()  — structured output + JSON suffix enforcement
-                #   tools/native_tools → loop()  — tool-calling loop required
-                #   else               → chat()  — single turn, no tools
-                #
-                # Final return:
-                #   state.typed  →  Pydantic object if last step had output_schema
-                #   state.text   →  plain string otherwise
-
-                state = _ChainState(text=task, typed=None, ctx=None)
-
-                for p in _parts:
-                    if hasattr(p, "chat"):                      # LazyAgent
-                        kw: dict[str, Any] = {}
-                        if _native:
-                            kw["native_tools"] = _native
-
-                        if state.ctx is not None:
-                            # Previous step was an agent: inject its context so the
-                            # current agent sees prior results in its system prompt,
-                            # while still receiving the *original* task as its message.
-                            # Keeping the original task preserves the pipeline's goal
-                            # across all agent steps — the context is additive, not
-                            # a replacement.
-                            kw["context"] = state.ctx
-                            current_task = task
-                        else:
-                            # Previous step was a tool (or first step): the tool's
-                            # output is the raw material to process, so it becomes
-                            # the agent's message directly.
-                            current_task = state.text
-
-                        schema = getattr(p, "output_schema", None)
-                        _has_tools = bool(
-                            getattr(p, "tools", None) or
-                            getattr(p, "native_tools", None) or
-                            kw.get("native_tools")
-                        )
-
-                        if schema is not None:
-                            result = p.json(current_task, schema, **kw)
-                            state = _ChainState(
-                                text=(
-                                    result.model_dump_json()
-                                    if hasattr(result, "model_dump_json")
-                                    else str(result)
-                                ),
-                                typed=result,
-                                ctx=LazyContext.from_agent(p),
-                            )
-                        elif _has_tools:
-                            resp = p.loop(current_task, **kw)
-                            state = _ChainState(
-                                text=resp.content if hasattr(resp, "content") else str(resp),
-                                typed=None,
-                                ctx=LazyContext.from_agent(p),
-                            )
-                        else:
-                            resp = p.chat(current_task, **kw)
-                            state = _ChainState(
-                                text=resp.content if hasattr(resp, "content") else str(resp),
-                                typed=None,
-                                ctx=LazyContext.from_agent(p),
-                            )
-
-                    elif hasattr(p, "run"):                     # LazyTool (nested pipeline)
-                        result = p.run({"task": state.text})
-                        # ctx=None signals to the next agent: use text as task,
-                        # not as context — tool output is data, not interpretation.
-                        state = _ChainState(text=str(result), typed=None, ctx=None)
-
-                    else:
-                        raise TypeError(
-                            f"Chain participant {p!r} is not a LazyAgent (needs .chat()) "
-                            f"or a LazyTool (needs .run()). "
-                            f"Participants must be LazyAgent instances or LazyTool objects."
-                        )
-
-                # Return the typed Pydantic object if the last step produced one,
-                # otherwise the plain text output.
-                # When this chain is used as a tool inside loop(), the executor
-                # serialises Pydantic objects via model_dump_json() automatically.
-                return state.typed if state.typed is not None else state.text
-
-            return LazyTool.from_function(_run_chain, name=name, description=description)
+            from lazybridge.pipeline_builders import build_chain_func
+            func = build_chain_func(_parts, _native)
+            return LazyTool.from_function(func, name=name, description=description)
 
         raise ValueError(f"Unknown mode {mode!r}. Use 'parallel' or 'chain'.")
 
