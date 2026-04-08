@@ -575,3 +575,30 @@ def test_n22_resolve_participant_unknown_type_raises():
         pass
     with pytest.raises(TypeError, match="LazyAgent or LazyTool"):
         _resolve_participant(Unknown())
+
+
+def test_n23_parallel_raises_cross_session_for_delegate_tool():
+    """N23: _validate_session_compatibility raises ValueError for a delegate tool
+    whose inner agent is bound to a different session."""
+    from unittest.mock import MagicMock
+
+    sess_a = MagicMock()
+    sess_b = MagicMock()
+
+    inner_agent = MagicMock()
+    inner_agent._last_output = None   # _is_agent_instance checks hasattr(_last_output)
+    inner_agent.session = sess_b
+    inner_agent.name = "foreign_agent"
+
+    class _FakeDelegate:
+        agent = inner_agent
+
+    class _FakeDelegateTool:
+        _delegate = _FakeDelegate()
+        def run(self, task): return "ok"
+        def arun(self, task): return "ok"
+
+    participant = _FakeDelegateTool()
+
+    with pytest.raises(ValueError, match="different session"):
+        LazyTool.parallel(participant, name="p", description="d", session=sess_a)

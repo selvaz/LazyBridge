@@ -266,16 +266,22 @@ def _resolve_participant(p: Any) -> Any:
 
 
 def _validate_session_compatibility(participants: tuple, session: Any) -> None:
-    """Validation-only: raises ValueError on cross-session conflict. No registration."""
+    """Validation-only: raises ValueError on cross-session conflict. No registration.
+    Covers LazyAgent instances AND LazyTool.from_agent() delegate tools.
+    """
     if session is None:
         return
     for p in participants:
-        if not _is_agent_instance(p):
+        if _is_agent_instance(p):
+            agent = p
+        elif _is_delegate_tool(p):
+            agent = p._delegate.agent
+        else:
             continue
-        agent_session = getattr(p, "session", None)
+        agent_session = getattr(agent, "session", None)
         if agent_session is not None and agent_session is not session:
             raise ValueError(
-                f"Agent '{getattr(p, 'name', repr(p))}' is bound to a different session. "
+                f"Agent '{getattr(agent, 'name', repr(agent))}' is bound to a different session. "
                 "Pass the same session= to both the LazyAgent constructor and factory method, "
                 "or omit session= from the factory."
             )

@@ -54,6 +54,7 @@ def _mock_tool(name: str, return_value: str) -> MagicMock:
     # LazyTool has chat attribute? No. Use hasattr to distinguish from agent.
     del tool.chat   # ensure hasattr(tool, "chat") is False
     del tool.achat
+    tool._delegate = None  # spec=LazyTool would auto-generate _delegate as truthy MagicMock
     return tool
 
 
@@ -546,3 +547,32 @@ def test_as_tool_chain_save_raises(tmp_path):
     tool = sess.as_tool(mode="chain", name="c", description="d")
     with pytest.raises(ValueError, match="pipeline tool"):
         tool.save(str(tmp_path / "c.json"))
+
+
+def test_as_tool_parallel_does_not_mutate_original_agent(fake_response):
+    """R-G7: running as_tool(mode='parallel') must not mutate original agent._last_output."""
+    from unittest.mock import AsyncMock
+    sess = LazySession()
+    ag = _mock_session_agent("writer")
+    ag.session = sess
+    ag.achat = AsyncMock(return_value=fake_response)
+    sess._register_agent(ag)
+
+    tool = sess.as_tool(mode="parallel", name="p", description="d")
+    tool.run({"task": "test task"})
+
+    assert ag._last_output is None  # original must be untouched
+
+
+def test_as_tool_chain_does_not_mutate_original_agent(fake_response):
+    """R-G8: running as_tool(mode='chain') must not mutate original agent._last_output."""
+    sess = LazySession()
+    ag = _mock_session_agent("writer")
+    ag.session = sess
+    ag.chat = MagicMock(return_value=fake_response)
+    sess._register_agent(ag)
+
+    tool = sess.as_tool(mode="chain", name="c", description="d")
+    tool.run({"task": "test task"})
+
+    assert ag._last_output is None  # original must be untouched

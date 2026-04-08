@@ -492,17 +492,29 @@ class LazySession:
                     f"Invalid combiner {combiner!r} for parallel mode. Use 'concat' or 'last'."
                 )
 
-            from lazybridge.pipeline_builders import build_parallel_func
-            func = build_parallel_func(_parts, _native, combiner)
-            tool = LazyTool.from_function(func, name=name, description=description, guidance=guidance)
+            from lazybridge.pipeline_builders import build_parallel_func, _resolve_participant
+            _sess_parts = list(_parts)
+            _sess_native = list(_native)
+
+            def _run_parallel(task: str) -> str:
+                inv = [_resolve_participant(p) for p in _sess_parts]
+                return build_parallel_func(inv, _sess_native, combiner)(task)
+
+            tool = LazyTool.from_function(_run_parallel, name=name, description=description, guidance=guidance)
             tool._is_pipeline_tool = True
             return tool
 
         # ── Chain mode ─────────────────────────────────────────────────────
         if mode == "chain":
-            from lazybridge.pipeline_builders import build_chain_func
-            func = build_chain_func(_parts, _native)
-            tool = LazyTool.from_function(func, name=name, description=description, guidance=guidance)
+            from lazybridge.pipeline_builders import build_chain_func, _resolve_participant
+            _sess_parts = list(_parts)
+            _sess_native = list(_native)
+
+            def _run_chain(task: str):
+                inv = [_resolve_participant(p) for p in _sess_parts]
+                return build_chain_func(inv, _sess_native)(task)
+
+            tool = LazyTool.from_function(_run_chain, name=name, description=description, guidance=guidance)
             tool._is_pipeline_tool = True
             return tool
 
