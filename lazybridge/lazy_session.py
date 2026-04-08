@@ -540,8 +540,17 @@ class LazySession:
                         if hasattr(p, "achat"):          # LazyAgent
                             kw = {"native_tools": _native} if _native else {}
                             schema = getattr(p, "output_schema", None)
+                            _has_tools = bool(
+                                getattr(p, "tools", None) or
+                                getattr(p, "native_tools", None) or
+                                kw.get("native_tools")
+                            )
                             if schema is not None:
                                 coros.append(p.ajson(task, schema, **kw))
+                            elif _has_tools:
+                                # Agent has tools — use aloop() so it can invoke them.
+                                # Mirrors the same check in _run_chain.
+                                coros.append(p.aloop(task, **kw))
                             else:
                                 coros.append(p.achat(task, **kw))
                         else:                            # LazyTool
