@@ -17,13 +17,14 @@ def _fake_response(content: str) -> CompletionResponse:
 
 
 def _mock_agent(name: str, response_content: str) -> MagicMock:
-    """Create a minimal mock LazyAgent-like object."""
+    """Create a minimal mock LazyAgent-like object (standalone, no session)."""
     agent = MagicMock()
     agent.name = name
     agent._last_output = None
     agent.output_schema = None
     agent.tools = []
     agent.native_tools = []
+    agent.session = None  # standalone — MagicMock would auto-generate a truthy value
     resp = _fake_response(response_content)
 
     def _chat(task, **kwargs):
@@ -243,6 +244,7 @@ async def test_parallel_tool_partial_failure_does_not_raise():
     bad.output_schema = None
     bad.tools = []
     bad.native_tools = []
+    bad.session = None  # standalone — prevent cross-session validation error
 
     async def _fail(task, **kwargs):
         raise RuntimeError("agent exploded")
@@ -271,6 +273,7 @@ async def test_parallel_tool_failure_produces_error_marker():
     bad.output_schema = None
     bad.tools = []
     bad.native_tools = []
+    bad.session = None  # standalone — prevent cross-session validation error
 
     async def _fail(task, **kwargs):
         raise ValueError("something went wrong")
@@ -576,3 +579,78 @@ def test_as_tool_chain_does_not_mutate_original_agent(fake_response):
     tool.run({"task": "test task"})
 
     assert ag._last_output is None  # original must be untouched
+
+
+# ── R-EQ: semantic equivalence between as_tool() and LazyTool.parallel/chain ──
+
+def test_as_tool_parallel_equivalent_to_lazytool_parallel_properties():
+    """R-EQ1: as_tool(mode='parallel') and LazyTool.parallel() produce tools
+    with identical observable properties (guidance, _is_pipeline_tool, flag)."""
+    sess = LazySession()
+    ag = _mock_session_agent("ag")
+    ag.session = sess
+    sess._register_agent(ag)
+
+    via_session = sess.as_tool(mode="parallel", name="p", description="d", guidance="g")
+    via_classmethod = LazyTool.parallel(ag, name="p", description="d", guidance="g")
+
+    assert via_session.guidance == via_classmethod.guidance == "g"
+    assert via_session._is_pipeline_tool is True
+    assert via_classmethod._is_pipeline_tool is True
+    assert via_session.name == via_classmethod.name
+    assert via_session.description == via_classmethod.description
+
+
+def test_as_tool_chain_equivalent_to_lazytool_chain_properties():
+    """R-EQ2: as_tool(mode='chain') and LazyTool.chain() produce tools
+    with identical observable properties."""
+    sess = LazySession()
+    ag = _mock_session_agent("ag")
+    ag.session = sess
+    sess._register_agent(ag)
+
+    via_session = sess.as_tool(mode="chain", name="c", description="d", guidance="g")
+    via_classmethod = LazyTool.chain(ag, name="c", description="d", guidance="g")
+
+    assert via_session.guidance == via_classmethod.guidance == "g"
+    assert via_session._is_pipeline_tool is True
+    assert via_classmethod._is_pipeline_tool is True
+    assert via_session.name == via_classmethod.name
+
+
+def test_as_tool_parallel_equivalent_no_mutation(fake_response):
+    """R-EQ3: both factories leave original agent._last_output untouched after run."""
+    from unittest.mock import AsyncMock
+    ag1 = _mock_session_agent("ag1")
+    ag2 = _mock_session_agent("ag2")
+    for ag in (ag1, ag2):
+        ag.achat = AsyncMock(return_value=fake_response)
+
+    sess = LazySession()
+    ag1.session = sess
+    sess._register_agent(ag1)
+
+    via_session = sess.as_tool(mode="parallel", name="p", description="d")
+    via_session.run({"task": "t"})
+    assert ag1._last_output is None
+
+    via_classmethod = LazyTool.parallel(ag2, name="p", description="d")
+    via_classmethod.run({"task": "t"})
+    assert ag2._last_output is None
+
+
+def test_as_tool_save_raises_equivalent(tmp_path):
+    """R-EQ4: save() raises ValueError for tools from both factories."""
+    sess = LazySession()
+    ag = _mock_session_agent()
+    ag.session = sess
+    sess._register_agent(ag)
+
+    for tool in (
+        sess.as_tool(mode="parallel", name="p", description="d"),
+        LazyTool.parallel(ag, name="p2", description="d"),
+        sess.as_tool(mode="chain", name="c", description="d"),
+        LazyTool.chain(ag, name="c2", description="d"),
+    ):
+        with pytest.raises(ValueError, match="pipeline tool"):
+            tool.save(str(tmp_path / f"{tool.name}.json"))
