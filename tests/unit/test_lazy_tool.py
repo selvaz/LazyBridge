@@ -325,3 +325,253 @@ def test_save_dotdot_raises():
     tool = LazyTool.from_function(multiply)
     with pytest.raises(ValueError, match="'\\.\\.'"):
         tool.save("auto_tool/../../etc/evil.py")
+
+
+# =============================================================================
+# PR-B — LazyTool.parallel(), LazyTool.chain(), cloning, discriminators
+# N1–N22
+# =============================================================================
+
+from lazybridge.pipeline_builders import (
+    _is_agent_instance,
+    _is_delegate_tool,
+    _clone_for_invocation,
+    _resolve_participant,
+)
+from lazybridge.core.types import CompletionResponse, UsageStats
+
+
+def _mock_agent(name: str, response_content: str) -> MagicMock:
+    """Minimal mock LazyAgent-like object with all relevant attributes set."""
+    agent = MagicMock()
+    agent.name = name
+    agent._last_output = None
+    agent._last_response = None
+    agent.output_schema = None
+    agent.tools = []
+    agent.native_tools = []
+    agent.session = None
+    agent._log = None
+    agent._executor = MagicMock()
+    resp = CompletionResponse(content=response_content, usage=UsageStats())
+
+    # Side effects return resp without touching _last_output.
+    # The chain/parallel builders read resp.content from the return value;
+    # real LazyAgent.chat() sets _last_output internally, but the mock doesn't
+    # need to so that N13/N14 can verify the original is not mutated.
+    agent.chat = MagicMock(return_value=resp)
+    agent.achat = AsyncMock(return_value=resp)
+    agent.json = MagicMock(return_value={"mocked": True})
+    agent.ajson = MagicMock(return_value={"mocked": True})
+    return agent
+
+
+# ── N1 — parallel() returns LazyTool with _is_pipeline_tool=True ─────────────
+
+def test_n1_parallel_returns_lazytool():
+    a = _mock_agent("a", "out_a")
+    b = _mock_agent("b", "out_b")
+    t = LazyTool.parallel(a, b, name="par", description="parallel test")
+    assert isinstance(t, LazyTool)
+    assert t._is_pipeline_tool is True
+
+
+# ── N2 — chain() returns LazyTool with _is_pipeline_tool=True ────────────────
+
+def test_n2_chain_returns_lazytool():
+    a = _mock_agent("a", "out_a")
+    t = LazyTool.chain(a, name="ch", description="chain test")
+    assert isinstance(t, LazyTool)
+    assert t._is_pipeline_tool is True
+
+
+# ── N3 — parallel() with no participants raises ValueError ───────────────────
+
+def test_n3_parallel_no_participants():
+    with pytest.raises(ValueError):
+        LazyTool.parallel(name="t", description="t")
+
+
+# ── N4 — chain() with no participants raises ValueError ──────────────────────
+
+def test_n4_chain_no_participants():
+    with pytest.raises(ValueError):
+        LazyTool.chain(name="t", description="t")
+
+
+# ── N5 — save() on pipeline tool raises ValueError ───────────────────────────
+
+def test_n5_save_pipeline_tool_raises(tmp_path):
+    a = _mock_agent("a", "out_a")
+    t = LazyTool.parallel(a, name="par", description="t")
+    with pytest.raises(ValueError, match="pipeline tool"):
+        t.save(str(tmp_path / "out.py"))
+    t2 = LazyTool.chain(a, name="ch", description="t")
+    with pytest.raises(ValueError, match="cannot be serialized"):
+        t2.save(str(tmp_path / "out2.py"))
+
+
+# ── N6 — _clone_for_invocation resets _last_output ───────────────────────────
+
+def test_n6_clone_resets_last_output():
+    agent = _mock_agent("a", "something")
+    agent._last_output = "previous result"
+    clone = _clone_for_invocation(agent)
+    assert clone._last_output is None
+    assert agent._last_output == "previous result"  # original unchanged
+
+
+# ── N7 — _clone_for_invocation shares _executor ──────────────────────────────
+
+def test_n7_clone_shares_executor():
+    agent = _mock_agent("a", "x")
+    clone = _clone_for_invocation(agent)
+    assert clone._executor is agent._executor
+
+
+# ── N8 — _clone_for_invocation has new id ────────────────────────────────────
+
+def test_n8_clone_new_id():
+    import uuid
+    agent = _mock_agent("a", "x")
+    agent.id = str(uuid.uuid4())
+    clone = _clone_for_invocation(agent)
+    assert clone.id != agent.id
+
+
+# ── N9 — _clone_for_invocation has session=None ──────────────────────────────
+
+def test_n9_clone_session_none():
+    agent = _mock_agent("a", "x")
+    agent.session = MagicMock()  # agent had a session
+    clone = _clone_for_invocation(agent)
+    assert clone.session is None
+
+
+# ── N10 — _clone_for_invocation gets _log when original has session ──────────
+
+def test_n10_clone_log_when_session():
+    agent = _mock_agent("a", "x")
+    mock_session = MagicMock()
+    mock_log = MagicMock()
+    mock_session.events.agent_log.return_value = mock_log
+    agent.session = mock_session
+    agent.name = "a"
+    clone = _clone_for_invocation(agent)
+    assert clone._log is mock_log
+    mock_session.events.agent_log.assert_called_once_with(clone.id, "a")
+
+
+# ── N11 — _clone_for_invocation gets _log=None when no session ───────────────
+
+def test_n11_clone_log_none_no_session():
+    agent = _mock_agent("a", "x")
+    agent.session = None
+    clone = _clone_for_invocation(agent)
+    assert clone._log is None
+
+
+# ── N12 — _clone_delegate_tool_for_invocation clones inner agent ─────────────
+
+def test_n12_clone_delegate_tool():
+    from lazybridge.lazy_tool import _clone_delegate_tool_for_invocation
+    agent = _mock_agent("delegate", "response")
+    agent.id = "original-id"
+    dt = LazyTool.from_agent(agent, name="dt", description="delegate tool")
+    dt_clone = _clone_delegate_tool_for_invocation(dt)
+    assert dt_clone._delegate.agent is not dt._delegate.agent
+
+
+# ── N13 — original agent._last_output is None after chain run ────────────────
+
+def test_n13_original_last_output_unchanged_after_chain():
+    agent = _mock_agent("worker", "chain output")
+    agent._last_output = None
+    t = LazyTool.chain(agent, name="pipe", description="t")
+    result = t.run({"task": "do something"})
+    assert result == "chain output"
+    # Original agent was NOT run — clone ran
+    assert agent._last_output is None
+
+
+# ── N14 — LazyContext.from_agent(original) returns "" after chain run ─────────
+
+def test_n14_lazy_context_from_original_empty_after_chain():
+    from lazybridge.lazy_context import LazyContext
+    agent = _mock_agent("worker", "chain output")
+    t = LazyTool.chain(agent, name="pipe", description="t")
+    t.run({"task": "go"})
+    ctx = LazyContext.from_agent(agent)
+    assert ctx() == ""   # original _last_output is None → empty
+
+
+# ── N15 — specialize() preserves _is_pipeline_tool ───────────────────────────
+
+def test_n15_specialize_preserves_pipeline_flag():
+    a = _mock_agent("a", "out")
+    t = LazyTool.parallel(a, name="par", description="t")
+    t2 = t.specialize(name="par_v2")
+    assert t2._is_pipeline_tool is True
+
+
+# ── N16 — session= with conflicting session raises ValueError ─────────────────
+
+def test_n16_session_cross_session_conflict():
+    a = _mock_agent("a", "out")
+    session_a = MagicMock()
+    session_b = MagicMock()
+    a.session = session_a   # agent bound to session_a
+    with pytest.raises(ValueError, match="different session"):
+        LazyTool.parallel(a, name="t", description="t", session=session_b)
+
+
+# ── N17 — concurrent parallel calls: original _last_output unchanged ─────────
+
+def test_n17_parallel_original_last_output_unchanged():
+    a = _mock_agent("a", "result_a")
+    b = _mock_agent("b", "result_b")
+    t = LazyTool.parallel(a, b, name="par", description="t")
+    t.run({"task": "go"})
+    # Originals were NOT called — clones ran
+    assert a._last_output is None
+    assert b._last_output is None
+
+
+# ── N18 — _is_agent_instance returns True for mock agent ─────────────────────
+
+def test_n18_is_agent_instance_true():
+    a = _mock_agent("a", "x")
+    assert _is_agent_instance(a) is True
+
+
+# ── N19 — _is_agent_instance returns False for LazyTool ──────────────────────
+
+def test_n19_is_agent_instance_false_for_tool():
+    def f(task: str) -> str: return task
+    t = LazyTool.from_function(f, name="t", description="t")
+    assert _is_agent_instance(t) is False
+
+
+# ── N20 — _is_delegate_tool returns True for from_agent() tool ───────────────
+
+def test_n20_is_delegate_tool_true():
+    agent = _mock_agent("a", "x")
+    dt = LazyTool.from_agent(agent, name="dt", description="t")
+    assert _is_delegate_tool(dt) is True
+
+
+# ── N21 — _is_delegate_tool returns False for from_function() tool ───────────
+
+def test_n21_is_delegate_tool_false():
+    def f(task: str) -> str: return task
+    t = LazyTool.from_function(f, name="t", description="t")
+    assert _is_delegate_tool(t) is False
+
+
+# ── N22 — _resolve_participant raises TypeError for unknown type ──────────────
+
+def test_n22_resolve_participant_unknown_type_raises():
+    class Unknown:
+        pass
+    with pytest.raises(TypeError, match="LazyAgent or LazyTool"):
+        _resolve_participant(Unknown())

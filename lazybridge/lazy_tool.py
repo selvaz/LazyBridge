@@ -112,6 +112,7 @@ class LazyTool:
     schema_llm: Any | None = None
     _delegate: _DelegateConfig | None = field(default=None, repr=False)
     _compiled: ToolDefinition | None = field(default=None, repr=False)
+    _is_pipeline_tool: bool = field(default=False, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # Factory: from plain Python function
@@ -389,6 +390,12 @@ class LazyTool:
         ``load()`` executes the target file — passing an LLM-controlled
         path to it is a code-execution vulnerability.
         """
+        if self._is_pipeline_tool:
+            raise ValueError(
+                f"LazyTool '{self.name}' is a chain or parallel pipeline tool and "
+                "cannot be serialized — it is a runtime composition. "
+                "Save individual participants via agent.as_tool().save() instead."
+            )
         _validate_save_path(path)
         if self._delegate is not None:
             self._save_agent(path)
@@ -569,6 +576,126 @@ class LazyTool:
         kind = "delegate" if self._delegate else "function"
         return f"LazyTool(name={self.name!r}, kind={kind})"
 
+    # ------------------------------------------------------------------
+    # Pipeline factory methods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def parallel(
+        cls,
+        *participants: Any,
+        name: str,
+        description: str,
+        combiner: str = "concat",
+        native_tools: list | None = None,
+        session: Any | None = None,
+        guidance: str | None = None,
+    ) -> "LazyTool":
+        """Fan-out pipeline tool: all participants run concurrently on the same task.
+
+        Participants are cloned per invocation for call-state isolation —
+        ``participant._last_output`` on the original is unchanged after the run.
+        No ``LazySession`` required.
+
+        Parameters
+        ----------
+        *participants:
+            LazyAgent or LazyTool instances.
+        name, description:
+            Tool name and description exposed to the orchestrator LLM.
+        combiner:
+            ``"concat"`` (default) — outputs joined with agent-name headers.
+            ``"last"`` — only the last result is returned.
+        native_tools:
+            Optional list of NativeTool values passed to all agent participants.
+        session:
+            *Validation-only.* If provided, raises ``ValueError`` if any agent
+            participant is bound to a conflicting session. Does **not** register
+            agents. Does **not** modify the graph.
+        guidance:
+            Optional hint injected into the tool description for the LLM.
+        """
+        from lazybridge.pipeline_builders import (
+            build_parallel_func,
+            _resolve_participant,
+            _validate_session_compatibility,
+        )
+        if not participants:
+            raise ValueError("parallel() requires at least one participant.")
+        if combiner not in ("concat", "last"):
+            raise ValueError(f"Invalid combiner {combiner!r}. Use 'concat' or 'last'.")
+        _validate_session_compatibility(participants, session)
+        _native = list(native_tools or [])
+
+        def _run(task: str) -> str:
+            inv = [_resolve_participant(p) for p in participants]
+            return build_parallel_func(inv, _native, combiner)(task)
+
+        tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
+        tool._is_pipeline_tool = True
+        return tool
+
+    @classmethod
+    def chain(
+        cls,
+        *participants: Any,
+        name: str,
+        description: str,
+        native_tools: list | None = None,
+        session: Any | None = None,
+        guidance: str | None = None,
+    ) -> "LazyTool":
+        """Sequential pipeline tool: participants run in order, each receiving
+        the previous output as context (agent→agent) or as the new task (tool→agent).
+
+        Participants are cloned per invocation for call-state isolation —
+        ``participant._last_output`` on the original is unchanged after the run.
+        No ``LazySession`` required.
+
+        Parameters
+        ----------
+        *participants:
+            LazyAgent or LazyTool instances, in execution order.
+        name, description:
+            Tool name and description exposed to the orchestrator LLM.
+        native_tools:
+            Optional list of NativeTool values passed to all agent steps.
+        session:
+            *Validation-only.* If provided, raises ``ValueError`` if any agent
+            participant is bound to a conflicting session. Does **not** register
+            agents. Does **not** modify the graph.
+        guidance:
+            Optional hint injected into the tool description for the LLM.
+
+        Notes
+        -----
+        Handoff semantics (source: pipeline_builders.build_chain_func):
+            agent → agent: previous agent's output is injected as context;
+                           the original task string is kept as the message.
+            tool  → agent: tool's output becomes the next agent's task directly.
+
+        Because clones execute the run, ``participant._last_output`` on the
+        original object is ``None`` after the call. Use the return value of
+        ``tool.run()`` or ``output_schema`` on the last step instead.
+        """
+        from lazybridge.pipeline_builders import (
+            build_chain_func,
+            _resolve_participant,
+            _validate_session_compatibility,
+        )
+        if not participants:
+            raise ValueError("chain() requires at least one participant.")
+        _validate_session_compatibility(participants, session)
+        _native = list(native_tools or [])
+
+        def _run(task: str) -> Any:
+            inv = [_resolve_participant(p) for p in participants]
+            return build_chain_func(inv, _native)(task)
+
+        tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
+        tool._is_pipeline_tool = True
+        return tool
+
 
 # ---------------------------------------------------------------------------
 # save/load helpers — module-private
@@ -695,6 +822,26 @@ class NormalizedToolSet:
                 raise TypeError(f"Expected LazyTool, ToolDefinition or dict, got {type(item)}")
 
         return cls(definitions=definitions, bridges=bridges, registry=registry)
+
+
+def _clone_delegate_tool_for_invocation(tool: "LazyTool") -> "LazyTool":
+    """Clone the delegate agent inside a LazyTool.from_agent() tool.
+
+    FRIEND MODULE CONTRACT:
+      Called exclusively by pipeline_builders._resolve_participant().
+      Encapsulates _DelegateConfig access here in its home module.
+      If _DelegateConfig is renamed or restructured, only this function needs updating.
+
+    Parameters
+    ----------
+    tool:
+        A LazyTool with a non-None _delegate (created via from_agent()).
+    """
+    from lazybridge.pipeline_builders import _clone_for_invocation
+    from dataclasses import replace
+    agent_clone = _clone_for_invocation(tool._delegate.agent)  # type: ignore[union-attr]
+    new_delegate = replace(tool._delegate, agent=agent_clone)   # type: ignore[union-attr]
+    return replace(tool, _delegate=new_delegate)
 
 
 __all__ = [
