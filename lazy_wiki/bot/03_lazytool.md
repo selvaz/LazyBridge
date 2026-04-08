@@ -376,7 +376,7 @@ tool_set = NormalizedToolSet.from_list([search_tool, calc_def, lookup_dict])
 
 ---
 
-## 5. `parallel()` — fan-out pipeline tool
+## 10. `parallel()` — fan-out pipeline tool
 
 Runs all participants concurrently on the same task. No `LazySession` required.
 Participants are **cloned per invocation** — `participant._last_output` on the
@@ -412,9 +412,19 @@ orchestrator.loop("Summarise today's AI news", tools=[news_tool])
 | `session` | `None` | Validation-only: raises ValueError if any agent is bound to a conflicting session |
 | `guidance` | `None` | Hint injected into the tool description |
 
+**Equivalence with `LazySession.as_tool()`:**
+`sess.as_tool(mode="parallel", ...)` is a thin wrapper over `LazyTool.parallel()`.
+Use the classmethod when you don't have (or don't need) a session. Use `sess.as_tool()`
+when participants are already registered session agents.
+
+**`_is_pipeline_tool` flag:**
+Tools created by `parallel()` and `chain()` have `tool._is_pipeline_tool = True`.
+`save()` raises `ValueError` for these tools — they are runtime compositions and
+cannot be serialized. Save individual participants via `agent.as_tool().save()` instead.
+
 ---
 
-## 6. `chain()` — sequential pipeline tool
+## 11. `chain()` — sequential pipeline tool
 
 Runs participants in order. Each agent receives the previous step's output
 as context (agent→agent) or as its task (tool→agent). No `LazySession` required.
@@ -450,7 +460,7 @@ orchestrator.loop("Analyse fusion energy breakthroughs", tools=[pipeline])
 
 ---
 
-## 7. `save()` and pipeline tools
+## 12. `save()` and pipeline tools
 
 `save()` raises `ValueError` on `chain()` / `parallel()` tools — they are
 runtime compositions (closures over participant references) and cannot be
@@ -473,7 +483,7 @@ analyst.as_tool(name="analyst_tool", description="...").save("analyst.py")
 
 ---
 
-## 8. Clone behaviour — `participant._last_output` after run
+## 13. Clone behaviour — `participant._last_output` after run
 
 `LazyTool.parallel()` and `LazyTool.chain()` clone participants per invocation.
 The **original** participant's `_last_output` is `None` after the call.

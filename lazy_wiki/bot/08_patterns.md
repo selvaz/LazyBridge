@@ -81,7 +81,8 @@ Do you need one agent to drive others, deciding what to call and when?
    │
    └─ Do you need to expose a whole pipeline as a single tool to an outer orchestrator?
              → Pattern E (Pipeline as Tool)
-               pipeline_tool = LazyTool.from_function(run_pipeline, ...)
+               pipeline_tool = sess.as_tool("name", "desc", mode="chain")
+               pipeline_tool = LazyTool.chain(a, b, name="name", description="desc")
 ```
 
 ### Which method to call on a single agent?

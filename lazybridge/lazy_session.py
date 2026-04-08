@@ -463,6 +463,15 @@ class LazySession:
             Legacy single-agent delegation (kept for backward compatibility).
         guidance:
             Optional hint injected into the tool description for the LLM.
+            Propagated unchanged to the underlying ``LazyTool``.
+
+        Note — implementation:
+            ``mode="parallel"`` and ``mode="chain"`` are thin wrappers over
+            ``LazyTool.parallel()`` / ``LazyTool.chain()``.  The returned tool
+            has ``_is_pipeline_tool = True`` — ``save()`` raises ``ValueError``
+            on it.  Cross-session conflicts are validated at creation time;
+            this includes ``LazyTool.from_agent()`` participants (their inner
+            agent's session is also checked).
         """
         from lazybridge.lazy_tool import LazyTool
 

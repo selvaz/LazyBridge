@@ -177,6 +177,10 @@ def as_tool(
 
 Wraps one or more agents (and/or nested `LazyTool`s) as a single `LazyTool`. The tool schema is always `{"task": str}`. The orchestrator passes a task string; the participants receive it.
 
+**Implementation note:** `as_tool(mode="parallel")` and `as_tool(mode="chain")` are thin wrappers over `LazyTool.parallel()` and `LazyTool.chain()` respectively — semantically identical. Use `LazyTool.parallel()` / `LazyTool.chain()` directly when you don't have a session. The returned tool has `_is_pipeline_tool = True`; `save()` raises `ValueError` on it.
+
+**Cross-session validation:** if participants are bound to different sessions, `as_tool()` raises `ValueError` at creation time. This also covers `LazyTool.from_agent()` tools — the inner agent's session is checked, not just direct `LazyAgent` participants.
+
 ### `mode="parallel"` — all agents receive the same task concurrently
 
 All participants run in parallel on the same input task. Their outputs are combined (default: concatenated with agent-name headers) and returned as a single string.

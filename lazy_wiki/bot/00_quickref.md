@@ -166,6 +166,27 @@ LazyTool.from_agent(
     strict: bool = False,
 ) -> LazyTool  # schema always {"task": str}
 
+LazyTool.parallel(
+    *participants: LazyAgent | LazyTool,  # at least one required
+    name: str,
+    description: str,
+    combiner: str = "concat",             # "concat" | "last"
+    native_tools: list | None = None,
+    session: LazySession | None = None,   # validation-only; raises on cross-session conflict
+    guidance: str | None = None,
+) -> LazyTool  # all participants run concurrently; cloned per invocation
+               # original agent._last_output is None after run — use return value
+
+LazyTool.chain(
+    *participants: LazyAgent | LazyTool,  # at least one required
+    name: str,
+    description: str,
+    native_tools: list | None = None,
+    session: LazySession | None = None,   # validation-only; raises on cross-session conflict
+    guidance: str | None = None,
+) -> LazyTool  # participants run sequentially; each receives previous output
+               # cloned per invocation — original agent._last_output is None after run
+
 LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.arun(arguments: dict, parent: LazyAgent | None = None) -> Any  # async
 
@@ -182,6 +203,7 @@ LazyTool.specialize(
 LazyTool.save(path: str) -> None          # generate human-readable .py file
 LazyTool.load(path: str) -> LazyTool      # classmethod; only loads LazyBridge-generated files
 # save() works for from_function() and from_agent() tools
+# save() raises ValueError for parallel() / chain() tools (_is_pipeline_tool=True)
 # load() requires sentinel header — rejects arbitrary .py files (security)
 # NEVER expose LazyTool.load as an agent tool — it executes the file
 ```
