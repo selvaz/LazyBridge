@@ -3,9 +3,34 @@ from __future__ import annotations
 
 import logging
 import sys
+import types
 import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock
+
+# ---------------------------------------------------------------------------
+# Google provider stub
+#
+# google-genai imports google.auth.crypt.es which loads a Rust extension that
+# panics on this environment (pyo3_runtime.PanicException — not catchable in
+# Python).  Stub the entire google.* namespace before any lazybridge import so
+# that GoogleProvider silently receives _genai = None and skips initialisation.
+# ---------------------------------------------------------------------------
+_google_stubs = [
+    "google",
+    "google.auth",
+    "google.auth.crypt",
+    "google.auth.crypt.es",
+    "google.auth.transport",
+    "google.auth.transport.requests",
+    "google.oauth2",
+    "google.oauth2.service_account",
+    "google.genai",
+    "google.genai.types",
+]
+for _mod_name in _google_stubs:
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = types.ModuleType(_mod_name)
 
 # ---------------------------------------------------------------------------
 # Nested event loop compatibility (Spyder / Jupyter)

@@ -58,7 +58,7 @@ from lazybridge.core.types import (
 try:
     from google import genai as _genai
     from google.genai import types as _gtypes
-except ImportError:
+except Exception:  # noqa: BLE001 — also catches Rust/pyo3 panics in some environments
     _genai = None  # type: ignore
     _gtypes = None  # type: ignore
 

@@ -362,7 +362,7 @@ def _mock_agent(name: str, response_content: str) -> MagicMock:
     agent.chat = MagicMock(return_value=resp)
     agent.achat = AsyncMock(return_value=resp)
     agent.json = MagicMock(return_value={"mocked": True})
-    agent.ajson = MagicMock(return_value={"mocked": True})
+    agent.ajson = AsyncMock(return_value={"mocked": True})
     return agent
 
 

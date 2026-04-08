@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from lazybridge.lazy_session import LazySession
 from lazybridge.lazy_store import LazyStore
@@ -38,7 +38,10 @@ def _mock_agent(name: str, response_content: str) -> MagicMock:
     agent.chat = MagicMock(side_effect=_chat)
     agent.achat = MagicMock(side_effect=_achat)
     agent.json = MagicMock(return_value={"mocked": True})
-    agent.ajson = MagicMock(return_value={"mocked": True})
+    agent.ajson = AsyncMock(return_value={"mocked": True})
+    # loop/aloop not set by default — tests that need them must set them explicitly
+    agent.loop = MagicMock()
+    agent.aloop = AsyncMock()
     return agent
 
 
@@ -170,11 +173,10 @@ def test_chain_agent_to_agent():
     tool = sess.as_tool("t", "d", mode="chain", participants=[a, b])
     result = tool.run({"task": "original_task"})
 
-    # A must have been called
-    a.chat.assert_called_once()
-    # B must have been called with context (kw contains context=)
-    b.chat.assert_called_once()
-    call_kwargs = b.chat.call_args[1]
+    # chain is async-under-the-hood — achat() is called, not chat()
+    a.achat.assert_called_once()
+    b.achat.assert_called_once()
+    call_kwargs = b.achat.call_args[1]
     assert "context" in call_kwargs
     # Final output is B's output
     assert result == "B_output"
@@ -191,9 +193,9 @@ def test_chain_tool_to_agent():
                         participants=[mock_tool, agent])
     result = tool.run({"task": "original"})
 
-    # The agent must have received the tool's output as its task
-    agent.chat.assert_called_once()
-    call_args = agent.chat.call_args[0]
+    # chain is async-under-the-hood — achat() is called, not chat()
+    agent.achat.assert_called_once()
+    call_args = agent.achat.call_args[0]
     assert call_args[0] == "fetched_data_from_tool"
     assert result == "analysis_output"
 
@@ -210,14 +212,14 @@ def test_chain_output_schema_calls_json():
     agent = _mock_agent("structured_agent", "ignored")
     agent.output_schema = MySchema
     parsed = MySchema(value="structured_result")
-    agent.json = MagicMock(return_value=parsed)
+    agent.ajson = AsyncMock(return_value=parsed)
 
     tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
     tool.run({"task": "give me structure"})
 
-    agent.json.assert_called_once()
-    # chat() must NOT have been called
-    agent.chat.assert_not_called()
+    # chain is async-under-the-hood — ajson() is called, not json()
+    agent.ajson.assert_called_once()
+    agent.achat.assert_not_called()
 
 
 # ── T4.11 — gather: one failing coroutine returns exception, others complete ──
@@ -370,7 +372,7 @@ def test_chain_last_agent_output_schema_returns_pydantic(tmp_path):
     agent = _mock_agent("reporter", "ignored")
     agent.output_schema = Report
     expected = Report(title="AI Today", body="Some content")
-    agent.json = MagicMock(return_value=expected)
+    agent.ajson = AsyncMock(return_value=expected)  # chain is async-under-the-hood
 
     tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
     result = tool.run({"task": "write a report"})
@@ -393,7 +395,7 @@ def test_chain_intermediate_schema_last_plain():
     sess = LazySession()
     mid_agent = _mock_agent("mid", "ignored")
     mid_agent.output_schema = Mid
-    mid_agent.json = MagicMock(return_value=Mid(data="mid_result"))
+    mid_agent.ajson = AsyncMock(return_value=Mid(data="mid_result"))  # chain uses ajson
 
     last_agent = _mock_agent("last", "final_text")
     last_agent.output_schema = None
@@ -410,25 +412,26 @@ def test_chain_intermediate_schema_last_plain():
 # =============================================================================
 
 def test_chain_agent_with_tools_uses_loop():
-    """T_CH.1: agent with self.tools in chain → loop() called, not chat()."""
+    """T_CH.1: agent with self.tools in chain → aloop() called, not achat()."""
     sess = LazySession()
 
     agent = _mock_agent("worker", "tool result")
-    agent.tools = [MagicMock()]  # non-empty tools list → _has_tools = True
+    agent.tools = [MagicMock()]  # non-empty tools list → has_tools = True
 
     resp_mock = MagicMock()
     resp_mock.content = "tool result"
-    agent.loop = MagicMock(return_value=resp_mock)
+    # chain is async-under-the-hood — uses aloop(), not loop()
+    agent.aloop = AsyncMock(return_value=resp_mock)
 
     tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
     tool.run({"task": "do something"})
 
-    agent.loop.assert_called_once()
-    agent.chat.assert_not_called()
+    agent.aloop.assert_called_once()
+    agent.achat.assert_not_called()
 
 
 def test_chain_agent_without_tools_uses_chat():
-    """T_CH.2: agent without tools in chain → chat() called (regression guard)."""
+    """T_CH.2: agent without tools in chain → achat() called (regression guard)."""
     sess = LazySession()
 
     agent = _mock_agent("worker", "plain result")
@@ -437,8 +440,9 @@ def test_chain_agent_without_tools_uses_chat():
     tool = sess.as_tool("t", "d", mode="chain", participants=[agent])
     tool.run({"task": "do something"})
 
-    agent.chat.assert_called_once()
-    agent.loop.assert_not_called()
+    # chain is async-under-the-hood — uses achat(), not chat()
+    agent.achat.assert_called_once()
+    agent.aloop.assert_not_called()
 
 
 # =============================================================================
@@ -572,7 +576,8 @@ def test_as_tool_chain_does_not_mutate_original_agent(fake_response):
     sess = LazySession()
     ag = _mock_session_agent("writer")
     ag.session = sess
-    ag.chat = MagicMock(return_value=fake_response)
+    # chain is async-under-the-hood — uses achat(), not chat()
+    ag.achat = AsyncMock(return_value=fake_response)
     sess._register_agent(ag)
 
     tool = sess.as_tool(mode="chain", name="c", description="d")

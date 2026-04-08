@@ -66,6 +66,8 @@ def build_parallel_func(
     parts: list,
     native_tools: list,
     combiner: str,
+    concurrency_limit: int | None = None,
+    step_timeout: float | None = None,
 ) -> Callable[[str], str]:
     """Return a closure that runs parts concurrently when called with (task).
 
@@ -74,6 +76,18 @@ def build_parallel_func(
       has_tools/native_tools  → aloop
       bare agent              → achat
       LazyTool                → arun({"task": task})
+
+    Parameters
+    ----------
+    concurrency_limit:
+        Maximum number of participants that run simultaneously.
+        None (default) means no limit — all run at once.
+        Use when API rate limits or resource constraints apply.
+    step_timeout:
+        Per-participant timeout in seconds.  If a participant exceeds this,
+        its result becomes ``asyncio.TimeoutError`` (rendered as
+        ``"[ERROR: TimeoutError: ...]"`` in concat mode).
+        None (default) means no timeout.
     """
     def _run_parallel(task: str) -> str:
         from lazybridge.lazy_run import run_async
@@ -97,6 +111,17 @@ def build_parallel_func(
                         coros.append(p.achat(task, **kw))
                 else:                                      # LazyTool
                     coros.append(p.arun({"task": task}))
+
+            if step_timeout is not None:
+                coros = [asyncio.wait_for(c, timeout=step_timeout) for c in coros]
+
+            if concurrency_limit is not None:
+                sem = asyncio.Semaphore(concurrency_limit)
+                async def _guarded(c: Any) -> Any:
+                    async with sem:
+                        return await c
+                coros = [_guarded(c) for c in coros]
+
             results = await asyncio.gather(*coros, return_exceptions=True)
             if not results:
                 return ""
@@ -185,6 +210,96 @@ def build_chain_func(
         return state.typed if state.typed is not None else state.text
 
     return _run_chain
+
+
+def build_achain_func(
+    parts: list,
+    native_tools: list,
+    step_timeout: float | None = None,
+) -> Callable[[str], Any]:
+    """Return an async closure for sequential execution (mirrors build_chain_func).
+
+    Uses achat()/aloop()/ajson() instead of their sync counterparts so the
+    event loop is never blocked.  Used by LazyTool.chain() — same async-under-
+    the-hood pattern as build_parallel_func.
+
+    The inner coroutine is constructed inline (not inside a nested def) to
+    avoid Python's closure-capture-by-reference hazard in loops.
+
+    Parameters
+    ----------
+    step_timeout:
+        Per-step timeout in seconds.  asyncio.TimeoutError is raised if a
+        step exceeds the limit.  None means no timeout.
+    """
+    async def _run_achain(task: str) -> Any:
+        from lazybridge.lazy_context import LazyContext
+
+        state = _ChainState(text=task, typed=None, ctx=None)
+
+        for p in parts:
+            if hasattr(p, "achat"):                        # LazyAgent
+                kw: dict = {}
+                if native_tools:
+                    kw["native_tools"] = native_tools
+                if state.ctx is not None:
+                    kw["context"] = state.ctx
+                    current_task = task
+                else:
+                    current_task = state.text
+
+                schema = getattr(p, "output_schema", None)
+                has_tools = bool(
+                    getattr(p, "tools", None) or
+                    getattr(p, "native_tools", None) or
+                    kw.get("native_tools")
+                )
+
+                # Build the coroutine inline — avoids closure-in-loop capture issues.
+                # Coroutines capture their arguments at creation time.
+                if schema is not None:
+                    coro = p.ajson(current_task, schema, **kw)
+                elif has_tools:
+                    coro = p.aloop(current_task, **kw)
+                else:
+                    coro = p.achat(current_task, **kw)
+
+                result = (
+                    await asyncio.wait_for(coro, timeout=step_timeout)
+                    if step_timeout is not None
+                    else await coro
+                )
+
+                if schema is not None:
+                    state = _ChainState(
+                        text=result.model_dump_json() if hasattr(result, "model_dump_json") else str(result),
+                        typed=result,
+                        ctx=LazyContext.from_agent(p),
+                    )
+                else:
+                    state = _ChainState(
+                        text=result.content if hasattr(result, "content") else str(result),
+                        typed=None,
+                        ctx=LazyContext.from_agent(p),
+                    )
+
+            elif hasattr(p, "arun"):                       # LazyTool (nested pipeline)
+                coro = p.arun({"task": state.text})
+                result_str = (
+                    await asyncio.wait_for(coro, timeout=step_timeout)
+                    if step_timeout is not None
+                    else await coro
+                )
+                state = _ChainState(text=str(result_str), typed=None, ctx=None)
+
+            else:
+                raise TypeError(
+                    f"Participant {p!r} must be a LazyAgent (has .achat) or LazyTool (has .arun)."
+                )
+
+        return state.typed if state.typed is not None else state.text
+
+    return _run_achain
 
 
 # ---------------------------------------------------------------------------

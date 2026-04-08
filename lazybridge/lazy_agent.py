@@ -713,6 +713,16 @@ class LazyAgent:
                 f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
             )
 
+        if verify is not None and len(_verify_log) == _attempts:
+            import warnings
+            warnings.warn(
+                f"loop() verify exhausted after {_attempts} attempt(s) without approval. "
+                "Returning last result unchanged. "
+                "Increase max_verify= or review your verify function.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
         self._last_response = resp  # type: ignore[union-attr]
@@ -836,6 +846,16 @@ class LazyAgent:
                 await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = (
                 f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
+            )
+
+        if verify is not None and len(_verify_log) == _attempts:
+            import warnings
+            warnings.warn(
+                f"aloop() verify exhausted after {_attempts} attempt(s) without approval. "
+                "Returning last result unchanged. "
+                "Increase max_verify= or review your verify function.",
+                UserWarning,
+                stacklevel=2,
             )
 
         resp.verify_log = _verify_log  # type: ignore[union-attr]

@@ -590,6 +590,8 @@ class LazyTool:
         native_tools: list | None = None,
         session: Any | None = None,
         guidance: str | None = None,
+        concurrency_limit: int | None = None,
+        step_timeout: float | None = None,
     ) -> "LazyTool":
         """Fan-out pipeline tool: all participants run concurrently on the same task.
 
@@ -614,6 +616,14 @@ class LazyTool:
             agents. Does **not** modify the graph.
         guidance:
             Optional hint injected into the tool description for the LLM.
+        concurrency_limit:
+            Maximum number of participants that execute simultaneously.
+            ``None`` (default) — all run at once.
+            Use when API rate limits or resource constraints apply.
+        step_timeout:
+            Per-participant timeout in seconds.  Exceeded participants return
+            ``"[ERROR: TimeoutError: ...]"`` in concat mode.
+            ``None`` (default) — no timeout.
         """
         from lazybridge.pipeline_builders import (
             build_parallel_func,
@@ -629,7 +639,7 @@ class LazyTool:
 
         def _run(task: str) -> str:
             inv = [_resolve_participant(p) for p in participants]
-            return build_parallel_func(inv, _native, combiner)(task)
+            return build_parallel_func(inv, _native, combiner, concurrency_limit, step_timeout)(task)
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
@@ -644,6 +654,7 @@ class LazyTool:
         native_tools: list | None = None,
         session: Any | None = None,
         guidance: str | None = None,
+        step_timeout: float | None = None,
     ) -> "LazyTool":
         """Sequential pipeline tool: participants run in order, each receiving
         the previous output as context (agent→agent) or as the new task (tool→agent).
@@ -669,17 +680,27 @@ class LazyTool:
 
         Notes
         -----
-        Handoff semantics (source: pipeline_builders.build_chain_func):
+        Handoff semantics (source: pipeline_builders.build_achain_func):
             agent → agent: previous agent's output is injected as context;
                            the original task string is kept as the message.
             tool  → agent: tool's output becomes the next agent's task directly.
 
+        Async-under-the-hood: the chain runs via ``build_achain_func`` (uses
+        ``achat``/``aloop``/``ajson``) so the event loop is never blocked.
+        ``run()`` drives it with ``run_async()``; ``arun()`` awaits it directly.
+
         Because clones execute the run, ``participant._last_output`` on the
         original object is ``None`` after the call. Use the return value of
         ``tool.run()`` or ``output_schema`` on the last step instead.
+
+        Parameters (additional)
+        -----------------------
+        step_timeout:
+            Per-step timeout in seconds.  ``asyncio.TimeoutError`` is raised
+            if a step exceeds the limit.  ``None`` (default) — no timeout.
         """
         from lazybridge.pipeline_builders import (
-            build_chain_func,
+            build_achain_func,
             _resolve_participant,
             _validate_session_compatibility,
         )
@@ -689,8 +710,9 @@ class LazyTool:
         _native = list(native_tools or [])
 
         def _run(task: str) -> Any:
+            from lazybridge.lazy_run import run_async
             inv = [_resolve_participant(p) for p in participants]
-            return build_chain_func(inv, _native)(task)
+            return run_async(build_achain_func(inv, _native, step_timeout)(task))
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
