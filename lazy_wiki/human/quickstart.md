@@ -124,4 +124,5 @@ print(sess.store.read_all())  # shared state
 | Context injection | [context.md](context.md) |
 | Conditional routing | [routing.md](routing.md) |
 | Full pipeline examples | [pipelines.md](pipelines.md) |
+| Session-free pipelines (`parallel`/`chain`) | [pipelines.md](pipelines.md) |
 | LazyBridge vs raw SDK | [comparison.md](comparison.md) |

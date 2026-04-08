@@ -219,3 +219,78 @@ eu_search = base.specialize(
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Compare today's AI news in the US vs EU", tools=[us_search, eu_search])
 ```
+
+---
+
+## Pipeline Tools — `LazyTool.parallel()` / `LazyTool.chain()`
+
+Session-free factory methods that compose agents and tools into a single `LazyTool`. No `LazySession` required. `LazySession.as_tool(mode=...)` is a thin wrapper over these — semantically identical.
+
+### `parallel()` — fan-out
+
+All participants run concurrently on the same task. Results are combined (default: concatenated with agent-name headers).
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+us     = LazyAgent("anthropic", name="us",     system="Report US AI news.")
+europe = LazyAgent("openai",    name="europe",  system="Report European AI news.")
+asia   = LazyAgent("google",    name="asia",    system="Report Asian AI news.")
+
+news_tool = LazyTool.parallel(
+    us, europe, asia,
+    name="world_news",
+    description="Parallel AI news summary from US, Europe, and Asia",
+    combiner="concat",  # "concat" (default) | "last"
+)
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Produce a global AI news digest.", tools=[news_tool])
+```
+
+**Cloning:** participants are cloned per invocation. After the run, `us._last_output` is `None` — use the tool's return value or the orchestrator's response.
+
+### `chain()` — sequential handoff
+
+Participants run in order. Each step passes its output to the next.
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+researcher  = LazyAgent("anthropic", name="researcher",  system="Research AI topics in depth.")
+summariser  = LazyAgent("openai",    name="summariser",  system="Summarise research concisely.")
+fact_checker = LazyAgent("anthropic", name="checker",    system="Verify factual claims.")
+
+pipeline = LazyTool.chain(
+    researcher, summariser, fact_checker,
+    name="research_pipeline",
+    description="Research, summarise, and fact-check a topic.",
+)
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Produce a verified report on fusion energy.", tools=[pipeline])
+```
+
+**Handoff semantics:**
+
+| Previous step | Next step | What changes |
+|---|---|---|
+| Agent | Agent | Output injected as `context=` (original task preserved) |
+| Agent | Tool | Output becomes the tool's `task` argument |
+| Tool | Agent | Tool's return value becomes next agent's task |
+| Tool | Tool | Tool's return value becomes next tool's `task` argument |
+
+### Cross-session validation
+
+Pass `session=` to validate that all participants belong to (or are compatible with) the same session. Checked at creation time, not at run time.
+
+```python
+# Raises ValueError if any participant is bound to a different session
+pipeline = LazyTool.parallel(a, b, name="...", description="...", session=my_session)
+```
+
+This also covers `LazyTool.from_agent()` delegate tools — the inner agent's session is checked.
+
+### `save()` restriction
+
+`parallel()` and `chain()` tools have `_is_pipeline_tool = True`. Calling `save()` raises `ValueError` — they are runtime compositions and cannot be serialized. Save individual participants via `agent.as_tool().save()` instead.

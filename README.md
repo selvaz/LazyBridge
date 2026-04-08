@@ -83,6 +83,21 @@ print(result.content)
 print(sess.graph.to_json())   # serializable pipeline topology for GUI
 ```
 
+For concurrent or sequential pipelines without a session, use `LazyTool.parallel()` / `LazyTool.chain()`:
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+pipeline = LazyTool.chain(
+    LazyAgent("anthropic", name="researcher"),
+    LazyAgent("openai",    name="summariser"),
+    name="research_pipeline",
+    description="Research a topic and return a concise summary.",
+)
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Summarise AI advances in 2024.", tools=[pipeline])
+```
+
 ## Native provider tools (web search, code execution, …)
 
 ```python

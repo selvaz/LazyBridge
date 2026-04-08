@@ -76,6 +76,24 @@ newsletter = editor.loop(
 print(newsletter.content)
 ```
 
+**Session-free alternative:** if you don't need a session, `LazyTool.parallel()` is equivalent:
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+gather_news = LazyTool.parallel(
+    LazyAgent("anthropic", name="us_news"),
+    LazyAgent("openai",    name="eu_news"),
+    LazyAgent("google",    name="asia_news"),
+    name="gather_global_news",
+    description="Simultaneously gather AI news from US, Europe, and Asia",
+    combiner="concat",
+)
+# same tool, no session required
+```
+
+> **Cloning:** agents are cloned per invocation — `us_news._last_output` is `None` after the run. Use the editor's response or the tool's return value.
+
 ---
 
 ## Pipeline 3 — Decoupled Analysis (Network, Pattern C)
@@ -192,7 +210,8 @@ An outer orchestrator manages two inner pipelines, each exposed as a single tool
 ```python
 from lazybridge import LazyAgent, LazySession
 
-# Inner pipeline A: research → summarise (chain: summariser receives researcher's output)
+# Inner pipeline A: research → summarise
+# Option 1: with session (tracks events, uses existing session agents)
 sess_a = LazySession()
 research_tool = sess_a.as_tool(
     "research",
@@ -203,6 +222,14 @@ research_tool = sess_a.as_tool(
         LazyAgent("openai",    name="summariser", session=sess_a),
     ],
 )
+
+# Option 2: session-free (simpler, no tracking overhead)
+# research_tool = LazyTool.chain(
+#     LazyAgent("anthropic", name="researcher"),
+#     LazyAgent("openai",    name="summariser"),
+#     name="research",
+#     description="Deep-research any topic and return a concise summary.",
+# )
 
 # Inner pipeline B: fact-checking (single agent, exposed as tool)
 sess_b = LazySession()
