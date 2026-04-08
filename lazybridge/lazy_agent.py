@@ -649,7 +649,11 @@ class LazyAgent:
 
                 # Append the assistant's turn (with tool-use blocks).
                 # Build content list explicitly so text + thinking + tool blocks are never lost.
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
+                # thought_signature is forwarded for Gemini thinking models — it is an opaque
+                # token that must be re-emitted verbatim on the next turn or the API returns
+                # 400 INVALID_ARGUMENT ("missing thought_signature in functionCall parts").
+                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
+                                             thought_signature=tc.thought_signature)
                               for tc in resp.tool_calls]
                 _thinking_blocks: list[Any] = (
                     [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
@@ -770,7 +774,8 @@ class LazyAgent:
 
                 self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
 
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments)
+                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
+                                             thought_signature=tc.thought_signature)
                               for tc in resp.tool_calls]
                 _thinking_blocks: list[Any] = (
                     [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
