@@ -152,6 +152,39 @@ All image parameters (`first_frame`, `last_frame`, `reference_images`) accept:
 
 ---
 
+## Production / Vertex AI (future)
+
+This tool currently uses the **Gemini API** (`GOOGLE_API_KEY` from AI Studio).
+For stable production deployments, the recommended path is **Vertex AI**, which
+unlocks features the Gemini API does not expose:
+
+| Feature | Gemini API | Vertex AI |
+|---|---|---|
+| `seed` (reproducibility) | ❌ not supported | ✅ uint32 — anchors random state; helps keep subject/composition stable across runs with the same prompt |
+| `reference_images` type `"style"` | ❌ | ✅ aesthetic style transfer |
+| `number_of_videos` | ❌ fixed at 1 | ✅ 1–4 per request |
+| `output_gcs_uri` | ❌ | ✅ write output directly to GCS |
+| Reliability of `reference_images` | ⚠️ SDK issues in some versions | ✅ stable |
+
+Vertex AI uses a **different authentication** model — it does **not** use
+`GOOGLE_API_KEY`. It requires a Google Cloud project with billing enabled and
+`gcloud auth application-default login` (once), or a service account JSON key.
+
+When Vertex AI support is added, `veo_tool()` will gain:
+
+```python
+tool = veo_tool(
+    vertexai=True,
+    project="my-gcp-project",
+    location="us-central1",
+    # no api_key needed — uses ADC / service account
+)
+```
+
+The rest of the API (`tool.run({...})`) will remain identical.
+
+---
+
 ## Dependencies
 
 ```bash
