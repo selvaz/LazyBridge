@@ -261,14 +261,20 @@ def veo_tool(
             raise ValueError("reference_images supports at most 3 asset images")
 
         # ── Build GenerateVideosConfig ────────────────────────────────────────
+        # Only pass parameters explicitly — avoids 400 errors on SDK versions
+        # that don't support every field (e.g. enhance_prompt, person_generation).
 
         cfg: dict = {
-            "aspect_ratio":    aspect_ratio,
+            "aspect_ratio":     aspect_ratio,
             "duration_seconds": dur_str,
-            "resolution":      resolution,
-            "person_generation": person_generation,
-            "enhance_prompt":  enhance_prompt,
+            "resolution":       resolution,
         }
+        if person_generation != "allow_all":
+            # "allow_all" is the API default for Veo 3.x text-to-video; skip it
+            cfg["person_generation"] = person_generation
+        if enhance_prompt is not True:
+            # True is the API default; only pass when user explicitly sets False
+            cfg["enhance_prompt"] = enhance_prompt
         if negative_prompt:
             cfg["negative_prompt"] = negative_prompt
         if seed is not None:
