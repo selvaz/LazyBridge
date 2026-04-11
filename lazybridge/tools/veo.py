@@ -188,7 +188,7 @@ def veo_tool(
         resolution:          Annotated[Resolution,           "Output resolution: '720p' (default), '1080p', or '4k'.  Higher resolutions require duration_seconds=8."] = "720p",
         generate_audio:      Annotated[bool,                 "Generate an audio track with the video (default True).  Only supported by non-fast Veo 3.x models.  Setting True with a fast/Veo-2 model raises an error."] = True,
         negative_prompt:     Annotated[Optional[str],        "What to exclude from the video.  Use descriptive nouns, not negations: 'blur, noise, shaky camera' not 'no blur'."] = None,
-        seed:                Annotated[Optional[int],        "Integer 0–4294967295 for reproducibility.  Improves consistency but does not guarantee identical output."] = None,
+        seed:                Annotated[Optional[int],        "NOT supported by the Gemini API — raises ValueError if set.  Reserved for future Vertex AI support."] = None,
         enhance_prompt:      Annotated[bool,                 "Let Veo auto-expand the prompt for richer results (default True)."] = True,
         first_frame:         Annotated[Optional[str],        "Local file path or gs:// URI for the first frame (image-to-video)."] = None,
         last_frame:          Annotated[Optional[str],        "Local file path or gs:// URI for the last frame (frame interpolation).  Requires first_frame and duration_seconds=8."] = None,
@@ -253,7 +253,10 @@ def veo_tool(
         if negative_prompt:
             cfg["negative_prompt"] = negative_prompt
         if seed is not None:
-            cfg["seed"] = seed
+            raise ValueError(
+                "seed is not supported by the Gemini API — only on Vertex AI. "
+                "Remove seed= from your call."
+            )
         if last_frame:
             cfg["last_frame"] = _load_image(last_frame)
         if reference_images:
