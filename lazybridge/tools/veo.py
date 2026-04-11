@@ -59,6 +59,25 @@ Caveats
     - reference_images may be unreliable via the Gemini API in some SDK
       versions; Vertex AI is more robust for that feature
     - Generated videos are stored on Google servers for 2 days — download promptly
+
+Production / Vertex AI (future)
+--------------------------------
+    This tool uses the Gemini API (GOOGLE_API_KEY).  For stable production use,
+    migrate to Vertex AI which unlocks features not available in the Gemini API:
+
+        Feature                     Gemini API      Vertex AI
+        ──────────────────────────  ──────────────  ─────────────────────────
+        seed (reproducibility)      ✗ not supported ✓ uint32 0–4 294 967 295
+        reference_images "style"    ✗               ✓ aesthetic style transfer
+        number_of_videos            ✗ fixed at 1    ✓ 1–4 per request
+        output_gcs_uri              ✗               ✓ write directly to GCS
+
+    Vertex AI uses a different client init and Google Cloud credentials (not
+    GOOGLE_API_KEY); it requires a GCP project with billing enabled and
+    `gcloud auth application-default login` (or a service account JSON key).
+
+    When Vertex AI support is added, veo_tool() will gain:
+        veo_tool(vertexai=True, project="my-gcp-project", location="us-central1")
 """
 
 from __future__ import annotations
@@ -188,7 +207,7 @@ def veo_tool(
         resolution:          Annotated[Resolution,           "Output resolution: '720p' (default), '1080p', or '4k'.  Higher resolutions require duration_seconds=8."] = "720p",
         generate_audio:      Annotated[bool,                 "Generate an audio track with the video (default True).  Only supported by non-fast Veo 3.x models.  Setting True with a fast/Veo-2 model raises an error."] = True,
         negative_prompt:     Annotated[Optional[str],        "What to exclude from the video.  Use descriptive nouns, not negations: 'blur, noise, shaky camera' not 'no blur'."] = None,
-        seed:                Annotated[Optional[int],        "NOT supported by the Gemini API — raises ValueError if set.  Reserved for future Vertex AI support."] = None,
+        seed:                Annotated[Optional[int],        "NOT supported by the Gemini API — raises ValueError if set.  On Vertex AI (future) this would be a uint32 that anchors the random state, helping produce visually similar output across runs with the same prompt.  Useful for iterating on a prompt while keeping subject/composition stable."] = None,
         enhance_prompt:      Annotated[bool,                 "Let Veo auto-expand the prompt for richer results (default True)."] = True,
         first_frame:         Annotated[Optional[str],        "Local file path or gs:// URI for the first frame (image-to-video)."] = None,
         last_frame:          Annotated[Optional[str],        "Local file path or gs:// URI for the last frame (frame interpolation).  Requires first_frame and duration_seconds=8."] = None,
