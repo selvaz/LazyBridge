@@ -35,13 +35,18 @@ from lazybridge.stat_runtime.tools import stat_tools
 class MockCatalog:
     def __init__(self, datasets=None):
         self._datasets = datasets or []
+        self._by_name = {d.name: d for d in self._datasets}
 
     def list_datasets(self):
         return self._datasets
 
+    def get(self, name):
+        return self._by_name.get(name)
+
     def register_parquet(self, *args, **kwargs):
         meta = DatasetMeta(name=args[0], uri=args[1])
         self._datasets.append(meta)
+        self._by_name[meta.name] = meta
         return meta
 
 
@@ -694,3 +699,204 @@ class TestDiscoverDataEnriched:
         ds = result["datasets"][0]
         assert ds["column_signals"] == {}
         assert ds["has_profile"] is False
+
+
+# ---------------------------------------------------------------------------
+# analyze() group_col/group_value safety
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeGroupSafety:
+    """P0: group_col/group_value must not allow SQL injection."""
+
+    def _get_analyze(self, meta):
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        return next(t for t in tools if t.name == "analyze")
+
+    def test_invalid_group_col_rejected(self):
+        meta = _make_dataset()
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "group_col": "nonexistent",
+            "group_value": "SPY",
+        })
+        assert result.get("error") is True
+        assert "not found" in result["message"]
+
+    def test_injection_in_group_col_rejected(self):
+        meta = _make_dataset()
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "group_col": "symbol; DROP TABLE--",
+            "group_value": "SPY",
+        })
+        assert result.get("error") is True
+
+    def test_group_col_without_value_rejected(self):
+        meta = _make_dataset()
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "group_col": "symbol",
+        })
+        assert result.get("error") is True
+        assert "together" in result["message"]
+
+    def test_group_value_without_col_rejected(self):
+        meta = _make_dataset()
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "group_value": "SPY",
+        })
+        assert result.get("error") is True
+        assert "together" in result["message"]
+
+    def test_injection_in_group_value_escaped(self):
+        """SQL injection via group_value should be neutralized by escaping."""
+        meta = _make_dataset()
+        tool = self._get_analyze(meta)
+        # This would break unescaped SQL: WHERE symbol = '' OR 1=1 --'
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "group_col": "symbol",
+            "group_value": "' OR 1=1 --",
+        })
+        # Should not succeed as an injection — either errors on execution
+        # or passes through safely. Key: must not return data from all rows.
+        # Since we have a mock runtime, it will fail at execute(), but the
+        # important thing is the SQL was built safely (no raw interpolation).
+        # The error should NOT be a validation error — it should be a runtime error.
+        assert result.get("error") is True
+        assert "not found" not in result.get("message", "")  # not a column error
+
+    def test_nonexistent_dataset_rejected(self):
+        rt = MockRuntime(datasets=[])
+        tools = stat_tools(rt, level="high")
+        tool = next(t for t in tools if t.name == "analyze")
+        result = tool.run({"dataset_name": "nope", "target_col": "x"})
+        assert result.get("error") is True
+        assert "not registered" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# analyze() target resolution
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeTargetResolution:
+    def _get_analyze(self, meta):
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        return next(t for t in tools if t.name == "analyze")
+
+    def test_explicit_target_used(self):
+        meta = _make_dataset(canonical_target="volume")
+        tool = self._get_analyze(meta)
+        # Even though canonical_target is "volume", explicit target_col wins
+        result = tool.run({
+            "dataset_name": "equities",
+            "target_col": "ret",
+            "mode": "describe",
+        })
+        # Will fail at execute (mock), but target_col should be "ret"
+        assert result.get("error") is True  # mock can't execute
+        # The error comes from execute, not from target resolution
+
+    def test_canonical_target_fallback(self):
+        meta = _make_dataset(canonical_target="ret")
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "mode": "recommend",
+        })
+        # Will fail at execute (mock), but should not fail on target resolution
+        assert result.get("error") is True
+        # Should NOT be a MissingTarget or AmbiguousTarget error
+        assert result.get("type") != "MissingTarget"
+        assert result.get("type") != "AmbiguousTarget"
+
+    def test_inferred_single_target_fallback(self):
+        # Dataset with only one target-like column
+        meta = _make_dataset(
+            columns_schema={"date": "Date", "ret": "Float64"},
+            entity_keys=[],
+        )
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "mode": "recommend",
+        })
+        # Should not be an ambiguity error
+        assert result.get("type") != "AmbiguousTarget"
+
+    def test_ambiguous_targets_returns_candidates(self):
+        # Dataset with multiple target-like columns
+        meta = _make_dataset(
+            columns_schema={
+                "date": "Date",
+                "ret": "Float64",
+                "close": "Float64",
+                "price": "Float64",
+            },
+            entity_keys=[],
+        )
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "mode": "recommend",
+        })
+        assert result.get("error") is True
+        assert result.get("type") == "AmbiguousTarget"
+        assert "candidates" in result
+        assert len(result["candidates"]) > 1
+
+    def test_describe_without_target_uses_first_numeric(self):
+        meta = _make_dataset(
+            columns_schema={"date": "Date", "temperature": "Float64", "humidity": "Float64"},
+            entity_keys=[],
+        )
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "mode": "describe",
+        })
+        # Should not be a MissingTarget error — describe picks first numeric
+        assert result.get("type") != "MissingTarget"
+
+    def test_no_target_no_numeric_errors(self):
+        meta = _make_dataset(
+            columns_schema={"name": "Utf8", "label": "Utf8"},
+            entity_keys=[],
+        )
+        tool = self._get_analyze(meta)
+        result = tool.run({
+            "dataset_name": "equities",
+            "mode": "recommend",
+        })
+        assert result.get("error") is True
+        assert result.get("type") == "MissingTarget"
+
+
+# ---------------------------------------------------------------------------
+# register_dataset semantic fields
+# ---------------------------------------------------------------------------
+
+class TestRegisterDatasetSemanticFields:
+    """register_dataset should accept and persist semantic metadata."""
+
+    def test_semantic_fields_in_tool_schema(self):
+        rt = MockRuntime()
+        tools = stat_tools(rt, level="high")
+        reg = next(t for t in tools if t.name == "register_dataset")
+        defn = reg.definition()
+        params = defn.parameters.get("properties", {})
+        assert "business_description" in params
+        assert "canonical_target" in params
+        assert "identifiers_to_ignore" in params

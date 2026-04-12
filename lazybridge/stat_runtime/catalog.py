@@ -47,6 +47,9 @@ class DatasetCatalog:
         time_column: str | None = None,
         entity_keys: list[str] | None = None,
         semantic_roles: dict[str, str] | None = None,
+        business_description: str | None = None,
+        canonical_target: str | None = None,
+        identifiers_to_ignore: list[str] | None = None,
         version: str = "1",
     ) -> DatasetMeta:
         """Register a Parquet file or directory as a named dataset.
@@ -63,11 +66,8 @@ class DatasetCatalog:
         schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
         row_count = lf.select(pl.len()).collect().item()
 
-        if time_column and time_column not in schema:
-            raise ValueError(
-                f"time_column '{time_column}' not found in schema. "
-                f"Available columns: {list(schema.keys())}"
-            )
+        self._validate_columns(schema, time_column, canonical_target,
+                               identifiers_to_ignore, semantic_roles)
 
         freq = Frequency(frequency) if isinstance(frequency, str) else frequency
         meta = DatasetMeta(
@@ -80,6 +80,9 @@ class DatasetCatalog:
             time_column=time_column,
             entity_keys=entity_keys or [],
             semantic_roles=semantic_roles or {},
+            business_description=business_description,
+            canonical_target=canonical_target,
+            identifiers_to_ignore=identifiers_to_ignore or [],
             row_count=row_count,
         )
         self._store.save_dataset(meta)
@@ -95,6 +98,9 @@ class DatasetCatalog:
         time_column: str | None = None,
         entity_keys: list[str] | None = None,
         semantic_roles: dict[str, str] | None = None,
+        business_description: str | None = None,
+        canonical_target: str | None = None,
+        identifiers_to_ignore: list[str] | None = None,
         version: str = "1",
     ) -> DatasetMeta:
         """Register a CSV file as a named dataset."""
@@ -107,11 +113,8 @@ class DatasetCatalog:
         schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
         row_count = lf.select(pl.len()).collect().item()
 
-        if time_column and time_column not in schema:
-            raise ValueError(
-                f"time_column '{time_column}' not found in schema. "
-                f"Available columns: {list(schema.keys())}"
-            )
+        self._validate_columns(schema, time_column, canonical_target,
+                               identifiers_to_ignore, semantic_roles)
 
         freq = Frequency(frequency) if isinstance(frequency, str) else frequency
         meta = DatasetMeta(
@@ -124,11 +127,49 @@ class DatasetCatalog:
             time_column=time_column,
             entity_keys=entity_keys or [],
             semantic_roles=semantic_roles or {},
+            business_description=business_description,
+            canonical_target=canonical_target,
+            identifiers_to_ignore=identifiers_to_ignore or [],
             row_count=row_count,
         )
         self._store.save_dataset(meta)
         _logger.info("Registered CSV dataset '%s' (%d rows, %d cols)", name, row_count, len(schema))
         return meta
+
+    @staticmethod
+    def _validate_columns(
+        schema: dict[str, str],
+        time_column: str | None,
+        canonical_target: str | None,
+        identifiers_to_ignore: list[str] | None,
+        semantic_roles: dict[str, str] | None,
+    ) -> None:
+        """Validate that referenced columns exist in the schema."""
+        cols = list(schema.keys())
+        if time_column and time_column not in schema:
+            raise ValueError(
+                f"time_column '{time_column}' not found in schema. "
+                f"Available columns: {cols}"
+            )
+        if canonical_target and canonical_target not in schema:
+            raise ValueError(
+                f"canonical_target '{canonical_target}' not found in schema. "
+                f"Available columns: {cols}"
+            )
+        if identifiers_to_ignore:
+            bad = [c for c in identifiers_to_ignore if c not in schema]
+            if bad:
+                raise ValueError(
+                    f"identifiers_to_ignore contains unknown columns: {bad}. "
+                    f"Available columns: {cols}"
+                )
+        if semantic_roles:
+            bad = [c for c in semantic_roles if c not in schema]
+            if bad:
+                raise ValueError(
+                    f"semantic_roles references unknown columns: {bad}. "
+                    f"Available columns: {cols}"
+                )
 
     # ------------------------------------------------------------------
     # Retrieval

@@ -261,7 +261,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
 
     def analyze(
         dataset_name: Annotated[str, "Registered dataset name"],
-        target_col: Annotated[str, "Target column name"],
+        target_col: Annotated[str | None, "Target column (auto-resolved from metadata/inference if omitted)"] = None,
         mode: Annotated[str, "Analysis goal: describe, forecast, volatility, regime, recommend — or explicit family: ols, arima, garch, markov"] = "recommend",
         time_col: Annotated[str | None, "Time column for ordering (auto-detected if not set)"] = None,
         forecast_steps: Annotated[int | None, "Forecast steps (None = auto based on mode)"] = None,
@@ -278,7 +278,8 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
           - regime: regime detection (auto-selects Markov switching)
           - recommend: inspects the data and picks the best analysis automatically
 
-        You can also pass an explicit family (ols, arima, garch, markov) as the mode.
+        target_col is optional for recommend and describe modes — the runtime will
+        auto-resolve from canonical_target metadata or column role inference.
 
         Returns enriched output with: why the analysis was chosen, model assumptions,
         interpretation, diagnostics health, artifact catalog, and suggested next steps.
@@ -296,34 +297,122 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
                 ModelSpec,
             )
 
-            # Resolve mode to family + rationale
-            meta = rt.catalog.get(dataset_name) if dataset_name else None
-            roles = infer_column_roles(meta) if meta else None
+            # Load dataset metadata
+            meta = rt.catalog.get(dataset_name)
+            if meta is None:
+                return _error(ValueError(
+                    f"Dataset '{dataset_name}' is not registered. "
+                    f"Call register_dataset() first."
+                ))
+            roles = infer_column_roles(meta)
 
-            # Auto-detect time_col from metadata if not provided
-            if not time_col and meta and meta.time_column:
-                time_col = meta.time_column
+            # --- Target resolution ---
+            target_resolution_reason = ""
+            resolved_target = target_col
 
-            family, rationale, assumptions = resolve_analysis_mode(
-                mode, meta, roles, target_col,
-            )
+            if not resolved_target:
+                # 1. Try canonical_target from metadata
+                if meta.canonical_target and meta.canonical_target in meta.columns_schema:
+                    resolved_target = meta.canonical_target
+                    target_resolution_reason = (
+                        f"Auto-selected target '{resolved_target}' from dataset "
+                        f"canonical_target metadata."
+                    )
+                else:
+                    # 2. Try inferred target candidates
+                    candidates = [
+                        r.column for r in roles
+                        if r.inferred_role == "target"
+                    ]
+                    if len(candidates) == 1:
+                        resolved_target = candidates[0]
+                        target_resolution_reason = (
+                            f"Auto-selected target '{resolved_target}' — "
+                            f"only inferred target candidate."
+                        )
+                    elif len(candidates) > 1:
+                        # Ambiguous — return structured response
+                        return {
+                            "error": True,
+                            "type": "AmbiguousTarget",
+                            "message": (
+                                f"Multiple target candidates found: {candidates}. "
+                                f"Please specify target_col explicitly, or set "
+                                f"canonical_target when registering the dataset."
+                            ),
+                            "candidates": candidates,
+                        }
+                    else:
+                        # No candidates — require explicit for non-describe modes
+                        if mode.lower() not in ("describe",):
+                            return {
+                                "error": True,
+                                "type": "MissingTarget",
+                                "message": (
+                                    "No target column specified and none could be inferred. "
+                                    "Please provide target_col or set canonical_target "
+                                    "when registering the dataset."
+                                ),
+                                "available_columns": list(meta.columns_schema.keys()),
+                            }
+                        # For describe, pick the first numeric column as a reasonable default
+                        for r in roles:
+                            if r.inferred_role in ("target", "exogenous"):
+                                resolved_target = r.column
+                                target_resolution_reason = (
+                                    f"Describe mode: auto-selected '{resolved_target}' "
+                                    f"as the first numeric column for profiling."
+                                )
+                                break
+                        if not resolved_target:
+                            return _error(ValueError(
+                                "No numeric columns found for describe mode."
+                            ))
+            else:
+                target_resolution_reason = f"Explicit target_col='{resolved_target}'."
 
-            # If no explicit assumptions from mode, use family defaults
-            if not assumptions:
-                assumptions = get_model_assumptions(family)
-
-            # Build SQL filter if group_col/group_value specified
+            # --- Group filtering validation (safe, no SQL injection) ---
             query_sql = None
             effective_dataset = dataset_name
-            if group_col and group_value and dataset_name:
+
+            if group_col or group_value:
+                if not group_col or not group_value:
+                    return _error(ValueError(
+                        "Both group_col and group_value must be provided together."
+                    ))
+                # Validate group_col is a real column
+                if group_col not in meta.columns_schema:
+                    return _error(ValueError(
+                        f"group_col '{group_col}' not found in dataset schema. "
+                        f"Available columns: {list(meta.columns_schema.keys())}"
+                    ))
+                # Validate group_col is a safe identifier (alphanumeric + underscore only)
+                import re as _re
+                if not _re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', group_col):
+                    return _error(ValueError(
+                        f"group_col '{group_col}' contains invalid characters. "
+                        f"Only alphanumeric characters and underscores are allowed."
+                    ))
+                # Sanitize group_value: escape single quotes
+                safe_value = group_value.replace("'", "''")
+                # Build safe SQL with validated column and escaped value
+                order_clause = f" ORDER BY {time_col}" if time_col else ""
                 query_sql = (
                     f"SELECT * FROM dataset('{dataset_name}') "
-                    f"WHERE {group_col} = '{group_value}' "
-                    f"ORDER BY {time_col}" if time_col else
-                    f"SELECT * FROM dataset('{dataset_name}') "
-                    f"WHERE {group_col} = '{group_value}'"
+                    f"WHERE \"{group_col}\" = '{safe_value}'{order_clause}"
                 )
-                effective_dataset = None  # use query_sql instead
+                effective_dataset = None
+
+            # --- Auto-detect time_col ---
+            if not time_col and meta.time_column:
+                time_col = meta.time_column
+
+            # --- Resolve mode ---
+            family, rationale, assumptions = resolve_analysis_mode(
+                mode, meta, roles, resolved_target,
+            )
+            if not assumptions:
+                assumptions = get_model_assumptions(family)
 
             # Auto forecast steps for forecast/volatility modes
             if forecast_steps is None and mode.lower() in ("forecast", "volatility"):
@@ -331,7 +420,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
 
             spec = ModelSpec(
                 family=ModelFamily(family),
-                target_col=target_col,
+                target_col=resolved_target,
                 dataset_name=effective_dataset,
                 query_sql=query_sql,
                 exog_cols=[],
@@ -390,12 +479,16 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             # Interpretation
             interp, warns, nexts = build_interpretation(run, family)
 
+            # Add target resolution info
+            if target_resolution_reason and target_col is None:
+                interp.insert(0, target_resolution_reason)
+
             result = AnalysisResult(
                 run_id=run.run_id,
                 status=str(run.status),
                 engine=run.engine,
                 dataset_name=run.dataset_name or dataset_name,
-                target_col=target_col,
+                target_col=resolved_target,
                 mode=mode,
                 mode_rationale=rationale,
                 assumptions=assumptions,
@@ -431,20 +524,31 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
         time_column: Annotated[str | None, "Primary time/date column name"] = None,
         frequency: Annotated[str, "Data frequency: daily, weekly, monthly, quarterly, annual, intraday, irregular"] = "daily",
         entity_keys: Annotated[list[str] | None, "Key columns (e.g. ['symbol', 'country'])"] = None,
+        business_description: Annotated[str | None, "What this dataset represents (e.g. 'Daily S&P 500 returns')"] = None,
+        canonical_target: Annotated[str | None, "Preferred target column for analysis (must exist in the data)"] = None,
+        identifiers_to_ignore: Annotated[list[str] | None, "Columns to exclude from modeling (IDs, hashes)"] = None,
     ) -> dict[str, Any]:
-        """Register a dataset file for use in statistical analysis."""
+        """Register a dataset file for use in statistical analysis.
+
+        Optionally provide semantic metadata to improve analysis quality:
+        - business_description: what the data represents
+        - canonical_target: preferred target column (used by analyze mode=recommend)
+        - identifiers_to_ignore: columns that should not be used as features
+        """
         try:
+            kwargs = dict(
+                frequency=frequency,
+                time_column=time_column,
+                entity_keys=entity_keys or [],
+                business_description=business_description,
+                canonical_target=canonical_target,
+                identifiers_to_ignore=identifiers_to_ignore or [],
+            )
             uri_lower = uri.lower()
             if uri_lower.endswith(".csv"):
-                meta = rt.catalog.register_csv(
-                    name, uri, frequency=frequency,
-                    time_column=time_column, entity_keys=entity_keys or [],
-                )
+                meta = rt.catalog.register_csv(name, uri, **kwargs)
             else:
-                meta = rt.catalog.register_parquet(
-                    name, uri, frequency=frequency,
-                    time_column=time_column, entity_keys=entity_keys or [],
-                )
+                meta = rt.catalog.register_parquet(name, uri, **kwargs)
             return meta.model_dump(mode="json")
         except Exception as exc:
             return _error(exc)
