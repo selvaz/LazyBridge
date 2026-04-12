@@ -83,6 +83,7 @@ from lazybridge.lazy_tool import (
     ToolSchemaMode,
 )
 from lazybridge.memory import Memory
+from lazybridge.quant_agent import quant_agent
 
 __all__ = [
     # Main classes
@@ -105,6 +106,8 @@ __all__ = [
     # Session / tracking
     "TrackLevel",
     "Event",
+    # Pre-configured agents
+    "quant_agent",
     # Graph
     "GraphSchema",
     "NodeType",
