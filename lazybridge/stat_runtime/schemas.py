@@ -42,6 +42,19 @@ class Frequency(StrEnum):
     IRREGULAR = "irregular"
 
 
+class AnalysisMode(StrEnum):
+    """Goal-oriented analysis modes for analyze().
+
+    The LLM picks a goal, not a model family.  The runtime maps
+    each mode to the appropriate model/workflow automatically.
+    """
+    DESCRIBE = "describe"
+    FORECAST = "forecast"
+    VOLATILITY = "volatility"
+    REGIME = "regime"
+    RECOMMEND = "recommend"
+
+
 # ---------------------------------------------------------------------------
 # Dataset contracts
 # ---------------------------------------------------------------------------
@@ -70,6 +83,19 @@ class DatasetMeta(BaseModel):
     )
     row_count: int | None = None
     registered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Semantic layer — user-supplied business context
+    business_description: str | None = Field(
+        default=None,
+        description="Human-readable description of what this dataset represents",
+    )
+    canonical_target: str | None = Field(
+        default=None,
+        description="Explicitly declared preferred target column for analysis",
+    )
+    identifiers_to_ignore: list[str] = Field(
+        default_factory=list,
+        description="Columns to exclude from modeling (IDs, hashes, keys)",
+    )
 
 
 class ColumnProfile(BaseModel):
@@ -238,6 +264,15 @@ class ColumnRoleInference(BaseModel):
     reason: str = Field(description="Human-readable explanation of inference")
 
 
+class ColumnSignals(BaseModel):
+    """Lightweight quality signals for a column (from cached profile)."""
+    null_pct: float | None = None
+    unique_count: int | None = None
+    min_val: Any = None
+    max_val: Any = None
+    mean: float | None = None
+
+
 class DatasetDiscovery(BaseModel):
     """Enriched dataset metadata for LLM discovery."""
     name: str
@@ -252,8 +287,19 @@ class DatasetDiscovery(BaseModel):
         description="Column name -> dtype string",
     )
     column_roles: list[ColumnRoleInference] = Field(default_factory=list)
+    column_signals: dict[str, ColumnSignals] = Field(
+        default_factory=dict,
+        description="Column name -> quality signals (from cached profile, if available)",
+    )
     suggestions: list[str] = Field(default_factory=list)
     has_profile: bool = False
+    # Semantic layer
+    business_description: str | None = None
+    canonical_target: str | None = None
+    summary: str = Field(
+        default="",
+        description="Auto-generated one-line natural language summary",
+    )
 
 
 class DataDiscoveryResult(BaseModel):
@@ -317,6 +363,16 @@ class AnalysisResult(BaseModel):
     engine: str = ""
     dataset_name: str = ""
     target_col: str = ""
+    # Mode selection rationale
+    mode: str = Field(default="", description="Analysis mode that was used")
+    mode_rationale: str = Field(
+        default="",
+        description="Why this analysis mode/family was chosen",
+    )
+    assumptions: list[str] = Field(
+        default_factory=list,
+        description="Key assumptions the model makes about the data",
+    )
     # Model results
     params: dict[str, float] = Field(default_factory=dict)
     metrics: dict[str, float] = Field(default_factory=dict)

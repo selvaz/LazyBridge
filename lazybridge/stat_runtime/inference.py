@@ -470,3 +470,189 @@ def _get_float(d: dict[str, Any], key: str) -> float | None:
         return f if math.isfinite(f) else None
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Natural language dataset summary
+# ---------------------------------------------------------------------------
+
+def generate_dataset_summary(
+    meta: DatasetMeta,
+    roles: list[ColumnRoleInference],
+) -> str:
+    """Generate a concise one-line natural language summary of a dataset."""
+    parts: list[str] = []
+
+    # Business description takes precedence
+    if meta.business_description:
+        return meta.business_description
+
+    # Row count + frequency
+    if meta.row_count is not None:
+        freq_str = str(meta.frequency) if meta.frequency else ""
+        parts.append(f"{meta.row_count:,} {freq_str} observations".strip())
+
+    # Time range hint (from profile if available)
+    time_roles = [r for r in roles if r.inferred_role == "time"]
+    if time_roles:
+        parts.append(f"time column: {time_roles[0].column}")
+
+    # Target candidates
+    targets = [r for r in roles if r.inferred_role == "target"]
+    if meta.canonical_target:
+        parts.append(f"target: {meta.canonical_target}")
+    elif targets:
+        names = ", ".join(r.column for r in targets[:3])
+        parts.append(f"likely target(s): {names}")
+
+    # Entity keys
+    if meta.entity_keys:
+        keys = ", ".join(meta.entity_keys[:3])
+        parts.append(f"grouped by {keys}")
+
+    # Numeric column count
+    numeric = [r for r in roles if r.inferred_role in ("target", "exogenous")]
+    if numeric:
+        parts.append(f"{len(numeric)} numeric columns")
+
+    if not parts:
+        return f"Dataset '{meta.name}' with {len(meta.columns_schema)} columns."
+
+    return f"{meta.name}: {'; '.join(parts)}."
+
+
+# ---------------------------------------------------------------------------
+# Analysis mode resolution
+# ---------------------------------------------------------------------------
+
+_MODE_TO_FAMILY: dict[str, str] = {
+    "forecast": "arima",
+    "volatility": "garch",
+    "regime": "markov",
+}
+
+_MODE_ASSUMPTIONS: dict[str, list[str]] = {
+    "describe": [
+        "No model fitting — descriptive statistics and stationarity tests only.",
+    ],
+    "forecast": [
+        "ARIMA model assumes the series is stationary (or can be differenced to stationarity).",
+        "Forecast accuracy degrades with horizon length.",
+        "Default order ARIMA(1,0,1) if not specified; adjust based on ACF/PACF.",
+    ],
+    "volatility": [
+        "GARCH model assumes volatility clustering in the return series.",
+        "Target should be returns, not prices.",
+        "Default GARCH(1,1) with normal distribution; Student-t recommended for fat tails.",
+    ],
+    "regime": [
+        "Markov switching assumes the data-generating process switches between distinct states.",
+        "Default 2 regimes with switching variance.",
+        "Requires sufficient data for regime identification (typically 200+ observations).",
+    ],
+}
+
+
+def resolve_analysis_mode(
+    mode: str,
+    meta: DatasetMeta | None,
+    roles: list[ColumnRoleInference] | None,
+    target_col: str | None,
+) -> tuple[str, str, list[str]]:
+    """Resolve an AnalysisMode into (family, rationale, assumptions).
+
+    For 'recommend' mode, inspects dataset metadata and roles to choose
+    the best analysis. For explicit modes, maps directly.
+
+    Returns:
+        (family, rationale, assumptions) where family is a ModelFamily string.
+    """
+    mode_lc = mode.lower()
+
+    # Direct mode mappings
+    if mode_lc in _MODE_TO_FAMILY:
+        family = _MODE_TO_FAMILY[mode_lc]
+        rationale = f"Mode '{mode_lc}' maps to {family.upper()} family."
+        assumptions = _MODE_ASSUMPTIONS.get(mode_lc, [])
+        return family, rationale, assumptions
+
+    if mode_lc == "describe":
+        # Describe mode still needs a family for the runner — use OLS as baseline
+        return "ols", (
+            "Describe mode: fitting a simple trend model for diagnostic summary. "
+            "Focus is on data profiling, stationarity tests, and distribution analysis."
+        ), _MODE_ASSUMPTIONS["describe"]
+
+    # Recommend mode — inspect data to choose
+    if mode_lc == "recommend":
+        return _recommend_family(meta, roles, target_col)
+
+    # Fallback: treat as family name directly (backward compat)
+    if mode_lc in ("ols", "arima", "garch", "markov"):
+        return mode_lc, f"Explicit family '{mode_lc}' specified.", []
+
+    raise ValueError(
+        f"Unknown analysis mode: '{mode}'. "
+        f"Valid modes: describe, forecast, volatility, regime, recommend, "
+        f"or explicit families: ols, arima, garch, markov."
+    )
+
+
+def _recommend_family(
+    meta: DatasetMeta | None,
+    roles: list[ColumnRoleInference] | None,
+    target_col: str | None,
+) -> tuple[str, str, list[str]]:
+    """Auto-select the best analysis family based on dataset characteristics."""
+    reasons: list[str] = []
+
+    # Check for time column
+    has_time = False
+    if meta and meta.time_column:
+        has_time = True
+    elif roles:
+        has_time = any(r.inferred_role == "time" for r in roles)
+
+    # Check for return-like target
+    target_is_return = False
+    if target_col:
+        tgt_lc = target_col.lower()
+        target_is_return = tgt_lc in _TARGET_NAMES or "ret" in tgt_lc
+
+    # Decision logic
+    if target_is_return and has_time:
+        reasons.append(f"Target '{target_col}' looks like a return series.")
+        reasons.append("Time column present — time-series analysis appropriate.")
+        reasons.append("Recommending GARCH for volatility analysis of returns.")
+        return "garch", " ".join(reasons), _MODE_ASSUMPTIONS["volatility"]
+
+    if has_time:
+        reasons.append("Time column present — time-series analysis appropriate.")
+        if meta and meta.row_count and meta.row_count >= 200:
+            reasons.append(f"Sufficient data ({meta.row_count} rows) for ARIMA forecasting.")
+            return "arima", " ".join(reasons), _MODE_ASSUMPTIONS["forecast"]
+        else:
+            reasons.append("Recommending ARIMA for time-series forecasting.")
+            return "arima", " ".join(reasons), _MODE_ASSUMPTIONS["forecast"]
+
+    # No time column — default to OLS
+    reasons.append("No time column detected — using linear regression.")
+    return "ols", " ".join(reasons), [
+        "OLS assumes a linear relationship between target and predictors.",
+        "Residuals should be independent and normally distributed.",
+    ]
+
+
+def get_model_assumptions(family: str) -> list[str]:
+    """Return standard assumptions for a model family."""
+    _FAMILY_ASSUMPTIONS: dict[str, list[str]] = {
+        "ols": [
+            "Linear relationship between target and predictors.",
+            "Residuals are independent and normally distributed.",
+            "No perfect multicollinearity among predictors.",
+        ],
+        "arima": _MODE_ASSUMPTIONS["forecast"],
+        "garch": _MODE_ASSUMPTIONS["volatility"],
+        "markov": _MODE_ASSUMPTIONS["regime"],
+    }
+    return _FAMILY_ASSUMPTIONS.get(family.lower(), [])

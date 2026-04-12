@@ -79,14 +79,17 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
 
         Call this FIRST to understand what data is available before running any analysis.
         Returns column-level type information, inferred roles (target, time, entity key),
-        and actionable suggestions for next steps.
+        quality signals (missingness, cardinality from cached profile), a natural language
+        summary, and actionable suggestions for next steps.
         """
         try:
             from lazybridge.stat_runtime.inference import (
+                generate_dataset_summary,
                 infer_column_roles,
                 suggest_for_dataset,
             )
             from lazybridge.stat_runtime.schemas import (
+                ColumnSignals,
                 DataDiscoveryResult,
                 DatasetDiscovery,
             )
@@ -97,6 +100,21 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             for meta in datasets_meta:
                 roles = infer_column_roles(meta)
                 suggestions = suggest_for_dataset(meta, roles)
+                summary = generate_dataset_summary(meta, roles)
+
+                # Extract column signals from cached profile
+                col_signals: dict[str, ColumnSignals] = {}
+                if meta.profile_json and "columns" in meta.profile_json:
+                    for col_name, col_data in meta.profile_json["columns"].items():
+                        if isinstance(col_data, dict):
+                            col_signals[col_name] = ColumnSignals(
+                                null_pct=col_data.get("null_pct"),
+                                unique_count=col_data.get("unique_count"),
+                                min_val=col_data.get("min_val"),
+                                max_val=col_data.get("max_val"),
+                                mean=col_data.get("mean"),
+                            )
+
                 discoveries.append(DatasetDiscovery(
                     name=meta.name,
                     uri=meta.uri,
@@ -107,8 +125,12 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
                     entity_keys=meta.entity_keys,
                     columns=meta.columns_schema,
                     column_roles=[r.model_dump() for r in roles],
+                    column_signals=col_signals,
                     suggestions=suggestions,
                     has_profile=bool(meta.profile_json),
+                    business_description=meta.business_description,
+                    canonical_target=meta.canonical_target,
+                    summary=summary,
                 ))
 
             global_suggestions = []
@@ -238,35 +260,81 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
     # -- analyze ---------------------------------------------------------
 
     def analyze(
-        family: Annotated[str, "Model family: ols, arima, garch, or markov"],
+        dataset_name: Annotated[str, "Registered dataset name"],
         target_col: Annotated[str, "Target column name"],
-        dataset_name: Annotated[str | None, "Registered dataset name"] = None,
-        query_sql: Annotated[str | None, "SQL query using dataset('name') macro"] = None,
-        exog_cols: Annotated[list[str] | None, "Exogenous variable columns"] = None,
-        params: Annotated[dict[str, Any] | None, "Model parameters (e.g. {'p': 1, 'q': 1})"] = None,
-        forecast_steps: Annotated[int | None, "Forecast steps (None = no forecast)"] = None,
-        time_col: Annotated[str | None, "Time column for ordering"] = None,
+        mode: Annotated[str, "Analysis goal: describe, forecast, volatility, regime, recommend — or explicit family: ols, arima, garch, markov"] = "recommend",
+        time_col: Annotated[str | None, "Time column for ordering (auto-detected if not set)"] = None,
+        forecast_steps: Annotated[int | None, "Forecast steps (None = auto based on mode)"] = None,
+        group_col: Annotated[str | None, "Column to filter/segment by (e.g. 'symbol')"] = None,
+        group_value: Annotated[str | None, "Value to filter group_col to (e.g. 'SPY')"] = None,
+        params: Annotated[dict[str, Any] | None, "Expert override: model parameters"] = None,
     ) -> dict[str, Any]:
-        """Run a complete statistical analysis: fit model, diagnostics, plots, and interpretation.
+        """Run a goal-oriented statistical analysis with automatic model selection.
 
-        This is the primary analysis tool. It calls fit_model internally but returns a richer
-        result with inline artifact catalog, diagnostic health assessment, interpretation hints,
-        and suggested next steps. Prefer this over fit_model for new analyses.
+        The primary analysis tool. Pick a MODE (your goal) instead of a model family:
+          - describe: data profiling, stationarity tests, distribution analysis
+          - forecast: time-series forecasting (auto-selects ARIMA)
+          - volatility: volatility modeling (auto-selects GARCH)
+          - regime: regime detection (auto-selects Markov switching)
+          - recommend: inspects the data and picks the best analysis automatically
+
+        You can also pass an explicit family (ols, arima, garch, markov) as the mode.
+
+        Returns enriched output with: why the analysis was chosen, model assumptions,
+        interpretation, diagnostics health, artifact catalog, and suggested next steps.
         """
         try:
-            from lazybridge.stat_runtime.inference import build_interpretation
+            from lazybridge.stat_runtime.inference import (
+                build_interpretation,
+                get_model_assumptions,
+                infer_column_roles,
+                resolve_analysis_mode,
+            )
             from lazybridge.stat_runtime.schemas import (
                 AnalysisResult,
                 ArtifactSummary,
                 ModelSpec,
             )
 
+            # Resolve mode to family + rationale
+            meta = rt.catalog.get(dataset_name) if dataset_name else None
+            roles = infer_column_roles(meta) if meta else None
+
+            # Auto-detect time_col from metadata if not provided
+            if not time_col and meta and meta.time_column:
+                time_col = meta.time_column
+
+            family, rationale, assumptions = resolve_analysis_mode(
+                mode, meta, roles, target_col,
+            )
+
+            # If no explicit assumptions from mode, use family defaults
+            if not assumptions:
+                assumptions = get_model_assumptions(family)
+
+            # Build SQL filter if group_col/group_value specified
+            query_sql = None
+            effective_dataset = dataset_name
+            if group_col and group_value and dataset_name:
+                query_sql = (
+                    f"SELECT * FROM dataset('{dataset_name}') "
+                    f"WHERE {group_col} = '{group_value}' "
+                    f"ORDER BY {time_col}" if time_col else
+                    f"SELECT * FROM dataset('{dataset_name}') "
+                    f"WHERE {group_col} = '{group_value}'"
+                )
+                effective_dataset = None  # use query_sql instead
+
+            # Auto forecast steps for forecast/volatility modes
+            if forecast_steps is None and mode.lower() in ("forecast", "volatility"):
+                forecast_steps = 20
+
             spec = ModelSpec(
                 family=ModelFamily(family),
                 target_col=target_col,
-                dataset_name=dataset_name,
+                dataset_name=effective_dataset,
                 query_sql=query_sql,
-                exog_cols=exog_cols or [],
+                exog_cols=[],
                 params=params or {},
                 forecast_steps=forecast_steps,
                 time_col=time_col,
@@ -279,7 +347,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             try:
                 arts = rt.meta_store.list_artifacts(run_id=run.run_id)
                 for a in arts:
-                    summary = ArtifactSummary(
+                    art_summary = ArtifactSummary(
                         name=a.name,
                         artifact_type=a.artifact_type,
                         file_format=a.file_format,
@@ -287,9 +355,9 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
                         description=a.description,
                     )
                     if a.artifact_type == "plot":
-                        plots.append(summary)
+                        plots.append(art_summary)
                     else:
-                        data_arts.append(summary)
+                        data_arts.append(art_summary)
             except Exception:
                 pass
 
@@ -297,7 +365,6 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             diags = run.diagnostics_json or []
             d_passed = sum(1 for d in diags if d.get("passed") is True)
             d_failed = sum(1 for d in diags if d.get("passed") is False)
-            # Model adequate if no Ljung-Box failures (Jarque-Bera is informational)
             lb_failures = [
                 d for d in diags
                 if d.get("passed") is False
@@ -327,8 +394,11 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
                 run_id=run.run_id,
                 status=str(run.status),
                 engine=run.engine,
-                dataset_name=run.dataset_name,
+                dataset_name=run.dataset_name or dataset_name,
                 target_col=target_col,
+                mode=mode,
+                mode_rationale=rationale,
+                assumptions=assumptions,
                 params=run.params_json or {},
                 metrics=run.metrics_json or {},
                 fit_summary=run.fit_summary or "",
@@ -596,10 +666,11 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
         ),
         LazyTool.from_function(
             analyze, name="analyze",
-            description="Run a complete analysis: fit model, diagnostics, plots, and interpretation",
-            guidance="Primary analysis tool. Returns enriched output with interpretation, "
-                     "diagnostics health, artifact catalog, and suggested next steps. "
-                     "Prefer this over fit_model for new analyses.",
+            description="Run a goal-oriented analysis with automatic model selection",
+            guidance="Primary analysis tool. Use mode='recommend' (default) to let the "
+                     "runtime pick the best analysis, or specify a goal: describe, forecast, "
+                     "volatility, regime. Returns interpretation, assumptions, diagnostics, "
+                     "artifact catalog, and suggested next steps.",
         ),
         LazyTool.from_function(
             register_dataset, name="register_dataset",

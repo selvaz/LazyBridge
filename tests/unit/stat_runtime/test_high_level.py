@@ -453,3 +453,244 @@ class TestNewSchemas:
         data = ar.model_dump(mode="json")
         restored = AnalysisResult(**data)
         assert restored.interpretation == ["High persistence"]
+
+    def test_analysis_result_new_fields(self):
+        ar = AnalysisResult(
+            run_id="test",
+            mode="volatility",
+            mode_rationale="Mode 'volatility' maps to GARCH family.",
+            assumptions=["GARCH assumes volatility clustering"],
+        )
+        assert ar.mode == "volatility"
+        assert ar.mode_rationale != ""
+        assert len(ar.assumptions) == 1
+
+    def test_dataset_meta_semantic_fields(self):
+        meta = DatasetMeta(
+            name="equities", uri="/data/eq.parquet",
+            business_description="Daily S&P 500 returns",
+            canonical_target="ret",
+            identifiers_to_ignore=["trade_id", "hash"],
+        )
+        assert meta.business_description == "Daily S&P 500 returns"
+        assert meta.canonical_target == "ret"
+        assert meta.identifiers_to_ignore == ["trade_id", "hash"]
+
+    def test_dataset_meta_semantic_defaults(self):
+        meta = DatasetMeta(name="test", uri="/data/test.parquet")
+        assert meta.business_description is None
+        assert meta.canonical_target is None
+        assert meta.identifiers_to_ignore == []
+
+    def test_analysis_mode_enum(self):
+        from lazybridge.stat_runtime.schemas import AnalysisMode
+        assert AnalysisMode.RECOMMEND == "recommend"
+        assert AnalysisMode.FORECAST == "forecast"
+        assert AnalysisMode.VOLATILITY == "volatility"
+        assert AnalysisMode("describe") == AnalysisMode.DESCRIBE
+
+    def test_column_signals(self):
+        from lazybridge.stat_runtime.schemas import ColumnSignals
+        cs = ColumnSignals(null_pct=0.05, unique_count=100, mean=0.01)
+        assert cs.null_pct == 0.05
+        assert cs.unique_count == 100
+
+    def test_dataset_discovery_new_fields(self):
+        dd = DatasetDiscovery(
+            name="equities", uri="/data/eq.parquet",
+            file_format="parquet", frequency="daily",
+            summary="equities: 5,000 daily observations; target: ret.",
+            business_description="S&P 500 returns",
+            canonical_target="ret",
+        )
+        assert dd.summary != ""
+        assert dd.business_description == "S&P 500 returns"
+        assert dd.canonical_target == "ret"
+
+
+# ---------------------------------------------------------------------------
+# Natural language dataset summary
+# ---------------------------------------------------------------------------
+
+class TestGenerateDatasetSummary:
+    def test_basic_summary(self):
+        from lazybridge.stat_runtime.inference import generate_dataset_summary
+        meta = _make_dataset()
+        roles = infer_column_roles(meta)
+        summary = generate_dataset_summary(meta, roles)
+        assert "equities" in summary
+        assert "5,000" in summary
+
+    def test_business_description_takes_precedence(self):
+        from lazybridge.stat_runtime.inference import generate_dataset_summary
+        meta = _make_dataset(business_description="Daily S&P 500 total returns")
+        roles = infer_column_roles(meta)
+        summary = generate_dataset_summary(meta, roles)
+        assert summary == "Daily S&P 500 total returns"
+
+    def test_canonical_target_in_summary(self):
+        from lazybridge.stat_runtime.inference import generate_dataset_summary
+        meta = _make_dataset(canonical_target="ret")
+        roles = infer_column_roles(meta)
+        summary = generate_dataset_summary(meta, roles)
+        assert "target: ret" in summary
+
+    def test_entity_keys_in_summary(self):
+        from lazybridge.stat_runtime.inference import generate_dataset_summary
+        meta = _make_dataset(entity_keys=["symbol"])
+        roles = infer_column_roles(meta)
+        summary = generate_dataset_summary(meta, roles)
+        assert "symbol" in summary
+
+
+# ---------------------------------------------------------------------------
+# Analysis mode resolution
+# ---------------------------------------------------------------------------
+
+class TestResolveAnalysisMode:
+    def test_forecast_mode(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        family, rationale, assumptions = resolve_analysis_mode(
+            "forecast", None, None, None,
+        )
+        assert family == "arima"
+        assert "forecast" in rationale.lower()
+        assert len(assumptions) > 0
+
+    def test_volatility_mode(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        family, rationale, assumptions = resolve_analysis_mode(
+            "volatility", None, None, None,
+        )
+        assert family == "garch"
+
+    def test_regime_mode(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        family, rationale, assumptions = resolve_analysis_mode(
+            "regime", None, None, None,
+        )
+        assert family == "markov"
+
+    def test_describe_mode(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        family, rationale, assumptions = resolve_analysis_mode(
+            "describe", None, None, None,
+        )
+        assert family == "ols"
+        assert "describe" in rationale.lower()
+
+    def test_recommend_returns_with_time(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        meta = _make_dataset(time_column="date")
+        roles = infer_column_roles(meta)
+        family, rationale, assumptions = resolve_analysis_mode(
+            "recommend", meta, roles, "ret",
+        )
+        # Returns + time → GARCH
+        assert family == "garch"
+        assert "return" in rationale.lower()
+
+    def test_recommend_time_series_non_return(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        meta = _make_dataset(
+            time_column="date",
+            columns_schema={"date": "Date", "temperature": "Float64"},
+            entity_keys=[],
+        )
+        roles = infer_column_roles(meta)
+        family, rationale, assumptions = resolve_analysis_mode(
+            "recommend", meta, roles, "temperature",
+        )
+        # Time series but not returns → ARIMA
+        assert family == "arima"
+
+    def test_recommend_no_time(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        meta = _make_dataset(
+            time_column=None,
+            columns_schema={"x": "Float64", "y": "Float64"},
+            entity_keys=[],
+        )
+        roles = infer_column_roles(meta)
+        family, rationale, assumptions = resolve_analysis_mode(
+            "recommend", meta, roles, "y",
+        )
+        # No time → OLS
+        assert family == "ols"
+
+    def test_explicit_family_passthrough(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        family, rationale, assumptions = resolve_analysis_mode(
+            "garch", None, None, None,
+        )
+        assert family == "garch"
+        assert "explicit" in rationale.lower()
+
+    def test_unknown_mode_raises(self):
+        from lazybridge.stat_runtime.inference import resolve_analysis_mode
+        with pytest.raises(ValueError, match="Unknown analysis mode"):
+            resolve_analysis_mode("invalid_mode", None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# discover_data enriched output
+# ---------------------------------------------------------------------------
+
+class TestDiscoverDataEnriched:
+    def test_summary_populated(self):
+        meta = _make_dataset()
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        dd = next(t for t in tools if t.name == "discover_data")
+        result = dd.run({})
+        ds = result["datasets"][0]
+        assert ds["summary"] != ""
+        assert "equities" in ds["summary"]
+
+    def test_business_description_forwarded(self):
+        meta = _make_dataset(business_description="Daily equity returns")
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        dd = next(t for t in tools if t.name == "discover_data")
+        result = dd.run({})
+        ds = result["datasets"][0]
+        assert ds["business_description"] == "Daily equity returns"
+
+    def test_canonical_target_forwarded(self):
+        meta = _make_dataset(canonical_target="ret")
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        dd = next(t for t in tools if t.name == "discover_data")
+        result = dd.run({})
+        ds = result["datasets"][0]
+        assert ds["canonical_target"] == "ret"
+
+    def test_profile_signals_from_cache(self):
+        meta = _make_dataset(profile_json={
+            "columns": {
+                "ret": {"null_pct": 0.01, "unique_count": 4500, "mean": 0.0004},
+                "volume": {"null_pct": 0.0, "unique_count": 3000},
+            },
+        })
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        dd = next(t for t in tools if t.name == "discover_data")
+        result = dd.run({})
+        ds = result["datasets"][0]
+        assert ds["has_profile"] is True
+        signals = ds["column_signals"]
+        assert "ret" in signals
+        assert signals["ret"]["null_pct"] == 0.01
+        assert signals["ret"]["unique_count"] == 4500
+        assert signals["ret"]["mean"] == 0.0004
+        assert signals["volume"]["null_pct"] == 0.0
+
+    def test_no_profile_no_signals(self):
+        meta = _make_dataset(profile_json={})
+        rt = MockRuntime(datasets=[meta])
+        tools = stat_tools(rt, level="high")
+        dd = next(t for t in tools if t.name == "discover_data")
+        result = dd.run({})
+        ds = result["datasets"][0]
+        assert ds["column_signals"] == {}
+        assert ds["has_profile"] is False
