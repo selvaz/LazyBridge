@@ -198,18 +198,40 @@ class StatRuntime:
     # ------------------------------------------------------------------
 
     def _load_data(self, spec: ModelSpec) -> tuple[np.ndarray, np.ndarray | None]:
-        """Extract target and exog arrays from the dataset or query."""
+        """Extract target and exog arrays from the dataset or query.
+
+        If ``spec.time_col`` is provided, data is sorted by that column
+        before extraction.  For dataset-based loads, ``time_col`` falls
+        back to the dataset's registered ``time_column`` if not set
+        explicitly.  This is critical for time-series families (ARIMA,
+        GARCH, Markov) where row order determines temporal sequence.
+        """
+        # Resolve time_col: explicit > dataset metadata > None
+        time_col = spec.time_col
         if spec.query_sql:
             result = self.query_engine.execute(spec.query_sql)
             data = result.data_json
         elif spec.dataset_name:
+            meta = self.catalog.get(spec.dataset_name)
+            if meta is None:
+                raise ValueError(f"Dataset '{spec.dataset_name}' is not registered")
+            if time_col is None:
+                time_col = meta.time_column
             df = self.catalog.load_df(spec.dataset_name)
+            # Sort by time column if available
+            if time_col and time_col in df.columns:
+                df = df.sort(time_col)
             data = df.to_dicts()
         else:
             raise ValueError("ModelSpec must have either dataset_name or query_sql")
 
         if not data:
             raise ValueError("Query returned no data")
+
+        # Sort query results by time_col if present
+        if time_col and time_col in data[0]:
+            data.sort(key=lambda row: row[time_col])
+
         if spec.target_col not in data[0]:
             raise ValueError(
                 f"Target column '{spec.target_col}' not found. "

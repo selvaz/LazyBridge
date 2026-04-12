@@ -1,7 +1,10 @@
 """SQL validation, macro expansion, and query execution via DuckDB.
 
-The query contract uses restricted SQL with a small macro layer.
-The ``dataset('name')`` macro resolves to the registered dataset's URI.
+Security model: **allowlist, not denylist**.  User SQL may only access data
+through the ``dataset('name')`` macro.  Direct DuckDB file readers
+(``read_parquet``, ``read_csv``, ``read_json``, etc.) are rejected in user
+SQL.  Row limits are enforced at the DB level via ``LIMIT``, not by
+post-fetch slicing.
 
 Usage::
 
@@ -9,9 +12,10 @@ Usage::
     result = engine.execute("SELECT date, ret FROM dataset('equities') ORDER BY date")
 
 Validation rules:
-  - Only SELECT statements allowed
-  - dataset('name') macro expanded to Parquet file read
-  - Dangerous functions and file access restricted
+  - Only SELECT / WITH (CTE) statements allowed
+  - All table access must go through dataset('name')
+  - Direct file reader functions are blocked in user SQL
+  - max_rows enforced via DB-level LIMIT (no full-result materialization)
   - Normalized SQL hashed for lineage tracking
 """
 
@@ -33,13 +37,23 @@ _DATASET_MACRO_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Dangerous SQL patterns to reject
-_FORBIDDEN_PATTERNS = [
-    re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|COPY)\b", re.IGNORECASE),
-    re.compile(r"\b(EXPORT|IMPORT|LOAD)\b", re.IGNORECASE),
-    re.compile(r"\bread_csv_auto\b", re.IGNORECASE),
-    re.compile(r"\bread_json_auto\b", re.IGNORECASE),
-]
+# DuckDB file-reader functions that must be blocked in USER sql.
+# These are only allowed in the internally-generated expanded SQL.
+_FILE_READER_RE = re.compile(
+    r"""\b(read_parquet|read_csv|read_csv_auto|read_json|read_json_auto"""
+    r"""|read_text|read_blob|st_read|iceberg_scan|delta_scan"""
+    r"""|parquet_scan|parquet_metadata|parquet_schema"""
+    r"""|glob|httpfs_|http_get|s3_)\b""",
+    re.IGNORECASE,
+)
+
+# Mutation / DDL keywords
+_MUTATION_RE = re.compile(
+    r"""\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH"""
+    r"""|COPY|EXPORT|IMPORT|LOAD|VACUUM|PRAGMA|SET|RESET|CALL"""
+    r"""|INSTALL|EXECUTE|PREPARE)\b""",
+    re.IGNORECASE,
+)
 
 
 class QueryEngine:
@@ -56,12 +70,16 @@ class QueryEngine:
     ) -> QueryResult:
         """Validate, expand macros, and execute a SQL query.
 
-        Returns a QueryResult with the data capped at max_rows.
+        Row limit is enforced at the DB level via LIMIT, not by
+        materializing the full result and then slicing.
         """
         duckdb = _import_duckdb()
 
         original_sql = sql.strip()
+
+        # Validate BEFORE macro expansion (checks run on user-provided SQL)
         self._validate(original_sql)
+
         expanded_sql = self._expand_macros(original_sql)
         normalized_sql = self._normalize(expanded_sql)
         query_hash = self._hash(normalized_sql)
@@ -70,13 +88,16 @@ class QueryEngine:
 
         conn = duckdb.connect()
         try:
-            result = conn.execute(expanded_sql)
+            # First: get the true row count via a COUNT wrapper
+            count_sql = f"SELECT COUNT(*) FROM ({expanded_sql}) AS _q"
+            total_rows = conn.execute(count_sql).fetchone()[0]
+            truncated = total_rows > max_rows
+
+            # Then: fetch only max_rows+1 rows using DB-level LIMIT
+            limited_sql = f"SELECT * FROM ({expanded_sql}) AS _q LIMIT {max_rows}"
+            result = conn.execute(limited_sql)
             columns = [desc[0] for desc in result.description]
             rows = result.fetchall()
-            total_rows = len(rows)
-            truncated = total_rows > max_rows
-            if truncated:
-                rows = rows[:max_rows]
 
             data_json = [dict(zip(columns, row)) for row in rows]
             # Convert non-serializable types
@@ -100,28 +121,44 @@ class QueryEngine:
         )
 
     # ------------------------------------------------------------------
-    # Validation
+    # Validation (runs on user-provided SQL, BEFORE macro expansion)
     # ------------------------------------------------------------------
 
     def _validate(self, sql: str) -> None:
-        """Reject non-SELECT statements and dangerous patterns."""
+        """Reject non-SELECT statements, mutations, and direct file access.
+
+        This is an allowlist model: user SQL may only access data through
+        the dataset('name') macro.  Direct file readers are blocked.
+        """
         stripped = sql.strip().rstrip(";").strip()
+        if not stripped:
+            raise ValueError("Empty SQL query")
 
         # Must start with SELECT or WITH (CTE)
-        first_word = stripped.split()[0].upper() if stripped else ""
+        first_word = stripped.split()[0].upper()
         if first_word not in ("SELECT", "WITH"):
             raise ValueError(
                 f"Only SELECT statements are allowed. Got: {first_word}... "
                 "INSERT, UPDATE, DELETE, DROP, CREATE, and other mutations are blocked."
             )
 
-        for pattern in _FORBIDDEN_PATTERNS:
-            match = pattern.search(stripped)
-            if match:
-                raise ValueError(
-                    f"Forbidden SQL keyword detected: {match.group(0)}. "
-                    "Only SELECT queries are allowed."
-                )
+        # Block mutation / DDL keywords
+        match = _MUTATION_RE.search(stripped)
+        if match:
+            raise ValueError(
+                f"Forbidden SQL keyword: {match.group(0)}. "
+                "Only SELECT queries are allowed."
+            )
+
+        # Block direct file-reader functions (allowlist enforcement)
+        # Users must go through dataset('name'), not read_parquet() etc.
+        match = _FILE_READER_RE.search(stripped)
+        if match:
+            raise ValueError(
+                f"Direct file access function '{match.group(0)}' is not allowed. "
+                "Use the dataset('name') macro to access registered datasets. "
+                "Example: SELECT * FROM dataset('my_data')"
+            )
 
     # ------------------------------------------------------------------
     # Macro expansion

@@ -28,6 +28,7 @@ class OLSEngine(BaseEngine):
     ) -> FitResult:
         sm = _import_sm()
 
+        has_exog = X is not None
         if X is None:
             X = sm.add_constant(np.arange(len(y), dtype=float))
         elif spec.params.get("add_constant", True):
@@ -56,6 +57,7 @@ class OLSEngine(BaseEngine):
             residuals_json=result.resid.tolist(),
             fitted_values_json=result.fittedvalues.tolist(),
             extra={
+                "has_exog": has_exog,
                 "p_values": p_values,
                 "std_errors": {
                     name: float(se)
@@ -75,6 +77,17 @@ class OLSEngine(BaseEngine):
         result_obj = fit_result.extra.get("_result_obj")
         if result_obj is None:
             raise ValueError("OLS forecast requires a fitted model object (re-fit first)")
+
+        # Check if the model was fitted with user-supplied exogenous variables.
+        # If so, we cannot generate a meaningful forecast without future X values.
+        has_exog = fit_result.extra.get("has_exog", False)
+        if has_exog:
+            raise ValueError(
+                "OLS forecast is not supported for models fitted with exogenous "
+                "regressors because future values of the regressors are required "
+                "but not available. Either re-fit without exogenous variables, or "
+                "use query_data to build your own prediction matrix."
+            )
 
         sm = _import_sm()
         n = len(fit_result.fitted_values_json)

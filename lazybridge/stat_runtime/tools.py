@@ -3,6 +3,10 @@
 Each tool function catches all exceptions and returns a structured error dict
 (never raises to the LLM).  Return values are plain dicts (JSON-serializable).
 
+Runtime binding is **closure-based**: each call to ``stat_tools(runtime)``
+returns tools permanently bound to that specific runtime instance.  Multiple
+runtimes can coexist safely in the same process.
+
 Usage::
 
     from lazybridge import LazyAgent
@@ -25,262 +29,21 @@ from lazybridge.stat_runtime.schemas import Frequency, ModelFamily
 
 _logger = logging.getLogger(__name__)
 
-# Module-level runtime reference — bound by stat_tools()
-_runtime = None
-
-
-def _get_rt():
-    if _runtime is None:
-        raise RuntimeError(
-            "stat_runtime tools not initialized. Use stat_tools(runtime) first."
-        )
-    return _runtime
-
 
 def _error(exc: Exception) -> dict:
     return {"error": True, "type": type(exc).__name__, "message": str(exc)}
 
 
 # ---------------------------------------------------------------------------
-# Tool functions
-# ---------------------------------------------------------------------------
-
-def register_dataset(
-    name: Annotated[str, "Logical name for the dataset (e.g. 'equities.daily')"],
-    uri: Annotated[str, "File path to a Parquet or CSV file"],
-    time_column: Annotated[str | None, "Primary time/date column name"] = None,
-    frequency: Annotated[str, "Data frequency: daily, weekly, monthly, quarterly, annual, intraday, irregular"] = "daily",
-    entity_keys: Annotated[list[str] | None, "Key columns (e.g. ['symbol', 'country'])"] = None,
-) -> dict[str, Any]:
-    """Register a dataset file for use in statistical analysis.
-
-    The file is scanned for schema and row count but NOT loaded into memory.
-    After registration, use the dataset name in queries and model specs.
-    """
-    try:
-        rt = _get_rt()
-        uri_lower = uri.lower()
-        if uri_lower.endswith(".csv"):
-            meta = rt.catalog.register_csv(
-                name, uri, frequency=frequency,
-                time_column=time_column, entity_keys=entity_keys or [],
-            )
-        else:
-            meta = rt.catalog.register_parquet(
-                name, uri, frequency=frequency,
-                time_column=time_column, entity_keys=entity_keys or [],
-            )
-        return meta.model_dump(mode="json")
-    except Exception as exc:
-        return _error(exc)
-
-
-def list_datasets() -> list[dict[str, Any]]:
-    """List all registered datasets with their metadata."""
-    try:
-        rt = _get_rt()
-        return [
-            {"name": d.name, "uri": d.uri, "format": d.file_format,
-             "columns": list(d.columns_schema.keys()), "row_count": d.row_count,
-             "time_column": d.time_column, "frequency": str(d.frequency)}
-            for d in rt.catalog.list_datasets()
-        ]
-    except Exception as exc:
-        return [_error(exc)]
-
-
-def profile_dataset(
-    name: Annotated[str, "Name of a registered dataset"],
-) -> dict[str, Any]:
-    """Compute column-level statistics (nulls, min, max, mean, std) for a dataset."""
-    try:
-        rt = _get_rt()
-        result = rt.catalog.profile(name)
-        return result.model_dump(mode="json")
-    except Exception as exc:
-        return _error(exc)
-
-
-def query_data(
-    sql: Annotated[str, "SQL SELECT query. Use dataset('name') to reference registered datasets."],
-    max_rows: Annotated[int, "Maximum rows to return"] = 5000,
-) -> dict[str, Any]:
-    """Execute a SQL query against registered datasets.
-
-    Example: SELECT date, ret FROM dataset('equities') WHERE symbol = 'SPY' ORDER BY date
-    Only SELECT statements are allowed.  Use the dataset('name') macro.
-    """
-    try:
-        rt = _get_rt()
-        result = rt.query_engine.execute(sql, max_rows=max_rows)
-        return result.model_dump(mode="json")
-    except Exception as exc:
-        return _error(exc)
-
-
-def fit_model(
-    family: Annotated[str, "Model family: ols, arima, garch, or markov"],
-    target_col: Annotated[str, "Target column name in the dataset"],
-    dataset_name: Annotated[str | None, "Registered dataset name"] = None,
-    query_sql: Annotated[str | None, "SQL query to extract data (alternative to dataset_name)"] = None,
-    exog_cols: Annotated[list[str] | None, "Exogenous/independent variable columns"] = None,
-    params: Annotated[dict[str, Any] | None, "Model-specific parameters (e.g. {'p': 1, 'q': 1} for GARCH)"] = None,
-    forecast_steps: Annotated[int | None, "Number of forecast steps (None = no forecast)"] = None,
-    time_col: Annotated[str | None, "Time column for ordering"] = None,
-) -> dict[str, Any]:
-    """Fit a statistical model to data.
-
-    Supported families and their key parameters:
-      - ols: add_constant (bool, default True)
-      - arima: order (tuple, e.g. [1,1,1]), seasonal_order, trend
-      - garch: p (int), q (int), vol (str), dist (str), mean (str)
-      - markov: k_regimes (int), order (int), switching_variance (bool)
-
-    Returns the run record with metrics, diagnostics, and artifact paths.
-    """
-    try:
-        from lazybridge.stat_runtime.schemas import ModelSpec
-        rt = _get_rt()
-
-        spec = ModelSpec(
-            family=ModelFamily(family),
-            target_col=target_col,
-            dataset_name=dataset_name,
-            query_sql=query_sql,
-            exog_cols=exog_cols or [],
-            params=params or {},
-            forecast_steps=forecast_steps,
-            time_col=time_col,
-        )
-        run = rt.execute(spec)
-        result = run.model_dump(mode="json")
-        # Remove datetime objects that might not serialize cleanly
-        result["created_at"] = str(result["created_at"])
-        return result
-    except Exception as exc:
-        return _error(exc)
-
-
-def forecast_model(
-    run_id: Annotated[str, "Run ID from a previous fit_model call"],
-    steps: Annotated[int, "Number of forecast steps"],
-    ci_level: Annotated[float, "Confidence interval level (0-1)"] = 0.95,
-) -> dict[str, Any]:
-    """Generate a forecast from a previously fitted model."""
-    try:
-        rt = _get_rt()
-        result = rt.forecast(run_id, steps, ci_level=ci_level)
-        return result.model_dump(mode="json")
-    except Exception as exc:
-        return _error(exc)
-
-
-def run_diagnostics(
-    series_name: Annotated[str, "Dataset name for stationarity tests"],
-    column: Annotated[str, "Column to test"],
-) -> list[dict[str, Any]]:
-    """Run stationarity tests (ADF + KPSS) on a data column."""
-    try:
-        import numpy as np
-        from lazybridge.stat_runtime.diagnostics import adf_test, kpss_test
-        rt = _get_rt()
-        df = rt.catalog.load_df(series_name)
-        series = np.array(df[column].to_list(), dtype=float)
-        series = series[~np.isnan(series)]
-        results = [adf_test(series), kpss_test(series)]
-        return [r.model_dump(mode="json") for r in results]
-    except Exception as exc:
-        return [_error(exc)]
-
-
-def get_run(
-    run_id: Annotated[str, "Run ID to retrieve"],
-) -> dict[str, Any]:
-    """Retrieve a past model run record with its metrics and artifact paths."""
-    try:
-        rt = _get_rt()
-        run = rt.get_run(run_id)
-        if run is None:
-            return {"error": True, "message": f"Run '{run_id}' not found"}
-        result = run.model_dump(mode="json")
-        result["created_at"] = str(result["created_at"])
-        return result
-    except Exception as exc:
-        return _error(exc)
-
-
-def list_runs(
-    dataset_name: Annotated[str | None, "Filter by dataset name"] = None,
-    limit: Annotated[int, "Maximum runs to return"] = 20,
-) -> list[dict[str, Any]]:
-    """List past model runs, optionally filtered by dataset."""
-    try:
-        rt = _get_rt()
-        runs = rt.list_runs(dataset_name=dataset_name, limit=limit)
-        return [
-            {"run_id": r.run_id, "engine": r.engine, "dataset": r.dataset_name,
-             "status": str(r.status), "aic": r.metrics_json.get("aic"),
-             "bic": r.metrics_json.get("bic"), "duration": r.duration_secs,
-             "created_at": str(r.created_at)}
-            for r in runs
-        ]
-    except Exception as exc:
-        return [_error(exc)]
-
-
-def compare_models(
-    run_ids: Annotated[list[str], "List of run IDs to compare"],
-) -> dict[str, Any]:
-    """Compare multiple model runs by AIC, BIC, and other metrics."""
-    try:
-        from lazybridge.stat_runtime.diagnostics import compare_models as _compare
-        rt = _get_rt()
-        runs = [rt.get_run(rid) for rid in run_ids]
-        runs = [r for r in runs if r is not None]
-        if not runs:
-            return {"error": True, "message": "No valid runs found"}
-        result = _compare(runs)
-        return result.model_dump(mode="json")
-    except Exception as exc:
-        return _error(exc)
-
-
-def list_artifacts(
-    run_id: Annotated[str, "Run ID to list artifacts for"],
-    artifact_type: Annotated[str | None, "Filter: plot, data, summary, forecast"] = None,
-) -> list[dict[str, Any]]:
-    """List all artifacts (plots, data, summaries) for a model run."""
-    try:
-        rt = _get_rt()
-        arts = rt.meta_store.list_artifacts(run_id=run_id, artifact_type=artifact_type)
-        return [a.model_dump(mode="json") for a in arts]
-    except Exception as exc:
-        return [_error(exc)]
-
-
-def get_plot(
-    run_id: Annotated[str, "Run ID"],
-    name: Annotated[str, "Plot name (e.g. 'residuals', 'volatility', 'forecast', 'regimes')"],
-) -> dict[str, Any]:
-    """Get the file path for a specific plot from a model run."""
-    try:
-        rt = _get_rt()
-        arts = rt.meta_store.list_artifacts(run_id=run_id, artifact_type="plot")
-        for a in arts:
-            if a.name == name:
-                return {"path": a.path, "name": a.name, "description": a.description}
-        available = [a.name for a in arts]
-        return {"error": True, "message": f"Plot '{name}' not found. Available: {available}"}
-    except Exception as exc:
-        return _error(exc)
-
-
-# ---------------------------------------------------------------------------
-# Tool factory
+# Tool factory — closure-based, no global state
 # ---------------------------------------------------------------------------
 
 def stat_tools(runtime) -> list[LazyTool]:
     """Return all stat_runtime tools bound to the given StatRuntime instance.
+
+    Each tool captures ``runtime`` in its closure.  Multiple runtimes can
+    coexist: tools from ``stat_tools(rt1)`` will always use ``rt1``, even
+    if ``stat_tools(rt2)`` is called later.
 
     Usage::
 
@@ -291,8 +54,235 @@ def stat_tools(runtime) -> list[LazyTool]:
         tools = stat_tools(rt)
         agent = LazyAgent("anthropic", tools=tools)
     """
-    global _runtime
-    _runtime = runtime
+    rt = runtime  # captured by all closures below
+
+    # -- register_dataset ------------------------------------------------
+
+    def register_dataset(
+        name: Annotated[str, "Logical name for the dataset (e.g. 'equities.daily')"],
+        uri: Annotated[str, "File path to a Parquet or CSV file"],
+        time_column: Annotated[str | None, "Primary time/date column name"] = None,
+        frequency: Annotated[str, "Data frequency: daily, weekly, monthly, quarterly, annual, intraday, irregular"] = "daily",
+        entity_keys: Annotated[list[str] | None, "Key columns (e.g. ['symbol', 'country'])"] = None,
+    ) -> dict[str, Any]:
+        """Register a dataset file for use in statistical analysis."""
+        try:
+            uri_lower = uri.lower()
+            if uri_lower.endswith(".csv"):
+                meta = rt.catalog.register_csv(
+                    name, uri, frequency=frequency,
+                    time_column=time_column, entity_keys=entity_keys or [],
+                )
+            else:
+                meta = rt.catalog.register_parquet(
+                    name, uri, frequency=frequency,
+                    time_column=time_column, entity_keys=entity_keys or [],
+                )
+            return meta.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- list_datasets ---------------------------------------------------
+
+    def list_datasets() -> list[dict[str, Any]]:
+        """List all registered datasets with their metadata."""
+        try:
+            return [
+                {"name": d.name, "uri": d.uri, "format": d.file_format,
+                 "columns": list(d.columns_schema.keys()), "row_count": d.row_count,
+                 "time_column": d.time_column, "frequency": str(d.frequency)}
+                for d in rt.catalog.list_datasets()
+            ]
+        except Exception as exc:
+            return [_error(exc)]
+
+    # -- profile_dataset -------------------------------------------------
+
+    def profile_dataset(
+        name: Annotated[str, "Name of a registered dataset"],
+    ) -> dict[str, Any]:
+        """Compute column-level statistics (nulls, min, max, mean, std) for a dataset."""
+        try:
+            result = rt.catalog.profile(name)
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- query_data ------------------------------------------------------
+
+    def query_data(
+        sql: Annotated[str, "SQL SELECT query. Use dataset('name') to reference registered datasets."],
+        max_rows: Annotated[int, "Maximum rows to return"] = 5000,
+    ) -> dict[str, Any]:
+        """Execute a SQL query against registered datasets.
+
+        Example: SELECT date, ret FROM dataset('equities') WHERE symbol = 'SPY' ORDER BY date
+        Only SELECT statements are allowed.  Use the dataset('name') macro.
+        Direct file access (read_parquet, etc.) is blocked — use dataset('name') instead.
+        """
+        try:
+            result = rt.query_engine.execute(sql, max_rows=max_rows)
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- fit_model -------------------------------------------------------
+
+    def fit_model(
+        family: Annotated[str, "Model family: ols, arima, garch, or markov"],
+        target_col: Annotated[str, "Target column name in the dataset"],
+        dataset_name: Annotated[str | None, "Registered dataset name"] = None,
+        query_sql: Annotated[str | None, "SQL query to extract data (alternative to dataset_name)"] = None,
+        exog_cols: Annotated[list[str] | None, "Exogenous/independent variable columns"] = None,
+        params: Annotated[dict[str, Any] | None, "Model-specific parameters (e.g. {'p': 1, 'q': 1} for GARCH)"] = None,
+        forecast_steps: Annotated[int | None, "Number of forecast steps (None = no forecast)"] = None,
+        time_col: Annotated[str | None, "Time column for ordering"] = None,
+    ) -> dict[str, Any]:
+        """Fit a statistical model to data.
+
+        Supported families and their key parameters:
+          - ols: add_constant (bool, default True)
+          - arima: order (tuple, e.g. [1,1,1]), seasonal_order, trend
+          - garch: p (int), q (int), vol (str), dist (str), mean (str)
+          - markov: k_regimes (int), order (int), switching_variance (bool)
+
+        Returns the run record with metrics, diagnostics, and artifact paths.
+        """
+        try:
+            from lazybridge.stat_runtime.schemas import ModelSpec
+
+            spec = ModelSpec(
+                family=ModelFamily(family),
+                target_col=target_col,
+                dataset_name=dataset_name,
+                query_sql=query_sql,
+                exog_cols=exog_cols or [],
+                params=params or {},
+                forecast_steps=forecast_steps,
+                time_col=time_col,
+            )
+            run = rt.execute(spec)
+            result = run.model_dump(mode="json")
+            result["created_at"] = str(result["created_at"])
+            return result
+        except Exception as exc:
+            return _error(exc)
+
+    # -- forecast_model --------------------------------------------------
+
+    def forecast_model(
+        run_id: Annotated[str, "Run ID from a previous fit_model call"],
+        steps: Annotated[int, "Number of forecast steps"],
+        ci_level: Annotated[float, "Confidence interval level (0-1)"] = 0.95,
+    ) -> dict[str, Any]:
+        """Generate a forecast from a previously fitted model."""
+        try:
+            result = rt.forecast(run_id, steps, ci_level=ci_level)
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- run_diagnostics -------------------------------------------------
+
+    def run_diagnostics(
+        series_name: Annotated[str, "Dataset name for stationarity tests"],
+        column: Annotated[str, "Column to test"],
+    ) -> list[dict[str, Any]]:
+        """Run stationarity tests (ADF + KPSS) on a data column."""
+        try:
+            import numpy as np
+            from lazybridge.stat_runtime.diagnostics import adf_test, kpss_test
+            df = rt.catalog.load_df(series_name)
+            series = np.array(df[column].to_list(), dtype=float)
+            series = series[~np.isnan(series)]
+            results = [adf_test(series), kpss_test(series)]
+            return [r.model_dump(mode="json") for r in results]
+        except Exception as exc:
+            return [_error(exc)]
+
+    # -- get_run ---------------------------------------------------------
+
+    def get_run(
+        run_id: Annotated[str, "Run ID to retrieve"],
+    ) -> dict[str, Any]:
+        """Retrieve a past model run record with its metrics and artifact paths."""
+        try:
+            run = rt.get_run(run_id)
+            if run is None:
+                return {"error": True, "message": f"Run '{run_id}' not found"}
+            result = run.model_dump(mode="json")
+            result["created_at"] = str(result["created_at"])
+            return result
+        except Exception as exc:
+            return _error(exc)
+
+    # -- list_runs -------------------------------------------------------
+
+    def list_runs(
+        dataset_name: Annotated[str | None, "Filter by dataset name"] = None,
+        limit: Annotated[int, "Maximum runs to return"] = 20,
+    ) -> list[dict[str, Any]]:
+        """List past model runs, optionally filtered by dataset."""
+        try:
+            runs = rt.list_runs(dataset_name=dataset_name, limit=limit)
+            return [
+                {"run_id": r.run_id, "engine": r.engine, "dataset": r.dataset_name,
+                 "status": str(r.status), "aic": r.metrics_json.get("aic"),
+                 "bic": r.metrics_json.get("bic"), "duration": r.duration_secs,
+                 "created_at": str(r.created_at)}
+                for r in runs
+            ]
+        except Exception as exc:
+            return [_error(exc)]
+
+    # -- compare_models --------------------------------------------------
+
+    def compare_models(
+        run_ids: Annotated[list[str], "List of run IDs to compare"],
+    ) -> dict[str, Any]:
+        """Compare multiple model runs by AIC, BIC, and other metrics."""
+        try:
+            from lazybridge.stat_runtime.diagnostics import compare_models as _compare
+            runs = [rt.get_run(rid) for rid in run_ids]
+            runs = [r for r in runs if r is not None]
+            if not runs:
+                return {"error": True, "message": "No valid runs found"}
+            result = _compare(runs)
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- list_artifacts --------------------------------------------------
+
+    def list_artifacts(
+        run_id: Annotated[str, "Run ID to list artifacts for"],
+        artifact_type: Annotated[str | None, "Filter: plot, data, summary, forecast"] = None,
+    ) -> list[dict[str, Any]]:
+        """List all artifacts (plots, data, summaries) for a model run."""
+        try:
+            arts = rt.meta_store.list_artifacts(run_id=run_id, artifact_type=artifact_type)
+            return [a.model_dump(mode="json") for a in arts]
+        except Exception as exc:
+            return [_error(exc)]
+
+    # -- get_plot --------------------------------------------------------
+
+    def get_plot(
+        run_id: Annotated[str, "Run ID"],
+        name: Annotated[str, "Plot name (e.g. 'residuals', 'volatility', 'forecast', 'regimes')"],
+    ) -> dict[str, Any]:
+        """Get the file path for a specific plot from a model run."""
+        try:
+            arts = rt.meta_store.list_artifacts(run_id=run_id, artifact_type="plot")
+            for a in arts:
+                if a.name == name:
+                    return {"path": a.path, "name": a.name, "description": a.description}
+            available = [a.name for a in arts]
+            return {"error": True, "message": f"Plot '{name}' not found. Available: {available}"}
+        except Exception as exc:
+            return _error(exc)
+
+    # -- Assemble tools --------------------------------------------------
 
     return [
         LazyTool.from_function(
@@ -313,8 +303,9 @@ def stat_tools(runtime) -> list[LazyTool]:
         LazyTool.from_function(
             query_data, name="query_data",
             description="Run a SQL query on registered datasets using dataset('name') macro",
-            guidance="Use SELECT only. Reference datasets with dataset('name'). Example: "
-                     "SELECT date, ret FROM dataset('equities') WHERE symbol='SPY' ORDER BY date",
+            guidance="Use SELECT only. Reference datasets with dataset('name'). "
+                     "Direct file access (read_parquet etc.) is blocked. "
+                     "Example: SELECT date, ret FROM dataset('equities') WHERE symbol='SPY' ORDER BY date",
         ),
         LazyTool.from_function(
             fit_model, name="fit_model",
