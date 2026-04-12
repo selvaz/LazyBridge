@@ -1,5 +1,7 @@
 # fit_model Tool Reference
 
+> **Note**: For most analyses, prefer `analyze()` which provides automatic model selection, interpretation, assumptions, and suggested next steps. Use `fit_model` when you need explicit family/parameter control or raw RunRecord output.
+
 ## Tool Signature
 
 ```python

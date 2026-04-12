@@ -96,7 +96,7 @@ is_available("statsmodels") # True/False
 
 **Cause**: The `time_column` parameter does not match any column name in the file.
 
-**Recovery**: Check the exact column name. Column names are case-sensitive. Use `profile_dataset` or check the `schema_json` in the registration response to see exact column names.
+**Recovery**: Check the exact column name. Column names are case-sensitive. Use `discover_data()` or check the `columns_schema` in the registration response to see exact column names.
 
 ### Dataset name collision
 

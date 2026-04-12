@@ -61,10 +61,13 @@ A `DatasetMeta` Pydantic model is persisted in the `MetaStore` (in-memory dict o
 | `frequency` | `Frequency` | User-provided | The frequency enum value |
 | `time_column` | `str \| None` | User-provided | The time column name, or `None` |
 | `entity_keys` | `list[str]` | User-provided | Entity key column names, or empty list |
-| `semantic_roles` | `dict[str, str]` | Default `{}` | Not populated by the tool; reserved for future use |
+| `semantic_roles` | `dict[str, str]` | Default `{}` | Column-to-role mapping. Not auto-populated by the tool; can be set programmatically. |
 | `profile_json` | `dict` | Default `{}` | Empty until `profile_dataset` is called |
 | `row_count` | `int` | Auto-detected | Total number of rows in the file |
 | `registered_at` | `datetime` | Auto-generated | UTC timestamp of registration |
+| `business_description` | `str \| None` | Default `None` | Human-readable description of the dataset (e.g. "Daily S&P 500 returns"). Used by `discover_data()` summaries. |
+| `canonical_target` | `str \| None` | Default `None` | Explicitly declared preferred target column. Used by `analyze(mode="recommend")`. |
+| `identifiers_to_ignore` | `list[str]` | Default `[]` | Columns to exclude from modeling (IDs, hashes). Used by inference to avoid treating identifiers as features. |
 
 ## Return Value
 
@@ -89,7 +92,10 @@ On success, returns the full `DatasetMeta` serialized as a JSON dict via `model_
   "semantic_roles": {},
   "profile_json": {},
   "row_count": 125000,
-  "registered_at": "2025-01-15T10:30:00+00:00"
+  "registered_at": "2025-01-15T10:30:00+00:00",
+  "business_description": null,
+  "canonical_target": null,
+  "identifiers_to_ignore": []
 }
 ```
 

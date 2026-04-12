@@ -4,7 +4,68 @@ This document provides complete, step-by-step workflows using the stat_runtime t
 
 ---
 
-## Workflow A: GARCH Volatility Study
+## Recommended Workflow: High-Level (analyze)
+
+**Goal**: Analyze data with minimal tool calls using the high-level `analyze()` tool.
+
+### Step 1: Register Data
+
+```python
+register_dataset(
+    name="sp500",
+    uri="/data/sp500_returns.parquet",
+    time_column="date",
+    frequency="daily"
+)
+```
+
+### Step 2: Discover Data
+
+```python
+discover_data()
+```
+
+Read the `column_roles` to identify target candidates and time columns. Read `suggestions` for actionable advice.
+
+### Step 3: Run Analysis
+
+```python
+analyze(
+    dataset_name="sp500",
+    target_col="ret",
+    mode="recommend"    # let the runtime choose
+)
+```
+
+The result includes `mode_rationale` (why this analysis was chosen), `assumptions`, `interpretation`, `model_adequate`, `plots`, and `next_steps`.
+
+### Step 4: Review Past Analyses
+
+```python
+discover_analyses(dataset_name="sp500")
+```
+
+Shows all runs with inline metrics and artifact catalogs. Use `best_by_aic` to find the best model.
+
+### Step 5: Refine (if needed)
+
+If `next_steps` suggests trying a different approach:
+
+```python
+analyze(
+    dataset_name="sp500",
+    target_col="ret",
+    mode="regime"    # try regime detection
+)
+```
+
+### Step 6: For Expert Control, Delegate
+
+Use `delegate_to_expert()` or switch to low-level tools for custom SQL, specific model parameters, or manual plot retrieval.
+
+---
+
+## Expert Workflow A: GARCH Volatility Study
 
 **Goal**: Estimate time-varying volatility of a financial return series, assess model adequacy, and forecast future volatility.
 
@@ -19,7 +80,7 @@ register_dataset(
 )
 ```
 
-Verify the return contains `"row_count"` and `"schema_json"` with the expected columns.
+Verify the return contains `"row_count"` and `"columns_schema"` with the expected columns.
 
 ### Step A2: Profile the Data
 

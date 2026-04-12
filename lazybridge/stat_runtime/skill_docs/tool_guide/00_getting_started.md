@@ -61,21 +61,40 @@ from lazybridge.stat_runtime.runner import StatRuntime
 from lazybridge.stat_runtime.tools import stat_tools
 
 rt = StatRuntime()
-agent = LazyAgent("anthropic", tools=stat_tools(rt))
-resp = agent.loop("Register data.parquet, fit GARCH(1,1) on returns")
+# High-level tools only (recommended for LLM agents)
+agent = LazyAgent("anthropic", tools=stat_tools(rt, level="high"))
+
+# Or use stat_agent() for a pre-configured agent with expert delegation
+from lazybridge.stat_runtime.tools import stat_agent
+agent, rt = stat_agent("anthropic")
+resp = agent.loop("Register data.parquet and analyze the volatility of SPY returns")
 ```
 
-## Available Tools
+## Two-Tier Tool Architecture
 
-After calling `stat_tools(rt)`, the following tools are available:
+Tools are organized into two tiers. Use `stat_tools(rt, level=...)` to select:
+
+- `level="high"` — 4 tools for the main LLM agent (recommended default)
+- `level="low"` — 11 expert tools for fine-grained control
+- `level="all"` — all 15 tools combined (default)
+
+### High-Level Tools (Main Agent)
 
 | Tool Name | Purpose |
 |---|---|
+| `discover_data` | Discover datasets with column roles, types, quality signals, and suggestions |
+| `discover_analyses` | Discover completed runs with inline metrics, diagnostics, and artifact catalogs |
+| `analyze` | Run a goal-oriented analysis with automatic model selection |
 | `register_dataset` | Register a Parquet or CSV file as a named dataset |
+
+### Expert Tools (Sub-Agent / Advanced Use)
+
+| Tool Name | Purpose |
+|---|---|
 | `list_datasets` | List all registered datasets with schema and row count |
 | `profile_dataset` | Compute column-level statistics (nulls, min, max, mean, std) |
 | `query_data` | Execute a SQL SELECT query using `dataset('name')` macro |
-| `fit_model` | Fit a statistical model (OLS, ARIMA, GARCH, Markov) |
+| `fit_model` | Fit a statistical model with explicit family and parameters |
 | `forecast_model` | Generate a forecast from a previously fitted model |
 | `run_diagnostics` | Run stationarity tests (ADF + KPSS) on a data column |
 | `get_run` | Retrieve a past model run with metrics and artifact paths |
@@ -132,12 +151,15 @@ On success, returns the full `DatasetMeta` as a dict:
   "version": "1",
   "uri": "/data/returns.parquet",
   "file_format": "parquet",
-  "schema_json": {"date": "Date", "symbol": "Utf8", "ret": "Float64", "volume": "Int64"},
+  "columns_schema": {"date": "Date", "symbol": "Utf8", "ret": "Float64", "volume": "Int64"},
   "frequency": "daily",
   "time_column": "date",
   "entity_keys": ["symbol"],
   "row_count": 125000,
-  "registered_at": "2025-01-15T10:30:00+00:00"
+  "registered_at": "2025-01-15T10:30:00+00:00",
+  "business_description": null,
+  "canonical_target": null,
+  "identifiers_to_ignore": []
 }
 ```
 
@@ -276,32 +298,51 @@ Returns a `DiagnosticResult` dict with the comparison table in `detail.models` a
 ## Data Flow Summary
 
 ```
-register_dataset  -->  [DatasetCatalog]  -->  query_data / fit_model
-                                                    |
-                                              [Engine: fit]
-                                                    |
-                                         [Diagnostics + Plots]
-                                                    |
-                                         [ArtifactStore + MetaStore]
-                                                    |
-                                      get_run / list_artifacts / get_plot
+register_dataset  -->  discover_data  -->  analyze (mode=recommend)
+                                                |
+                                     [Auto: model selection + fit]
+                                                |
+                                     [Diagnostics + Plots + Interpretation]
+                                                |
+                                     discover_analyses  -->  get_plot / compare_models
+```
+
+For expert use, the low-level path is:
+
+```
+register_dataset  -->  query_data / profile_dataset  -->  fit_model
+                                                              |
+                                                        [Engine: fit]
+                                                              |
+                                                   [ArtifactStore + MetaStore]
+                                                              |
+                                                get_run / list_artifacts / get_plot
 ```
 
 ## Key Conventions
 
 1. **Dataset names** are strings you choose. Use dots for namespacing: `"equities.daily"`, `"macro.gdp"`.
-2. **Run IDs** are auto-generated hex strings (16 chars). Always returned by `fit_model`.
+2. **Run IDs** are auto-generated hex strings (16 chars). Returned by `analyze` and `fit_model`.
 3. **All tools return dicts.** Never raises. Check for `"error": true` in the return value.
 4. **Artifacts are stored on disk** under `{artifacts_dir}/{run_id}/plots/`, `{artifacts_dir}/{run_id}/data/`, `{artifacts_dir}/{run_id}/summaries/`.
-5. **Plots are auto-generated on fit.** You do not need to call a separate plot tool. Use `get_plot` to retrieve paths after fitting.
+5. **Plots are auto-generated on fit.** Both `analyze` and `fit_model` generate plots automatically.
 6. **Forecasts can be generated at fit time** (via `forecast_steps`) or after the fact (via `forecast_model` with a `run_id`).
 
-## Typical Agent Workflow
+## Recommended Agent Workflow (High-Level)
 
 1. Call `register_dataset` for each data file.
-2. Call `list_datasets` or `profile_dataset` to understand the data.
+2. Call `discover_data()` to see column roles, types, quality signals, and suggestions.
+3. Call `analyze(dataset, target, mode="recommend")` — the runtime picks the best analysis.
+4. Report the `interpretation`, `mode_rationale`, and artifact paths from the result.
+5. Call `discover_analyses()` to review all completed runs.
+6. Only drop to expert tools (`fit_model`, `query_data`, etc.) if the user needs custom parameters.
+
+## Expert Workflow (Low-Level)
+
+1. Call `register_dataset` for each data file.
+2. Call `profile_dataset` to understand data quality.
 3. Call `run_diagnostics` to check stationarity if fitting time-series models.
-4. Call `fit_model` with appropriate family and params.
+4. Call `fit_model` with explicit family and params.
 5. Read `run_id`, `status`, `metrics_json`, and `diagnostics_json` from the return.
 6. Call `get_plot` to retrieve visualization paths.
 7. Optionally call `forecast_model` for additional forecasts.
