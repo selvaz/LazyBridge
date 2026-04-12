@@ -38,6 +38,23 @@ _logger = logging.getLogger(__name__)
 _SCHEMA_VERSION = 1
 
 
+def _safe_float(obj):
+    """JSON serializer fallback for numpy floats, inf, nan."""
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return None
+        if math.isinf(obj):
+            return None
+    # numpy scalar
+    if hasattr(obj, "item"):
+        val = obj.item()
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return val
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 # ---------------------------------------------------------------------------
 # InMemory backend
 # ---------------------------------------------------------------------------
@@ -136,7 +153,7 @@ class _DuckDBBackend:
         semantic_roles JSON,
         profile_json   JSON,
         row_count      BIGINT,
-        registered_at  TIMESTAMP DEFAULT current_timestamp
+        registered_at  TIMESTAMPTZ DEFAULT current_timestamp
     );
 
     CREATE TABLE IF NOT EXISTS runs (
@@ -151,7 +168,7 @@ class _DuckDBBackend:
         diagnostics_json JSON,
         artifact_paths   JSON,
         engine           VARCHAR DEFAULT '',
-        created_at       TIMESTAMP DEFAULT current_timestamp,
+        created_at       TIMESTAMPTZ DEFAULT current_timestamp,
         duration_secs    DOUBLE,
         error_message    VARCHAR
     );
@@ -163,7 +180,7 @@ class _DuckDBBackend:
         file_format   VARCHAR NOT NULL,
         path          VARCHAR NOT NULL,
         description   VARCHAR DEFAULT '',
-        created_at    TIMESTAMP DEFAULT current_timestamp,
+        created_at    TIMESTAMPTZ DEFAULT current_timestamp,
         metadata_json JSON,
         PRIMARY KEY (run_id, name)
     );
@@ -204,8 +221,9 @@ class _DuckDBBackend:
     # -- datasets --
     def save_dataset(self, meta: DatasetMeta) -> None:
         conn = self._conn()
+        conn.execute("DELETE FROM datasets WHERE name = ?", [meta.name])
         conn.execute(
-            """INSERT OR REPLACE INTO datasets
+            """INSERT INTO datasets
                (dataset_id, name, version, uri, file_format, schema_json,
                 frequency, time_column, entity_keys, semantic_roles,
                 profile_json, row_count, registered_at)
@@ -220,9 +238,15 @@ class _DuckDBBackend:
             ],
         )
 
+    _DATASET_COLS = (
+        "dataset_id, name, version, uri, file_format, schema_json, "
+        "frequency, time_column, entity_keys, semantic_roles, "
+        "profile_json, row_count, registered_at"
+    )
+
     def get_dataset(self, name: str) -> DatasetMeta | None:
         row = self._conn().execute(
-            "SELECT * FROM datasets WHERE name = ?", [name]
+            f"SELECT {self._DATASET_COLS} FROM datasets WHERE name = ?", [name]
         ).fetchone()
         if row is None:
             return None
@@ -230,7 +254,7 @@ class _DuckDBBackend:
 
     def list_datasets(self) -> list[DatasetMeta]:
         rows = self._conn().execute(
-            "SELECT * FROM datasets ORDER BY registered_at DESC"
+            f"SELECT {self._DATASET_COLS} FROM datasets ORDER BY registered_at DESC"
         ).fetchall()
         return [self._row_to_dataset(r) for r in rows]
 
@@ -254,26 +278,36 @@ class _DuckDBBackend:
     # -- runs --
     def save_run(self, record: RunRecord) -> None:
         conn = self._conn()
+        conn.execute("DELETE FROM runs WHERE run_id = ?", [record.run_id])
         conn.execute(
-            """INSERT OR REPLACE INTO runs
+            """INSERT INTO runs
                (run_id, dataset_name, query_hash, spec_json, status,
                 fit_summary, params_json, metrics_json, diagnostics_json,
                 artifact_paths, engine, created_at, duration_secs, error_message)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 record.run_id, record.dataset_name, record.query_hash,
-                json.dumps(record.spec_json), str(record.status),
-                record.fit_summary, json.dumps(record.params_json),
-                json.dumps(record.metrics_json), json.dumps(record.diagnostics_json),
+                json.dumps(record.spec_json, default=_safe_float),
+                str(record.status),
+                record.fit_summary,
+                json.dumps(record.params_json, default=_safe_float),
+                json.dumps(record.metrics_json, default=_safe_float),
+                json.dumps(record.diagnostics_json, default=_safe_float),
                 json.dumps(record.artifact_paths), record.engine,
                 record.created_at.isoformat(), record.duration_secs,
                 record.error_message,
             ],
         )
 
+    _RUN_COLS = (
+        "run_id, dataset_name, query_hash, spec_json, status, "
+        "fit_summary, params_json, metrics_json, diagnostics_json, "
+        "artifact_paths, engine, created_at, duration_secs, error_message"
+    )
+
     def get_run(self, run_id: str) -> RunRecord | None:
         row = self._conn().execute(
-            "SELECT * FROM runs WHERE run_id = ?", [run_id]
+            f"SELECT {self._RUN_COLS} FROM runs WHERE run_id = ?", [run_id]
         ).fetchone()
         if row is None:
             return None
@@ -296,7 +330,7 @@ class _DuckDBBackend:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         rows = self._conn().execute(
-            f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT {self._RUN_COLS} FROM runs{where} ORDER BY created_at DESC LIMIT ?",
             params,
         ).fetchall()
         return [self._row_to_run(r) for r in rows]
@@ -322,7 +356,11 @@ class _DuckDBBackend:
     def save_artifact(self, record: ArtifactRecord) -> None:
         conn = self._conn()
         conn.execute(
-            """INSERT OR REPLACE INTO artifacts
+            "DELETE FROM artifacts WHERE run_id = ? AND name = ?",
+            [record.run_id, record.name],
+        )
+        conn.execute(
+            """INSERT INTO artifacts
                (run_id, name, artifact_type, file_format, path,
                 description, created_at, metadata_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",

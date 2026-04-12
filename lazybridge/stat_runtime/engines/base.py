@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
-
-import numpy as np
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from lazybridge.stat_runtime.schemas import (
     DiagnosticResult,
@@ -15,12 +13,18 @@ from lazybridge.stat_runtime.schemas import (
     ModelSpec,
 )
 
+if TYPE_CHECKING:
+    import numpy as np
+
 
 class BaseEngine(ABC):
     """Abstract model engine.  One subclass per ModelFamily.
 
     Engines receive numpy arrays, not DataFrames.  The runner is responsible
     for extracting columns from the query result before calling the engine.
+
+    numpy is NOT imported at module level to preserve lazy-import semantics.
+    It is imported inside each engine's methods at call time.
     """
 
     family: ClassVar[ModelFamily]
@@ -28,8 +32,8 @@ class BaseEngine(ABC):
     @abstractmethod
     def fit(
         self,
-        y: np.ndarray,
-        X: np.ndarray | None = None,
+        y: Any,
+        X: Any | None = None,
         *,
         spec: ModelSpec,
     ) -> FitResult:
@@ -51,8 +55,8 @@ class BaseEngine(ABC):
     def diagnostics(
         self,
         fit_result: FitResult,
-        y: np.ndarray,
-        X: np.ndarray | None = None,
+        y: Any,
+        X: Any | None = None,
     ) -> list[DiagnosticResult]:
         """Run model-specific diagnostic tests."""
         ...

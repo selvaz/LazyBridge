@@ -29,7 +29,15 @@ class ARIMAEngine(BaseEngine):
         SARIMAX = _import_sarimax()
 
         order = tuple(spec.params.get("order", (1, 0, 0)))
+        if len(order) != 3:
+            raise ValueError(
+                f"ARIMA order must be a 3-element tuple (p, d, q), got {order}"
+            )
         seasonal_order = tuple(spec.params.get("seasonal_order", (0, 0, 0, 0)))
+        if len(seasonal_order) != 4:
+            raise ValueError(
+                f"Seasonal order must be a 4-element tuple (P, D, Q, s), got {seasonal_order}"
+            )
         trend = spec.params.get("trend", "c")
 
         model = SARIMAX(
@@ -84,8 +92,8 @@ class ARIMAEngine(BaseEngine):
             family=ModelFamily.ARIMA,
             steps=steps,
             point_forecast=summary["mean"].tolist(),
-            lower_ci=summary[f"mean_ci_lower"].tolist(),
-            upper_ci=summary[f"mean_ci_upper"].tolist(),
+            lower_ci=summary["mean_ci_lower"].tolist(),
+            upper_ci=summary["mean_ci_upper"].tolist(),
             ci_level=ci_level,
         )
 

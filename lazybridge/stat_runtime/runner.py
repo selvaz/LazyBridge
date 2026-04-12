@@ -158,8 +158,9 @@ class StatRuntime:
     def forecast(self, run_id: str, steps: int, *, ci_level: float = 0.95) -> ForecastResult:
         """Generate a forecast from a previously fitted model.
 
-        NOTE: This requires the fitted model object to be in memory
-        (i.e., the run must have been executed in this session).
+        This re-fits the model from the stored spec to obtain a live model
+        object, then produces the forecast.  This approach avoids persisting
+        fragile pickle objects while still supporting forecast-after-fit.
         """
         run = self.meta_store.get_run(run_id)
         if run is None:
@@ -167,14 +168,11 @@ class StatRuntime:
         if run.status != RunStatus.SUCCESS:
             raise ValueError(f"Run '{run_id}' did not succeed (status={run.status})")
 
+        # Re-fit to get a live model object
+        spec = ModelSpec(**run.spec_json)
+        y, X = self._load_data(spec)
         engine = get_engine(run.engine)
-        # Reconstruct FitResult from stored data
-        fit_result = FitResult(
-            family=ModelFamily(run.engine),
-            summary_text=run.fit_summary,
-            params=run.params_json,
-            metrics=run.metrics_json,
-        )
+        fit_result = engine.fit(y, X, spec=spec)
         return engine.forecast(fit_result, steps, ci_level=ci_level)
 
     # ------------------------------------------------------------------
@@ -205,7 +203,6 @@ class StatRuntime:
             result = self.query_engine.execute(spec.query_sql)
             data = result.data_json
         elif spec.dataset_name:
-            pl = _import_polars()
             df = self.catalog.load_df(spec.dataset_name)
             data = df.to_dicts()
         else:
@@ -222,6 +219,13 @@ class StatRuntime:
         y = np.array([row[spec.target_col] for row in data], dtype=float)
         X = None
         if spec.exog_cols:
+            available = set(data[0].keys())
+            missing = [c for c in spec.exog_cols if c not in available]
+            if missing:
+                raise ValueError(
+                    f"Exogenous columns not found: {missing}. "
+                    f"Available: {sorted(available)}"
+                )
             X = np.column_stack([
                 np.array([row[col] for row in data], dtype=float)
                 for col in spec.exog_cols

@@ -112,28 +112,30 @@ class MarkovEngine(BaseEngine):
         regime_means = np.array(regime_means)
 
         point_forecast = []
+        regime_probs_forecast = []
         current_probs = last_probs.copy()
         for _ in range(steps):
             current_probs = transition.T @ current_probs
             point_forecast.append(float(current_probs @ regime_means))
+            regime_probs_forecast.append(current_probs.tolist())
 
-        # Simple CI from historical residual std
+        # CI grows with forecast horizon (sqrt scaling)
         residuals = np.array(fit_result.residuals_json)
         std = float(np.std(residuals)) if len(residuals) > 0 else 1.0
         from scipy.stats import norm
         z = norm.ppf((1 + ci_level) / 2)
 
         pf = np.array(point_forecast)
+        horizons = np.arange(1, steps + 1)
+        ci_width = z * std * np.sqrt(horizons)
         return ForecastResult(
             family=ModelFamily.MARKOV,
             steps=steps,
             point_forecast=pf.tolist(),
-            lower_ci=(pf - z * std).tolist(),
-            upper_ci=(pf + z * std).tolist(),
+            lower_ci=(pf - ci_width).tolist(),
+            upper_ci=(pf + ci_width).tolist(),
             ci_level=ci_level,
-            extra={"regime_probabilities_forecast": [
-                (transition.T @ last_probs).tolist() for _ in range(steps)
-            ]},
+            extra={"regime_probabilities_forecast": regime_probs_forecast},
         )
 
     def diagnostics(

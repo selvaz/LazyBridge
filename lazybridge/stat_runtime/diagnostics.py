@@ -220,8 +220,11 @@ def compare_models(runs: list[RunRecord]) -> DiagnosticResult:
 def _import_sm_tsa():
     from lazybridge.stat_runtime._deps import require_statsmodels
     require_statsmodels()
-    import statsmodels.tsa as tsa
-    return tsa
+    import statsmodels.tsa.stattools as _stattools
+    # Return a namespace object that exposes .stattools
+    class _ns:
+        stattools = _stattools
+    return _ns()
 
 
 def _import_sm_diagnostic():

@@ -49,20 +49,24 @@ class GARCHEngine(BaseEngine):
             "log_likelihood": float(result.loglikelihood),
         }
 
+        # Standardized residuals: guard against division by zero
+        safe_vol = np.where(cond_vol > 0, cond_vol, np.nan)
+        std_resid = np.where(safe_vol > 0, result.resid / safe_vol, 0.0)
+
         return FitResult(
             family=ModelFamily.GARCH,
             summary_text=str(result.summary()),
             params=params,
             metrics=metrics,
             residuals_json=result.resid.tolist(),
-            fitted_values_json=cond_vol.tolist(),
+            fitted_values_json=result.resid.tolist(),  # mean model residuals (not volatility)
             extra={
                 "p": p,
                 "q": q,
                 "vol_model": vol,
                 "distribution": dist,
                 "conditional_volatility": cond_vol.tolist(),
-                "std_residuals": (result.resid / cond_vol).tolist(),
+                "std_residuals": std_resid.tolist(),
                 "p_values": {name: float(pv) for name, pv in result.pvalues.items()},
                 "_result_obj": result,
             },
