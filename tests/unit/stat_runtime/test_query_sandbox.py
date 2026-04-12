@@ -67,6 +67,66 @@ class TestFileReaderBlocking:
             engine._validate("SELECT * FROM READ_PARQUET('/data.parquet')")
 
 
+class TestPathLiteralBlocking:
+    """P0: DuckDB replacement scans via path literals must be blocked."""
+
+    def test_absolute_unix_path(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate("SELECT * FROM '/tmp/secret.parquet'")
+
+    def test_absolute_unix_path_double_quotes(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate('SELECT * FROM "/tmp/secret.parquet"')
+
+    def test_windows_path_forward_slash(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate("SELECT * FROM 'C:/temp/secret.csv'")
+
+    def test_windows_path_backslash(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate(r"SELECT * FROM 'C:\data\file.parquet'")
+
+    def test_relative_dot_slash(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate("SELECT * FROM './local.csv'")
+
+    def test_relative_dot_dot_slash(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate("SELECT * FROM '../outside.csv'")
+
+    def test_filename_with_extension(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate("SELECT * FROM 'data.parquet'")
+
+    def test_join_path_literal(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate(
+                "SELECT * FROM dataset('ok') JOIN '/tmp/evil.csv' ON 1=1"
+            )
+
+    def test_path_in_cte_body(self, engine):
+        with pytest.raises(ValueError, match="Direct file path"):
+            engine._validate(
+                "WITH t AS (SELECT * FROM '/tmp/secret.parquet') SELECT * FROM t"
+            )
+
+    def test_dataset_macro_still_works(self, engine):
+        # dataset('name') should NOT be blocked by path-literal check
+        engine._validate("SELECT * FROM dataset('equities') ORDER BY date")
+
+    def test_string_literal_in_predicate_allowed(self, engine):
+        # Normal string literals in WHERE should not trigger false positive
+        engine._validate(
+            "SELECT * FROM dataset('ok') WHERE symbol = 'SPY'"
+        )
+
+    def test_string_literal_with_dots_in_predicate_allowed(self, engine):
+        # Strings with dots in predicates should not be blocked
+        engine._validate(
+            "SELECT * FROM dataset('ok') WHERE name = 'file.txt'"
+        )
+
+
 class TestMutationBlocking:
     """Mutation and DDL keywords must be blocked (either by first-word or regex)."""
 

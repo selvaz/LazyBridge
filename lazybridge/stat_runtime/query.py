@@ -47,6 +47,20 @@ _FILE_READER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# DuckDB replacement scans: FROM 'path.parquet' / JOIN 'path.csv'
+# Matches a path-like quoted string after FROM or JOIN keywords.
+# Path indicators: / \ . .. or drive letter (C:)
+_PATH_LITERAL_RE = re.compile(
+    r"""(?:FROM|JOIN)\s+['"]"""        # FROM or JOIN followed by quote
+    r"""(?:"""
+    r"""[/\\]"""                        # starts with / or \
+    r"""|\.\.?[/\\]"""                  # starts with ./ or ../
+    r"""|[A-Za-z]:[/\\]"""             # Windows drive letter (C:/ C:\)
+    r"""|[^'"]*\."""                    # contains a dot (file extension)
+    r""")""",
+    re.IGNORECASE,
+)
+
 # Mutation / DDL keywords
 _MUTATION_RE = re.compile(
     r"""\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH"""
@@ -156,6 +170,16 @@ class QueryEngine:
         if match:
             raise ValueError(
                 f"Direct file access function '{match.group(0)}' is not allowed. "
+                "Use the dataset('name') macro to access registered datasets. "
+                "Example: SELECT * FROM dataset('my_data')"
+            )
+
+        # Block path-literal replacement scans: FROM '/path/file.parquet'
+        # DuckDB auto-detects file extensions and reads them as tables.
+        match = _PATH_LITERAL_RE.search(stripped)
+        if match:
+            raise ValueError(
+                "Direct file path in FROM/JOIN clause is not allowed. "
                 "Use the dataset('name') macro to access registered datasets. "
                 "Example: SELECT * FROM dataset('my_data')"
             )
