@@ -2,7 +2,18 @@
 
 This is the primary reference for how an LLM agent should use the statistical runtime. Follow this workflow for every analysis request.
 
-## Default Workflow
+## Default Workflow (with data download)
+
+```
+1. search_tickers() or list_universe()  → Find tickers to analyze
+2. download_tickers([...])              → Download + auto-register in stat_runtime
+3. discover_data()                      → Verify datasets, see column roles
+4. analyze(dataset, target)             → Run analysis (mode="recommend" by default)
+5. Report the narrative + artifacts
+6. Only use expert tools if the user asks for custom control
+```
+
+## If Data Is Already Registered
 
 ```
 1. discover_data()              → What data is available?

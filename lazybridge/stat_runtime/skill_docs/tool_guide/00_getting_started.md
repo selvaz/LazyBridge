@@ -66,8 +66,8 @@ agent = LazyAgent("anthropic", tools=stat_tools(rt, level="high"))
 
 # Or use stat_agent() for a pre-configured agent with expert delegation
 from lazybridge.stat_runtime.tools import stat_agent
-agent, rt = stat_agent("anthropic")
-resp = agent.loop("Register data.parquet and analyze the volatility of SPY returns")
+agent, rt = stat_agent("anthropic")  # includes downloader + stat tools
+resp = agent.loop("Download SPY and AAPL data, then analyze their volatility")
 ```
 
 ## Two-Tier Tool Architecture
@@ -82,6 +82,9 @@ Tools are organized into two tiers. Use `stat_tools(rt, level=...)` to select:
 
 | Tool Name | Purpose |
 |---|---|
+| `list_universe` | Browse 140-ticker universe by asset class (Yahoo/FRED/ECB) |
+| `search_tickers` | Search tickers by name, symbol, sector, or country |
+| `download_tickers` | Download market data and auto-register for analysis |
 | `discover_data` | Discover datasets with column roles, types, quality signals, and suggestions |
 | `discover_analyses` | Discover completed runs with inline metrics, diagnostics, and artifact catalogs |
 | `analyze` | Run a goal-oriented analysis with automatic model selection |

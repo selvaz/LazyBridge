@@ -28,6 +28,45 @@ from lazybridge.data_downloader.ticker_db import TickerDatabase
 from lazybridge.data_downloader.downloader import DataDownloader
 from lazybridge.data_downloader.tools import downloader_tools
 
+
+def build_downloader_skills(output_root: str = "./generated_skills"):
+    """Build BM25-indexed skill bundle from downloader docs.
+
+    Returns dict with skill_dir path, or empty dict if docs missing.
+    """
+    from pathlib import Path
+    from lazybridge.tools.doc_skills import build_skill
+
+    docs_dir = Path(__file__).parent / "skill_docs"
+    if not docs_dir.exists() or not any(docs_dir.iterdir()):
+        return {}
+
+    return {
+        "data_downloader": build_skill(
+            [str(docs_dir)],
+            "data-downloader-guide",
+            output_root=output_root,
+            description="Guide to using the data downloader: 140-ticker universe, "
+                        "Yahoo/FRED/ECB sources, download workflows, ticker taxonomy.",
+        ),
+    }
+
+
+def downloader_skill_tools(skill_dir_map: dict):
+    """Create LazyTool wrappers for downloader skill bundles."""
+    from lazybridge.tools.doc_skills import skill_tool
+
+    tools = []
+    if "data_downloader" in skill_dir_map:
+        tools.append(skill_tool(
+            skill_dir_map["data_downloader"]["skill_dir"],
+            name="data_downloader_guide",
+            guidance="Query this to learn about available tickers, data sources, "
+                     "asset class taxonomy, and download workflows.",
+        ))
+    return tools
+
+
 __all__ = [
     "DownloaderConfig",
     "FetchResult",
@@ -35,4 +74,6 @@ __all__ = [
     "TickerDatabase",
     "DataDownloader",
     "downloader_tools",
+    "build_downloader_skills",
+    "downloader_skill_tools",
 ]
