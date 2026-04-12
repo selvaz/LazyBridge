@@ -7,6 +7,18 @@ Runtime binding is **closure-based**: each call to ``stat_tools(runtime)``
 returns tools permanently bound to that specific runtime instance.  Multiple
 runtimes can coexist safely in the same process.
 
+Two-tier architecture::
+
+    # High-level tools (for main agent): discover_data, discover_analyses,
+    # analyze, register_dataset
+    tools = stat_tools(rt, level="high")
+
+    # Low-level expert tools (for sub-agent): fit_model, query_data, etc.
+    tools = stat_tools(rt, level="low")
+
+    # All tools combined
+    tools = stat_tools(rt, level="all")   # or just stat_tools(rt)
+
 Usage::
 
     from lazybridge import LazyAgent
@@ -14,8 +26,8 @@ Usage::
     from lazybridge.stat_runtime.tools import stat_tools
 
     rt = StatRuntime()
-    agent = LazyAgent("anthropic", tools=stat_tools(rt))
-    resp = agent.loop("Register data.parquet, fit GARCH(1,1) on returns")
+    agent = LazyAgent("anthropic", tools=stat_tools(rt, level="high"))
+    resp = agent.loop("Register data.parquet and analyze the volatility of SPY returns")
 """
 
 from __future__ import annotations
@@ -38,23 +50,308 @@ def _error(exc: Exception) -> dict:
 # Tool factory — closure-based, no global state
 # ---------------------------------------------------------------------------
 
-def stat_tools(runtime) -> list[LazyTool]:
-    """Return all stat_runtime tools bound to the given StatRuntime instance.
+def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
+    """Return stat_runtime tools bound to the given StatRuntime instance.
+
+    Args:
+        runtime: A StatRuntime instance.
+        level: Tool tier to return:
+            - ``"high"`` — discovery + analyze + register_dataset (4 tools).
+              Designed for the main LLM agent.
+            - ``"low"`` — all 11 original expert tools (fit_model, query_data,
+              etc.). Designed for an expert sub-agent.
+            - ``"all"`` — both tiers combined (15 tools). Default.
 
     Each tool captures ``runtime`` in its closure.  Multiple runtimes can
     coexist: tools from ``stat_tools(rt1)`` will always use ``rt1``, even
     if ``stat_tools(rt2)`` is called later.
-
-    Usage::
-
-        from lazybridge.stat_runtime.runner import StatRuntime
-        from lazybridge.stat_runtime.tools import stat_tools
-
-        rt = StatRuntime()
-        tools = stat_tools(rt)
-        agent = LazyAgent("anthropic", tools=tools)
     """
     rt = runtime  # captured by all closures below
+
+    # ===================================================================
+    # HIGH-LEVEL TOOLS (main agent tier)
+    # ===================================================================
+
+    # -- discover_data ---------------------------------------------------
+
+    def discover_data() -> dict[str, Any]:
+        """Discover all registered datasets with column types, inferred roles, and suggestions.
+
+        Call this FIRST to understand what data is available before running any analysis.
+        Returns column-level type information, inferred roles (target, time, entity key),
+        and actionable suggestions for next steps.
+        """
+        try:
+            from lazybridge.stat_runtime.inference import (
+                infer_column_roles,
+                suggest_for_dataset,
+            )
+            from lazybridge.stat_runtime.schemas import (
+                DataDiscoveryResult,
+                DatasetDiscovery,
+            )
+
+            datasets_meta = rt.catalog.list_datasets()
+            discoveries = []
+
+            for meta in datasets_meta:
+                roles = infer_column_roles(meta)
+                suggestions = suggest_for_dataset(meta, roles)
+                discoveries.append(DatasetDiscovery(
+                    name=meta.name,
+                    uri=meta.uri,
+                    file_format=meta.file_format,
+                    frequency=str(meta.frequency),
+                    row_count=meta.row_count,
+                    time_column=meta.time_column,
+                    entity_keys=meta.entity_keys,
+                    columns=meta.columns_schema,
+                    column_roles=[r.model_dump() for r in roles],
+                    suggestions=suggestions,
+                    has_profile=bool(meta.profile_json),
+                ))
+
+            global_suggestions = []
+            if not discoveries:
+                global_suggestions.append(
+                    "No datasets registered. Call register_dataset() to add data files."
+                )
+
+            result = DataDiscoveryResult(
+                datasets=discoveries,
+                total_datasets=len(discoveries),
+                suggestions=global_suggestions,
+            )
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- discover_analyses -----------------------------------------------
+
+    def discover_analyses(
+        dataset_name: Annotated[str | None, "Filter by dataset name"] = None,
+        limit: Annotated[int, "Maximum runs to return"] = 20,
+    ) -> dict[str, Any]:
+        """Discover completed analysis runs with metrics, diagnostics, and artifact catalogs.
+
+        Call this to see what analyses have already been performed.
+        Returns run records enriched with inline metrics, diagnostics pass/fail counts,
+        and a complete list of artifacts (plots, data files, summaries) for each run.
+        """
+        try:
+            from lazybridge.stat_runtime.schemas import (
+                AnalysisDiscoveryResult,
+                ArtifactSummary,
+                RunSummary,
+            )
+
+            runs = rt.list_runs(dataset_name=dataset_name, limit=limit)
+            summaries = []
+            best_aic = (None, float("inf"))
+            best_bic = (None, float("inf"))
+            ds_set: set[str] = set()
+
+            for run in runs:
+                # Extract metrics
+                m = run.metrics_json or {}
+                aic = m.get("aic")
+                bic = m.get("bic")
+                ll = m.get("log_likelihood")
+
+                if aic is not None and aic < best_aic[1]:
+                    best_aic = (run.run_id, aic)
+                if bic is not None and bic < best_bic[1]:
+                    best_bic = (run.run_id, bic)
+
+                # Extract diagnostics summary
+                diags = run.diagnostics_json or []
+                d_passed = sum(1 for d in diags if d.get("passed") is True)
+                d_failed = sum(1 for d in diags if d.get("passed") is False)
+
+                # Extract spec highlights
+                spec = run.spec_json or {}
+                target = spec.get("target_col", "")
+                model_params = spec.get("params", {})
+
+                # Build artifact catalog
+                artifacts = []
+                try:
+                    arts = rt.meta_store.list_artifacts(run_id=run.run_id)
+                    for a in arts:
+                        artifacts.append(ArtifactSummary(
+                            name=a.name,
+                            artifact_type=a.artifact_type,
+                            file_format=a.file_format,
+                            path=a.path,
+                            description=a.description,
+                        ))
+                except Exception:
+                    pass  # artifact listing failure should not break discovery
+
+                if run.dataset_name:
+                    ds_set.add(run.dataset_name)
+
+                summaries.append(RunSummary(
+                    run_id=run.run_id,
+                    dataset_name=run.dataset_name,
+                    engine=run.engine,
+                    status=str(run.status),
+                    created_at=str(run.created_at),
+                    duration_secs=run.duration_secs,
+                    aic=aic,
+                    bic=bic,
+                    log_likelihood=ll,
+                    diagnostics_passed=d_passed,
+                    diagnostics_failed=d_failed,
+                    diagnostics_total=d_passed + d_failed,
+                    target_col=target,
+                    model_params=model_params,
+                    artifacts=artifacts,
+                    error_message=run.error_message,
+                ))
+
+            # Suggestions
+            suggestions = []
+            failed = [s for s in summaries if s.status == "failed"]
+            if failed:
+                suggestions.append(
+                    f"{len(failed)} run(s) failed. Check error_message for details."
+                )
+            engines_used = {s.engine for s in summaries if s.engine}
+            if len(engines_used) >= 2:
+                suggestions.append(
+                    "Multiple model families fitted. Use compare_models() to evaluate."
+                )
+
+            result = AnalysisDiscoveryResult(
+                runs=summaries,
+                total_runs=len(summaries),
+                datasets_analyzed=sorted(ds_set),
+                best_by_aic=best_aic[0],
+                best_by_bic=best_bic[0],
+                suggestions=suggestions,
+            )
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # -- analyze ---------------------------------------------------------
+
+    def analyze(
+        family: Annotated[str, "Model family: ols, arima, garch, or markov"],
+        target_col: Annotated[str, "Target column name"],
+        dataset_name: Annotated[str | None, "Registered dataset name"] = None,
+        query_sql: Annotated[str | None, "SQL query using dataset('name') macro"] = None,
+        exog_cols: Annotated[list[str] | None, "Exogenous variable columns"] = None,
+        params: Annotated[dict[str, Any] | None, "Model parameters (e.g. {'p': 1, 'q': 1})"] = None,
+        forecast_steps: Annotated[int | None, "Forecast steps (None = no forecast)"] = None,
+        time_col: Annotated[str | None, "Time column for ordering"] = None,
+    ) -> dict[str, Any]:
+        """Run a complete statistical analysis: fit model, diagnostics, plots, and interpretation.
+
+        This is the primary analysis tool. It calls fit_model internally but returns a richer
+        result with inline artifact catalog, diagnostic health assessment, interpretation hints,
+        and suggested next steps. Prefer this over fit_model for new analyses.
+        """
+        try:
+            from lazybridge.stat_runtime.inference import build_interpretation
+            from lazybridge.stat_runtime.schemas import (
+                AnalysisResult,
+                ArtifactSummary,
+                ModelSpec,
+            )
+
+            spec = ModelSpec(
+                family=ModelFamily(family),
+                target_col=target_col,
+                dataset_name=dataset_name,
+                query_sql=query_sql,
+                exog_cols=exog_cols or [],
+                params=params or {},
+                forecast_steps=forecast_steps,
+                time_col=time_col,
+            )
+            run = rt.execute(spec)
+
+            # Build artifact catalog
+            plots = []
+            data_arts = []
+            try:
+                arts = rt.meta_store.list_artifacts(run_id=run.run_id)
+                for a in arts:
+                    summary = ArtifactSummary(
+                        name=a.name,
+                        artifact_type=a.artifact_type,
+                        file_format=a.file_format,
+                        path=a.path,
+                        description=a.description,
+                    )
+                    if a.artifact_type == "plot":
+                        plots.append(summary)
+                    else:
+                        data_arts.append(summary)
+            except Exception:
+                pass
+
+            # Diagnostics assessment
+            diags = run.diagnostics_json or []
+            d_passed = sum(1 for d in diags if d.get("passed") is True)
+            d_failed = sum(1 for d in diags if d.get("passed") is False)
+            # Model adequate if no Ljung-Box failures (Jarque-Bera is informational)
+            lb_failures = [
+                d for d in diags
+                if d.get("passed") is False
+                and "ljung" in d.get("test_name", "").lower()
+            ]
+            model_adequate = run.status == "success" and len(lb_failures) == 0
+
+            # Forecast data
+            forecast_data = None
+            if forecast_steps and run.status == "success":
+                try:
+                    fc_arts = rt.meta_store.list_artifacts(
+                        run_id=run.run_id, artifact_type="forecast",
+                    )
+                    if fc_arts:
+                        fc_json = rt.artifacts.read_json(
+                            run.run_id, "forecast", artifact_type="data",
+                        )
+                        forecast_data = fc_json
+                except Exception:
+                    pass
+
+            # Interpretation
+            interp, warns, nexts = build_interpretation(run, family)
+
+            result = AnalysisResult(
+                run_id=run.run_id,
+                status=str(run.status),
+                engine=run.engine,
+                dataset_name=run.dataset_name,
+                target_col=target_col,
+                params=run.params_json or {},
+                metrics=run.metrics_json or {},
+                fit_summary=run.fit_summary or "",
+                diagnostics=diags,
+                diagnostics_passed=d_passed,
+                diagnostics_failed=d_failed,
+                model_adequate=model_adequate,
+                forecast=forecast_data,
+                plots=plots,
+                data_artifacts=data_arts,
+                interpretation=interp,
+                warnings=warns,
+                next_steps=nexts,
+                duration_secs=run.duration_secs,
+                error_message=run.error_message,
+            )
+            return result.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    # ===================================================================
+    # LOW-LEVEL EXPERT TOOLS
+    # ===================================================================
 
     # -- register_dataset ------------------------------------------------
 
@@ -282,18 +579,42 @@ def stat_tools(runtime) -> list[LazyTool]:
         except Exception as exc:
             return _error(exc)
 
-    # -- Assemble tools --------------------------------------------------
+    # -- Assemble tools by tier ------------------------------------------
 
-    return [
+    high_level_tools = [
+        LazyTool.from_function(
+            discover_data, name="discover_data",
+            description="Discover all registered datasets with column roles, types, and suggestions",
+            guidance="Call this first to understand what data is available. "
+                     "Returns enriched metadata with inferred column roles and actionable suggestions.",
+        ),
+        LazyTool.from_function(
+            discover_analyses, name="discover_analyses",
+            description="Discover completed analysis runs with metrics, diagnostics, and artifact catalogs",
+            guidance="Call to see what analyses and artifacts already exist. "
+                     "Shows metrics, diagnostics health, and all plots/data per run.",
+        ),
+        LazyTool.from_function(
+            analyze, name="analyze",
+            description="Run a complete analysis: fit model, diagnostics, plots, and interpretation",
+            guidance="Primary analysis tool. Returns enriched output with interpretation, "
+                     "diagnostics health, artifact catalog, and suggested next steps. "
+                     "Prefer this over fit_model for new analyses.",
+        ),
         LazyTool.from_function(
             register_dataset, name="register_dataset",
             description="Register a Parquet or CSV file as a named dataset for analysis",
-            guidance="Call this first to make data available. The file is scanned but not loaded.",
+            guidance="Call to make a new data file available. The file is scanned but not loaded. "
+                     "After registering, call discover_data() to see the enriched view.",
         ),
+    ]
+
+    low_level_tools = [
         LazyTool.from_function(
             list_datasets, name="list_datasets",
             description="List all registered datasets with schema and row count",
-            guidance="Call to discover what data is available before querying or fitting.",
+            guidance="Expert tool. Prefer discover_data() for a richer view with column roles. "
+                     "Use this for a quick name/schema check.",
         ),
         LazyTool.from_function(
             profile_dataset, name="profile_dataset",
@@ -310,14 +631,14 @@ def stat_tools(runtime) -> list[LazyTool]:
         LazyTool.from_function(
             fit_model, name="fit_model",
             description="Fit a statistical model (OLS, ARIMA, GARCH, Markov) to data",
-            guidance="Specify family and target_col. Key params by family: "
-                     "GARCH: p, q; ARIMA: order; Markov: k_regimes. "
-                     "Auto-generates diagnostics and plots.",
+            guidance="Expert tool. Prefer analyze() for standard analyses — it returns richer output. "
+                     "Use fit_model for programmatic fits or when you need the raw RunRecord. "
+                     "Key params by family: GARCH: p, q; ARIMA: order; Markov: k_regimes.",
         ),
         LazyTool.from_function(
             forecast_model, name="forecast_model",
             description="Generate a forecast from a previously fitted model",
-            guidance="Provide run_id from fit_model and number of steps to forecast.",
+            guidance="Provide run_id from fit_model/analyze and number of steps to forecast.",
         ),
         LazyTool.from_function(
             run_diagnostics, name="run_diagnostics",
@@ -326,11 +647,13 @@ def stat_tools(runtime) -> list[LazyTool]:
         ),
         LazyTool.from_function(
             get_run, name="get_run",
-            description="Retrieve a past model run with metrics and artifact paths",
+            description="Retrieve a past model run with full metrics and artifact paths",
         ),
         LazyTool.from_function(
             list_runs, name="list_runs",
             description="List past model runs, optionally filtered by dataset",
+            guidance="Expert tool. Prefer discover_analyses() for enriched view "
+                     "with inline metrics and artifact catalogs.",
         ),
         LazyTool.from_function(
             compare_models, name="compare_models",
@@ -340,7 +663,8 @@ def stat_tools(runtime) -> list[LazyTool]:
         LazyTool.from_function(
             list_artifacts, name="list_artifacts",
             description="List all artifacts (plots, data, summaries) for a model run",
-            guidance="Call to see what outputs are available: plots, residuals, forecasts.",
+            guidance="Expert tool. discover_analyses() includes artifacts inline. "
+                     "Use this for type-filtered artifact lookups.",
         ),
         LazyTool.from_function(
             get_plot, name="get_plot",
@@ -348,6 +672,12 @@ def stat_tools(runtime) -> list[LazyTool]:
             guidance="Common plot names: residuals, acf_pacf, volatility, regimes, forecast.",
         ),
     ]
+
+    if level == "high":
+        return high_level_tools
+    if level == "low":
+        return low_level_tools
+    return high_level_tools + low_level_tools
 
 
 # ---------------------------------------------------------------------------
@@ -407,3 +737,131 @@ def stat_skill_tools(skill_dir_map: dict[str, Any]) -> list[LazyTool]:
                      "interpretation frameworks, risk analysis, reporting standards.",
         ))
     return tools
+
+
+# ---------------------------------------------------------------------------
+# Pre-configured agent with two-tier architecture
+# ---------------------------------------------------------------------------
+
+def stat_agent(
+    provider: str = "anthropic",
+    *,
+    model: str | None = None,
+    db: str | None = None,
+    artifacts_dir: str = "artifacts",
+    include_skills: bool = True,
+    expert_mode: bool = True,
+    name: str = "stat_analyst",
+    system: str | None = None,
+    **agent_kwargs: Any,
+) -> tuple[Any, Any]:
+    """Create a pre-configured LazyAgent with stat_runtime tools.
+
+    Two operating modes:
+
+    **expert_mode=True** (default):
+        Main agent gets high-level tools (discover_data, discover_analyses,
+        analyze, register_dataset) plus a ``delegate_to_expert`` tool that
+        forwards tasks to an inner agent with all low-level tools.
+
+    **expert_mode=False**:
+        Main agent gets all tools in a flat list (no delegation).
+
+    Returns:
+        (agent, runtime) tuple. The runtime is returned so the caller can
+        register datasets programmatically or close it when done.
+
+    Usage::
+
+        agent, rt = stat_agent("anthropic")
+        agent.loop("Register data.parquet and analyze volatility of SPY returns")
+        rt.close()
+    """
+    from lazybridge.lazy_agent import LazyAgent
+    from lazybridge.stat_runtime.runner import StatRuntime
+
+    rt = StatRuntime(db=db, artifacts_dir=artifacts_dir)
+
+    default_system = (
+        "You are a quantitative analyst. Follow this workflow:\n"
+        "1. discover_data() — understand available datasets\n"
+        "2. discover_analyses() — see what's been done\n"
+        "3. analyze() — run new analyses\n"
+        "4. compare_models() — compare runs\n\n"
+        "Always check diagnostics before trusting results. "
+        "Report artifact paths so the user can view plots."
+    )
+
+    all_tools: list[LazyTool] = []
+
+    if expert_mode:
+        # Main agent: high-level tools
+        all_tools.extend(stat_tools(rt, level="high"))
+
+        # Inner expert agent with low-level tools
+        expert_tools = stat_tools(rt, level="low")
+        if include_skills:
+            try:
+                skill_dirs = build_stat_skills()
+                expert_tools.extend(stat_skill_tools(skill_dirs))
+            except Exception:
+                _logger.warning("Failed to build stat skills for expert agent", exc_info=True)
+
+        expert = LazyAgent(
+            provider,
+            model=model,
+            name="stat_expert",
+            description="Expert statistical analyst with low-level tool access",
+            system="You are an expert statistical analyst. Use the available tools "
+                   "to fulfill the task precisely. Return results as structured data.",
+            tools=expert_tools,
+            **agent_kwargs,
+        )
+
+        # Wrap expert as a tool for the main agent
+        expert_tool = expert.as_tool(
+            name="delegate_to_expert",
+            description="Delegate a task to the expert statistical agent for fine-grained control",
+            guidance="Use when the user needs specific model parameters, custom SQL queries, "
+                     "individual diagnostic tests, manual plot retrieval, or model comparison. "
+                     "The expert has access to: fit_model, forecast_model, query_data, "
+                     "profile_dataset, run_diagnostics, compare_models, get_run, list_runs, "
+                     "list_datasets, list_artifacts, get_plot.",
+        )
+        all_tools.append(expert_tool)
+
+        # Add skills to main agent too
+        if include_skills:
+            try:
+                skill_dirs = build_stat_skills()
+                all_tools.extend(stat_skill_tools(skill_dirs))
+            except Exception:
+                pass
+
+    else:
+        # Flat mode: all tools
+        all_tools.extend(stat_tools(rt, level="all"))
+        if include_skills:
+            try:
+                skill_dirs = build_stat_skills()
+                all_tools.extend(stat_skill_tools(skill_dirs))
+            except Exception:
+                _logger.warning("Failed to build stat skills", exc_info=True)
+
+    if expert_mode:
+        default_system += (
+            "\n\nUse delegate_to_expert() when the user needs specific model parameters, "
+            "custom SQL queries, or fine-grained control over the analysis pipeline."
+        )
+
+    agent = LazyAgent(
+        provider,
+        model=model,
+        name=name,
+        description="Statistical analyst with quantitative analysis capabilities",
+        system=system or default_system,
+        tools=all_tools,
+        **agent_kwargs,
+    )
+
+    return agent, rt

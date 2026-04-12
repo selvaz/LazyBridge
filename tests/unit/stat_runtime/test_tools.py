@@ -13,7 +13,7 @@ class TestStatToolsFactory:
         tools = stat_tools(MockRuntime())
         assert isinstance(tools, list)
         assert all(isinstance(t, LazyTool) for t in tools)
-        assert len(tools) == 12
+        assert len(tools) == 15  # 4 high-level + 11 low-level
 
     def test_tool_names(self):
         class MockRuntime:
@@ -21,7 +21,10 @@ class TestStatToolsFactory:
         tools = stat_tools(MockRuntime())
         names = {t.name for t in tools}
         expected = {
-            "register_dataset", "list_datasets", "profile_dataset",
+            # High-level
+            "discover_data", "discover_analyses", "analyze", "register_dataset",
+            # Low-level
+            "list_datasets", "profile_dataset",
             "query_data", "fit_model", "forecast_model", "run_diagnostics",
             "get_run", "list_runs", "compare_models", "list_artifacts", "get_plot",
         }
@@ -46,6 +49,9 @@ class TestToolErrorHandling:
             def get_run(self, run_id):
                 raise RuntimeError("DB connection failed")
             meta_store = None
+            catalog = type("C", (), {"list_datasets": lambda self: []})()
+            def list_runs(self, **kwargs):
+                return []
 
         tools = stat_tools(BrokenRuntime())
         get_run_tool = next(t for t in tools if t.name == "get_run")

@@ -26,6 +26,15 @@ __version__ = "0.1.0"
 
 # Schemas are always importable (no heavy deps — only pydantic)
 from lazybridge.stat_runtime.schemas import (
+    # High-level discovery & analysis
+    AnalysisDiscoveryResult,
+    AnalysisResult,
+    ArtifactSummary,
+    ColumnRoleInference,
+    DataDiscoveryResult,
+    DatasetDiscovery,
+    RunSummary,
+    # Original schemas
     ArtifactRecord,
     ColumnProfile,
     DatasetMeta,
@@ -62,4 +71,12 @@ __all__ = [
     "ArtifactRecord",
     # Run
     "RunRecord",
+    # High-level discovery & analysis
+    "ColumnRoleInference",
+    "DatasetDiscovery",
+    "DataDiscoveryResult",
+    "ArtifactSummary",
+    "RunSummary",
+    "AnalysisDiscoveryResult",
+    "AnalysisResult",
 ]

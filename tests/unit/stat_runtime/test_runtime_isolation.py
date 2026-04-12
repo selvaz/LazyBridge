@@ -91,4 +91,4 @@ class TestToolSchemaGeneration:
             pass
 
         tools = stat_tools(MockRuntime())
-        assert len(tools) == 12
+        assert len(tools) == 15  # 4 high-level + 11 low-level

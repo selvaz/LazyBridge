@@ -221,3 +221,120 @@ class RunRecord(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     duration_secs: float | None = None
     error_message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# High-level discovery & analysis contracts
+# ---------------------------------------------------------------------------
+
+class ColumnRoleInference(BaseModel):
+    """Inferred semantic role for a dataset column."""
+    column: str
+    dtype: str
+    inferred_role: str = Field(
+        description="time, target, entity_key, exogenous, identifier, or unknown",
+    )
+    confidence: str = Field(description="high, medium, or low")
+    reason: str = Field(description="Human-readable explanation of inference")
+
+
+class DatasetDiscovery(BaseModel):
+    """Enriched dataset metadata for LLM discovery."""
+    name: str
+    uri: str
+    file_format: str
+    frequency: str
+    row_count: int | None = None
+    time_column: str | None = None
+    entity_keys: list[str] = Field(default_factory=list)
+    columns: dict[str, str] = Field(
+        default_factory=dict,
+        description="Column name -> dtype string",
+    )
+    column_roles: list[ColumnRoleInference] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    has_profile: bool = False
+
+
+class DataDiscoveryResult(BaseModel):
+    """Result of discover_data() — all registered datasets with enriched metadata."""
+    datasets: list[DatasetDiscovery] = Field(default_factory=list)
+    total_datasets: int = 0
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class ArtifactSummary(BaseModel):
+    """Lightweight artifact reference for discovery results."""
+    name: str
+    artifact_type: str = Field(description="plot, data, summary, or forecast")
+    file_format: str = ""
+    path: str = ""
+    description: str = ""
+
+
+class RunSummary(BaseModel):
+    """Enriched run summary for analysis discovery."""
+    run_id: str
+    dataset_name: str = ""
+    engine: str = ""
+    status: str = ""
+    created_at: str = ""
+    duration_secs: float | None = None
+    # Key metrics inline
+    aic: float | None = None
+    bic: float | None = None
+    log_likelihood: float | None = None
+    # Diagnostics summary
+    diagnostics_passed: int = 0
+    diagnostics_failed: int = 0
+    diagnostics_total: int = 0
+    # Spec highlights
+    target_col: str = ""
+    model_params: dict[str, Any] = Field(default_factory=dict)
+    # Full artifact catalog for this run
+    artifacts: list[ArtifactSummary] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+class AnalysisDiscoveryResult(BaseModel):
+    """Result of discover_analyses() — all runs with inline metrics and artifacts."""
+    runs: list[RunSummary] = Field(default_factory=list)
+    total_runs: int = 0
+    datasets_analyzed: list[str] = Field(default_factory=list)
+    best_by_aic: str | None = Field(
+        default=None, description="run_id with lowest AIC",
+    )
+    best_by_bic: str | None = Field(
+        default=None, description="run_id with lowest BIC",
+    )
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class AnalysisResult(BaseModel):
+    """Structured output of analyze() — enriched single-call analysis result."""
+    run_id: str
+    status: str = "success"
+    engine: str = ""
+    dataset_name: str = ""
+    target_col: str = ""
+    # Model results
+    params: dict[str, float] = Field(default_factory=dict)
+    metrics: dict[str, float] = Field(default_factory=dict)
+    fit_summary: str = ""
+    # Diagnostics with pass/fail assessment
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    diagnostics_passed: int = 0
+    diagnostics_failed: int = 0
+    model_adequate: bool = False
+    # Forecast (if requested)
+    forecast: dict[str, Any] | None = None
+    # Inline artifact catalog
+    plots: list[ArtifactSummary] = Field(default_factory=list)
+    data_artifacts: list[ArtifactSummary] = Field(default_factory=list)
+    # Interpretation for LLM narrative
+    interpretation: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    # Timing
+    duration_secs: float | None = None
+    error_message: str | None = None
