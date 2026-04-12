@@ -211,14 +211,17 @@ def _make_chunks(path: Path, text: str, chunk_size: int, overlap: int) -> list[D
         else [("", c) for c in _char_chunks(text, chunk_size, overlap)]
     )
 
-    return [
-        DocChunk(
+    results = []
+    for i, (heading, body) in enumerate(pairs):
+        stripped = body.strip()
+        if not stripped:
+            continue
+        toks = _tokenize(stripped)
+        results.append(DocChunk(
             path=str(path), title=doc_title, heading=heading or doc_title,
-            text=body, tokens=(toks := _tokenize(body)), doc_len=len(toks), ordinal=i,
-        )
-        for i, (heading, body) in enumerate(pairs)
-        if (body := body.strip())
-    ]
+            text=stripped, tokens=toks, doc_len=len(toks), ordinal=i,
+        ))
+    return results
 
 
 # ── BM25 ───────────────────────────────────────────────────────────────────────
@@ -503,11 +506,13 @@ def query_skill(
     elif resolved_mode == "summarize":
         result_lines = ["Summary:"]
         for c in selected[:6]:
-            result_lines.append(f"  • {_trim(re.sub(r'\\s+', ' ', c.text), 300)}  [{Path(c.path).name}]")
+            condensed = re.sub(r'\s+', ' ', c.text)
+            result_lines.append(f"  - {_trim(condensed, 300)}  [{Path(c.path).name}]")
     else:
         result_lines = ["Best evidence:"]
         for c in selected[:5]:
-            result_lines.append(f"  • {_trim(re.sub(r'\\s+', ' ', c.text), 400)}  [{Path(c.path).name}]")
+            condensed = re.sub(r'\s+', ' ', c.text)
+            result_lines.append(f"  - {_trim(condensed, 400)}  [{Path(c.path).name}]")
         if include_quotes:
             result_lines.append("\nFull excerpts:")
             for c in selected[:3]:
