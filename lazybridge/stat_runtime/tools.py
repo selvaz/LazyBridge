@@ -925,6 +925,7 @@ def stat_agent(
     db: str | None = None,
     artifacts_dir: str = "artifacts",
     include_skills: bool = True,
+    include_downloader: bool = True,
     expert_mode: bool = True,
     name: str = "stat_analyst",
     system: str | None = None,
@@ -942,6 +943,9 @@ def stat_agent(
     **expert_mode=False**:
         Main agent gets all tools in a flat list (no delegation).
 
+    When **include_downloader=True** (default), adds data download tools:
+        list_universe, search_tickers, download_tickers (Yahoo/FRED/ECB).
+
     Returns:
         (agent, runtime) tuple. The runtime is returned so the caller can
         register datasets programmatically or close it when done.
@@ -949,7 +953,7 @@ def stat_agent(
     Usage::
 
         agent, rt = stat_agent("anthropic")
-        agent.loop("Register data.parquet and analyze volatility of SPY returns")
+        agent.loop("Download SPY data and analyze its volatility")
         rt.close()
     """
     from lazybridge.lazy_agent import LazyAgent
@@ -959,15 +963,31 @@ def stat_agent(
 
     default_system = (
         "You are a quantitative analyst. Follow this workflow:\n"
-        "1. discover_data() — understand available datasets\n"
-        "2. discover_analyses() — see what's been done\n"
-        "3. analyze() — run new analyses\n"
-        "4. compare_models() — compare runs\n\n"
-        "Always check diagnostics before trusting results. "
+        "1. search_tickers() or list_universe() — find tickers to analyze\n"
+        "2. download_tickers() — download real market data\n"
+        "3. discover_data() — verify registered datasets and column roles\n"
+        "4. analyze() — run goal-oriented analysis (mode=recommend/volatility/forecast/regime)\n"
+        "5. discover_analyses() — review completed analyses\n\n"
+        "Always check model_adequate in results before trusting them. "
         "Report artifact paths so the user can view plots."
     )
 
     all_tools: list[LazyTool] = []
+
+    # Add downloader tools if available
+    if include_downloader:
+        try:
+            from lazybridge.data_downloader.tools import downloader_tools
+            from lazybridge.data_downloader.ticker_db import TickerDatabase
+            from lazybridge.data_downloader.downloader import DataDownloader
+            tdb = TickerDatabase()
+            dl = DataDownloader(
+                cache_dir=str(Path(artifacts_dir) / "ticker_cache"),
+            )
+            all_tools.extend(downloader_tools(rt, tdb, dl))
+            _logger.info("Data downloader tools loaded (%d tickers)", len(tdb.list_all()))
+        except Exception:
+            _logger.warning("Data downloader not available", exc_info=True)
 
     if expert_mode:
         # Main agent: high-level tools
