@@ -91,6 +91,28 @@ class _DelegateConfig:
     system_prompt: str | None = None
 
 
+@dataclass
+class _PipelineConfig:
+    """Metadata for pipeline tools (chain/parallel/agent_tool).
+
+    Stored on the LazyTool so the pipeline can be serialized.
+    Closures capture participants at runtime; this records the topology.
+    """
+    mode: str  # "chain" | "parallel" | "agent_tool"
+    participants: tuple = ()
+    native_tools: list = field(default_factory=list)
+    combiner: str | None = None             # parallel only
+    concurrency_limit: int | None = None    # parallel only
+    step_timeout: float | None = None
+    guidance: str | None = None
+    # agent_tool-specific
+    input_schema: type | None = None
+    agent_tool_func: Callable | None = None
+    agent_tool_provider: str | None = None
+    agent_tool_model: str | None = None
+    agent_tool_system: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # LazyTool
 # ---------------------------------------------------------------------------
@@ -113,6 +135,7 @@ class LazyTool:
     _delegate: _DelegateConfig | None = field(default=None, repr=False)
     _compiled: ToolDefinition | None = field(default=None, repr=False)
     _is_pipeline_tool: bool = field(default=False, repr=False, compare=False)
+    _pipeline: _PipelineConfig | None = field(default=None, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # Factory: from plain Python function
@@ -361,6 +384,7 @@ class LazyTool:
     # ------------------------------------------------------------------
 
     _SENTINEL = "# LAZYBRIDGE_GENERATED_TOOL v1"
+    _SENTINEL_V2 = "# LAZYBRIDGE_GENERATED_TOOL v2"
 
     def save(self, path: str) -> None:
         """Serialise this tool to a human-readable Python file.
@@ -390,14 +414,16 @@ class LazyTool:
         ``load()`` executes the target file — passing an LLM-controlled
         path to it is a code-execution vulnerability.
         """
-        if self._is_pipeline_tool:
-            raise ValueError(
-                f"LazyTool '{self.name}' is a chain or parallel pipeline tool and "
-                "cannot be serialized — it is a runtime composition. "
-                "Save individual participants via agent.as_tool().save() instead."
-            )
         _validate_save_path(path)
-        if self._delegate is not None:
+        if self._is_pipeline_tool:
+            if self._pipeline is None:
+                raise ValueError(
+                    f"LazyTool '{self.name}' is a pipeline tool without metadata. "
+                    "Only pipelines created via chain()/parallel()/agent_tool() "
+                    "on this version can be saved."
+                )
+            self._save_pipeline(path)
+        elif self._delegate is not None:
             self._save_agent(path)
         else:
             self._save_function(path)
@@ -517,8 +543,197 @@ class LazyTool:
 
         _write_file(path, "\n".join(lines))
 
+    def _save_pipeline(self, path: str) -> None:
+        """Code-gen a .py file that reconstructs a pipeline tool."""
+        cfg = self._pipeline
+        import textwrap
+
+        lines: list[str] = [
+            self._SENTINEL_V2,
+            f"# pipeline_mode: {cfg.mode}",
+            "# NOTE: API keys are not serialized.",
+            "# Set the appropriate environment variable before loading.",
+            "",
+            "from lazybridge import LazyAgent, LazyTool",
+            "",
+        ]
+
+        # Emit each participant as a named variable
+        var_names: list[str] = []
+        reconnect_needed: list[str] = []
+
+        for i, p in enumerate(cfg.participants):
+            var = f"participant_{i}"
+            code = self._emit_participant(p, var, i)
+            if code is None:
+                # Unsaveable — emit reconnect placeholder
+                p_name = getattr(p, "name", f"unknown_{i}")
+                lines.append(f"# {var}: <unsaveable: {p_name}>")
+                lines.append(f"# Pass via reconnect={{'{p_name}': ...}} when loading")
+                lines.append(f'{var} = reconnect["{p_name}"]')
+                lines.append("")
+                reconnect_needed.append(p_name)
+            else:
+                lines.extend(code)
+                lines.append("")
+            var_names.append(var)
+
+        # Emit reconnect check if needed
+        if reconnect_needed:
+            lines.insert(3, f"# REQUIRES reconnect: {reconnect_needed}")
+
+        # Emit the pipeline reconstruction call
+        lines.append("")
+        if cfg.mode == "parallel":
+            call_args = [f"    {v}," for v in var_names]
+            call_args.append(f"    name={self.name!r},")
+            call_args.append(f"    description={self.description!r},")
+            if cfg.combiner:
+                call_args.append(f"    combiner={cfg.combiner!r},")
+            if cfg.concurrency_limit is not None:
+                call_args.append(f"    concurrency_limit={cfg.concurrency_limit!r},")
+            if cfg.step_timeout is not None:
+                call_args.append(f"    step_timeout={cfg.step_timeout!r},")
+            if cfg.guidance is not None:
+                call_args.append(f"    guidance={cfg.guidance!r},")
+            lines.append("tool = LazyTool.parallel(")
+            lines.extend(call_args)
+            lines.append(")")
+
+        elif cfg.mode == "chain":
+            call_args = [f"    {v}," for v in var_names]
+            call_args.append(f"    name={self.name!r},")
+            call_args.append(f"    description={self.description!r},")
+            if cfg.step_timeout is not None:
+                call_args.append(f"    step_timeout={cfg.step_timeout!r},")
+            if cfg.guidance is not None:
+                call_args.append(f"    guidance={cfg.guidance!r},")
+            lines.append("tool = LazyTool.chain(")
+            lines.extend(call_args)
+            lines.append(")")
+
+        elif cfg.mode == "agent_tool":
+            # Emit the function source and input schema source
+            func = cfg.agent_tool_func
+            schema = cfg.input_schema
+            func_source = self._get_source_safe(func)
+            schema_source = self._get_source_safe(schema)
+
+            if func_source:
+                lines.append("")
+                lines.append(textwrap.dedent(func_source))
+            if schema_source:
+                # Add pydantic import if needed
+                lines.insert(6, "from pydantic import BaseModel, Field")
+                lines.append("")
+                lines.append(textwrap.dedent(schema_source))
+
+            func_name = func.__name__ if func else "None"
+            schema_name = schema.__name__ if schema else "None"
+
+            at_args = [f"    {func_name},"]
+            at_args.append(f"    input_schema={schema_name},")
+            if cfg.agent_tool_provider:
+                at_args.append(f"    provider={cfg.agent_tool_provider!r},")
+            if cfg.agent_tool_model:
+                at_args.append(f"    model={cfg.agent_tool_model!r},")
+            at_args.append(f"    name={self.name!r},")
+            at_args.append(f"    description={self.description!r},")
+            if cfg.guidance is not None:
+                at_args.append(f"    guidance={cfg.guidance!r},")
+            if cfg.step_timeout is not None:
+                at_args.append(f"    step_timeout={cfg.step_timeout!r},")
+
+            lines.append("tool = LazyTool.agent_tool(")
+            lines.extend(at_args)
+            lines.append(")")
+
+        lines.append("")
+        _write_file(path, "\n".join(lines))
+
+    def _emit_participant(self, p: Any, var: str, idx: int) -> list[str] | None:
+        """Generate code lines for a single participant, or None if unsaveable."""
+        import textwrap
+
+        # LazyAgent
+        if hasattr(p, "_last_output"):
+            provider_alias = _provider_alias(p)
+            model = getattr(p._executor, "model", None) or ""
+            agent_args = [f"    {provider_alias!r}"]
+            name = getattr(p, "name", None)
+            if name:
+                agent_args.append(f"    name={name!r}")
+            if model:
+                agent_args.append(f"    model={model!r}")
+            system = getattr(p, "system", None)
+            if system:
+                agent_args.append(f"    system={system!r}")
+            output_schema = getattr(p, "output_schema", None)
+            if output_schema is not None:
+                schema_name = getattr(output_schema, "__name__", None)
+                if schema_name:
+                    agent_args.append(f"    output_schema={schema_name}")
+
+            lines = [f"{var} = LazyAgent("]
+            lines.extend(f"{arg}," for arg in agent_args)
+            lines.append(")")
+            return lines
+
+        # LazyTool with function (from_function)
+        if isinstance(p, LazyTool) and p.func is not None and not p._is_pipeline_tool:
+            source = self._get_source_safe(p.func)
+            if source is None:
+                return None  # closure — unsaveable
+            source = textwrap.dedent(source)
+            func_name = p.func.__name__
+            call_args = [f"    {func_name}"]
+            if p.name != func_name:
+                call_args.append(f"    name={p.name!r}")
+            call_args.append(f"    description={p.description!r}")
+            if p.guidance is not None:
+                call_args.append(f"    guidance={p.guidance!r}")
+
+            lines = [source, "", f"{var} = LazyTool.from_function("]
+            lines.extend(f"{arg}," for arg in call_args)
+            lines.append(")")
+            return lines
+
+        # LazyTool with delegate (from_agent)
+        if isinstance(p, LazyTool) and p._delegate is not None:
+            agent = p._delegate.agent
+            inner_lines = self._emit_participant(agent, f"{var}_agent", 0)
+            if inner_lines is None:
+                return None
+            tool_args = [f"    name={p.name!r}", f"    description={p.description!r}"]
+            if p.guidance is not None:
+                tool_args.append(f"    guidance={p.guidance!r}")
+            lines = inner_lines + ["", f"{var} = {var}_agent.as_tool("]
+            lines.extend(f"{arg}," for arg in tool_args)
+            lines.append(")")
+            return lines
+
+        # Nested pipeline
+        if isinstance(p, LazyTool) and p._is_pipeline_tool and p._pipeline is not None:
+            # Recursive: serialize nested pipeline inline
+            # For simplicity, save to a temp string and inline it
+            # This would need more work for deep nesting; for now, mark unsaveable
+            return None
+
+        # Unknown — unsaveable
+        return None
+
+    @staticmethod
+    def _get_source_safe(obj: Any) -> str | None:
+        """Try to get source code; return None on failure."""
+        if obj is None:
+            return None
+        try:
+            return inspect.getsource(obj)
+        except (OSError, TypeError):
+            return None
+
     @classmethod
-    def load(cls, path: str) -> "LazyTool":
+    def load(cls, path: str, *, reconnect: dict[str, Any] | None = None) -> "LazyTool":
         """Load a :class:`LazyTool` from a file previously created by :meth:`save`.
 
         Parameters
@@ -550,7 +765,7 @@ class LazyTool:
         with open(resolved, encoding="utf-8") as fh:
             first_line = fh.readline().rstrip("\n")
 
-        if first_line != cls._SENTINEL:
+        if first_line not in (cls._SENTINEL, cls._SENTINEL_V2):
             raise ValueError(
                 f"File {path!r} does not appear to have been generated by "
                 "LazyTool.save() (missing sentinel header). "
@@ -562,6 +777,8 @@ class LazyTool:
         if spec is None or spec.loader is None:
             raise ValueError(f"Cannot load module from {path!r}")
         module = importlib.util.module_from_spec(spec)
+        # Inject reconnect dict for pipeline files that reference it
+        module.reconnect = reconnect or {}  # type: ignore[attr-defined]
         spec.loader.exec_module(module)  # type: ignore[union-attr]
 
         tool = getattr(module, "tool", None)
@@ -643,6 +860,15 @@ class LazyTool:
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
+        tool._pipeline = _PipelineConfig(
+            mode="parallel",
+            participants=participants,
+            native_tools=_native,
+            combiner=combiner,
+            concurrency_limit=concurrency_limit,
+            step_timeout=step_timeout,
+            guidance=guidance,
+        )
         return tool
 
     @classmethod
@@ -716,6 +942,13 @@ class LazyTool:
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
+        tool._pipeline = _PipelineConfig(
+            mode="chain",
+            participants=participants,
+            native_tools=_native,
+            step_timeout=step_timeout,
+            guidance=guidance,
+        )
         return tool
 
     @classmethod
@@ -832,7 +1065,7 @@ class LazyTool:
         func_tool = cls.from_function(func, name=f"{tool_name}_exec", description=tool_desc)
 
         # Chain: sub_agent (produces typed Pydantic) → func_tool (receives model_dump())
-        return cls.chain(
+        pipeline = cls.chain(
             sub_agent,
             func_tool,
             name=tool_name,
@@ -840,6 +1073,20 @@ class LazyTool:
             guidance=guidance,
             step_timeout=step_timeout,
         )
+        # Override the chain's _pipeline with agent_tool metadata
+        pipeline._pipeline = _PipelineConfig(
+            mode="agent_tool",
+            participants=(sub_agent, func_tool),
+            native_tools=[],
+            step_timeout=step_timeout,
+            guidance=guidance,
+            input_schema=input_schema,
+            agent_tool_func=func,
+            agent_tool_provider=provider,
+            agent_tool_model=model,
+            agent_tool_system=system,
+        )
+        return pipeline
 
 
 # ---------------------------------------------------------------------------

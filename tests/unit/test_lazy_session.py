@@ -540,20 +540,26 @@ def test_as_tool_chain_is_pipeline_tool():
     assert tool._is_pipeline_tool is True
 
 
-def test_as_tool_parallel_save_raises(tmp_path):
-    """R-G5: save() raises ValueError on pipeline tool created via as_tool(mode='parallel')."""
+def test_as_tool_parallel_save_succeeds(tmp_path):
+    """R-G5: save() produces a v2 pipeline file for parallel tools."""
     sess, _ = _sess_with_agent()
     tool = sess.as_tool(mode="parallel", name="p", description="d")
-    with pytest.raises(ValueError, match="pipeline tool"):
-        tool.save(str(tmp_path / "p.json"))
+    out = str(tmp_path / "p.py")
+    tool.save(out)
+    content = open(out).read()
+    assert "LAZYBRIDGE_GENERATED_TOOL v2" in content
+    assert "LazyTool.parallel(" in content
 
 
-def test_as_tool_chain_save_raises(tmp_path):
-    """R-G6: save() raises ValueError on pipeline tool created via as_tool(mode='chain')."""
+def test_as_tool_chain_save_succeeds(tmp_path):
+    """R-G6: save() produces a v2 pipeline file for chain tools."""
     sess, _ = _sess_with_agent()
     tool = sess.as_tool(mode="chain", name="c", description="d")
-    with pytest.raises(ValueError, match="pipeline tool"):
-        tool.save(str(tmp_path / "c.json"))
+    out = str(tmp_path / "c.py")
+    tool.save(out)
+    content = open(out).read()
+    assert "LAZYBRIDGE_GENERATED_TOOL v2" in content
+    assert "LazyTool.chain(" in content
 
 
 def test_as_tool_parallel_does_not_mutate_original_agent(fake_response):
@@ -644,8 +650,8 @@ def test_as_tool_parallel_equivalent_no_mutation(fake_response):
     assert ag2._last_output is None
 
 
-def test_as_tool_save_raises_equivalent(tmp_path):
-    """R-EQ4: save() raises ValueError for tools from both factories."""
+def test_as_tool_save_succeeds_for_all_factories(tmp_path):
+    """R-EQ4: save() succeeds for pipeline tools from both factories."""
     sess = LazySession()
     ag = _mock_session_agent()
     ag.session = sess
@@ -657,5 +663,7 @@ def test_as_tool_save_raises_equivalent(tmp_path):
         sess.as_tool(mode="chain", name="c", description="d"),
         LazyTool.chain(ag, name="c2", description="d"),
     ):
-        with pytest.raises(ValueError, match="pipeline tool"):
-            tool.save(str(tmp_path / f"{tool.name}.json"))
+        out = str(tmp_path / f"{tool.name}.py")
+        tool.save(out)
+        content = open(out).read()
+        assert "LAZYBRIDGE_GENERATED_TOOL v2" in content

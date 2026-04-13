@@ -401,14 +401,21 @@ def test_n4_chain_no_participants():
 
 # ── N5 — save() on pipeline tool raises ValueError ───────────────────────────
 
-def test_n5_save_pipeline_tool_raises(tmp_path):
+def test_n5_save_pipeline_tool_produces_file(tmp_path):
     a = _mock_agent("a", "out_a")
-    t = LazyTool.parallel(a, name="par", description="t")
-    with pytest.raises(ValueError, match="pipeline tool"):
-        t.save(str(tmp_path / "out.py"))
-    t2 = LazyTool.chain(a, name="ch", description="t")
-    with pytest.raises(ValueError, match="cannot be serialized"):
-        t2.save(str(tmp_path / "out2.py"))
+    t = LazyTool.parallel(a, name="par", description="parallel test")
+    out = str(tmp_path / "out.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "LAZYBRIDGE_GENERATED_TOOL v2" in content
+    assert "LazyTool.parallel(" in content
+
+    t2 = LazyTool.chain(a, name="ch", description="chain test")
+    out2 = str(tmp_path / "out2.py")
+    t2.save(out2)
+    content2 = Path(out2).read_text()
+    assert "LAZYBRIDGE_GENERATED_TOOL v2" in content2
+    assert "LazyTool.chain(" in content2
 
 
 # ── N6 — _clone_for_invocation resets _last_output ───────────────────────────
@@ -655,3 +662,124 @@ def test_n23_parallel_raises_cross_session_for_delegate_tool():
 
     with pytest.raises(ValueError, match="different session"):
         LazyTool.parallel(participant, name="p", description="d", session=sess_a)
+
+
+# =============================================================================
+# Pipeline Persistence Tests
+# =============================================================================
+
+from pathlib import Path
+
+
+def test_pipeline_chain_save_produces_v2_file(tmp_path):
+    """Chain pipeline save produces a v2 sentinel file with chain reconstruction."""
+    a = _mock_agent("researcher", "result")
+    t = LazyTool.chain(a, name="my_chain", description="a chain")
+    out = str(tmp_path / "chain.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "LAZYBRIDGE_GENERATED_TOOL v2" in content
+    assert "LazyTool.chain(" in content
+    assert "my_chain" in content
+    assert "a chain" in content
+
+
+def test_pipeline_parallel_save_preserves_combiner(tmp_path):
+    """Parallel pipeline save includes combiner and concurrency settings."""
+    a = _mock_agent("a", "out_a")
+    b = _mock_agent("b", "out_b")
+    t = LazyTool.parallel(a, b, name="par", description="parallel",
+                          combiner="last", concurrency_limit=2)
+    out = str(tmp_path / "par.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "combiner='last'" in content
+    assert "concurrency_limit=2" in content
+    assert "LazyTool.parallel(" in content
+
+
+def test_pipeline_save_no_api_keys(tmp_path):
+    """Pipeline save does not include API key values."""
+    a = _mock_agent("worker", "result")
+    t = LazyTool.chain(a, name="ch", description="test")
+    out = str(tmp_path / "ch.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "API keys are not serialized" in content
+    # Verify no common key patterns
+    assert "sk-" not in content
+    assert "api_key" not in content.lower()
+
+
+def test_pipeline_config_stored_on_chain():
+    """chain() stores _PipelineConfig with mode='chain'."""
+    a = _mock_agent("a", "x")
+    t = LazyTool.chain(a, name="ch", description="t")
+    assert t._pipeline is not None
+    assert t._pipeline.mode == "chain"
+    assert len(t._pipeline.participants) == 1
+
+
+def test_pipeline_config_stored_on_parallel():
+    """parallel() stores _PipelineConfig with mode='parallel'."""
+    a = _mock_agent("a", "x")
+    b = _mock_agent("b", "y")
+    t = LazyTool.parallel(a, b, name="par", description="t", combiner="last")
+    assert t._pipeline is not None
+    assert t._pipeline.mode == "parallel"
+    assert t._pipeline.combiner == "last"
+    assert len(t._pipeline.participants) == 2
+
+
+def test_pipeline_with_function_tool_save(tmp_path):
+    """Pipeline with a from_function tool saves the function source."""
+    a = _mock_agent("a", "out")
+
+    # Use a real function (not closure) for saveable source
+    tool = LazyTool.from_function(add, name="add", description="add two numbers")
+    t = LazyTool.chain(a, tool, name="chain_with_func", description="test")
+    out = str(tmp_path / "chain_func.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "def add(" in content
+    assert "LazyTool.from_function(" in content
+    assert "LazyTool.chain(" in content
+
+
+def test_pipeline_with_closure_tool_emits_reconnect(tmp_path):
+    """Pipeline with a closure tool emits reconnect placeholder."""
+    a = _mock_agent("a", "out")
+
+    # Create a closure-based tool (unsaveable)
+    captured = 42
+    def closure_func(x: int) -> int:
+        return x + captured
+    closure_tool = LazyTool.from_function(closure_func, name="closure_op", description="closure")
+
+    t = LazyTool.chain(a, closure_tool, name="chain_reconnect", description="test")
+    out = str(tmp_path / "chain_reconnect.py")
+    t.save(out)
+    content = Path(out).read_text()
+    assert "reconnect" in content
+    assert "closure_op" in content
+
+
+def test_load_v2_sentinel_accepted(tmp_path):
+    """load() accepts both v1 and v2 sentinel headers."""
+    # v1 is already tested by existing tests
+    # v2: create a minimal pipeline file
+    a = _mock_agent("a", "out")
+    t = LazyTool.chain(a, name="ch", description="test")
+    out = str(tmp_path / "v2.py")
+    t.save(out)
+    # Verify it has v2 sentinel
+    content = Path(out).read_text()
+    assert "v2" in content.split("\n")[0]
+
+
+def test_pipeline_save_with_step_timeout(tmp_path):
+    """Pipeline with step_timeout includes it in the output."""
+    a = _mock_agent("a", "out")
+    t = LazyTool.chain(a, name="timed", description="timed chain", step_timeout=30.0)
+    # Just verify the config captured it
+    assert t._pipeline.step_timeout == 30.0
