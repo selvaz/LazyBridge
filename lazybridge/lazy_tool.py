@@ -618,10 +618,11 @@ class LazyTool:
         else:
             # chain / parallel: emit each participant, then the pipeline call
             var_names: list[str] = []
+            emitted_funcs: set[str] = set()
 
             for i, p in enumerate(cfg.participants):
                 var = f"participant_{i}"
-                result = self._emit_participant(p, var, extra_imports)
+                result = self._emit_participant(p, var, extra_imports, emitted_funcs)
                 if result is None:
                     # Unsaveable — emit reconnect placeholder
                     p_name = getattr(p, "name", f"unknown_{i}")
@@ -685,12 +686,18 @@ class LazyTool:
 
     def _emit_participant(
         self, p: Any, var: str, extra_imports: set[str],
+        emitted_funcs: set[str] | None = None,
     ) -> list[str] | None:
         """Generate code lines for a single participant, or None if unsaveable.
 
         Mutates ``extra_imports`` to add any imports the participant needs.
+        Mutates ``emitted_funcs`` to track which function defs have already
+        been emitted (avoids duplicate ``def`` blocks for reused functions).
         """
         import textwrap
+
+        if emitted_funcs is None:
+            emitted_funcs = set()
 
         # LazyAgent
         if hasattr(p, "_last_output"):
@@ -733,6 +740,15 @@ class LazyTool:
                 pass
 
             func_name = p.func.__name__
+
+            # Only emit the function def once (skip if same function reused)
+            func_id = id(p.func)
+            lines: list[str] = []
+            if func_id not in emitted_funcs:
+                emitted_funcs.add(func_id)
+                lines.append(source)
+                lines.append("")
+
             call_args = [f"    {func_name}"]
             if p.name != func_name:
                 call_args.append(f"    name={p.name!r}")
@@ -740,7 +756,7 @@ class LazyTool:
             if p.guidance is not None:
                 call_args.append(f"    guidance={p.guidance!r}")
 
-            lines = [source, "", f"{var} = LazyTool.from_function("]
+            lines.append(f"{var} = LazyTool.from_function(")
             lines.extend(f"{arg}," for arg in call_args)
             lines.append(")")
             return lines
@@ -748,7 +764,9 @@ class LazyTool:
         # LazyTool with delegate (from_agent)
         if isinstance(p, LazyTool) and p._delegate is not None:
             agent = p._delegate.agent
-            inner_lines = self._emit_participant(agent, f"{var}_agent", extra_imports)
+            inner_lines = self._emit_participant(
+                agent, f"{var}_agent", extra_imports, emitted_funcs,
+            )
             if inner_lines is None:
                 return None
             tool_args = [f"    name={p.name!r}", f"    description={p.description!r}"]
@@ -761,13 +779,14 @@ class LazyTool:
 
         # Nested pipeline — recursive save
         if isinstance(p, LazyTool) and p._is_pipeline_tool and p._pipeline is not None:
-            return self._emit_nested_pipeline(p, var, extra_imports)
+            return self._emit_nested_pipeline(p, var, extra_imports, emitted_funcs)
 
         # Unknown — unsaveable
         return None
 
     def _emit_nested_pipeline(
         self, p: "LazyTool", var: str, extra_imports: set[str],
+        emitted_funcs: set[str] | None = None,
     ) -> list[str] | None:
         """Recursively emit a nested pipeline as inline code."""
         cfg = p._pipeline
@@ -776,7 +795,7 @@ class LazyTool:
 
         for i, sub_p in enumerate(cfg.participants):
             sub_var = f"{var}_p{i}"
-            result = self._emit_participant(sub_p, sub_var, extra_imports)
+            result = self._emit_participant(sub_p, sub_var, extra_imports, emitted_funcs)
             if result is None:
                 return None  # unsaveable participant → whole nested pipeline unsaveable
             lines.extend(result)
@@ -1217,29 +1236,89 @@ def _source_location(func: Callable) -> str:
 
 
 def _extract_imports(func: Callable) -> list[str]:
-    """Extract top-level import lines from the function's source file."""
+    """Extract imports from ``func``'s source file that ``func`` actually uses.
+
+    Uses AST analysis: parse the function/class source to find all referenced
+    names, then intersect with the file's top-level imports.  Only imports
+    whose provided names appear in the function body are returned.
+
+    This avoids polluting generated files with unrelated imports from the
+    source file (e.g. ``import pytest`` when the function only uses ``int``).
+    """
+    import ast
+    import textwrap
+
+    # 1. Get function source and find referenced names
+    try:
+        func_source = inspect.getsource(func)
+    except (OSError, TypeError):
+        return []
+    func_source = textwrap.dedent(func_source)
+    try:
+        func_tree = ast.parse(func_source)
+    except SyntaxError:
+        return []
+
+    referenced_names: set[str] = set()
+    for node in ast.walk(func_tree):
+        if isinstance(node, ast.Name):
+            referenced_names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            # For 'os.path.join', extract root name 'os'
+            root = node
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name):
+                referenced_names.add(root.id)
+
+    if not referenced_names:
+        return []
+
+    # 2. Parse the source file's top-level imports
     try:
         src_file = inspect.getfile(func)
     except (OSError, TypeError):
         return []
     try:
         with open(src_file, encoding="utf-8") as fh:
-            lines = fh.readlines()
+            file_source = fh.read()
     except OSError:
         return []
-    imports: list[str] = []
-    for line in lines:
-        stripped = line.rstrip("\n")
-        # Top-level import lines only (no indentation)
-        if stripped.startswith("import ") or stripped.startswith("from "):
-            # Skip lazybridge imports — we generate our own
-            if "lazybridge" in stripped:
+    try:
+        file_tree = ast.parse(file_source)
+    except SyntaxError:
+        return []
+
+    # Map: provided_name -> import source line
+    # An import line is included if ANY of the names it provides are referenced.
+    import_line_names: list[tuple[str, set[str]]] = []
+    for node in ast.iter_child_nodes(file_tree):
+        if isinstance(node, ast.Import):
+            line = ast.get_source_segment(file_source, node)
+            if line is None:
                 continue
-            # Skip __future__ imports — already present in generated file context
-            if "from __future__" in stripped:
+            if "lazybridge" in line or "from __future__" in line:
                 continue
-            imports.append(stripped)
-    return imports
+            provided = {a.asname or a.name.split(".")[0] for a in node.names}
+            import_line_names.append((line, provided))
+        elif isinstance(node, ast.ImportFrom):
+            line = ast.get_source_segment(file_source, node)
+            if line is None:
+                continue
+            if node.module and ("lazybridge" in node.module or "__future__" in node.module):
+                continue
+            provided = {a.asname or a.name for a in node.names}
+            import_line_names.append((line, provided))
+
+    # 3. Keep only imports whose provided names intersect with referenced names
+    needed: list[str] = []
+    seen: set[str] = set()
+    for line, provided in import_line_names:
+        if provided & referenced_names and line not in seen:
+            seen.add(line)
+            needed.append(line)
+
+    return needed
 
 
 def _provider_alias(agent: Any) -> str:
