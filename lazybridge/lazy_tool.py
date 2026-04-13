@@ -548,85 +548,52 @@ class LazyTool:
         cfg = self._pipeline
         import textwrap
 
-        lines: list[str] = [
-            self._SENTINEL_V2,
-            f"# pipeline_mode: {cfg.mode}",
-            "# NOTE: API keys are not serialized.",
-            "# Set the appropriate environment variable before loading.",
-            "",
-            "from lazybridge import LazyAgent, LazyTool",
-            "",
-        ]
-
-        # Emit each participant as a named variable
-        var_names: list[str] = []
+        # Collect imports and body separately, then merge at the end.
+        # This avoids fragile index-based insertion.
+        extra_imports: set[str] = set()
+        body_lines: list[str] = []
         reconnect_needed: list[str] = []
 
-        for i, p in enumerate(cfg.participants):
-            var = f"participant_{i}"
-            code = self._emit_participant(p, var, i)
-            if code is None:
-                # Unsaveable — emit reconnect placeholder
-                p_name = getattr(p, "name", f"unknown_{i}")
-                lines.append(f"# {var}: <unsaveable: {p_name}>")
-                lines.append(f"# Pass via reconnect={{'{p_name}': ...}} when loading")
-                lines.append(f'{var} = reconnect["{p_name}"]')
-                lines.append("")
-                reconnect_needed.append(p_name)
-            else:
-                lines.extend(code)
-                lines.append("")
-            var_names.append(var)
-
-        # Emit reconnect check if needed
-        if reconnect_needed:
-            lines.insert(3, f"# REQUIRES reconnect: {reconnect_needed}")
-
-        # Emit the pipeline reconstruction call
-        lines.append("")
-        if cfg.mode == "parallel":
-            call_args = [f"    {v}," for v in var_names]
-            call_args.append(f"    name={self.name!r},")
-            call_args.append(f"    description={self.description!r},")
-            if cfg.combiner:
-                call_args.append(f"    combiner={cfg.combiner!r},")
-            if cfg.concurrency_limit is not None:
-                call_args.append(f"    concurrency_limit={cfg.concurrency_limit!r},")
-            if cfg.step_timeout is not None:
-                call_args.append(f"    step_timeout={cfg.step_timeout!r},")
-            if cfg.guidance is not None:
-                call_args.append(f"    guidance={cfg.guidance!r},")
-            lines.append("tool = LazyTool.parallel(")
-            lines.extend(call_args)
-            lines.append(")")
-
-        elif cfg.mode == "chain":
-            call_args = [f"    {v}," for v in var_names]
-            call_args.append(f"    name={self.name!r},")
-            call_args.append(f"    description={self.description!r},")
-            if cfg.step_timeout is not None:
-                call_args.append(f"    step_timeout={cfg.step_timeout!r},")
-            if cfg.guidance is not None:
-                call_args.append(f"    guidance={cfg.guidance!r},")
-            lines.append("tool = LazyTool.chain(")
-            lines.extend(call_args)
-            lines.append(")")
-
-        elif cfg.mode == "agent_tool":
-            # Emit the function source and input schema source
+        if cfg.mode == "agent_tool":
+            # agent_tool: emit func source + schema source + LazyTool.agent_tool()
+            # Do NOT emit participants — agent_tool() creates them internally.
             func = cfg.agent_tool_func
             schema = cfg.input_schema
             func_source = self._get_source_safe(func)
             schema_source = self._get_source_safe(schema)
 
-            if func_source:
-                lines.append("")
-                lines.append(textwrap.dedent(func_source))
+            if func_source is None and func is not None:
+                raise ValueError(
+                    f"Cannot save agent_tool pipeline '{self.name}': "
+                    f"function '{func.__name__}' source is not available "
+                    "(closure, REPL, or C extension). Define it in a .py file."
+                )
+            if schema_source is None and schema is not None:
+                raise ValueError(
+                    f"Cannot save agent_tool pipeline '{self.name}': "
+                    f"input_schema '{schema.__name__}' source is not available. "
+                    "Define it in a .py file."
+                )
+
+            # Emit schema source (before func, since func may reference it)
             if schema_source:
-                # Add pydantic import if needed
-                lines.insert(6, "from pydantic import BaseModel, Field")
-                lines.append("")
-                lines.append(textwrap.dedent(schema_source))
+                extra_imports.add("from pydantic import BaseModel, Field")
+                # Also extract imports from the schema's module
+                try:
+                    extra_imports.update(_extract_imports(schema))
+                except Exception:
+                    pass
+                body_lines.append(textwrap.dedent(schema_source))
+                body_lines.append("")
+
+            # Emit func source
+            if func_source:
+                try:
+                    extra_imports.update(_extract_imports(func))
+                except Exception:
+                    pass
+                body_lines.append(textwrap.dedent(func_source))
+                body_lines.append("")
 
             func_name = func.__name__ if func else "None"
             schema_name = schema.__name__ if schema else "None"
@@ -644,35 +611,104 @@ class LazyTool:
             if cfg.step_timeout is not None:
                 at_args.append(f"    step_timeout={cfg.step_timeout!r},")
 
-            lines.append("tool = LazyTool.agent_tool(")
-            lines.extend(at_args)
-            lines.append(")")
+            body_lines.append("tool = LazyTool.agent_tool(")
+            body_lines.extend(at_args)
+            body_lines.append(")")
 
-        lines.append("")
+        else:
+            # chain / parallel: emit each participant, then the pipeline call
+            var_names: list[str] = []
+
+            for i, p in enumerate(cfg.participants):
+                var = f"participant_{i}"
+                result = self._emit_participant(p, var, extra_imports)
+                if result is None:
+                    # Unsaveable — emit reconnect placeholder
+                    p_name = getattr(p, "name", f"unknown_{i}")
+                    body_lines.append(f"# {var}: <unsaveable: {p_name}>")
+                    body_lines.append(f"# Pass via reconnect={{'{p_name}': ...}} when loading")
+                    body_lines.append(f'{var} = reconnect["{p_name}"]')
+                    body_lines.append("")
+                    reconnect_needed.append(p_name)
+                else:
+                    body_lines.extend(result)
+                    body_lines.append("")
+                var_names.append(var)
+
+            # Emit pipeline reconstruction call
+            body_lines.append("")
+            if cfg.mode == "parallel":
+                call_args = [f"    {v}," for v in var_names]
+                call_args.append(f"    name={self.name!r},")
+                call_args.append(f"    description={self.description!r},")
+                if cfg.combiner:
+                    call_args.append(f"    combiner={cfg.combiner!r},")
+                if cfg.concurrency_limit is not None:
+                    call_args.append(f"    concurrency_limit={cfg.concurrency_limit!r},")
+                if cfg.step_timeout is not None:
+                    call_args.append(f"    step_timeout={cfg.step_timeout!r},")
+                if cfg.guidance is not None:
+                    call_args.append(f"    guidance={cfg.guidance!r},")
+                body_lines.append("tool = LazyTool.parallel(")
+                body_lines.extend(call_args)
+                body_lines.append(")")
+
+            elif cfg.mode == "chain":
+                call_args = [f"    {v}," for v in var_names]
+                call_args.append(f"    name={self.name!r},")
+                call_args.append(f"    description={self.description!r},")
+                if cfg.step_timeout is not None:
+                    call_args.append(f"    step_timeout={cfg.step_timeout!r},")
+                if cfg.guidance is not None:
+                    call_args.append(f"    guidance={cfg.guidance!r},")
+                body_lines.append("tool = LazyTool.chain(")
+                body_lines.extend(call_args)
+                body_lines.append(")")
+
+        # Assemble final file: header + imports + body
+        header = [
+            self._SENTINEL_V2,
+            f"# pipeline_mode: {cfg.mode}",
+            "# NOTE: API keys are not serialized.",
+            "# Set the appropriate environment variable before loading.",
+        ]
+        if reconnect_needed:
+            header.append(f"# REQUIRES reconnect: {reconnect_needed}")
+        header.append("")
+
+        import_lines = ["from lazybridge import LazyAgent, LazyTool"]
+        import_lines.extend(sorted(extra_imports))
+        import_lines.append("")
+
+        lines = header + import_lines + [""] + body_lines + [""]
         _write_file(path, "\n".join(lines))
 
-    def _emit_participant(self, p: Any, var: str, idx: int) -> list[str] | None:
-        """Generate code lines for a single participant, or None if unsaveable."""
+    def _emit_participant(
+        self, p: Any, var: str, extra_imports: set[str],
+    ) -> list[str] | None:
+        """Generate code lines for a single participant, or None if unsaveable.
+
+        Mutates ``extra_imports`` to add any imports the participant needs.
+        """
         import textwrap
 
         # LazyAgent
         if hasattr(p, "_last_output"):
             provider_alias = _provider_alias(p)
-            model = getattr(p._executor, "model", None) or ""
+            raw_model = getattr(p._executor, "model", None)
+            model = raw_model if isinstance(raw_model, str) else None
+            raw_system = getattr(p, "system", None)
+            system = raw_system if isinstance(raw_system, str) else None
+            raw_name = getattr(p, "name", None)
+            name = raw_name if isinstance(raw_name, str) else None
+
             agent_args = [f"    {provider_alias!r}"]
-            name = getattr(p, "name", None)
             if name:
                 agent_args.append(f"    name={name!r}")
             if model:
                 agent_args.append(f"    model={model!r}")
-            system = getattr(p, "system", None)
             if system:
                 agent_args.append(f"    system={system!r}")
-            output_schema = getattr(p, "output_schema", None)
-            if output_schema is not None:
-                schema_name = getattr(output_schema, "__name__", None)
-                if schema_name:
-                    agent_args.append(f"    output_schema={schema_name}")
 
             lines = [f"{var} = LazyAgent("]
             lines.extend(f"{arg}," for arg in agent_args)
@@ -681,10 +717,21 @@ class LazyTool:
 
         # LazyTool with function (from_function)
         if isinstance(p, LazyTool) and p.func is not None and not p._is_pipeline_tool:
+            # Reject closures: free variables mean the source isn't self-contained
+            if getattr(p.func, "__code__", None) and p.func.__code__.co_freevars:
+                return None  # closure with captured variables — unsaveable
             source = self._get_source_safe(p.func)
             if source is None:
-                return None  # closure — unsaveable
+                return None  # source not retrievable — unsaveable
             source = textwrap.dedent(source)
+
+            # Extract function's imports into the shared import set
+            try:
+                for imp in _extract_imports(p.func):
+                    extra_imports.add(imp)
+            except Exception:
+                pass
+
             func_name = p.func.__name__
             call_args = [f"    {func_name}"]
             if p.name != func_name:
@@ -701,7 +748,7 @@ class LazyTool:
         # LazyTool with delegate (from_agent)
         if isinstance(p, LazyTool) and p._delegate is not None:
             agent = p._delegate.agent
-            inner_lines = self._emit_participant(agent, f"{var}_agent", 0)
+            inner_lines = self._emit_participant(agent, f"{var}_agent", extra_imports)
             if inner_lines is None:
                 return None
             tool_args = [f"    name={p.name!r}", f"    description={p.description!r}"]
@@ -712,15 +759,52 @@ class LazyTool:
             lines.append(")")
             return lines
 
-        # Nested pipeline
+        # Nested pipeline — recursive save
         if isinstance(p, LazyTool) and p._is_pipeline_tool and p._pipeline is not None:
-            # Recursive: serialize nested pipeline inline
-            # For simplicity, save to a temp string and inline it
-            # This would need more work for deep nesting; for now, mark unsaveable
-            return None
+            return self._emit_nested_pipeline(p, var, extra_imports)
 
         # Unknown — unsaveable
         return None
+
+    def _emit_nested_pipeline(
+        self, p: "LazyTool", var: str, extra_imports: set[str],
+    ) -> list[str] | None:
+        """Recursively emit a nested pipeline as inline code."""
+        cfg = p._pipeline
+        lines: list[str] = []
+        sub_vars: list[str] = []
+
+        for i, sub_p in enumerate(cfg.participants):
+            sub_var = f"{var}_p{i}"
+            result = self._emit_participant(sub_p, sub_var, extra_imports)
+            if result is None:
+                return None  # unsaveable participant → whole nested pipeline unsaveable
+            lines.extend(result)
+            lines.append("")
+            sub_vars.append(sub_var)
+
+        if cfg.mode == "parallel":
+            call_args = [f"    {v}," for v in sub_vars]
+            call_args.append(f"    name={p.name!r},")
+            call_args.append(f"    description={p.description!r},")
+            if cfg.combiner:
+                call_args.append(f"    combiner={cfg.combiner!r},")
+            if cfg.concurrency_limit is not None:
+                call_args.append(f"    concurrency_limit={cfg.concurrency_limit!r},")
+            lines.append(f"{var} = LazyTool.parallel(")
+            lines.extend(call_args)
+            lines.append(")")
+        elif cfg.mode == "chain":
+            call_args = [f"    {v}," for v in sub_vars]
+            call_args.append(f"    name={p.name!r},")
+            call_args.append(f"    description={p.description!r},")
+            lines.append(f"{var} = LazyTool.chain(")
+            lines.extend(call_args)
+            lines.append(")")
+        else:
+            return None  # unsupported nested mode
+
+        return lines
 
     @staticmethod
     def _get_source_safe(obj: Any) -> str | None:

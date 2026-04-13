@@ -175,19 +175,18 @@ class EventLog:
             conn.executescript(self._SCHEMA)
 
     # ------------------------------------------------------------------
-    # Exporter management
+    # Exporter management (thread-safe via copy-on-write)
     # ------------------------------------------------------------------
 
     def add_exporter(self, exporter: Any) -> None:
         """Register an event exporter. It will receive all future events."""
-        self._exporters.append(exporter)
+        with self._lock:
+            self._exporters = [*self._exporters, exporter]
 
     def remove_exporter(self, exporter: Any) -> None:
         """Unregister an event exporter."""
-        try:
-            self._exporters.remove(exporter)
-        except ValueError:
-            pass
+        with self._lock:
+            self._exporters = [e for e in self._exporters if e is not exporter]
 
     # ------------------------------------------------------------------
     # Write
@@ -235,8 +234,11 @@ class EventLog:
         if self._console:
             self._print_event(agent_name, event_type, data)
 
-        # Fan-out to registered exporters
-        for exp in self._exporters:
+        # Fan-out to registered exporters.
+        # Snapshot the list (copy-on-write guarantees the reference is stable)
+        # so iteration is safe even if another thread calls add/remove_exporter.
+        exporters = self._exporters
+        for exp in exporters:
             try:
                 exp.export(row)
             except Exception as exc:

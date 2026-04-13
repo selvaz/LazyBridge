@@ -29,6 +29,7 @@ Filtering::
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 _logger = logging.getLogger(__name__)
@@ -114,26 +115,47 @@ class JsonFileExporter:
     """Appends events as JSON lines to a file.
 
     Useful for offline analysis, debugging, or feeding into other tools.
+    The file handle is kept open for performance and flushed after each
+    write to ensure durability.
 
     Usage::
 
         exporter = JsonFileExporter("events.jsonl")
         sess = LazySession(exporters=[exporter])
+        # ... run agents ...
+        exporter.close()  # optional — flushes and closes
     """
 
-    __slots__ = ("_path",)
+    __slots__ = ("_path", "_fh", "_lock")
 
     def __init__(self, path: str) -> None:
         self._path = path
+        self._lock = threading.Lock()
+        self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115
 
     def export(self, event: dict[str, Any]) -> None:
         import json
         try:
             line = json.dumps(event, default=str)
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+            with self._lock:
+                self._fh.write(line + "\n")
+                self._fh.flush()
         except Exception as exc:
             _logger.debug("JsonFileExporter write failed: %s", exc)
+
+    def close(self) -> None:
+        """Flush and close the file handle."""
+        try:
+            with self._lock:
+                self._fh.close()
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            pass
 
     def __repr__(self) -> str:
         return f"JsonFileExporter({self._path!r})"

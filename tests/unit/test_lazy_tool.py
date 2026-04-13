@@ -783,3 +783,130 @@ def test_pipeline_save_with_step_timeout(tmp_path):
     t = LazyTool.chain(a, name="timed", description="timed chain", step_timeout=30.0)
     # Just verify the config captured it
     assert t._pipeline.step_timeout == 30.0
+
+
+# =============================================================================
+# Round-trip load tests (save → load → verify)
+# =============================================================================
+
+
+def test_roundtrip_chain_with_function_tools(tmp_path):
+    """Save a chain of two function tools, load it, verify it's a working pipeline."""
+    # Use functions defined at module scope (source retrievable)
+    t1 = LazyTool.from_function(add, name="add", description="add two numbers")
+    t2 = LazyTool.from_function(scale, name="scale", description="scale a value")
+    chain = LazyTool.chain(t1, t2, name="add_then_scale", description="add then scale")
+
+    out = str(tmp_path / "chain.py")
+    chain.save(out)
+
+    # Verify the generated file is valid Python
+    content = Path(out).read_text()
+    assert "def add(" in content
+    assert "def scale(" in content
+    assert "LazyTool.chain(" in content
+
+    # Load it back
+    loaded = LazyTool.load(out)
+    assert isinstance(loaded, LazyTool)
+    assert loaded._is_pipeline_tool is True
+    assert loaded.name == "add_then_scale"
+    assert loaded.description == "add then scale"
+
+
+def test_roundtrip_parallel_with_function_tools(tmp_path):
+    """Save a parallel of two function tools, load it, verify reconstruction."""
+    t1 = LazyTool.from_function(add, name="add", description="add")
+    t2 = LazyTool.from_function(greet, name="greet", description="greet")
+    par = LazyTool.parallel(t1, t2, name="add_and_greet", description="both",
+                            combiner="last", concurrency_limit=3)
+
+    out = str(tmp_path / "par.py")
+    par.save(out)
+    loaded = LazyTool.load(out)
+    assert loaded._is_pipeline_tool is True
+    assert loaded.name == "add_and_greet"
+    # Verify combiner was preserved in the generated code
+    content = Path(out).read_text()
+    assert "combiner='last'" in content
+    assert "concurrency_limit=3" in content
+
+
+def test_roundtrip_chain_with_reconnect(tmp_path):
+    """Save a chain with an unsaveable closure tool, load with reconnect."""
+    # Saveable function tool
+    func_tool = LazyTool.from_function(add, name="add", description="add")
+
+    # Unsaveable closure tool
+    captured = 10
+    def closure_fn(x: int) -> int:
+        return x + captured
+    closure_tool = LazyTool.from_function(closure_fn, name="my_closure", description="closure")
+
+    chain = LazyTool.chain(func_tool, closure_tool, name="mixed", description="mixed chain")
+
+    out = str(tmp_path / "mixed.py")
+    chain.save(out)
+
+    content = Path(out).read_text()
+    assert 'reconnect["my_closure"]' in content
+    assert "REQUIRES reconnect" in content
+
+    # Load with reconnect
+    replacement = LazyTool.from_function(greet, name="my_closure", description="replacement")
+    loaded = LazyTool.load(out, reconnect={"my_closure": replacement})
+    assert loaded._is_pipeline_tool is True
+    assert loaded.name == "mixed"
+
+
+def test_roundtrip_load_without_reconnect_raises(tmp_path):
+    """Loading a pipeline that needs reconnect without providing it raises KeyError."""
+    func_tool = LazyTool.from_function(add, name="add", description="add")
+    captured = 10
+    def closure_fn(x: int) -> int:
+        return x + captured
+    closure_tool = LazyTool.from_function(closure_fn, name="needs_reconnect", description="x")
+
+    chain = LazyTool.chain(func_tool, closure_tool, name="ch", description="d")
+    out = str(tmp_path / "ch.py")
+    chain.save(out)
+
+    with pytest.raises(KeyError, match="needs_reconnect"):
+        LazyTool.load(out)
+
+
+def test_roundtrip_nested_pipeline(tmp_path):
+    """Save a chain containing a parallel, load it back."""
+    t1 = LazyTool.from_function(add, name="add", description="add")
+    t2 = LazyTool.from_function(greet, name="greet", description="greet")
+    inner = LazyTool.parallel(t1, t2, name="inner_par", description="parallel inner")
+
+    t3 = LazyTool.from_function(scale, name="scale", description="scale")
+    outer = LazyTool.chain(inner, t3, name="outer_chain", description="chain with nested parallel")
+
+    out = str(tmp_path / "nested.py")
+    outer.save(out)
+
+    content = Path(out).read_text()
+    assert "LazyTool.parallel(" in content
+    assert "LazyTool.chain(" in content
+
+    loaded = LazyTool.load(out)
+    assert loaded._is_pipeline_tool is True
+    assert loaded.name == "outer_chain"
+
+
+def test_v1_files_still_load(tmp_path):
+    """Backward compat: v1 function tool files still load correctly."""
+    t = LazyTool.from_function(add, name="add", description="add two numbers")
+    out = str(tmp_path / "v1.py")
+    t.save(out)  # v1 format (not a pipeline)
+
+    content = Path(out).read_text()
+    assert "LAZYBRIDGE_GENERATED_TOOL v1" in content
+
+    loaded = LazyTool.load(out)
+    assert loaded.name == "add"
+    assert loaded.func is not None
+    result = loaded.run({"a": 3, "b": 4})
+    assert result == 7
