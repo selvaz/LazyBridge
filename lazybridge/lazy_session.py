@@ -140,10 +140,12 @@ class EventLog:
         db: str | None = None,
         level: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
+        exporters: list | None = None,
     ) -> None:
         self.session_id = session_id
         self.level = TrackLevel(level) if not isinstance(level, TrackLevel) else level
         self._console = console
+        self._exporters: list = list(exporters or [])
         self._db = str(Path(db).resolve()) if db else None
         self._mem: list[dict] | None = [] if db is None else None  # in-memory fallback
         self._lock = threading.Lock()
@@ -171,6 +173,21 @@ class EventLog:
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.executescript(self._SCHEMA)
+
+    # ------------------------------------------------------------------
+    # Exporter management
+    # ------------------------------------------------------------------
+
+    def add_exporter(self, exporter: Any) -> None:
+        """Register an event exporter. It will receive all future events."""
+        self._exporters.append(exporter)
+
+    def remove_exporter(self, exporter: Any) -> None:
+        """Unregister an event exporter."""
+        try:
+            self._exporters.remove(exporter)
+        except ValueError:
+            pass
 
     # ------------------------------------------------------------------
     # Write
@@ -217,6 +234,13 @@ class EventLog:
 
         if self._console:
             self._print_event(agent_name, event_type, data)
+
+        # Fan-out to registered exporters
+        for exp in self._exporters:
+            try:
+                exp.export(row)
+            except Exception as exc:
+                _logger.debug("Exporter %s failed: %s", type(exp).__name__, exc)
 
     def _print_event(self, agent_name: str | None, event_type: str, data: dict) -> None:
         from datetime import datetime as _dt
@@ -360,16 +384,28 @@ class LazySession:
         db: str | None = None,
         tracking: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
+        exporters: list | None = None,
     ) -> None:
         self.id = str(uuid.uuid4())
         self.store = LazyStore(db=db)
-        self.events = EventLog(self.id, db=db, level=tracking, console=console)
+        self.events = EventLog(
+            self.id, db=db, level=tracking, console=console,
+            exporters=exporters,
+        )
         self.graph = GraphSchema(self.id)
         self._agents: list[Any] = []  # ordered list of registered agents
 
     # ------------------------------------------------------------------
     # Agent registration (called by LazyAgent.__init__)
     # ------------------------------------------------------------------
+
+    def add_exporter(self, exporter: Any) -> None:
+        """Register an event exporter on this session's EventLog."""
+        self.events.add_exporter(exporter)
+
+    def remove_exporter(self, exporter: Any) -> None:
+        """Unregister an event exporter."""
+        self.events.remove_exporter(exporter)
 
     def _register_agent(self, agent: LazyAgent) -> None:
         self.graph.add_agent(agent)
