@@ -1,35 +1,33 @@
 """Pre-configured Quantitative Analysis Agent.
 
-A specialized LazyAgent with N sub-agent pipeline tools — each function gets
-its own agent(output_schema) → function chain.  The router agent knows the
-methodology (via skill tools) and calls the right sub-agent as a tool.
+Hybrid architecture: complex tools get dedicated sub-agent pipelines
+(agent_tool) for intelligent parameter construction; simple tools use
+direct tool calling (plain LazyTool) for efficiency.
 
 Architecture::
 
     router_agent (skills: methodology, tool guide, downloader guide)
-    ├── discover_data          (plain tool — no params)
-    ├── analyze_agent          (sub-agent → analyze())
-    ├── discover_analyses_agent(sub-agent → discover_analyses())
-    ├── register_dataset_agent (sub-agent → register_dataset())
-    ├── list_universe_agent    (sub-agent → list_universe())
-    ├── search_tickers_agent   (sub-agent → search_tickers())
-    ├── download_tickers_agent (sub-agent → download_tickers())
-    ├── fit_model_agent        (sub-agent → fit_model())
-    ├── query_data_agent       (sub-agent → query_data())
-    ├── forecast_agent         (sub-agent → forecast_model())
-    ├── diagnostics_agent      (sub-agent → run_diagnostics())
-    ├── compare_models_agent   (sub-agent → compare_models())
-    ├── profile_dataset_agent  (sub-agent → profile_dataset())
-    ├── get_run_agent          (sub-agent → get_run())
-    ├── list_runs_agent        (sub-agent → list_runs())
-    ├── list_artifacts_agent   (sub-agent → list_artifacts())
-    └── get_plot_agent         (sub-agent → get_plot())
-
-Each sub-agent pipeline:
-  1. Receives {"task": "natural language request"} from the router
-  2. Sub-agent (LLM) produces structured output = function's input schema
-  3. Chain passes model_dump() to the function for deterministic execution
-  4. Function result returns to the router
+    │
+    │ agent_tool pipelines (2x LLM calls — NL→structured params→function):
+    ├── analyze            (complex: mode resolution, target inference)
+    ├── fit_model           (complex: family selection, param tuning)
+    ├── download_tickers    (complex: ticker list from NL description)
+    ├── query_data          (complex: NL→SQL translation)
+    │
+    │ plain tools (1x LLM call — direct arg filling):
+    ├── discover_data       (no params)
+    ├── discover_analyses   (simple: optional dataset + limit)
+    ├── register_dataset    (simple: user provides explicit values)
+    ├── list_universe       (simple: optional filter)
+    ├── search_tickers      (simple: single query string)
+    ├── profile_dataset     (simple: single name)
+    ├── forecast_model      (simple: run_id + steps)
+    ├── run_diagnostics     (simple: name + column)
+    ├── compare_models      (simple: list of run_ids)
+    ├── get_run             (simple: single run_id)
+    ├── list_runs           (simple: optional dataset + limit)
+    ├── list_artifacts      (simple: run_id + optional type)
+    └── get_plot            (simple: run_id + name)
 
 Usage::
 
@@ -56,43 +54,36 @@ statistical analysis runtime.
 
 ## Your Tools
 
-Each tool accepts a natural language task and handles parameter extraction \
-automatically. Just describe what you need.
-
 **Data Discovery & Download:**
-- `list_universe` — browse 140 tickers by asset class
-- `search_tickers` — search by name, symbol, sector, country
-- `download_tickers` — download from Yahoo/FRED/ECB and register
+- `list_universe(asset_class=...)` — browse 140 tickers by asset class
+- `search_tickers(query)` — search by name, symbol, sector, country
+- `download_tickers` — describe what data to download (intelligent — extracts tickers from your description)
 
 **Discovery:**
-- `discover_data` — see registered datasets with column roles and quality signals
-- `discover_analyses` — review completed analyses with metrics and plots
+- `discover_data()` — see registered datasets with column roles and quality signals
+- `discover_analyses(dataset_name=..., limit=...)` — review completed analyses
 
 **Analysis:**
-- `analyze` — run goal-oriented analysis:
-  - mode="recommend" — auto-select best analysis
-  - mode="volatility" — GARCH volatility modeling
-  - mode="forecast" — ARIMA time-series forecast
-  - mode="regime" — Markov regime detection
-  - mode="describe" — descriptive statistics
-- `register_dataset` — register a new data file for analysis
+- `analyze` — describe your analysis goal (intelligent — picks mode, resolves target, tunes params)
+  - Supports: recommend, describe, forecast, volatility, regime
+- `register_dataset(name, uri, ...)` — register a new data file
 
 **Expert Tools:**
-- `fit_model` — fit a specific model with custom parameters
-- `query_data` — run SQL on registered datasets
-- `forecast_model` — generate forecast from a fitted model
-- `run_diagnostics` — stationarity tests on a data column
-- `compare_models` — compare multiple model runs
-- `profile_dataset` — column-level statistics
-- `get_run` — retrieve a past model run
-- `list_runs` — list past model runs
-- `list_artifacts` — list artifacts for a run
-- `get_plot` — get a specific plot
+- `fit_model` — describe the model to fit (intelligent — selects family, params)
+- `query_data` — describe the SQL query you need (intelligent — translates NL to SQL)
+- `forecast_model(run_id, steps)` — generate forecast from a fitted model
+- `run_diagnostics(series_name, column)` — stationarity tests on a data column
+- `compare_models(run_ids)` — compare multiple model runs
+- `profile_dataset(name)` — column-level statistics
+- `get_run(run_id)` — retrieve a past model run
+- `list_runs(dataset_name=..., limit=...)` — list past model runs
+- `list_artifacts(run_id, artifact_type=...)` — list artifacts for a run
+- `get_plot(run_id, name)` — get a specific plot
 
 **Knowledge:**
-- `data_downloader_guide` — look up ticker info, data sources, workflows
-- `stat_tool_guide` — look up tool usage, parameters, error recovery
-- `quant_methodology` — look up statistical methods and best practices
+- `data_downloader_guide(query)` — look up ticker info, data sources, workflows
+- `stat_tool_guide(query)` — look up tool usage, parameters, error recovery
+- `quant_methodology(query)` — look up statistical methods and best practices
 
 ## Workflow
 
@@ -126,9 +117,12 @@ def quant_agent(
 ) -> tuple[Any, Any]:
     """Create a fully-equipped quantitative analysis agent.
 
-    Uses N specialized sub-agent pipelines — each function gets its own
-    agent(output_schema) → function chain.  The router agent knows the
-    methodology and calls the right sub-agent as a tool.
+    Hybrid architecture:
+    - Complex tools (analyze, fit_model, download_tickers, query_data) get
+      dedicated sub-agent pipelines via agent_tool() for intelligent parameter
+      construction (2x LLM calls but better accuracy).
+    - Simple tools (discover_data, get_run, etc.) use direct tool calling
+      for efficiency (1x LLM call).
 
     Args:
         provider: LLM provider ("anthropic", "openai", "google", "deepseek")
@@ -158,21 +152,9 @@ def quant_agent(
     )
     from lazybridge.stat_runtime.schemas import (
         AnalyzeInput,
-        CompareModelsInput,
-        DiscoverAnalysesInput,
         DownloadTickersInput,
         FitModelInput,
-        ForecastInput,
-        GetPlotInput,
-        GetRunInput,
-        ListArtifactsInput,
-        ListRunsInput,
-        ListUniverseInput,
-        ProfileDatasetInput,
         QueryDataInput,
-        RegisterDatasetInput,
-        RunDiagnosticsInput,
-        SearchTickersInput,
     )
     from lazybridge.data_downloader import (
         TickerDatabase,
@@ -192,131 +174,92 @@ def quant_agent(
 
     # Get raw tool functions (bound to runtime via closures)
     all_stat = stat_tools(rt, level="all")
-    dl_tools = downloader_tools(rt, db, dl)
+    dl_tools_list = downloader_tools(rt, db, dl)
 
-    # Build name→LazyTool lookup for the raw functions
-    raw_tools = {t.name: t for t in all_stat + dl_tools}
+    # Build name→LazyTool lookup
+    raw_tools = {t.name: t for t in all_stat + dl_tools_list}
 
-    # Common agent kwargs for sub-agents
+    # Common sub-agent kwargs
     sub_kwargs = {k: v for k, v in agent_kwargs.items() if k not in ("tools",)}
 
     # ---------------------------------------------------------------
-    # Build agent_tool pipelines for each function
+    # COMPLEX TOOLS — agent_tool pipelines (NL → structured → function)
+    # These benefit from a dedicated LLM step for parameter construction.
     # ---------------------------------------------------------------
 
-    def _build_agent_tool(
-        tool_name: str,
-        input_schema: type,
-        description: str,
-        guidance: str | None = None,
-    ) -> LazyTool:
-        """Build a sub-agent → function pipeline for a single tool."""
-        raw = raw_tools[tool_name]
-        return LazyTool.agent_tool(
-            raw.func,
-            input_schema=input_schema,
-            provider=provider,
-            model=model,
-            name=tool_name,
-            description=description,
-            guidance=guidance,
-            **sub_kwargs,
-        )
+    agent_tools: list[LazyTool] = []
 
-    all_tools: list[LazyTool] = []
-
-    # discover_data has no params — keep as plain tool
-    if "discover_data" in raw_tools:
-        all_tools.append(raw_tools["discover_data"])
-
-    # High-level analysis tools
-    all_tools.append(_build_agent_tool(
-        "analyze", AnalyzeInput,
-        "Run a goal-oriented analysis with automatic model selection",
-        guidance="Primary analysis tool. Describe the analysis goal and the dataset. "
-                 "Modes: recommend, describe, forecast, volatility, regime.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "discover_analyses", DiscoverAnalysesInput,
-        "Discover completed analysis runs with metrics and artifact catalogs",
-        guidance="Call to review what analyses exist. Optionally filter by dataset name.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "register_dataset", RegisterDatasetInput,
-        "Register a Parquet or CSV file as a named dataset for analysis",
-        guidance="Provide file path and metadata. After registering, call discover_data().",
+    agent_tools.append(LazyTool.agent_tool(
+        raw_tools["analyze"].func,
+        input_schema=AnalyzeInput,
+        provider=provider, model=model,
+        name="analyze",
+        description="Run a goal-oriented analysis with automatic model selection. "
+                    "Describe your analysis goal — mode, target, and params are inferred.",
+        guidance="Primary analysis tool. Just describe what you want to analyze and how. "
+                 "The sub-agent resolves mode, target column, and parameters from your description.",
+        **sub_kwargs,
     ))
 
-    # Data downloader tools
-    all_tools.append(_build_agent_tool(
-        "list_universe", ListUniverseInput,
-        "Browse the 140-ticker universe by asset class",
-        guidance="Describe what asset classes or categories you want to explore.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "search_tickers", SearchTickersInput,
-        "Search tickers by name, symbol, sector, or country",
-        guidance="Describe what you're looking for — partial matches work.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "download_tickers", DownloadTickersInput,
-        "Download market data and register in stat_runtime for analysis",
-        guidance="List the tickers to download. Sources auto-detected from universe.",
+    agent_tools.append(LazyTool.agent_tool(
+        raw_tools["fit_model"].func,
+        input_schema=FitModelInput,
+        provider=provider, model=model,
+        name="fit_model",
+        description="Fit a specific statistical model to data. "
+                    "Describe the model — family, parameters, and data source are inferred.",
+        guidance="For custom model fits. Describe the model family (OLS/ARIMA/GARCH/Markov), "
+                 "target data, and any specific parameters you want.",
+        **sub_kwargs,
     ))
 
-    # Expert-level stat tools
-    all_tools.append(_build_agent_tool(
-        "fit_model", FitModelInput,
-        "Fit a specific statistical model (OLS, ARIMA, GARCH, Markov) to data",
-        guidance="Specify model family, target column, dataset, and any custom parameters.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "query_data", QueryDataInput,
-        "Run a SQL query on registered datasets using dataset('name') macro",
-        guidance="Describe the SQL query needed. Only SELECT statements allowed.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "forecast_model", ForecastInput,
-        "Generate a forecast from a previously fitted model",
-        guidance="Provide run_id and number of forecast steps.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "run_diagnostics", RunDiagnosticsInput,
-        "Run stationarity tests (ADF + KPSS) on a data column",
-        guidance="Specify dataset name and column to test.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "compare_models", CompareModelsInput,
-        "Compare multiple model runs by AIC, BIC, and other metrics",
-        guidance="Provide a list of run IDs to compare.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "profile_dataset", ProfileDatasetInput,
-        "Compute column-level statistics for a registered dataset",
-        guidance="Provide the dataset name to profile.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "get_run", GetRunInput,
-        "Retrieve a past model run with full metrics and artifact paths",
-        guidance="Provide the run ID to retrieve.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "list_runs", ListRunsInput,
-        "List past model runs, optionally filtered by dataset",
-        guidance="Optionally specify dataset name and limit.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "list_artifacts", ListArtifactsInput,
-        "List all artifacts (plots, data, summaries) for a model run",
-        guidance="Provide run ID and optionally filter by artifact type.",
-    ))
-    all_tools.append(_build_agent_tool(
-        "get_plot", GetPlotInput,
-        "Get the file path for a specific plot from a model run",
-        guidance="Provide run ID and plot name (residuals, volatility, forecast, regimes).",
+    agent_tools.append(LazyTool.agent_tool(
+        raw_tools["download_tickers"].func,
+        input_schema=DownloadTickersInput,
+        provider=provider, model=model,
+        name="download_tickers",
+        description="Download market data and register for analysis. "
+                    "Describe what data you need — ticker symbols and date range are extracted.",
+        guidance="Describe the data you want. The sub-agent identifies ticker symbols, "
+                 "date range, and registration preferences from your description.",
+        **sub_kwargs,
     ))
 
-    # Skills: downloader guide + stat guide + quant methodology
+    agent_tools.append(LazyTool.agent_tool(
+        raw_tools["query_data"].func,
+        input_schema=QueryDataInput,
+        provider=provider, model=model,
+        name="query_data",
+        description="Query registered datasets with SQL. "
+                    "Describe what data you need — the SQL is generated automatically.",
+        guidance="Describe the data query in natural language. The sub-agent translates "
+                 "to SQL using dataset('name') macro. Only SELECT is allowed.",
+        **sub_kwargs,
+    ))
+
+    # ---------------------------------------------------------------
+    # SIMPLE TOOLS — direct tool calling (LLM fills args directly)
+    # These have straightforward params the router can handle.
+    # ---------------------------------------------------------------
+
+    simple_tool_names = [
+        "discover_data", "discover_analyses", "register_dataset",
+        "list_universe", "search_tickers",
+        "profile_dataset", "forecast_model", "run_diagnostics",
+        "compare_models", "get_run", "list_runs",
+        "list_artifacts", "get_plot",
+        "list_datasets",
+    ]
+
+    simple_tools = [raw_tools[n] for n in simple_tool_names if n in raw_tools]
+
+    # ---------------------------------------------------------------
+    # Combine: agent_tools + simple_tools + skills
+    # ---------------------------------------------------------------
+
+    all_tools: list[LazyTool] = agent_tools + simple_tools
+
+    # Skills
     try:
         dl_skills = build_downloader_skills(
             output_root=str(Path(artifacts_dir) / "skills"),
@@ -344,9 +287,11 @@ def quant_agent(
         **agent_kwargs,
     )
 
+    n_agent = len(agent_tools)
+    n_simple = len(simple_tools)
     _logger.info(
-        "Created quant_agent with %d tools (%d tickers in universe)",
-        len(all_tools), len(db.list_all()),
+        "Created quant_agent: %d agent_tools + %d plain tools (%d tickers in universe)",
+        n_agent, n_simple, len(db.list_all()),
     )
 
     return agent, rt
