@@ -577,6 +577,59 @@ def test_n22_resolve_participant_unknown_type_raises():
         _resolve_participant(Unknown())
 
 
+# ── N-typed — chain: agent(output_schema) → LazyTool passes model_dump() ────
+
+def test_chain_typed_agent_to_tool_passes_model_dump():
+    """When an agent step produces a typed Pydantic object (output_schema),
+    the next LazyTool step receives model_dump() as its arguments dict
+    instead of {"task": serialized_text}."""
+    from pydantic import BaseModel
+
+    class AddInput(BaseModel):
+        a: int
+        b: int
+
+    # Mock agent that produces a typed Pydantic result
+    typed_result = AddInput(a=3, b=4)
+    agent = _mock_agent("param_builder", "")
+    agent.output_schema = AddInput
+    resp = CompletionResponse(content=typed_result.model_dump_json(), usage=UsageStats())
+    resp._parsed = typed_result
+
+    # ajson returns the Pydantic model directly (like real LazyAgent.ajson)
+    agent.ajson = AsyncMock(return_value=typed_result)
+
+    # The function tool that should receive {"a": 3, "b": 4}
+    def add_fn(a: int, b: int) -> int:
+        return a + b
+
+    tool = LazyTool.from_function(add_fn, name="add_fn", description="add two numbers")
+
+    pipeline = LazyTool.chain(agent, tool, name="typed_chain", description="test")
+    result = pipeline.run({"task": "add 3 and 4"})
+    # Chain stringifies the last step's output (text representation)
+    assert result == "7"
+
+
+def test_chain_untyped_agent_to_tool_passes_task():
+    """When an agent step has no output_schema, the next LazyTool step
+    receives {"task": text} as before (backward compat)."""
+    agent = _mock_agent("writer", "some text output")
+
+    captured_args = {}
+
+    def sink(task: str) -> str:
+        captured_args["task"] = task
+        return "done"
+
+    tool = LazyTool.from_function(sink, name="sink", description="captures input")
+
+    pipeline = LazyTool.chain(agent, tool, name="compat_chain", description="test")
+    result = pipeline.run({"task": "go"})
+    assert result == "done"
+    assert captured_args["task"] == "some text output"
+
+
 def test_n23_parallel_raises_cross_session_for_delegate_tool():
     """N23: _validate_session_compatibility raises ValueError for a delegate tool
     whose inner agent is bound to a different session."""

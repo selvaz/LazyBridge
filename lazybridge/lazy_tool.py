@@ -718,6 +718,129 @@ class LazyTool:
         tool._is_pipeline_tool = True
         return tool
 
+    @classmethod
+    def agent_tool(
+        cls,
+        func: Callable,
+        *,
+        input_schema: type,
+        provider: str = "anthropic",
+        model: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        guidance: str | None = None,
+        system: str | None = None,
+        step_timeout: float | None = None,
+        **agent_kwargs: Any,
+    ) -> "LazyTool":
+        """Create an intelligent tool by chaining a sub-agent → function.
+
+        The sub-agent receives a natural-language task, produces structured
+        output matching ``input_schema`` (a Pydantic BaseModel whose fields
+        correspond to ``func``'s parameters), and the chain automatically
+        passes ``model_dump()`` to the function for deterministic execution.
+
+        This is the universal pattern for turning any function into an
+        LLM-callable tool with validated parameter construction::
+
+            from lazybridge.lazy_tool import LazyTool
+            from pydantic import BaseModel, Field
+
+            class FitModelInput(BaseModel):
+                family: str = Field(description="Model family: ols, arima, garch, markov")
+                target_col: str = Field(description="Target column in the dataset")
+                dataset_name: str | None = None
+
+            fit_tool = LazyTool.agent_tool(
+                fit_model,
+                input_schema=FitModelInput,
+                provider="anthropic",
+                name="fit_model",
+                description="Fit a statistical model with LLM-guided parameter selection",
+            )
+
+            # The orchestrator calls fit_tool with {"task": "fit GARCH to SPY returns"}
+            # → sub-agent produces FitModelInput(family="garch", target_col="value", ...)
+            # → fit_model(**input.model_dump()) executes deterministically
+
+        Parameters
+        ----------
+        func:
+            The function to execute.  Its signature must accept the fields
+            of ``input_schema`` as keyword arguments.
+        input_schema:
+            Pydantic BaseModel class.  The sub-agent's ``output_schema``.
+        provider:
+            LLM provider for the sub-agent.
+        model:
+            Model override for the sub-agent.
+        name:
+            Tool name exposed to the orchestrator (defaults to func.__name__).
+        description:
+            Tool description (defaults to func docstring).
+        guidance:
+            Optional guidance hint for the orchestrator.
+        system:
+            System prompt for the sub-agent.  Defaults to a prompt built
+            from ``input_schema``'s field descriptions.
+        step_timeout:
+            Per-step timeout in seconds for the chain.
+        **agent_kwargs:
+            Extra keyword arguments forwarded to LazyAgent constructor.
+
+        Returns
+        -------
+        LazyTool
+            A pipeline tool with schema ``{"task": str}``.
+        """
+        from lazybridge.lazy_agent import LazyAgent
+
+        tool_name = name or getattr(func, "__name__", "agent_tool")
+        tool_desc = description or getattr(func, "__doc__", None) or f"Intelligent {tool_name} tool"
+
+        # Build a default system prompt from the schema if not provided
+        if system is None:
+            schema_info = input_schema.model_json_schema()
+            props = schema_info.get("properties", {})
+            required = schema_info.get("required", [])
+            field_lines = []
+            for fname, finfo in props.items():
+                desc = finfo.get("description", "")
+                req = "(required)" if fname in required else "(optional)"
+                field_lines.append(f"  - {fname} {req}: {desc}")
+            fields_text = "\n".join(field_lines) if field_lines else "  (no fields)"
+
+            system = (
+                f"You are a parameter extraction agent for the '{tool_name}' function.\n"
+                f"Given a natural language task, produce the correct parameters.\n\n"
+                f"Parameters:\n{fields_text}\n\n"
+                f"Output ONLY the structured parameters. Do not explain or narrate."
+            )
+
+        # Create the sub-agent (no tools — pure structured output)
+        sub_agent = LazyAgent(
+            provider,
+            model=model,
+            name=f"{tool_name}_params",
+            description=f"Parameter builder for {tool_name}",
+            system=system,
+            output_schema=input_schema,
+            **agent_kwargs,
+        )
+
+        # Wrap the function as a LazyTool
+        func_tool = cls.from_function(func, name=f"{tool_name}_exec", description=tool_desc)
+
+        # Chain: sub_agent (produces typed Pydantic) → func_tool (receives model_dump())
+        return cls.chain(
+            sub_agent,
+            func_tool,
+            name=tool_name,
+            description=tool_desc,
+            guidance=guidance,
+            step_timeout=step_timeout,
+        )
+
 
 # ---------------------------------------------------------------------------
 # save/load helpers — module-private

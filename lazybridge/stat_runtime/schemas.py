@@ -394,3 +394,122 @@ class AnalysisResult(BaseModel):
     # Timing
     duration_secs: float | None = None
     error_message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tool input schemas — used as output_schema for sub-agent → function chains
+# ---------------------------------------------------------------------------
+
+class AnalyzeInput(BaseModel):
+    """Input schema for the analyze() tool."""
+    dataset_name: str = Field(description="Registered dataset name")
+    target_col: str | None = Field(default=None, description="Target column (auto-resolved from metadata if omitted)")
+    mode: str = Field(default="recommend", description="Analysis goal: describe, forecast, volatility, regime, recommend")
+    time_col: str | None = Field(default=None, description="Time column for ordering (auto-detected if not set)")
+    forecast_steps: int | None = Field(default=None, description="Forecast steps (None = auto based on mode)")
+    group_col: str | None = Field(default=None, description="Column to filter/segment by (e.g. 'symbol')")
+    group_value: str | None = Field(default=None, description="Value to filter group_col to (e.g. 'SPY')")
+    params: dict[str, Any] | None = Field(default=None, description="Expert override: model parameters")
+
+
+class FitModelInput(BaseModel):
+    """Input schema for the fit_model() tool."""
+    family: str = Field(description="Model family: ols, arima, garch, or markov")
+    target_col: str = Field(description="Target column name in the dataset")
+    dataset_name: str | None = Field(default=None, description="Registered dataset name")
+    query_sql: str | None = Field(default=None, description="SQL query to extract data (alternative to dataset_name)")
+    exog_cols: list[str] | None = Field(default=None, description="Exogenous/independent variable columns")
+    params: dict[str, Any] | None = Field(default=None, description="Model-specific parameters (e.g. {'p': 1, 'q': 1} for GARCH)")
+    forecast_steps: int | None = Field(default=None, description="Number of forecast steps (None = no forecast)")
+    time_col: str | None = Field(default=None, description="Time column for ordering")
+
+
+class ForecastInput(BaseModel):
+    """Input schema for the forecast_model() tool."""
+    run_id: str = Field(description="Run ID from a previous fit_model call")
+    steps: int = Field(description="Number of forecast steps")
+    ci_level: float = Field(default=0.95, description="Confidence interval level (0-1)")
+
+
+class QueryDataInput(BaseModel):
+    """Input schema for the query_data() tool."""
+    sql: str = Field(description="SQL SELECT query. Use dataset('name') to reference registered datasets.")
+    max_rows: int = Field(default=5000, description="Maximum rows to return")
+
+
+class ProfileDatasetInput(BaseModel):
+    """Input schema for the profile_dataset() tool."""
+    name: str = Field(description="Name of a registered dataset")
+
+
+class RunDiagnosticsInput(BaseModel):
+    """Input schema for the run_diagnostics() tool."""
+    series_name: str = Field(description="Dataset name for stationarity tests")
+    column: str = Field(description="Column to test")
+
+
+class CompareModelsInput(BaseModel):
+    """Input schema for the compare_models() tool."""
+    run_ids: list[str] = Field(description="List of run IDs to compare")
+
+
+class RegisterDatasetInput(BaseModel):
+    """Input schema for the register_dataset() tool."""
+    name: str = Field(description="Logical name for the dataset (e.g. 'equities.daily')")
+    uri: str = Field(description="File path to a Parquet or CSV file")
+    time_column: str | None = Field(default=None, description="Primary time/date column name")
+    frequency: str = Field(default="daily", description="Data frequency: daily, weekly, monthly, quarterly, annual, intraday, irregular")
+    entity_keys: list[str] | None = Field(default=None, description="Key columns (e.g. ['symbol', 'country'])")
+    business_description: str | None = Field(default=None, description="What this dataset represents")
+    canonical_target: str | None = Field(default=None, description="Preferred target column for analysis")
+    identifiers_to_ignore: list[str] | None = Field(default=None, description="Columns to exclude from modeling")
+
+
+class GetRunInput(BaseModel):
+    """Input schema for the get_run() tool."""
+    run_id: str = Field(description="Run ID to retrieve")
+
+
+class ListRunsInput(BaseModel):
+    """Input schema for the list_runs() tool."""
+    dataset_name: str | None = Field(default=None, description="Filter by dataset name")
+    limit: int = Field(default=20, description="Maximum runs to return")
+
+
+class ListArtifactsInput(BaseModel):
+    """Input schema for the list_artifacts() tool."""
+    run_id: str = Field(description="Run ID to list artifacts for")
+    artifact_type: str | None = Field(default=None, description="Filter: plot, data, summary, forecast")
+
+
+class GetPlotInput(BaseModel):
+    """Input schema for the get_plot() tool."""
+    run_id: str = Field(description="Run ID")
+    name: str = Field(description="Plot name (e.g. 'residuals', 'volatility', 'forecast', 'regimes')")
+
+
+class DiscoverAnalysesInput(BaseModel):
+    """Input schema for the discover_analyses() tool."""
+    dataset_name: str | None = Field(default=None, description="Filter by dataset name")
+    limit: int = Field(default=20, description="Maximum runs to return")
+
+
+# -- Data downloader input schemas --
+
+class ListUniverseInput(BaseModel):
+    """Input schema for the list_universe() tool."""
+    asset_class: str | None = Field(default=None, description="Filter by asset class: EQUITY, FIXED_INCOME, COMMODITIES, REAL_ESTATE, ALTERNATIVES, MACRO, FX")
+    sub_asset_class: str | None = Field(default=None, description="Filter by sub-asset class (e.g. 'Developed', 'Government', 'Energy')")
+
+
+class SearchTickersInput(BaseModel):
+    """Input schema for the search_tickers() tool."""
+    query: str = Field(description="Search query: ticker symbol, name, asset class, sector, or country")
+
+
+class DownloadTickersInput(BaseModel):
+    """Input schema for the download_tickers() tool."""
+    tickers: list[str] = Field(description="Ticker symbols to download (e.g. ['SPY', 'AAPL', 'DGS10'])")
+    start: str | None = Field(default=None, description="Start date YYYY-MM-DD (default: 2000-01-01)")
+    end: str | None = Field(default=None, description="End date YYYY-MM-DD (default: today)")
+    auto_register: bool = Field(default=True, description="Auto-register downloaded data in stat_runtime")

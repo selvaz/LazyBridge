@@ -41,6 +41,65 @@ class TestStatToolsFactory:
             assert "properties" in defn.parameters or defn.parameters == {}
 
 
+class TestToolInputSchemas:
+    """Verify input schema Pydantic models are well-formed."""
+
+    def test_all_input_schemas_importable(self):
+        from lazybridge.stat_runtime.schemas import (
+            AnalyzeInput,
+            CompareModelsInput,
+            DiscoverAnalysesInput,
+            DownloadTickersInput,
+            FitModelInput,
+            ForecastInput,
+            GetPlotInput,
+            GetRunInput,
+            ListArtifactsInput,
+            ListRunsInput,
+            ListUniverseInput,
+            ProfileDatasetInput,
+            QueryDataInput,
+            RegisterDatasetInput,
+            RunDiagnosticsInput,
+            SearchTickersInput,
+        )
+        # Each should be a Pydantic BaseModel
+        from pydantic import BaseModel
+        for cls in [
+            AnalyzeInput, CompareModelsInput, DiscoverAnalysesInput,
+            DownloadTickersInput, FitModelInput, ForecastInput,
+            GetPlotInput, GetRunInput, ListArtifactsInput,
+            ListRunsInput, ListUniverseInput, ProfileDatasetInput,
+            QueryDataInput, RegisterDatasetInput, RunDiagnosticsInput,
+            SearchTickersInput,
+        ]:
+            assert issubclass(cls, BaseModel), f"{cls.__name__} is not a BaseModel"
+
+    def test_fit_model_input_round_trips(self):
+        from lazybridge.stat_runtime.schemas import FitModelInput
+        inp = FitModelInput(
+            family="garch",
+            target_col="value",
+            dataset_name="spy",
+            params={"p": 1, "q": 1},
+        )
+        d = inp.model_dump()
+        assert d["family"] == "garch"
+        assert d["target_col"] == "value"
+        assert d["dataset_name"] == "spy"
+        assert d["params"] == {"p": 1, "q": 1}
+        # Re-parse
+        inp2 = FitModelInput(**d)
+        assert inp2 == inp
+
+    def test_analyze_input_defaults(self):
+        from lazybridge.stat_runtime.schemas import AnalyzeInput
+        inp = AnalyzeInput(dataset_name="test")
+        assert inp.mode == "recommend"
+        assert inp.target_col is None
+        assert inp.forecast_steps is None
+
+
 class TestToolErrorHandling:
     """Tools bound to a broken runtime should return error dicts, not raise."""
 
