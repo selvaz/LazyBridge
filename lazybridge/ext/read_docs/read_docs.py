@@ -1,5 +1,5 @@
 """
-lazybridge.ext.tools.read_docs  —  Multi-format document reader
+lazybridge.ext.read_docs  —  Multi-format document reader
 ===========================================================
 
 Reads .txt, .md, .pdf, .docx, .html files from a folder or a single file
@@ -8,12 +8,12 @@ and returns their text content in a format ready for LLM consumption.
 Works as a plain Python function or as a LazyTool passed to any agent.
 
 Usage — plain function:
-    from lazybridge.ext.tools.read_docs import read_folder_docs
+    from lazybridge.ext.read_docs import read_folder_docs
     text = read_folder_docs("/path/to/reports", extensions="pdf,docx")
 
 Usage — as a LazyTool:
     from lazybridge import LazyAgent, LazyTool
-    from lazybridge.ext.tools.read_docs import read_folder_docs
+    from lazybridge.ext.read_docs import read_folder_docs
 
     docs_tool = LazyTool.from_function(read_folder_docs)
     resp = LazyAgent("anthropic").loop(
@@ -225,10 +225,10 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m lazybridge.ext.tools.read_docs /path/to/folder
-  python -m lazybridge.ext.tools.read_docs /path/to/file.pdf
-  python -m lazybridge.ext.tools.read_docs /path/to/folder --extensions pdf,docx --recursive
-  python -m lazybridge.ext.tools.read_docs /path/to/folder --format json
+  python -m lazybridge.ext.read_docs /path/to/folder
+  python -m lazybridge.ext.read_docs /path/to/file.pdf
+  python -m lazybridge.ext.read_docs /path/to/folder --extensions pdf,docx --recursive
+  python -m lazybridge.ext.read_docs /path/to/folder --format json
 """,
     )
     parser.add_argument("path", help="File or folder to read")

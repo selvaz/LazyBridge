@@ -52,7 +52,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
     Returns dict with skill_dir path, or empty dict if docs missing.
     """
     from pathlib import Path
-    from lazybridge.ext.tools.doc_skills import build_skill
+    from lazybridge.ext.doc_skills import build_skill
 
     docs_dir = Path(__file__).parent / "skill_docs"
     if not docs_dir.exists() or not any(docs_dir.iterdir()):
@@ -71,7 +71,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
 
 def downloader_skill_tools(skill_dir_map: dict):
     """Create LazyTool wrappers for downloader skill bundles."""
-    from lazybridge.ext.tools.doc_skills import skill_tool
+    from lazybridge.ext.doc_skills import skill_tool
 
     tools = []
     if "data_downloader" in skill_dir_map:

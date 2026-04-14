@@ -1,5 +1,5 @@
 """
-lazybridge.ext.tools.doc_skills  —  Local documentation skill runtime
+lazybridge.ext.doc_skills  —  Local documentation skill runtime
 =================================================================
 
 Index local documentation folders into a portable skill bundle, then expose
@@ -25,7 +25,7 @@ Public API
 
 Quick start
 -----------
-    from lazybridge.ext.tools.doc_skills import build_skill, skill_tool
+    from lazybridge.ext.doc_skills import build_skill, skill_tool
     from lazybridge import LazyAgent
 
     meta = build_skill(["./docs", "./reference"], "my-project")
@@ -111,7 +111,7 @@ class SkillManifest:
     avgdl:         float
     extensions:    list[str]
     version:       str = "3.0.0"
-    created_by:    str = "lazybridge.ext.tools.doc_skills"
+    created_by:    str = "lazybridge.ext.doc_skills"
 
 
 # ── Text utilities ─────────────────────────────────────────────────────────────

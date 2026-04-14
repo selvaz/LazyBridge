@@ -864,7 +864,7 @@ def build_stat_skills(output_root: str = "./generated_skills") -> dict[str, Any]
 
     Call once — persists to disk. Returns dict with skill_dir paths.
     """
-    from lazybridge.ext.tools.doc_skills import build_skill
+    from lazybridge.ext.doc_skills import build_skill
 
     base = Path(__file__).parent / "skill_docs"
     result = {}
@@ -894,7 +894,7 @@ def build_stat_skills(output_root: str = "./generated_skills") -> dict[str, Any]
 
 def stat_skill_tools(skill_dir_map: dict[str, Any]) -> list[LazyTool]:
     """Create LazyTool wrappers for the stat skill bundles."""
-    from lazybridge.ext.tools.doc_skills import skill_tool
+    from lazybridge.ext.doc_skills import skill_tool
 
     tools = []
     if "tool_guide" in skill_dir_map:

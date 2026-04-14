@@ -151,13 +151,13 @@ Drop-in tools for common agent tasks — each in its own folder with a README an
 
 | Module | What it does |
 |---|---|
-| `lazybridge.ext.tools.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
-| `lazybridge.ext.tools.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
+| `lazybridge.ext.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
+| `lazybridge.ext.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
 
 ### doc_skills — example
 
 ```python
-from lazybridge.ext.tools.doc_skills import build_skill, skill_tool
+from lazybridge.ext.doc_skills import build_skill, skill_tool
 from lazybridge import LazyAgent
 
 # Index your docs once — bundle persists to disk
@@ -172,7 +172,7 @@ print(resp.content)
 ### read_docs — example
 
 ```python
-from lazybridge.ext.tools.read_docs import read_folder_docs
+from lazybridge.ext.read_docs import read_folder_docs
 from lazybridge import LazyAgent, LazyTool
 
 docs_tool = LazyTool.from_function(read_folder_docs)
