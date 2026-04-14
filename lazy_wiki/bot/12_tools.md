@@ -1,17 +1,19 @@
-# lazybridge.tools — Ready-made tools
+# lazybridge.ext — Ready-made extensions
 
 ## Overview
 
-`lazybridge.tools` is a subpackage of ready-made LazyBridge-compatible tools.
+`lazybridge.ext` is a subpackage of ready-made LazyBridge-compatible extensions.
 Each tool is a standalone module exposing plain Python functions that can be
 called directly or wrapped as a `LazyTool` for any agent or pipeline.
 
 ```
 lazybridge/
-  tools/
-    __init__.py
-    doc_skills.py   ← BM25 local documentation skill
-    read_docs.py    ← multi-format document reader
+  ext/
+    doc_skills/    ← BM25 local documentation skill
+    read_docs/     ← multi-format document reader
+    stat_runtime/  ← econometrics & time-series
+    data_downloader/ ← market data ingestion
+    quant_agent/   ← pre-configured quant agent
 ```
 
 Import pattern:
@@ -27,7 +29,7 @@ pip install lazybridge[tools]   # pypdf, python-docx, trafilatura
 
 ---
 
-## tools.doc_skills
+## doc_skills
 
 Local documentation skill runtime. Index a folder of docs once, query them
 from any agent using full BM25 retrieval. No vector DB, no embeddings API.
@@ -181,7 +183,7 @@ detects tools and calls `loop()` automatically.
 
 ---
 
-## tools.read_docs
+## read_docs
 
 Multi-format document reader. Returns LLM-ready text from any combination of
 `.txt`, `.md`, `.pdf`, `.docx`, `.html` files.

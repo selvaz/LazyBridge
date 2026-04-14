@@ -1,6 +1,6 @@
 # LazyBridge Tools
 
-`lazybridge.tools` ships ready-made tools for the most common agent tasks.
+`lazybridge.ext` ships ready-made tools for the most common agent tasks.
 Each tool works as a plain Python function **and** as a `LazyTool` you can
 pass directly to any agent.
 
@@ -205,10 +205,11 @@ If a dependency is missing the tool returns a clear message instead of crashing:
 
 ## Adding new tools
 
-New tools go in `lazybridge/tools/` as standalone `.py` files.
+New tools go in `lazybridge/ext/` as individual directories (one per tool).
 Add a row to the tables in this file and in `lazy_wiki/bot/12_tools.md`.
 
 Convention:
+- Each tool lives in its own directory under `lazybridge/ext/` (e.g. `lazybridge/ext/doc_skills/`)
 - One or more plain functions with full type annotations and docstrings
 - `Annotated[type, "description"]` on parameters — `LazyTool.from_function` picks them up automatically
 - Graceful degradation for optional dependencies (`try/except ImportError`)

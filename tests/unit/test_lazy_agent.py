@@ -219,6 +219,25 @@ def test_json_stream_raises():
         agent.json("hi", schema=dict, stream=True)
 
 
+# ── T6.09b — json() raises on structured-output validation failure ───────────
+
+def test_json_raises_on_validation_error():
+    from lazybridge.core.types import StructuredOutputParseError
+
+    resp = CompletionResponse(
+        content='{"bad": "json"}',
+        parsed=None,
+        validation_error="JSON parse error: expected int",
+        validated=False,
+        usage=UsageStats(),
+    )
+    agent = _make_agent()
+    agent._executor.execute.return_value = resp
+
+    with pytest.raises(StructuredOutputParseError):
+        agent.json("give me a number", schema=dict)
+
+
 # ── T6.10 — json() preserves caller-supplied system prompt ───────────────────
 
 def test_json_appends_suffix_to_existing_system(fake_response):

@@ -325,6 +325,27 @@ def test_save_dotdot_raises():
         tool.save("auto_tool/../../etc/evil.py")
 
 
+# ── T3.12 — load with base_dir blocks out-of-scope paths ────────────────────
+
+def test_load_base_dir_blocks_outside(tmp_path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    f = outside / "tool.py"
+    f.write_text("# just a file\n")
+    with pytest.raises(ValueError, match="outside the allowed"):
+        LazyTool.load(str(f), base_dir=str(allowed))
+
+
+def test_load_base_dir_allows_inside(tmp_path):
+    tool = LazyTool.from_function(multiply)
+    f = tmp_path / "my_tool.py"
+    tool.save(str(f))
+    loaded = LazyTool.load(str(f), base_dir=str(tmp_path))
+    assert loaded.name == "multiply"
+
+
 # =============================================================================
 # PR-B — LazyTool.parallel(), LazyTool.chain(), cloning, discriminators
 # N1–N22

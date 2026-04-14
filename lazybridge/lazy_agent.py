@@ -1019,6 +1019,7 @@ class LazyAgent:
         )
         resp = self.chat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
+        resp.raise_if_failed()
         return resp.parsed
 
     async def atext(self, messages: str | list, **kwargs) -> str:
@@ -1037,6 +1038,7 @@ class LazyAgent:
         )
         resp = await self.achat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
+        resp.raise_if_failed()
         return resp.parsed
 
     # ------------------------------------------------------------------

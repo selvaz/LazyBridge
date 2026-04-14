@@ -199,9 +199,9 @@ LazyBridge/
 │   ├── memory.py             # Memory — stateful conversation history
 │   ├── graph/                # GraphSchema — serializable pipeline topology
 │   └── core/                 # Provider adapters, executor, tool schema builder
-├── tools/           # Tests and READMEs for lazybridge.tools
-│   ├── doc_skills/           # test_doc_skills.py + README
-│   └── read_docs/            # README
+├── tests/           # Tests for lazybridge.ext modules
+│   ├── doc_skills/           # test_doc_skills.py
+│   └── read_docs/            # test_read_docs.py
 └── lazy_wiki/
     ├── bot/                  # LLM-optimised reference (exhaustive, structured)
     └── human/                # Human-readable guides and SDK comparison

@@ -144,18 +144,24 @@ drafter = LazyAgent(
     system="You are a precise technical writer. Be accurate and concise.",
 )
 
+judge = LazyAgent(
+    "anthropic",
+    system=(
+        "You are a quality reviewer. "
+        "Reply 'approved' if the summary is accurate, self-contained, "
+        "and exactly 200 words. Otherwise reply 'rejected: <reason>'."
+    ),
+)
+
 result = drafter.loop(
     "Write a 200-word intro to transformer architecture.",
-    verify=(
-        "Check this text: is it accurate, clearly written, and under 200 words? "
-        "Reply with APPROVED or REJECTED and a one-sentence reason."
-    ),
+    verify=judge,
     max_verify=3,   # retry up to 3 times before accepting as-is
 )
 print(result.content)
 ```
 
-The judge sees each draft and replies `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), returns the current output.
+The judge agent sees each draft and replies `approved` or `rejected: <reason>`. On rejection, `loop()` re-runs with the judge's reason appended as feedback. On approval (or after `max_verify` attempts), returns the current output.
 
 > **Exhaustion warning:** if all `max_verify` attempts are rejected, `loop()` emits a `UserWarning` — `"loop() verify exhausted after N attempt(s) without approval."` — and returns the last result unchanged. No exception is raised.
 

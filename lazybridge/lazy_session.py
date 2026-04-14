@@ -93,7 +93,7 @@ class Event(StrEnum):
 
 
 # These events flood the log at BASIC level; only emitted when tracking="verbose"/"full"
-_VERBOSE_ONLY = {Event.MESSAGES, Event.SYSTEM_CONTEXT, Event.STREAM_CHUNK}
+_VERBOSE_ONLY = {Event.MESSAGES, Event.SYSTEM_CONTEXT, Event.STREAM_CHUNK, Event.MODEL_RESPONSE}
 _VERBOSE_LEVELS = {TrackLevel.VERBOSE, TrackLevel.FULL}
 
 

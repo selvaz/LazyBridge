@@ -151,20 +151,28 @@ print(result.content)
 
 ### Built-in self-checking with verify=
 
-Pass a judge prompt to `verify=` and `loop()` retries automatically if the output is rejected — no manual retry code needed:
+Pass a `LazyAgent` judge (or any callable) to `verify=` and `loop()` retries automatically if the output is rejected — no manual retry code needed:
 
 ```python
+judge = LazyAgent(
+    "anthropic",
+    system=(
+        "You are a quality reviewer. "
+        "Reply 'approved' if the summary is accurate, self-contained, "
+        "and exactly 200 words. Otherwise reply 'rejected: <reason>'."
+    ),
+)
+
 result = ai.loop(
     "Write a 200-word summary of transformer architecture.",
     tools=[search],
-    verify="Check the summary is accurate, self-contained, and exactly 200 words. "
-           "Reply with APPROVED or REJECTED and a reason.",
+    verify=judge,
     max_verify=2,   # retry up to 2 times (default: 1)
 )
 print(result.content)
 ```
 
-The verify prompt sees the output and returns `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's feedback appended. On `APPROVED` (or after `max_verify` attempts), returns the result normally.
+The judge sees the output and returns `approved` or `rejected: <reason>`. On rejection, `loop()` re-runs with the judge's feedback appended. On approval (or after `max_verify` attempts), returns the result normally.
 
 Use this for:
 - Output length or format constraints

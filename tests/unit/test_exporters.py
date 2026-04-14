@@ -167,7 +167,7 @@ def test_add_exporter_at_runtime():
     assert len(collected) == 0
 
     log.add_exporter(CallbackExporter(collected.append))
-    log.log(Event.MODEL_RESPONSE, model="test", content="hi")  # after add
+    log.log(Event.TOOL_CALL, name="test", arguments={})  # after add
     assert len(collected) == 1
 
 
