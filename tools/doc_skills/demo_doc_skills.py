@@ -1,5 +1,5 @@
 """
-demo_doc_skills.py  —  manual demo for lazybridge.tools.doc_skills
+demo_doc_skills.py  —  manual demo for lazybridge.ext.tools.doc_skills
 Run with F5 in Spyder or: python tools/doc_skills/demo_doc_skills.py
 
 NOT a pytest test — intentionally named demo_* to avoid automatic test discovery.
@@ -29,7 +29,7 @@ if _env.exists():
 else:
     print(f"[.env] not found at {_env}")
 
-from lazybridge.tools.doc_skills import build_skill, query_skill, skill_tool, skill_pipeline  # noqa: E402
+from lazybridge.ext.tools.doc_skills import build_skill, query_skill, skill_tool, skill_pipeline  # noqa: E402
 
 WIKI_DIR   = str(REPO_ROOT / "lazy_wiki" / "bot")
 SKILL_ROOT = str(REPO_ROOT / "generated_skills")

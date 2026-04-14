@@ -16,8 +16,8 @@ lazybridge/
 
 Import pattern:
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool, skill_pipeline
-from lazybridge.tools.read_docs  import read_folder_docs
+from lazybridge.ext.tools.doc_skills import build_skill, skill_tool, skill_pipeline
+from lazybridge.ext.tools.read_docs  import read_folder_docs
 ```
 
 Optional dependencies for `read_docs`:
@@ -45,7 +45,7 @@ from any agent using full BM25 retrieval. No vector DB, no embeddings API.
 ### build_skill
 
 ```python
-from lazybridge.tools.doc_skills import build_skill
+from lazybridge.ext.tools.doc_skills import build_skill
 
 meta = build_skill(
     source_dirs    = ["./docs", "./reference"],
@@ -80,7 +80,7 @@ generated_skills/my-project/
 ### query_skill
 
 ```python
-from lazybridge.tools.doc_skills import query_skill
+from lazybridge.ext.tools.doc_skills import query_skill
 
 brief = query_skill(
     skill_dir     = "./generated_skills/my-project",
@@ -115,7 +115,7 @@ k1=1.5, b=0.75
 ### skill_tool
 
 ```python
-from lazybridge.tools.doc_skills import skill_tool
+from lazybridge.ext.tools.doc_skills import skill_tool
 from lazybridge import LazyAgent
 
 tool = skill_tool(
@@ -131,7 +131,7 @@ resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
 ### skill_builder_tool
 
 ```python
-from lazybridge.tools.doc_skills import skill_builder_tool
+from lazybridge.ext.tools.doc_skills import skill_builder_tool
 
 builder = skill_builder_tool()
 orchestrator.loop(
@@ -145,7 +145,7 @@ orchestrator.loop(
 Two-step chain: `skill_router` → `skill_executor`.
 
 ```python
-from lazybridge.tools.doc_skills import skill_pipeline
+from lazybridge.ext.tools.doc_skills import skill_pipeline
 from lazybridge import LazyAgent
 
 pipeline = skill_pipeline(
@@ -193,7 +193,7 @@ Multi-format document reader. Returns LLM-ready text from any combination of
 | `read_folder_docs(path, ...)` | Read a file or folder, return text or JSON |
 
 ```python
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 # Single file
 text = read_folder_docs("/reports/q4.pdf")

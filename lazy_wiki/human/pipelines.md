@@ -267,7 +267,7 @@ BM25 retrieval. No vector database, no embeddings API — everything runs locall
 See [`lazy_wiki/human/tools.md`](tools.md) for the full guide.
 
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool, skill_pipeline
+from lazybridge.ext.tools.doc_skills import build_skill, skill_tool, skill_pipeline
 from lazybridge import LazyAgent
 
 # Step 1 — build the skill bundle (run once, or when docs change)

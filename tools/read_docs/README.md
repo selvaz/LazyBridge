@@ -12,14 +12,14 @@ Works as a plain Python function or as a `LazyTool` passed to any agent.
 
 ```python
 # As a plain function
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 text = read_folder_docs("/path/to/reports", extensions="pdf,docx")
 print(text)
 
 # As a LazyBridge tool
 from lazybridge import LazyTool, LazyAgent
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 docs_tool = LazyTool.from_function(read_folder_docs)
 resp = LazyAgent("anthropic").loop(
@@ -108,9 +108,9 @@ All three are optional — the tool degrades gracefully if any are missing.
 ## CLI usage
 
 ```bash
-python -m lazybridge.tools.read_docs /path/to/folder --extensions pdf,docx --recursive
-python -m lazybridge.tools.read_docs /path/to/folder --format json
-python -m lazybridge.tools.read_docs /path/to/file.pdf
+python -m lazybridge.ext.tools.read_docs /path/to/folder --extensions pdf,docx --recursive
+python -m lazybridge.ext.tools.read_docs /path/to/folder --format json
+python -m lazybridge.ext.tools.read_docs /path/to/file.pdf
 ```
 
 ---
@@ -122,7 +122,7 @@ import sys
 
 
 from lazybridge import LazyAgent, LazyTool
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 docs_tool = LazyTool.from_function(
     read_folder_docs,

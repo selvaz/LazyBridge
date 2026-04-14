@@ -6,7 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.5.0] — Unreleased
+## [0.5.0] — 2026-04-14
+
+### Breaking Changes
+
+- **Core/extension separation**: domain-specific modules moved under `lazybridge.ext/`:
+  - `lazybridge.stat_runtime` → `lazybridge.ext.stat_runtime`
+  - `lazybridge.data_downloader` → `lazybridge.ext.data_downloader`
+  - `lazybridge.quant_agent` → `lazybridge.ext.quant_agent`
+  - `lazybridge.tools.doc_skills` → `lazybridge.ext.tools.doc_skills`
+  - `lazybridge.tools.read_docs` → `lazybridge.ext.tools.read_docs`
+- `quant_agent` is no longer exported from the top-level `lazybridge` package.
+  Use `from lazybridge.ext.quant_agent import quant_agent` instead.
 
 ### Added
 - `LazyTool.parallel(*participants, name, description, combiner="concat", native_tools=None, session=None, guidance=None)` — session-free fan-out pipeline tool. All participants run concurrently on the same task; results are concatenated or the last result is returned depending on `combiner`.

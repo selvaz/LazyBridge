@@ -16,7 +16,7 @@ pip install yfinance requests pyarrow
 ### Python API
 
 ```python
-from lazybridge.data_downloader import TickerDatabase, DataDownloader
+from lazybridge.ext.data_downloader import TickerDatabase, DataDownloader
 
 # Browse the universe
 db = TickerDatabase()
@@ -33,7 +33,7 @@ print(result.rows, result.file_path)
 ### With LLM Agent
 
 ```python
-from lazybridge.stat_runtime.tools import stat_agent
+from lazybridge.ext.stat_runtime.tools import stat_agent
 
 agent, rt = stat_agent("anthropic", include_downloader=True)
 resp = agent.loop("Download SPY and AAPL, analyze their volatility")
@@ -44,9 +44,9 @@ rt.close()
 ### With stat_runtime (manual)
 
 ```python
-from lazybridge.stat_runtime.runner import StatRuntime
-from lazybridge.stat_runtime.tools import stat_tools
-from lazybridge.data_downloader import TickerDatabase, DataDownloader, downloader_tools
+from lazybridge.ext.stat_runtime.runner import StatRuntime
+from lazybridge.ext.stat_runtime.tools import stat_tools
+from lazybridge.ext.data_downloader import TickerDatabase, DataDownloader, downloader_tools
 
 rt = StatRuntime(artifacts_dir="./artifacts")
 db = TickerDatabase()
@@ -152,7 +152,7 @@ dl.download_and_register(ticker_infos, start, end, runtime)  # list[FetchResult]
 ### Schemas
 
 ```python
-from lazybridge.data_downloader.schemas import (
+from lazybridge.ext.data_downloader.schemas import (
     TickerInfo,         # Ticker metadata (symbol, name, source, taxonomy)
     FetchResult,        # Download result (ok, rows, path, frequency)
     DownloaderConfig,   # Config (timeout, retries, cache settings)

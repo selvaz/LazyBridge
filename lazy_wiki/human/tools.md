@@ -16,8 +16,8 @@ pip install lazybridge[tools]   # read_docs — adds pypdf, python-docx, trafila
 
 | Module | What it does | Extra deps? |
 |---|---|---|
-| `lazybridge.tools.doc_skills` | Index local docs with BM25, query from any agent | None |
-| `lazybridge.tools.read_docs` | Read .txt .md .pdf .docx .html from file or folder | `lazybridge[tools]` |
+| `lazybridge.ext.tools.doc_skills` | Index local docs with BM25, query from any agent | None |
+| `lazybridge.ext.tools.read_docs` | Read .txt .md .pdf .docx .html from file or folder | `lazybridge[tools]` |
 
 ---
 
@@ -29,7 +29,7 @@ BM25 retrieval — no vector database, no external API, everything local.
 ### Build and persist a skill bundle
 
 ```python
-from lazybridge.tools.doc_skills import build_skill
+from lazybridge.ext.tools.doc_skills import build_skill
 
 meta = build_skill(
     source_dirs=["./docs", "./reference"],
@@ -51,7 +51,7 @@ Add `generated_skills/` to your `.gitignore`.
 ### Load and use a saved skill
 
 ```python
-from lazybridge.tools.doc_skills import skill_tool
+from lazybridge.ext.tools.doc_skills import skill_tool
 from lazybridge import LazyAgent
 
 # skill_dir points to the folder created by build_skill — works across restarts
@@ -70,7 +70,7 @@ For complex or ambiguous queries, the pipeline first sharpens the query
 (router), then retrieves and synthesises the answer (executor):
 
 ```python
-from lazybridge.tools.doc_skills import skill_pipeline
+from lazybridge.ext.tools.doc_skills import skill_pipeline
 from lazybridge import LazyAgent
 
 pipeline = skill_pipeline(
@@ -97,7 +97,7 @@ orchestrator
 ### Let an agent build skills on demand
 
 ```python
-from lazybridge.tools.doc_skills import skill_builder_tool
+from lazybridge.ext.tools.doc_skills import skill_builder_tool
 from lazybridge import LazyAgent
 
 builder = skill_builder_tool()
@@ -120,7 +120,7 @@ agent.loop(
 Mode is detected automatically from the query wording, or set it explicitly:
 
 ```python
-from lazybridge.tools.doc_skills import query_skill
+from lazybridge.ext.tools.doc_skills import query_skill
 
 brief = query_skill(
     "./generated_skills/my-project",
@@ -142,7 +142,7 @@ pip install lazybridge[tools]
 ### Plain function
 
 ```python
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 # Single file
 text = read_folder_docs("/reports/q4.pdf")
@@ -164,7 +164,7 @@ for r in records:
 
 ```python
 from lazybridge import LazyAgent, LazyTool
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.tools.read_docs import read_folder_docs
 
 docs_tool = LazyTool.from_function(
     read_folder_docs,

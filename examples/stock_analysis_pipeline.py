@@ -23,8 +23,8 @@ import polars as pl
 import yfinance as yf
 
 from lazybridge import LazyAgent, LazyTool
-from lazybridge.stat_runtime.runner import StatRuntime
-from lazybridge.stat_runtime.tools import stat_tools, build_stat_skills, stat_skill_tools
+from lazybridge.ext.stat_runtime.runner import StatRuntime
+from lazybridge.ext.stat_runtime.tools import stat_tools, build_stat_skills, stat_skill_tools
 
 
 # ======================================================================

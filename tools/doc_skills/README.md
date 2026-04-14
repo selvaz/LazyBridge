@@ -51,7 +51,7 @@ BM25 (Robertson IDF, k1=1.5, b=0.75) vs the naïve TF approach:
 ## Quick start
 
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool
+from lazybridge.ext.tools.doc_skills import build_skill, skill_tool
 from lazybridge import LazyAgent
 
 # 1. Build once

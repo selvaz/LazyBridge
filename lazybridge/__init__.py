@@ -50,7 +50,7 @@ Pipeline as tool (expose a session to an orchestrator)::
     orchestrator.loop("coordinate the work", tools=[pipeline])
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from lazybridge.core.providers import BaseProvider
 from lazybridge.core.structured import StructuredOutputError
@@ -84,7 +84,6 @@ from lazybridge.lazy_tool import (
     ToolSchemaMode,
 )
 from lazybridge.memory import Memory
-from lazybridge.quant_agent import quant_agent
 
 __all__ = [
     # Main classes
@@ -112,8 +111,6 @@ __all__ = [
     "CallbackExporter",
     "FilteredExporter",
     "JsonFileExporter",
-    # Pre-configured agents
-    "quant_agent",
     # Graph
     "GraphSchema",
     "NodeType",

@@ -60,7 +60,7 @@ else:
     print("[.env] not found — API keys must be set in environment")
 
 from lazybridge import LazyAgent, LazySession                                    # noqa: E402
-from lazybridge.tools.doc_skills import build_skill, query_skill, skill_tool     # noqa: E402
+from lazybridge.ext.tools.doc_skills import build_skill, query_skill, skill_tool     # noqa: E402
 
 
 # ── Output schema for Phase 3 ─────────────────────────────────────────────────

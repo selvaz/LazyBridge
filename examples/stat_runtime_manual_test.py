@@ -96,8 +96,8 @@ def create_test_data(tmpdir: Path) -> dict[str, str]:
 
 
 def main():
-    from lazybridge.stat_runtime.runner import StatRuntime
-    from lazybridge.stat_runtime.tools import stat_tools
+    from lazybridge.ext.stat_runtime.runner import StatRuntime
+    from lazybridge.ext.stat_runtime.tools import stat_tools
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -358,7 +358,7 @@ def main():
         print("""
 Next step: Connect a real LLM agent:
 
-    from lazybridge.stat_runtime.tools import stat_agent
+    from lazybridge.ext.stat_runtime.tools import stat_agent
 
     agent, rt = stat_agent("anthropic")
 
