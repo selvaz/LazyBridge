@@ -22,8 +22,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Iterator
 
-_logger = logging.getLogger(__name__)
-
 from lazybridge.core.providers.openai import OpenAIProvider, _safe_json_loads
 from lazybridge.core.types import (
     CompletionRequest,
@@ -33,6 +31,8 @@ from lazybridge.core.types import (
     ToolCall,
     UsageStats,
 )
+
+_logger = logging.getLogger(__name__)
 
 _DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 _DEEPSEEK_ENV_KEY = "DEEPSEEK_API_KEY"

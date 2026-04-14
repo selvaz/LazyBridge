@@ -70,7 +70,12 @@ def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
             r = requests.get(url, params=params, timeout=cfg.request_timeout)
             r.raise_for_status()
             return r
-        except Exception:
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:
+            _logger.warning(
+                "HTTP GET failed (attempt %d/%d) url=%s: %s: %s",
+                attempt + 1, cfg.max_retries, url,
+                type(exc).__name__, exc,
+            )
             if attempt == cfg.max_retries - 1:
                 raise
             time.sleep(cfg.retry_sleep * (2 ** attempt))

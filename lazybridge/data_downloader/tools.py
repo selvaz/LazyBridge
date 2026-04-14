@@ -12,7 +12,6 @@ from typing import Annotated, Any
 
 from lazybridge.lazy_tool import LazyTool
 from lazybridge.data_downloader.downloader import DataDownloader
-from lazybridge.data_downloader.schemas import FetchResult
 from lazybridge.data_downloader.ticker_db import TickerDatabase
 
 

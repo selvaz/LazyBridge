@@ -282,7 +282,6 @@ def _interpret_garch(
     alpha = _get_float(params, "alpha[1]")
     beta = _get_float(params, "beta[1]")
     gamma = _get_float(params, "gamma[1]")
-    omega = _get_float(params, "omega")
 
     if alpha is not None and beta is not None:
         persistence = alpha + beta

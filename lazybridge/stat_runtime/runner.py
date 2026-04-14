@@ -31,7 +31,6 @@ from lazybridge.stat_runtime.engines import get_engine
 from lazybridge.stat_runtime.persistence import MetaStore
 from lazybridge.stat_runtime.query import QueryEngine
 from lazybridge.stat_runtime.schemas import (
-    DiagnosticResult,
     FitResult,
     ForecastResult,
     ModelFamily,

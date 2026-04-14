@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import pytest
-import tempfile
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 from lazybridge.lazy_tool import (
     LazyTool,

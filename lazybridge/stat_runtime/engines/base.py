@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from lazybridge.stat_runtime.schemas import (
     DiagnosticResult,
@@ -12,10 +12,6 @@ from lazybridge.stat_runtime.schemas import (
     ModelFamily,
     ModelSpec,
 )
-
-if TYPE_CHECKING:
-    import numpy as np
-
 
 class BaseEngine(ABC):
     """Abstract model engine.  One subclass per ModelFamily.

@@ -25,8 +25,25 @@ from lazybridge.data_downloader.schemas import (
     TickerInfo,
 )
 from lazybridge.data_downloader.ticker_db import TickerDatabase
-from lazybridge.data_downloader.downloader import DataDownloader
-from lazybridge.data_downloader.tools import downloader_tools
+
+
+def _lazy_import_downloader():
+    from lazybridge.data_downloader.downloader import DataDownloader
+    return DataDownloader
+
+
+def _lazy_import_tools():
+    from lazybridge.data_downloader.tools import downloader_tools
+    return downloader_tools
+
+
+def __getattr__(name: str):
+    """Lazy import for heavy deps (pandas) — ticker-only usage works without them."""
+    if name == "DataDownloader":
+        return _lazy_import_downloader()
+    if name == "downloader_tools":
+        return _lazy_import_tools()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_downloader_skills(output_root: str = "./generated_skills"):

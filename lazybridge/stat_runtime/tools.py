@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from lazybridge.lazy_tool import LazyTool
-from lazybridge.stat_runtime.schemas import Frequency, ModelFamily
+from lazybridge.stat_runtime.schemas import ModelFamily
 
 _logger = logging.getLogger(__name__)
 

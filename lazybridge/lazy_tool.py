@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -447,7 +446,7 @@ class LazyTool:
             ) from exc
 
         # Dedent: inspect.getsource may include class/method indentation
-        source = inspect.cleandoc.__func__(source) if False else source  # noqa: keep for clarity
+        source = inspect.cleandoc.__func__(source) if False else source  # noqa: SIM108
         import textwrap
         source = textwrap.dedent(source)
 
