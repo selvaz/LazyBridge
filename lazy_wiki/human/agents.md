@@ -167,7 +167,7 @@ result = ai.loop(
     "Write a 200-word summary of transformer architecture.",
     tools=[search],
     verify=judge,
-    max_verify=2,   # retry up to 2 times (default: 1)
+    max_verify=2,   # retry up to 2 times (default: 3)
 )
 print(result.content)
 ```

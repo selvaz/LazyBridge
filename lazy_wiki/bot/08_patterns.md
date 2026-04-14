@@ -69,7 +69,7 @@ Do you need one agent to drive others, deciding what to call and when?
    │
    ├─ Do you need the output to pass a quality gate or self-check?
    │   │
-   │   └─ YES → CANONICAL: loop(verify="...", max_verify=N)
+   │   └─ YES → CANONICAL: loop(verify=<agent|callable>, max_verify=N)
    │             (built-in retry; no reviewer agent, no router, no loop management)
    │             ADVANCED: Pattern D-b (LazyRouter) only when review routes to different agents
    │

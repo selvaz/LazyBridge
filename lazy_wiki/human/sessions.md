@@ -6,15 +6,14 @@ A `LazySession` is the shared container for a multi-agent pipeline. Create one w
 
 ## When do you need a session?
 
-| Scenario | Session needed? |
-|----------|----------------|
-| Single agent, one-off question | No |
-| Single agent with tools | No |
-| Two agents sharing results | Yes |
-| Agents running concurrently | Yes |
-| Persistent state across runs | Yes |
-| You want event tracking | Yes |
-| GUI pipeline visualization | Yes |
+| Scenario                                         | Session needed? |
+|--------------------------------------------------|-----------------|
+| Single agent, no shared state                    | No              |
+| Concurrent agents via `LazyTool.parallel()`      | No              |
+| Sequential pipeline via `LazyTool.chain()`       | No              |
+| Concurrent agents with shared state or tracking  | Yes             |
+| Need event log, cost tracking, or graph export   | Yes             |
+| Multi-agent pipeline with `LazyStore` blackboard | Yes             |
 
 ---
 
@@ -182,11 +181,16 @@ async def run():
     )
     # results[i] are CompletionResponse objects — full access to usage, tool_calls, etc.
     for r in results:
+        if isinstance(r, Exception):
+            print(f"  failed: {r}")
+            continue
         print(r.content[:200])
         print(f"  tokens: {r.usage.input_tokens}in / {r.usage.output_tokens}out")
 
 asyncio.run(run())
 ```
+
+`gather()` uses `return_exceptions=True` internally — always check for `Exception` objects in the results list.
 
 For most cases where you just want concurrent agents and a combined result, `sess.as_tool(mode="parallel")` is simpler.
 

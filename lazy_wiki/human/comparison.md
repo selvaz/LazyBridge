@@ -251,7 +251,7 @@ Key benefits:
 - No JSON mode configuration
 - No manual `json.loads`
 - No try/except
-- Retry on parse failure built in
+- Fail-fast validation (raises on parse/validation error)
 - Returns typed Pydantic instance directly
 
 ---
