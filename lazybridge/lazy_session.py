@@ -389,6 +389,7 @@ class LazySession:
         exporters: list | None = None,
     ) -> None:
         self.id = str(uuid.uuid4())
+        self._db = str(Path(db).resolve()) if db else None
         self.store = LazyStore(db=db)
         self.events = EventLog(
             self.id, db=db, level=tracking, console=console,
@@ -552,6 +553,8 @@ class LazySession:
                 native_tools=_native or None,
                 session=self,
                 guidance=guidance,
+                store=self.store if self._db else None,
+                chain_id=name,
             )
 
         raise ValueError(f"Unknown mode {mode!r}. Use 'parallel' or 'chain'.")
@@ -574,6 +577,40 @@ class LazySession:
         # Rebind EventLog so events logged after restore use the correct session_id.
         sess.events.session_id = sess.id
         return sess
+
+    @classmethod
+    def from_db(
+        cls,
+        db: str,
+        *,
+        tracking: TrackLevel | str = TrackLevel.BASIC,
+        **kwargs: Any,
+    ) -> "LazySession":
+        """Resume a session from an existing SQLite database.
+
+        The store entries and event log history persisted in *db* are
+        automatically available on the returned session.  Agents must be
+        re-created and registered separately (pass ``session=`` to
+        ``LazyAgent(...)``).
+
+        Usage::
+
+            sess = LazySession.from_db("pipeline.db")
+            researcher = LazyAgent("anthropic", name="researcher", session=sess)
+            pipeline = sess.as_tool("pipeline", "...", mode="chain")
+            pipeline.run("task")  # resumes from last checkpoint
+
+        Parameters
+        ----------
+        db:
+            Path to an existing SQLite database previously created by a
+            ``LazySession(db=...)`` call.
+        tracking:
+            Tracking level for new events logged on the resumed session.
+        """
+        if not Path(db).exists():
+            raise FileNotFoundError(f"No database found at {db!r}")
+        return cls(db=db, tracking=tracking, **kwargs)
 
     def __repr__(self) -> str:
         return f"LazySession(id={self.id[:8]}..., store={len(self.store.keys())} keys)"

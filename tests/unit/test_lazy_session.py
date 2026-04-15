@@ -667,3 +667,91 @@ def test_as_tool_save_succeeds_for_all_factories(tmp_path):
         tool.save(out)
         content = open(out).read()
         assert "LAZYBRIDGE_GENERATED_TOOL v2" in content
+
+
+# =============================================================================
+# Checkpoint & Resume
+# =============================================================================
+
+def test_chain_checkpoint_and_resume():
+    """Chain with store writes checkpoint after each step and resumes correctly."""
+    store = LazyStore()
+
+    # Three agents: A → B → C
+    a = _mock_agent("a", "output_a")
+    b = _mock_agent("b", "output_b")
+    c = _mock_agent("c", "output_c")
+
+    # Run full chain with checkpoint
+    tool = LazyTool.chain(a, b, c, name="pipe", description="d", store=store, chain_id="test")
+    result = tool.run({"task": "go"})
+    assert result == "output_c"
+
+    # Checkpoint should be cleared on success
+    assert store.read("_ckpt:test") is None
+
+
+def test_chain_resumes_from_checkpoint():
+    """Chain skips already-completed steps when a checkpoint exists."""
+    store = LazyStore()
+
+    # Simulate a crash after step 1 by writing a checkpoint manually
+    store.write("_ckpt:test", {"step": 1, "output": "output_from_step_1"})
+
+    a = _mock_agent("a", "should_not_run")
+    b = _mock_agent("b", "should_not_run")
+    c = _mock_agent("c", "output_c")
+
+    tool = LazyTool.chain(a, b, c, name="pipe", description="d", store=store, chain_id="test")
+    result = tool.run({"task": "go"})
+
+    assert result == "output_c"
+    # Steps 0 and 1 were skipped
+    a.chat.assert_not_called()
+    b.chat.assert_not_called()
+    # Step 2 ran
+    assert c.chat.called or c.achat.called
+
+
+def test_chain_no_store_no_checkpoint():
+    """Chain without store works exactly as before — no checkpoint written."""
+    a = _mock_agent("a", "out_a")
+    b = _mock_agent("b", "out_b")
+
+    tool = LazyTool.chain(a, b, name="pipe", description="d")
+    result = tool.run({"task": "go"})
+    assert result == "out_b"
+
+
+def test_from_db_resumes_store(tmp_path):
+    """LazySession.from_db() reconnects to an existing database with stored data."""
+    db_path = str(tmp_path / "test.db")
+
+    # Create session, write data, then discard
+    sess1 = LazySession(db=db_path)
+    sess1.store.write("key1", "value1")
+    del sess1
+
+    # Resume from the same db
+    sess2 = LazySession.from_db(db_path)
+    assert sess2.store.read("key1") == "value1"
+
+
+def test_from_db_raises_on_missing_file():
+    """LazySession.from_db() raises FileNotFoundError for nonexistent db."""
+    with pytest.raises(FileNotFoundError):
+        LazySession.from_db("/tmp/nonexistent_lazybridge.db")
+
+
+def test_pydantic_model_in_store():
+    """LazyStore.write() auto-converts Pydantic models via model_dump()."""
+    from pydantic import BaseModel
+
+    class Item(BaseModel):
+        name: str
+        value: int
+
+    store = LazyStore()
+    store.write("item", Item(name="test", value=42))
+    result = store.read("item")
+    assert result == {"name": "test", "value": 42}

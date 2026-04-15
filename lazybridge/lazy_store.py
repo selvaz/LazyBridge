@@ -227,13 +227,16 @@ class LazyStore:
         """Write a value under ``key``.  Overwrites any existing entry.
 
         ``value`` must be JSON-serializable (str, int, float, bool, None,
-        list, or dict with JSON-compatible contents).  Non-serializable objects
-        are rejected so behaviour is consistent between in-memory and SQLite
-        backends.
+        list, or dict with JSON-compatible contents).  Pydantic models are
+        auto-converted via ``model_dump(mode="json")``.  Other non-serializable
+        objects are rejected so behaviour is consistent between in-memory and
+        SQLite backends.
 
         Warning: the key namespace is **global** across all agents in a session.
         Use namespaced keys (e.g. ``"agent_name:key"``) to avoid collisions.
         """
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
         try:
             json.dumps(value)
         except (TypeError, ValueError) as exc:

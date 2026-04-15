@@ -150,19 +150,47 @@ def build_parallel_func(
 def build_chain_func(
     parts: list,
     native_tools: list,
+    *,
+    store: Any | None = None,
+    chain_id: str = "chain",
 ) -> Callable[[str], Any]:
     """Return a closure that runs parts sequentially when called with (task).
 
     Handoff semantics identical to LazySession.as_tool(mode='chain'):
       prev = agent (ctx is not None) → inject context, keep original task
       prev = tool  (ctx is None)     → state.text becomes task
+
+    Parameters
+    ----------
+    store:
+        Optional LazyStore for checkpoint persistence.  When provided,
+        state is saved after each step so the chain can resume from the
+        last completed step on re-execution.
+    chain_id:
+        Namespace for checkpoint keys in the store.  Use distinct ids
+        when multiple chains share the same store.
     """
+    _ckpt_key = f"_ckpt:{chain_id}"
+
     def _run_chain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
 
         state = _ChainState(text=task, typed=None, ctx=None)
 
-        for p in parts:
+        # ── Resume from checkpoint ────────────────────────────────────
+        start_step = 0
+        if store is not None:
+            saved = store.read(_ckpt_key)
+            if saved is not None:
+                start_step = saved["step"] + 1
+                state = _ChainState(
+                    text=saved["output"], typed=None, ctx=None,
+                )
+
+        for i, p in enumerate(parts):
+            if i < start_step:
+                continue
+
             if hasattr(p, "chat"):                         # LazyAgent
                 kw: dict = {}
                 if native_tools:
@@ -207,6 +235,14 @@ def build_chain_func(
                     f"Participant {p!r} must be a LazyAgent (has .chat) or LazyTool (has .run)."
                 )
 
+            # ── Checkpoint after each completed step ──────────────────
+            if store is not None:
+                store.write(_ckpt_key, {"step": i, "output": state.text})
+
+        # ── Clear checkpoint on successful completion ─────────────────
+        if store is not None:
+            store.write(_ckpt_key, None)
+
         return state.typed if state.typed is not None else state.text
 
     return _run_chain
@@ -216,6 +252,9 @@ def build_achain_func(
     parts: list,
     native_tools: list,
     step_timeout: float | None = None,
+    *,
+    store: Any | None = None,
+    chain_id: str = "chain",
 ) -> Callable[[str], Any]:
     """Return an async closure for sequential execution (mirrors build_chain_func).
 
@@ -231,13 +270,32 @@ def build_achain_func(
     step_timeout:
         Per-step timeout in seconds.  asyncio.TimeoutError is raised if a
         step exceeds the limit.  None means no timeout.
+    store:
+        Optional LazyStore for checkpoint persistence (see build_chain_func).
+    chain_id:
+        Namespace for checkpoint keys in the store.
     """
+    _ckpt_key = f"_ckpt:{chain_id}"
+
     async def _run_achain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
 
         state = _ChainState(text=task, typed=None, ctx=None)
 
-        for p in parts:
+        # ── Resume from checkpoint ────────────────────────────────────
+        start_step = 0
+        if store is not None:
+            saved = store.read(_ckpt_key)
+            if saved is not None:
+                start_step = saved["step"] + 1
+                state = _ChainState(
+                    text=saved["output"], typed=None, ctx=None,
+                )
+
+        for i, p in enumerate(parts):
+            if i < start_step:
+                continue
+
             if hasattr(p, "achat"):                        # LazyAgent
                 kw: dict = {}
                 if native_tools:
@@ -307,6 +365,14 @@ def build_achain_func(
                 raise TypeError(
                     f"Participant {p!r} must be a LazyAgent (has .achat) or LazyTool (has .arun)."
                 )
+
+            # ── Checkpoint after each completed step ──────────────────
+            if store is not None:
+                store.write(_ckpt_key, {"step": i, "output": state.text})
+
+        # ── Clear checkpoint on successful completion ─────────────────
+        if store is not None:
+            store.write(_ckpt_key, None)
 
         return state.typed if state.typed is not None else state.text
 

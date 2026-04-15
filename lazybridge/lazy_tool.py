@@ -994,6 +994,8 @@ class LazyTool:
         session: Any | None = None,
         guidance: str | None = None,
         step_timeout: float | None = None,
+        store: Any | None = None,
+        chain_id: str | None = None,
     ) -> "LazyTool":
         """Sequential pipeline tool: participants run in order, each receiving
         the previous output as context (agent→agent) or as the new task (tool→agent).
@@ -1016,6 +1018,16 @@ class LazyTool:
             agents. Does **not** modify the graph.
         guidance:
             Optional hint injected into the tool description for the LLM.
+        step_timeout:
+            Per-step timeout in seconds.  ``asyncio.TimeoutError`` is raised
+            if a step exceeds the limit.  ``None`` (default) — no timeout.
+        store:
+            Optional ``LazyStore`` for checkpoint persistence.  When provided,
+            the chain saves progress after each step and can resume from the
+            last completed step on re-execution.
+        chain_id:
+            Namespace for checkpoint keys in the store.  Defaults to *name*.
+            Use distinct ids when multiple chains share the same store.
 
         Notes
         -----
@@ -1031,12 +1043,6 @@ class LazyTool:
         Because clones execute the run, ``participant._last_output`` on the
         original object is ``None`` after the call. Use the return value of
         ``tool.run()`` or ``output_schema`` on the last step instead.
-
-        Parameters (additional)
-        -----------------------
-        step_timeout:
-            Per-step timeout in seconds.  ``asyncio.TimeoutError`` is raised
-            if a step exceeds the limit.  ``None`` (default) — no timeout.
         """
         from lazybridge.pipeline_builders import (
             build_achain_func,
@@ -1047,11 +1053,15 @@ class LazyTool:
             raise ValueError("chain() requires at least one participant.")
         _validate_session_compatibility(participants, session)
         _native = list(native_tools or [])
+        _cid = chain_id or name
 
         def _run(task: str) -> Any:
             from lazybridge.lazy_run import run_async
             inv = [_resolve_participant(p) for p in participants]
-            return run_async(build_achain_func(inv, _native, step_timeout)(task))
+            return run_async(build_achain_func(
+                inv, _native, step_timeout,
+                store=store, chain_id=_cid,
+            )(task))
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True

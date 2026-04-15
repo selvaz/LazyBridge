@@ -196,6 +196,69 @@ For most cases where you just want concurrent agents and a combined result, `ses
 
 ---
 
+## Checkpoint & resume
+
+Chain pipelines can automatically checkpoint progress after each step.
+If execution fails mid-chain, re-running resumes from the last completed step.
+
+### Enable checkpoints
+
+Pass `store=` to `LazyTool.chain()`, or use a SQLite-backed session:
+
+```python
+from lazybridge import LazyAgent, LazySession
+
+# SQLite session — checkpoints survive process restarts
+sess = LazySession(db="pipeline.db")
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer = LazyAgent("openai", name="writer", session=sess)
+
+# as_tool(mode="chain") auto-enables checkpoint when session has db=
+pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
+```
+
+### Resume after crash
+
+```python
+# Re-create session from existing database
+sess = LazySession.from_db("pipeline.db")
+
+# Re-create agents (same names, same order)
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer = LazyAgent("openai", name="writer", session=sess)
+
+# Pipeline resumes from last checkpoint automatically
+pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
+result = pipeline.run("Analyze fusion energy trends")
+```
+
+### Nested pipelines
+
+Each chain checkpoints its own steps independently:
+
+```python
+from lazybridge import LazyStore
+from lazybridge.lazy_tool import LazyTool
+
+store = LazyStore(db="pipeline.db")
+sub = LazyTool.chain(step_a, step_b, name="sub", description="...",
+                     store=store, chain_id="sub")
+main = LazyTool.chain(researcher, sub, writer, name="main", description="...",
+                      store=store, chain_id="main")
+```
+
+If `sub` crashes during `step_b`, on resume `main` skips `researcher` and
+`sub` skips `step_a` — execution resumes from `step_b`.
+
+### How it works
+
+- After each completed step, the chain writes `{"step": i, "output": "..."}` to the store
+- On re-execution, it reads the checkpoint and skips completed steps
+- On successful completion, the checkpoint is cleared
+- Without `store=`, chains work exactly as before — no overhead
+
+---
+
 ## Graph serialization (for GUI)
 
 The session's pipeline topology is automatically captured and can be exported:
