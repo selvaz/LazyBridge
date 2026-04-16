@@ -156,6 +156,7 @@ def build_chain_func(
     *,
     store: Any | None = None,
     chain_id: str = "chain",
+    run_id: str | None = None,
 ) -> Callable[[str], Any]:
     """Return a closure that runs parts sequentially when called with (task).
 
@@ -171,22 +172,24 @@ def build_chain_func(
         last completed step on re-execution.
     chain_id:
         Namespace for checkpoint keys in the store.  Use distinct ids
-        when multiple chains share the same store.  **Concurrency
-        constraint:** if the same ``chain_id`` runs concurrently against
-        the same store, checkpoint writes will collide.  Use a unique
-        ``chain_id`` per concurrent execution.
+        when multiple chains share the same store.
+    run_id:
+        Optional run identifier for checkpoint isolation.  When provided,
+        the checkpoint key becomes ``_ckpt:{chain_id}:{run_id}`` instead
+        of ``_ckpt:{chain_id}``.  Use this to isolate concurrent or
+        repeated runs that share the same chain_id and store.  The caller
+        must pass the same run_id to resume a specific run.
 
     Limitations
     -----------
-    Checkpoint resume restores the text output of the last completed step
-    but not the ``LazyContext`` object (which may contain live agent
-    references).  This means agent→agent context-injection semantics are
-    lost on resume: the next step receives the saved text as its task
-    (tool→agent handoff) rather than the original task with injected
-    context.  For most pipelines this is acceptable because the text
-    carries the substantive content.
+    Checkpoint resume preserves handoff semantics (agent→agent context
+    injection vs tool→agent text-as-task) via a synthetic context
+    reconstructed from the saved output text.  However, the reconstructed
+    context is a plain text snapshot — it does not carry the live agent's
+    ``_last_output`` reference or any ``LazyContext`` composition that was
+    active at checkpoint time.
     """
-    _ckpt_key = f"_ckpt:{chain_id}"
+    _ckpt_key = f"_ckpt:{chain_id}:{run_id}" if run_id else f"_ckpt:{chain_id}"
 
     def _run_chain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
@@ -204,10 +207,20 @@ def build_chain_func(
                     and "output" in saved
                 ):
                     start_step = saved["step"] + 1
-                    # Resume with text only — ctx is not serializable (see Limitations).
-                    state = _ChainState(
-                        text=saved["output"], typed=None, ctx=None,
-                    )
+                    _handoff = saved.get("handoff_mode", "text_task")
+                    if _handoff == "agent_context":
+                        _orig = saved.get("original_task", saved["output"])
+                        state = _ChainState(
+                            text=_orig,
+                            typed=None,
+                            ctx=LazyContext.from_text(
+                                f"[resumed previous output]\n{saved['output']}"
+                            ),
+                        )
+                    else:
+                        state = _ChainState(
+                            text=saved["output"], typed=None, ctx=None,
+                        )
                 else:
                     _logger.warning(
                         "Ignoring malformed checkpoint for %r: %r",
@@ -275,7 +288,12 @@ def build_chain_func(
 
             # ── Checkpoint after each completed step ──────────────────
             if store is not None:
-                store.write(_ckpt_key, {"step": i, "output": state.text})
+                store.write(_ckpt_key, {
+                    "step": i,
+                    "output": state.text,
+                    "original_task": task,
+                    "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
+                })
 
         # ── Clear checkpoint on successful completion ─────────────────
         if store is not None:
@@ -293,6 +311,7 @@ def build_achain_func(
     *,
     store: Any | None = None,
     chain_id: str = "chain",
+    run_id: str | None = None,
 ) -> Callable[[str], Any]:
     """Return an async closure for sequential execution (mirrors build_chain_func).
 
@@ -313,8 +332,10 @@ def build_achain_func(
     chain_id:
         Namespace for checkpoint keys in the store.  See build_chain_func
         for concurrency constraints and resume-semantics limitations.
+    run_id:
+        Optional run identifier for checkpoint isolation (see build_chain_func).
     """
-    _ckpt_key = f"_ckpt:{chain_id}"
+    _ckpt_key = f"_ckpt:{chain_id}:{run_id}" if run_id else f"_ckpt:{chain_id}"
 
     async def _run_achain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
@@ -332,10 +353,20 @@ def build_achain_func(
                     and "output" in saved
                 ):
                     start_step = saved["step"] + 1
-                    # Resume with text only — ctx is not serializable (see Limitations).
-                    state = _ChainState(
-                        text=saved["output"], typed=None, ctx=None,
-                    )
+                    _handoff = saved.get("handoff_mode", "text_task")
+                    if _handoff == "agent_context":
+                        _orig = saved.get("original_task", saved["output"])
+                        state = _ChainState(
+                            text=_orig,
+                            typed=None,
+                            ctx=LazyContext.from_text(
+                                f"[resumed previous output]\n{saved['output']}"
+                            ),
+                        )
+                    else:
+                        state = _ChainState(
+                            text=saved["output"], typed=None, ctx=None,
+                        )
                 else:
                     _logger.warning(
                         "Ignoring malformed checkpoint for %r: %r",
@@ -418,7 +449,12 @@ def build_achain_func(
 
             # ── Checkpoint after each completed step ──────────────────
             if store is not None:
-                store.write(_ckpt_key, {"step": i, "output": state.text})
+                store.write(_ckpt_key, {
+                    "step": i,
+                    "output": state.text,
+                    "original_task": task,
+                    "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
+                })
 
         # ── Clear checkpoint on successful completion ─────────────────
         if store is not None:

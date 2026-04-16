@@ -876,3 +876,228 @@ def test_from_db_empty_db_keeps_fresh_id(tmp_path):
     sess2 = LazySession.from_db(db)
     assert sess2.id  # has a valid UUID
     assert len(sess2.events.get()) == 0
+
+
+# ── Checkpoint semantic resume ──────────────────────────────────────────────
+
+def _make_echo_chain_multi(agents, store, chain_id="test", run_id=None):
+    """Helper: build an N-step chain from a list of mock agents."""
+    from lazybridge.pipeline_builders import build_chain_func
+    return build_chain_func(agents, [], store=store, chain_id=chain_id, run_id=run_id)
+
+
+def test_chain_resume_preserves_agent_handoff_semantics():
+    """When resuming from an agent→agent checkpoint, the next agent gets
+    the original task (not the previous output) and context is injected."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test", {
+        "step": 0,
+        "output": "agent_0_output",
+        "original_task": "my original task",
+        "handoff_mode": "agent_context",
+    })
+
+    received_tasks = []
+    received_contexts = []
+
+    class CapturingAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            received_tasks.append(task)
+            received_contexts.append(kw.get("context"))
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            self._last_output = f"result:{task}"
+            return CompletionResponse(content=f"result:{task}", usage=UsageStats())
+
+    skip_agent = CapturingAgent()
+    resume_agent = CapturingAgent()
+
+    chain_fn = build_chain_func(
+        [skip_agent, resume_agent], [], store=store, chain_id="test",
+    )
+    chain_fn("my original task")
+
+    assert len(received_tasks) == 1
+    assert received_tasks[0] == "my original task"
+    ctx = received_contexts[0]
+    assert ctx is not None
+    assert "agent_0_output" in ctx()
+
+
+def test_chain_resume_text_task_handoff():
+    """When resuming from a tool→agent checkpoint (text_task), the next agent
+    receives the saved output as its task with no context injection."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test", {
+        "step": 0,
+        "output": "tool_output_text",
+        "original_task": "original",
+        "handoff_mode": "text_task",
+    })
+
+    received_tasks = []
+    received_contexts = []
+
+    class CapturingAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            received_tasks.append(task)
+            received_contexts.append(kw.get("context"))
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="done", usage=UsageStats())
+
+    chain_fn = build_chain_func(
+        [CapturingAgent(), CapturingAgent()], [], store=store, chain_id="test",
+    )
+    chain_fn("original")
+
+    assert len(received_tasks) == 1
+    assert received_tasks[0] == "tool_output_text"
+    assert received_contexts[0] is None
+
+
+def test_chain_resume_legacy_checkpoint_compat():
+    """Legacy checkpoints (no handoff_mode) fall back to text_task behavior."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test", {"step": 0, "output": "old text"})
+
+    received_tasks = []
+
+    class CapturingAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            received_tasks.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="done", usage=UsageStats())
+
+    chain_fn = build_chain_func(
+        [CapturingAgent(), CapturingAgent()], [], store=store, chain_id="test",
+    )
+    chain_fn("ignored original")
+
+    assert len(received_tasks) == 1
+    assert received_tasks[0] == "old text"
+
+
+# ── run_id checkpoint isolation ─────────────────────────────────────────────
+
+def test_chain_run_id_isolates_checkpoints():
+    """Different run_ids produce independent checkpoint lanes."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test:run-A", {
+        "step": 0, "output": "A_output",
+        "original_task": "task", "handoff_mode": "text_task",
+    })
+    store.write("_ckpt:test:run-B", {
+        "step": 1, "output": "B_output",
+        "original_task": "task", "handoff_mode": "text_task",
+    })
+
+    calls_a = []
+    calls_b = []
+
+    class AgentA:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            calls_a.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="a_done", usage=UsageStats())
+
+    class AgentB:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            calls_b.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="b_done", usage=UsageStats())
+
+    chain_a = build_chain_func(
+        [AgentA(), AgentA(), AgentA()], [], store=store, chain_id="test", run_id="run-A",
+    )
+    chain_a("task")
+    assert len(calls_a) == 2  # skipped step 0, ran steps 1 and 2
+
+    chain_b = build_chain_func(
+        [AgentB(), AgentB(), AgentB()], [], store=store, chain_id="test", run_id="run-B",
+    )
+    chain_b("task")
+    assert len(calls_b) == 1  # skipped steps 0-1, ran step 2
+
+
+def test_chain_run_id_none_uses_legacy_key():
+    """run_id=None uses legacy key; run_id set does NOT read the legacy checkpoint."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test", {
+        "step": 0, "output": "legacy_output",
+        "original_task": "t", "handoff_mode": "text_task",
+    })
+
+    legacy_calls = []
+    isolated_calls = []
+
+    class LegacyAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            legacy_calls.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="done", usage=UsageStats())
+
+    class IsolatedAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            isolated_calls.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            return CompletionResponse(content="done", usage=UsageStats())
+
+    # Without run_id — reads legacy checkpoint, skips step 0
+    chain_legacy = build_chain_func(
+        [LegacyAgent(), LegacyAgent()], [], store=store, chain_id="test",
+    )
+    chain_legacy("original")
+    assert len(legacy_calls) == 1
+    assert legacy_calls[0] == "legacy_output"
+
+    # With run_id — does NOT read legacy checkpoint, starts from step 0
+    chain_isolated = build_chain_func(
+        [IsolatedAgent(), IsolatedAgent()], [], store=store, chain_id="test", run_id="new-run",
+    )
+    chain_isolated("fresh_task")
+    assert len(isolated_calls) == 2
+    assert isolated_calls[0] == "fresh_task"

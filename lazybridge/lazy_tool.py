@@ -995,6 +995,7 @@ class LazyTool:
         step_timeout: float | None = None,
         store: Any | None = None,
         chain_id: str | None = None,
+        run_id: str | None = None,
     ) -> "LazyTool":
         """Sequential pipeline tool: participants run in order, each receiving
         the previous output as context (agent→agent) or as the new task (tool→agent).
@@ -1027,8 +1028,12 @@ class LazyTool:
         chain_id:
             Namespace for checkpoint keys in the store.  Defaults to *name*.
             Use distinct ids when multiple chains share the same store.
-            **Concurrency constraint:** concurrent runs with the same
-            ``chain_id`` and ``store`` will collide.
+        run_id:
+            Optional run identifier for checkpoint isolation.  When provided,
+            the checkpoint key becomes ``_ckpt:{chain_id}:{run_id}``.  Use
+            this to isolate concurrent or repeated runs sharing the same
+            chain_id and store.  The caller must pass the same run_id to
+            resume a specific run.
 
         Notes
         -----
@@ -1061,7 +1066,7 @@ class LazyTool:
             inv = [_resolve_participant(p) for p in participants]
             return run_async(build_achain_func(
                 inv, _native, step_timeout,
-                store=store, chain_id=_cid,
+                store=store, chain_id=_cid, run_id=run_id,
             )(task))
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)

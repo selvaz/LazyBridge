@@ -445,6 +445,7 @@ class LazySession:
         native_tools: list[Any] | None = None,
         entry_agent: Any | None = None,
         guidance: str | None = None,
+        run_id: str | None = None,
     ) -> LazyTool:
         """Expose agents (or nested pipeline tools) as a single LazyTool.
 
@@ -555,6 +556,7 @@ class LazySession:
                 guidance=guidance,
                 store=self.store if self._db else None,
                 chain_id=name,
+                run_id=run_id,
             )
 
         raise ValueError(f"Unknown mode {mode!r}. Use 'parallel' or 'chain'.")
