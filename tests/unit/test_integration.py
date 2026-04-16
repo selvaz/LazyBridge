@@ -38,7 +38,7 @@ def _make_session_agent(sess, name, response_content):
 
 
 # ---------------------------------------------------------------------------
-# Full pipeline flow: session → agents → store → context → graph
+# Full pipeline flow: session -> agents -> store -> context -> graph
 # ---------------------------------------------------------------------------
 
 
@@ -91,7 +91,7 @@ def test_usage_summary_empty_session():
 
 
 # ---------------------------------------------------------------------------
-# Streaming methods — dedicated API
+# Streaming methods
 # ---------------------------------------------------------------------------
 
 
@@ -121,7 +121,7 @@ def test_chat_stream_returns_iterator():
 
 
 # ---------------------------------------------------------------------------
-# Exporter tests — StructuredLogExporter
+# StructuredLogExporter
 # ---------------------------------------------------------------------------
 
 
@@ -148,7 +148,7 @@ def test_structured_log_exporter():
 
 
 # ---------------------------------------------------------------------------
-# OTelExporter — import guard
+# OTelExporter — import guard (when otel is NOT installed)
 # ---------------------------------------------------------------------------
 
 
@@ -162,3 +162,144 @@ def test_otel_exporter_import_guard():
     except ImportError:
         with pytest.raises(ImportError, match="OpenTelemetry"):
             OTelExporter()
+
+
+# ---------------------------------------------------------------------------
+# OTelExporter — real integration tests (when otel IS installed)
+# ---------------------------------------------------------------------------
+
+
+def _otel_available():
+    try:
+        import opentelemetry  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _make_otel_env():
+    """Set up an isolated OTEL TracerProvider with a custom span collector.
+
+    Returns (provider, collector, tracer) — pass tracer to OTelExporter
+    to avoid mutating the global TracerProvider.
+    """
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+
+    class _Collector(SpanExporter):
+        def __init__(self):
+            self.spans = []
+
+        def export(self, spans):
+            self.spans.extend(spans)
+            return SpanExportResult.SUCCESS
+
+        def shutdown(self):
+            pass
+
+    provider = TracerProvider()
+    collector = _Collector()
+    provider.add_span_processor(SimpleSpanProcessor(collector))
+    tracer = provider.get_tracer("lazybridge-test")
+    return provider, collector, tracer
+
+
+@pytest.mark.skipif(not _otel_available(), reason="opentelemetry not installed")
+def test_otel_exporter_creates_spans():
+    """OTelExporter creates real spans for agent_start/agent_finish events."""
+    from lazybridge.exporters import OTelExporter
+
+    provider, collector, tracer = _make_otel_env()
+    exporter = OTelExporter(service_name="test", tracer=tracer)
+    exporter.export(
+        {"event_type": "agent_start", "agent_id": "a1", "agent_name": "researcher", "data": {"task": "find papers"}}
+    )
+    exporter.export(
+        {
+            "event_type": "agent_finish",
+            "agent_id": "a1",
+            "agent_name": "researcher",
+            "data": {"stop_reason": "end_turn", "n_steps": 3},
+        }
+    )
+    provider.force_flush()
+
+    assert len(collector.spans) == 1
+    span = collector.spans[0]
+    assert "researcher" in span.name
+    assert span.attributes["lazybridge.agent.name"] == "researcher"
+    assert span.attributes["lazybridge.task"] == "find papers"
+
+
+@pytest.mark.skipif(not _otel_available(), reason="opentelemetry not installed")
+def test_otel_exporter_tool_spans():
+    """OTelExporter creates child spans for tool calls."""
+    from lazybridge.exporters import OTelExporter
+
+    provider, collector, tracer = _make_otel_env()
+    exporter = OTelExporter(tracer=tracer)
+    exporter.export({"event_type": "agent_start", "agent_id": "a1", "agent_name": "agent", "data": {}})
+    exporter.export({"event_type": "tool_call", "agent_id": "a1", "agent_name": "agent", "data": {"name": "search"}})
+    exporter.export({"event_type": "tool_result", "agent_id": "a1", "agent_name": "agent", "data": {"name": "search"}})
+    exporter.export({"event_type": "agent_finish", "agent_id": "a1", "agent_name": "agent", "data": {}})
+    provider.force_flush()
+
+    assert len(collector.spans) == 2
+    tool_span = next(s for s in collector.spans if "tool:" in s.name)
+    assert tool_span.attributes["lazybridge.tool.name"] == "search"
+
+
+@pytest.mark.skipif(not _otel_available(), reason="opentelemetry not installed")
+def test_otel_exporter_model_spans_with_tokens():
+    """OTelExporter records token counts on model response spans."""
+    from lazybridge.exporters import OTelExporter
+
+    provider, collector, tracer = _make_otel_env()
+    exporter = OTelExporter(tracer=tracer)
+    exporter.export({"event_type": "agent_start", "agent_id": "a1", "agent_name": "agent", "data": {}})
+    exporter.export(
+        {
+            "event_type": "model_request",
+            "agent_id": "a1",
+            "agent_name": "agent",
+            "data": {"model": "claude-sonnet-4-6"},
+        }
+    )
+    exporter.export(
+        {
+            "event_type": "model_response",
+            "agent_id": "a1",
+            "agent_name": "agent",
+            "data": {"input_tokens": 150, "output_tokens": 80, "cost_usd": 0.002},
+        }
+    )
+    exporter.export({"event_type": "agent_finish", "agent_id": "a1", "agent_name": "agent", "data": {}})
+    provider.force_flush()
+
+    model_span = next(s for s in collector.spans if "llm:" in s.name)
+    assert model_span.attributes["llm.model"] == "claude-sonnet-4-6"
+    assert model_span.attributes["llm.input_tokens"] == 150
+    assert model_span.attributes["llm.output_tokens"] == 80
+    assert model_span.attributes["llm.cost_usd"] == 0.002
+
+
+# ---------------------------------------------------------------------------
+# Verifier Protocol
+# ---------------------------------------------------------------------------
+
+
+def test_verifier_protocol():
+    from lazybridge.core.types import Verifier
+
+    class MyVerifier:
+        def text(self, messages: str) -> str:
+            return "approved"
+
+    assert isinstance(MyVerifier(), Verifier)
+
+    class NotAVerifier:
+        def check(self, x: str) -> str:
+            return "no"
+
+    assert not isinstance(NotAVerifier(), Verifier)

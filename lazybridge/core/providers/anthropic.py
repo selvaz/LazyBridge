@@ -111,6 +111,11 @@ class AnthropicProvider(BaseProvider):
         if _anthropic is None:
             raise ImportError("anthropic package not installed. Run: pip install anthropic")
         key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise ValueError(
+                "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
+                "variable, or pass api_key= to LazyAgent/AnthropicProvider."
+            )
         # Allow callers to override beta header versions and the streaming threshold.
         self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
         self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)

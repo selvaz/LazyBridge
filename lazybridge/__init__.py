@@ -66,6 +66,7 @@ from lazybridge.core.types import (
     ToolCall,
     ToolDefinition,
     UsageStats,
+    Verifier,
 )
 from lazybridge.exporters import (
     CallbackExporter,
@@ -134,6 +135,7 @@ __all__ = [
     "StructuredOutputConfig",
     "ThinkingConfig",
     "ToolCall",
+    "Verifier",
     "ToolDefinition",
     "UsageStats",
     "BaseProvider",

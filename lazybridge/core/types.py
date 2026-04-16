@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 
 class Role(StrEnum):
@@ -278,3 +278,23 @@ class StreamChunk:
         default_factory=list
     )  # Queries issued by the grounding tool (populated on is_final=True)
     search_entry_point: str | None = None  # Google's rendered HTML attribution widget (populated on is_final=True)
+
+
+# ---------------------------------------------------------------------------
+# Verifier Protocol — type-safe verify parameter for loop()/aloop()
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class Verifier(Protocol):
+    """Protocol for verify judges used in ``loop()`` / ``aloop()``.
+
+    Any object with a ``text(messages) -> str`` method satisfies this
+    protocol — including ``LazyAgent`` itself.  Alternatively, pass a
+    plain ``Callable[[str, str], str]`` to loop()'s ``verify`` parameter.
+
+    Return a string starting with ``"approved"`` (case-insensitive) to
+    accept the answer; anything else triggers a retry with the feedback.
+    """
+
+    def text(self, messages: str) -> str: ...

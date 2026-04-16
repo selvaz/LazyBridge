@@ -43,7 +43,7 @@ import logging
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any
+from typing import Any, Literal, overload
 
 from lazybridge.core.executor import Executor
 from lazybridge.core.types import (
@@ -62,6 +62,7 @@ from lazybridge.core.types import (
     ToolDefinition,
     ToolResultContent,
     ToolUseContent,
+    Verifier,
 )
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_session import Event, EventLog, LazySession, TrackLevel
@@ -518,6 +519,11 @@ class LazyAgent:
     # chat() — single turn
     # ------------------------------------------------------------------
 
+    @overload
+    def chat(self, messages: str | list, *, stream: Literal[False] = ..., **kwargs: Any) -> CompletionResponse: ...
+    @overload
+    def chat(self, messages: str | list, *, stream: Literal[True], **kwargs: Any) -> Iterator[StreamChunk]: ...
+
     def chat(
         self,
         messages: str | list,
@@ -554,10 +560,20 @@ class LazyAgent:
             self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
             resp = self.chat(
-                full, system=system, tools=tools, native_tools=native_tools,
-                output_schema=output_schema, thinking=thinking, skills=skills,
-                stream=False, model=model, max_tokens=max_tokens,
-                temperature=temperature, tool_choice=tool_choice, context=context, **kwargs,
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                **kwargs,
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
@@ -565,10 +581,20 @@ class LazyAgent:
             return resp
 
         msgs, request = self._prepare_chat_request(
-            messages, system=system, tools=tools, native_tools=native_tools,
-            output_schema=output_schema, thinking=thinking, skills=skills,
-            stream=stream, model=model, max_tokens=max_tokens,
-            temperature=temperature, tool_choice=tool_choice, context=context, **kwargs,
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=stream,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
         )
 
         self._track(Event.MODEL_REQUEST, model=request.model or self._model_name, n_messages=len(msgs))
@@ -578,6 +604,15 @@ class LazyAgent:
         resp = self._executor.execute(request)
         self._record_response(resp)
         return resp
+
+    @overload
+    async def achat(
+        self, messages: str | list, *, stream: Literal[False] = ..., **kwargs: Any
+    ) -> CompletionResponse: ...
+    @overload
+    async def achat(
+        self, messages: str | list, *, stream: Literal[True], **kwargs: Any
+    ) -> AsyncIterator[StreamChunk]: ...
 
     async def achat(
         self,
@@ -603,10 +638,20 @@ class LazyAgent:
             self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
             resp = await self.achat(
-                full, system=system, tools=tools, native_tools=native_tools,
-                output_schema=output_schema, thinking=thinking, skills=skills,
-                stream=False, model=model, max_tokens=max_tokens,
-                temperature=temperature, tool_choice=tool_choice, context=context, **kwargs,
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                **kwargs,
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
@@ -614,10 +659,20 @@ class LazyAgent:
             return resp
 
         msgs, request = self._prepare_chat_request(
-            messages, system=system, tools=tools, native_tools=native_tools,
-            output_schema=output_schema, thinking=thinking, skills=skills,
-            stream=stream, model=model, max_tokens=max_tokens,
-            temperature=temperature, tool_choice=tool_choice, context=context, **kwargs,
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=stream,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
         )
 
         self._track(Event.MODEL_REQUEST, model=request.model or self._model_name, n_messages=len(msgs))
@@ -641,7 +696,7 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: LazyAgent | Callable[[str, str], str] | None = None,
+        verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
@@ -765,7 +820,7 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: LazyAgent | Callable[..., Any] | None = None,
+        verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:

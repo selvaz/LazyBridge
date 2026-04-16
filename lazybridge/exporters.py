@@ -240,13 +240,20 @@ class OTelExporter:
 
     __slots__ = ("_agent_spans", "_lock", "_model_spans", "_tool_spans", "_tracer")
 
-    def __init__(self, service_name: str = "lazybridge", tracer_name: str = "lazybridge") -> None:
+    def __init__(
+        self,
+        service_name: str = "lazybridge",
+        tracer_name: str = "lazybridge",
+        tracer: Any = None,
+    ) -> None:
         try:
             from opentelemetry import trace
         except ImportError:
             raise ImportError("OpenTelemetry not installed. Run: pip install lazybridge[otel]") from None
 
-        self._tracer = trace.get_tracer(tracer_name, schema_url=f"https://lazybridge.dev/schema/{service_name}")
+        self._tracer = tracer or trace.get_tracer(
+            tracer_name, schema_url=f"https://lazybridge.dev/schema/{service_name}"
+        )
         self._agent_spans: dict[str, Any] = {}
         self._tool_spans: dict[str, Any] = {}
         self._model_spans: dict[str, Any] = {}

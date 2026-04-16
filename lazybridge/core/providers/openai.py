@@ -138,6 +138,11 @@ class OpenAIProvider(BaseProvider):
         if _openai is None:
             raise ImportError("openai package not installed. Run: pip install openai")
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError(
+                "OpenAI API key not found. Set the OPENAI_API_KEY environment "
+                "variable, or pass api_key= to LazyAgent/OpenAIProvider."
+            )
         base_url = kwargs.pop("base_url", None)
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
         self._async_client = _openai.AsyncOpenAI(api_key=key, base_url=base_url, **kwargs)
