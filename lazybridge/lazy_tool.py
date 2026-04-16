@@ -1027,6 +1027,8 @@ class LazyTool:
         chain_id:
             Namespace for checkpoint keys in the store.  Defaults to *name*.
             Use distinct ids when multiple chains share the same store.
+            **Concurrency constraint:** concurrent runs with the same
+            ``chain_id`` and ``store`` will collide.
 
         Notes
         -----
@@ -1237,6 +1239,12 @@ def _validate_load_path(path: str, *, base_dir: str | None = None) -> None:
         raise ValueError(f"Path {path!r} must end in '.py'.")
     if not p.exists():
         raise FileNotFoundError(f"No such file: {path!r}")
+    if base_dir is None and p.is_absolute():
+        _logger.warning(
+            "LazyTool.load() called with absolute path %r and no base_dir restriction. "
+            "Consider passing base_dir= to limit file access scope.",
+            path,
+        )
     if base_dir is not None:
         resolved = p.resolve()
         base = Path(base_dir).resolve()

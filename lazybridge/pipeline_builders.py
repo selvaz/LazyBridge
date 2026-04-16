@@ -17,7 +17,10 @@ at module load time. All cross-module imports are deferred inside function bodie
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 from collections.abc import Callable
 
 
@@ -168,7 +171,20 @@ def build_chain_func(
         last completed step on re-execution.
     chain_id:
         Namespace for checkpoint keys in the store.  Use distinct ids
-        when multiple chains share the same store.
+        when multiple chains share the same store.  **Concurrency
+        constraint:** if the same ``chain_id`` runs concurrently against
+        the same store, checkpoint writes will collide.  Use a unique
+        ``chain_id`` per concurrent execution.
+
+    Limitations
+    -----------
+    Checkpoint resume restores the text output of the last completed step
+    but not the ``LazyContext`` object (which may contain live agent
+    references).  This means agent→agent context-injection semantics are
+    lost on resume: the next step receives the saved text as its task
+    (tool→agent handoff) rather than the original task with injected
+    context.  For most pipelines this is acceptable because the text
+    carries the substantive content.
     """
     _ckpt_key = f"_ckpt:{chain_id}"
 
@@ -182,10 +198,21 @@ def build_chain_func(
         if store is not None:
             saved = store.read(_ckpt_key)
             if saved is not None:
-                start_step = saved["step"] + 1
-                state = _ChainState(
-                    text=saved["output"], typed=None, ctx=None,
-                )
+                if (
+                    isinstance(saved, dict)
+                    and isinstance(saved.get("step"), int)
+                    and "output" in saved
+                ):
+                    start_step = saved["step"] + 1
+                    # Resume with text only — ctx is not serializable (see Limitations).
+                    state = _ChainState(
+                        text=saved["output"], typed=None, ctx=None,
+                    )
+                else:
+                    _logger.warning(
+                        "Ignoring malformed checkpoint for %r: %r",
+                        _ckpt_key, saved,
+                    )
 
         for i, p in enumerate(parts):
             if i < start_step:
@@ -284,7 +311,8 @@ def build_achain_func(
     store:
         Optional LazyStore for checkpoint persistence (see build_chain_func).
     chain_id:
-        Namespace for checkpoint keys in the store.
+        Namespace for checkpoint keys in the store.  See build_chain_func
+        for concurrency constraints and resume-semantics limitations.
     """
     _ckpt_key = f"_ckpt:{chain_id}"
 
@@ -298,10 +326,21 @@ def build_achain_func(
         if store is not None:
             saved = store.read(_ckpt_key)
             if saved is not None:
-                start_step = saved["step"] + 1
-                state = _ChainState(
-                    text=saved["output"], typed=None, ctx=None,
-                )
+                if (
+                    isinstance(saved, dict)
+                    and isinstance(saved.get("step"), int)
+                    and "output" in saved
+                ):
+                    start_step = saved["step"] + 1
+                    # Resume with text only — ctx is not serializable (see Limitations).
+                    state = _ChainState(
+                        text=saved["output"], typed=None, ctx=None,
+                    )
+                else:
+                    _logger.warning(
+                        "Ignoring malformed checkpoint for %r: %r",
+                        _ckpt_key, saved,
+                    )
 
         for i, p in enumerate(parts):
             if i < start_step:

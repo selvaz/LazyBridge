@@ -598,7 +598,7 @@ class LazySession:
             sess = LazySession.from_db("pipeline.db")
             researcher = LazyAgent("anthropic", name="researcher", session=sess)
             pipeline = sess.as_tool("pipeline", "...", mode="chain")
-            pipeline.run("task")  # resumes from last checkpoint
+            pipeline.run({"task": "..."})  # resumes from last checkpoint
 
         Parameters
         ----------
@@ -610,7 +610,21 @@ class LazySession:
         """
         if not Path(db).exists():
             raise FileNotFoundError(f"No database found at {db!r}")
-        return cls(db=db, tracking=tracking, **kwargs)
+        sess = cls(db=db, tracking=tracking, **kwargs)
+        # Restore the most recent session_id so prior events are visible.
+        # Mirrors the pattern in from_json() which also rebinds sess.id.
+        try:
+            with sess.events._conn() as conn:
+                row = conn.execute(
+                    "SELECT session_id FROM events ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            if row is not None:
+                sess.id = row[0]
+                sess.events.session_id = row[0]
+                sess.graph = GraphSchema(row[0])
+        except Exception:
+            pass  # table may not exist or be empty; keep fresh UUID
+        return sess
 
     def __repr__(self) -> str:
         return f"LazySession(id={self.id[:8]}..., store={len(self.store.keys())} keys)"

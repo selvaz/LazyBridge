@@ -795,3 +795,84 @@ def test_sync_chain_typed_handoff():
     # The tool should have received model_dump() output, not {"task": ...}
     assert len(calls) == 1
     assert calls[0] == {"x": 42, "y": "hello"}
+
+
+# ── Checkpoint payload validation ─────────────────────────────────────────
+
+def _make_echo_chain(store, chain_id="test"):
+    """Helper: build a 1-step chain that echoes the task via a mock agent."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    calls = []
+
+    class EchoAgent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            calls.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+            self._last_output = f"echo:{task}"
+            return CompletionResponse(content=f"echo:{task}", usage=UsageStats())
+
+    chain_fn = build_chain_func([EchoAgent()], [], store=store, chain_id=chain_id)
+    return chain_fn, calls
+
+
+def test_chain_ignores_malformed_checkpoint_missing_step():
+    """Chain runs from step 0 when checkpoint is missing 'step' key."""
+    store = LazyStore()
+    store.write("_ckpt:test", {"output": "text"})
+    chain_fn, calls = _make_echo_chain(store)
+    chain_fn("hello")
+    assert len(calls) == 1
+    assert calls[0] == "hello"
+
+
+def test_chain_ignores_malformed_checkpoint_wrong_type():
+    """Chain runs from step 0 when checkpoint is not a dict."""
+    store = LazyStore()
+    store.write("_ckpt:test", "not_a_dict")
+    chain_fn, calls = _make_echo_chain(store)
+    chain_fn("hello")
+    assert len(calls) == 1
+    assert calls[0] == "hello"
+
+
+def test_chain_ignores_malformed_checkpoint_step_not_int():
+    """Chain runs from step 0 when checkpoint step is not an int."""
+    store = LazyStore()
+    store.write("_ckpt:test", {"step": "one", "output": "text"})
+    chain_fn, calls = _make_echo_chain(store)
+    chain_fn("hello")
+    assert len(calls) == 1
+    assert calls[0] == "hello"
+
+
+# ── from_db() session_id restoration ──────────────────────────────────────
+
+def test_from_db_restores_session_id(tmp_path):
+    """from_db() restores the previous session_id so old events are visible."""
+    db = str(tmp_path / "restore.db")
+    sess1 = LazySession(db=db, tracking="verbose")
+    original_id = sess1.id
+    sess1.events.log("test_event", agent_id="a1", data="hello")
+    del sess1
+
+    sess2 = LazySession.from_db(db, tracking="verbose")
+    assert sess2.id == original_id
+    events = sess2.events.get(event_type="test_event")
+    assert len(events) >= 1
+
+
+def test_from_db_empty_db_keeps_fresh_id(tmp_path):
+    """from_db() on a DB with no events keeps a fresh UUID (no crash)."""
+    db = str(tmp_path / "empty.db")
+    sess1 = LazySession(db=db)
+    del sess1
+
+    sess2 = LazySession.from_db(db)
+    assert sess2.id  # has a valid UUID
+    assert len(sess2.events.get()) == 0

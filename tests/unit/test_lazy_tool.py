@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 from pathlib import Path
+import unittest.mock
 from unittest.mock import MagicMock, AsyncMock
 
 from lazybridge.lazy_tool import (
@@ -929,3 +930,24 @@ def test_v1_files_still_load(tmp_path):
     assert loaded.func is not None
     result = loaded.run({"a": 3, "b": 4})
     assert result == 7
+
+
+# ── load() absolute path warning ─────────────────────────────────────────
+
+def test_load_warns_on_absolute_path_without_base_dir(tmp_path):
+    """_validate_load_path logs a warning for absolute paths without base_dir."""
+    import logging
+    from lazybridge.lazy_tool import _validate_load_path, LazyTool
+
+    # Create a valid sentinel file
+    f = tmp_path / "tool.py"
+    f.write_text(f"{LazyTool._SENTINEL}\n# empty\n")
+
+    abs_path = str(f.resolve())
+    assert abs_path.startswith("/")
+
+    logger = logging.getLogger("lazybridge.lazy_tool")
+    with unittest.mock.patch.object(logger, "warning") as mock_warn:
+        _validate_load_path(abs_path)
+        mock_warn.assert_called_once()
+        assert "base_dir" in mock_warn.call_args[0][0]
