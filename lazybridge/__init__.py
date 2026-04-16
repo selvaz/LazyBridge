@@ -68,6 +68,7 @@ from lazybridge.core.types import (
     UsageStats,
     Verifier,
 )
+from lazybridge.evals import EvalCase, EvalReport, EvalSuite
 from lazybridge.exporters import (
     CallbackExporter,
     EventExporter,
@@ -111,6 +112,10 @@ __all__ = [
     "GuardError",
     "ContentGuard",
     "GuardChain",
+    # Evals
+    "EvalSuite",
+    "EvalCase",
+    "EvalReport",
     "LLMGuard",
     # Tool schema
     "ToolSchemaMode",

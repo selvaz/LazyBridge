@@ -543,6 +543,35 @@ class LazyAgent:
             raise GuardError(action)
         return resp
 
+    @staticmethod
+    async def _arun_input_guard(guard: Guard | None, messages: str | list) -> str | list:
+        """Async input guard. Uses acheck_input if available, else check_input."""
+        if guard is None:
+            return messages
+        text = messages if isinstance(messages, str) else _messages_to_str(messages)
+        if hasattr(guard, "acheck_input"):
+            action = await guard.acheck_input(text)
+        else:
+            action = guard.check_input(text)
+        if not action.allowed:
+            raise GuardError(action)
+        if action.modified_text is not None and isinstance(messages, str):
+            return action.modified_text
+        return messages
+
+    @staticmethod
+    async def _arun_output_guard(guard: Guard | None, resp: CompletionResponse) -> CompletionResponse:
+        """Async output guard. Uses acheck_output if available, else check_output."""
+        if guard is None or not resp.content:
+            return resp
+        if hasattr(guard, "acheck_output"):
+            action = await guard.acheck_output(resp.content)
+        else:
+            action = guard.check_output(resp.content)
+        if not action.allowed:
+            raise GuardError(action)
+        return resp
+
     # ------------------------------------------------------------------
     # chat() — single turn
     # ------------------------------------------------------------------
@@ -671,7 +700,7 @@ class LazyAgent:
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
         """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
-        messages = self._run_input_guard(guard, messages)
+        messages = await self._arun_input_guard(guard, messages)
 
         if memory is not None:
             self._validate_memory(messages, memory, stream)
@@ -721,7 +750,7 @@ class LazyAgent:
 
         resp = await self._executor.aexecute(request)
         self._record_response(resp)
-        self._run_output_guard(guard, resp)
+        await self._arun_output_guard(guard, resp)
         return resp
 
     # ------------------------------------------------------------------
@@ -886,7 +915,7 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
-        messages = self._run_input_guard(guard, messages)
+        messages = await self._arun_input_guard(guard, messages)
         _orig_q = _messages_to_str(messages)
         _current_messages: str | list = messages
         _attempts = max(1, max_verify) if verify is not None else 1
@@ -958,7 +987,7 @@ class LazyAgent:
             _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
 
         result = self._finalize_loop(resp, _verify_log, _attempts, verify, "aloop", step)  # type: ignore[arg-type]
-        self._run_output_guard(guard, result)
+        await self._arun_output_guard(guard, result)
         return result
 
     # ------------------------------------------------------------------

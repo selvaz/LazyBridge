@@ -37,6 +37,7 @@ Using an LLM as a guard::
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -114,6 +115,12 @@ class Guard(Protocol):
     def check_input(self, text: str) -> GuardAction: ...
     def check_output(self, text: str) -> GuardAction: ...
 
+    async def acheck_input(self, text: str) -> GuardAction:
+        return self.check_input(text)
+
+    async def acheck_output(self, text: str) -> GuardAction:
+        return self.check_output(text)
+
 
 # ---------------------------------------------------------------------------
 # ContentGuard — function-based guard
@@ -154,6 +161,22 @@ class ContentGuard:
             return self._output_fn(text)
         return GuardAction.allow()
 
+    async def acheck_input(self, text: str) -> GuardAction:
+        if self._input_fn is not None:
+            result = self._input_fn(text)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        return GuardAction.allow()
+
+    async def acheck_output(self, text: str) -> GuardAction:
+        if self._output_fn is not None:
+            result = self._output_fn(text)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        return GuardAction.allow()
+
 
 # ---------------------------------------------------------------------------
 # GuardChain — compose multiple guards
@@ -186,6 +209,24 @@ class GuardChain:
     def check_output(self, text: str) -> GuardAction:
         for g in self._guards:
             action = g.check_output(text)
+            if not action.allowed:
+                return action
+            if action.modified_text is not None:
+                text = action.modified_text
+        return GuardAction.allow()
+
+    async def acheck_input(self, text: str) -> GuardAction:
+        for g in self._guards:
+            action = await g.acheck_input(text) if hasattr(g, "acheck_input") else g.check_input(text)
+            if not action.allowed:
+                return action
+            if action.modified_text is not None:
+                text = action.modified_text
+        return GuardAction.allow()
+
+    async def acheck_output(self, text: str) -> GuardAction:
+        for g in self._guards:
+            action = await g.acheck_output(text) if hasattr(g, "acheck_output") else g.check_output(text)
             if not action.allowed:
                 return action
             if action.modified_text is not None:
@@ -240,6 +281,19 @@ class LLMGuard:
             return GuardAction.block(reason)
         return GuardAction.allow()
 
+    async def _aevaluate(self, text: str) -> GuardAction:
+        prompt = self._PROMPT.format(policy=self._policy, content=text[:2000])
+        try:
+            verdict = (await self._agent.atext(prompt)).strip()
+        except Exception as exc:
+            _logger.warning("LLMGuard async evaluation failed: %s", exc)
+            return GuardAction.allow(message="guard-error: evaluation failed")
+
+        if verdict.upper().startswith("BLOCK"):
+            reason = verdict[5:].strip().lstrip(":").strip() or "Blocked by LLM moderator"
+            return GuardAction.block(reason)
+        return GuardAction.allow()
+
     def check_input(self, text: str) -> GuardAction:
         if self._check_input:
             return self._evaluate(text)
@@ -248,4 +302,14 @@ class LLMGuard:
     def check_output(self, text: str) -> GuardAction:
         if self._check_output:
             return self._evaluate(text)
+        return GuardAction.allow()
+
+    async def acheck_input(self, text: str) -> GuardAction:
+        if self._check_input:
+            return await self._aevaluate(text)
+        return GuardAction.allow()
+
+    async def acheck_output(self, text: str) -> GuardAction:
+        if self._check_output:
+            return await self._aevaluate(text)
         return GuardAction.allow()

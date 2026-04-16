@@ -184,3 +184,61 @@ def test_guard_error_has_action():
     assert err.action is action
     assert "test reason" in str(err)
     assert err.action.metadata["score"] == 0.95
+
+
+# ---------------------------------------------------------------------------
+# Async guards
+# ---------------------------------------------------------------------------
+
+
+async def test_async_guard_input_blocks():
+    from unittest.mock import AsyncMock
+
+    guard = ContentGuard(input_fn=lambda t: GuardAction.block("nope") if "bad" in t else GuardAction.allow())
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="ok", usage=UsageStats()))
+
+    with pytest.raises(GuardError, match="nope"):
+        await agent.achat("bad input", guard=guard)
+
+
+async def test_async_guard_output_blocks():
+    from unittest.mock import AsyncMock
+
+    guard = ContentGuard(output_fn=lambda t: GuardAction.block("toxic") if "toxic" in t else GuardAction.allow())
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="toxic output", usage=UsageStats()))
+
+    with pytest.raises(GuardError, match="toxic"):
+        await agent.achat("hello", guard=guard)
+
+
+async def test_async_guard_allows_clean():
+    from unittest.mock import AsyncMock
+
+    guard = ContentGuard(
+        input_fn=lambda t: GuardAction.allow(),
+        output_fn=lambda t: GuardAction.allow(),
+    )
+    agent = _make_agent()
+    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="clean", usage=UsageStats()))
+
+    resp = await agent.achat("hello", guard=guard)
+    assert resp.content == "clean"
+
+
+async def test_async_content_guard_with_async_fn():
+    """ContentGuard supports async check functions via acheck_input."""
+
+    async def async_check(text: str) -> GuardAction:
+        if "secret" in text:
+            return GuardAction.block("async blocked")
+        return GuardAction.allow()
+
+    guard = ContentGuard(input_fn=async_check)
+    action = await guard.acheck_input("this has a secret")
+    assert not action.allowed
+    assert action.message == "async blocked"
+
+    action2 = await guard.acheck_input("clean text")
+    assert action2.allowed
