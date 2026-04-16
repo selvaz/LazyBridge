@@ -130,7 +130,7 @@ for src in resp.grounding_sources:
 |---|---|---|
 | Anthropic | `"anthropic"` / `"claude"` | claude-sonnet-4-6 |
 | OpenAI | `"openai"` / `"gpt"` | gpt-5.4 |
-| Google | `"google"` / `"gemini"` | gemini-2.5-flash |
+| Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
 | DeepSeek | `"deepseek"` | deepseek-chat |
 
 ## Installation

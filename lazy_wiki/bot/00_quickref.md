@@ -50,13 +50,16 @@ LazyAgent.loop(
     max_steps: int = 8,                    # hard cap; raises ValueError if < 1
     tool_runner: Callable[[str, dict], Any] | None = None,  # fallback for tools not in registry
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
-    verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
+    verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
                                            # exhausting all attempts emits UserWarning and returns last result
     **chat_kwargs,                         # forwarded to chat() on each step
 ) -> CompletionResponse
 
 LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async; same UserWarning on exhaustion
+
+LazyAgent.chat_stream(messages, ...) -> Iterator[StreamChunk]     # dedicated streaming (preferred over chat(stream=True))
+LazyAgent.achat_stream(messages, ...) -> AsyncIterator[StreamChunk]  # async streaming
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
@@ -109,8 +112,34 @@ LazySession.as_tool(                                 # CANONICAL — compose pip
     guidance: str | None = None,
 ) -> LazyTool
 
+LazySession.usage_summary() -> dict       # {"total": {...}, "by_agent": {...}} — requires tracking="verbose"
+LazySession.add_exporter(exporter) -> None
+LazySession.remove_exporter(exporter) -> None
 LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
+```
+
+### Exporters
+
+```python
+CallbackExporter(fn: Callable)                     # wraps any callable
+FilteredExporter(inner, event_types={"tool_call"})  # forwards only specified types
+JsonFileExporter("events.jsonl")                    # appends JSON lines to file
+StructuredLogExporter(logger_name="lazybridge.events")  # JSON via stdlib logging
+OTelExporter(service_name="my-app", tracer=None)   # OpenTelemetry spans (pip install lazybridge[otel])
+```
+
+### Verifier Protocol
+
+```python
+from lazybridge import Verifier
+
+class MyJudge:
+    def text(self, messages: str) -> str:
+        return "approved" if ok else "retry: fix X"
+
+# Any object with .text() satisfies Verifier — including LazyAgent itself
+agent.loop("task", verify=MyJudge())
 ```
 
 ### EventLog (`sess.events`)

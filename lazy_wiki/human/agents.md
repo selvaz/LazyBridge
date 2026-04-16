@@ -203,10 +203,11 @@ print(summary.bullets)
 
 ## Streaming
 
-Receive output token by token as it's generated.
+Receive output token by token as it's generated. Use the dedicated streaming methods for clear return types:
 
 ```python
-for chunk in ai.chat("Write me a haiku about Python.", stream=True):
+# Preferred — return type is always Iterator[StreamChunk]
+for chunk in ai.chat_stream("Write me a haiku about Python."):
     print(chunk.delta, end="", flush=True)
 print()  # newline at end
 ```
@@ -214,9 +215,12 @@ print()  # newline at end
 Async streaming:
 
 ```python
-async for chunk in await ai.achat("Write a haiku", stream=True):
+# Preferred — return type is always AsyncIterator[StreamChunk]
+async for chunk in await ai.achat_stream("Write a haiku"):
     print(chunk.delta, end="", flush=True)
 ```
+
+The `chat(stream=True)` form still works but returns a union type (`CompletionResponse | Iterator[StreamChunk]`), which requires runtime type checks. Prefer `chat_stream()` / `achat_stream()` for new code.
 
 ---
 

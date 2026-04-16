@@ -295,3 +295,40 @@ writer = LazyAgent("openai", session=sess2)
 ctx = LazyContext.from_store(sess2.store, keys=["phase1"])
 writer.chat("continue from this research", context=ctx)
 ```
+
+---
+
+## Usage tracking & cost
+
+Aggregate token usage and costs across all agents:
+
+```python
+sess = LazySession(tracking="verbose")
+# ... run agents ...
+summary = sess.usage_summary()
+print(f"Total cost: ${summary['total']['cost_usd']:.4f}")
+print(f"Total tokens: {summary['total']['input_tokens']} in / {summary['total']['output_tokens']} out")
+for name, usage in summary["by_agent"].items():
+    print(f"  {name}: ${usage['cost_usd']:.4f}")
+```
+
+Note: requires `tracking="verbose"` because `model_response` events (which contain token counts) are only emitted at verbose level.
+
+---
+
+## Exporters
+
+Forward events to external observability systems:
+
+```python
+from lazybridge import LazySession, CallbackExporter, OTelExporter
+
+# Log to OpenTelemetry (requires: pip install lazybridge[otel])
+sess = LazySession(exporters=[OTelExporter(service_name="my-pipeline")])
+
+# Or simple callback for custom handling
+events = []
+sess = LazySession(exporters=[CallbackExporter(events.append)])
+```
+
+See the [API reference](../bot/00_quickref.md) for all available exporters.

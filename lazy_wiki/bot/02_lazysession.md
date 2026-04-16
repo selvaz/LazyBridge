@@ -446,7 +446,58 @@ If you only need the combined text (not per-agent response objects), `sess.as_to
 
 ---
 
-## 8. Serialization
+## 8. Usage Summary — cost and token tracking
+
+```python
+summary = sess.usage_summary()
+# Returns:
+# {
+#     "total": {"input_tokens": 1500, "output_tokens": 800, "cost_usd": 0.023},
+#     "by_agent": {
+#         "researcher": {"input_tokens": 1000, "output_tokens": 500, "cost_usd": 0.015},
+#         "writer":     {"input_tokens": 500,  "output_tokens": 300, "cost_usd": 0.008},
+#     },
+# }
+```
+
+Aggregates token counts and costs from all `model_response` events in the session. Requires `tracking="verbose"` (model_response events are verbose-only).
+
+---
+
+## 9. Exporters — external observability
+
+Register exporters to forward events to external systems:
+
+```python
+from lazybridge import LazySession, CallbackExporter, OTelExporter, StructuredLogExporter
+
+# Simple callback
+events = []
+sess = LazySession(exporters=[CallbackExporter(events.append)])
+
+# Structured JSON logging (stdlib logging, no extra deps)
+sess = LazySession(exporters=[StructuredLogExporter()])
+
+# OpenTelemetry spans (requires: pip install lazybridge[otel])
+sess = LazySession(exporters=[OTelExporter(service_name="my-pipeline")])
+```
+
+Available exporters:
+- **`CallbackExporter(fn)`** — wraps any callable
+- **`FilteredExporter(inner, event_types={"tool_call", ...})`** — forwards only specified event types
+- **`JsonFileExporter("events.jsonl")`** — appends JSON lines to a file
+- **`StructuredLogExporter()`** — emits events as structured JSON via Python's logging module
+- **`OTelExporter()`** — maps events to OpenTelemetry spans (agent, tool, model spans with token/cost attributes)
+
+Add/remove at runtime:
+```python
+sess.add_exporter(my_exporter)
+sess.remove_exporter(my_exporter)
+```
+
+---
+
+## 10. Serialization
 
 ```python
 # Serialize graph topology to JSON (nodes + edges; live agents are NOT included)

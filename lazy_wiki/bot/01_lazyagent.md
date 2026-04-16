@@ -237,7 +237,11 @@ print(resp.content)                    # "Parigi"
 # Call-level system addition (appended to agent.system)
 resp = ai.chat("What is the capital of France?", system="Reply in one word only.")
 
-# Streaming
+# Streaming (preferred — unambiguous return type)
+for chunk in ai.chat_stream("Tell me a story"):
+    print(chunk.delta, end="", flush=True)
+
+# Streaming (legacy — returns union type, still works)
 for chunk in ai.chat("Tell me a story", stream=True):
     print(chunk.delta, end="", flush=True)
 
@@ -618,3 +622,17 @@ asyncio.run(main())
 ```
 
 `achat()` with `stream=True` returns an `AsyncIterator[StreamChunk]` — iterate with `async for`.
+
+**Dedicated streaming methods (recommended):**
+
+```python
+# Sync — always returns Iterator[StreamChunk]
+for chunk in ai.chat_stream("Tell me a story"):
+    print(chunk.delta, end="", flush=True)
+
+# Async — always returns AsyncIterator[StreamChunk]
+async for chunk in await ai.achat_stream("Tell me a story"):
+    print(chunk.delta, end="", flush=True)
+```
+
+These are preferred over `chat(stream=True)` because the return type is unambiguous — IDEs can infer it without `isinstance` checks.
