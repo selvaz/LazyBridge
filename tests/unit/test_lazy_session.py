@@ -1195,3 +1195,70 @@ def test_chain_run_id_none_uses_legacy_key():
     chain_isolated("fresh_task")
     assert len(isolated_calls) == 2
     assert isolated_calls[0] == "fresh_task"
+
+
+# ── Checkpoint bounds check ──────────────────────────────────────────────
+
+
+def test_chain_checkpoint_step_out_of_range():
+    """Checkpoint with step exceeding chain length gracefully restarts from step 0."""
+    from lazybridge.pipeline_builders import build_chain_func
+
+    store = LazyStore()
+    store.write("_ckpt:test", {"step": 99, "output": "stale", "handoff_mode": "text_task"})
+
+    calls = []
+
+    class Agent:
+        tools = None
+        native_tools = None
+        output_schema = None
+        _last_output = None
+
+        def chat(self, task, **kw):
+            calls.append(task)
+            from lazybridge.core.types import CompletionResponse, UsageStats
+
+            self._last_output = f"done:{task}"
+            return CompletionResponse(content=f"done:{task}", usage=UsageStats())
+
+    chain_fn = build_chain_func([Agent(), Agent()], [], store=store, chain_id="test")
+    chain_fn("fresh start")
+
+    assert len(calls) == 2
+    assert calls[0] == "fresh start"
+
+
+# ── from_db(session_id=...) ─────────────────────────────────────────────
+
+
+def test_from_db_specific_session_id(tmp_path):
+    """from_db(session_id=...) binds to the specified session, not the latest."""
+    db = str(tmp_path / "multi.db")
+
+    sess1 = LazySession(db=db, tracking="verbose")
+    id1 = sess1.id
+    sess1.events.log("ev1", agent_id="a1", x=1)
+    del sess1
+
+    sess2 = LazySession(db=db, tracking="verbose")
+    id2 = sess2.id
+    sess2.events.log("ev2", agent_id="a2", x=2)
+    del sess2
+
+    assert id1 != id2
+
+    restored = LazySession.from_db(db, session_id=id1, tracking="verbose")
+    assert restored.id == id1
+    events = restored.events.get(event_type="ev1")
+    assert len(events) >= 1
+
+
+def test_from_db_nonexistent_session_id_keeps_fresh(tmp_path):
+    """from_db with a non-existent session_id keeps a fresh UUID."""
+    db = str(tmp_path / "fresh.db")
+    sess = LazySession(db=db)
+    del sess
+
+    restored = LazySession.from_db(db, session_id="does-not-exist-abc")
+    assert restored.id != "does-not-exist-abc"

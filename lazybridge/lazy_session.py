@@ -628,6 +628,7 @@ class LazySession:
         cls,
         db: str,
         *,
+        session_id: str | None = None,
         tracking: TrackLevel | str = TrackLevel.BASIC,
         **kwargs: Any,
     ) -> LazySession:
@@ -650,23 +651,36 @@ class LazySession:
         db:
             Path to an existing SQLite database previously created by a
             ``LazySession(db=...)`` call.
+        session_id:
+            Bind to a specific session by ID.  When provided, only events
+            from that session are visible via ``events.get()``.  When
+            ``None`` (default), the most recent session_id in the database
+            is used automatically.
         tracking:
             Tracking level for new events logged on the resumed session.
         """
         if not Path(db).exists():
             raise FileNotFoundError(f"No database found at {db!r}")
         sess = cls(db=db, tracking=tracking, **kwargs)
-        # Restore the most recent session_id so prior events are visible.
-        # Mirrors the pattern in from_json() which also rebinds sess.id.
         try:
             with sess.events._conn() as conn:
-                row = conn.execute("SELECT session_id FROM events ORDER BY id DESC LIMIT 1").fetchone()
-            if row is not None:
-                sess.id = row[0]
-                sess.events.session_id = row[0]
-                sess.graph = GraphSchema(row[0])
+                if session_id is not None:
+                    row = conn.execute(
+                        "SELECT session_id FROM events WHERE session_id = ? LIMIT 1",
+                        (session_id,),
+                    ).fetchone()
+                    if row is not None:
+                        sess.id = session_id
+                        sess.events.session_id = session_id
+                        sess.graph = GraphSchema(session_id)
+                else:
+                    row = conn.execute("SELECT session_id FROM events ORDER BY id DESC LIMIT 1").fetchone()
+                    if row is not None:
+                        sess.id = row[0]
+                        sess.events.session_id = row[0]
+                        sess.graph = GraphSchema(row[0])
         except Exception:
-            pass  # table may not exist or be empty; keep fresh UUID
+            pass
         return sess
 
     def __repr__(self) -> str:

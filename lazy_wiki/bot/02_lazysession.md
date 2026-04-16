@@ -512,3 +512,18 @@ print(sess2.graph.nodes())   # list of AgentNode descriptors, not LazyAgent inst
 ```
 
 `to_json()` delegates to `sess.graph.to_json()`. `from_json(text, **kwargs)` is a classmethod that creates a new `LazySession` (forwarding `**kwargs` to the constructor, e.g. `db=`), then replaces its `graph` with the deserialized `GraphSchema` and restores `session_id` from the JSON.
+
+### Resuming from a database
+
+```python
+# Resume latest session (default)
+sess = LazySession.from_db("pipeline.db")
+
+# Resume a specific session by ID
+sess = LazySession.from_db("pipeline.db", session_id="abc-123-...")
+```
+
+`from_db(db, *, session_id=None, tracking="basic")`:
+- If `session_id` is provided, binds to that specific session — only its events are visible via `events.get()`
+- If `session_id` is None, auto-detects the most recent session in the database
+- Raises `FileNotFoundError` if the database file doesn't exist

@@ -229,7 +229,7 @@ writer = LazyAgent("openai", name="writer", session=sess)
 
 # Pipeline resumes from last checkpoint automatically
 pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
-result = pipeline.run("Analyze fusion energy trends")
+result = pipeline.run({"task": "Analyze fusion energy trends"})
 ```
 
 ### Nested pipelines
@@ -256,6 +256,29 @@ If `sub` crashes during `step_b`, on resume `main` skips `researcher` and
 - On re-execution, it reads the checkpoint and skips completed steps
 - On successful completion, the checkpoint is cleared
 - Without `store=`, chains work exactly as before — no overhead
+
+### Checkpoint key isolation (run_id)
+
+By default, checkpoint keys use `_ckpt:{chain_id}`. If you run the same
+chain concurrently (e.g. parallel workers, retries, scheduled runs), they
+will collide on the same checkpoint key.
+
+Use `run_id` to isolate concurrent invocations:
+
+```python
+# Each worker gets its own checkpoint lane
+tool = LazyTool.chain(a, b, name="pipe", description="d",
+                      store=store, chain_id="pipe", run_id="worker-1")
+tool.run({"task": "analyze"})
+
+# Another worker, same chain, independent checkpoint
+tool2 = LazyTool.chain(a, b, name="pipe", description="d",
+                       store=store, chain_id="pipe", run_id="worker-2")
+tool2.run({"task": "analyze"})
+```
+
+When `run_id` is omitted, the legacy single-lane behavior applies.
+To resume a specific run, pass the same `run_id` value.
 
 ---
 

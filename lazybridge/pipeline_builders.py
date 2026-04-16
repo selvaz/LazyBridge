@@ -254,6 +254,15 @@ def build_chain_func(
         from lazybridge.lazy_context import LazyContext
 
         start_step, state = _restore_checkpoint(store, _ckpt_key, task)
+        if start_step >= len(parts):
+            _logger.warning(
+                "Checkpoint step %d exceeds chain length %d for %r; restarting from step 0",
+                start_step,
+                len(parts),
+                _ckpt_key,
+            )
+            start_step = 0
+            state = _ChainState(text=task, typed=None, ctx=None)
 
         for i, p in enumerate(parts):
             if i < start_step:
@@ -355,6 +364,15 @@ def build_achain_func(
         from lazybridge.lazy_context import LazyContext
 
         start_step, state = _restore_checkpoint(store, _ckpt_key, task)
+        if start_step >= len(parts):
+            _logger.warning(
+                "Checkpoint step %d exceeds chain length %d for %r; restarting from step 0",
+                start_step,
+                len(parts),
+                _ckpt_key,
+            )
+            start_step = 0
+            state = _ChainState(text=task, typed=None, ctx=None)
 
         for i, p in enumerate(parts):
             if i < start_step:
