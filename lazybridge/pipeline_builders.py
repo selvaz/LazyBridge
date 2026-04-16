@@ -62,6 +62,66 @@ class _ChainState:
 
 
 # ---------------------------------------------------------------------------
+# Shared checkpoint helpers (used by both sync and async chain builders)
+# ---------------------------------------------------------------------------
+
+
+def _restore_checkpoint(store: Any, ckpt_key: str, task: str) -> tuple[int, _ChainState]:
+    """Restore chain state from checkpoint. Returns (start_step, state).
+
+    Handles validation and semantic resume (handoff_mode).
+    Falls back to step 0 on missing or malformed checkpoints.
+    """
+    if store is None:
+        return 0, _ChainState(text=task, typed=None, ctx=None)
+
+    saved = store.read(ckpt_key)
+    if saved is None:
+        return 0, _ChainState(text=task, typed=None, ctx=None)
+
+    if not (isinstance(saved, dict) and isinstance(saved.get("step"), int) and "output" in saved):
+        _logger.warning("Ignoring malformed checkpoint for %r: %r", ckpt_key, saved)
+        return 0, _ChainState(text=task, typed=None, ctx=None)
+
+    from lazybridge.lazy_context import LazyContext
+
+    start_step = saved["step"] + 1
+    _handoff = saved.get("handoff_mode", "text_task")
+    if _handoff == "agent_context":
+        _orig = saved.get("original_task", saved["output"])
+        state = _ChainState(
+            text=_orig,
+            typed=None,
+            ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
+        )
+    else:
+        state = _ChainState(text=saved["output"], typed=None, ctx=None)
+    return start_step, state
+
+
+def _save_checkpoint(store: Any, ckpt_key: str, step: int, state: _ChainState, task: str) -> None:
+    """Save checkpoint with handoff semantics."""
+    if store is None:
+        return
+    store.write(
+        ckpt_key,
+        {
+            "step": step,
+            "output": state.text,
+            "original_task": task,
+            "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
+        },
+    )
+
+
+def _clear_checkpoint(store: Any, ckpt_key: str) -> None:
+    """Remove checkpoint after successful completion."""
+    if store is None:
+        return
+    store.write(ckpt_key, None)
+
+
+# ---------------------------------------------------------------------------
 # Pipeline builders
 # ---------------------------------------------------------------------------
 
@@ -193,35 +253,7 @@ def build_chain_func(
     def _run_chain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
 
-        state = _ChainState(text=task, typed=None, ctx=None)
-
-        # ── Resume from checkpoint ────────────────────────────────────
-        start_step = 0
-        if store is not None:
-            saved = store.read(_ckpt_key)
-            if saved is not None:
-                if isinstance(saved, dict) and isinstance(saved.get("step"), int) and "output" in saved:
-                    start_step = saved["step"] + 1
-                    _handoff = saved.get("handoff_mode", "text_task")
-                    if _handoff == "agent_context":
-                        _orig = saved.get("original_task", saved["output"])
-                        state = _ChainState(
-                            text=_orig,
-                            typed=None,
-                            ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
-                        )
-                    else:
-                        state = _ChainState(
-                            text=saved["output"],
-                            typed=None,
-                            ctx=None,
-                        )
-                else:
-                    _logger.warning(
-                        "Ignoring malformed checkpoint for %r: %r",
-                        _ckpt_key,
-                        saved,
-                    )
+        start_step, state = _restore_checkpoint(store, _ckpt_key, task)
 
         for i, p in enumerate(parts):
             if i < start_step:
@@ -278,22 +310,9 @@ def build_chain_func(
             else:
                 raise TypeError(f"Participant {p!r} must be a LazyAgent (has .chat) or LazyTool (has .run).")
 
-            # ── Checkpoint after each completed step ──────────────────
-            if store is not None:
-                store.write(
-                    _ckpt_key,
-                    {
-                        "step": i,
-                        "output": state.text,
-                        "original_task": task,
-                        "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
-                    },
-                )
+            _save_checkpoint(store, _ckpt_key, i, state, task)
 
-        # ── Clear checkpoint on successful completion ─────────────────
-        if store is not None:
-            store.write(_ckpt_key, None)
-
+        _clear_checkpoint(store, _ckpt_key)
         return state.typed if state.typed is not None else state.text
 
     return _run_chain
@@ -335,35 +354,7 @@ def build_achain_func(
     async def _run_achain(task: str) -> Any:
         from lazybridge.lazy_context import LazyContext
 
-        state = _ChainState(text=task, typed=None, ctx=None)
-
-        # ── Resume from checkpoint ────────────────────────────────────
-        start_step = 0
-        if store is not None:
-            saved = store.read(_ckpt_key)
-            if saved is not None:
-                if isinstance(saved, dict) and isinstance(saved.get("step"), int) and "output" in saved:
-                    start_step = saved["step"] + 1
-                    _handoff = saved.get("handoff_mode", "text_task")
-                    if _handoff == "agent_context":
-                        _orig = saved.get("original_task", saved["output"])
-                        state = _ChainState(
-                            text=_orig,
-                            typed=None,
-                            ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
-                        )
-                    else:
-                        state = _ChainState(
-                            text=saved["output"],
-                            typed=None,
-                            ctx=None,
-                        )
-                else:
-                    _logger.warning(
-                        "Ignoring malformed checkpoint for %r: %r",
-                        _ckpt_key,
-                        saved,
-                    )
+        start_step, state = _restore_checkpoint(store, _ckpt_key, task)
 
         for i, p in enumerate(parts):
             if i < start_step:
@@ -429,21 +420,9 @@ def build_achain_func(
             else:
                 raise TypeError(f"Participant {p!r} must be a LazyAgent (has .achat) or LazyTool (has .arun).")
 
-            # ── Checkpoint after each completed step ──────────────────
-            if store is not None:
-                store.write(
-                    _ckpt_key,
-                    {
-                        "step": i,
-                        "output": state.text,
-                        "original_task": task,
-                        "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
-                    },
-                )
+            _save_checkpoint(store, _ckpt_key, i, state, task)
 
-        # ── Clear checkpoint on successful completion ─────────────────
-        if store is not None:
-            store.write(_ckpt_key, None)
+        _clear_checkpoint(store, _ckpt_key)
 
         return state.typed if state.typed is not None else state.text
 
