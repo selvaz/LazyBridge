@@ -52,3 +52,4 @@ htmlcov/
 
 # Node dependencies
 node_modules/
+site/

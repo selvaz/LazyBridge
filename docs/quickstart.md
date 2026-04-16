@@ -1,0 +1,1 @@
+../lazy_wiki/human/quickstart.md

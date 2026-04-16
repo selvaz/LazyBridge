@@ -354,4 +354,4 @@ events = []
 sess = LazySession(exporters=[CallbackExporter(events.append)])
 ```
 
-See the [API reference](../bot/00_quickref.md) for all available exporters.
+See the API reference for all available exporters.

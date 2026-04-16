@@ -64,6 +64,7 @@ from lazybridge.core.types import (
     ToolUseContent,
     Verifier,
 )
+from lazybridge.guardrails import Guard, GuardError
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_session import Event, EventLog, LazySession, TrackLevel
 from lazybridge.lazy_tool import LazyTool, NormalizedToolSet
@@ -516,6 +517,33 @@ class LazyAgent:
         return resp
 
     # ------------------------------------------------------------------
+    # Guard helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_input_guard(guard: Guard | None, messages: str | list) -> str | list:
+        """Run input guard on the user message text. Returns (possibly modified) messages."""
+        if guard is None:
+            return messages
+        text = messages if isinstance(messages, str) else _messages_to_str(messages)
+        action = guard.check_input(text)
+        if not action.allowed:
+            raise GuardError(action)
+        if action.modified_text is not None and isinstance(messages, str):
+            return action.modified_text
+        return messages
+
+    @staticmethod
+    def _run_output_guard(guard: Guard | None, resp: CompletionResponse) -> CompletionResponse:
+        """Run output guard on the response content. Raises GuardError if blocked."""
+        if guard is None or not resp.content:
+            return resp
+        action = guard.check_output(resp.content)
+        if not action.allowed:
+            raise GuardError(action)
+        return resp
+
+    # ------------------------------------------------------------------
     # chat() — single turn
     # ------------------------------------------------------------------
 
@@ -541,6 +569,7 @@ class LazyAgent:
         temperature: float | None = None,
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
+        guard: Guard | None = None,
         **kwargs: Any,
     ) -> CompletionResponse | Iterator[StreamChunk]:
         """Send a single-turn chat request.
@@ -555,7 +584,12 @@ class LazyAgent:
         ``"required"`` (force at least one tool call), or a specific tool name.
 
         ``context`` overrides the agent-level context for this call only.
+
+        ``guard`` runs input validation before the LLM call and output validation
+        after. Raises ``GuardError`` if the guard blocks content.
         """
+        messages = self._run_input_guard(guard, messages)
+
         if memory is not None:
             self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
@@ -573,6 +607,7 @@ class LazyAgent:
                 temperature=temperature,
                 tool_choice=tool_choice,
                 context=context,
+                guard=guard,
                 **kwargs,
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
@@ -603,6 +638,7 @@ class LazyAgent:
 
         resp = self._executor.execute(request)
         self._record_response(resp)
+        self._run_output_guard(guard, resp)
         return resp
 
     @overload
@@ -631,9 +667,12 @@ class LazyAgent:
         temperature: float | None = None,
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
+        guard: Guard | None = None,
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
-        """Async version of chat(). Accepts memory= and tool_choice=."""
+        """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
+        messages = self._run_input_guard(guard, messages)
+
         if memory is not None:
             self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
@@ -651,6 +690,7 @@ class LazyAgent:
                 temperature=temperature,
                 tool_choice=tool_choice,
                 context=context,
+                guard=guard,
                 **kwargs,
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
@@ -681,6 +721,7 @@ class LazyAgent:
 
         resp = await self._executor.aexecute(request)
         self._record_response(resp)
+        self._run_output_guard(guard, resp)
         return resp
 
     # ------------------------------------------------------------------
@@ -698,6 +739,7 @@ class LazyAgent:
         on_event: Callable[[str, Any], None] | None = None,
         verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
+        guard: Guard | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -738,6 +780,7 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in loop(). Use chat() for streaming.")
 
+        messages = self._run_input_guard(guard, messages)
         _orig_q = _messages_to_str(messages)
         _current_messages: str | list = messages
         _attempts = max(1, max_verify) if verify is not None else 1
@@ -809,7 +852,9 @@ class LazyAgent:
                 on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
 
-        return self._finalize_loop(resp, _verify_log, _attempts, verify, "loop", step)  # type: ignore[arg-type]
+        result = self._finalize_loop(resp, _verify_log, _attempts, verify, "loop", step)  # type: ignore[arg-type]
+        self._run_output_guard(guard, result)
+        return result
 
     async def aloop(
         self,
@@ -822,6 +867,7 @@ class LazyAgent:
         on_event: Callable[[str, Any], None] | None = None,
         verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
+        guard: Guard | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -840,6 +886,7 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
+        messages = self._run_input_guard(guard, messages)
         _orig_q = _messages_to_str(messages)
         _current_messages: str | list = messages
         _attempts = max(1, max_verify) if verify is not None else 1
@@ -910,7 +957,9 @@ class LazyAgent:
                 await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
             _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
 
-        return self._finalize_loop(resp, _verify_log, _attempts, verify, "aloop", step)  # type: ignore[arg-type]
+        result = self._finalize_loop(resp, _verify_log, _attempts, verify, "aloop", step)  # type: ignore[arg-type]
+        self._run_output_guard(guard, result)
+        return result
 
     # ------------------------------------------------------------------
     # Tool execution helpers

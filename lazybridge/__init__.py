@@ -77,6 +77,7 @@ from lazybridge.exporters import (
     StructuredLogExporter,
 )
 from lazybridge.graph.schema import EdgeType, GraphSchema, NodeType
+from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.lazy_agent import LazyAgent
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_router import LazyRouter
@@ -104,6 +105,13 @@ __all__ = [
     "LazyTool",
     "LazyRouter",
     "run_async",
+    # Guardrails
+    "Guard",
+    "GuardAction",
+    "GuardError",
+    "ContentGuard",
+    "GuardChain",
+    "LLMGuard",
     # Tool schema
     "ToolSchemaMode",
     "ToolSchemaBuilder",

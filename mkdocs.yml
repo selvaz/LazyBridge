@@ -1,0 +1,61 @@
+site_name: LazyBridge
+site_description: Zero-boilerplate multi-provider LLM agent framework
+site_url: https://selvaz.github.io/LazyBridge/
+repo_url: https://github.com/selvaz/LazyBridge
+repo_name: selvaz/LazyBridge
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting Started: quickstart.md
+  - Guide:
+    - Agents: agents.md
+    - Tools: tools.md
+    - Sessions & Pipelines: sessions.md
+    - Pipelines (advanced): pipelines.md
+    - Context Injection: context.md
+    - Routing: routing.md
+  - Reference:
+    - API Quick Reference: reference.md
+  - Troubleshooting: troubleshooting.md
+  - Comparison: comparison.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/selvaz/LazyBridge
