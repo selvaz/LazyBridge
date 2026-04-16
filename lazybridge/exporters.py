@@ -124,6 +124,12 @@ class JsonFileExporter:
         sess = LazySession(exporters=[exporter])
         # ... run agents ...
         exporter.close()  # optional — flushes and closes
+
+    Or as a context manager::
+
+        with JsonFileExporter("events.jsonl") as exporter:
+            sess = LazySession(exporters=[exporter])
+            # ... run agents ...
     """
 
     __slots__ = ("_path", "_fh", "_lock")
@@ -150,6 +156,12 @@ class JsonFileExporter:
                 self._fh.close()
         except Exception:
             pass
+
+    def __enter__(self) -> "JsonFileExporter":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     def __del__(self) -> None:
         try:

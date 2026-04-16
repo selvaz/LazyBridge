@@ -1,4 +1,4 @@
-"""DeepSeek provider for uniAI.
+"""DeepSeek provider for LazyBridge.
 
 DeepSeek's API is fully compatible with the OpenAI SDK — it uses the same
 client with a custom base_url and different model names.
@@ -180,16 +180,8 @@ class DeepSeekProvider(OpenAIProvider):
         resp = self._parse_deepseek_chat_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -248,16 +240,8 @@ class DeepSeekProvider(OpenAIProvider):
                         is_final=True,
                     )
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
@@ -272,16 +256,8 @@ class DeepSeekProvider(OpenAIProvider):
         resp = self._parse_deepseek_chat_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -339,14 +315,6 @@ class DeepSeekProvider(OpenAIProvider):
                         is_final=True,
                     )
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk

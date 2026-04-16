@@ -446,7 +446,6 @@ class LazyTool:
             ) from exc
 
         # Dedent: inspect.getsource may include class/method indentation
-        source = inspect.cleandoc.__func__(source) if False else source  # noqa: SIM108
         import textwrap
         source = textwrap.dedent(source)
 

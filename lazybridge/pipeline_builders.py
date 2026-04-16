@@ -228,7 +228,18 @@ def build_chain_func(
                         ctx=LazyContext.from_agent(p),
                     )
             elif hasattr(p, "run"):                        # LazyTool (nested pipeline)
-                result = p.run({"task": state.text})
+                # When the previous step produced a typed Pydantic object
+                # (e.g. an agent with output_schema), pass its fields as
+                # the tool's arguments so agent→function chains work:
+                #   Agent(output_schema=FitModelInput) → LazyTool(fit_model)
+                # The agent produces FitModelInput; model_dump() becomes
+                # {"family": "garch", "target_col": "value", ...} which
+                # maps directly to fit_model's signature.
+                if state.typed is not None and hasattr(state.typed, "model_dump"):
+                    args = state.typed.model_dump()
+                else:
+                    args = {"task": state.text}
+                result = p.run(args)
                 state = _ChainState(text=str(result), typed=None, ctx=None)
             else:
                 raise TypeError(

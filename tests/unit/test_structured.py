@@ -167,3 +167,33 @@ def test_normalize_json_schema_preserves_existing():
     }
     result = normalize_json_schema(schema)
     assert result["additionalProperties"] is True
+
+
+# ---------------------------------------------------------------------------
+# apply_structured_validation helper
+# ---------------------------------------------------------------------------
+
+def test_apply_structured_validation_success():
+    """apply_structured_validation sets parsed/validated on success."""
+    from lazybridge.core.structured import apply_structured_validation
+    from lazybridge.core.types import CompletionResponse, UsageStats
+
+    resp = CompletionResponse(content='{"a": 1}', usage=UsageStats())
+    schema = {"type": "object", "properties": {"a": {"type": "integer"}}}
+    apply_structured_validation(resp, '{"a": 1}', schema)
+    assert resp.validated is True
+    assert resp.parsed == {"a": 1}
+    assert resp.validation_error is None
+
+
+def test_apply_structured_validation_failure():
+    """apply_structured_validation sets validation_error on failure."""
+    from lazybridge.core.structured import apply_structured_validation
+    from lazybridge.core.types import CompletionResponse, UsageStats
+
+    resp = CompletionResponse(content="not json", usage=UsageStats())
+    schema = {"type": "object", "properties": {}}
+    apply_structured_validation(resp, "not json", schema)
+    assert resp.validated is False
+    assert resp.validation_error is not None
+    assert resp.parsed is None

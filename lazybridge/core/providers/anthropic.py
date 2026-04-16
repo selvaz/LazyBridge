@@ -1,4 +1,4 @@
-"""Anthropic (Claude) provider for uniAI."""
+"""Anthropic (Claude) provider for LazyBridge."""
 
 from __future__ import annotations
 
@@ -404,9 +404,8 @@ class AnthropicProvider(BaseProvider):
 
         if request.structured_output and request.structured_output.schema:
             from lazybridge.core.structured import (
-                StructuredOutputError,
+                apply_structured_validation,
                 normalize_json_schema,
-                parse_structured_output,
             )
             schema = request.structured_output.schema
             if isinstance(schema, dict):
@@ -414,12 +413,7 @@ class AnthropicProvider(BaseProvider):
                 params["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
                 response = self._client.beta.messages.create(**params, **self._beta_kwargs(betas))
                 resp = self._parse_response(response)
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             else:
                 use_native_parse = not request.thinking and not request.native_tools and not betas
                 if use_native_parse:
@@ -433,31 +427,16 @@ class AnthropicProvider(BaseProvider):
                             resp.parsed = response.parsed_output
                             resp.validated = True
                         else:
-                            try:
-                                resp.parsed = parse_structured_output(resp.content, schema)
-                                resp.validated = True
-                            except StructuredOutputError as exc:
-                                resp.validation_error = str(exc)
-                                resp.validated = False
+                            apply_structured_validation(resp, resp.content, schema)
                     except (AttributeError, NotImplementedError):
                         # messages.parse() not available on this SDK version — fall back
                         response = self._client.messages.create(**params)
                         resp = self._parse_response(response)
-                        try:
-                            resp.parsed = parse_structured_output(resp.content, schema)
-                            resp.validated = True
-                        except StructuredOutputError as exc:
-                            resp.validation_error = str(exc)
-                            resp.validated = False
+                        apply_structured_validation(resp, resp.content, schema)
                 else:
                     response = self._client.messages.create(**params)
                     resp = self._parse_response(response)
-                    try:
-                        resp.parsed = parse_structured_output(resp.content, schema)
-                        resp.validated = True
-                    except StructuredOutputError as exc:
-                        resp.validation_error = str(exc)
-                        resp.validated = False
+                    apply_structured_validation(resp, resp.content, schema)
             return resp
 
         if betas:
@@ -526,19 +505,8 @@ class AnthropicProvider(BaseProvider):
                         grounding_sources=grounding_sources,
                     )
                     if request.structured_output:
-                        # Validate accumulated text against the schema here, at
-                        # stream end, rather than on every delta.  validation_error
-                        # is exposed to the caller for optional repair logic.
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk
 
     # ------------------------------------------------------------------
@@ -553,9 +521,8 @@ class AnthropicProvider(BaseProvider):
 
         if request.structured_output and request.structured_output.schema:
             from lazybridge.core.structured import (
-                StructuredOutputError,
+                apply_structured_validation,
                 normalize_json_schema,
-                parse_structured_output,
             )
             schema = request.structured_output.schema
             if isinstance(schema, dict):
@@ -564,12 +531,7 @@ class AnthropicProvider(BaseProvider):
                 params["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
                 response = await self._async_client.beta.messages.create(**params, **self._beta_kwargs(betas))
                 resp = self._parse_response(response)
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             else:
                 use_native_parse = not request.thinking and not request.native_tools and not betas
                 if use_native_parse:
@@ -583,31 +545,16 @@ class AnthropicProvider(BaseProvider):
                             resp.parsed = response.parsed_output
                             resp.validated = True
                         else:
-                            try:
-                                resp.parsed = parse_structured_output(resp.content, schema)
-                                resp.validated = True
-                            except StructuredOutputError as exc:
-                                resp.validation_error = str(exc)
-                                resp.validated = False
+                            apply_structured_validation(resp, resp.content, schema)
                     except (AttributeError, NotImplementedError):
                         # messages.parse() not available on this SDK version — fall back
                         response = await self._async_client.messages.create(**params)
                         resp = self._parse_response(response)
-                        try:
-                            resp.parsed = parse_structured_output(resp.content, schema)
-                            resp.validated = True
-                        except StructuredOutputError as exc:
-                            resp.validation_error = str(exc)
-                            resp.validated = False
+                        apply_structured_validation(resp, resp.content, schema)
                 else:
                     response = await self._async_client.messages.create(**params)
                     resp = self._parse_response(response)
-                    try:
-                        resp.parsed = parse_structured_output(resp.content, schema)
-                        resp.validated = True
-                    except StructuredOutputError as exc:
-                        resp.validation_error = str(exc)
-                        resp.validated = False
+                    apply_structured_validation(resp, resp.content, schema)
             return resp
 
         if betas:
@@ -671,14 +618,6 @@ class AnthropicProvider(BaseProvider):
                         grounding_sources=grounding_sources,
                     )
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk

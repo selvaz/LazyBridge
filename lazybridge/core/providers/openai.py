@@ -450,19 +450,11 @@ class OpenAIProvider(BaseProvider):
         """Parse Responses API output."""
         content = ""
         tool_calls = []
-        grounding_sources = []
         for item in response.output:
             if item.type == "message":
                 for block in item.content:
                     if block.type == "output_text":
                         content += block.text
-                        # Extract url_citation annotations as grounding sources
-                        for ann in getattr(block, "annotations", []) or []:
-                            if getattr(ann, "type", None) == "url_citation":
-                                grounding_sources.append(GroundingSource(
-                                    url=getattr(ann, "url", "") or "",
-                                    title=getattr(ann, "title", None),
-                                ))
             elif item.type == "function_call":
                 tool_calls.append(ToolCall(
                     id=item.call_id,
@@ -483,8 +475,24 @@ class OpenAIProvider(BaseProvider):
             model=getattr(response, "model", None),
             usage=usage,
             raw=response,
-            grounding_sources=grounding_sources,
+            grounding_sources=self._extract_grounding_from_output(response.output),
         )
+
+    @staticmethod
+    def _extract_grounding_from_output(output: Any) -> list[GroundingSource]:
+        """Extract url_citation annotations from Responses API output items."""
+        sources: list[GroundingSource] = []
+        for item in output or []:
+            if getattr(item, "type", None) == "message":
+                for block in getattr(item, "content", []) or []:
+                    if getattr(block, "type", None) == "output_text":
+                        for ann in getattr(block, "annotations", []) or []:
+                            if getattr(ann, "type", None) == "url_citation":
+                                sources.append(GroundingSource(
+                                    url=getattr(ann, "url", "") or "",
+                                    title=getattr(ann, "title", None),
+                                ))
+        return sources
 
     @staticmethod
     def _responses_stop_reason(response: Any, tool_calls: list) -> str:
@@ -555,17 +563,9 @@ class OpenAIProvider(BaseProvider):
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens, usage.output_tokens,
                 )
-            # Extract grounding sources from completed response output
-            for item in getattr(completed_response, "output", []) or []:
-                if getattr(item, "type", None) == "message":
-                    for block in getattr(item, "content", []) or []:
-                        if getattr(block, "type", None) == "output_text":
-                            for ann in getattr(block, "annotations", []) or []:
-                                if getattr(ann, "type", None) == "url_citation":
-                                    grounding_sources.append(GroundingSource(
-                                        url=getattr(ann, "url", "") or "",
-                                        title=getattr(ann, "title", None),
-                                    ))
+            grounding_sources = self._extract_grounding_from_output(
+                getattr(completed_response, "output", [])
+            )
 
         yield StreamChunk(
             stop_reason=self._responses_stop_reason(completed_response, tool_calls),
@@ -627,17 +627,9 @@ class OpenAIProvider(BaseProvider):
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens, usage.output_tokens,
                 )
-            # Extract grounding sources from completed response output
-            for item in getattr(completed_response, "output", []) or []:
-                if getattr(item, "type", None) == "message":
-                    for block in getattr(item, "content", []) or []:
-                        if getattr(block, "type", None) == "output_text":
-                            for ann in getattr(block, "annotations", []) or []:
-                                if getattr(ann, "type", None) == "url_citation":
-                                    grounding_sources.append(GroundingSource(
-                                        url=getattr(ann, "url", "") or "",
-                                        title=getattr(ann, "title", None),
-                                    ))
+            grounding_sources = self._extract_grounding_from_output(
+                getattr(completed_response, "output", [])
+            )
 
         yield StreamChunk(
             stop_reason=self._responses_stop_reason(completed_response, tool_calls),
@@ -663,26 +655,15 @@ class OpenAIProvider(BaseProvider):
             response = self._client.responses.create(**params)
             resp = self._parse_responses_response(response)
             if request.structured_output:
-                from lazybridge.core.structured import (
-                    StructuredOutputError,
-                    parse_structured_output,
-                )
-                try:
-                    resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                from lazybridge.core.structured import apply_structured_validation
+                apply_structured_validation(resp, resp.content, request.structured_output.schema)
             return resp
 
         params = self._build_chat_params(request)
 
         # Pydantic schema: use native beta.parse() on Chat Completions
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
+            from lazybridge.core.structured import apply_structured_validation
             schema = request.structured_output.schema
             params["response_format"] = schema
             response = self._client.beta.chat.completions.parse(**params)
@@ -692,12 +673,7 @@ class OpenAIProvider(BaseProvider):
                 resp.parsed = native_parsed
                 resp.validated = True
             else:
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             return resp
 
         response = self._client.chat.completions.create(**params)
@@ -714,16 +690,8 @@ class OpenAIProvider(BaseProvider):
                     yield chunk
                 else:
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            chunk.validated = True
-                        except StructuredOutputError as exc:
-                            chunk.validation_error = str(exc)
-                            chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(chunk, text_accum, request.structured_output.schema)
                     yield chunk
             return
 
@@ -777,16 +745,8 @@ class OpenAIProvider(BaseProvider):
                     is_final=True,
                 )
                 if request.structured_output:
-                    from lazybridge.core.structured import (
-                        StructuredOutputError,
-                        parse_structured_output,
-                    )
-                    try:
-                        final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                        final_chunk.validated = True
-                    except StructuredOutputError as exc:
-                        final_chunk.validation_error = str(exc)
-                        final_chunk.validated = False
+                    from lazybridge.core.structured import apply_structured_validation
+                    apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         if final_chunk is not None:
             final_chunk.usage = final_chunk.usage or final_usage
             yield final_chunk
@@ -801,26 +761,15 @@ class OpenAIProvider(BaseProvider):
             response = await self._async_client.responses.create(**params)
             resp = self._parse_responses_response(response)
             if request.structured_output:
-                from lazybridge.core.structured import (
-                    StructuredOutputError,
-                    parse_structured_output,
-                )
-                try:
-                    resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                from lazybridge.core.structured import apply_structured_validation
+                apply_structured_validation(resp, resp.content, request.structured_output.schema)
             return resp
 
         params = self._build_chat_params(request)
 
         # Pydantic schema: use native beta.parse() on Chat Completions
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
+            from lazybridge.core.structured import apply_structured_validation
             schema = request.structured_output.schema
             params["response_format"] = schema
             response = await self._async_client.beta.chat.completions.parse(**params)
@@ -830,12 +779,7 @@ class OpenAIProvider(BaseProvider):
                 resp.parsed = native_parsed
                 resp.validated = True
             else:
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             return resp
 
         response = await self._async_client.chat.completions.create(**params)
@@ -852,16 +796,8 @@ class OpenAIProvider(BaseProvider):
                     yield chunk
                 else:
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            chunk.validated = True
-                        except StructuredOutputError as exc:
-                            chunk.validation_error = str(exc)
-                            chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+                        apply_structured_validation(chunk, text_accum, request.structured_output.schema)
                     yield chunk
             return
 
@@ -913,16 +849,8 @@ class OpenAIProvider(BaseProvider):
                     is_final=True,
                 )
                 if request.structured_output:
-                    from lazybridge.core.structured import (
-                        StructuredOutputError,
-                        parse_structured_output,
-                    )
-                    try:
-                        final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                        final_chunk.validated = True
-                    except StructuredOutputError as exc:
-                        final_chunk.validation_error = str(exc)
-                        final_chunk.validated = False
+                    from lazybridge.core.structured import apply_structured_validation
+                    apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         if final_chunk is not None:
             final_chunk.usage = final_chunk.usage or final_usage
             yield final_chunk

@@ -100,7 +100,7 @@ def _messages_to_str(messages: str | list) -> str:
     if isinstance(messages, str):
         return messages
     for m in messages:
-        if isinstance(m, Message) and str(m.role) in ("user", "Role.USER"):
+        if isinstance(m, Message) and m.role == Role.USER:
             return m.content if isinstance(m.content, str) else str(m.content)
         if isinstance(m, dict) and m.get("role") == "user":
             return str(m.get("content", ""))
@@ -420,7 +420,7 @@ class LazyAgent:
 
             mem = Memory()
             ai.chat("ciao", memory=mem)
-            ai.chat("ricordi?", memory=mem)   # history inclusa automaticamente
+            ai.chat("ricordi?", memory=mem)   # history included automatically
 
         ``tool_choice`` controls tool selection: ``"auto"`` (default), ``"none"``,
         ``"required"`` (force at least one tool call), or a specific tool name.

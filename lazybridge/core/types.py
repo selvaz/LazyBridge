@@ -59,7 +59,7 @@ class ToolUseContent:
 class ToolResultContent:
     tool_use_id: str
     content: str | list[Any]
-    tool_name: str | None = None    # nome funzione — obbligatorio per Gemini function_response
+    tool_name: str | None = None    # function name — required for Gemini function_response
     is_error: bool = False
     type: ContentType = ContentType.TOOL_RESULT
 
@@ -136,10 +136,6 @@ class StructuredOutputConfig:
     """Config for constrained JSON output."""
     schema: type | dict[str, Any]  # Pydantic model class or raw JSON schema dict
     strict: bool = True            # pass strict=True to APIs that support it
-    max_retries: int = 1           # repair retries on parse/validation failure (0 = no retry)
-    enable_fallback: bool = True
-    fallback_provider: str | None = None
-    fallback_model: str | None = None
 
 
 @dataclass

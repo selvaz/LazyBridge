@@ -755,3 +755,43 @@ def test_pydantic_model_in_store():
     store.write("item", Item(name="test", value=42))
     result = store.read("item")
     assert result == {"name": "test", "value": 42}
+
+
+# ── Sync chain typed handoff ─────────────────────────────────────────────
+
+def test_sync_chain_typed_handoff():
+    """Sync build_chain_func passes model_dump() when previous step produced typed output."""
+    from lazybridge.pipeline_builders import _ChainState, build_chain_func
+    from pydantic import BaseModel
+
+    class Params(BaseModel):
+        x: int
+        y: str
+
+    calls = []
+
+    class FakeAgent:
+        """Mimics a LazyAgent that returns structured output."""
+        output_schema = Params
+        tools = None
+        native_tools = None
+
+        def json(self, task, schema, **kw):
+            return Params(x=42, y="hello")
+
+        def chat(self, task, **kw):
+            pass
+
+    class FakeTool:
+        """Mimics a LazyTool that records its arguments."""
+        def run(self, args):
+            calls.append(args)
+            return "done"
+
+    parts = [FakeAgent(), FakeTool()]
+    chain_fn = build_chain_func(parts, [])
+    chain_fn("test task")
+
+    # The tool should have received model_dump() output, not {"task": ...}
+    assert len(calls) == 1
+    assert calls[0] == {"x": 42, "y": "hello"}

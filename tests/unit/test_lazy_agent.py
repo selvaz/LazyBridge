@@ -849,3 +849,59 @@ def test_result_returns_pydantic_when_output_schema_active():
     assert isinstance(result, BlogPost)
     assert result.title == "AI in 2025"
     assert result.intro == "It was a big year."
+
+
+# ── messages_to_str edge cases ────────────────────────────────────────────
+
+def test_messages_to_str_uses_role_enum(mock_execute):
+    """_messages_to_str correctly matches Role.USER enum values."""
+    from lazybridge.lazy_agent import _messages_to_str
+    from lazybridge.core.types import Message, Role
+
+    # Message with Role enum
+    msgs = [Message(role=Role.USER, content="hello")]
+    assert _messages_to_str(msgs) == "hello"
+
+    # No user role — falls back to str(messages)
+    msgs_no_user = [Message(role=Role.ASSISTANT, content="hi")]
+    result = _messages_to_str(msgs_no_user)
+    assert isinstance(result, str)
+
+
+# ── chat() with context= override ────────────────────────────────────────
+
+@patch("lazybridge.core.executor.Executor.execute")
+@patch("lazybridge.core.providers.anthropic.AnthropicProvider._init_client")
+def test_chat_context_override(mock_init, mock_exec):
+    """Call-level context= overrides agent-level context."""
+    from lazybridge.lazy_context import LazyContext
+
+    mock_exec.return_value = CompletionResponse(content="ok", usage=UsageStats())
+
+    agent_ctx = LazyContext.from_text("agent-level context")
+    call_ctx = LazyContext.from_text("call-level context")
+    agent = LazyAgent("anthropic", system="base", context=agent_ctx)
+
+    agent.chat("hello", context=call_ctx)
+
+    # The system prompt passed to the executor should include the call-level context
+    call_args = mock_exec.call_args
+    request = call_args[0][0]
+    assert "call-level context" in request.system
+    assert "agent-level context" not in request.system
+
+
+# ── tool_choice forwarding ────────────────────────────────────────────────
+
+@patch("lazybridge.core.executor.Executor.execute")
+@patch("lazybridge.core.providers.anthropic.AnthropicProvider._init_client")
+def test_tool_choice_forwarded_to_request(mock_init, mock_exec):
+    """tool_choice parameter is forwarded to CompletionRequest."""
+    mock_exec.return_value = CompletionResponse(content="ok", usage=UsageStats())
+
+    agent = LazyAgent("anthropic")
+    agent.chat("hello", tool_choice="required")
+
+    call_args = mock_exec.call_args
+    request = call_args[0][0]
+    assert request.tool_choice == "required"

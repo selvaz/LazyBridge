@@ -164,6 +164,34 @@ def parse_structured_output(
             raise StructuredOutputError(f"Validation error: {exc}") from exc
 
 
+def apply_structured_validation(
+    resp: Any,
+    content: str,
+    schema: type | dict[str, Any],
+) -> None:
+    """Parse *content* and set ``parsed``/``validated``/``validation_error`` on *resp*.
+
+    Centralised helper that replaces the identical try/except blocks duplicated
+    across every provider.  Mutates *resp* in place.
+
+    Parameters
+    ----------
+    resp:
+        A ``CompletionResponse`` or ``StreamChunk`` instance.
+    content:
+        The accumulated text to parse (may differ from ``resp.content`` in
+        streaming scenarios where text is collected separately).
+    schema:
+        Pydantic model class or raw JSON schema dict.
+    """
+    try:
+        resp.parsed = parse_structured_output(content, schema)
+        resp.validated = True
+    except StructuredOutputError as exc:
+        resp.validation_error = str(exc)
+        resp.validated = False
+
+
 def build_repair_messages(
     original_messages: list[Message],
     invalid_content: str,

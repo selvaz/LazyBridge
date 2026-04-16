@@ -1,4 +1,4 @@
-"""Google Gemini provider for uniAI.
+"""Google Gemini provider for LazyBridge.
 
 Uses the ``google-genai`` SDK (not the legacy ``google-generativeai``).
 
@@ -583,16 +583,8 @@ class GoogleProvider(BaseProvider):
         resp = self._parse_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -660,16 +652,8 @@ class GoogleProvider(BaseProvider):
             search_entry_point=search_entry_point,
         )
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                final_chunk.validated = True
-            except StructuredOutputError as exc:
-                final_chunk.validation_error = str(exc)
-                final_chunk.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         yield final_chunk
 
     # ------------------------------------------------------------------
@@ -689,16 +673,8 @@ class GoogleProvider(BaseProvider):
         resp = self._parse_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -765,14 +741,6 @@ class GoogleProvider(BaseProvider):
             search_entry_point=search_entry_point,
         )
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                final_chunk.validated = True
-            except StructuredOutputError as exc:
-                final_chunk.validation_error = str(exc)
-                final_chunk.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+            apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         yield final_chunk

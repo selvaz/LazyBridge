@@ -219,3 +219,19 @@ def test_custom_exporter_protocol():
             pass
 
     assert isinstance(MyExporter(), EventExporter)
+
+
+# ── JsonFileExporter context manager ──────────────────────────────────────
+
+def test_json_file_exporter_context_manager(tmp_path):
+    """JsonFileExporter works as a context manager."""
+    path = str(tmp_path / "cm_events.jsonl")
+    with JsonFileExporter(path) as exporter:
+        exporter.export({"event_type": "test", "data": "hello"})
+
+    # File should be flushed and closed after exiting the context
+    import json
+    with open(path) as f:
+        line = f.readline()
+    parsed = json.loads(line)
+    assert parsed["event_type"] == "test"
