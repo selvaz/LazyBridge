@@ -1,7 +1,5 @@
 """Tests for ArtifactStore — filesystem only, no heavy deps."""
 
-import json
-
 import pytest
 
 from lazybridge.ext.stat_runtime.artifact_store import ArtifactStore
@@ -34,6 +32,7 @@ class TestWriteAndRead:
         path = art_store.write_bytes("run1", "raw", b"binary_data", file_format="bin")
         # Read using exact filename since .bin isn't in the auto-search list
         from pathlib import Path
+
         assert Path(path).read_bytes() == b"binary_data"
 
     def test_list_files(self, store):

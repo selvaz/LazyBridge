@@ -36,7 +36,13 @@ class GARCHEngine(BaseEngine):
         rescale = spec.params.get("rescale", False)
 
         model = arch_model(
-            y, mean=mean, vol=vol, p=p, q=q, dist=dist, rescale=rescale,
+            y,
+            mean=mean,
+            vol=vol,
+            p=p,
+            q=q,
+            dist=dist,
+            rescale=rescale,
         )
         result = model.fit(disp="off")
 
@@ -84,6 +90,7 @@ class GARCHEngine(BaseEngine):
             raise ValueError("GARCH forecast requires a fitted model object (re-fit first)")
 
         from scipy.stats import norm
+
         z = norm.ppf((1 + ci_level) / 2)
 
         forecasts = result_obj.forecast(horizon=steps)
@@ -114,22 +121,23 @@ class GARCHEngine(BaseEngine):
             jarque_bera_test,
             ljung_box_test,
         )
+
         std_resid = np.array(fit_result.extra.get("std_residuals", fit_result.residuals_json))
         results = [
             ljung_box_test(std_resid, lags=10),
-            ljung_box_test(std_resid ** 2, lags=10),
+            ljung_box_test(std_resid**2, lags=10),
             jarque_bera_test(std_resid),
         ]
         # Rename the squared residuals test
         results[1].test_name = "Ljung-Box (squared residuals)"
-        results[1].interpretation = (
-            results[1].interpretation.replace("residuals", "squared standardized residuals")
-        )
+        results[1].interpretation = results[1].interpretation.replace("residuals", "squared standardized residuals")
         return results
 
 
 def _import_arch_model():
     from lazybridge.ext.stat_runtime._deps import require_arch
+
     require_arch()
     from arch import arch_model
+
     return arch_model

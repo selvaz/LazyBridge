@@ -1,14 +1,17 @@
 """Unit tests for run_async() — T9.xx series."""
+
 from __future__ import annotations
 
 import asyncio
-import pytest
-from lazybridge.lazy_run import run_async, _run_suppressed
 
+import pytest
+
+from lazybridge.lazy_run import _run_suppressed, run_async
 
 # ---------------------------------------------------------------------------
 # T9.01 — run_async returns correct value from a simple coroutine
 # ---------------------------------------------------------------------------
+
 
 def test_run_async_returns_value():
     # T9.01
@@ -23,6 +26,7 @@ def test_run_async_returns_value():
 # T9.02 — run_async propagates exceptions
 # ---------------------------------------------------------------------------
 
+
 def test_run_async_propagates_exception():
     # T9.02
     async def coro():
@@ -35,6 +39,7 @@ def test_run_async_propagates_exception():
 # ---------------------------------------------------------------------------
 # T9.03 — run_async works with async/await chains
 # ---------------------------------------------------------------------------
+
 
 def test_run_async_nested_await():
     # T9.03
@@ -52,6 +57,7 @@ def test_run_async_nested_await():
 # T9.04 — run_async from an already-running loop uses ThreadPoolExecutor path
 # ---------------------------------------------------------------------------
 
+
 async def test_run_async_inside_event_loop():
     # T9.04 — called from inside an async test; a loop is already running
     async def coro():
@@ -66,6 +72,7 @@ async def test_run_async_inside_event_loop():
 # T9.05 — _run_suppressed cleans up on exception
 # ---------------------------------------------------------------------------
 
+
 def test_run_suppressed_cleans_up_on_exception():
     # T9.05
     async def failing():
@@ -76,7 +83,7 @@ def test_run_suppressed_cleans_up_on_exception():
 
     # After cleanup, no running loop should exist
     try:
-        loop = asyncio.get_running_loop()
+        _loop = asyncio.get_running_loop()
         # If we're inside an async context, that's fine — the loop is from pytest
     except RuntimeError:
         pass  # No loop — correct for sync context
@@ -85,6 +92,7 @@ def test_run_suppressed_cleans_up_on_exception():
 # ---------------------------------------------------------------------------
 # T9.06 — run_async handles coroutines that use asyncio.sleep
 # ---------------------------------------------------------------------------
+
 
 def test_run_async_with_sleep():
     # T9.06

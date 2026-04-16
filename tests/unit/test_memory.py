@@ -1,13 +1,13 @@
 """Unit tests for Memory — no API calls."""
+
 from __future__ import annotations
 
 import threading
-import pytest
 
 from lazybridge.memory import Memory
 
-
 # ── T7.01 — basic append and history ─────────────────────────────────────────
+
 
 def test_record_and_history():
     mem = Memory()
@@ -24,10 +24,11 @@ def test_history_is_copy():
     mem._record("q", "a")
     h = mem.history
     h.append({"role": "user", "content": "injected"})
-    assert len(mem.history) == 2   # still 2, not 3
+    assert len(mem.history) == 2  # still 2, not 3
 
 
 # ── T7.02 — len() reflects number of stored messages ─────────────────────────
+
 
 def test_len():
     mem = Memory()
@@ -40,6 +41,7 @@ def test_len():
 
 # ── T7.03 — clear resets history ─────────────────────────────────────────────
 
+
 def test_clear():
     mem = Memory()
     mem._record("q", "a")
@@ -50,13 +52,14 @@ def test_clear():
 
 # ── T7.04 — _build_input prepends history without mutating state ─────────────
 
+
 def test_build_input_prepends_history():
     mem = Memory()
     mem._record("turn1", "answer1")
     msgs = mem._build_input("new question")
     assert msgs[-1] == {"role": "user", "content": "new question"}
     assert msgs[0] == {"role": "user", "content": "turn1"}
-    assert len(mem) == 2   # _build_input must not mutate
+    assert len(mem) == 2  # _build_input must not mutate
 
 
 # ── T7.05 — from_history: public API to restore serialized memory ─────────────
@@ -64,10 +67,11 @@ def test_build_input_prepends_history():
 # Audit finding: the module docstring tells users to write mem._messages
 # directly (a private attribute).  from_history() is the safe public API.
 
+
 def test_from_history_restores_messages():
     """Memory.from_history() must exist and restore history correctly."""
     history = [
-        {"role": "user",      "content": "hello"},
+        {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
     ]
     mem = Memory.from_history(history)
@@ -89,6 +93,7 @@ def test_from_history_returns_copy():
 
 # ── T7.06 — thread safety ────────────────────────────────────────────────────
 
+
 def test_thread_safety_concurrent_records():
     mem = Memory()
     errors: list[Exception] = []
@@ -106,4 +111,4 @@ def test_thread_safety_concurrent_records():
         t.join()
 
     assert not errors
-    assert len(mem) == 40   # 20 turns × 2 messages each
+    assert len(mem) == 40  # 20 turns × 2 messages each

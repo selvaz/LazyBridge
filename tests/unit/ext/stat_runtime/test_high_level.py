@@ -5,7 +5,11 @@ Also tests the two-tier tool split (level parameter) and inference module.
 
 import pytest
 
-from lazybridge.lazy_tool import LazyTool
+from lazybridge.ext.stat_runtime.inference import (
+    build_interpretation,
+    infer_column_roles,
+    suggest_for_dataset,
+)
 from lazybridge.ext.stat_runtime.schemas import (
     AnalysisDiscoveryResult,
     AnalysisResult,
@@ -20,17 +24,13 @@ from lazybridge.ext.stat_runtime.schemas import (
     RunStatus,
     RunSummary,
 )
-from lazybridge.ext.stat_runtime.inference import (
-    build_interpretation,
-    infer_column_roles,
-    suggest_for_dataset,
-)
 from lazybridge.ext.stat_runtime.tools import stat_tools
-
+from lazybridge.lazy_tool import LazyTool
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 class MockCatalog:
     def __init__(self, datasets=None):
@@ -85,8 +85,11 @@ class MockRuntime:
 
 def _make_dataset(name="equities", **overrides):
     defaults = dict(
-        name=name, uri=f"/data/{name}.parquet", file_format="parquet",
-        frequency=Frequency.DAILY, time_column="date",
+        name=name,
+        uri=f"/data/{name}.parquet",
+        file_format="parquet",
+        frequency=Frequency.DAILY,
+        time_column="date",
         entity_keys=["symbol"],
         columns_schema={"date": "Date", "symbol": "Utf8", "ret": "Float64", "volume": "Int64"},
         row_count=5000,
@@ -97,7 +100,9 @@ def _make_dataset(name="equities", **overrides):
 
 def _make_run(run_id="run1", **overrides):
     defaults = dict(
-        run_id=run_id, dataset_name="equities", engine="garch",
+        run_id=run_id,
+        dataset_name="equities",
+        engine="garch",
         status=RunStatus.SUCCESS,
         spec_json={"family": "garch", "target_col": "ret", "params": {"p": 1, "q": 1}},
         params_json={"mu": 0.05, "omega": 0.01, "alpha[1]": 0.08, "beta[1]": 0.90},
@@ -115,8 +120,11 @@ def _make_run(run_id="run1", **overrides):
 
 def _make_artifact(run_id="run1", name="residuals", artifact_type="plot"):
     return ArtifactRecord(
-        run_id=run_id, name=name, artifact_type=artifact_type,
-        file_format="png", path=f"artifacts/{run_id}/plots/{name}.png",
+        run_id=run_id,
+        name=name,
+        artifact_type=artifact_type,
+        file_format="png",
+        path=f"artifacts/{run_id}/plots/{name}.png",
         description=f"{name} plot",
     )
 
@@ -124,6 +132,7 @@ def _make_artifact(run_id="run1", name="residuals", artifact_type="plot"):
 # ---------------------------------------------------------------------------
 # Two-tier tool split
 # ---------------------------------------------------------------------------
+
 
 class TestToolLevelParam:
     def test_level_all_returns_15_tools(self):
@@ -142,9 +151,17 @@ class TestToolLevelParam:
         assert len(tools) == 11
         names = {t.name for t in tools}
         expected = {
-            "list_datasets", "profile_dataset", "query_data",
-            "fit_model", "forecast_model", "run_diagnostics",
-            "get_run", "list_runs", "compare_models", "list_artifacts", "get_plot",
+            "list_datasets",
+            "profile_dataset",
+            "query_data",
+            "fit_model",
+            "forecast_model",
+            "run_diagnostics",
+            "get_run",
+            "list_runs",
+            "compare_models",
+            "list_artifacts",
+            "get_plot",
         }
         assert names == expected
 
@@ -163,6 +180,7 @@ class TestToolLevelParam:
 # ---------------------------------------------------------------------------
 # Column role inference
 # ---------------------------------------------------------------------------
+
 
 class TestColumnRoleInference:
     def test_declared_time_column(self):
@@ -222,6 +240,7 @@ class TestColumnRoleInference:
 # Dataset suggestions
 # ---------------------------------------------------------------------------
 
+
 class TestDatasetSuggestions:
     def test_no_profile_suggestion(self):
         meta = _make_dataset(profile_json={})
@@ -251,6 +270,7 @@ class TestDatasetSuggestions:
 # ---------------------------------------------------------------------------
 # Build interpretation
 # ---------------------------------------------------------------------------
+
 
 class TestBuildInterpretation:
     def test_garch_persistence(self):
@@ -297,10 +317,12 @@ class TestBuildInterpretation:
         assert any("persistent" in s.lower() for s in interp)
 
     def test_diagnostics_summary(self):
-        run = _make_run(diagnostics_json=[
-            {"test_name": "Ljung-Box", "statistic": 8.0, "p_value": 0.6, "passed": True},
-            {"test_name": "Jarque-Bera", "statistic": 15.0, "p_value": 0.001, "passed": False},
-        ])
+        run = _make_run(
+            diagnostics_json=[
+                {"test_name": "Ljung-Box", "statistic": 8.0, "p_value": 0.6, "passed": True},
+                {"test_name": "Jarque-Bera", "statistic": 15.0, "p_value": 0.001, "passed": False},
+            ]
+        )
         interp, warns, nexts = build_interpretation(run, "garch")
         assert any("1/2" in s or "diagnostics" in s.lower() for s in interp)
         assert any("jarque-bera" in s.lower() for s in warns)
@@ -309,6 +331,7 @@ class TestBuildInterpretation:
 # ---------------------------------------------------------------------------
 # discover_data tool
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverData:
     def test_empty_registry(self):
@@ -346,6 +369,7 @@ class TestDiscoverData:
 # ---------------------------------------------------------------------------
 # discover_analyses tool
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverAnalyses:
     def test_empty_runs(self):
@@ -405,19 +429,24 @@ class TestDiscoverAnalyses:
 # New schema models
 # ---------------------------------------------------------------------------
 
+
 class TestNewSchemas:
     def test_column_role_inference(self):
         cr = ColumnRoleInference(
-            column="ret", dtype="Float64",
-            inferred_role="target", confidence="medium",
+            column="ret",
+            dtype="Float64",
+            inferred_role="target",
+            confidence="medium",
             reason="Numeric column named 'ret'",
         )
         assert cr.inferred_role == "target"
 
     def test_dataset_discovery(self):
         dd = DatasetDiscovery(
-            name="equities", uri="/data/eq.parquet",
-            file_format="parquet", frequency="daily",
+            name="equities",
+            uri="/data/eq.parquet",
+            file_format="parquet",
+            frequency="daily",
         )
         assert dd.has_profile is False
         assert dd.column_roles == []
@@ -472,7 +501,8 @@ class TestNewSchemas:
 
     def test_dataset_meta_semantic_fields(self):
         meta = DatasetMeta(
-            name="equities", uri="/data/eq.parquet",
+            name="equities",
+            uri="/data/eq.parquet",
             business_description="Daily S&P 500 returns",
             canonical_target="ret",
             identifiers_to_ignore=["trade_id", "hash"],
@@ -489,6 +519,7 @@ class TestNewSchemas:
 
     def test_analysis_mode_enum(self):
         from lazybridge.ext.stat_runtime.schemas import AnalysisMode
+
         assert AnalysisMode.RECOMMEND == "recommend"
         assert AnalysisMode.FORECAST == "forecast"
         assert AnalysisMode.VOLATILITY == "volatility"
@@ -496,14 +527,17 @@ class TestNewSchemas:
 
     def test_column_signals(self):
         from lazybridge.ext.stat_runtime.schemas import ColumnSignals
+
         cs = ColumnSignals(null_pct=0.05, unique_count=100, mean=0.01)
         assert cs.null_pct == 0.05
         assert cs.unique_count == 100
 
     def test_dataset_discovery_new_fields(self):
         dd = DatasetDiscovery(
-            name="equities", uri="/data/eq.parquet",
-            file_format="parquet", frequency="daily",
+            name="equities",
+            uri="/data/eq.parquet",
+            file_format="parquet",
+            frequency="daily",
             summary="equities: 5,000 daily observations; target: ret.",
             business_description="S&P 500 returns",
             canonical_target="ret",
@@ -517,9 +551,11 @@ class TestNewSchemas:
 # Natural language dataset summary
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateDatasetSummary:
     def test_basic_summary(self):
         from lazybridge.ext.stat_runtime.inference import generate_dataset_summary
+
         meta = _make_dataset()
         roles = infer_column_roles(meta)
         summary = generate_dataset_summary(meta, roles)
@@ -528,6 +564,7 @@ class TestGenerateDatasetSummary:
 
     def test_business_description_takes_precedence(self):
         from lazybridge.ext.stat_runtime.inference import generate_dataset_summary
+
         meta = _make_dataset(business_description="Daily S&P 500 total returns")
         roles = infer_column_roles(meta)
         summary = generate_dataset_summary(meta, roles)
@@ -535,6 +572,7 @@ class TestGenerateDatasetSummary:
 
     def test_canonical_target_in_summary(self):
         from lazybridge.ext.stat_runtime.inference import generate_dataset_summary
+
         meta = _make_dataset(canonical_target="ret")
         roles = infer_column_roles(meta)
         summary = generate_dataset_summary(meta, roles)
@@ -542,6 +580,7 @@ class TestGenerateDatasetSummary:
 
     def test_entity_keys_in_summary(self):
         from lazybridge.ext.stat_runtime.inference import generate_dataset_summary
+
         meta = _make_dataset(entity_keys=["symbol"])
         roles = infer_column_roles(meta)
         summary = generate_dataset_summary(meta, roles)
@@ -552,11 +591,16 @@ class TestGenerateDatasetSummary:
 # Analysis mode resolution
 # ---------------------------------------------------------------------------
 
+
 class TestResolveAnalysisMode:
     def test_forecast_mode(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         family, rationale, assumptions = resolve_analysis_mode(
-            "forecast", None, None, None,
+            "forecast",
+            None,
+            None,
+            None,
         )
         assert family == "arima"
         assert "forecast" in rationale.lower()
@@ -564,32 +608,48 @@ class TestResolveAnalysisMode:
 
     def test_volatility_mode(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         family, rationale, assumptions = resolve_analysis_mode(
-            "volatility", None, None, None,
+            "volatility",
+            None,
+            None,
+            None,
         )
         assert family == "garch"
 
     def test_regime_mode(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         family, rationale, assumptions = resolve_analysis_mode(
-            "regime", None, None, None,
+            "regime",
+            None,
+            None,
+            None,
         )
         assert family == "markov"
 
     def test_describe_mode(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         family, rationale, assumptions = resolve_analysis_mode(
-            "describe", None, None, None,
+            "describe",
+            None,
+            None,
+            None,
         )
         assert family == "ols"
         assert "describe" in rationale.lower()
 
     def test_recommend_returns_with_time(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         meta = _make_dataset(time_column="date")
         roles = infer_column_roles(meta)
         family, rationale, assumptions = resolve_analysis_mode(
-            "recommend", meta, roles, "ret",
+            "recommend",
+            meta,
+            roles,
+            "ret",
         )
         # Returns + time → GARCH
         assert family == "garch"
@@ -597,6 +657,7 @@ class TestResolveAnalysisMode:
 
     def test_recommend_time_series_non_return(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         meta = _make_dataset(
             time_column="date",
             columns_schema={"date": "Date", "temperature": "Float64"},
@@ -604,13 +665,17 @@ class TestResolveAnalysisMode:
         )
         roles = infer_column_roles(meta)
         family, rationale, assumptions = resolve_analysis_mode(
-            "recommend", meta, roles, "temperature",
+            "recommend",
+            meta,
+            roles,
+            "temperature",
         )
         # Time series but not returns → ARIMA
         assert family == "arima"
 
     def test_recommend_no_time(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         meta = _make_dataset(
             time_column=None,
             columns_schema={"x": "Float64", "y": "Float64"},
@@ -618,21 +683,29 @@ class TestResolveAnalysisMode:
         )
         roles = infer_column_roles(meta)
         family, rationale, assumptions = resolve_analysis_mode(
-            "recommend", meta, roles, "y",
+            "recommend",
+            meta,
+            roles,
+            "y",
         )
         # No time → OLS
         assert family == "ols"
 
     def test_explicit_family_passthrough(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         family, rationale, assumptions = resolve_analysis_mode(
-            "garch", None, None, None,
+            "garch",
+            None,
+            None,
+            None,
         )
         assert family == "garch"
         assert "explicit" in rationale.lower()
 
     def test_unknown_mode_raises(self):
         from lazybridge.ext.stat_runtime.inference import resolve_analysis_mode
+
         with pytest.raises(ValueError, match="Unknown analysis mode"):
             resolve_analysis_mode("invalid_mode", None, None, None)
 
@@ -640,6 +713,7 @@ class TestResolveAnalysisMode:
 # ---------------------------------------------------------------------------
 # discover_data enriched output
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverDataEnriched:
     def test_summary_populated(self):
@@ -671,12 +745,14 @@ class TestDiscoverDataEnriched:
         assert ds["canonical_target"] == "ret"
 
     def test_profile_signals_from_cache(self):
-        meta = _make_dataset(profile_json={
-            "columns": {
-                "ret": {"null_pct": 0.01, "unique_count": 4500, "mean": 0.0004},
-                "volume": {"null_pct": 0.0, "unique_count": 3000},
-            },
-        })
+        meta = _make_dataset(
+            profile_json={
+                "columns": {
+                    "ret": {"null_pct": 0.01, "unique_count": 4500, "mean": 0.0004},
+                    "volume": {"null_pct": 0.0, "unique_count": 3000},
+                },
+            }
+        )
         rt = MockRuntime(datasets=[meta])
         tools = stat_tools(rt, level="high")
         dd = next(t for t in tools if t.name == "discover_data")
@@ -705,6 +781,7 @@ class TestDiscoverDataEnriched:
 # analyze() group_col/group_value safety
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzeGroupSafety:
     """P0: group_col/group_value must not allow SQL injection."""
 
@@ -716,45 +793,53 @@ class TestAnalyzeGroupSafety:
     def test_invalid_group_col_rejected(self):
         meta = _make_dataset()
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "group_col": "nonexistent",
-            "group_value": "SPY",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "group_col": "nonexistent",
+                "group_value": "SPY",
+            }
+        )
         assert result.get("error") is True
         assert "not found" in result["message"]
 
     def test_injection_in_group_col_rejected(self):
         meta = _make_dataset()
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "group_col": "symbol; DROP TABLE--",
-            "group_value": "SPY",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "group_col": "symbol; DROP TABLE--",
+                "group_value": "SPY",
+            }
+        )
         assert result.get("error") is True
 
     def test_group_col_without_value_rejected(self):
         meta = _make_dataset()
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "group_col": "symbol",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "group_col": "symbol",
+            }
+        )
         assert result.get("error") is True
         assert "together" in result["message"]
 
     def test_group_value_without_col_rejected(self):
         meta = _make_dataset()
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "group_value": "SPY",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "group_value": "SPY",
+            }
+        )
         assert result.get("error") is True
         assert "together" in result["message"]
 
@@ -763,12 +848,14 @@ class TestAnalyzeGroupSafety:
         meta = _make_dataset()
         tool = self._get_analyze(meta)
         # This would break unescaped SQL: WHERE symbol = '' OR 1=1 --'
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "group_col": "symbol",
-            "group_value": "' OR 1=1 --",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "group_col": "symbol",
+                "group_value": "' OR 1=1 --",
+            }
+        )
         # Should not succeed as an injection — either errors on execution
         # or passes through safely. Key: must not return data from all rows.
         # Since we have a mock runtime, it will fail at execute(), but the
@@ -790,6 +877,7 @@ class TestAnalyzeGroupSafety:
 # analyze() target resolution
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzeTargetResolution:
     def _get_analyze(self, meta):
         rt = MockRuntime(datasets=[meta])
@@ -800,11 +888,13 @@ class TestAnalyzeTargetResolution:
         meta = _make_dataset(canonical_target="volume")
         tool = self._get_analyze(meta)
         # Even though canonical_target is "volume", explicit target_col wins
-        result = tool.run({
-            "dataset_name": "equities",
-            "target_col": "ret",
-            "mode": "describe",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "target_col": "ret",
+                "mode": "describe",
+            }
+        )
         # Will fail at execute (mock), but target_col should be "ret"
         assert result.get("error") is True  # mock can't execute
         # The error comes from execute, not from target resolution
@@ -812,10 +902,12 @@ class TestAnalyzeTargetResolution:
     def test_canonical_target_fallback(self):
         meta = _make_dataset(canonical_target="ret")
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "mode": "recommend",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "mode": "recommend",
+            }
+        )
         # Will fail at execute (mock), but should not fail on target resolution
         assert result.get("error") is True
         # Should NOT be a MissingTarget or AmbiguousTarget error
@@ -829,10 +921,12 @@ class TestAnalyzeTargetResolution:
             entity_keys=[],
         )
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "mode": "recommend",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "mode": "recommend",
+            }
+        )
         # Should not be an ambiguity error
         assert result.get("type") != "AmbiguousTarget"
 
@@ -848,10 +942,12 @@ class TestAnalyzeTargetResolution:
             entity_keys=[],
         )
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "mode": "recommend",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "mode": "recommend",
+            }
+        )
         assert result.get("error") is True
         assert result.get("type") == "AmbiguousTarget"
         assert "candidates" in result
@@ -863,10 +959,12 @@ class TestAnalyzeTargetResolution:
             entity_keys=[],
         )
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "mode": "describe",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "mode": "describe",
+            }
+        )
         # Should not be a MissingTarget error — describe picks first numeric
         assert result.get("type") != "MissingTarget"
 
@@ -876,10 +974,12 @@ class TestAnalyzeTargetResolution:
             entity_keys=[],
         )
         tool = self._get_analyze(meta)
-        result = tool.run({
-            "dataset_name": "equities",
-            "mode": "recommend",
-        })
+        result = tool.run(
+            {
+                "dataset_name": "equities",
+                "mode": "recommend",
+            }
+        )
         assert result.get("error") is True
         assert result.get("type") == "MissingTarget"
 
@@ -887,6 +987,7 @@ class TestAnalyzeTargetResolution:
 # ---------------------------------------------------------------------------
 # register_dataset semantic fields
 # ---------------------------------------------------------------------------
+
 
 class TestRegisterDatasetSemanticFields:
     """register_dataset should accept and persist semantic metadata."""

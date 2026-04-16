@@ -37,6 +37,7 @@ _STYLE = {
 
 def _get_plt():
     from lazybridge.ext.stat_runtime._deps import require_matplotlib
+
     plt = require_matplotlib()
     plt.rcParams.update(_STYLE)
     return plt
@@ -45,6 +46,7 @@ def _get_plt():
 # ---------------------------------------------------------------------------
 # Residual plots
 # ---------------------------------------------------------------------------
+
 
 def plot_residuals(
     residuals: np.ndarray | list[float],
@@ -76,7 +78,9 @@ def plot_residuals(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "residuals", fig,
+        run_id,
+        "residuals",
+        fig,
         description="Residual scatter plot and histogram",
     )
 
@@ -84,6 +88,7 @@ def plot_residuals(
 # ---------------------------------------------------------------------------
 # ACF / PACF
 # ---------------------------------------------------------------------------
+
 
 def plot_acf_pacf(
     series: np.ndarray | list[float],
@@ -96,6 +101,7 @@ def plot_acf_pacf(
     """Autocorrelation and partial autocorrelation plots."""
     plt = _get_plt()
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
@@ -111,7 +117,9 @@ def plot_acf_pacf(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "acf_pacf", fig,
+        run_id,
+        "acf_pacf",
+        fig,
         description="ACF and PACF correlogram",
     )
 
@@ -119,6 +127,7 @@ def plot_acf_pacf(
 # ---------------------------------------------------------------------------
 # Conditional volatility (GARCH)
 # ---------------------------------------------------------------------------
+
 
 def plot_volatility(
     conditional_vol: np.ndarray | list[float],
@@ -153,7 +162,9 @@ def plot_volatility(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "volatility", fig,
+        run_id,
+        "volatility",
+        fig,
         description="GARCH conditional volatility plot",
     )
 
@@ -161,6 +172,7 @@ def plot_volatility(
 # ---------------------------------------------------------------------------
 # Regime probabilities (Markov)
 # ---------------------------------------------------------------------------
+
 
 def plot_regimes(
     smoothed_probs: dict[str, list[float]],
@@ -174,9 +186,12 @@ def plot_regimes(
     plt = _get_plt()
     n_regimes = len(smoothed_probs)
 
-    fig, axes = plt.subplots(n_regimes + (1 if series is not None else 0), 1,
-                             figsize=(12, 3 * (n_regimes + (1 if series is not None else 0))),
-                             sharex=True)
+    fig, axes = plt.subplots(
+        n_regimes + (1 if series is not None else 0),
+        1,
+        figsize=(12, 3 * (n_regimes + (1 if series is not None else 0))),
+        sharex=True,
+    )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
 
@@ -203,7 +218,9 @@ def plot_regimes(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "regimes", fig,
+        run_id,
+        "regimes",
+        fig,
         description="Markov switching smoothed regime probabilities",
     )
 
@@ -211,6 +228,7 @@ def plot_regimes(
 # ---------------------------------------------------------------------------
 # Forecast plot
 # ---------------------------------------------------------------------------
+
 
 def plot_forecast(
     actuals: np.ndarray | list[float],
@@ -241,8 +259,7 @@ def plot_forecast(
     # Forecast
     x_fc = range(n_actual, n_actual + len(fc))
     ax.plot(x_fc, fc, color="#2196F3", linewidth=1.5, label="Forecast")
-    ax.fill_between(x_fc, lo, hi, alpha=0.2, color="#2196F3",
-                     label=f"{forecast_result.ci_level*100:.0f}% CI")
+    ax.fill_between(x_fc, lo, hi, alpha=0.2, color="#2196F3", label=f"{forecast_result.ci_level * 100:.0f}% CI")
 
     ax.set_xlabel("Observation")
     ax.set_ylabel("Value")
@@ -251,14 +268,17 @@ def plot_forecast(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "forecast", fig,
-        description=f"{forecast_result.steps}-step forecast with {forecast_result.ci_level*100:.0f}% CI",
+        run_id,
+        "forecast",
+        fig,
+        description=f"{forecast_result.steps}-step forecast with {forecast_result.ci_level * 100:.0f}% CI",
     )
 
 
 # ---------------------------------------------------------------------------
 # Model comparison
 # ---------------------------------------------------------------------------
+
 
 def plot_model_comparison(
     runs: list[RunRecord],
@@ -291,14 +311,22 @@ def plot_model_comparison(
     for bars in [bars1, bars2]:
         for bar in bars:
             h = bar.get_height()
-            ax.annotate(f"{h:.1f}", xy=(bar.get_x() + bar.get_width() / 2, h),
-                        xytext=(0, 3), textcoords="offset points", ha="center", fontsize=9)
+            ax.annotate(
+                f"{h:.1f}",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                fontsize=9,
+            )
 
     fig.suptitle(title, fontsize=14, fontweight="bold")
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, "model_comparison", fig,
+        run_id,
+        "model_comparison",
+        fig,
         description="AIC/BIC comparison across model runs",
     )
 
@@ -306,6 +334,7 @@ def plot_model_comparison(
 # ---------------------------------------------------------------------------
 # Basic time series plot
 # ---------------------------------------------------------------------------
+
 
 def plot_series(
     series: np.ndarray | list[float],
@@ -328,6 +357,8 @@ def plot_series(
     fig.tight_layout()
 
     return artifact_store.write_plot(
-        run_id, name, fig,
+        run_id,
+        name,
+        fig,
         description=f"Time series plot: {title}",
     )

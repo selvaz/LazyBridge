@@ -44,9 +44,10 @@ import math
 import re
 import shutil
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Annotated, Any, Iterable, Literal, Sequence
+from typing import Annotated, Any, Literal
 
 from lazybridge import LazyAgent, LazySession, LazyTool
 from lazybridge.core.tool_schema import ToolSchemaMode  # noqa: F401 — re-exported for callers
@@ -54,67 +55,140 @@ from lazybridge.core.tool_schema import ToolSchemaMode  # noqa: F401 — re-expo
 __all__ = [
     "build_skill",
     "query_skill",
-    "skill_tool",
     "skill_builder_tool",
     "skill_pipeline",
+    "skill_tool",
 ]
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 DEFAULT_EXTENSIONS: tuple[str, ...] = (
-    ".md", ".mdx", ".txt", ".rst", ".adoc",
-    ".py", ".json", ".yaml", ".yml", ".toml",
+    ".md",
+    ".mdx",
+    ".txt",
+    ".rst",
+    ".adoc",
+    ".py",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
 )
 
 HEADING_EXTENSIONS: frozenset[str] = frozenset({".md", ".mdx", ".rst", ".adoc"})
 
 BM25_K1: float = 1.5
-BM25_B:  float = 0.75
+BM25_B: float = 0.75
 
-STOPWORDS: frozenset[str] = frozenset({
-    # English
-    "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "with",
-    "by", "from", "is", "are", "was", "were", "be", "as", "that", "this",
-    "it", "its", "at", "into", "how", "what", "why", "when", "which", "who",
-    "can", "could", "should", "would", "use", "using", "used", "about",
-    "than", "then", "them", "they", "their", "there",
-    # Italian
-    "de", "del", "della", "di", "e", "il", "la", "lo", "gli", "le", "un",
-    "una", "uno", "che", "come", "per", "con", "su", "da", "nel", "nella",
-    "delle", "dei", "degli",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        # English
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "for",
+        "in",
+        "on",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "as",
+        "that",
+        "this",
+        "it",
+        "its",
+        "at",
+        "into",
+        "how",
+        "what",
+        "why",
+        "when",
+        "which",
+        "who",
+        "can",
+        "could",
+        "should",
+        "would",
+        "use",
+        "using",
+        "used",
+        "about",
+        "than",
+        "then",
+        "them",
+        "they",
+        "their",
+        "there",
+        # Italian
+        "de",
+        "del",
+        "della",
+        "di",
+        "e",
+        "il",
+        "la",
+        "lo",
+        "gli",
+        "le",
+        "un",
+        "una",
+        "uno",
+        "che",
+        "come",
+        "per",
+        "con",
+        "su",
+        "da",
+        "nel",
+        "nella",
+        "delle",
+        "dei",
+        "degli",
+    }
+)
 
 MODE = Literal["answer", "extract", "locate", "summarize"]
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────
 
+
 @dataclass(slots=True)
 class DocChunk:
-    path:    str
-    title:   str       # document-level title (first H1 or filename)
-    heading: str       # nearest section heading — used for BM25 title boost
-    text:    str
-    tokens:  list[str]
-    doc_len: int       # token count — needed for BM25 length normalisation
+    path: str
+    title: str  # document-level title (first H1 or filename)
+    heading: str  # nearest section heading — used for BM25 title boost
+    text: str
+    tokens: list[str]
+    doc_len: int  # token count — needed for BM25 length normalisation
     ordinal: int
 
 
 @dataclass(slots=True)
 class SkillManifest:
-    name:          str
-    description:   str
-    source_dirs:   list[str]
+    name: str
+    description: str
+    source_dirs: list[str]
     indexed_files: list[str]
-    total_chunks:  int
-    avgdl:         float
-    extensions:    list[str]
-    version:       str = "3.0.0"
-    created_by:    str = "lazybridge.ext.doc_skills"
+    total_chunks: int
+    avgdl: float
+    extensions: list[str]
+    version: str = "3.0.0"
+    created_by: str = "lazybridge.ext.doc_skills"
 
 
 # ── Text utilities ─────────────────────────────────────────────────────────────
+
 
 def _slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value.strip().lower())
@@ -153,13 +227,13 @@ _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
 def _char_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
     out, start, n = [], 0, len(text)
     while start < n:
-        end    = min(start + chunk_size, n)
+        end = min(start + chunk_size, n)
         window = text[start:end]
         if end < n:
             split = window.rfind("\n\n")
             if split >= chunk_size // 2:
                 window = window[:split]
-                end    = start + split
+                end = start + split
         if window.strip():
             out.append(window.strip())
         if end >= n:
@@ -180,10 +254,10 @@ def _heading_chunks(text: str, max_chunk: int, overlap: int) -> list[tuple[str, 
             raw.append(("", preamble))
 
     for i, m in enumerate(matches):
-        end     = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         raw.append((m.group(2).strip(), text[m.start() : end].strip()))
 
-    result:   list[tuple[str, str]] = []
+    result: list[tuple[str, str]] = []
     min_size: int = max_chunk // 4
 
     for heading, body in raw:
@@ -217,14 +291,22 @@ def _make_chunks(path: Path, text: str, chunk_size: int, overlap: int) -> list[D
         if not stripped:
             continue
         toks = _tokenize(stripped)
-        results.append(DocChunk(
-            path=str(path), title=doc_title, heading=heading or doc_title,
-            text=stripped, tokens=toks, doc_len=len(toks), ordinal=i,
-        ))
+        results.append(
+            DocChunk(
+                path=str(path),
+                title=doc_title,
+                heading=heading or doc_title,
+                text=stripped,
+                tokens=toks,
+                doc_len=len(toks),
+                ordinal=i,
+            )
+        )
     return results
 
 
 # ── BM25 ───────────────────────────────────────────────────────────────────────
+
 
 def _build_idf(chunks: list[DocChunk]) -> dict[str, float]:
     """Robertson IDF:  log( (N - df + 0.5) / (df + 0.5) + 1 )"""
@@ -233,10 +315,7 @@ def _build_idf(chunks: list[DocChunk]) -> dict[str, float]:
     for chunk in chunks:
         for tok in set(chunk.tokens):
             df[tok] += 1
-    return {
-        tok: math.log((N - freq + 0.5) / (freq + 0.5) + 1)
-        for tok, freq in df.items()
-    }
+    return {tok: math.log((N - freq + 0.5) / (freq + 0.5) + 1) for tok, freq in df.items()}
 
 
 def _bm25(chunk: DocChunk, q_tokens: list[str], idf: dict[str, float], avgdl: float) -> float:
@@ -248,9 +327,7 @@ def _bm25(chunk: DocChunk, q_tokens: list[str], idf: dict[str, float], avgdl: fl
         tf = tf_map.get(tok, 0)
         if not tf:
             continue
-        score += idf.get(tok, 0.5) * tf * (BM25_K1 + 1) / (
-            tf + BM25_K1 * (1 - BM25_B + BM25_B * dl / avgdl)
-        )
+        score += idf.get(tok, 0.5) * tf * (BM25_K1 + 1) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * dl / avgdl))
     heading_lower = chunk.heading.lower()
     for tok in q_tokens:
         if tok in heading_lower:
@@ -263,9 +340,10 @@ def _bm25(chunk: DocChunk, q_tokens: list[str], idf: dict[str, float], avgdl: fl
 
 # ── File iteration ─────────────────────────────────────────────────────────────
 
+
 def _iter_docs(roots: Sequence[Path], include_exts: Sequence[str]) -> Iterable[Path]:
     extset: set[str] = {e.lower() for e in include_exts}
-    seen:   set[Path] = set()
+    seen: set[Path] = set()
     for root in roots:
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.name.startswith("."):
@@ -280,16 +358,20 @@ def _iter_docs(roots: Sequence[Path], include_exts: Sequence[str]) -> Iterable[P
 
 # ── Bundle I/O ─────────────────────────────────────────────────────────────────
 
+
 def _load_manifest(skill_dir: Path) -> SkillManifest:
     return SkillManifest(**json.loads((skill_dir / "manifest.json").read_text(encoding="utf-8")))
+
 
 def _load_chunks(skill_dir: Path) -> list[DocChunk]:
     with (skill_dir / "chunks.jsonl").open(encoding="utf-8") as f:
         return [DocChunk(**json.loads(line)) for line in f]
 
+
 def _load_idf(skill_dir: Path) -> dict[str, float]:
     p = skill_dir / "vocab.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
 
 def _load_skill_md(skill_dir: Path) -> str:
     p = skill_dir / "SKILL.md"
@@ -298,8 +380,10 @@ def _load_skill_md(skill_dir: Path) -> str:
 
 # ── SKILL.md ───────────────────────────────────────────────────────────────────
 
-def _render_skill_md(*, name: str, description: str, usage_notes: str,
-                     file_count: int, total_chunks: int, source_dirs: Sequence[Path]) -> str:
+
+def _render_skill_md(
+    *, name: str, description: str, usage_notes: str, file_count: int, total_chunks: int, source_dirs: Sequence[Path]
+) -> str:
     roots = "\n".join(f"- {p}" for p in source_dirs)
     return f"""---
 name: {name}
@@ -345,21 +429,32 @@ Grounded only in the documentation indexed from:
 
 # ── Context brief ──────────────────────────────────────────────────────────────
 
-def _build_brief(*, manifest: SkillManifest, skill_md: str, task: str,
-                 mode: MODE, selected: list[DocChunk]) -> str:
-    sources  = list(dict.fromkeys(c.path for c in selected))
+
+def _build_brief(*, manifest: SkillManifest, skill_md: str, task: str, mode: MODE, selected: list[DocChunk]) -> str:
+    sources = list(dict.fromkeys(c.path for c in selected))
     excerpts = [f"### {c.heading}  [{Path(c.path).name}]\n{_trim(c.text, 800)}" for c in selected[:6]]
-    return "\n".join([
-        f"[skill]   {manifest.name}", f"[task]    {task}", f"[mode]    {mode}", "",
-        "[skill_instructions]", _trim(skill_md, 2500) if skill_md else "No SKILL.md present.", "",
-        "[sources_retrieved]", *[f"  • {p}" for p in sources], "",
-        "[excerpts]", *excerpts, "",
-        "[execution_policy]",
-        "  1. Use only the evidence above.",
-        "  2. Do not infer behaviour not shown in the excerpts.",
-        "  3. Cite source file names in every answer.",
-        "  4. If evidence is partial or missing, say so explicitly.",
-    ])
+    return "\n".join(
+        [
+            f"[skill]   {manifest.name}",
+            f"[task]    {task}",
+            f"[mode]    {mode}",
+            "",
+            "[skill_instructions]",
+            _trim(skill_md, 2500) if skill_md else "No SKILL.md present.",
+            "",
+            "[sources_retrieved]",
+            *[f"  • {p}" for p in sources],
+            "",
+            "[excerpts]",
+            *excerpts,
+            "",
+            "[execution_policy]",
+            "  1. Use only the evidence above.",
+            "  2. Do not infer behaviour not shown in the excerpts.",
+            "  3. Cite source file names in every answer.",
+            "  4. If evidence is partial or missing, say so explicitly.",
+        ]
+    )
 
 
 def _auto_mode(task: str) -> MODE:
@@ -377,17 +472,18 @@ def _auto_mode(task: str) -> MODE:
 # PUBLIC API
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def build_skill(
     source_dirs: Annotated[list[str], "One or more folders containing documentation to index."],
-    skill_name:  Annotated[str,       "Skill name — used as the bundle folder name and title."],
-    output_root: Annotated[str,       "Parent directory for the generated bundle."] = "./generated_skills",
-    description: Annotated[str,       "What this skill covers (used in SKILL.md and tool description)."] = "",
-    usage_notes: Annotated[str,       "Extra operational rules appended to SKILL.md."] = "",
-    include_extensions: Annotated[list[str], "File extensions to index."] = list(DEFAULT_EXTENSIONS),
-    chunk_size:    Annotated[int,  "Maximum characters per chunk."] = 1800,
-    chunk_overlap: Annotated[int,  "Overlap between char-mode chunks."] = 180,
-    copy_sources:  Annotated[bool, "Copy original docs into the bundle under sources/."] = False,
-    overwrite:     Annotated[bool, "Replace an existing bundle with the same name."] = True,
+    skill_name: Annotated[str, "Skill name — used as the bundle folder name and title."],
+    output_root: Annotated[str, "Parent directory for the generated bundle."] = "./generated_skills",
+    description: Annotated[str, "What this skill covers (used in SKILL.md and tool description)."] = "",
+    usage_notes: Annotated[str, "Extra operational rules appended to SKILL.md."] = "",
+    include_extensions: Annotated[list[str], "File extensions to index."] = list(DEFAULT_EXTENSIONS),  # noqa: B006
+    chunk_size: Annotated[int, "Maximum characters per chunk."] = 1800,
+    chunk_overlap: Annotated[int, "Overlap between char-mode chunks."] = 180,
+    copy_sources: Annotated[bool, "Copy original docs into the bundle under sources/."] = False,
+    overwrite: Annotated[bool, "Replace an existing bundle with the same name."] = True,
     max_chars_per_file: Annotated[int, "Safety cap on characters read per file."] = 200_000,
 ) -> dict[str, Any]:
     """
@@ -411,8 +507,8 @@ def build_skill(
     if copy_sources:
         (skill_dir / "sources").mkdir()
 
-    indexed_files: list[str]      = []
-    all_chunks:    list[DocChunk] = []
+    indexed_files: list[str] = []
+    all_chunks: list[DocChunk] = []
 
     for root in roots:
         for path in _iter_docs([root], include_extensions):
@@ -435,38 +531,54 @@ def build_skill(
 
     description = description or f"Documentation skill built from {len(indexed_files)} files."
     avgdl = sum(c.doc_len for c in all_chunks) / len(all_chunks)
-    idf   = _build_idf(all_chunks)
+    idf = _build_idf(all_chunks)
 
     manifest = SkillManifest(
-        name=skill_name, description=description, source_dirs=[str(p) for p in roots],
-        indexed_files=indexed_files, total_chunks=len(all_chunks), avgdl=avgdl,
+        name=skill_name,
+        description=description,
+        source_dirs=[str(p) for p in roots],
+        indexed_files=indexed_files,
+        total_chunks=len(all_chunks),
+        avgdl=avgdl,
         extensions=list(include_extensions),
     )
     skill_md = _render_skill_md(
-        name=skill_name, description=description, usage_notes=usage_notes,
-        file_count=len(indexed_files), total_chunks=len(all_chunks), source_dirs=roots,
+        name=skill_name,
+        description=description,
+        usage_notes=usage_notes,
+        file_count=len(indexed_files),
+        total_chunks=len(all_chunks),
+        source_dirs=roots,
     )
 
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
-    (skill_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
+    (skill_dir / "manifest.json").write_text(
+        json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     (skill_dir / "vocab.json").write_text(json.dumps(idf, ensure_ascii=False, indent=2), encoding="utf-8")
     with (skill_dir / "chunks.jsonl").open("w", encoding="utf-8") as f:
         for chunk in all_chunks:
             f.write(json.dumps(asdict(chunk), ensure_ascii=False) + "\n")
 
     return {
-        "skill_dir": str(skill_dir), "skill_name": skill_name, "description": description,
-        "indexed_files": indexed_files, "total_chunks": len(all_chunks), "avgdl": round(avgdl, 1),
+        "skill_dir": str(skill_dir),
+        "skill_name": skill_name,
+        "description": description,
+        "indexed_files": indexed_files,
+        "total_chunks": len(all_chunks),
+        "avgdl": round(avgdl, 1),
     }
 
 
 def query_skill(
-    skill_dir:  Annotated[str, "Path to a skill bundle created by build_skill()."],
-    task:       Annotated[str, "Question or task to answer from the indexed documentation."],
-    mode:       Annotated[Literal["auto", "answer", "extract", "locate", "summarize"],
-                          "Execution mode. 'auto' detects intent from the task wording."] = "auto",
-    top_k:      Annotated[int,  "Number of chunks to retrieve."] = 8,
-    max_chars:  Annotated[int,  "Maximum characters in the returned context brief."] = 10_000,
+    skill_dir: Annotated[str, "Path to a skill bundle created by build_skill()."],
+    task: Annotated[str, "Question or task to answer from the indexed documentation."],
+    mode: Annotated[
+        Literal["auto", "answer", "extract", "locate", "summarize"],
+        "Execution mode. 'auto' detects intent from the task wording.",
+    ] = "auto",
+    top_k: Annotated[int, "Number of chunks to retrieve."] = 8,
+    max_chars: Annotated[int, "Maximum characters in the returned context brief."] = 10_000,
     include_quotes: Annotated[bool, "Append full excerpts after evidence bullets."] = True,
 ) -> str:
     """
@@ -477,24 +589,24 @@ def query_skill(
     if not sdir.exists():
         raise FileNotFoundError(f"Skill directory not found: {sdir}")
 
-    manifest      = _load_manifest(sdir)
-    chunks        = _load_chunks(sdir)
-    idf           = _load_idf(sdir)
-    skill_md      = _load_skill_md(sdir)
+    manifest = _load_manifest(sdir)
+    chunks = _load_chunks(sdir)
+    idf = _load_idf(sdir)
+    skill_md = _load_skill_md(sdir)
     resolved_mode: MODE = _auto_mode(task) if mode == "auto" else mode  # type: ignore[assignment]
 
     q_tokens = _tokenize(task)
-    ranked   = sorted(((c, _bm25(c, q_tokens, idf, manifest.avgdl)) for c in chunks),
-                      key=lambda x: x[1], reverse=True)
-    selected = [c for c, score in ranked[:max(1, top_k)] if score > 0]
+    ranked = sorted(((c, _bm25(c, q_tokens, idf, manifest.avgdl)) for c in chunks), key=lambda x: x[1], reverse=True)
+    selected = [c for c, score in ranked[: max(1, top_k)] if score > 0]
 
     if not selected:
-        return (f"[skill] {manifest.name}\n[task] {task}\n\n"
-                "No relevant documentation was retrieved for this task. "
-                "Do not answer beyond the indexed evidence.")[:max_chars]
+        return (
+            f"[skill] {manifest.name}\n[task] {task}\n\n"
+            "No relevant documentation was retrieved for this task. "
+            "Do not answer beyond the indexed evidence."
+        )[:max_chars]
 
-    brief = _build_brief(manifest=manifest, skill_md=skill_md,
-                         task=task, mode=resolved_mode, selected=selected)
+    brief = _build_brief(manifest=manifest, skill_md=skill_md, task=task, mode=resolved_mode, selected=selected)
     result_lines: list[str] = []
 
     if resolved_mode == "locate":
@@ -506,12 +618,12 @@ def query_skill(
     elif resolved_mode == "summarize":
         result_lines = ["Summary:"]
         for c in selected[:6]:
-            condensed = re.sub(r'\s+', ' ', c.text)
+            condensed = re.sub(r"\s+", " ", c.text)
             result_lines.append(f"  - {_trim(condensed, 300)}  [{Path(c.path).name}]")
     else:
         result_lines = ["Best evidence:"]
         for c in selected[:5]:
-            condensed = re.sub(r'\s+', ' ', c.text)
+            condensed = re.sub(r"\s+", " ", c.text)
             result_lines.append(f"  - {_trim(condensed, 400)}  [{Path(c.path).name}]")
         if include_quotes:
             result_lines.append("\nFull excerpts:")
@@ -522,20 +634,20 @@ def query_skill(
 
 
 def skill_tool(
-    skill_dir:   Annotated[str,        "Path to a skill bundle created by build_skill()."],
-    name:        Annotated[str | None, "Tool name exposed to the agent."] = None,
+    skill_dir: Annotated[str, "Path to a skill bundle created by build_skill()."],
+    name: Annotated[str | None, "Tool name exposed to the agent."] = None,
     description: Annotated[str | None, "Tool description."] = None,
-    guidance:    Annotated[str | None, "Guidance injected into the calling agent's system prompt."] = None,
-    strict:      Annotated[bool,       "Strict JSON schema validation."] = False,
+    guidance: Annotated[str | None, "Guidance injected into the calling agent's system prompt."] = None,
+    strict: Annotated[bool, "Strict JSON schema validation."] = False,
 ) -> LazyTool:
     """Wrap query_skill() as a LazyTool ready to be passed to any agent or pipeline."""
-    sdir     = Path(skill_dir).expanduser().resolve()
+    sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
 
     def _run(
-        task:    Annotated[str, "Question or task to answer from this skill."],
-        mode:    Annotated[Literal["auto", "answer", "extract", "locate", "summarize"], "Retrieval mode."] = "auto",
-        top_k:   Annotated[int,  "Number of chunks to retrieve."] = 8,
+        task: Annotated[str, "Question or task to answer from this skill."],
+        mode: Annotated[Literal["auto", "answer", "extract", "locate", "summarize"], "Retrieval mode."] = "auto",
+        top_k: Annotated[int, "Number of chunks to retrieve."] = 8,
         include_quotes: Annotated[bool, "Include full excerpts."] = True,
     ) -> str:
         """Query a local documentation skill and return a grounded context brief."""
@@ -545,7 +657,8 @@ def skill_tool(
         _run,
         name=name or _slugify(manifest.name),
         description=description or manifest.description,
-        guidance=guidance or (
+        guidance=guidance
+        or (
             "Call this tool when the task is about the documentation indexed by this skill. "
             "Treat the result as grounded evidence and answer only from it."
         ),
@@ -554,9 +667,11 @@ def skill_tool(
 
 
 def skill_builder_tool(
-    name:        Annotated[str,  "Tool name."] = "build_doc_skill",
-    description: Annotated[str,  "Tool description."] = "Index documentation folders into a reusable local skill bundle.",
-    guidance:    Annotated[str,  "Guidance for the calling agent."] = (
+    name: Annotated[str, "Tool name."] = "build_doc_skill",
+    description: Annotated[
+        str, "Tool description."
+    ] = "Index documentation folders into a reusable local skill bundle.",
+    guidance: Annotated[str, "Guidance for the calling agent."] = (
         "Use this tool to transform one or more documentation folders into a queryable local skill."
     ),
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
@@ -567,12 +682,12 @@ def skill_builder_tool(
 
 def skill_pipeline(
     *,
-    skill_dir:      Annotated[str,        "Path to a skill bundle."],
-    provider:       Annotated[str | Any,  "LazyBridge provider alias or instance."] = "anthropic",
-    router_model:   Annotated[str | None, "Model for the task-sharpening router."] = None,
+    skill_dir: Annotated[str, "Path to a skill bundle."],
+    provider: Annotated[str | Any, "LazyBridge provider alias or instance."] = "anthropic",
+    router_model: Annotated[str | None, "Model for the task-sharpening router."] = None,
     executor_model: Annotated[str | None, "Model for the grounded-answer executor."] = None,
-    session:        Annotated[Any,        "Optional LazySession. Created if omitted."] = None,
-    native_tools:   Annotated[list | None, "Provider-native tools for the executor."] = None,
+    session: Annotated[Any, "Optional LazySession. Created if omitted."] = None,
+    native_tools: Annotated[list | None, "Provider-native tools for the executor."] = None,
 ) -> LazyTool:
     """
     Two-step pipeline exposed as a single LazyTool.
@@ -583,13 +698,16 @@ def skill_pipeline(
     Wired via sess.as_tool(mode="chain"). The executor has tools= at construction
     so the chain automatically calls loop() on it.
     """
-    sdir     = Path(skill_dir).expanduser().resolve()
+    sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
-    sess     = session or LazySession()
-    s_tool   = skill_tool(skill_dir=str(sdir))
+    sess = session or LazySession()
+    s_tool = skill_tool(skill_dir=str(sdir))
 
     router = LazyAgent(
-        provider, name="skill_router", model=router_model, session=sess,
+        provider,
+        name="skill_router",
+        model=router_model,
+        session=sess,
         system=(
             "You sharpen user queries for a local documentation retrieval system. "
             "Return a single concise retrieval query. "
@@ -599,8 +717,12 @@ def skill_pipeline(
         ),
     )
     executor = LazyAgent(
-        provider, name="skill_executor", model=executor_model, session=sess,
-        native_tools=native_tools, tools=[s_tool],
+        provider,
+        name="skill_executor",
+        model=executor_model,
+        session=sess,
+        native_tools=native_tools,
+        tools=[s_tool],
         system=(
             "You answer from the local skill tool only. Always call the skill tool first. "
             "Build your answer exclusively from the tool result. "

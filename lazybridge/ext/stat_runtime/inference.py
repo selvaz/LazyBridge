@@ -21,48 +21,115 @@ from lazybridge.ext.stat_runtime.schemas import (
 # ---------------------------------------------------------------------------
 
 _TIME_NAMES: set[str] = {
-    "date", "time", "timestamp", "datetime", "dt", "period",
-    "month", "quarter", "year", "week", "day", "hour",
-    "trade_date", "obs_date", "report_date",
+    "date",
+    "time",
+    "timestamp",
+    "datetime",
+    "dt",
+    "period",
+    "month",
+    "quarter",
+    "year",
+    "week",
+    "day",
+    "hour",
+    "trade_date",
+    "obs_date",
+    "report_date",
 }
 _TIME_DTYPE_PREFIXES: tuple[str, ...] = (
-    "date", "datetime", "timestamp", "time",
-    "Date", "Datetime", "Timestamp", "Time",
+    "date",
+    "datetime",
+    "timestamp",
+    "time",
+    "Date",
+    "Datetime",
+    "Timestamp",
+    "Time",
 )
 
 _TARGET_NAMES: set[str] = {
-    "ret", "return", "returns", "log_ret", "log_return", "log_returns",
-    "close", "price", "adj_close", "adj_price",
-    "value", "yield", "growth", "rate", "spread",
-    "sales", "revenue", "gdp", "cpi", "inflation",
+    "ret",
+    "return",
+    "returns",
+    "log_ret",
+    "log_return",
+    "log_returns",
+    "close",
+    "price",
+    "adj_close",
+    "adj_price",
+    "value",
+    "yield",
+    "growth",
+    "rate",
+    "spread",
+    "sales",
+    "revenue",
+    "gdp",
+    "cpi",
+    "inflation",
 }
 
 _ENTITY_NAMES: set[str] = {
-    "symbol", "ticker", "stock", "asset", "fund",
-    "country", "region", "sector", "industry",
-    "company", "firm", "issuer",
+    "symbol",
+    "ticker",
+    "stock",
+    "asset",
+    "fund",
+    "country",
+    "region",
+    "sector",
+    "industry",
+    "company",
+    "firm",
+    "issuer",
 }
 
 _IDENTIFIER_NAMES: set[str] = {
-    "id", "code", "isin", "cusip", "sedol", "figi",
-    "permno", "gvkey",
+    "id",
+    "code",
+    "isin",
+    "cusip",
+    "sedol",
+    "figi",
+    "permno",
+    "gvkey",
 }
 
 _NUMERIC_DTYPE_PREFIXES: tuple[str, ...] = (
-    "float", "Float", "int", "Int", "UInt",
-    "f32", "f64", "i32", "i64", "u32", "u64",
+    "float",
+    "Float",
+    "int",
+    "Int",
+    "UInt",
+    "f32",
+    "f64",
+    "i32",
+    "i64",
+    "u32",
+    "u64",
     "Decimal",
 )
 
 _STRING_DTYPE_PREFIXES: tuple[str, ...] = (
-    "str", "Str", "Utf8", "utf8", "String", "string",
-    "Categorical", "categorical", "object", "Object",
+    "str",
+    "Str",
+    "Utf8",
+    "utf8",
+    "String",
+    "string",
+    "Categorical",
+    "categorical",
+    "object",
+    "Object",
 )
 
 
 # ---------------------------------------------------------------------------
 # Column role inference
 # ---------------------------------------------------------------------------
+
 
 def infer_column_roles(meta: DatasetMeta) -> list[ColumnRoleInference]:
     """Infer semantic roles for all columns in a dataset.
@@ -76,15 +143,20 @@ def infer_column_roles(meta: DatasetMeta) -> list[ColumnRoleInference]:
     for col, dtype in meta.columns_schema.items():
         name_lc = name_lower_map[col]
         role, confidence, reason = _infer_single(
-            col, name_lc, dtype, meta,
+            col,
+            name_lc,
+            dtype,
+            meta,
         )
-        roles.append(ColumnRoleInference(
-            column=col,
-            dtype=dtype,
-            inferred_role=role,
-            confidence=confidence,
-            reason=reason,
-        ))
+        roles.append(
+            ColumnRoleInference(
+                column=col,
+                dtype=dtype,
+                inferred_role=role,
+                confidence=confidence,
+                reason=reason,
+            )
+        )
 
     return roles
 
@@ -99,11 +171,11 @@ def _infer_single(
 
     # 1. Declared time column — highest precedence
     if meta.time_column and col == meta.time_column:
-        return "time", "high", f"Declared as time_column in dataset metadata"
+        return "time", "high", "Declared as time_column in dataset metadata"
 
     # 2. Declared entity keys
     if col in meta.entity_keys:
-        return "entity_key", "high", f"Declared in entity_keys"
+        return "entity_key", "high", "Declared in entity_keys"
 
     # 3. Declared semantic roles
     if col in meta.semantic_roles:
@@ -118,29 +190,23 @@ def _infer_single(
 
     # 5. Entity key inference from name + string dtype
     if name_lc in _ENTITY_NAMES and dtype.startswith(_STRING_DTYPE_PREFIXES):
-        return "entity_key", "medium", (
-            f"String column named '{col}' matches entity key patterns"
-        )
+        return "entity_key", "medium", (f"String column named '{col}' matches entity key patterns")
 
     # 6. Identifier inference
     if name_lc in _IDENTIFIER_NAMES and dtype.startswith(_STRING_DTYPE_PREFIXES):
-        return "identifier", "medium", (
-            f"String column named '{col}' matches identifier patterns"
-        )
+        return "identifier", "medium", (f"String column named '{col}' matches identifier patterns")
 
     # 7. Target inference from name + numeric dtype
     if name_lc in _TARGET_NAMES and dtype.startswith(_NUMERIC_DTYPE_PREFIXES):
-        return "target", "medium", (
-            f"Numeric column named '{col}' matches common target variable patterns"
-        )
+        return "target", "medium", (f"Numeric column named '{col}' matches common target variable patterns")
 
     # 8. Generic numeric → exogenous
     if dtype.startswith(_NUMERIC_DTYPE_PREFIXES):
-        return "exogenous", "low", f"Numeric column not matching known target patterns"
+        return "exogenous", "low", "Numeric column not matching known target patterns"
 
     # 9. Generic string → unknown
     if dtype.startswith(_STRING_DTYPE_PREFIXES):
-        return "unknown", "low", f"String column with no recognized role"
+        return "unknown", "low", "String column with no recognized role"
 
     return "unknown", "low", f"Unrecognized dtype '{dtype}'"
 
@@ -148,6 +214,7 @@ def _infer_single(
 # ---------------------------------------------------------------------------
 # Dataset suggestions
 # ---------------------------------------------------------------------------
+
 
 def suggest_for_dataset(
     meta: DatasetMeta,
@@ -162,28 +229,21 @@ def suggest_for_dataset(
     if not meta.time_column and time_roles:
         candidates = ", ".join(r.column for r in time_roles)
         suggestions.append(
-            f"Time column not set but detected candidates: {candidates}. "
-            f"Consider re-registering with time_column set."
+            f"Time column not set but detected candidates: {candidates}. Consider re-registering with time_column set."
         )
 
     # Multiple potential targets
     target_roles = [r for r in roles if r.inferred_role == "target"]
     if len(target_roles) > 1:
         names = ", ".join(r.column for r in target_roles)
-        suggestions.append(
-            f"Multiple potential target columns: {names}. "
-            f"Specify target_col explicitly when fitting."
-        )
+        suggestions.append(f"Multiple potential target columns: {names}. Specify target_col explicitly when fitting.")
     elif len(target_roles) == 1:
-        suggestions.append(
-            f"Likely target column: '{target_roles[0].column}' ({target_roles[0].reason})."
-        )
+        suggestions.append(f"Likely target column: '{target_roles[0].column}' ({target_roles[0].reason}).")
 
     # No profile cached
     if not meta.profile_json:
         suggestions.append(
-            f"No profile cached for '{meta.name}'. "
-            f"Call profile_dataset('{meta.name}') for column-level statistics."
+            f"No profile cached for '{meta.name}'. Call profile_dataset('{meta.name}') for column-level statistics."
         )
 
     # Panel data hint
@@ -213,6 +273,7 @@ def suggest_for_dataset(
 # ---------------------------------------------------------------------------
 # Analysis interpretation
 # ---------------------------------------------------------------------------
+
 
 def build_interpretation(
     run: RunRecord,
@@ -255,18 +316,14 @@ def build_interpretation(
     failed = sum(1 for d in diag_list if d.get("passed") is False)
     total = passed + failed
     if total > 0:
-        interpretation.append(
-            f"Diagnostics: {passed}/{total} tests passed."
-        )
+        interpretation.append(f"Diagnostics: {passed}/{total} tests passed.")
         if failed > 0:
             failed_names = [d["test_name"] for d in diag_list if d.get("passed") is False]
             warnings.append(f"Failed diagnostics: {', '.join(failed_names)}.")
 
     # Common: suggest comparison if no next_steps yet
     if not next_steps:
-        next_steps.append(
-            "Consider fitting alternative specifications and using compare_models()."
-        )
+        next_steps.append("Consider fitting alternative specifications and using compare_models().")
 
     return interpretation, warnings, next_steps
 
@@ -285,20 +342,12 @@ def _interpret_garch(
 
     if alpha is not None and beta is not None:
         persistence = alpha + beta
-        interpretation.append(
-            f"Volatility persistence (alpha+beta) = {persistence:.4f}."
-        )
+        interpretation.append(f"Volatility persistence (alpha+beta) = {persistence:.4f}.")
         if persistence >= 1.0:
-            warnings.append(
-                f"IGARCH-like: persistence >= 1.0 ({persistence:.4f}). "
-                f"Volatility shocks are permanent."
-            )
+            warnings.append(f"IGARCH-like: persistence >= 1.0 ({persistence:.4f}). Volatility shocks are permanent.")
         elif persistence > 0.95:
             half_life = math.log(0.5) / math.log(persistence)
-            interpretation.append(
-                f"High persistence. Half-life of volatility shocks: "
-                f"{half_life:.0f} periods."
-            )
+            interpretation.append(f"High persistence. Half-life of volatility shocks: {half_life:.0f} periods.")
 
     if gamma is not None and gamma != 0:
         direction = "negative" if gamma > 0 else "positive"
@@ -310,19 +359,12 @@ def _interpret_garch(
     # Check for remaining ARCH effects
     sq_lb = [d for d in diags if "squared" in d.get("test_name", "").lower()]
     if sq_lb and any(d.get("passed") is False for d in sq_lb):
-        warnings.append(
-            "Ljung-Box on squared residuals failed: remaining ARCH effects. "
-            "Consider increasing p or q."
-        )
+        warnings.append("Ljung-Box on squared residuals failed: remaining ARCH effects. Consider increasing p or q.")
         next_steps.append("Try GARCH(2,1) or GARCH(1,2) to capture remaining effects.")
 
-    next_steps.append(
-        "Try EGARCH or TARCH for asymmetric volatility comparison."
-    )
+    next_steps.append("Try EGARCH or TARCH for asymmetric volatility comparison.")
     if "nu" not in params:
-        next_steps.append(
-            "Try dist='t' (Student-t) for fat-tailed returns."
-        )
+        next_steps.append("Try dist='t' (Student-t) for fat-tailed returns.")
 
 
 def _interpret_arima(
@@ -340,23 +382,16 @@ def _interpret_arima(
 
     seasonal = spec.get("params", {}).get("seasonal_order", [])
     if seasonal and any(s != 0 for s in seasonal):
-        interpretation.append(
-            f"Seasonal order: ({', '.join(str(s) for s in seasonal)})."
-        )
+        interpretation.append(f"Seasonal order: ({', '.join(str(s) for s in seasonal)}).")
 
     # Residual autocorrelation check
     lb = [d for d in diags if d.get("test_name", "").startswith("Ljung-Box")]
     if lb and any(d.get("passed") is False for d in lb):
-        warnings.append(
-            "Ljung-Box failed: residual autocorrelation detected. "
-            "Model may be under-specified."
-        )
+        warnings.append("Ljung-Box failed: residual autocorrelation detected. Model may be under-specified.")
         next_steps.append("Increase AR order (p) or MA order (q) and re-fit.")
 
     if not seasonal or all(s == 0 for s in seasonal):
-        next_steps.append(
-            "Consider seasonal ARIMA if data has periodic patterns."
-        )
+        next_steps.append("Consider seasonal ARIMA if data has periodic patterns.")
 
 
 def _interpret_markov(
@@ -388,14 +423,11 @@ def _interpret_markov(
         stat = rcc[0].get("statistic")
         if stat is not None and stat < 0.7:
             warnings.append(
-                f"Regime classification certainty is low ({stat:.2f} < 0.70). "
-                f"Regimes may not be well-separated."
+                f"Regime classification certainty is low ({stat:.2f} < 0.70). Regimes may not be well-separated."
             )
             next_steps.append("Try fewer regimes or switching_variance=True.")
         elif stat is not None:
-            interpretation.append(
-                f"Regime classification certainty: {stat:.2f} (good separation)."
-            )
+            interpretation.append(f"Regime classification certainty: {stat:.2f} (good separation).")
 
     # Transition persistence
     for key, val in params.items():
@@ -405,8 +437,7 @@ def _interpret_markov(
             if val > 0.9:
                 duration = 1.0 / (1.0 - val) if val < 1.0 else float("inf")
                 interpretation.append(
-                    f"Regime {regime} is persistent (p={val:.3f}, "
-                    f"expected duration: {duration:.0f} periods)."
+                    f"Regime {regime} is persistent (p={val:.3f}, expected duration: {duration:.0f} periods)."
                 )
 
     if k_regimes == 2:
@@ -437,9 +468,7 @@ def _interpret_ols(
         elif f_pval < 0.05:
             interpretation.append("F-test: model is significant at 5% level.")
         else:
-            warnings.append(
-                f"F-test p-value = {f_pval:.4f}: model may not be significant."
-            )
+            warnings.append(f"F-test p-value = {f_pval:.4f}: model may not be significant.")
 
     # Durbin-Watson
     dw = [d for d in diags if "durbin" in d.get("test_name", "").lower()]
@@ -459,6 +488,7 @@ def _interpret_ols(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_float(d: dict[str, Any], key: str) -> float | None:
     """Safely extract a float from a dict, returning None on failure."""
     val = d.get(key)
@@ -474,6 +504,7 @@ def _get_float(d: dict[str, Any], key: str) -> float | None:
 # ---------------------------------------------------------------------------
 # Natural language dataset summary
 # ---------------------------------------------------------------------------
+
 
 def generate_dataset_summary(
     meta: DatasetMeta,
@@ -577,10 +608,14 @@ def resolve_analysis_mode(
 
     if mode_lc == "describe":
         # Describe mode still needs a family for the runner — use OLS as baseline
-        return "ols", (
-            "Describe mode: fitting a simple trend model for diagnostic summary. "
-            "Focus is on data profiling, stationarity tests, and distribution analysis."
-        ), _MODE_ASSUMPTIONS["describe"]
+        return (
+            "ols",
+            (
+                "Describe mode: fitting a simple trend model for diagnostic summary. "
+                "Focus is on data profiling, stationarity tests, and distribution analysis."
+            ),
+            _MODE_ASSUMPTIONS["describe"],
+        )
 
     # Recommend mode — inspect data to choose
     if mode_lc == "recommend":
@@ -636,10 +671,14 @@ def _recommend_family(
 
     # No time column — default to OLS
     reasons.append("No time column detected — using linear regression.")
-    return "ols", " ".join(reasons), [
-        "OLS assumes a linear relationship between target and predictors.",
-        "Residuals should be independent and normally distributed.",
-    ]
+    return (
+        "ols",
+        " ".join(reasons),
+        [
+            "OLS assumes a linear relationship between target and predictors.",
+            "Residuals should be independent and normally distributed.",
+        ],
+    )
 
 
 def get_model_assumptions(family: str) -> list[str]:

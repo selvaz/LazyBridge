@@ -142,27 +142,27 @@ def quant_agent(
         print(resp.content)
         rt.close()
     """
-    from lazybridge.lazy_agent import LazyAgent
-    from lazybridge.lazy_tool import LazyTool
-    from lazybridge.ext.stat_runtime.runner import StatRuntime
-    from lazybridge.ext.stat_runtime.tools import (
-        stat_tools,
-        build_stat_skills,
-        stat_skill_tools,
+    from lazybridge.ext.data_downloader import (
+        DataDownloader,
+        TickerDatabase,
+        build_downloader_skills,
+        downloader_skill_tools,
+        downloader_tools,
     )
+    from lazybridge.ext.stat_runtime.runner import StatRuntime
     from lazybridge.ext.stat_runtime.schemas import (
         AnalyzeInput,
         DownloadTickersInput,
         FitModelInput,
         QueryDataInput,
     )
-    from lazybridge.ext.data_downloader import (
-        TickerDatabase,
-        DataDownloader,
-        downloader_tools,
-        build_downloader_skills,
-        downloader_skill_tools,
+    from lazybridge.ext.stat_runtime.tools import (
+        build_stat_skills,
+        stat_skill_tools,
+        stat_tools,
     )
+    from lazybridge.lazy_agent import LazyAgent
+    from lazybridge.lazy_tool import LazyTool
 
     # Runtime
     rt = StatRuntime(artifacts_dir=artifacts_dir)
@@ -189,53 +189,65 @@ def quant_agent(
 
     agent_tools: list[LazyTool] = []
 
-    agent_tools.append(LazyTool.agent_tool(
-        raw_tools["analyze"].func,
-        input_schema=AnalyzeInput,
-        provider=provider, model=model,
-        name="analyze",
-        description="Run a goal-oriented analysis with automatic model selection. "
-                    "Describe your analysis goal — mode, target, and params are inferred.",
-        guidance="Primary analysis tool. Just describe what you want to analyze and how. "
-                 "The sub-agent resolves mode, target column, and parameters from your description.",
-        **sub_kwargs,
-    ))
+    agent_tools.append(
+        LazyTool.agent_tool(
+            raw_tools["analyze"].func,
+            input_schema=AnalyzeInput,
+            provider=provider,
+            model=model,
+            name="analyze",
+            description="Run a goal-oriented analysis with automatic model selection. "
+            "Describe your analysis goal — mode, target, and params are inferred.",
+            guidance="Primary analysis tool. Just describe what you want to analyze and how. "
+            "The sub-agent resolves mode, target column, and parameters from your description.",
+            **sub_kwargs,
+        )
+    )
 
-    agent_tools.append(LazyTool.agent_tool(
-        raw_tools["fit_model"].func,
-        input_schema=FitModelInput,
-        provider=provider, model=model,
-        name="fit_model",
-        description="Fit a specific statistical model to data. "
-                    "Describe the model — family, parameters, and data source are inferred.",
-        guidance="For custom model fits. Describe the model family (OLS/ARIMA/GARCH/Markov), "
-                 "target data, and any specific parameters you want.",
-        **sub_kwargs,
-    ))
+    agent_tools.append(
+        LazyTool.agent_tool(
+            raw_tools["fit_model"].func,
+            input_schema=FitModelInput,
+            provider=provider,
+            model=model,
+            name="fit_model",
+            description="Fit a specific statistical model to data. "
+            "Describe the model — family, parameters, and data source are inferred.",
+            guidance="For custom model fits. Describe the model family (OLS/ARIMA/GARCH/Markov), "
+            "target data, and any specific parameters you want.",
+            **sub_kwargs,
+        )
+    )
 
-    agent_tools.append(LazyTool.agent_tool(
-        raw_tools["download_tickers"].func,
-        input_schema=DownloadTickersInput,
-        provider=provider, model=model,
-        name="download_tickers",
-        description="Download market data and register for analysis. "
-                    "Describe what data you need — ticker symbols and date range are extracted.",
-        guidance="Describe the data you want. The sub-agent identifies ticker symbols, "
-                 "date range, and registration preferences from your description.",
-        **sub_kwargs,
-    ))
+    agent_tools.append(
+        LazyTool.agent_tool(
+            raw_tools["download_tickers"].func,
+            input_schema=DownloadTickersInput,
+            provider=provider,
+            model=model,
+            name="download_tickers",
+            description="Download market data and register for analysis. "
+            "Describe what data you need — ticker symbols and date range are extracted.",
+            guidance="Describe the data you want. The sub-agent identifies ticker symbols, "
+            "date range, and registration preferences from your description.",
+            **sub_kwargs,
+        )
+    )
 
-    agent_tools.append(LazyTool.agent_tool(
-        raw_tools["query_data"].func,
-        input_schema=QueryDataInput,
-        provider=provider, model=model,
-        name="query_data",
-        description="Query registered datasets with SQL. "
-                    "Describe what data you need — the SQL is generated automatically.",
-        guidance="Describe the data query in natural language. The sub-agent translates "
-                 "to SQL using dataset('name') macro. Only SELECT is allowed.",
-        **sub_kwargs,
-    ))
+    agent_tools.append(
+        LazyTool.agent_tool(
+            raw_tools["query_data"].func,
+            input_schema=QueryDataInput,
+            provider=provider,
+            model=model,
+            name="query_data",
+            description="Query registered datasets with SQL. "
+            "Describe what data you need — the SQL is generated automatically.",
+            guidance="Describe the data query in natural language. The sub-agent translates "
+            "to SQL using dataset('name') macro. Only SELECT is allowed.",
+            **sub_kwargs,
+        )
+    )
 
     # ---------------------------------------------------------------
     # SIMPLE TOOLS — direct tool calling (LLM fills args directly)
@@ -243,11 +255,19 @@ def quant_agent(
     # ---------------------------------------------------------------
 
     simple_tool_names = [
-        "discover_data", "discover_analyses", "register_dataset",
-        "list_universe", "search_tickers",
-        "profile_dataset", "forecast_model", "run_diagnostics",
-        "compare_models", "get_run", "list_runs",
-        "list_artifacts", "get_plot",
+        "discover_data",
+        "discover_analyses",
+        "register_dataset",
+        "list_universe",
+        "search_tickers",
+        "profile_dataset",
+        "forecast_model",
+        "run_diagnostics",
+        "compare_models",
+        "get_run",
+        "list_runs",
+        "list_artifacts",
+        "get_plot",
         "list_datasets",
     ]
 
@@ -291,7 +311,9 @@ def quant_agent(
     n_simple = len(simple_tools)
     _logger.info(
         "Created quant_agent: %d agent_tools + %d plain tools (%d tickers in universe)",
-        n_agent, n_simple, len(db.list_all()),
+        n_agent,
+        n_simple,
+        len(db.list_all()),
     )
 
     return agent, rt

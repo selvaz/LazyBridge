@@ -74,6 +74,7 @@ _logger = logging.getLogger(__name__)
 # Message normalisation helpers
 # ---------------------------------------------------------------------------
 
+
 def _normalise_messages(messages: str | list) -> list[Message]:
     if isinstance(messages, str):
         return [Message(role=Role.USER, content=messages)]
@@ -86,7 +87,8 @@ def _normalise_messages(messages: str | list) -> list[Message]:
                 warnings.warn(
                     "Message dict is missing the 'role' key; defaulting to 'user'. "
                     "Pass role='user'|'assistant'|'system' explicitly.",
-                    UserWarning, stacklevel=3,
+                    UserWarning,
+                    stacklevel=3,
                 )
             role = Role(m.get("role", "user"))
             result.append(Message(role=role, content=m.get("content", "")))
@@ -116,6 +118,7 @@ def _serialise_tool_result(result: Any) -> str:
         return result.model_dump_json()
     if isinstance(result, dict):
         import json
+
         try:
             return json.dumps(result)
         except (TypeError, ValueError):
@@ -147,6 +150,7 @@ async def _call_event_async(callback: Callable, name: str, payload: Any) -> None
 # ---------------------------------------------------------------------------
 # LazyAgent
 # ---------------------------------------------------------------------------
+
 
 class LazyAgent:
     """Unified LLM agent with optional session, context injection, and tool loops.
@@ -223,9 +227,7 @@ class LazyAgent:
         self.context = context
         self.tools: list[LazyTool | ToolDefinition | dict] = tools or []
         self.output_schema: type | dict | None = output_schema
-        self.native_tools: list[NativeTool] = [
-            NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])
-        ]
+        self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         self.session = session
 
         # Stores the last text output; read by LazyContext.from_agent() when
@@ -430,8 +432,7 @@ class LazyAgent:
         if memory is not None:
             if not isinstance(messages, str):
                 raise TypeError(
-                    "memory= requires messages to be a str. "
-                    "For list messages manage history manually via chat(list)."
+                    "memory= requires messages to be a str. For list messages manage history manually via chat(list)."
                 )
             if stream:
                 raise TypeError(
@@ -439,11 +440,22 @@ class LazyAgent:
                     "Consume the stream manually and call memory._record() yourself."
                 )
             full = memory._build_input(messages)
-            resp = self.chat(full, system=system, tools=tools, native_tools=native_tools,
-                             output_schema=output_schema, thinking=thinking, skills=skills,
-                             stream=False, model=model, max_tokens=max_tokens,
-                             temperature=temperature, tool_choice=tool_choice,
-                             context=context, **kwargs)
+            resp = self.chat(
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                **kwargs,
+            )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
             memory._record(messages, resp.content)
@@ -478,12 +490,14 @@ class LazyAgent:
         resp = self._executor.execute(request)
         self._last_output = resp.content
         self._last_response = resp
-        self._track(Event.MODEL_RESPONSE,
-                    model=resp.model or self._model_name,
-                    stop_reason=resp.stop_reason,
-                    input_tokens=resp.usage.input_tokens,
-                    output_tokens=resp.usage.output_tokens,
-                    content=resp.content)
+        self._track(
+            Event.MODEL_RESPONSE,
+            model=resp.model or self._model_name,
+            stop_reason=resp.stop_reason,
+            input_tokens=resp.usage.input_tokens,
+            output_tokens=resp.usage.output_tokens,
+            content=resp.content,
+        )
         return resp
 
     async def achat(
@@ -509,8 +523,7 @@ class LazyAgent:
         if memory is not None:
             if not isinstance(messages, str):
                 raise TypeError(
-                    "memory= requires messages to be a str. "
-                    "For list messages manage history manually via achat(list)."
+                    "memory= requires messages to be a str. For list messages manage history manually via achat(list)."
                 )
             if stream:
                 raise TypeError(
@@ -518,11 +531,22 @@ class LazyAgent:
                     "Consume the stream manually and call memory._record() yourself."
                 )
             full = memory._build_input(messages)
-            resp = await self.achat(full, system=system, tools=tools, native_tools=native_tools,
-                                    output_schema=output_schema, thinking=thinking, skills=skills,
-                                    stream=False, model=model, max_tokens=max_tokens,
-                                    temperature=temperature, tool_choice=tool_choice,
-                                    context=context, **kwargs)
+            resp = await self.achat(
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                **kwargs,
+            )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
             memory._record(messages, resp.content)
@@ -557,12 +581,14 @@ class LazyAgent:
         resp = await self._executor.aexecute(request)
         self._last_output = resp.content
         self._last_response = resp
-        self._track(Event.MODEL_RESPONSE,
-                    model=resp.model or self._model_name,
-                    stop_reason=resp.stop_reason,
-                    input_tokens=resp.usage.input_tokens,
-                    output_tokens=resp.usage.output_tokens,
-                    content=resp.content)
+        self._track(
+            Event.MODEL_RESPONSE,
+            model=resp.model or self._model_name,
+            stop_reason=resp.stop_reason,
+            input_tokens=resp.usage.input_tokens,
+            output_tokens=resp.usage.output_tokens,
+            content=resp.content,
+        )
         return resp
 
     # ------------------------------------------------------------------
@@ -578,7 +604,7 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: "LazyAgent | Callable[[str, str], str] | None" = None,
+        verify: LazyAgent | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
@@ -657,16 +683,13 @@ class LazyAgent:
                 # thought_signature is forwarded for Gemini thinking models — it is an opaque
                 # token that must be re-emitted verbatim on the next turn or the API returns
                 # 400 INVALID_ARGUMENT ("missing thought_signature in functionCall parts").
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
-                                             thought_signature=tc.thought_signature)
-                              for tc in resp.tool_calls]
-                _thinking_blocks: list[Any] = (
-                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
-                )
+                _tc_blocks = [
+                    ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments, thought_signature=tc.thought_signature)
+                    for tc in resp.tool_calls
+                ]
+                _thinking_blocks: list[Any] = [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
                 if resp.tool_calls:
-                    _text_blocks: list[Any] = (
-                        [TextContent(text=resp.content)] if resp.content else []
-                    )
+                    _text_blocks: list[Any] = [TextContent(text=resp.content)] if resp.content else []
                     _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
                 else:
                     _asst_content = resp.content or ""
@@ -709,12 +732,11 @@ class LazyAgent:
             _verify_log.append(_verdict)
             if on_event:
                 on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-            )
+            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
 
         if verify is not None and len(_verify_log) == _attempts:
             import warnings
+
             warnings.warn(
                 f"loop() verify exhausted after {_attempts} attempt(s) without approval. "
                 "Returning last result unchanged. "
@@ -726,9 +748,12 @@ class LazyAgent:
         resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
         self._last_response = resp  # type: ignore[union-attr]
-        self._track(Event.AGENT_FINISH, method="loop",
-                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
-                    n_steps=step + 1)
+        self._track(
+            Event.AGENT_FINISH,
+            method="loop",
+            stop_reason=resp.stop_reason,  # type: ignore[union-attr]
+            n_steps=step + 1,
+        )
         return resp  # type: ignore[return-value]
 
     async def aloop(
@@ -740,7 +765,7 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: "LazyAgent | Callable[..., Any] | None" = None,
+        verify: LazyAgent | Callable[..., Any] | None = None,
         max_verify: int = 3,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
@@ -789,16 +814,13 @@ class LazyAgent:
 
                 self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
 
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
-                                             thought_signature=tc.thought_signature)
-                              for tc in resp.tool_calls]
-                _thinking_blocks: list[Any] = (
-                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
-                )
+                _tc_blocks = [
+                    ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments, thought_signature=tc.thought_signature)
+                    for tc in resp.tool_calls
+                ]
+                _thinking_blocks: list[Any] = [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
                 if resp.tool_calls:
-                    _text_blocks: list[Any] = (
-                        [TextContent(text=resp.content)] if resp.content else []
-                    )
+                    _text_blocks: list[Any] = [TextContent(text=resp.content)] if resp.content else []
                     _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
                 else:
                     _asst_content = resp.content or ""
@@ -829,9 +851,7 @@ class LazyAgent:
                 break
 
             if hasattr(verify, "atext"):
-                _raw = await verify.atext(
-                    f"Question: {_orig_q}\nAnswer: {resp.content}"
-                )
+                _raw = await verify.atext(f"Question: {_orig_q}\nAnswer: {resp.content}")
             elif inspect.iscoroutinefunction(verify):
                 _raw = await verify(_orig_q, resp.content)
             else:
@@ -844,12 +864,11 @@ class LazyAgent:
             _verify_log.append(_verdict)
             if on_event:
                 await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-            )
+            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
 
         if verify is not None and len(_verify_log) == _attempts:
             import warnings
+
             warnings.warn(
                 f"aloop() verify exhausted after {_attempts} attempt(s) without approval. "
                 "Returning last result unchanged. "
@@ -861,9 +880,12 @@ class LazyAgent:
         resp.verify_log = _verify_log  # type: ignore[union-attr]
         self._last_output = resp.content  # type: ignore[union-attr]
         self._last_response = resp  # type: ignore[union-attr]
-        self._track(Event.AGENT_FINISH, method="aloop",
-                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
-                    n_steps=step + 1)
+        self._track(
+            Event.AGENT_FINISH,
+            method="aloop",
+            stop_reason=resp.stop_reason,  # type: ignore[union-attr]
+            n_steps=step + 1,
+        )
         return resp  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
@@ -882,10 +904,7 @@ class LazyAgent:
         # Fallback to user-provided runner (e.g. native tool handling)
         if runner:
             return runner(call.name, call.arguments)
-        raise RuntimeError(
-            f"No handler for tool '{call.name}'. "
-            "Add a LazyTool with that name or provide tool_runner."
-        )
+        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
 
     async def _aexecute_tool(
         self,
@@ -902,10 +921,7 @@ class LazyAgent:
             if inspect.isawaitable(result):
                 return await result
             return result
-        raise RuntimeError(
-            f"No handler for tool '{call.name}'. "
-            "Add a LazyTool with that name or provide tool_runner."
-        )
+        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
 
     # ------------------------------------------------------------------
     # as_tool() — expose this agent as a LazyTool
@@ -1014,9 +1030,7 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in json(). Use chat(stream=True) instead.")
         existing = kwargs.pop("system", None)
-        kwargs["system"] = (
-            f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        )
+        kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = self.chat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
         resp.raise_if_failed()
@@ -1033,13 +1047,102 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in ajson(). Use achat(stream=True) instead.")
         existing = kwargs.pop("system", None)
-        kwargs["system"] = (
-            f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        )
+        kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = await self.achat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
         resp.raise_if_failed()
         return resp.parsed
+
+    # ------------------------------------------------------------------
+    # Dedicated streaming methods (unambiguous return types)
+    # ------------------------------------------------------------------
+
+    def chat_stream(
+        self,
+        messages: str | list,
+        *,
+        system: str | None = None,
+        tools: list | None = None,
+        native_tools: list[NativeTool | str] | None = None,
+        output_schema: type | dict | None = None,
+        thinking: bool | ThinkingConfig = False,
+        skills: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        tool_choice: str | None = None,
+        context: LazyContext | Callable[[], str] | None = None,
+        **kwargs: Any,
+    ) -> Iterator[StreamChunk]:
+        """Stream a chat response. Always returns ``Iterator[StreamChunk]``.
+
+        This is the recommended way to stream — the return type is unambiguous,
+        unlike ``chat(stream=True)`` which returns a union type.
+
+        Usage::
+
+            for chunk in agent.chat_stream("tell me a story"):
+                print(chunk.delta, end="", flush=True)
+        """
+        result = self.chat(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=True,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
+        )
+        return result  # type: ignore[return-value]
+
+    async def achat_stream(
+        self,
+        messages: str | list,
+        *,
+        system: str | None = None,
+        tools: list | None = None,
+        native_tools: list[NativeTool | str] | None = None,
+        output_schema: type | dict | None = None,
+        thinking: bool | ThinkingConfig = False,
+        skills: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        tool_choice: str | None = None,
+        context: LazyContext | Callable[[], str] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Async stream. Always returns ``AsyncIterator[StreamChunk]``.
+
+        Usage::
+
+            async for chunk in await agent.achat_stream("tell me a story"):
+                print(chunk.delta, end="", flush=True)
+        """
+        result = await self.achat(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=True,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
+        )
+        return result  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Guidance rendering
@@ -1060,8 +1163,5 @@ class LazyAgent:
     def __repr__(self) -> str:
         session_info = f", session={self.session.id[:8]}..." if self.session else ""
         return (
-            f"LazyAgent(name={self.name!r}, "
-            f"provider={self._provider_name!r}, "
-            f"model={self._model_name!r}"
-            f"{session_info})"
+            f"LazyAgent(name={self.name!r}, provider={self._provider_name!r}, model={self._model_name!r}{session_info})"
         )

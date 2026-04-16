@@ -46,16 +46,16 @@ _FORCE_STREAM_MAX_TOKENS = 20_000
 
 # Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "claude-opus-4-6":    (15.0,  75.0),
-    "claude-opus-4-5":    (15.0,  75.0),
-    "claude-sonnet-4-6":  (3.0,   15.0),
-    "claude-sonnet-4-5":  (3.0,   15.0),
-    "claude-haiku-4-5":   (0.80,  4.0),
-    "claude-3-5-sonnet":  (3.0,   15.0),
-    "claude-3-5-haiku":   (0.80,  4.0),
-    "claude-3-opus":      (15.0,  75.0),
-    "claude-3-sonnet":    (3.0,   15.0),
-    "claude-3-haiku":     (0.25,  1.25),
+    "claude-opus-4-6": (15.0, 75.0),
+    "claude-opus-4-5": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-sonnet-4-5": (3.0, 15.0),
+    "claude-haiku-4-5": (0.80, 4.0),
+    "claude-3-5-sonnet": (3.0, 15.0),
+    "claude-3-5-haiku": (0.80, 4.0),
+    "claude-3-opus": (15.0, 75.0),
+    "claude-3-sonnet": (3.0, 15.0),
+    "claude-3-haiku": (0.25, 1.25),
 }
 
 
@@ -72,11 +72,13 @@ class AnthropicProvider(BaseProvider):
     """
 
     default_model = "claude-sonnet-4-6"
-    supported_native_tools: frozenset[NativeTool] = frozenset({
-        NativeTool.WEB_SEARCH,
-        NativeTool.CODE_EXECUTION,
-        NativeTool.COMPUTER_USE,
-    })
+    supported_native_tools: frozenset[NativeTool] = frozenset(
+        {
+            NativeTool.WEB_SEARCH,
+            NativeTool.CODE_EXECUTION,
+            NativeTool.COMPUTER_USE,
+        }
+    )
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         # Substring matching against model.lower() lets a fully-qualified model
@@ -111,9 +113,7 @@ class AnthropicProvider(BaseProvider):
         key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
         # Allow callers to override beta header versions and the streaming threshold.
         self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
-        self._force_stream_threshold: int = kwargs.pop(
-            "force_stream_threshold", _FORCE_STREAM_MAX_TOKENS
-        )
+        self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
         self._client = _anthropic.Anthropic(api_key=key, **kwargs)
         self._async_client = _anthropic.AsyncAnthropic(api_key=key, **kwargs)
 
@@ -140,39 +140,48 @@ class AnthropicProvider(BaseProvider):
                         ToolResultContent,
                         ToolUseContent,
                     )
+
                     if isinstance(block, TextContent):
                         blocks.append({"type": "text", "text": block.text})
                     elif isinstance(block, ThinkingContent):
                         blocks.append({"type": "thinking", "thinking": block.thinking})
                     elif isinstance(block, ImageContent):
                         if block.url:
-                            blocks.append({
-                                "type": "image",
-                                "source": {"type": "url", "url": block.url},
-                            })
+                            blocks.append(
+                                {
+                                    "type": "image",
+                                    "source": {"type": "url", "url": block.url},
+                                }
+                            )
                         elif block.base64_data:
-                            blocks.append({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": block.media_type,
-                                    "data": block.base64_data,
-                                },
-                            })
+                            blocks.append(
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": block.media_type,
+                                        "data": block.base64_data,
+                                    },
+                                }
+                            )
                     elif isinstance(block, ToolUseContent):
-                        blocks.append({
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        })
+                        blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
                     elif isinstance(block, ToolResultContent):
-                        blocks.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.tool_use_id,
-                            "content": block.content,
-                            "is_error": block.is_error,
-                        })
+                        blocks.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.tool_use_id,
+                                "content": block.content,
+                                "is_error": block.is_error,
+                            }
+                        )
                 api_role = "user" if msg.role == Role.TOOL else msg.role.value
                 result.append({"role": api_role, "content": blocks})
         return result
@@ -221,11 +230,13 @@ class AnthropicProvider(BaseProvider):
             # Skills require three beta headers simultaneously: the skills package
             # header, code execution (skills can execute code), and files API (skills
             # may read/write files).  Duplicates are removed below.
-            betas.extend([
-                overrides.get("skills", _BETA_SKILLS),
-                overrides.get("code_execution", _BETA_CODE_EXEC),
-                overrides.get("files", _BETA_FILES),
-            ])
+            betas.extend(
+                [
+                    overrides.get("skills", _BETA_SKILLS),
+                    overrides.get("code_execution", _BETA_CODE_EXEC),
+                    overrides.get("files", _BETA_FILES),
+                ]
+            )
         # dict.fromkeys preserves insertion order while removing duplicates.
         # This is needed when both skills and code_execution are requested —
         # both contribute _BETA_CODE_EXEC and the API rejects repeated headers.
@@ -243,6 +254,7 @@ class AnthropicProvider(BaseProvider):
         if "-4-6" in model:
             if request.thinking.budget_tokens is not None:
                 import warnings
+
                 warnings.warn(
                     f"ThinkingConfig.budget_tokens is deprecated for model '{model}' "
                     "and will be ignored. Use 'effort' instead.",
@@ -296,16 +308,20 @@ class AnthropicProvider(BaseProvider):
             elif block.type == "thinking":
                 thinking = (thinking or "") + block.thinking
             elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.id,
-                    name=block.name,
-                    arguments=block.input,
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=block.id,
+                        name=block.name,
+                        arguments=block.input,
+                    )
+                )
             elif block.type == "web_search_result":
-                grounding_sources.append(GroundingSource(
-                    url=getattr(block, "url", "") or "",
-                    title=getattr(block, "title", None),
-                ))
+                grounding_sources.append(
+                    GroundingSource(
+                        url=getattr(block, "url", "") or "",
+                        title=getattr(block, "title", None),
+                    )
+                )
 
         usage = UsageStats(
             input_tokens=response.usage.input_tokens,
@@ -335,9 +351,11 @@ class AnthropicProvider(BaseProvider):
         threshold = getattr(self, "_force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
         if request.max_tokens and request.max_tokens > threshold:
             import logging as _logging
+
             _logging.getLogger(__name__).debug(
                 "AnthropicProvider: auto-forcing streaming because max_tokens=%d > threshold=%d.",
-                request.max_tokens, threshold,
+                request.max_tokens,
+                threshold,
             )
             return True
         return False
@@ -407,6 +425,7 @@ class AnthropicProvider(BaseProvider):
                 apply_structured_validation,
                 normalize_json_schema,
             )
+
             schema = request.structured_output.schema
             if isinstance(schema, dict):
                 schema = normalize_json_schema(schema)
@@ -487,15 +506,15 @@ class AnthropicProvider(BaseProvider):
                         getattr(final, "model", ""), usage.input_tokens, usage.output_tokens
                     )
                     tool_calls = [
-                        ToolCall(id=b.id, name=b.name, arguments=b.input)
-                        for b in final.content if b.type == "tool_use"
+                        ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"
                     ]
                     grounding_sources = [
                         GroundingSource(
                             url=getattr(b, "url", "") or "",
                             title=getattr(b, "title", None),
                         )
-                        for b in final.content if b.type == "web_search_result"
+                        for b in final.content
+                        if b.type == "web_search_result"
                     ]
                     final_chunk = StreamChunk(
                         stop_reason=final.stop_reason,
@@ -506,6 +525,7 @@ class AnthropicProvider(BaseProvider):
                     )
                     if request.structured_output:
                         from lazybridge.core.structured import apply_structured_validation
+
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk
 
@@ -524,6 +544,7 @@ class AnthropicProvider(BaseProvider):
                 apply_structured_validation,
                 normalize_json_schema,
             )
+
             schema = request.structured_output.schema
             if isinstance(schema, dict):
                 # Always use beta endpoint — output_config requires it.
@@ -600,15 +621,15 @@ class AnthropicProvider(BaseProvider):
                         getattr(final, "model", ""), usage.input_tokens, usage.output_tokens
                     )
                     tool_calls = [
-                        ToolCall(id=b.id, name=b.name, arguments=b.input)
-                        for b in final.content if b.type == "tool_use"
+                        ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"
                     ]
                     grounding_sources = [
                         GroundingSource(
                             url=getattr(b, "url", "") or "",
                             title=getattr(b, "title", None),
                         )
-                        for b in final.content if b.type == "web_search_result"
+                        for b in final.content
+                        if b.type == "web_search_result"
                     ]
                     final_chunk = StreamChunk(
                         stop_reason=final.stop_reason,
@@ -619,5 +640,6 @@ class AnthropicProvider(BaseProvider):
                     )
                     if request.structured_output:
                         from lazybridge.core.structured import apply_structured_validation
+
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk

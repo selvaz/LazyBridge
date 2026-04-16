@@ -41,6 +41,7 @@ _SCHEMA_VERSION = 1
 def _safe_float(obj):
     """JSON serializer fallback for numpy floats, inf, nan."""
     import math
+
     if isinstance(obj, float):
         if math.isnan(obj):
             return None
@@ -58,6 +59,7 @@ def _safe_float(obj):
 # ---------------------------------------------------------------------------
 # InMemory backend
 # ---------------------------------------------------------------------------
+
 
 class _InMemoryBackend:
     def __init__(self) -> None:
@@ -133,6 +135,7 @@ class _InMemoryBackend:
 # DuckDB backend
 # ---------------------------------------------------------------------------
 
+
 class _DuckDBBackend:
     _DDL = """
     CREATE TABLE IF NOT EXISTS _meta (
@@ -201,9 +204,7 @@ class _DuckDBBackend:
         conn = self._conn()
         conn.execute(self._DDL)
         # Check / set schema version
-        existing = conn.execute(
-            "SELECT value FROM _meta WHERE key = 'schema_version'"
-        ).fetchone()
+        existing = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
         if existing is None:
             conn.execute(
                 "INSERT INTO _meta (key, value) VALUES ('schema_version', ?)",
@@ -229,11 +230,18 @@ class _DuckDBBackend:
                 profile_json, row_count, registered_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                meta.dataset_id, meta.name, meta.version, meta.uri,
-                meta.file_format, json.dumps(meta.columns_schema),
-                str(meta.frequency), meta.time_column,
-                json.dumps(meta.entity_keys), json.dumps(meta.semantic_roles),
-                json.dumps(meta.profile_json), meta.row_count,
+                meta.dataset_id,
+                meta.name,
+                meta.version,
+                meta.uri,
+                meta.file_format,
+                json.dumps(meta.columns_schema),
+                str(meta.frequency),
+                meta.time_column,
+                json.dumps(meta.entity_keys),
+                json.dumps(meta.semantic_roles),
+                json.dumps(meta.profile_json),
+                meta.row_count,
                 meta.registered_at.isoformat(),
             ],
         )
@@ -245,17 +253,13 @@ class _DuckDBBackend:
     )
 
     def get_dataset(self, name: str) -> DatasetMeta | None:
-        row = self._conn().execute(
-            f"SELECT {self._DATASET_COLS} FROM datasets WHERE name = ?", [name]
-        ).fetchone()
+        row = self._conn().execute(f"SELECT {self._DATASET_COLS} FROM datasets WHERE name = ?", [name]).fetchone()
         if row is None:
             return None
         return self._row_to_dataset(row)
 
     def list_datasets(self) -> list[DatasetMeta]:
-        rows = self._conn().execute(
-            f"SELECT {self._DATASET_COLS} FROM datasets ORDER BY registered_at DESC"
-        ).fetchall()
+        rows = self._conn().execute(f"SELECT {self._DATASET_COLS} FROM datasets ORDER BY registered_at DESC").fetchall()
         return [self._row_to_dataset(r) for r in rows]
 
     def delete_dataset(self, name: str) -> None:
@@ -264,10 +268,14 @@ class _DuckDBBackend:
     @staticmethod
     def _row_to_dataset(row: tuple) -> DatasetMeta:
         return DatasetMeta(
-            dataset_id=row[0], name=row[1], version=row[2], uri=row[3],
+            dataset_id=row[0],
+            name=row[1],
+            version=row[2],
+            uri=row[3],
             file_format=row[4],
             columns_schema=json.loads(row[5]) if row[5] else {},
-            frequency=row[6], time_column=row[7],
+            frequency=row[6],
+            time_column=row[7],
             entity_keys=json.loads(row[8]) if row[8] else [],
             semantic_roles=json.loads(row[9]) if row[9] else {},
             profile_json=json.loads(row[10]) if row[10] else {},
@@ -286,15 +294,19 @@ class _DuckDBBackend:
                 artifact_paths, engine, created_at, duration_secs, error_message)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                record.run_id, record.dataset_name, record.query_hash,
+                record.run_id,
+                record.dataset_name,
+                record.query_hash,
                 json.dumps(record.spec_json, default=_safe_float),
                 str(record.status),
                 record.fit_summary,
                 json.dumps(record.params_json, default=_safe_float),
                 json.dumps(record.metrics_json, default=_safe_float),
                 json.dumps(record.diagnostics_json, default=_safe_float),
-                json.dumps(record.artifact_paths), record.engine,
-                record.created_at.isoformat(), record.duration_secs,
+                json.dumps(record.artifact_paths),
+                record.engine,
+                record.created_at.isoformat(),
+                record.duration_secs,
                 record.error_message,
             ],
         )
@@ -306,9 +318,7 @@ class _DuckDBBackend:
     )
 
     def get_run(self, run_id: str) -> RunRecord | None:
-        row = self._conn().execute(
-            f"SELECT {self._RUN_COLS} FROM runs WHERE run_id = ?", [run_id]
-        ).fetchone()
+        row = self._conn().execute(f"SELECT {self._RUN_COLS} FROM runs WHERE run_id = ?", [run_id]).fetchone()
         if row is None:
             return None
         return self._row_to_run(row)
@@ -329,16 +339,22 @@ class _DuckDBBackend:
             params.append(status)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
-        rows = self._conn().execute(
-            f"SELECT {self._RUN_COLS} FROM runs{where} ORDER BY created_at DESC LIMIT ?",
-            params,
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                f"SELECT {self._RUN_COLS} FROM runs{where} ORDER BY created_at DESC LIMIT ?",
+                params,
+            )
+            .fetchall()
+        )
         return [self._row_to_run(r) for r in rows]
 
     @staticmethod
     def _row_to_run(row: tuple) -> RunRecord:
         return RunRecord(
-            run_id=row[0], dataset_name=row[1], query_hash=row[2],
+            run_id=row[0],
+            dataset_name=row[1],
+            query_hash=row[2],
             spec_json=json.loads(row[3]) if row[3] else {},
             status=RunStatus(row[4]) if row[4] else RunStatus.PENDING,
             fit_summary=row[5] or "",
@@ -365,9 +381,14 @@ class _DuckDBBackend:
                 description, created_at, metadata_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                record.run_id, record.name, record.artifact_type,
-                record.file_format, record.path, record.description,
-                record.created_at.isoformat(), json.dumps(record.metadata),
+                record.run_id,
+                record.name,
+                record.artifact_type,
+                record.file_format,
+                record.path,
+                record.description,
+                record.created_at.isoformat(),
+                json.dumps(record.metadata),
             ],
         )
 
@@ -385,14 +406,22 @@ class _DuckDBBackend:
             clauses.append("artifact_type = ?")
             params.append(artifact_type)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._conn().execute(
-            f"SELECT * FROM artifacts{where} ORDER BY created_at DESC",
-            params,
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                f"SELECT * FROM artifacts{where} ORDER BY created_at DESC",
+                params,
+            )
+            .fetchall()
+        )
         return [
             ArtifactRecord(
-                run_id=r[0], name=r[1], artifact_type=r[2], file_format=r[3],
-                path=r[4], description=r[5] or "",
+                run_id=r[0],
+                name=r[1],
+                artifact_type=r[2],
+                file_format=r[3],
+                path=r[4],
+                description=r[5] or "",
                 created_at=datetime.fromisoformat(r[6]) if r[6] else datetime.now(UTC),
                 metadata=json.loads(r[7]) if r[7] else {},
             )
@@ -411,12 +440,14 @@ class _DuckDBBackend:
 def _import_duckdb():
     """Lazy import of duckdb — only called when DuckDB backend is used."""
     from lazybridge.ext.stat_runtime._deps import require_duckdb
+
     return require_duckdb()
 
 
 # ---------------------------------------------------------------------------
 # MetaStore (public facade)
 # ---------------------------------------------------------------------------
+
 
 class MetaStore:
     """Metadata store for the statistical runtime.
@@ -431,9 +462,7 @@ class MetaStore:
     """
 
     def __init__(self, db: str | None = None) -> None:
-        self._backend: _InMemoryBackend | _DuckDBBackend = (
-            _DuckDBBackend(db) if db else _InMemoryBackend()
-        )
+        self._backend: _InMemoryBackend | _DuckDBBackend = _DuckDBBackend(db) if db else _InMemoryBackend()
 
     # -- datasets --
     def save_dataset(self, meta: DatasetMeta) -> None:

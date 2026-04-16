@@ -43,6 +43,7 @@ _logger = logging.getLogger(__name__)
 # LazyContext
 # ---------------------------------------------------------------------------
 
+
 class LazyContext:
     """A lazily-evaluated, composable context string.
 
@@ -82,12 +83,14 @@ class LazyContext:
 
         If ``keys`` is given, only those keys are included.
         """
+
         def _read() -> str:
             text = store.to_text(keys=keys) if (keys or store.keys()) else ""
             if not text:
                 return ""
             label = prefix or "[store context]"
             return f"{label}\n{text}"
+
         ctx = cls()
         ctx._sources.append(_read)
         return ctx
@@ -104,6 +107,7 @@ class LazyContext:
         The agent must have been run before this context is materialised,
         otherwise an empty string is returned.
         """
+
         def _read() -> str:
             output = getattr(agent, "_last_output", None)
             agent_name = getattr(agent, "name", None) or repr(agent)
@@ -115,6 +119,7 @@ class LazyContext:
                 return ""
             label = prefix or (f"[{agent_name} output]")
             return f"{label}\n{output}"
+
         ctx = cls()
         ctx._sources.append(_read)
         return ctx

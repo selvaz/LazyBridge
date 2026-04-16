@@ -14,6 +14,6 @@ Quick start::
     rt.close()
 """
 
-from lazybridge.ext.quant_agent.agent import quant_agent, QUANT_SYSTEM_PROMPT  # noqa: F401
+from lazybridge.ext.quant_agent.agent import QUANT_SYSTEM_PROMPT, quant_agent
 
-__all__ = ["quant_agent", "QUANT_SYSTEM_PROMPT"]
+__all__ = ["QUANT_SYSTEM_PROMPT", "quant_agent"]

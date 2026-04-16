@@ -58,38 +58,40 @@ _logger = logging.getLogger(__name__)
 
 # _ChainState lives in pipeline_builders.py; re-exported here for backward compatibility.
 # (Existing test imports like `from lazybridge.lazy_session import _ChainState` remain valid.)
-from lazybridge.pipeline_builders import _ChainState  # noqa: E402, F401
-
+from lazybridge.pipeline_builders import _ChainState  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # TrackLevel
 # ---------------------------------------------------------------------------
 
+
 class TrackLevel(StrEnum):
-    OFF     = "off"
-    BASIC   = "basic"
+    OFF = "off"
+    BASIC = "basic"
     VERBOSE = "verbose"
-    FULL    = "full"   # synonym for VERBOSE
+    FULL = "full"  # synonym for VERBOSE
 
 
 # ---------------------------------------------------------------------------
 # Event types
 # ---------------------------------------------------------------------------
 
+
 class Event(StrEnum):
     """All event types emitted by LazyAgent during execution."""
-    MODEL_REQUEST  = "model_request"
+
+    MODEL_REQUEST = "model_request"
     MODEL_RESPONSE = "model_response"
-    TOOL_CALL      = "tool_call"
-    TOOL_RESULT    = "tool_result"
-    TOOL_ERROR     = "tool_error"
-    AGENT_START    = "agent_start"
-    AGENT_FINISH   = "agent_finish"
-    LOOP_STEP      = "loop_step"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    TOOL_ERROR = "tool_error"
+    AGENT_START = "agent_start"
+    AGENT_FINISH = "agent_finish"
+    LOOP_STEP = "loop_step"
     # verbose-only events (high volume — only emitted when tracking="verbose")
-    MESSAGES       = "messages"
+    MESSAGES = "messages"
     SYSTEM_CONTEXT = "system_context"
-    STREAM_CHUNK   = "stream_chunk"
+    STREAM_CHUNK = "stream_chunk"
 
 
 # These events flood the log at BASIC level; only emitted when tracking="verbose"/"full"
@@ -100,6 +102,7 @@ _VERBOSE_LEVELS = {TrackLevel.VERBOSE, TrackLevel.FULL}
 # ---------------------------------------------------------------------------
 # EventLog — SQLite-backed event tracking
 # ---------------------------------------------------------------------------
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -207,12 +210,12 @@ class EventLog:
         if self.level not in _VERBOSE_LEVELS and event_type in _VERBOSE_ONLY:
             return
         row = {
-            "timestamp":  _now(),
+            "timestamp": _now(),
             "session_id": self.session_id,
-            "agent_id":   agent_id,
+            "agent_id": agent_id,
             "agent_name": agent_name,
             "event_type": event_type,
-            "data":       data,
+            "data": data,
         }
         if self._db:
             try:
@@ -221,8 +224,12 @@ class EventLog:
                         "INSERT INTO events(timestamp, session_id, agent_id, agent_name,"
                         " event_type, data_json) VALUES (?,?,?,?,?,?)",
                         (
-                            row["timestamp"], self.session_id, agent_id,
-                            agent_name, event_type, _safe_json(data),
+                            row["timestamp"],
+                            self.session_id,
+                            agent_id,
+                            agent_name,
+                            event_type,
+                            _safe_json(data),
                         ),
                     )
             except Exception as exc:
@@ -246,38 +253,36 @@ class EventLog:
 
     def _print_event(self, agent_name: str | None, event_type: str, data: dict) -> None:
         from datetime import datetime as _dt
+
         ts = _dt.now().strftime("%H:%M:%S")
         label = f"[{agent_name or '?':12s}]"
 
         if event_type == Event.MODEL_REQUEST:
             model = data.get("model", "")
-            msgs  = data.get("n_messages", "")
-            line  = f">> model_request   model={model}  msgs={msgs}"
+            msgs = data.get("n_messages", "")
+            line = f">> model_request   model={model}  msgs={msgs}"
         elif event_type == Event.MODEL_RESPONSE:
-            model   = data.get("model", "")
-            stop    = data.get("stop_reason", "")
-            in_t    = data.get("input_tokens", "")
-            out_t   = data.get("output_tokens", "")
+            model = data.get("model", "")
+            stop = data.get("stop_reason", "")
+            in_t = data.get("input_tokens", "")
+            out_t = data.get("output_tokens", "")
             content = data.get("content") or ""
             preview = content.replace("\n", " ").strip()
             if len(preview) > 200:
                 preview = preview[:200] + "…"
-            line = (
-                f"<< model_response  model={model}  stop={stop}  in={in_t} out={out_t}\n"
-                f"{'':26s}{label} {preview!r}"
-            )
+            line = f"<< model_response  model={model}  stop={stop}  in={in_t} out={out_t}\n{'':26s}{label} {preview!r}"
         elif event_type == Event.TOOL_CALL:
             name = data.get("name", "")
             args = str(data.get("arguments", ""))[:120]
             line = f">> tool_call       {name}({args})"
         elif event_type == Event.TOOL_RESULT:
-            name   = data.get("name", "")
+            name = data.get("name", "")
             result = str(data.get("result", ""))[:120]
-            line   = f"<< tool_result     {name} -> {result}"
+            line = f"<< tool_result     {name} -> {result}"
         elif event_type == Event.TOOL_ERROR:
-            name  = data.get("name", "")
+            name = data.get("name", "")
             error = str(data.get("error", ""))[:120]
-            line  = f"!! tool_error      {name}: {error}"
+            line = f"!! tool_error      {name}: {error}"
         else:
             line = f"   {event_type}"
 
@@ -325,11 +330,11 @@ class EventLog:
         # Reverse so result is chronological (oldest→newest), matching in-memory behaviour.
         return [
             {
-                "timestamp":  r[0],
-                "agent_id":   r[1],
+                "timestamp": r[0],
+                "agent_id": r[1],
                 "agent_name": r[2],
                 "event_type": r[3],
-                "data":       json.loads(r[4]),
+                "data": json.loads(r[4]),
             }
             for r in reversed(rows)
         ]
@@ -359,6 +364,7 @@ class _AgentLog:
 # ---------------------------------------------------------------------------
 # LazySession
 # ---------------------------------------------------------------------------
+
 
 class LazySession:
     """Shared context for a multi-agent pipeline.
@@ -392,7 +398,10 @@ class LazySession:
         self._db = str(Path(db).resolve()) if db else None
         self.store = LazyStore(db=db)
         self.events = EventLog(
-            self.id, db=db, level=tracking, console=console,
+            self.id,
+            db=db,
+            level=tracking,
+            console=console,
             exporters=exporters,
         )
         self.graph = GraphSchema(self.id)
@@ -409,6 +418,46 @@ class LazySession:
     def remove_exporter(self, exporter: Any) -> None:
         """Unregister an event exporter."""
         self.events.remove_exporter(exporter)
+
+    # ------------------------------------------------------------------
+    # Usage summary
+    # ------------------------------------------------------------------
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Aggregate token counts and costs across all agents in this session.
+
+        Returns a dict with ``total`` and ``by_agent`` breakdowns::
+
+            {
+                "total": {"input_tokens": 1500, "output_tokens": 800, "cost_usd": 0.023},
+                "by_agent": {
+                    "researcher": {"input_tokens": 1000, ...},
+                    "writer":     {"input_tokens": 500,  ...},
+                },
+            }
+        """
+        events = self.events.get(event_type="model_response", limit=10000)
+        total = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        by_agent: dict[str, dict[str, Any]] = {}
+
+        for ev in events:
+            data = ev.get("data", {}) if isinstance(ev.get("data"), dict) else {}
+            agent_name = ev.get("agent_name", "unknown")
+
+            if agent_name not in by_agent:
+                by_agent[agent_name] = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+
+            for key in ("input_tokens", "output_tokens"):
+                val = data.get(key, 0) or 0
+                total[key] += val
+                by_agent[agent_name][key] += val
+
+            cost = data.get("cost_usd")
+            if cost is not None:
+                total["cost_usd"] += cost
+                by_agent[agent_name]["cost_usd"] += cost
+
+        return {"total": total, "by_agent": by_agent}
 
     def _register_agent(self, agent: LazyAgent) -> None:
         self.graph.add_agent(agent)
@@ -518,19 +567,13 @@ class LazySession:
         # ── Legacy path ────────────────────────────────────────────────────
         if mode is None:
             if entry_agent is None:
-                raise ValueError(
-                    "Provide mode='parallel'|'chain', or entry_agent= for single-agent delegation."
-                )
-            return LazyTool.from_agent(
-                entry_agent, name=name, description=description, guidance=guidance
-            )
+                raise ValueError("Provide mode='parallel'|'chain', or entry_agent= for single-agent delegation.")
+            return LazyTool.from_agent(entry_agent, name=name, description=description, guidance=guidance)
 
         # ── Resolve participant list ────────────────────────────────────────
         _parts: list[Any] = participants if participants is not None else list(self._agents)
         if not _parts:
-            raise ValueError(
-                "No participants found. Pass participants= or register agents in the session first."
-            )
+            raise ValueError("No participants found. Pass participants= or register agents in the session first.")
 
         _native = native_tools or []
 
@@ -587,7 +630,7 @@ class LazySession:
         *,
         tracking: TrackLevel | str = TrackLevel.BASIC,
         **kwargs: Any,
-    ) -> "LazySession":
+    ) -> LazySession:
         """Resume a session from an existing SQLite database.
 
         The store entries and event log history persisted in *db* are
@@ -617,9 +660,7 @@ class LazySession:
         # Mirrors the pattern in from_json() which also rebinds sess.id.
         try:
             with sess.events._conn() as conn:
-                row = conn.execute(
-                    "SELECT session_id FROM events ORDER BY id DESC LIMIT 1"
-                ).fetchone()
+                row = conn.execute("SELECT session_id FROM events ORDER BY id DESC LIMIT 1").fetchone()
             if row is not None:
                 sess.id = row[0]
                 sess.events.session_id = row[0]

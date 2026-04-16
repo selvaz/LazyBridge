@@ -15,22 +15,22 @@ Quick start::
 No extra dependencies required beyond the standard library.
 """
 
-from lazybridge.ext.doc_skills.doc_skills import (  # noqa: F401
-    build_skill,
-    query_skill,
-    skill_tool,
-    skill_builder_tool,
-    skill_pipeline,
+from lazybridge.ext.doc_skills.doc_skills import (
     DocChunk,
     SkillManifest,
+    build_skill,
+    query_skill,
+    skill_builder_tool,
+    skill_pipeline,
+    skill_tool,
 )
 
 __all__ = [
-    "build_skill",
-    "query_skill",
-    "skill_tool",
-    "skill_builder_tool",
-    "skill_pipeline",
     "DocChunk",
     "SkillManifest",
+    "build_skill",
+    "query_skill",
+    "skill_builder_tool",
+    "skill_pipeline",
+    "skill_tool",
 ]

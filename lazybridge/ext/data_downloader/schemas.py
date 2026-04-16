@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class DownloaderConfig(BaseModel):
     """Configuration for data downloads."""
+
     default_start: str = "2000-01-01"
     request_timeout: int = 30
     max_retries: int = 3
@@ -16,20 +17,22 @@ class DownloaderConfig(BaseModel):
 
 class TickerInfo(BaseModel):
     """Metadata for a ticker in the universe database."""
+
     ticker: str
     name: str = ""
-    source: str = ""               # YAHOO, FRED, ECB, UNKNOWN
-    source_url: str = ""           # raw Fonte value
+    source: str = ""  # YAHOO, FRED, ECB, UNKNOWN
+    source_url: str = ""  # raw Fonte value
     area: str = ""
-    asset_class: str = ""          # Layer1_AssetClass
-    benchmark: str = ""            # Layer1_Benchmark
-    sub_asset_class: str = ""      # Layer2_SubAssetClass
-    geographic_sector: str = ""    # Layer3_Geographic_Sector
-    granular: str = ""             # Layer4_Granular
+    asset_class: str = ""  # Layer1_AssetClass
+    benchmark: str = ""  # Layer1_Benchmark
+    sub_asset_class: str = ""  # Layer2_SubAssetClass
+    geographic_sector: str = ""  # Layer3_Geographic_Sector
+    granular: str = ""  # Layer4_Granular
 
 
 class FetchResult(BaseModel):
     """Result of downloading a single ticker."""
+
     ticker: str
     source: str
     ok: bool = False

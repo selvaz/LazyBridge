@@ -21,6 +21,7 @@ _logger = logging.getLogger(__name__)
 class StructuredOutputError(ValueError):
     """Raised when the model output cannot be parsed or validated against the schema."""
 
+
 _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "object": dict,
     "array": list,

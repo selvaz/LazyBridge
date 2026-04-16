@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -29,8 +29,9 @@ _logger = logging.getLogger(__name__)
 # Utilities
 # ---------------------------------------------------------------------------
 
+
 def _iso_today() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def _safe_filename(s: str) -> str:
@@ -65,6 +66,7 @@ def _guess_freq(df: pd.DataFrame) -> str:
 def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
     """HTTP GET with retry logic."""
     import requests
+
     for attempt in range(cfg.max_retries):
         try:
             r = requests.get(url, params=params, timeout=cfg.request_timeout)
@@ -73,17 +75,21 @@ def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
         except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:
             _logger.warning(
                 "HTTP GET failed (attempt %d/%d) url=%s: %s: %s",
-                attempt + 1, cfg.max_retries, url,
-                type(exc).__name__, exc,
+                attempt + 1,
+                cfg.max_retries,
+                url,
+                type(exc).__name__,
+                exc,
             )
             if attempt == cfg.max_retries - 1:
                 raise
-            time.sleep(cfg.retry_sleep * (2 ** attempt))
+            time.sleep(cfg.retry_sleep * (2**attempt))
 
 
 # ---------------------------------------------------------------------------
 # Source-specific fetchers
 # ---------------------------------------------------------------------------
+
 
 def fetch_fred(series_id: str, start: str, end: str, cfg: DownloaderConfig) -> pd.DataFrame:
     """Download a FRED series (CSV, no API key needed)."""
@@ -116,8 +122,7 @@ def fetch_ecb(key_str: str, start: str, end: str, cfg: DownloaderConfig) -> pd.D
     raw = pd.read_csv(StringIO(r.text))
     if "TIME_PERIOD" not in raw.columns or "OBS_VALUE" not in raw.columns:
         raise ValueError(f"Unexpected ECB CSV columns: {raw.columns.tolist()[:10]}")
-    df = raw[["TIME_PERIOD", "OBS_VALUE"]].rename(
-        columns={"TIME_PERIOD": "date", "OBS_VALUE": "value"})
+    df = raw[["TIME_PERIOD", "OBS_VALUE"]].rename(columns={"TIME_PERIOD": "date", "OBS_VALUE": "value"})
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df = df.dropna(subset=["date"]).sort_values("date")
@@ -127,13 +132,16 @@ def fetch_ecb(key_str: str, start: str, end: str, cfg: DownloaderConfig) -> pd.D
 
 
 def fetch_yahoo_batch(
-    tickers: list[str], start: str, end: str, cfg: DownloaderConfig,
+    tickers: list[str],
+    start: str,
+    end: str,
+    cfg: DownloaderConfig,
 ) -> dict[str, pd.DataFrame]:
     """Download multiple Yahoo Finance tickers in a single call."""
     try:
         import yfinance as yf
     except ImportError:
-        raise RuntimeError("yfinance not installed. Run: pip install yfinance")
+        raise RuntimeError("yfinance not installed. Run: pip install yfinance") from None
 
     end_query = _end_plus_days(end, cfg.yahoo_end_plus_days)
 
@@ -156,8 +164,7 @@ def fetch_yahoo_batch(
     # Extract Close / Adj Close
     if isinstance(raw.columns, pd.MultiIndex):
         fields = raw.columns.get_level_values(0).unique().tolist()
-        pick = "Adj Close" if "Adj Close" in fields else (
-            "Close" if "Close" in fields else fields[0])
+        pick = "Adj Close" if "Adj Close" in fields else ("Close" if "Close" in fields else fields[0])
         prices = raw[pick].copy()
     else:
         prices = raw.copy()
@@ -201,6 +208,7 @@ def fetch_yahoo_batch(
 # ---------------------------------------------------------------------------
 # Cache management
 # ---------------------------------------------------------------------------
+
 
 class CacheManager:
     """Parquet-based per-ticker cache with merge/dedup."""
@@ -249,6 +257,7 @@ class CacheManager:
 # Main downloader class
 # ---------------------------------------------------------------------------
 
+
 class DataDownloader:
     """Downloads market data from Yahoo/FRED/ECB with parquet caching."""
 
@@ -286,8 +295,11 @@ class DataDownloader:
                     # Already up to date
                     path = self.cache.path_for(ticker)
                     return FetchResult(
-                        ticker=ticker, source=source, ok=True,
-                        rows=len(existing), cached=True,
+                        ticker=ticker,
+                        source=source,
+                        ok=True,
+                        rows=len(existing),
+                        cached=True,
                         date_start=str(existing["date"].min().date()),
                         date_end=str(existing["date"].max().date()),
                         file_path=path,
@@ -314,7 +326,9 @@ class DataDownloader:
             path = self.cache.save(ticker, merged)
 
             return FetchResult(
-                ticker=ticker, source=source, ok=True,
+                ticker=ticker,
+                source=source,
+                ok=True,
                 rows=len(merged),
                 date_start=str(merged["date"].min().date()) if len(merged) > 0 else None,
                 date_end=str(merged["date"].max().date()) if len(merged) > 0 else None,
@@ -326,7 +340,9 @@ class DataDownloader:
         except Exception as exc:
             _logger.warning("Failed to fetch %s: %s", ticker, exc)
             return FetchResult(
-                ticker=ticker, source=source, ok=False,
+                ticker=ticker,
+                source=source,
+                ok=False,
                 error=f"{type(exc).__name__}: {exc}",
             )
 
@@ -362,19 +378,27 @@ class DataDownloader:
                 try:
                     merged = CacheManager.merge_dedup(existing, new_df)
                     path = self.cache.save(ti.ticker, merged)
-                    results.append(FetchResult(
-                        ticker=ti.ticker, source="YAHOO", ok=True,
-                        rows=len(merged),
-                        date_start=str(merged["date"].min().date()) if len(merged) > 0 else None,
-                        date_end=str(merged["date"].max().date()) if len(merged) > 0 else None,
-                        file_path=path,
-                        frequency=_guess_freq(merged),
-                    ))
+                    results.append(
+                        FetchResult(
+                            ticker=ti.ticker,
+                            source="YAHOO",
+                            ok=True,
+                            rows=len(merged),
+                            date_start=str(merged["date"].min().date()) if len(merged) > 0 else None,
+                            date_end=str(merged["date"].max().date()) if len(merged) > 0 else None,
+                            file_path=path,
+                            frequency=_guess_freq(merged),
+                        )
+                    )
                 except Exception as exc:
-                    results.append(FetchResult(
-                        ticker=ti.ticker, source="YAHOO", ok=False,
-                        error=str(exc),
-                    ))
+                    results.append(
+                        FetchResult(
+                            ticker=ti.ticker,
+                            source="YAHOO",
+                            ok=False,
+                            error=str(exc),
+                        )
+                    )
 
         # FRED/ECB one by one
         for ti in other_tickers:
@@ -405,8 +429,10 @@ class DataDownloader:
 
                 # Detect if it's value-only (FRED/macro) or OHLCV
                 freq_map = {
-                    "daily": "daily", "weekly": "weekly",
-                    "monthly": "monthly", "quarterly": "quarterly",
+                    "daily": "daily",
+                    "weekly": "weekly",
+                    "monthly": "monthly",
+                    "quarterly": "quarterly",
                     "annual": "annual",
                 }
                 freq = freq_map.get(r.frequency, "daily")

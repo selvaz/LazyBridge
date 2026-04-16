@@ -53,6 +53,7 @@ _LLM_PROMPT_VERSION = "1"
 # Public exceptions (re-exported via tools.py)
 # ---------------------------------------------------------------------------
 
+
 class ToolArgumentValidationError(ValueError):
     """Raised when tool call arguments fail validation before execution."""
 
@@ -65,17 +66,19 @@ class ToolSchemaBuildError(RuntimeError):
 # ToolSchemaMode
 # ---------------------------------------------------------------------------
 
+
 class ToolSchemaMode(StrEnum):
     """How the ToolBridge generates the canonical ToolDefinition."""
 
     SIGNATURE = "signature"  # deterministic introspection — default
-    LLM = "llm"              # schema generated entirely by an external LLM
-    HYBRID = "hybrid"        # SIGNATURE types + LLM descriptions
+    LLM = "llm"  # schema generated entirely by an external LLM
+    HYBRID = "hybrid"  # SIGNATURE types + LLM descriptions
 
 
 # ---------------------------------------------------------------------------
 # ToolSourceStatus
 # ---------------------------------------------------------------------------
+
 
 class ToolSourceStatus(StrEnum):
     """Records how the final ToolDefinition in a ToolCompileArtifact was produced."""
@@ -96,6 +99,7 @@ class ToolSourceStatus(StrEnum):
 # ---------------------------------------------------------------------------
 # ToolCompileArtifact
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ToolCompileArtifact:
@@ -132,6 +136,7 @@ class ToolCompileArtifact:
 # ---------------------------------------------------------------------------
 # ArtifactStore protocol + InMemoryArtifactStore
 # ---------------------------------------------------------------------------
+
 
 class ArtifactStore(typing.Protocol):
     """Minimal interface for ToolCompileArtifact caching.
@@ -177,6 +182,7 @@ class InMemoryArtifactStore:
 # Phase 1 — compile input + fingerprinting (private)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class _CompileInput:
     """Canonical, hashable representation of all inputs to schema compilation."""
@@ -185,7 +191,7 @@ class _CompileInput:
     func_source_hash: str
     name: str
     description: str
-    mode: str           # ToolSchemaMode.value
+    mode: str  # ToolSchemaMode.value
     strict: bool
     schema_llm_id: str  # stable identifier; "" when schema_llm is None
     compiler_version: str
@@ -222,7 +228,7 @@ def _schema_llm_id(schema_llm: Any) -> str:
     if schema_llm is None:
         return ""
     if hasattr(schema_llm, "__qualname__"):
-        return getattr(schema_llm, "__qualname__")
+        return schema_llm.__qualname__
     return type(schema_llm).__qualname__
 
 
@@ -268,9 +274,7 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     args = getattr(annotation, "__args__", ()) or ()
 
     # Detect both typing.Union[X, Y] and native str | int (Python 3.10+)
-    is_union = origin is typing.Union or (
-        _NATIVE_UNION_TYPE is not None and isinstance(annotation, _NATIVE_UNION_TYPE)
-    )
+    is_union = origin is typing.Union or (_NATIVE_UNION_TYPE is not None and isinstance(annotation, _NATIVE_UNION_TYPE))
     if is_union and not args:
         args = getattr(annotation, "__args__", ()) or ()
 
@@ -289,7 +293,7 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
             if isinstance(meta, str) and meta:
                 return {**base, "description": meta}
             # pydantic.fields.FieldInfo and similar objects with .description
-            if hasattr(meta, "description") and isinstance(getattr(meta, "description"), str):
+            if hasattr(meta, "description") and isinstance(meta.description, str):
                 desc = meta.description
                 if desc:
                     return {**base, "description": desc}
@@ -421,15 +425,14 @@ def _make_arg_model(func: Callable) -> type | None:
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
         annotation = hints.get(name, Any)
-        fields[name] = (
-            (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
-        )
+        fields[name] = (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
 
     if not fields:
         return None  # zero-arg or pure **kwargs — nothing to validate
 
     try:
         from pydantic import ConfigDict
+
         model = _create_model(
             f"_{func.__name__}_args",
             __config__=ConfigDict(
@@ -463,18 +466,14 @@ def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) ->
         validated = model_cls.model_validate(arguments)  # type: ignore[attr-defined]
         return validated.model_dump()
     except _ValidationError as exc:
-        errors = "; ".join(
-            f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-            for e in exc.errors()
-        )
-        raise ToolArgumentValidationError(
-            f"Invalid arguments for '{func.__name__}': {errors}"
-        ) from exc
+        errors = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
+        raise ToolArgumentValidationError(f"Invalid arguments for '{func.__name__}': {errors}") from exc
 
 
 # ---------------------------------------------------------------------------
 # LLM-assisted schema helpers (private)
 # ---------------------------------------------------------------------------
+
 
 class _LLMParamDef(_BaseModel):
     """Single parameter description returned by the LLM in LLM mode."""
@@ -518,14 +517,14 @@ def _call_schema_llm(schema_llm: Any, prompt: str, schema: type) -> Any:
         return schema.model_validate(raw)  # type: ignore[attr-defined]
     except Exception as exc:
         raise ToolSchemaBuildError(
-            f"schema_llm failed to produce a valid tool schema "
-            f"(schema={schema.__name__}): {exc}"
+            f"schema_llm failed to produce a valid tool schema (schema={schema.__name__}): {exc}"
         ) from exc
 
 
 # ---------------------------------------------------------------------------
 # $ref flattening utility
 # ---------------------------------------------------------------------------
+
 
 def _flatten_refs(schema: dict) -> dict:
     """Inline all ``$ref`` / ``$defs`` entries in a JSON Schema, returning a flat copy.
@@ -565,7 +564,7 @@ def _flatten_refs(schema: dict) -> dict:
         if "$ref" in node:
             ref: str = node["$ref"]
             if ref.startswith("#/$defs/"):
-                def_name = ref[len("#/$defs/"):]
+                def_name = ref[len("#/$defs/") :]
                 # Circular reference guard: if this def is already being
                 # expanded on the current path, leave the $ref intact.
                 if def_name not in visited and def_name in defs:
@@ -584,6 +583,7 @@ def _flatten_refs(schema: dict) -> dict:
 # ---------------------------------------------------------------------------
 # ToolSchemaBuilder
 # ---------------------------------------------------------------------------
+
 
 class ToolSchemaBuilder:
     """Generates a canonical ToolDefinition (or ToolCompileArtifact) from a Python callable.
@@ -713,9 +713,7 @@ class ToolSchemaBuilder:
             # minor docstring edits don't invalidate the fingerprint.
             effective_desc = doc.splitlines()[0].strip() if doc else ""
 
-        compile_input = _make_compile_input(
-            func, effective_name, effective_desc, mode, strict, schema_llm
-        )
+        compile_input = _make_compile_input(func, effective_name, effective_desc, mode, strict, schema_llm)
         # 24-char hex fingerprint uniquely identifies this compile configuration.
         fp = compile_input.fingerprint()
 
@@ -726,15 +724,12 @@ class ToolSchemaBuilder:
                 # ToolCompileArtifact is a frozen dataclass so dataclasses.replace
                 # is used to produce a modified copy without mutating the stored obj.
                 from dataclasses import replace as _replace
+
                 return _replace(cached, cache_hit=True)
 
         # For LLM/HYBRID modes, pass the original (possibly None) description so the
         # LLM result takes precedence over the auto-extracted docstring.
-        desc_for_compile = (
-            description
-            if mode in (ToolSchemaMode.LLM, ToolSchemaMode.HYBRID)
-            else effective_desc
-        )
+        desc_for_compile = description if mode in (ToolSchemaMode.LLM, ToolSchemaMode.HYBRID) else effective_desc
         artifact = self._compile(
             func,
             name=effective_name,
@@ -748,6 +743,7 @@ class ToolSchemaBuilder:
         if self._flatten_refs:
             # Opt-in: inline all $ref/$defs for providers that don't handle them.
             from dataclasses import replace as _replace
+
             flat_params = _flatten_refs(artifact.definition.parameters)
             flat_defn = _replace(artifact.definition, parameters=flat_params)
             artifact = _replace(artifact, definition=flat_defn)
@@ -795,10 +791,7 @@ class ToolSchemaBuilder:
             except ToolSchemaBuildError as _llm_err:
                 # Graceful degradation: if the LLM call fails, fall back to the
                 # SIGNATURE baseline rather than raising to the caller.
-                msg = (
-                    f"ToolSchemaMode.LLM schema_llm call failed ({_llm_err}); "
-                    "falling back to SIGNATURE mode."
-                )
+                msg = f"ToolSchemaMode.LLM schema_llm call failed ({_llm_err}); falling back to SIGNATURE mode."
                 warnings.warn(msg, stacklevel=4)
                 compile_warnings.append(msg)
                 return ToolCompileArtifact(
@@ -832,16 +825,17 @@ class ToolSchemaBuilder:
             if schema_llm is not None:
                 try:
                     defn, llm_fields, extra_warnings = self._build_hybrid_mode(
-                        func, name=name, description=description, strict=strict,
-                        schema_llm=schema_llm, baseline=baseline,
+                        func,
+                        name=name,
+                        description=description,
+                        strict=strict,
+                        schema_llm=schema_llm,
+                        baseline=baseline,
                     )
                     compile_warnings.extend(extra_warnings)
                 except ToolSchemaBuildError as _llm_err:
                     # Graceful degradation: use baseline if enrichment fails.
-                    msg = (
-                        f"ToolSchemaMode.HYBRID schema_llm call failed ({_llm_err}); "
-                        "falling back to SIGNATURE mode."
-                    )
+                    msg = f"ToolSchemaMode.HYBRID schema_llm call failed ({_llm_err}); falling back to SIGNATURE mode."
                     warnings.warn(msg, stacklevel=4)
                     compile_warnings.append(msg)
                     return ToolCompileArtifact(
@@ -916,14 +910,15 @@ class ToolSchemaBuilder:
         except (NameError, AttributeError) as exc:
             _logger.debug(
                 "Cannot resolve type hints for %r (forward ref or missing attr): %s",
-                func.__qualname__, exc,
+                func.__qualname__,
+                exc,
             )
             resolved_hints = {}
         except Exception as exc:
             _logger.error(
-                "Could not resolve type hints for %r: %s. "
-                "Parameter types will be untyped.",
-                func.__qualname__, exc,
+                "Could not resolve type hints for %r: %s. Parameter types will be untyped.",
+                func.__qualname__,
+                exc,
             )
             resolved_hints = {}
 
@@ -941,9 +936,7 @@ class ToolSchemaBuilder:
             ):
                 continue
             annotation = resolved_hints.get(param_name, inspect.Parameter.empty)
-            prop: dict[str, Any] = (
-                {} if annotation is inspect.Parameter.empty else _annotation_to_schema(annotation)
-            )
+            prop: dict[str, Any] = {} if annotation is inspect.Parameter.empty else _annotation_to_schema(annotation)
             if "description" not in prop and param_name in doc_params:
                 prop["description"] = doc_params[param_name]
             properties[param_name] = prop
@@ -983,13 +976,13 @@ class ToolSchemaBuilder:
             "Analyze this Python function and generate a tool definition for it.\n\n"
             f"```python\n{source}\n```\n\n"
             "Return a JSON object with:\n"
-            '- name: snake_case tool name\n'
-            '- description: one clear sentence describing what the tool does\n'
-            '- params: object where each key is a parameter name and the value has:\n'
+            "- name: snake_case tool name\n"
+            "- description: one clear sentence describing what the tool does\n"
+            "- params: object where each key is a parameter name and the value has:\n"
             '  - type: one of "string","integer","number","boolean","array","object"'
-            ' (empty string if unknown)\n'
-            '  - description: what this parameter is for\n'
-            '  - required: true if the parameter has no default value\n'
+            " (empty string if unknown)\n"
+            "  - description: what this parameter is for\n"
+            "  - required: true if the parameter has no default value\n"
         )
 
         result: _LLMToolSchema = _call_schema_llm(schema_llm, prompt, _LLMToolSchema)
@@ -1113,6 +1106,7 @@ class ToolSchemaBuilder:
 # Helpers shared across build modes
 # ---------------------------------------------------------------------------
 
+
 def _get_source_or_stub(func: Callable) -> str:
     """Return source code or a best-effort stub for ``func``."""
     try:
@@ -1134,9 +1128,11 @@ def _sig_required_params(func: Callable) -> set[str]:
     try:
         sig = inspect.signature(func)
         return {
-            p for p, param in sig.parameters.items()
+            p
+            for p, param in sig.parameters.items()
             if param.default is inspect.Parameter.empty
-            and param.kind not in (
+            and param.kind
+            not in (
                 inspect.Parameter.VAR_POSITIONAL,
                 inspect.Parameter.VAR_KEYWORD,
             )

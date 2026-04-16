@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from lazybridge.lazy_tool import LazyTool
 from lazybridge.ext.data_downloader.downloader import DataDownloader
 from lazybridge.ext.data_downloader.ticker_db import TickerDatabase
+from lazybridge.lazy_tool import LazyTool
 
 
 def _error(exc: Exception) -> dict:
@@ -33,8 +33,12 @@ def downloader_tools(
     # -- list_universe ---------------------------------------------------
 
     def list_universe(
-        asset_class: Annotated[str | None, "Filter by asset class: EQUITY, FIXED_INCOME, COMMODITIES, REAL_ESTATE, ALTERNATIVES, MACRO, FX"] = None,
-        sub_asset_class: Annotated[str | None, "Filter by sub-asset class (e.g. 'Developed', 'Government', 'Energy')"] = None,
+        asset_class: Annotated[
+            str | None, "Filter by asset class: EQUITY, FIXED_INCOME, COMMODITIES, REAL_ESTATE, ALTERNATIVES, MACRO, FX"
+        ] = None,
+        sub_asset_class: Annotated[
+            str | None, "Filter by sub-asset class (e.g. 'Developed', 'Government', 'Energy')"
+        ] = None,
     ) -> dict[str, Any]:
         """List available tickers from the 140-ticker universe database.
 
@@ -50,10 +54,12 @@ def downloader_tools(
                 return {
                     "total": len(tickers),
                     "filters_applied": {
-                        k: v for k, v in [
+                        k: v
+                        for k, v in [
                             ("asset_class", asset_class),
                             ("sub_asset_class", sub_asset_class),
-                        ] if v
+                        ]
+                        if v
                     },
                     "tickers": [
                         {
@@ -131,10 +137,15 @@ def downloader_tools(
                 else:
                     # Not in universe — default to Yahoo
                     from lazybridge.ext.data_downloader.schemas import TickerInfo
-                    ticker_infos.append(TickerInfo(
-                        ticker=sym, name=sym, source="YAHOO",
-                        source_url="Yahoo Finance",
-                    ))
+
+                    ticker_infos.append(
+                        TickerInfo(
+                            ticker=sym,
+                            name=sym,
+                            source="YAHOO",
+                            source_url="Yahoo Finance",
+                        )
+                    )
                     unknown.append(sym)
 
             # Download and optionally register
@@ -154,13 +165,9 @@ def downloader_tools(
                 "results": [r.model_dump() for r in results],
             }
             if unknown:
-                summary["note"] = (
-                    f"Tickers not in universe (defaulted to Yahoo): {unknown}"
-                )
+                summary["note"] = f"Tickers not in universe (defaulted to Yahoo): {unknown}"
             if auto_register and ok:
-                summary["registered_datasets"] = [
-                    r.registered_as for r in ok if r.registered_as
-                ]
+                summary["registered_datasets"] = [r.registered_as for r in ok if r.registered_as]
 
             return summary
         except Exception as exc:
@@ -170,23 +177,26 @@ def downloader_tools(
 
     return [
         LazyTool.from_function(
-            list_universe, name="list_universe",
+            list_universe,
+            name="list_universe",
             description="Browse the 140-ticker universe by asset class",
             guidance="Call to see what tickers are available for download. "
-                     "Filter by asset_class (EQUITY, FIXED_INCOME, COMMODITIES, "
-                     "REAL_ESTATE, ALTERNATIVES, MACRO, FX) or sub_asset_class.",
+            "Filter by asset_class (EQUITY, FIXED_INCOME, COMMODITIES, "
+            "REAL_ESTATE, ALTERNATIVES, MACRO, FX) or sub_asset_class.",
         ),
         LazyTool.from_function(
-            search_tickers, name="search_tickers",
+            search_tickers,
+            name="search_tickers",
             description="Search tickers by name, symbol, sector, or country",
             guidance="Use to find specific tickers. Supports partial matches: "
-                     "'gold', 'treasury', 'emerging', 'technology', etc.",
+            "'gold', 'treasury', 'emerging', 'technology', etc.",
         ),
         LazyTool.from_function(
-            download_tickers, name="download_tickers",
+            download_tickers,
+            name="download_tickers",
             description="Download market data and register in stat_runtime for analysis",
             guidance="Provide ticker symbols. Sources auto-detected from universe. "
-                     "Data is cached incrementally. Set register=True (default) to "
-                     "auto-register for use with discover_data() and analyze().",
+            "Data is cached incrementally. Set register=True (default) to "
+            "auto-register for use with discover_data() and analyze().",
         ),
     ]

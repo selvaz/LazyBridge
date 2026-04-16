@@ -13,6 +13,7 @@ from lazybridge.ext.stat_runtime.schemas import (
     ModelSpec,
 )
 
+
 class BaseEngine(ABC):
     """Abstract model engine.  One subclass per ModelFamily.
 

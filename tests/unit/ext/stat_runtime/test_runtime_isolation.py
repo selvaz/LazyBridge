@@ -7,8 +7,6 @@ Tests that:
 - OLS forecast rejects exogenous models
 """
 
-import pytest
-
 from lazybridge.ext.stat_runtime.persistence import MetaStore
 from lazybridge.ext.stat_runtime.schemas import DatasetMeta, RunRecord, RunStatus
 from lazybridge.ext.stat_runtime.tools import stat_tools
@@ -24,12 +22,14 @@ class TestRuntimeIsolation:
             def __init__(self, name):
                 self._name = name
                 self.meta_store = MetaStore()
-                self.catalog = type("Cat", (), {
-                    "list_datasets": lambda self_: [
-                        DatasetMeta(name=f"ds_{self_._rt_name}", uri="/fake")
-                    ],
-                    "_rt_name": name,
-                })()
+                self.catalog = type(
+                    "Cat",
+                    (),
+                    {
+                        "list_datasets": lambda self_: [DatasetMeta(name=f"ds_{self_._rt_name}", uri="/fake")],
+                        "_rt_name": name,
+                    },
+                )()
 
         rt1 = FakeRuntime("rt1")
         rt2 = FakeRuntime("rt2")
@@ -57,8 +57,7 @@ class TestRuntimeIsolation:
                 self.meta_store = MetaStore()
 
             def get_run(self, run_id):
-                return RunRecord(run_id=run_id, engine=self._name,
-                                 status=RunStatus.SUCCESS)
+                return RunRecord(run_id=run_id, engine=self._name, status=RunStatus.SUCCESS)
 
         rt1 = FakeRuntime("engine_rt1")
         rt2 = FakeRuntime("engine_rt2")

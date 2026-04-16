@@ -19,6 +19,7 @@ _logger = logging.getLogger(__name__)
 # Stationarity tests
 # ---------------------------------------------------------------------------
 
+
 def adf_test(
     series: np.ndarray,
     *,
@@ -44,7 +45,7 @@ def adf_test(
         interpretation=(
             f"ADF statistic = {stat:.4f}, p-value = {pvalue:.4f}. "
             f"{'Series is stationary' if passed else 'Series is non-stationary (has unit root)'} "
-            f"at the {significance*100:.0f}% significance level."
+            f"at the {significance * 100:.0f}% significance level."
         ),
     )
 
@@ -59,10 +60,13 @@ def kpss_test(
     """KPSS test for stationarity (null = stationary)."""
     sm_tsa = _import_sm_tsa()
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         stat, pvalue, lags, crit = sm_tsa.stattools.kpss(
-            series, regression=regression, nlags=nlags,
+            series,
+            regression=regression,
+            nlags=nlags,
         )
     stat, pvalue = float(stat), float(pvalue)
     # KPSS: reject null (stationary) if p < significance → NOT stationary
@@ -80,7 +84,7 @@ def kpss_test(
         interpretation=(
             f"KPSS statistic = {stat:.4f}, p-value = {pvalue:.4f}. "
             f"{'Series is stationary' if passed else 'Series is NOT stationary'} "
-            f"at the {significance*100:.0f}% level. "
+            f"at the {significance * 100:.0f}% level. "
             f"(KPSS null hypothesis: series is stationary.)"
         ),
     )
@@ -89,6 +93,7 @@ def kpss_test(
 # ---------------------------------------------------------------------------
 # Residual diagnostics
 # ---------------------------------------------------------------------------
+
 
 def ljung_box_test(
     residuals: np.ndarray,
@@ -113,7 +118,7 @@ def ljung_box_test(
         interpretation=(
             f"Ljung-Box Q({lags}) = {stat:.4f}, p-value = {pvalue:.4f}. "
             f"{'No significant serial correlation' if passed else 'Serial correlation detected'} "
-            f"in residuals at the {significance*100:.0f}% level."
+            f"in residuals at the {significance * 100:.0f}% level."
         ),
     )
 
@@ -139,7 +144,7 @@ def jarque_bera_test(
             f"Jarque-Bera = {stat:.4f}, p-value = {pvalue:.4f}. "
             f"Skew = {skew:.4f}, Kurtosis = {kurtosis:.4f}. "
             f"{'Residuals are approximately normal' if passed else 'Residuals deviate from normality'} "
-            f"at the {significance*100:.0f}% level."
+            f"at the {significance * 100:.0f}% level."
         ),
     )
 
@@ -164,16 +169,14 @@ def durbin_watson_test(residuals: np.ndarray) -> DiagnosticResult:
         statistic=stat,
         passed=passed,
         detail={"range": "0-4, ideal ~2"},
-        interpretation=(
-            f"Durbin-Watson = {stat:.4f}. "
-            f"Indicates {interp} (range: 0-4, ideal near 2)."
-        ),
+        interpretation=(f"Durbin-Watson = {stat:.4f}. Indicates {interp} (range: 0-4, ideal near 2)."),
     )
 
 
 # ---------------------------------------------------------------------------
 # Model comparison
 # ---------------------------------------------------------------------------
+
 
 def compare_models(runs: list[RunRecord]) -> DiagnosticResult:
     """Compare multiple model runs by AIC and BIC."""
@@ -185,14 +188,16 @@ def compare_models(runs: list[RunRecord]) -> DiagnosticResult:
 
     comparison: list[dict[str, Any]] = []
     for run in runs:
-        comparison.append({
-            "run_id": run.run_id,
-            "engine": run.engine,
-            "dataset": run.dataset_name,
-            "aic": run.metrics_json.get("aic"),
-            "bic": run.metrics_json.get("bic"),
-            "log_likelihood": run.metrics_json.get("log_likelihood"),
-        })
+        comparison.append(
+            {
+                "run_id": run.run_id,
+                "engine": run.engine,
+                "dataset": run.dataset_name,
+                "aic": run.metrics_json.get("aic"),
+                "bic": run.metrics_json.get("bic"),
+                "log_likelihood": run.metrics_json.get("log_likelihood"),
+            }
+        )
 
     # Find best by AIC and BIC
     valid_aic = [c for c in comparison if c["aic"] is not None]
@@ -202,9 +207,13 @@ def compare_models(runs: list[RunRecord]) -> DiagnosticResult:
 
     interp_parts = [f"Compared {len(runs)} model runs."]
     if best_aic:
-        interp_parts.append(f"Best AIC: {best_aic['engine']} (run {best_aic['run_id'][:8]}, AIC={best_aic['aic']:.2f}).")
+        interp_parts.append(
+            f"Best AIC: {best_aic['engine']} (run {best_aic['run_id'][:8]}, AIC={best_aic['aic']:.2f})."
+        )
     if best_bic:
-        interp_parts.append(f"Best BIC: {best_bic['engine']} (run {best_bic['run_id'][:8]}, BIC={best_bic['bic']:.2f}).")
+        interp_parts.append(
+            f"Best BIC: {best_bic['engine']} (run {best_bic['run_id'][:8]}, BIC={best_bic['bic']:.2f})."
+        )
 
     return DiagnosticResult(
         test_name="Model Comparison",
@@ -217,25 +226,33 @@ def compare_models(runs: list[RunRecord]) -> DiagnosticResult:
 # Lazy imports
 # ---------------------------------------------------------------------------
 
+
 def _import_sm_tsa():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     import statsmodels.tsa.stattools as _stattools
+
     # Return a namespace object that exposes .stattools
     class _ns:
         stattools = _stattools
+
     return _ns()
 
 
 def _import_sm_diagnostic():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     from statsmodels.stats import diagnostic
+
     return diagnostic
 
 
 def _import_sm_stats():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     from statsmodels.stats import stattools
+
     return stattools

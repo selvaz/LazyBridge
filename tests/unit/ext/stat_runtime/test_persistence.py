@@ -89,8 +89,11 @@ class TestRunCRUD:
 class TestArtifactCRUD:
     def test_save_and_list(self, store):
         art = ArtifactRecord(
-            run_id="run1", name="volatility", artifact_type="plot",
-            file_format="png", path="/artifacts/run1/plots/volatility.png",
+            run_id="run1",
+            name="volatility",
+            artifact_type="plot",
+            file_format="png",
+            path="/artifacts/run1/plots/volatility.png",
         )
         store.save_artifact(art)
         arts = store.list_artifacts(run_id="run1")
@@ -98,14 +101,24 @@ class TestArtifactCRUD:
         assert arts[0].name == "volatility"
 
     def test_filter_by_type(self, store):
-        store.save_artifact(ArtifactRecord(
-            run_id="run1", name="vol", artifact_type="plot",
-            file_format="png", path="/a",
-        ))
-        store.save_artifact(ArtifactRecord(
-            run_id="run1", name="spec", artifact_type="summary",
-            file_format="json", path="/b",
-        ))
+        store.save_artifact(
+            ArtifactRecord(
+                run_id="run1",
+                name="vol",
+                artifact_type="plot",
+                file_format="png",
+                path="/a",
+            )
+        )
+        store.save_artifact(
+            ArtifactRecord(
+                run_id="run1",
+                name="spec",
+                artifact_type="summary",
+                file_format="json",
+                path="/b",
+            )
+        )
         plots = store.list_artifacts(run_id="run1", artifact_type="plot")
         assert len(plots) == 1
         assert plots[0].name == "vol"

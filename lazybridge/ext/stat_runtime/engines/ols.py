@@ -59,10 +59,7 @@ class OLSEngine(BaseEngine):
             extra={
                 "has_exog": has_exog,
                 "p_values": p_values,
-                "std_errors": {
-                    name: float(se)
-                    for name, se in zip(result.model.exog_names, result.bse)
-                },
+                "std_errors": {name: float(se) for name, se in zip(result.model.exog_names, result.bse)},
                 "_result_obj": result,  # kept in memory for forecast, not persisted
             },
         )
@@ -115,6 +112,7 @@ class OLSEngine(BaseEngine):
             jarque_bera_test,
             ljung_box_test,
         )
+
         residuals = np.array(fit_result.residuals_json)
         return [
             durbin_watson_test(residuals),
@@ -125,6 +123,8 @@ class OLSEngine(BaseEngine):
 
 def _import_sm():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     import statsmodels.api as sm
+
     return sm

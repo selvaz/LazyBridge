@@ -14,6 +14,6 @@ Optional dependencies::
     pip install lazybridge[tools]   # installs pypdf, python-docx, trafilatura
 """
 
-from lazybridge.ext.read_docs.read_docs import read_folder_docs  # noqa: F401
+from lazybridge.ext.read_docs.read_docs import read_folder_docs
 
 __all__ = ["read_folder_docs"]

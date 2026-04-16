@@ -43,7 +43,7 @@ _REASONING_MODELS = frozenset({"deepseek-reasoner"})
 # Price per 1M tokens (input, output). Approximate; verify at platform.deepseek.com/api-docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "deepseek-reasoner": (0.55, 2.19),
-    "deepseek-chat":     (0.14, 0.28),
+    "deepseek-chat": (0.14, 0.28),
 }
 
 
@@ -76,6 +76,7 @@ class DeepSeekProvider(OpenAIProvider):
 
     def _init_client(self, **kwargs) -> None:
         import os
+
         try:
             import openai as _openai
         except ImportError:
@@ -107,6 +108,7 @@ class DeepSeekProvider(OpenAIProvider):
                 # Auto-switch to reasoning model
                 import dataclasses
                 import warnings
+
                 warnings.warn(
                     f"DeepSeek: thinking requested but model '{model}' does not support "
                     "reasoning. Automatically switching to 'deepseek-reasoner'. "
@@ -123,9 +125,7 @@ class DeepSeekProvider(OpenAIProvider):
 
     def _parse_deepseek_chat_response(self, response, model: str) -> CompletionResponse:
         if not response.choices:
-            _logger.warning(
-                "DeepSeek response has no choices (content filter, quota, or API error)."
-            )
+            _logger.warning("DeepSeek response has no choices (content filter, quota, or API error).")
             usage = UsageStats(
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -146,11 +146,13 @@ class DeepSeekProvider(OpenAIProvider):
         tool_calls = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=_safe_json_loads(tc.function.arguments),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=_safe_json_loads(tc.function.arguments),
+                    )
+                )
         usage = UsageStats(
             input_tokens=response.usage.prompt_tokens if response.usage else 0,
             output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -181,6 +183,7 @@ class DeepSeekProvider(OpenAIProvider):
 
         if request.structured_output:
             from lazybridge.core.structured import apply_structured_validation
+
             apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
@@ -241,6 +244,7 @@ class DeepSeekProvider(OpenAIProvider):
                     )
                     if request.structured_output:
                         from lazybridge.core.structured import apply_structured_validation
+
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk
 
@@ -257,6 +261,7 @@ class DeepSeekProvider(OpenAIProvider):
 
         if request.structured_output:
             from lazybridge.core.structured import apply_structured_validation
+
             apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
@@ -316,5 +321,6 @@ class DeepSeekProvider(OpenAIProvider):
                     )
                     if request.structured_output:
                         from lazybridge.core.structured import apply_structured_validation
+
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk

@@ -63,9 +63,11 @@ class MarkovEngine(BaseEngine):
         # Regime means and variances
         regime_info = {}
         for regime in range(k_regimes):
-            regime_info[f"regime_{regime}_duration"] = float(
-                1.0 / (1.0 - result.regime_transition[regime, regime])
-            ) if result.regime_transition[regime, regime] < 1.0 else float("inf")
+            regime_info[f"regime_{regime}_duration"] = (
+                float(1.0 / (1.0 - result.regime_transition[regime, regime]))
+                if result.regime_transition[regime, regime] < 1.0
+                else float("inf")
+            )
 
         return FitResult(
             family=ModelFamily.MARKOV,
@@ -99,10 +101,7 @@ class MarkovEngine(BaseEngine):
         transition = np.array(fit_result.extra["transition_matrix"])
 
         # Get last regime probabilities
-        last_probs = np.array([
-            fit_result.extra["smoothed_probabilities"][f"regime_{r}"][-1]
-            for r in range(k_regimes)
-        ])
+        last_probs = np.array([fit_result.extra["smoothed_probabilities"][f"regime_{r}"][-1] for r in range(k_regimes)])
 
         # Extract regime-specific intercepts from params
         regime_means = []
@@ -123,6 +122,7 @@ class MarkovEngine(BaseEngine):
         residuals = np.array(fit_result.residuals_json)
         std = float(np.std(residuals)) if len(residuals) > 0 else 1.0
         from scipy.stats import norm
+
         z = norm.ppf((1 + ci_level) / 2)
 
         pf = np.array(point_forecast)
@@ -148,6 +148,7 @@ class MarkovEngine(BaseEngine):
             jarque_bera_test,
             ljung_box_test,
         )
+
         residuals = np.array(fit_result.residuals_json)
         results = [
             ljung_box_test(residuals, lags=min(10, len(residuals) // 5)),
@@ -163,22 +164,26 @@ class MarkovEngine(BaseEngine):
                 axis=0,
             )
             avg_certainty = float(np.mean(max_probs))
-            results.append(DiagnosticResult(
-                test_name="Regime Classification Certainty",
-                statistic=avg_certainty,
-                passed=avg_certainty > 0.7,
-                interpretation=(
-                    f"Average regime classification certainty: {avg_certainty:.3f}. "
-                    f"{'Good' if avg_certainty > 0.7 else 'Weak'} regime separation "
-                    f"(threshold: 0.70)."
-                ),
-            ))
+            results.append(
+                DiagnosticResult(
+                    test_name="Regime Classification Certainty",
+                    statistic=avg_certainty,
+                    passed=avg_certainty > 0.7,
+                    interpretation=(
+                        f"Average regime classification certainty: {avg_certainty:.3f}. "
+                        f"{'Good' if avg_certainty > 0.7 else 'Weak'} regime separation "
+                        f"(threshold: 0.70)."
+                    ),
+                )
+            )
 
         return results
 
 
 def _import_markov():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+
     return MarkovRegression

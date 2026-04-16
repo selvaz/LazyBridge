@@ -27,10 +27,11 @@ from typing import Any
 # Entry
 # ---------------------------------------------------------------------------
 
+
 class StoreEntry:
     """A single value stored in LazyStore."""
 
-    __slots__ = ("key", "value", "agent_id", "written_at")
+    __slots__ = ("agent_id", "key", "value", "written_at")
 
     def __init__(self, key: str, value: Any, agent_id: str | None = None) -> None:
         self.key = key
@@ -45,6 +46,7 @@ class StoreEntry:
 # ---------------------------------------------------------------------------
 # InMemory backend
 # ---------------------------------------------------------------------------
+
 
 class _InMemoryBackend:
     def __init__(self) -> None:
@@ -93,6 +95,7 @@ class _InMemoryBackend:
 # SQLite backend
 # ---------------------------------------------------------------------------
 
+
 class _SQLiteBackend:
     _SCHEMA = """
     CREATE TABLE IF NOT EXISTS store_entries (
@@ -131,16 +134,13 @@ class _SQLiteBackend:
         now = datetime.now(UTC).isoformat()
         with self._conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO store_entries (key, value_json, agent_id, written_at)"
-                " VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO store_entries (key, value_json, agent_id, written_at) VALUES (?, ?, ?, ?)",
                 (key, json.dumps(value), agent_id, now),
             )
 
     def read(self, key: str) -> Any:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT value_json FROM store_entries WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT value_json FROM store_entries WHERE key = ?", (key,)).fetchone()
         return json.loads(row[0]) if row else None
 
     def read_entry(self, key: str) -> StoreEntry | None:
@@ -157,9 +157,7 @@ class _SQLiteBackend:
 
     def read_all(self) -> dict[str, Any]:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT key, value_json FROM store_entries"
-            ).fetchall()
+            rows = conn.execute("SELECT key, value_json FROM store_entries").fetchall()
         return {row[0]: json.loads(row[1]) for row in rows}
 
     def read_by_agent(self, agent_id: str) -> dict[str, Any]:
@@ -185,9 +183,7 @@ class _SQLiteBackend:
 
     def entries(self) -> list[StoreEntry]:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT key, value_json, agent_id, written_at FROM store_entries"
-            ).fetchall()
+            rows = conn.execute("SELECT key, value_json, agent_id, written_at FROM store_entries").fetchall()
         result = []
         for row in rows:
             e = StoreEntry(row[0], json.loads(row[1]), row[2])
@@ -199,6 +195,7 @@ class _SQLiteBackend:
 # ---------------------------------------------------------------------------
 # LazyStore (public façade)
 # ---------------------------------------------------------------------------
+
 
 class LazyStore:
     """Shared key-value blackboard for agent pipelines.
@@ -215,9 +212,7 @@ class LazyStore:
     """
 
     def __init__(self, db: str | None = None) -> None:
-        self._backend: _InMemoryBackend | _SQLiteBackend = (
-            _SQLiteBackend(db) if db else _InMemoryBackend()
-        )
+        self._backend: _InMemoryBackend | _SQLiteBackend = _SQLiteBackend(db) if db else _InMemoryBackend()
 
     # ------------------------------------------------------------------
     # Write
@@ -343,7 +338,7 @@ class LazyStore:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.keys)
 
-    async def aread_entry(self, key: str) -> "StoreEntry | None":
+    async def aread_entry(self, key: str) -> StoreEntry | None:
         """Async-safe read_entry."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.read_entry(key))

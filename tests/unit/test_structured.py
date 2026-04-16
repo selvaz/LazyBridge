@@ -1,9 +1,10 @@
 """Unit tests for core/structured.py — T10.xx series."""
+
 from __future__ import annotations
 
-import json
 import pytest
 from pydantic import BaseModel
+
 from lazybridge.core.structured import (
     StructuredOutputError,
     build_repair_messages,
@@ -12,10 +13,10 @@ from lazybridge.core.structured import (
 )
 from lazybridge.core.types import Message
 
-
 # ---------------------------------------------------------------------------
 # T10.01 — parse valid JSON against a dict schema
 # ---------------------------------------------------------------------------
+
 
 def test_parse_valid_json_dict_schema():
     # T10.01
@@ -31,6 +32,7 @@ def test_parse_valid_json_dict_schema():
 # ---------------------------------------------------------------------------
 # T10.02 — parse valid JSON against a Pydantic model
 # ---------------------------------------------------------------------------
+
 
 class _City(BaseModel):
     name: str
@@ -49,6 +51,7 @@ def test_parse_valid_json_pydantic():
 # T10.03 — markdown code fence stripped before parsing
 # ---------------------------------------------------------------------------
 
+
 def test_parse_strips_markdown_fence():
     # T10.03
     raw = '```json\n{"name": "Berlin", "country": "Germany"}\n```'
@@ -59,6 +62,7 @@ def test_parse_strips_markdown_fence():
 # ---------------------------------------------------------------------------
 # T10.04 — markdown fence without language tag stripped
 # ---------------------------------------------------------------------------
+
 
 def test_parse_strips_fence_no_lang():
     # T10.04
@@ -71,6 +75,7 @@ def test_parse_strips_fence_no_lang():
 # T10.05 — invalid JSON raises StructuredOutputError
 # ---------------------------------------------------------------------------
 
+
 def test_parse_invalid_json_raises():
     # T10.05
     with pytest.raises(StructuredOutputError, match="JSON parse error"):
@@ -80,6 +85,7 @@ def test_parse_invalid_json_raises():
 # ---------------------------------------------------------------------------
 # T10.06 — dict schema validation failure raises StructuredOutputError
 # ---------------------------------------------------------------------------
+
 
 def test_parse_schema_validation_failure():
     # T10.06
@@ -96,6 +102,7 @@ def test_parse_schema_validation_failure():
 # T10.07 — missing required field raises StructuredOutputError
 # ---------------------------------------------------------------------------
 
+
 def test_parse_missing_required_raises():
     # T10.07
     schema = {
@@ -111,6 +118,7 @@ def test_parse_missing_required_raises():
 # T10.08 — Pydantic validation failure raises StructuredOutputError
 # ---------------------------------------------------------------------------
 
+
 def test_parse_pydantic_validation_failure():
     # T10.08
     class Strict(BaseModel):
@@ -123,6 +131,7 @@ def test_parse_pydantic_validation_failure():
 # ---------------------------------------------------------------------------
 # T10.09 — build_repair_messages produces correct structure
 # ---------------------------------------------------------------------------
+
 
 def test_build_repair_messages_structure():
     # T10.09
@@ -144,6 +153,7 @@ def test_build_repair_messages_structure():
 # T10.10 — normalize_json_schema closes objects
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_json_schema_closes_objects():
     # T10.10
     schema = {
@@ -157,6 +167,7 @@ def test_normalize_json_schema_closes_objects():
 # ---------------------------------------------------------------------------
 # T10.11 — normalize_json_schema does not overwrite existing additionalProperties
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_json_schema_preserves_existing():
     # T10.11
@@ -172,6 +183,7 @@ def test_normalize_json_schema_preserves_existing():
 # ---------------------------------------------------------------------------
 # apply_structured_validation helper
 # ---------------------------------------------------------------------------
+
 
 def test_apply_structured_validation_success():
     """apply_structured_validation sets parsed/validated on success."""

@@ -1,14 +1,14 @@
 """Unit tests for LazyContext — no API calls."""
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_store import LazyStore
 
-
 # ── T3.01 — from_text: build() returns verbatim text ─────────────────────────
+
 
 def test_from_text_build():
     ctx = LazyContext.from_text("you are an analyst")
@@ -22,6 +22,7 @@ def test_from_text_strips_whitespace():
 
 # ── T3.02 — from_function: fn is called at build time, not at creation time ──
 
+
 def test_from_function_lazy():
     calls = []
 
@@ -30,13 +31,14 @@ def test_from_function_lazy():
         return "dynamic content"
 
     ctx = LazyContext.from_function(source)
-    assert calls == []          # not called yet
+    assert calls == []  # not called yet
     result = ctx.build()
-    assert len(calls) == 1      # called exactly once
+    assert len(calls) == 1  # called exactly once
     assert result == "dynamic content"
 
 
 # ── T3.03 — from_agent: agent not yet run → empty string ─────────────────────
+
 
 def test_from_agent_not_run():
     agent = MagicMock()
@@ -47,6 +49,7 @@ def test_from_agent_not_run():
 
 
 # ── T3.04 — from_agent: agent has run → output included with label ────────────
+
 
 def test_from_agent_with_output():
     agent = MagicMock()
@@ -69,6 +72,7 @@ def test_from_agent_custom_prefix():
 
 
 # ── T3.05 — from_store: reads store keys at build time ───────────────────────
+
 
 def test_from_store_reads_at_build_time():
     store = LazyStore()
@@ -96,6 +100,7 @@ def test_from_store_filtered_keys():
 
 # ── T3.06 — merge / __add__: sources concatenated in order ───────────────────
 
+
 def test_merge_two_contexts():
     ctx1 = LazyContext.from_text("first")
     ctx2 = LazyContext.from_text("second")
@@ -115,6 +120,7 @@ def test_add_operator():
 
 # ── T3.07 — failing source is skipped, build() does not raise ────────────────
 
+
 def test_failing_source_skipped():
     def bad_source() -> str:
         raise RuntimeError("source exploded")
@@ -122,11 +128,12 @@ def test_failing_source_skipped():
     ctx = LazyContext.from_function(bad_source)
     ctx._sources.append(lambda: "good content")  # add a working source too
 
-    result = ctx.build()   # should not raise
+    result = ctx.build()  # should not raise
     assert "good content" in result
 
 
 # ── T3.08 — __bool__: True with sources, False when empty ────────────────────
+
 
 def test_bool_with_sources():
     ctx = LazyContext.from_text("something")

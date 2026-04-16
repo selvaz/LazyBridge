@@ -23,10 +23,10 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 from collections.abc import Callable
 
-
 # ---------------------------------------------------------------------------
 # _ChainState — moved from lazy_session.py
 # ---------------------------------------------------------------------------
+
 
 class _ChainState:
     """Internal state propagated between chain steps.
@@ -53,7 +53,7 @@ class _ChainState:
         ctx is None      →  tool  → agent  →  use text as new task
     """
 
-    __slots__ = ("text", "typed", "ctx")
+    __slots__ = ("ctx", "text", "typed")
 
     def __init__(self, text: str, typed: Any, ctx: Any) -> None:
         self.text = text
@@ -64,6 +64,7 @@ class _ChainState:
 # ---------------------------------------------------------------------------
 # Pipeline builders
 # ---------------------------------------------------------------------------
+
 
 def build_parallel_func(
     parts: list,
@@ -92,19 +93,18 @@ def build_parallel_func(
         ``"[ERROR: TimeoutError: ...]"`` in concat mode).
         None (default) means no timeout.
     """
+
     def _run_parallel(task: str) -> str:
         from lazybridge.lazy_run import run_async
 
         async def _gather() -> str:
             coros = []
             for p in parts:
-                if hasattr(p, "achat"):                    # LazyAgent
+                if hasattr(p, "achat"):  # LazyAgent
                     kw = {"native_tools": native_tools} if native_tools else {}
                     schema = getattr(p, "output_schema", None)
                     has_tools = bool(
-                        getattr(p, "tools", None) or
-                        getattr(p, "native_tools", None) or
-                        kw.get("native_tools")
+                        getattr(p, "tools", None) or getattr(p, "native_tools", None) or kw.get("native_tools")
                     )
                     if schema is not None:
                         coros.append(p.ajson(task, schema, **kw))
@@ -112,7 +112,7 @@ def build_parallel_func(
                         coros.append(p.aloop(task, **kw))
                     else:
                         coros.append(p.achat(task, **kw))
-                else:                                      # LazyTool
+                else:  # LazyTool
                     coros.append(p.arun({"task": task}))
 
             if step_timeout is not None:
@@ -120,9 +120,11 @@ def build_parallel_func(
 
             if concurrency_limit is not None:
                 sem = asyncio.Semaphore(concurrency_limit)
+
                 async def _guarded(c: Any) -> Any:
                     async with sem:
                         return await c
+
                 coros = [_guarded(c) for c in coros]
 
             results = await asyncio.gather(*coros, return_exceptions=True)
@@ -140,10 +142,7 @@ def build_parallel_func(
 
             if combiner == "last":
                 return _to_text(results[-1])
-            return "\n\n".join(
-                f"[{getattr(p, 'name', '?')}]\n{_to_text(r)}"
-                for p, r in zip(parts, results)
-            )
+            return "\n\n".join(f"[{getattr(p, 'name', '?')}]\n{_to_text(r)}" for p, r in zip(parts, results))
 
         return run_async(_gather())
 
@@ -201,11 +200,7 @@ def build_chain_func(
         if store is not None:
             saved = store.read(_ckpt_key)
             if saved is not None:
-                if (
-                    isinstance(saved, dict)
-                    and isinstance(saved.get("step"), int)
-                    and "output" in saved
-                ):
+                if isinstance(saved, dict) and isinstance(saved.get("step"), int) and "output" in saved:
                     start_step = saved["step"] + 1
                     _handoff = saved.get("handoff_mode", "text_task")
                     if _handoff == "agent_context":
@@ -213,25 +208,26 @@ def build_chain_func(
                         state = _ChainState(
                             text=_orig,
                             typed=None,
-                            ctx=LazyContext.from_text(
-                                f"[resumed previous output]\n{saved['output']}"
-                            ),
+                            ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
                         )
                     else:
                         state = _ChainState(
-                            text=saved["output"], typed=None, ctx=None,
+                            text=saved["output"],
+                            typed=None,
+                            ctx=None,
                         )
                 else:
                     _logger.warning(
                         "Ignoring malformed checkpoint for %r: %r",
-                        _ckpt_key, saved,
+                        _ckpt_key,
+                        saved,
                     )
 
         for i, p in enumerate(parts):
             if i < start_step:
                 continue
 
-            if hasattr(p, "chat"):                         # LazyAgent
+            if hasattr(p, "chat"):  # LazyAgent
                 kw: dict = {}
                 if native_tools:
                     kw["native_tools"] = native_tools
@@ -242,9 +238,7 @@ def build_chain_func(
                     current_task = state.text
                 schema = getattr(p, "output_schema", None)
                 has_tools = bool(
-                    getattr(p, "tools", None) or
-                    getattr(p, "native_tools", None) or
-                    kw.get("native_tools")
+                    getattr(p, "tools", None) or getattr(p, "native_tools", None) or kw.get("native_tools")
                 )
                 if schema is not None:
                     result = p.json(current_task, schema, **kw)
@@ -267,7 +261,7 @@ def build_chain_func(
                         typed=None,
                         ctx=LazyContext.from_agent(p),
                     )
-            elif hasattr(p, "run"):                        # LazyTool (nested pipeline)
+            elif hasattr(p, "run"):  # LazyTool (nested pipeline)
                 # When the previous step produced a typed Pydantic object
                 # (e.g. an agent with output_schema), pass its fields as
                 # the tool's arguments so agent→function chains work:
@@ -282,18 +276,19 @@ def build_chain_func(
                 result = p.run(args)
                 state = _ChainState(text=str(result), typed=None, ctx=None)
             else:
-                raise TypeError(
-                    f"Participant {p!r} must be a LazyAgent (has .chat) or LazyTool (has .run)."
-                )
+                raise TypeError(f"Participant {p!r} must be a LazyAgent (has .chat) or LazyTool (has .run).")
 
             # ── Checkpoint after each completed step ──────────────────
             if store is not None:
-                store.write(_ckpt_key, {
-                    "step": i,
-                    "output": state.text,
-                    "original_task": task,
-                    "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
-                })
+                store.write(
+                    _ckpt_key,
+                    {
+                        "step": i,
+                        "output": state.text,
+                        "original_task": task,
+                        "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
+                    },
+                )
 
         # ── Clear checkpoint on successful completion ─────────────────
         if store is not None:
@@ -347,11 +342,7 @@ def build_achain_func(
         if store is not None:
             saved = store.read(_ckpt_key)
             if saved is not None:
-                if (
-                    isinstance(saved, dict)
-                    and isinstance(saved.get("step"), int)
-                    and "output" in saved
-                ):
+                if isinstance(saved, dict) and isinstance(saved.get("step"), int) and "output" in saved:
                     start_step = saved["step"] + 1
                     _handoff = saved.get("handoff_mode", "text_task")
                     if _handoff == "agent_context":
@@ -359,25 +350,26 @@ def build_achain_func(
                         state = _ChainState(
                             text=_orig,
                             typed=None,
-                            ctx=LazyContext.from_text(
-                                f"[resumed previous output]\n{saved['output']}"
-                            ),
+                            ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
                         )
                     else:
                         state = _ChainState(
-                            text=saved["output"], typed=None, ctx=None,
+                            text=saved["output"],
+                            typed=None,
+                            ctx=None,
                         )
                 else:
                     _logger.warning(
                         "Ignoring malformed checkpoint for %r: %r",
-                        _ckpt_key, saved,
+                        _ckpt_key,
+                        saved,
                     )
 
         for i, p in enumerate(parts):
             if i < start_step:
                 continue
 
-            if hasattr(p, "achat"):                        # LazyAgent
+            if hasattr(p, "achat"):  # LazyAgent
                 kw: dict = {}
                 if native_tools:
                     kw["native_tools"] = native_tools
@@ -389,9 +381,7 @@ def build_achain_func(
 
                 schema = getattr(p, "output_schema", None)
                 has_tools = bool(
-                    getattr(p, "tools", None) or
-                    getattr(p, "native_tools", None) or
-                    kw.get("native_tools")
+                    getattr(p, "tools", None) or getattr(p, "native_tools", None) or kw.get("native_tools")
                 )
 
                 # Build the coroutine inline — avoids closure-in-loop capture issues.
@@ -403,11 +393,7 @@ def build_achain_func(
                 else:
                     coro = p.achat(current_task, **kw)
 
-                result = (
-                    await asyncio.wait_for(coro, timeout=step_timeout)
-                    if step_timeout is not None
-                    else await coro
-                )
+                result = await asyncio.wait_for(coro, timeout=step_timeout) if step_timeout is not None else await coro
 
                 if schema is not None:
                     state = _ChainState(
@@ -422,7 +408,7 @@ def build_achain_func(
                         ctx=LazyContext.from_agent(p),
                     )
 
-            elif hasattr(p, "arun"):                       # LazyTool (nested pipeline)
+            elif hasattr(p, "arun"):  # LazyTool (nested pipeline)
                 # When the previous step produced a typed Pydantic object
                 # (e.g. an agent with output_schema), pass its fields as
                 # the tool's arguments so agent→function chains work:
@@ -436,25 +422,24 @@ def build_achain_func(
                     args = {"task": state.text}
                 coro = p.arun(args)
                 result_str = (
-                    await asyncio.wait_for(coro, timeout=step_timeout)
-                    if step_timeout is not None
-                    else await coro
+                    await asyncio.wait_for(coro, timeout=step_timeout) if step_timeout is not None else await coro
                 )
                 state = _ChainState(text=str(result_str), typed=None, ctx=None)
 
             else:
-                raise TypeError(
-                    f"Participant {p!r} must be a LazyAgent (has .achat) or LazyTool (has .arun)."
-                )
+                raise TypeError(f"Participant {p!r} must be a LazyAgent (has .achat) or LazyTool (has .arun).")
 
             # ── Checkpoint after each completed step ──────────────────
             if store is not None:
-                store.write(_ckpt_key, {
-                    "step": i,
-                    "output": state.text,
-                    "original_task": task,
-                    "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
-                })
+                store.write(
+                    _ckpt_key,
+                    {
+                        "step": i,
+                        "output": state.text,
+                        "original_task": task,
+                        "handoff_mode": "agent_context" if state.ctx is not None else "text_task",
+                    },
+                )
 
         # ── Clear checkpoint on successful completion ─────────────────
         if store is not None:
@@ -468,6 +453,7 @@ def build_achain_func(
 # ---------------------------------------------------------------------------
 # Type discriminators (no circular imports — attribute checks only)
 # ---------------------------------------------------------------------------
+
 
 def _is_agent_instance(p: Any) -> bool:
     """True if p is a LazyAgent instance.
@@ -505,16 +491,14 @@ def _clone_for_invocation(agent: Any) -> Any:
     """
     import copy
     import uuid as _uuid
+
     clone = copy.copy(agent)
     clone.id = str(_uuid.uuid4())
     clone._last_output = None
     clone._last_response = None
     clone.session = None
     original_session = getattr(agent, "session", None)
-    clone._log = (
-        original_session.events.agent_log(clone.id, agent.name)
-        if original_session is not None else None
-    )
+    clone._log = original_session.events.agent_log(clone.id, agent.name) if original_session is not None else None
     return clone
 
 
@@ -534,9 +518,10 @@ def _resolve_participant(p: Any) -> Any:
         return _clone_for_invocation(p)
     if _is_delegate_tool(p):
         from lazybridge.lazy_tool import _clone_delegate_tool_for_invocation
+
         return _clone_delegate_tool_for_invocation(p)
     if hasattr(p, "run") and hasattr(p, "arun"):
-        return p           # LazyTool.from_function or pipeline tool — stateless
+        return p  # LazyTool.from_function or pipeline tool — stateless
     raise TypeError(
         f"Participant {p!r} is not a LazyAgent or LazyTool. "
         "Chain/parallel participants must be LazyAgent or LazyTool instances."

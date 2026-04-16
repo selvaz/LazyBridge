@@ -32,7 +32,8 @@ yaml      = ["pyyaml>=6.0"]
 tools     = ["pypdf>=3.0", "python-docx>=1.0", "trafilatura>=1.6"]
 stats     = ["duckdb>=1.0", "polars>=1.0", "sqlglot>=20.0", "statsmodels>=0.14", "arch>=7.0", "matplotlib>=3.8"]
 downloader = ["pandas>=2.0", "requests>=2.28", "yfinance>=0.2"]
-test      = ["pytest>=7.0", "pytest-asyncio>=0.23"]
+otel      = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
+test      = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
 all       = ["anthropic>=0.49.0", "openai>=1.70.0", "google-genai>=1.10.0", "pyyaml>=6.0", "pypdf>=3.0", "python-docx>=1.0", "trafilatura>=1.6", "duckdb>=1.0", "polars>=1.0", "sqlglot>=20.0", "statsmodels>=0.14", "arch>=7.0", "matplotlib>=3.8", "pandas>=2.0", "requests>=2.28", "yfinance>=0.2"]
 
 [project.urls]
@@ -66,4 +67,66 @@ filterwarnings = [
 ]
 markers = [
     "live: opt-in live tests that call real provider APIs (run with: pytest -m live)",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — linting & formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E402",    # module-level import not at top (deferred imports are intentional)
+    "E501",    # line length handled by formatter
+    "E741",    # ambiguous variable name (l, O, I)
+    "UP007",   # use X | Y (already used, but some Optional[] remain)
+    "SIM105",  # contextlib.suppress vs try/except/pass (readability)
+    "SIM108",  # ternary instead of if-else (readability)
+    "B008",    # function call in default arg (Pydantic uses this pattern)
+    "B905",    # zip() strict= (not always needed)
+    "RUF002",  # ambiguous unicode in docstrings (en-dash is intentional)
+    "RUF003",  # ambiguous unicode in comments
+    "RUF005",  # iterable unpacking vs concatenation (readability)
+    "RUF012",  # mutable class variable annotation
+    "RUF022",  # __all__ sorted (grouped by category instead)
+    "RUF059",  # unused unpacked variable (common in test fixtures)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lazybridge"]
+
+# ---------------------------------------------------------------------------
+# Mypy — gradual type checking
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["lazybridge"]
+omit = [
+    "lazybridge/ext/*",
+    "lazybridge/core/providers/anthropic.py",
+    "lazybridge/core/providers/openai.py",
+    "lazybridge/core/providers/google.py",
+    "lazybridge/core/providers/deepseek.py",
+]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
 ]

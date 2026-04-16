@@ -66,8 +66,7 @@ class DatasetCatalog:
         schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
         row_count = lf.select(pl.len()).collect().item()
 
-        self._validate_columns(schema, time_column, canonical_target,
-                               identifiers_to_ignore, semantic_roles)
+        self._validate_columns(schema, time_column, canonical_target, identifiers_to_ignore, semantic_roles)
 
         freq = Frequency(frequency) if isinstance(frequency, str) else frequency
         meta = DatasetMeta(
@@ -113,8 +112,7 @@ class DatasetCatalog:
         schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
         row_count = lf.select(pl.len()).collect().item()
 
-        self._validate_columns(schema, time_column, canonical_target,
-                               identifiers_to_ignore, semantic_roles)
+        self._validate_columns(schema, time_column, canonical_target, identifiers_to_ignore, semantic_roles)
 
         freq = Frequency(frequency) if isinstance(frequency, str) else frequency
         meta = DatasetMeta(
@@ -147,29 +145,17 @@ class DatasetCatalog:
         """Validate that referenced columns exist in the schema."""
         cols = list(schema.keys())
         if time_column and time_column not in schema:
-            raise ValueError(
-                f"time_column '{time_column}' not found in schema. "
-                f"Available columns: {cols}"
-            )
+            raise ValueError(f"time_column '{time_column}' not found in schema. Available columns: {cols}")
         if canonical_target and canonical_target not in schema:
-            raise ValueError(
-                f"canonical_target '{canonical_target}' not found in schema. "
-                f"Available columns: {cols}"
-            )
+            raise ValueError(f"canonical_target '{canonical_target}' not found in schema. Available columns: {cols}")
         if identifiers_to_ignore:
             bad = [c for c in identifiers_to_ignore if c not in schema]
             if bad:
-                raise ValueError(
-                    f"identifiers_to_ignore contains unknown columns: {bad}. "
-                    f"Available columns: {cols}"
-                )
+                raise ValueError(f"identifiers_to_ignore contains unknown columns: {bad}. Available columns: {cols}")
         if semantic_roles:
             bad = [c for c in semantic_roles if c not in schema]
             if bad:
-                raise ValueError(
-                    f"semantic_roles references unknown columns: {bad}. "
-                    f"Available columns: {cols}"
-                )
+                raise ValueError(f"semantic_roles references unknown columns: {bad}. Available columns: {cols}")
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -257,4 +243,5 @@ class DatasetCatalog:
 
 def _import_polars():
     from lazybridge.ext.stat_runtime._deps import require_polars
+
     return require_polars()

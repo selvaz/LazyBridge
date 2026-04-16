@@ -2,13 +2,13 @@
 
 import pytest
 
+from lazybridge.ext.data_downloader.schemas import DownloaderConfig, FetchResult, TickerInfo
 from lazybridge.ext.data_downloader.ticker_db import TickerDatabase, _parse_source
-from lazybridge.ext.data_downloader.schemas import TickerInfo, FetchResult, DownloaderConfig
-
 
 # ---------------------------------------------------------------------------
 # Source detection
 # ---------------------------------------------------------------------------
+
 
 class TestParseSource:
     def test_yahoo(self):
@@ -31,6 +31,7 @@ class TestParseSource:
 # ---------------------------------------------------------------------------
 # Ticker database
 # ---------------------------------------------------------------------------
+
 
 class TestTickerDatabase:
     @pytest.fixture
@@ -105,6 +106,7 @@ class TestTickerDatabase:
 # Schemas
 # ---------------------------------------------------------------------------
 
+
 class TestSchemas:
     def test_ticker_info_defaults(self):
         ti = TickerInfo(ticker="SPY")
@@ -118,9 +120,14 @@ class TestSchemas:
 
     def test_fetch_result_serialization(self):
         fr = FetchResult(
-            ticker="SPY", source="YAHOO", ok=True,
-            rows=100, date_start="2024-01-01", date_end="2024-04-01",
-            file_path="/tmp/spy.parquet", frequency="daily",
+            ticker="SPY",
+            source="YAHOO",
+            ok=True,
+            rows=100,
+            date_start="2024-01-01",
+            date_end="2024-04-01",
+            file_path="/tmp/spy.parquet",
+            frequency="daily",
             registered_as="spy",
         )
         data = fr.model_dump()

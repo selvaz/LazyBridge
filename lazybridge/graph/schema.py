@@ -24,20 +24,22 @@ from typing import Any
 # Node and Edge types
 # ---------------------------------------------------------------------------
 
+
 class NodeType(StrEnum):
-    AGENT  = "agent"
+    AGENT = "agent"
     ROUTER = "router"
 
 
 class EdgeType(StrEnum):
-    TOOL    = "tool"      # agent A calls agent B as a tool
-    CONTEXT = "context"   # agent A reads agent B's output via LazyContext
-    ROUTER  = "router"    # conditional branch from a LazyRouter
+    TOOL = "tool"  # agent A calls agent B as a tool
+    CONTEXT = "context"  # agent A reads agent B's output via LazyContext
+    ROUTER = "router"  # conditional branch from a LazyRouter
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_yaml_path(path: str) -> bool:
     """Return True if the path has a YAML extension."""
@@ -48,17 +50,20 @@ def _require_yaml() -> Any:
     """Import and return the yaml module, raising a clear error if missing."""
     try:
         import yaml  # type: ignore[import-untyped]
+
         return yaml
     except ImportError:
-        raise ImportError("PyYAML required: pip install pyyaml")
+        raise ImportError("PyYAML required: pip install pyyaml") from None
 
 
 # ---------------------------------------------------------------------------
 # Node / Edge descriptors
 # ---------------------------------------------------------------------------
 
+
 class _BaseNode:
     """Shared attributes for all graph nodes."""
+
     __slots__ = ("id", "name", "type")
 
     def __init__(self, id: str, name: str) -> None:
@@ -69,7 +74,7 @@ class _BaseNode:
 class AgentNode(_BaseNode):
     """Serialisable descriptor for a LazyAgent node."""
 
-    __slots__ = ("provider", "model", "system")
+    __slots__ = ("model", "provider", "system")
 
     def __init__(
         self,
@@ -87,12 +92,12 @@ class AgentNode(_BaseNode):
 
     def to_dict(self) -> dict:
         return {
-            "id":       self.id,
-            "name":     self.name,
+            "id": self.id,
+            "name": self.name,
             "provider": self.provider,
-            "model":    self.model,
-            "system":   self.system,
-            "type":     self.type,
+            "model": self.model,
+            "system": self.system,
+            "type": self.type,
         }
 
     @classmethod
@@ -109,7 +114,7 @@ class AgentNode(_BaseNode):
 class RouterNode(_BaseNode):
     """Serialisable descriptor for a LazyRouter node."""
 
-    __slots__ = ("routes", "default")
+    __slots__ = ("default", "routes")
 
     def __init__(self, id: str, name: str, routes: dict[str, str], default: str | None) -> None:
         super().__init__(id, name)
@@ -119,11 +124,11 @@ class RouterNode(_BaseNode):
 
     def to_dict(self) -> dict:
         return {
-            "id":      self.id,
-            "name":    self.name,
-            "routes":  self.routes,
+            "id": self.id,
+            "name": self.name,
+            "routes": self.routes,
             "default": self.default,
-            "type":    self.type,
+            "type": self.type,
         }
 
     @classmethod
@@ -139,7 +144,7 @@ class RouterNode(_BaseNode):
 class Edge:
     """A directed connection between two nodes."""
 
-    __slots__ = ("from_id", "to_id", "label", "kind")
+    __slots__ = ("from_id", "kind", "label", "to_id")
 
     def __init__(
         self,
@@ -155,10 +160,10 @@ class Edge:
 
     def to_dict(self) -> dict:
         return {
-            "from":  self.from_id,
-            "to":    self.to_id,
+            "from": self.from_id,
+            "to": self.to_id,
             "label": self.label,
-            "type":  self.kind,
+            "type": self.kind,
         }
 
     @classmethod
@@ -174,6 +179,7 @@ class Edge:
 # ---------------------------------------------------------------------------
 # GraphSchema
 # ---------------------------------------------------------------------------
+
 
 class GraphSchema:
     """Directed graph of agents, routers, and their connections.
@@ -221,12 +227,14 @@ class GraphSchema:
         label: str = "",
         kind: EdgeType | str = EdgeType.TOOL,
     ) -> None:
-        self._edges.append(Edge(
-            from_id=from_id,
-            to_id=to_id,
-            label=label,
-            kind=EdgeType(kind) if isinstance(kind, str) else kind,
-        ))
+        self._edges.append(
+            Edge(
+                from_id=from_id,
+                to_id=to_id,
+                label=label,
+                kind=EdgeType(kind) if isinstance(kind, str) else kind,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Queries
@@ -254,8 +262,8 @@ class GraphSchema:
     def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
-            "nodes":      [n.to_dict() for n in self._nodes.values()],  # type: ignore[attr-defined]
-            "edges":      [e.to_dict() for e in self._edges],
+            "nodes": [n.to_dict() for n in self._nodes.values()],  # type: ignore[attr-defined]
+            "edges": [e.to_dict() for e in self._edges],
         }
 
     def to_json(self, indent: int = 2) -> str:

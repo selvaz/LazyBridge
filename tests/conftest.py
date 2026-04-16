@@ -1,12 +1,14 @@
-﻿"""Global test fixtures — mock-only, no API keys required."""
+"""Global test fixtures — mock-only, no API keys required."""
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import types
-import asyncio
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 # ---------------------------------------------------------------------------
 # Google provider stub
@@ -45,7 +47,7 @@ for _mod_name in _google_stubs:
 # ---------------------------------------------------------------------------
 if sys.version_info >= (3, 11) and not getattr(asyncio.Runner.run, "_nest_patched", False):
     try:
-        import nest_asyncio as _nest_asyncio  # noqa: F401 — confirm it is present
+        import nest_asyncio as _nest_asyncio
 
         _orig_runner_run = asyncio.Runner.run
 
@@ -67,7 +69,6 @@ if sys.version_info >= (3, 11) and not getattr(asyncio.Runner.run, "_nest_patche
 
 from lazybridge.core.types import CompletionResponse, StreamChunk, UsageStats
 
-
 # ---------------------------------------------------------------------------
 # Suppress "Task exception was never retrieved: Event loop is closed"
 #
@@ -77,15 +78,14 @@ from lazybridge.core.types import CompletionResponse, StreamChunk, UsageStats
 # tests pass.  The filter below silences exactly that pattern.
 # ---------------------------------------------------------------------------
 
+
 class _SuppressLoopClosedFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.name != "asyncio":
             return True
         msg = record.getMessage()
-        return not (
-            "Task exception was never retrieved" in msg
-            and "Event loop is closed" in msg
-        )
+        return not ("Task exception was never retrieved" in msg and "Event loop is closed" in msg)
+
 
 logging.getLogger("asyncio").addFilter(_SuppressLoopClosedFilter())
 

@@ -80,7 +80,8 @@ class TickerDatabase:
         """Search tickers by name, symbol, or any taxonomy field."""
         q = query.lower()
         return [
-            t for t in self._tickers
+            t
+            for t in self._tickers
             if q in t.ticker.lower()
             or q in t.name.lower()
             or q in t.asset_class.lower()

@@ -54,9 +54,7 @@ def _run_suppressed(coro: Coroutine[Any, Any, T]) -> T:
             if pending:
                 for t in pending:
                     t.cancel()
-                loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
             pass

@@ -9,13 +9,15 @@ Tests that:
 
 import pytest
 
-from lazybridge.ext.stat_runtime.query import QueryEngine, _FILE_READER_RE, _MUTATION_RE
+from lazybridge.ext.stat_runtime.query import QueryEngine
 
 
 class FakeCatalog:
     """Minimal catalog stub for validation tests (no DuckDB needed)."""
+
     def get(self, name):
         return None
+
     def list_datasets(self):
         return []
 
@@ -58,9 +60,7 @@ class TestFileReaderBlocking:
 
     def test_read_parquet_in_subquery_blocked(self, engine):
         with pytest.raises(ValueError, match="Direct file access"):
-            engine._validate(
-                "SELECT * FROM (SELECT * FROM read_parquet('/secret.parquet')) t"
-            )
+            engine._validate("SELECT * FROM (SELECT * FROM read_parquet('/secret.parquet')) t")
 
     def test_case_insensitive_blocking(self, engine):
         with pytest.raises(ValueError, match="Direct file access"):
@@ -100,15 +100,11 @@ class TestPathLiteralBlocking:
 
     def test_join_path_literal(self, engine):
         with pytest.raises(ValueError, match="Direct file path"):
-            engine._validate(
-                "SELECT * FROM dataset('ok') JOIN '/tmp/evil.csv' ON 1=1"
-            )
+            engine._validate("SELECT * FROM dataset('ok') JOIN '/tmp/evil.csv' ON 1=1")
 
     def test_path_in_cte_body(self, engine):
         with pytest.raises(ValueError, match="Direct file path"):
-            engine._validate(
-                "WITH t AS (SELECT * FROM '/tmp/secret.parquet') SELECT * FROM t"
-            )
+            engine._validate("WITH t AS (SELECT * FROM '/tmp/secret.parquet') SELECT * FROM t")
 
     def test_dataset_macro_still_works(self, engine):
         # dataset('name') should NOT be blocked by path-literal check
@@ -116,15 +112,11 @@ class TestPathLiteralBlocking:
 
     def test_string_literal_in_predicate_allowed(self, engine):
         # Normal string literals in WHERE should not trigger false positive
-        engine._validate(
-            "SELECT * FROM dataset('ok') WHERE symbol = 'SPY'"
-        )
+        engine._validate("SELECT * FROM dataset('ok') WHERE symbol = 'SPY'")
 
     def test_string_literal_with_dots_in_predicate_allowed(self, engine):
         # Strings with dots in predicates should not be blocked
-        engine._validate(
-            "SELECT * FROM dataset('ok') WHERE name = 'file.txt'"
-        )
+        engine._validate("SELECT * FROM dataset('ok') WHERE name = 'file.txt'")
 
 
 class TestMutationBlocking:

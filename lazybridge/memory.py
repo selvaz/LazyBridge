@@ -81,5 +81,5 @@ class Memory:
     def _record(self, user_message: str, assistant_content: str) -> None:
         """Append a completed turn to history (called after a successful chat)."""
         with self._lock:
-            self._messages.append({"role": "user",      "content": user_message})
+            self._messages.append({"role": "user", "content": user_message})
             self._messages.append({"role": "assistant", "content": assistant_content})

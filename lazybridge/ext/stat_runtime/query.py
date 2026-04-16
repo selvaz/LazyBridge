@@ -50,12 +50,12 @@ _FILE_READER_RE = re.compile(
 # Matches a path-like quoted string after FROM or JOIN keywords.
 # Path indicators: / \ . .. or drive letter (C:)
 _PATH_LITERAL_RE = re.compile(
-    r"""(?:FROM|JOIN)\s+['"]"""        # FROM or JOIN followed by quote
+    r"""(?:FROM|JOIN)\s+['"]"""  # FROM or JOIN followed by quote
     r"""(?:"""
-    r"""[/\\]"""                        # starts with / or \
-    r"""|\.\.?[/\\]"""                  # starts with ./ or ../
-    r"""|[A-Za-z]:[/\\]"""             # Windows drive letter (C:/ C:\)
-    r"""|[^'"]*\."""                    # contains a dot (file extension)
+    r"""[/\\]"""  # starts with / or \
+    r"""|\.\.?[/\\]"""  # starts with ./ or ../
+    r"""|[A-Za-z]:[/\\]"""  # Windows drive letter (C:/ C:\)
+    r"""|[^'"]*\."""  # contains a dot (file extension)
     r""")""",
     re.IGNORECASE,
 )
@@ -158,10 +158,7 @@ class QueryEngine:
         # Block mutation / DDL keywords
         match = _MUTATION_RE.search(stripped)
         if match:
-            raise ValueError(
-                f"Forbidden SQL keyword: {match.group(0)}. "
-                "Only SELECT queries are allowed."
-            )
+            raise ValueError(f"Forbidden SQL keyword: {match.group(0)}. Only SELECT queries are allowed.")
 
         # Block direct file-reader functions (allowlist enforcement)
         # Users must go through dataset('name'), not read_parquet() etc.
@@ -189,6 +186,7 @@ class QueryEngine:
 
     def _expand_macros(self, sql: str) -> str:
         """Replace dataset('name') with read_parquet('uri')."""
+
         def _replacer(match: re.Match) -> str:
             dataset_name = match.group(1)
             meta = self._catalog.get(dataset_name)
@@ -212,7 +210,8 @@ class QueryEngine:
                     _logger.warning(
                         "Query on time-series dataset '%s' without ORDER BY. "
                         "Consider adding ORDER BY %s for deterministic results.",
-                        ds_name, meta.time_column,
+                        ds_name,
+                        meta.time_column,
                     )
         return expanded
 
@@ -234,4 +233,5 @@ class QueryEngine:
 
 def _import_duckdb():
     from lazybridge.ext.stat_runtime._deps import require_duckdb
+
     return require_duckdb()

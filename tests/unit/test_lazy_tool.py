@@ -1,20 +1,22 @@
 """Unit tests for LazyTool — no API calls, no provider required."""
+
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
 import unittest.mock
-from unittest.mock import MagicMock, AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from lazybridge.core.types import ToolDefinition
 from lazybridge.lazy_tool import (
     LazyTool,
     NormalizedToolSet,
     ToolArgumentValidationError,
 )
-from lazybridge.core.types import ToolDefinition
-
 
 # ── Helper functions used as tools ───────────────────────────────────────────
+
 
 def add(a: int, b: int) -> int:
     """Add two numbers."""
@@ -45,6 +47,7 @@ async def async_double(x: int) -> int:
 
 # ── T1.01 — from_function: default name and description ──────────────────────
 
+
 def test_from_function_default_name_desc():
     tool = LazyTool.from_function(add)
     assert tool.name == "add"
@@ -52,6 +55,7 @@ def test_from_function_default_name_desc():
 
 
 # ── T1.02 — from_function: explicit name/description override ────────────────
+
 
 def test_from_function_override_name_desc():
     tool = LazyTool.from_function(add, name="my_add", description="Custom desc")
@@ -61,21 +65,24 @@ def test_from_function_override_name_desc():
 
 # ── T1.03 — run: int coerced to float ────────────────────────────────────────
 
+
 def test_run_coercion():
     tool = LazyTool.from_function(scale)
-    result = tool.run({"x": 3})      # int 3 → float 3.0
+    result = tool.run({"x": 3})  # int 3 → float 3.0
     assert result == 6.0
 
 
 # ── T1.04 — run: missing required argument → ToolArgumentValidationError ─────
 
+
 def test_run_missing_argument():
     tool = LazyTool.from_function(add)
     with pytest.raises(ToolArgumentValidationError):
-        tool.run({"a": 1})           # b is missing
+        tool.run({"a": 1})  # b is missing
 
 
 # ── T1.05 — run: wrong type that can't be coerced → ToolArgumentValidationError
+
 
 def test_run_bad_type():
     tool = LazyTool.from_function(add)
@@ -84,6 +91,7 @@ def test_run_bad_type():
 
 
 # ── T1.06 — from_agent: fixed {"task": str} schema, _delegate set ─────────────
+
 
 def test_from_agent_schema():
     agent = MagicMock()
@@ -97,6 +105,7 @@ def test_from_agent_schema():
 
 
 # ── T1.07 — specialize: delegate tool with name override updates _compiled ────
+
 
 def test_specialize_delegate_updates_compiled():
     agent = MagicMock()
@@ -115,16 +124,18 @@ def test_specialize_delegate_updates_compiled():
 
 # ── T1.08 — specialize: function tool resets _compiled ───────────────────────
 
+
 def test_specialize_function_resets_compiled():
     tool = LazyTool.from_function(add)
-    _ = tool.definition()            # cache it
+    _ = tool.definition()  # cache it
     assert tool._compiled is not None
     specialized = tool.specialize(name="add_v2")
     assert specialized.name == "add_v2"
-    assert specialized._compiled is None   # cleared so it rebuilds
+    assert specialized._compiled is None  # cleared so it rebuilds
 
 
 # ── T1.09 — definition: result is cached after first call ─────────────────────
+
 
 def test_definition_cached():
     tool = LazyTool.from_function(add)
@@ -135,6 +146,7 @@ def test_definition_cached():
 
 # ── T1.10 — arun: sync function wrapped as awaitable ─────────────────────────
 
+
 async def test_arun_sync_function():
     tool = LazyTool.from_function(add)
     result = await tool.arun({"a": 3, "b": 4})
@@ -142,6 +154,7 @@ async def test_arun_sync_function():
 
 
 # ── T1.11 — arun: async function awaited correctly ───────────────────────────
+
 
 async def test_arun_async_function():
     tool = LazyTool.from_function(async_double)
@@ -151,14 +164,16 @@ async def test_arun_async_function():
 
 # ── T1.12 — NormalizedToolSet: duplicate name raises ValueError ───────────────
 
+
 def test_normalized_toolset_duplicate_name():
     tool_a = LazyTool.from_function(add)
-    tool_b = LazyTool.from_function(add)   # same name "add"
+    tool_b = LazyTool.from_function(add)  # same name "add"
     with pytest.raises(ValueError, match="Duplicate tool name"):
         NormalizedToolSet.from_list([tool_a, tool_b])
 
 
 # ── T1.13 — NormalizedToolSet: mix of LazyTool, ToolDefinition, dict ─────────
+
 
 def test_normalized_toolset_mixed_types():
     lazy = LazyTool.from_function(greet)
@@ -174,7 +189,7 @@ def test_normalized_toolset_mixed_types():
     }
     ts = NormalizedToolSet.from_list([lazy, defn, raw])
     assert len(ts.definitions) == 3
-    assert len(ts.bridges) == 1          # only LazyTool
+    assert len(ts.bridges) == 1  # only LazyTool
     assert "greet" in ts.registry
     assert "explicit_defn" not in ts.registry
     assert "raw_dict" not in ts.registry
@@ -184,6 +199,7 @@ def test_normalized_toolset_mixed_types():
 # T3.x — save() / load()
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 # Helper defined at module level so inspect.getsource() works
 def multiply(x: int, y: int) -> int:
     """Multiply two integers."""
@@ -191,6 +207,7 @@ def multiply(x: int, y: int) -> int:
 
 
 # ── T3.1 — round-trip: save + load produces a working tool ───────────────────
+
 
 def test_save_load_roundtrip(tmp_path):
     tool = LazyTool.from_function(multiply, guidance="Use for multiplication.")
@@ -205,6 +222,7 @@ def test_save_load_roundtrip(tmp_path):
 
 # ── T3.2 — generated file contains function source ───────────────────────────
 
+
 def test_save_contains_function_source(tmp_path):
     tool = LazyTool.from_function(multiply)
     dest = str(tmp_path / "tool.py")
@@ -215,6 +233,7 @@ def test_save_contains_function_source(tmp_path):
 
 
 # ── T3.3 — generated file contains lazybridge import and sentinel ─────────────
+
 
 def test_save_contains_sentinel_and_import(tmp_path):
     tool = LazyTool.from_function(multiply)
@@ -227,6 +246,7 @@ def test_save_contains_sentinel_and_import(tmp_path):
 
 # ── T3.4 — save on lambda raises ValueError ───────────────────────────────────
 
+
 def test_save_lambda_raises(tmp_path):
     tool = LazyTool.from_function(lambda x: x, name="identity", description="identity")
     with pytest.raises(ValueError, match="lambda"):
@@ -234,6 +254,7 @@ def test_save_lambda_raises(tmp_path):
 
 
 # ── T3.5 — save + load for from_agent tool ────────────────────────────────────
+
 
 def test_save_load_agent_tool(tmp_path):
     agent = MagicMock()
@@ -258,10 +279,12 @@ def test_save_load_agent_tool(tmp_path):
     assert "API keys are not serialized" in content
     # api_key must not appear as a kwarg assignment (only allowed in comments)
     import re
+
     assert not re.search(r'api_key\s*=\s*["\']', content)
 
 
 # ── T3.6 — load on file without sentinel raises ValueError ───────────────────
+
 
 def test_load_missing_sentinel_raises(tmp_path):
     bad = tmp_path / "bad.py"
@@ -272,6 +295,7 @@ def test_load_missing_sentinel_raises(tmp_path):
 
 # ── T3.7 — save creates parent directories automatically ──────────────────────
 
+
 def test_save_creates_parent_dirs(tmp_path):
     dest = str(tmp_path / "a" / "b" / "c" / "tool.py")
     tool = LazyTool.from_function(multiply)
@@ -280,6 +304,7 @@ def test_save_creates_parent_dirs(tmp_path):
 
 
 # ── T3.8 — api_key not in agent-tool file ────────────────────────────────────
+
 
 def test_save_agent_no_api_key(tmp_path):
     agent = MagicMock()
@@ -299,10 +324,12 @@ def test_save_agent_no_api_key(tmp_path):
     assert "sk-" not in content
     # "api_key" should not appear as a kwarg being set
     import re
+
     assert not re.search(r'api_key\s*=\s*["\']', content)
 
 
 # ── T3.9 — load on file without sentinel (explicit check) ────────────────────
+
 
 def test_load_no_sentinel_error_message(tmp_path):
     f = tmp_path / "tool.py"
@@ -313,12 +340,14 @@ def test_load_no_sentinel_error_message(tmp_path):
 
 # ── T3.10 — load with '..' in path raises ValueError ─────────────────────────
 
+
 def test_load_dotdot_raises():
     with pytest.raises(ValueError, match="'\\.\\.'"):
         LazyTool.load("auto_tool/../etc/passwd.py")
 
 
 # ── T3.11 — save with '..' in path raises ValueError ─────────────────────────
+
 
 def test_save_dotdot_raises():
     tool = LazyTool.from_function(multiply)
@@ -327,6 +356,7 @@ def test_save_dotdot_raises():
 
 
 # ── T3.12 — load with base_dir blocks out-of-scope paths ────────────────────
+
 
 def test_load_base_dir_blocks_outside(tmp_path):
     allowed = tmp_path / "allowed"
@@ -352,13 +382,13 @@ def test_load_base_dir_allows_inside(tmp_path):
 # N1–N22
 # =============================================================================
 
+from lazybridge.core.types import CompletionResponse, UsageStats
 from lazybridge.pipeline_builders import (
+    _clone_for_invocation,
     _is_agent_instance,
     _is_delegate_tool,
-    _clone_for_invocation,
     _resolve_participant,
 )
-from lazybridge.core.types import CompletionResponse, UsageStats
 
 
 def _mock_agent(name: str, response_content: str) -> MagicMock:
@@ -388,6 +418,7 @@ def _mock_agent(name: str, response_content: str) -> MagicMock:
 
 # ── N1 — parallel() returns LazyTool with _is_pipeline_tool=True ─────────────
 
+
 def test_n1_parallel_returns_lazytool():
     a = _mock_agent("a", "out_a")
     b = _mock_agent("b", "out_b")
@@ -398,6 +429,7 @@ def test_n1_parallel_returns_lazytool():
 
 # ── N2 — chain() returns LazyTool with _is_pipeline_tool=True ────────────────
 
+
 def test_n2_chain_returns_lazytool():
     a = _mock_agent("a", "out_a")
     t = LazyTool.chain(a, name="ch", description="chain test")
@@ -407,6 +439,7 @@ def test_n2_chain_returns_lazytool():
 
 # ── N3 — parallel() with no participants raises ValueError ───────────────────
 
+
 def test_n3_parallel_no_participants():
     with pytest.raises(ValueError):
         LazyTool.parallel(name="t", description="t")
@@ -414,12 +447,14 @@ def test_n3_parallel_no_participants():
 
 # ── N4 — chain() with no participants raises ValueError ──────────────────────
 
+
 def test_n4_chain_no_participants():
     with pytest.raises(ValueError):
         LazyTool.chain(name="t", description="t")
 
 
 # ── N5 — save() on pipeline tool raises ValueError ───────────────────────────
+
 
 def test_n5_save_pipeline_tool_produces_file(tmp_path):
     a = _mock_agent("a", "out_a")
@@ -440,6 +475,7 @@ def test_n5_save_pipeline_tool_produces_file(tmp_path):
 
 # ── N6 — _clone_for_invocation resets _last_output ───────────────────────────
 
+
 def test_n6_clone_resets_last_output():
     agent = _mock_agent("a", "something")
     agent._last_output = "previous result"
@@ -450,6 +486,7 @@ def test_n6_clone_resets_last_output():
 
 # ── N7 — _clone_for_invocation shares _executor ──────────────────────────────
 
+
 def test_n7_clone_shares_executor():
     agent = _mock_agent("a", "x")
     clone = _clone_for_invocation(agent)
@@ -458,8 +495,10 @@ def test_n7_clone_shares_executor():
 
 # ── N8 — _clone_for_invocation has new id ────────────────────────────────────
 
+
 def test_n8_clone_new_id():
     import uuid
+
     agent = _mock_agent("a", "x")
     agent.id = str(uuid.uuid4())
     clone = _clone_for_invocation(agent)
@@ -467,6 +506,7 @@ def test_n8_clone_new_id():
 
 
 # ── N9 — _clone_for_invocation has session=None ──────────────────────────────
+
 
 def test_n9_clone_session_none():
     agent = _mock_agent("a", "x")
@@ -476,6 +516,7 @@ def test_n9_clone_session_none():
 
 
 # ── N10 — _clone_for_invocation gets _log when original has session ──────────
+
 
 def test_n10_clone_log_when_session():
     agent = _mock_agent("a", "x")
@@ -491,6 +532,7 @@ def test_n10_clone_log_when_session():
 
 # ── N11 — _clone_for_invocation gets _log=None when no session ───────────────
 
+
 def test_n11_clone_log_none_no_session():
     agent = _mock_agent("a", "x")
     agent.session = None
@@ -500,8 +542,10 @@ def test_n11_clone_log_none_no_session():
 
 # ── N12 — _clone_delegate_tool_for_invocation clones inner agent ─────────────
 
+
 def test_n12_clone_delegate_tool():
     from lazybridge.lazy_tool import _clone_delegate_tool_for_invocation
+
     agent = _mock_agent("delegate", "response")
     agent.id = "original-id"
     dt = LazyTool.from_agent(agent, name="dt", description="delegate tool")
@@ -510,6 +554,7 @@ def test_n12_clone_delegate_tool():
 
 
 # ── N13 — original agent._last_output is None after chain run ────────────────
+
 
 def test_n13_original_last_output_unchanged_after_chain():
     agent = _mock_agent("worker", "chain output")
@@ -523,16 +568,19 @@ def test_n13_original_last_output_unchanged_after_chain():
 
 # ── N14 — LazyContext.from_agent(original) returns "" after chain run ─────────
 
+
 def test_n14_lazy_context_from_original_empty_after_chain():
     from lazybridge.lazy_context import LazyContext
+
     agent = _mock_agent("worker", "chain output")
     t = LazyTool.chain(agent, name="pipe", description="t")
     t.run({"task": "go"})
     ctx = LazyContext.from_agent(agent)
-    assert ctx() == ""   # original _last_output is None → empty
+    assert ctx() == ""  # original _last_output is None → empty
 
 
 # ── N15 — specialize() preserves _is_pipeline_tool ───────────────────────────
+
 
 def test_n15_specialize_preserves_pipeline_flag():
     a = _mock_agent("a", "out")
@@ -543,16 +591,18 @@ def test_n15_specialize_preserves_pipeline_flag():
 
 # ── N16 — session= with conflicting session raises ValueError ─────────────────
 
+
 def test_n16_session_cross_session_conflict():
     a = _mock_agent("a", "out")
     session_a = MagicMock()
     session_b = MagicMock()
-    a.session = session_a   # agent bound to session_a
+    a.session = session_a  # agent bound to session_a
     with pytest.raises(ValueError, match="different session"):
         LazyTool.parallel(a, name="t", description="t", session=session_b)
 
 
 # ── N17 — concurrent parallel calls: original _last_output unchanged ─────────
+
 
 def test_n17_parallel_original_last_output_unchanged():
     a = _mock_agent("a", "result_a")
@@ -566,6 +616,7 @@ def test_n17_parallel_original_last_output_unchanged():
 
 # ── N18 — _is_agent_instance returns True for mock agent ─────────────────────
 
+
 def test_n18_is_agent_instance_true():
     a = _mock_agent("a", "x")
     assert _is_agent_instance(a) is True
@@ -573,13 +624,17 @@ def test_n18_is_agent_instance_true():
 
 # ── N19 — _is_agent_instance returns False for LazyTool ──────────────────────
 
+
 def test_n19_is_agent_instance_false_for_tool():
-    def f(task: str) -> str: return task
+    def f(task: str) -> str:
+        return task
+
     t = LazyTool.from_function(f, name="t", description="t")
     assert _is_agent_instance(t) is False
 
 
 # ── N20 — _is_delegate_tool returns True for from_agent() tool ───────────────
+
 
 def test_n20_is_delegate_tool_true():
     agent = _mock_agent("a", "x")
@@ -589,22 +644,28 @@ def test_n20_is_delegate_tool_true():
 
 # ── N21 — _is_delegate_tool returns False for from_function() tool ───────────
 
+
 def test_n21_is_delegate_tool_false():
-    def f(task: str) -> str: return task
+    def f(task: str) -> str:
+        return task
+
     t = LazyTool.from_function(f, name="t", description="t")
     assert _is_delegate_tool(t) is False
 
 
 # ── N22 — _resolve_participant raises TypeError for unknown type ──────────────
 
+
 def test_n22_resolve_participant_unknown_type_raises():
     class Unknown:
         pass
+
     with pytest.raises(TypeError, match="LazyAgent or LazyTool"):
         _resolve_participant(Unknown())
 
 
 # ── N-typed — chain: agent(output_schema) → LazyTool passes model_dump() ────
+
 
 def test_chain_typed_agent_to_tool_passes_model_dump():
     """When an agent step produces a typed Pydantic object (output_schema),
@@ -666,7 +727,7 @@ def test_n23_parallel_raises_cross_session_for_delegate_tool():
     sess_b = MagicMock()
 
     inner_agent = MagicMock()
-    inner_agent._last_output = None   # _is_agent_instance checks hasattr(_last_output)
+    inner_agent._last_output = None  # _is_agent_instance checks hasattr(_last_output)
     inner_agent.session = sess_b
     inner_agent.name = "foreign_agent"
 
@@ -675,8 +736,12 @@ def test_n23_parallel_raises_cross_session_for_delegate_tool():
 
     class _FakeDelegateTool:
         _delegate = _FakeDelegate()
-        def run(self, task): return "ok"
-        def arun(self, task): return "ok"
+
+        def run(self, task):
+            return "ok"
+
+        def arun(self, task):
+            return "ok"
 
     participant = _FakeDelegateTool()
 
@@ -687,8 +752,6 @@ def test_n23_parallel_raises_cross_session_for_delegate_tool():
 # =============================================================================
 # Pipeline Persistence Tests
 # =============================================================================
-
-from pathlib import Path
 
 
 def test_pipeline_chain_save_produces_v2_file(tmp_path):
@@ -708,8 +771,7 @@ def test_pipeline_parallel_save_preserves_combiner(tmp_path):
     """Parallel pipeline save includes combiner and concurrency settings."""
     a = _mock_agent("a", "out_a")
     b = _mock_agent("b", "out_b")
-    t = LazyTool.parallel(a, b, name="par", description="parallel",
-                          combiner="last", concurrency_limit=2)
+    t = LazyTool.parallel(a, b, name="par", description="parallel", combiner="last", concurrency_limit=2)
     out = str(tmp_path / "par.py")
     t.save(out)
     content = Path(out).read_text()
@@ -772,8 +834,10 @@ def test_pipeline_with_closure_tool_emits_reconnect(tmp_path):
 
     # Create a closure-based tool (unsaveable)
     captured = 42
+
     def closure_func(x: int) -> int:
         return x + captured
+
     closure_tool = LazyTool.from_function(closure_func, name="closure_op", description="closure")
 
     t = LazyTool.chain(a, closure_tool, name="chain_reconnect", description="test")
@@ -838,8 +902,7 @@ def test_roundtrip_parallel_with_function_tools(tmp_path):
     """Save a parallel of two function tools, load it, verify reconstruction."""
     t1 = LazyTool.from_function(add, name="add", description="add")
     t2 = LazyTool.from_function(greet, name="greet", description="greet")
-    par = LazyTool.parallel(t1, t2, name="add_and_greet", description="both",
-                            combiner="last", concurrency_limit=3)
+    par = LazyTool.parallel(t1, t2, name="add_and_greet", description="both", combiner="last", concurrency_limit=3)
 
     out = str(tmp_path / "par.py")
     par.save(out)
@@ -859,8 +922,10 @@ def test_roundtrip_chain_with_reconnect(tmp_path):
 
     # Unsaveable closure tool
     captured = 10
+
     def closure_fn(x: int) -> int:
         return x + captured
+
     closure_tool = LazyTool.from_function(closure_fn, name="my_closure", description="closure")
 
     chain = LazyTool.chain(func_tool, closure_tool, name="mixed", description="mixed chain")
@@ -883,8 +948,10 @@ def test_roundtrip_load_without_reconnect_raises(tmp_path):
     """Loading a pipeline that needs reconnect without providing it raises KeyError."""
     func_tool = LazyTool.from_function(add, name="add", description="add")
     captured = 10
+
     def closure_fn(x: int) -> int:
         return x + captured
+
     closure_tool = LazyTool.from_function(closure_fn, name="needs_reconnect", description="x")
 
     chain = LazyTool.chain(func_tool, closure_tool, name="ch", description="d")
@@ -934,10 +1001,12 @@ def test_v1_files_still_load(tmp_path):
 
 # ── load() absolute path warning ─────────────────────────────────────────
 
+
 def test_load_warns_on_absolute_path_without_base_dir(tmp_path):
     """_validate_load_path logs a warning for absolute paths without base_dir."""
     import logging
-    from lazybridge.lazy_tool import _validate_load_path, LazyTool
+
+    from lazybridge.lazy_tool import LazyTool, _validate_load_path
 
     # Create a valid sentinel file
     f = tmp_path / "tool.py"

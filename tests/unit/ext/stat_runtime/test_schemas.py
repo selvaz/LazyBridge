@@ -1,7 +1,5 @@
 """Tests for stat_runtime schemas — pure Pydantic, no heavy deps needed."""
 
-import pytest
-
 from lazybridge.ext.stat_runtime.schemas import (
     ArtifactRecord,
     ColumnProfile,
@@ -54,8 +52,10 @@ class TestDatasetMeta:
 
     def test_serialization_roundtrip(self):
         meta = DatasetMeta(
-            name="equities", uri="/data/eq.parquet",
-            time_column="date", entity_keys=["symbol"],
+            name="equities",
+            uri="/data/eq.parquet",
+            time_column="date",
+            entity_keys=["symbol"],
             columns_schema={"date": "Date", "ret": "Float64"},
         )
         data = meta.model_dump(mode="json")

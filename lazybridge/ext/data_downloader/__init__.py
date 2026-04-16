@@ -29,11 +29,13 @@ from lazybridge.ext.data_downloader.ticker_db import TickerDatabase
 
 def _lazy_import_downloader():
     from lazybridge.ext.data_downloader.downloader import DataDownloader
+
     return DataDownloader
 
 
 def _lazy_import_tools():
     from lazybridge.ext.data_downloader.tools import downloader_tools
+
     return downloader_tools
 
 
@@ -52,6 +54,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
     Returns dict with skill_dir path, or empty dict if docs missing.
     """
     from pathlib import Path
+
     from lazybridge.ext.doc_skills import build_skill
 
     docs_dir = Path(__file__).parent / "skill_docs"
@@ -64,7 +67,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
             "data-downloader-guide",
             output_root=output_root,
             description="Guide to using the data downloader: 140-ticker universe, "
-                        "Yahoo/FRED/ECB sources, download workflows, ticker taxonomy.",
+            "Yahoo/FRED/ECB sources, download workflows, ticker taxonomy.",
         ),
     }
 
@@ -75,22 +78,24 @@ def downloader_skill_tools(skill_dir_map: dict):
 
     tools = []
     if "data_downloader" in skill_dir_map:
-        tools.append(skill_tool(
-            skill_dir_map["data_downloader"]["skill_dir"],
-            name="data_downloader_guide",
-            guidance="Query this to learn about available tickers, data sources, "
-                     "asset class taxonomy, and download workflows.",
-        ))
+        tools.append(
+            skill_tool(
+                skill_dir_map["data_downloader"]["skill_dir"],
+                name="data_downloader_guide",
+                guidance="Query this to learn about available tickers, data sources, "
+                "asset class taxonomy, and download workflows.",
+            )
+        )
     return tools
 
 
 __all__ = [
+    "DataDownloader",
     "DownloaderConfig",
     "FetchResult",
-    "TickerInfo",
     "TickerDatabase",
-    "DataDownloader",
-    "downloader_tools",
+    "TickerInfo",
     "build_downloader_skills",
     "downloader_skill_tools",
+    "downloader_tools",
 ]

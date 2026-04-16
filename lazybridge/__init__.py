@@ -67,12 +67,19 @@ from lazybridge.core.types import (
     ToolDefinition,
     UsageStats,
 )
+from lazybridge.exporters import (
+    CallbackExporter,
+    EventExporter,
+    FilteredExporter,
+    JsonFileExporter,
+    OTelExporter,
+    StructuredLogExporter,
+)
 from lazybridge.graph.schema import EdgeType, GraphSchema, NodeType
 from lazybridge.lazy_agent import LazyAgent
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_router import LazyRouter
 from lazybridge.lazy_run import run_async
-from lazybridge.exporters import CallbackExporter, EventExporter, FilteredExporter, JsonFileExporter
 from lazybridge.lazy_session import Event, LazySession, TrackLevel
 from lazybridge.lazy_store import LazyStore, StoreEntry
 from lazybridge.lazy_tool import (
@@ -111,6 +118,8 @@ __all__ = [
     "CallbackExporter",
     "FilteredExporter",
     "JsonFileExporter",
+    "StructuredLogExporter",
+    "OTelExporter",
     # Graph
     "GraphSchema",
     "NodeType",

@@ -1,8 +1,9 @@
 """Tests for the pluggable event exporter system."""
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from lazybridge.exporters import (
     CallbackExporter,
@@ -10,12 +11,12 @@ from lazybridge.exporters import (
     FilteredExporter,
     JsonFileExporter,
 )
-from lazybridge.lazy_session import EventLog, Event, LazySession, TrackLevel
-
+from lazybridge.lazy_session import Event, EventLog, LazySession, TrackLevel
 
 # ---------------------------------------------------------------------------
 # CallbackExporter
 # ---------------------------------------------------------------------------
+
 
 def test_callback_exporter_receives_events():
     """CallbackExporter receives events when registered on EventLog."""
@@ -89,6 +90,7 @@ def test_exporter_failure_preserves_sqlite_write(tmp_path):
 # FilteredExporter
 # ---------------------------------------------------------------------------
 
+
 def test_filtered_exporter_passes_matching_events():
     collected = []
     inner = CallbackExporter(collected.append)
@@ -120,6 +122,7 @@ def test_filtered_exporter_blocks_non_matching():
 # JsonFileExporter
 # ---------------------------------------------------------------------------
 
+
 def test_json_file_exporter_writes_jsonl(tmp_path):
     path = str(tmp_path / "events.jsonl")
     exp = JsonFileExporter(path)
@@ -140,6 +143,7 @@ def test_json_file_exporter_writes_jsonl(tmp_path):
 # TrackLevel gating
 # ---------------------------------------------------------------------------
 
+
 def test_off_level_skips_exporters():
     """When TrackLevel.OFF, exporters should NOT receive events."""
     collected = []
@@ -159,6 +163,7 @@ def test_verbose_events_skip_exporters_at_basic_level():
 # ---------------------------------------------------------------------------
 # add_exporter / remove_exporter
 # ---------------------------------------------------------------------------
+
 
 def test_add_exporter_at_runtime():
     collected = []
@@ -187,6 +192,7 @@ def test_remove_exporter():
 # LazySession integration
 # ---------------------------------------------------------------------------
 
+
 def test_session_passes_exporters_to_eventlog():
     collected = []
     sess = LazySession(exporters=[CallbackExporter(collected.append)])
@@ -206,6 +212,7 @@ def test_session_add_exporter_convenience():
 # EventExporter protocol
 # ---------------------------------------------------------------------------
 
+
 def test_protocol_compliance():
     """CallbackExporter satisfies the EventExporter protocol."""
     exp = CallbackExporter(lambda e: None)
@@ -214,6 +221,7 @@ def test_protocol_compliance():
 
 def test_custom_exporter_protocol():
     """A custom class with export() satisfies the protocol."""
+
     class MyExporter:
         def export(self, event):
             pass
@@ -223,6 +231,7 @@ def test_custom_exporter_protocol():
 
 # ── JsonFileExporter context manager ──────────────────────────────────────
 
+
 def test_json_file_exporter_context_manager(tmp_path):
     """JsonFileExporter works as a context manager."""
     path = str(tmp_path / "cm_events.jsonl")
@@ -231,6 +240,7 @@ def test_json_file_exporter_context_manager(tmp_path):
 
     # File should be flushed and closed after exiting the context
     import json
+
     with open(path) as f:
         line = f.readline()
     parsed = json.loads(line)

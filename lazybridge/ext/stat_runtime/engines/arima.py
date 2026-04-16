@@ -30,14 +30,10 @@ class ARIMAEngine(BaseEngine):
 
         order = tuple(spec.params.get("order", (1, 0, 0)))
         if len(order) != 3:
-            raise ValueError(
-                f"ARIMA order must be a 3-element tuple (p, d, q), got {order}"
-            )
+            raise ValueError(f"ARIMA order must be a 3-element tuple (p, d, q), got {order}")
         seasonal_order = tuple(spec.params.get("seasonal_order", (0, 0, 0, 0)))
         if len(seasonal_order) != 4:
-            raise ValueError(
-                f"Seasonal order must be a 4-element tuple (P, D, Q, s), got {seasonal_order}"
-            )
+            raise ValueError(f"Seasonal order must be a 4-element tuple (P, D, Q, s), got {seasonal_order}")
         trend = spec.params.get("trend", "c")
 
         model = SARIMAX(
@@ -107,6 +103,7 @@ class ARIMAEngine(BaseEngine):
             jarque_bera_test,
             ljung_box_test,
         )
+
         residuals = np.array(fit_result.residuals_json)
         return [
             ljung_box_test(residuals, lags=min(10, len(residuals) // 5)),
@@ -116,6 +113,8 @@ class ARIMAEngine(BaseEngine):
 
 def _import_sarimax():
     from lazybridge.ext.stat_runtime._deps import require_statsmodels
+
     require_statsmodels()
     from statsmodels.tsa.statespace.sarimax import SARIMAX
+
     return SARIMAX

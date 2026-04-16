@@ -30,8 +30,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 # ── Per-format readers ─────────────────────────────────────────────────────────
+
 
 def _read_txt(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
@@ -98,16 +98,17 @@ def _read_html(path: Path, mode: str) -> str:
 
 
 _EXT_READERS: dict[str, object] = {
-    ".txt":  lambda p, _: _read_txt(p),
-    ".md":   lambda p, _: _read_txt(p),
-    ".pdf":  lambda p, _: _read_pdf(p),
+    ".txt": lambda p, _: _read_txt(p),
+    ".md": lambda p, _: _read_txt(p),
+    ".pdf": lambda p, _: _read_pdf(p),
     ".docx": lambda p, _: _read_docx(p),
     ".html": _read_html,
-    ".htm":  _read_html,
+    ".htm": _read_html,
 }
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
 
 def read_folder_docs(
     path: str,
@@ -157,7 +158,7 @@ def read_folder_docs(
 
     if target.is_file():
         files = [target]
-        root  = target.parent
+        root = target.parent
     elif target.is_dir():
         root = target
         exts: set[str] = set()
@@ -185,14 +186,16 @@ def read_folder_docs(
                 content = reader(path, html_mode)  # type: ignore[call-arg]
             except Exception as exc:
                 content = f"[Error reading file: {exc}]"
-        records.append({
-            "filename":      path.name,
-            "relative_path": str(path.relative_to(root)),
-            "extension":     suffix.lstrip("."),
-            "size_bytes":    path.stat().st_size,
-            "char_count":    len(content),
-            "content":       content,
-        })
+        records.append(
+            {
+                "filename": path.name,
+                "relative_path": str(path.relative_to(root)),
+                "extension": suffix.lstrip("."),
+                "size_bytes": path.stat().st_size,
+                "char_count": len(content),
+                "content": content,
+            }
+        )
 
     if output_format == "json":
         return json.dumps(records, ensure_ascii=False, indent=2)
@@ -232,19 +235,20 @@ Examples:
 """,
     )
     parser.add_argument("path", help="File or folder to read")
-    parser.add_argument("--extensions", default="txt,md,pdf,docx,html",
-                        help="Comma-separated extensions (folder mode only)")
-    parser.add_argument("--html-mode", default="parsed", dest="html_mode",
-                        choices=["parsed", "full", "both"])
+    parser.add_argument(
+        "--extensions", default="txt,md,pdf,docx,html", help="Comma-separated extensions (folder mode only)"
+    )
+    parser.add_argument("--html-mode", default="parsed", dest="html_mode", choices=["parsed", "full", "both"])
     parser.add_argument("--recursive", action="store_true")
-    parser.add_argument("--format", default="text", dest="output_format",
-                        choices=["text", "json"])
+    parser.add_argument("--format", default="text", dest="output_format", choices=["text", "json"])
     args = parser.parse_args()
 
-    print(read_folder_docs(
-        path=args.path,
-        extensions=args.extensions,
-        html_mode=args.html_mode,
-        recursive=args.recursive,
-        output_format=args.output_format,
-    ))
+    print(
+        read_folder_docs(
+            path=args.path,
+            extensions=args.extensions,
+            html_mode=args.html_mode,
+            recursive=args.recursive,
+            output_format=args.output_format,
+        )
+    )

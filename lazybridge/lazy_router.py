@@ -47,9 +47,9 @@ class LazyRouter:
     """
 
     condition: Callable[[Any], str]
-    routes: dict[str, Any]          # str → LazyAgent
+    routes: dict[str, Any]  # str → LazyAgent
     name: str = "router"
-    default: str | None = None       # fallback key if condition returns unknown key
+    default: str | None = None  # fallback key if condition returns unknown key
 
     # ------------------------------------------------------------------
     # Routing
@@ -75,8 +75,7 @@ class LazyRouter:
     def _resolve(self, key: Any) -> Any:
         if not isinstance(key, str):
             raise TypeError(
-                f"LazyRouter '{self.name}': condition must return a str key, "
-                f"got {type(key).__name__!r} ({key!r})."
+                f"LazyRouter '{self.name}': condition must return a str key, got {type(key).__name__!r} ({key!r})."
             )
         if key in self.routes:
             return self.routes[key]
@@ -101,10 +100,7 @@ class LazyRouter:
         return {
             "type": "router",
             "name": self.name,
-            "routes": {
-                k: getattr(a, "id", str(k))
-                for k, a in self.routes.items()
-            },
+            "routes": {k: getattr(a, "id", str(k)) for k, a in self.routes.items()},
             "default": self.default,
         }
 

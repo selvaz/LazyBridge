@@ -107,7 +107,11 @@ class StatRuntime:
 
             # 5. Generate plots
             artifact_paths = self._generate_plots(
-                run.run_id, spec, fit_result, y, forecast_result,
+                run.run_id,
+                spec,
+                fit_result,
+                y,
+                forecast_result,
             )
 
             # 6. Save data artifacts
@@ -115,23 +119,34 @@ class StatRuntime:
 
             # 7. Save summary artifacts
             self.artifacts.write_json(
-                run.run_id, "spec", spec.model_dump(), artifact_type="summary",
+                run.run_id,
+                "spec",
+                spec.model_dump(),
+                artifact_type="summary",
                 description="Model specification",
             )
             self.artifacts.write_text(
-                run.run_id, "fit_summary", fit_result.summary_text, artifact_type="summary",
-                file_format="txt", description="Model fit summary",
+                run.run_id,
+                "fit_summary",
+                fit_result.summary_text,
+                artifact_type="summary",
+                file_format="txt",
+                description="Model fit summary",
             )
             self.artifacts.write_json(
-                run.run_id, "diagnostics",
+                run.run_id,
+                "diagnostics",
                 [d.model_dump() for d in diag_results],
-                artifact_type="summary", description="Diagnostic test results",
+                artifact_type="summary",
+                description="Diagnostic test results",
             )
-            artifact_paths.extend([
-                str(self.artifacts.path_for(run.run_id, "spec", "summary", ".json")),
-                str(self.artifacts.path_for(run.run_id, "fit_summary", "summary", ".txt")),
-                str(self.artifacts.path_for(run.run_id, "diagnostics", "summary", ".json")),
-            ])
+            artifact_paths.extend(
+                [
+                    str(self.artifacts.path_for(run.run_id, "spec", "summary", ".json")),
+                    str(self.artifacts.path_for(run.run_id, "fit_summary", "summary", ".txt")),
+                    str(self.artifacts.path_for(run.run_id, "diagnostics", "summary", ".json")),
+                ]
+            )
 
             # 8. Update run record
             run.status = RunStatus.SUCCESS
@@ -232,10 +247,7 @@ class StatRuntime:
             data.sort(key=lambda row: row[time_col])
 
         if spec.target_col not in data[0]:
-            raise ValueError(
-                f"Target column '{spec.target_col}' not found. "
-                f"Available: {list(data[0].keys())}"
-            )
+            raise ValueError(f"Target column '{spec.target_col}' not found. Available: {list(data[0].keys())}")
 
         y = np.array([row[spec.target_col] for row in data], dtype=float)
         X = None
@@ -243,14 +255,8 @@ class StatRuntime:
             available = set(data[0].keys())
             missing = [c for c in spec.exog_cols if c not in available]
             if missing:
-                raise ValueError(
-                    f"Exogenous columns not found: {missing}. "
-                    f"Available: {sorted(available)}"
-                )
-            X = np.column_stack([
-                np.array([row[col] for row in data], dtype=float)
-                for col in spec.exog_cols
-            ])
+                raise ValueError(f"Exogenous columns not found: {missing}. Available: {sorted(available)}")
+            X = np.column_stack([np.array([row[col] for row in data], dtype=float) for col in spec.exog_cols])
 
         # Remove NaN rows
         mask = ~np.isnan(y)
@@ -277,34 +283,57 @@ class StatRuntime:
         try:
             # Residual plots (all models)
             if fit_result.residuals_json:
-                paths.append(plots.plot_residuals(
-                    fit_result.residuals_json, run_id, self.artifacts,
-                ))
-                paths.append(plots.plot_acf_pacf(
-                    fit_result.residuals_json, run_id, self.artifacts,
-                    title="Residual ACF & PACF",
-                ))
+                paths.append(
+                    plots.plot_residuals(
+                        fit_result.residuals_json,
+                        run_id,
+                        self.artifacts,
+                    )
+                )
+                paths.append(
+                    plots.plot_acf_pacf(
+                        fit_result.residuals_json,
+                        run_id,
+                        self.artifacts,
+                        title="Residual ACF & PACF",
+                    )
+                )
 
             # Family-specific plots
             if spec.family == ModelFamily.GARCH:
                 cond_vol = fit_result.extra.get("conditional_volatility")
                 if cond_vol:
-                    paths.append(plots.plot_volatility(
-                        cond_vol, run_id, self.artifacts, returns=y.tolist(),
-                    ))
+                    paths.append(
+                        plots.plot_volatility(
+                            cond_vol,
+                            run_id,
+                            self.artifacts,
+                            returns=y.tolist(),
+                        )
+                    )
 
             elif spec.family == ModelFamily.MARKOV:
                 smoothed = fit_result.extra.get("smoothed_probabilities")
                 if smoothed:
-                    paths.append(plots.plot_regimes(
-                        smoothed, run_id, self.artifacts, series=y.tolist(),
-                    ))
+                    paths.append(
+                        plots.plot_regimes(
+                            smoothed,
+                            run_id,
+                            self.artifacts,
+                            series=y.tolist(),
+                        )
+                    )
 
             # Forecast plot
             if forecast_result is not None and forecast_result.point_forecast:
-                paths.append(plots.plot_forecast(
-                    y, forecast_result, run_id, self.artifacts,
-                ))
+                paths.append(
+                    plots.plot_forecast(
+                        y,
+                        forecast_result,
+                        run_id,
+                        self.artifacts,
+                    )
+                )
 
         except Exception as exc:
             _logger.warning("Plot generation failed (non-fatal): %s", exc)
@@ -321,15 +350,25 @@ class StatRuntime:
         paths: list[str] = []
         try:
             if fit_result.residuals_json:
-                paths.append(self.artifacts.write_json(
-                    run_id, "residuals", fit_result.residuals_json,
-                    artifact_type="data", description="Model residuals",
-                ))
+                paths.append(
+                    self.artifacts.write_json(
+                        run_id,
+                        "residuals",
+                        fit_result.residuals_json,
+                        artifact_type="data",
+                        description="Model residuals",
+                    )
+                )
             if forecast_result:
-                paths.append(self.artifacts.write_json(
-                    run_id, "forecast", forecast_result.model_dump(),
-                    artifact_type="forecast", description="Forecast results",
-                ))
+                paths.append(
+                    self.artifacts.write_json(
+                        run_id,
+                        "forecast",
+                        forecast_result.model_dump(),
+                        artifact_type="forecast",
+                        description="Forecast results",
+                    )
+                )
         except Exception as exc:
             _logger.warning("Data artifact save failed (non-fatal): %s", exc)
         return paths
@@ -353,4 +392,5 @@ class StatRuntime:
 
 def _import_polars():
     from lazybridge.ext.stat_runtime._deps import require_polars
+
     return require_polars()

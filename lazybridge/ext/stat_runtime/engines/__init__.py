@@ -30,15 +30,19 @@ def _load_engine(family: ModelFamily) -> None:
     """Import the engine module for a given family (lazy registration)."""
     if family == ModelFamily.OLS:
         from lazybridge.ext.stat_runtime.engines.ols import OLSEngine
+
         _REGISTRY[ModelFamily.OLS] = OLSEngine
     elif family == ModelFamily.ARIMA:
         from lazybridge.ext.stat_runtime.engines.arima import ARIMAEngine
+
         _REGISTRY[ModelFamily.ARIMA] = ARIMAEngine
     elif family == ModelFamily.GARCH:
         from lazybridge.ext.stat_runtime.engines.garch import GARCHEngine
+
         _REGISTRY[ModelFamily.GARCH] = GARCHEngine
     elif family == ModelFamily.MARKOV:
         from lazybridge.ext.stat_runtime.engines.markov import MarkovEngine
+
         _REGISTRY[ModelFamily.MARKOV] = MarkovEngine
     _LOADED.add(family)
 

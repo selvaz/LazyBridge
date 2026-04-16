@@ -82,6 +82,7 @@ def _params_to_schema(params: dict[str, Any]) -> dict:
 # _DelegateConfig — internal config for agent-backed tools
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _DelegateConfig:
     agent: Any  # LazyAgent instance
@@ -97,11 +98,12 @@ class _PipelineConfig:
     Stored on the LazyTool so the pipeline can be serialized.
     Closures capture participants at runtime; this records the topology.
     """
+
     mode: str  # "chain" | "parallel" | "agent_tool"
     participants: tuple = ()
     native_tools: list = field(default_factory=list)
-    combiner: str | None = None             # parallel only
-    concurrency_limit: int | None = None    # parallel only
+    combiner: str | None = None  # parallel only
+    concurrency_limit: int | None = None  # parallel only
     step_timeout: float | None = None
     guidance: str | None = None
     # agent_tool-specific
@@ -115,6 +117,7 @@ class _PipelineConfig:
 # ---------------------------------------------------------------------------
 # LazyTool
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class LazyTool:
@@ -274,12 +277,15 @@ class LazyTool:
 
         if self._delegate.output_schema:
             if tools or native:
-                resp = agent.loop(task, tools=tools, native_tools=native,
-                                  output_schema=self._delegate.output_schema,
-                                  **({"system": sys} if sys else {}))
+                resp = agent.loop(
+                    task,
+                    tools=tools,
+                    native_tools=native,
+                    output_schema=self._delegate.output_schema,
+                    **({"system": sys} if sys else {}),
+                )
             else:
-                resp = agent.chat(task, output_schema=self._delegate.output_schema,
-                                  **({"system": sys} if sys else {}))
+                resp = agent.chat(task, output_schema=self._delegate.output_schema, **({"system": sys} if sys else {}))
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -289,8 +295,7 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = agent.loop(task, tools=tools, native_tools=native,
-                              **({"system": sys} if sys else {}))
+            resp = agent.loop(task, tools=tools, native_tools=native, **({"system": sys} if sys else {}))
         else:
             resp = agent.chat(task, **({"system": sys} if sys else {}))
         return resp.content
@@ -321,12 +326,17 @@ class LazyTool:
 
         if self._delegate.output_schema:
             if tools or native:
-                resp = await agent.aloop(task, tools=tools, native_tools=native,
-                                         output_schema=self._delegate.output_schema,
-                                         **({"system": sys} if sys else {}))
+                resp = await agent.aloop(
+                    task,
+                    tools=tools,
+                    native_tools=native,
+                    output_schema=self._delegate.output_schema,
+                    **({"system": sys} if sys else {}),
+                )
             else:
-                resp = await agent.achat(task, output_schema=self._delegate.output_schema,
-                                         **({"system": sys} if sys else {}))
+                resp = await agent.achat(
+                    task, output_schema=self._delegate.output_schema, **({"system": sys} if sys else {})
+                )
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -336,8 +346,7 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = await agent.aloop(task, tools=tools, native_tools=native,
-                                     **({"system": sys} if sys else {}))
+            resp = await agent.aloop(task, tools=tools, native_tools=native, **({"system": sys} if sys else {}))
         else:
             resp = await agent.achat(task, **({"system": sys} if sys else {}))
         return resp.content
@@ -356,10 +365,17 @@ class LazyTool:
         strict: bool | None = None,
     ) -> LazyTool:
         """Return a copy with selective overrides. Clears cached schema."""
-        overrides = {k: v for k, v in {
-            "name": name, "description": description, "guidance": guidance,
-            "schema_mode": schema_mode, "strict": strict,
-        }.items() if v is not None}
+        overrides = {
+            k: v
+            for k, v in {
+                "name": name,
+                "description": description,
+                "guidance": guidance,
+                "schema_mode": schema_mode,
+                "strict": strict,
+            }.items()
+            if v is not None
+        }
         # Clear the cached schema so it is rebuilt with the new name/description.
         if self._delegate is None:
             overrides["_compiled"] = None
@@ -447,6 +463,7 @@ class LazyTool:
 
         # Dedent: inspect.getsource may include class/method indentation
         import textwrap
+
         source = textwrap.dedent(source)
 
         imports = _extract_imports(self.func)
@@ -462,12 +479,10 @@ class LazyTool:
         if self.schema_mode != ToolSchemaMode.SIGNATURE:
             call_args.append(f"    schema_mode=ToolSchemaMode.{self.schema_mode.name}")
         if self.strict:
-            call_args.append(f"    strict=True")
+            call_args.append("    strict=True")
 
         schema_mode_import = (
-            "\nfrom lazybridge.lazy_tool import ToolSchemaMode"
-            if self.schema_mode != ToolSchemaMode.SIGNATURE
-            else ""
+            "\nfrom lazybridge.lazy_tool import ToolSchemaMode" if self.schema_mode != ToolSchemaMode.SIGNATURE else ""
         )
 
         lines = [
@@ -512,7 +527,7 @@ class LazyTool:
         if self.guidance is not None:
             tool_args.append(f"    guidance={self.guidance!r}")
         if self.strict:
-            tool_args.append(f"    strict=True")
+            tool_args.append("    strict=True")
         if self._delegate.output_schema is not None:
             schema_name = getattr(self._delegate.output_schema, "__name__", repr(self._delegate.output_schema))
             tool_args.append(f"    # output_schema={schema_name}  # re-attach after load if needed")
@@ -683,7 +698,10 @@ class LazyTool:
         _write_file(path, "\n".join(lines))
 
     def _emit_participant(
-        self, p: Any, var: str, extra_imports: set[str],
+        self,
+        p: Any,
+        var: str,
+        extra_imports: set[str],
         emitted_funcs: set[str] | None = None,
     ) -> list[str] | None:
         """Generate code lines for a single participant, or None if unsaveable.
@@ -763,7 +781,10 @@ class LazyTool:
         if isinstance(p, LazyTool) and p._delegate is not None:
             agent = p._delegate.agent
             inner_lines = self._emit_participant(
-                agent, f"{var}_agent", extra_imports, emitted_funcs,
+                agent,
+                f"{var}_agent",
+                extra_imports,
+                emitted_funcs,
             )
             if inner_lines is None:
                 return None
@@ -783,7 +804,10 @@ class LazyTool:
         return None
 
     def _emit_nested_pipeline(
-        self, p: "LazyTool", var: str, extra_imports: set[str],
+        self,
+        p: LazyTool,
+        var: str,
+        extra_imports: set[str],
         emitted_funcs: set[str] | None = None,
     ) -> list[str] | None:
         """Recursively emit a nested pipeline as inline code."""
@@ -840,7 +864,7 @@ class LazyTool:
         *,
         reconnect: dict[str, Any] | None = None,
         base_dir: str | None = None,
-    ) -> "LazyTool":
+    ) -> LazyTool:
         """Load a :class:`LazyTool` from a file previously created by :meth:`save`.
 
         Parameters
@@ -885,6 +909,7 @@ class LazyTool:
             )
 
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("_lazybridge_tool_module", resolved)
         if spec is None or spec.loader is None:
             raise ValueError(f"Cannot load module from {path!r}")
@@ -921,7 +946,7 @@ class LazyTool:
         guidance: str | None = None,
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
-    ) -> "LazyTool":
+    ) -> LazyTool:
         """Fan-out pipeline tool: all participants run concurrently on the same task.
 
         Participants are cloned per invocation for call-state isolation —
@@ -955,10 +980,11 @@ class LazyTool:
             ``None`` (default) — no timeout.
         """
         from lazybridge.pipeline_builders import (
-            build_parallel_func,
             _resolve_participant,
             _validate_session_compatibility,
+            build_parallel_func,
         )
+
         if not participants:
             raise ValueError("parallel() requires at least one participant.")
         if combiner not in ("concat", "last"):
@@ -996,7 +1022,7 @@ class LazyTool:
         store: Any | None = None,
         chain_id: str | None = None,
         run_id: str | None = None,
-    ) -> "LazyTool":
+    ) -> LazyTool:
         """Sequential pipeline tool: participants run in order, each receiving
         the previous output as context (agent→agent) or as the new task (tool→agent).
 
@@ -1051,10 +1077,11 @@ class LazyTool:
         ``tool.run()`` or ``output_schema`` on the last step instead.
         """
         from lazybridge.pipeline_builders import (
-            build_achain_func,
             _resolve_participant,
             _validate_session_compatibility,
+            build_achain_func,
         )
+
         if not participants:
             raise ValueError("chain() requires at least one participant.")
         _validate_session_compatibility(participants, session)
@@ -1063,11 +1090,18 @@ class LazyTool:
 
         def _run(task: str) -> Any:
             from lazybridge.lazy_run import run_async
+
             inv = [_resolve_participant(p) for p in participants]
-            return run_async(build_achain_func(
-                inv, _native, step_timeout,
-                store=store, chain_id=_cid, run_id=run_id,
-            )(task))
+            return run_async(
+                build_achain_func(
+                    inv,
+                    _native,
+                    step_timeout,
+                    store=store,
+                    chain_id=_cid,
+                    run_id=run_id,
+                )(task)
+            )
 
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
@@ -1094,7 +1128,7 @@ class LazyTool:
         system: str | None = None,
         step_timeout: float | None = None,
         **agent_kwargs: Any,
-    ) -> "LazyTool":
+    ) -> LazyTool:
         """Create an intelligent tool by chaining a sub-agent → function.
 
         The sub-agent receives a natural-language task, produces structured
@@ -1222,13 +1256,11 @@ class LazyTool:
 # save/load helpers — module-private
 # ---------------------------------------------------------------------------
 
+
 def _validate_save_path(path: str) -> None:
     p = Path(path)
     if ".." in p.parts:
-        raise ValueError(
-            f"Path {path!r} contains '..' components. "
-            "Paths with '..' are not allowed in LazyTool.save()."
-        )
+        raise ValueError(f"Path {path!r} contains '..' components. Paths with '..' are not allowed in LazyTool.save().")
     if p.suffix.lower() != ".py":
         raise ValueError(f"Path {path!r} must end in '.py'.")
 
@@ -1236,10 +1268,7 @@ def _validate_save_path(path: str) -> None:
 def _validate_load_path(path: str, *, base_dir: str | None = None) -> None:
     p = Path(path)
     if ".." in p.parts:
-        raise ValueError(
-            f"Path {path!r} contains '..' components. "
-            "Paths with '..' are not allowed in LazyTool.load()."
-        )
+        raise ValueError(f"Path {path!r} contains '..' components. Paths with '..' are not allowed in LazyTool.load().")
     if p.suffix.lower() != ".py":
         raise ValueError(f"Path {path!r} must end in '.py'.")
     if not p.exists():
@@ -1256,10 +1285,7 @@ def _validate_load_path(path: str, *, base_dir: str | None = None) -> None:
         try:
             resolved.relative_to(base)
         except ValueError:
-            raise ValueError(
-                f"Path {path!r} resolves outside the allowed "
-                f"base directory {base_dir!r}."
-            ) from None
+            raise ValueError(f"Path {path!r} resolves outside the allowed base directory {base_dir!r}.") from None
 
 
 def _write_file(path: str, content: str) -> None:
@@ -1377,6 +1403,7 @@ def _provider_alias(agent: Any) -> str:
 # NormalizedToolSet — internal helper used by LazyAgent
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class NormalizedToolSet:
     definitions: list[ToolDefinition]
@@ -1421,7 +1448,7 @@ class NormalizedToolSet:
         return cls(definitions=definitions, bridges=bridges, registry=registry)
 
 
-def _clone_delegate_tool_for_invocation(tool: "LazyTool") -> "LazyTool":
+def _clone_delegate_tool_for_invocation(tool: LazyTool) -> LazyTool:
     """Clone the delegate agent inside a LazyTool.from_agent() tool.
 
     FRIEND MODULE CONTRACT:
@@ -1434,10 +1461,12 @@ def _clone_delegate_tool_for_invocation(tool: "LazyTool") -> "LazyTool":
     tool:
         A LazyTool with a non-None _delegate (created via from_agent()).
     """
-    from lazybridge.pipeline_builders import _clone_for_invocation
     from dataclasses import replace
+
+    from lazybridge.pipeline_builders import _clone_for_invocation
+
     agent_clone = _clone_for_invocation(tool._delegate.agent)  # type: ignore[union-attr]
-    new_delegate = replace(tool._delegate, agent=agent_clone)   # type: ignore[union-attr]
+    new_delegate = replace(tool._delegate, agent=agent_clone)  # type: ignore[union-attr]
     return replace(tool, _delegate=new_delegate)
 
 

@@ -62,9 +62,7 @@ class ArtifactStore:
     def root(self) -> Path:
         return self._root
 
-    def path_for(
-        self, run_id: str, name: str, artifact_type: str = "data", ext: str = ""
-    ) -> Path:
+    def path_for(self, run_id: str, name: str, artifact_type: str = "data", ext: str = "") -> Path:
         """Return the target path for an artifact (creates parent dirs)."""
         subdir = _TYPE_DIRS.get(artifact_type, artifact_type)
         fname = f"{name}{ext}" if ext else name
@@ -91,8 +89,7 @@ class ArtifactStore:
         ext = f".{file_format}" if not name.endswith(f".{file_format}") else ""
         path = self.path_for(run_id, name, artifact_type, ext)
         path.write_bytes(data)
-        self._register(run_id, name, artifact_type, file_format, str(path),
-                        description, metadata)
+        self._register(run_id, name, artifact_type, file_format, str(path), description, metadata)
         return str(path)
 
     def write_text(
@@ -110,8 +107,7 @@ class ArtifactStore:
         ext = f".{file_format}" if not name.endswith(f".{file_format}") else ""
         path = self.path_for(run_id, name, artifact_type, ext)
         path.write_text(text, encoding="utf-8")
-        self._register(run_id, name, artifact_type, file_format, str(path),
-                        description, metadata)
+        self._register(run_id, name, artifact_type, file_format, str(path), description, metadata)
         return str(path)
 
     def write_json(
@@ -126,11 +122,8 @@ class ArtifactStore:
     ) -> str:
         """Serialize data as JSON and register.  Returns the file path."""
         path = self.path_for(run_id, name, artifact_type, ".json")
-        path.write_text(
-            json.dumps(data, indent=2, default=str), encoding="utf-8"
-        )
-        self._register(run_id, name, artifact_type, "json", str(path),
-                        description, metadata)
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        self._register(run_id, name, artifact_type, "json", str(path), description, metadata)
         return str(path)
 
     def write_plot(
@@ -155,11 +148,11 @@ class ArtifactStore:
         try:
             plt = fig.get_figure() if hasattr(fig, "get_figure") else fig
             import matplotlib.pyplot as _plt
+
             _plt.close(plt)
         except Exception:
             pass
-        self._register(run_id, name, "plot", file_format, str(path),
-                        description, metadata)
+        self._register(run_id, name, "plot", file_format, str(path), description, metadata)
         return str(path)
 
     # ------------------------------------------------------------------
@@ -208,10 +201,7 @@ class ArtifactStore:
             candidate = base_dir / f"{name}{ext}"
             if candidate.exists():
                 return candidate
-        raise FileNotFoundError(
-            f"Artifact '{name}' (type={artifact_type}) not found for run {run_id} "
-            f"in {base_dir}"
-        )
+        raise FileNotFoundError(f"Artifact '{name}' (type={artifact_type}) not found for run {run_id} in {base_dir}")
 
     def _register(
         self,

@@ -1,22 +1,21 @@
 """Unit tests for LazyAgent — mock-only, no API calls."""
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from lazybridge.lazy_agent import LazyAgent
 from lazybridge.core.types import (
     CompletionResponse,
-    StreamChunk,
     ThinkingContent,
     ToolCall,
-    ToolUseContent,
     UsageStats,
 )
-
+from lazybridge.lazy_agent import LazyAgent
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_agent(provider="anthropic"):
     with patch("lazybridge.core.executor.Executor.__init__", return_value=None):
@@ -26,6 +25,7 @@ def _make_agent(provider="anthropic"):
     mock_exec.model = "test-model"
     agent._executor = mock_exec
     import uuid
+
     agent.id = str(uuid.uuid4())
     agent.name = "test"
     agent.description = None
@@ -58,14 +58,16 @@ def _final_response(content="done"):
 
 # ── T6.01 — chat: last_output set after single call ──────────────────────────
 
+
 def test_chat_sets_last_output(mock_execute, fake_response):
     agent = _make_agent()
     agent._executor.execute.return_value = fake_response
-    resp = agent.chat("hello")
+    _resp = agent.chat("hello")
     assert agent._last_output == "mock response"
 
 
 # ── T6.02 — loop: terminates when no tool calls returned ─────────────────────
+
 
 def test_loop_terminates_no_tool_calls(fake_response):
     agent = _make_agent()
@@ -76,6 +78,7 @@ def test_loop_terminates_no_tool_calls(fake_response):
 
 # ── T6.03 — loop: max_steps=0 raises ValueError ───────────────────────────────
 
+
 def test_loop_max_steps_zero():
     agent = _make_agent()
     with pytest.raises(ValueError, match="max_steps"):
@@ -83,6 +86,7 @@ def test_loop_max_steps_zero():
 
 
 # ── T6.04 — loop: stream=True raises TypeError ───────────────────────────────
+
 
 def test_loop_stream_raises():
     agent = _make_agent()
@@ -97,6 +101,7 @@ def test_loop_stream_raises():
 # required message format for thinking-enabled models.
 #
 # The fix: aloop() must mirror loop()'s thinking-block inclusion.
+
 
 async def test_aloop_preserves_thinking_blocks_in_convo():
     """aloop() must include ThinkingContent in the assistant message when the
@@ -156,12 +161,12 @@ async def test_aloop_preserves_thinking_blocks_in_convo():
     content = asst_msg.content if isinstance(asst_msg.content, list) else []
     thinking_blocks = [b for b in content if isinstance(b, ThinkingContent)]
     assert thinking_blocks, (
-        "aloop() dropped ThinkingContent from the assistant message. "
-        "Expected at least one ThinkingContent block."
+        "aloop() dropped ThinkingContent from the assistant message. Expected at least one ThinkingContent block."
     )
 
 
 # ── T6.06 — text() shorthand returns content string ──────────────────────────
+
 
 def test_text_returns_content(fake_response):
     agent = _make_agent()
@@ -172,6 +177,7 @@ def test_text_returns_content(fake_response):
 
 # ── T6.07 — text() with stream=True raises TypeError ─────────────────────────
 
+
 def test_text_stream_raises():
     agent = _make_agent()
     with pytest.raises(TypeError, match="stream"):
@@ -179,6 +185,7 @@ def test_text_stream_raises():
 
 
 # ── T6.08 — json() returns parsed result and injects _JSON_SYSTEM_SUFFIX ─────
+
 
 def test_json_returns_parsed_and_injects_suffix(fake_response):
     from pydantic import BaseModel
@@ -212,6 +219,7 @@ def test_json_returns_parsed_and_injects_suffix(fake_response):
 
 # ── T6.09 — json() with stream=True raises TypeError ─────────────────────────
 
+
 def test_json_stream_raises():
     # T6.09
     agent = _make_agent()
@@ -220,6 +228,7 @@ def test_json_stream_raises():
 
 
 # ── T6.09b — json() raises on structured-output validation failure ───────────
+
 
 def test_json_raises_on_validation_error():
     from lazybridge.core.types import StructuredOutputParseError
@@ -239,6 +248,7 @@ def test_json_raises_on_validation_error():
 
 
 # ── T6.10 — json() preserves caller-supplied system prompt ───────────────────
+
 
 def test_json_appends_suffix_to_existing_system(fake_response):
     # T6.10
@@ -268,6 +278,7 @@ def test_json_appends_suffix_to_existing_system(fake_response):
 
 # ── T6.11 — chat(stream=True) returns Iterator[StreamChunk] ──────────────────
 
+
 def test_chat_stream_returns_iterator(fake_chunks):
     # T6.11 — _make_agent() uses a raw MagicMock executor; configure .stream directly
     agent = _make_agent()
@@ -280,6 +291,7 @@ def test_chat_stream_returns_iterator(fake_chunks):
 
 
 # ── T6.12 — loop() executes tool and continues until no tool_calls ───────────
+
 
 def test_loop_executes_tool_and_continues():
     # T6.12
@@ -308,6 +320,7 @@ def test_loop_executes_tool_and_continues():
 
 # ── T6.13 — aloop() executes tool and continues ───────────────────────────────
 
+
 async def test_aloop_executes_tool_and_continues():
     # T6.13
     agent = _make_agent()
@@ -332,6 +345,7 @@ async def test_aloop_executes_tool_and_continues():
 
 # ── T6.14 — _build_effective_system: system + context + guidance ─────────────
 
+
 def test_build_effective_system_all_parts():
     # T6.14
     from lazybridge.lazy_context import LazyContext
@@ -351,6 +365,7 @@ def test_build_effective_system_all_parts():
 
 # ── T2.15 — loop(verify=None) is unchanged (regression guard) ────────────────
 
+
 def test_loop_verify_none_unchanged():
     """verify=None must not change loop() behaviour at all."""
     agent = _make_agent()
@@ -361,6 +376,7 @@ def test_loop_verify_none_unchanged():
 
 
 # ── T2.16 — loop(verify=callable) approves on first attempt ─────────────────
+
 
 def test_loop_verify_approves_first_attempt():
     """verify callable returns 'APPROVED' → loop exits after 1 attempt."""
@@ -380,6 +396,7 @@ def test_loop_verify_approves_first_attempt():
 
 
 # ── T2.17 — loop(verify=callable) retries, approves on second attempt ────────
+
 
 def test_loop_verify_retries_then_approves():
     """verify callable rejects once then approves — worker called twice."""
@@ -405,6 +422,7 @@ def test_loop_verify_retries_then_approves():
 
 # ── T2.18 — loop(verify=callable) returns last result when max_verify hit ────
 
+
 def test_loop_verify_max_exceeded_returns_last():
     """When max_verify is exhausted, return last worker result — no exception."""
     agent = _make_agent()
@@ -427,6 +445,7 @@ def test_loop_verify_max_exceeded_returns_last():
 
 # ── T2.19 — loop(verify=LazyAgent) calls verify.text() with correct prompt ───
 
+
 def test_loop_verify_lazy_agent_calls_text():
     """When verify is a LazyAgent, loop() must call verify.text() with the
     formatted prompt and use the verdict to decide whether to retry."""
@@ -438,13 +457,12 @@ def test_loop_verify_lazy_agent_calls_text():
 
     resp = agent.loop("the question", verify=mock_judge)
 
-    mock_judge.text.assert_called_once_with(
-        "Question: the question\nAnswer: final answer"
-    )
+    mock_judge.text.assert_called_once_with("Question: the question\nAnswer: final answer")
     assert resp.content == "final answer"
 
 
 # ── T2.20 — aloop(verify=async callable) works correctly ─────────────────────
+
 
 async def test_aloop_verify_async_callable():
     """aloop() with an async verify callable approves and returns result."""
@@ -477,6 +495,7 @@ async def test_aloop_verify_async_callable():
 
 # ── T2.21 — on_event("verify_rejected") fires on each rejection ───────────────
 
+
 def test_loop_verify_rejected_event_fires():
     """on_event("verify_rejected") fires with attempt and verdict on each rejection."""
     agent = _make_agent()
@@ -502,6 +521,7 @@ def test_loop_verify_rejected_event_fires():
 
 # ── T2.22 — on_event("verify_rejected") NOT fired when approved first try ─────
 
+
 def test_loop_verify_no_rejected_event_on_first_approval():
     """No verify_rejected event when the judge approves on the first attempt."""
     agent = _make_agent()
@@ -518,6 +538,7 @@ def test_loop_verify_no_rejected_event_on_first_approval():
 
 # ── T2.23 — resp.verify_log contains all rejected verdicts in order ───────────
 
+
 def test_loop_verify_log_collects_rejections():
     """verify_log on the returned CompletionResponse holds every rejected verdict."""
     agent = _make_agent()
@@ -533,6 +554,7 @@ def test_loop_verify_log_collects_rejections():
 
 # ── T2.24 — resp.verify_log is empty when verify=None ────────────────────────
 
+
 def test_loop_verify_log_empty_when_no_verify():
     """verify_log is [] when verify is not set."""
     agent = _make_agent()
@@ -545,9 +567,11 @@ def test_loop_verify_log_empty_when_no_verify():
 # T_TR — tool result serialization (P1.5)
 # =============================================================================
 
+
 def test_tool_result_pydantic_serialised_as_json():
     """T_TR.1: Pydantic model returned by a tool is serialised with model_dump_json()."""
     from pydantic import BaseModel
+
     from lazybridge.lazy_agent import _serialise_tool_result
 
     class BlogPost(BaseModel):
@@ -557,6 +581,7 @@ def test_tool_result_pydantic_serialised_as_json():
     post = BlogPost(title="AI News", intro="Big week for AI")
     result = _serialise_tool_result(post)
     import json
+
     parsed = json.loads(result)
     assert parsed["title"] == "AI News"
     assert parsed["intro"] == "Big week for AI"
@@ -564,8 +589,9 @@ def test_tool_result_pydantic_serialised_as_json():
 
 def test_tool_result_dict_serialised_as_json():
     """T_TR.2: dict returned by a tool is serialised with json.dumps()."""
-    from lazybridge.lazy_agent import _serialise_tool_result
     import json
+
+    from lazybridge.lazy_agent import _serialise_tool_result
 
     d = {"key": "value", "count": 42}
     result = _serialise_tool_result(d)
@@ -585,6 +611,7 @@ def test_tool_result_str_unchanged():
 # T_OS — output_schema as true default (P1.1)
 # =============================================================================
 
+
 def test_chat_uses_agent_level_output_schema():
     """T_OS.1: agent.chat() without call-level output_schema applies self.output_schema."""
     from pydantic import BaseModel
@@ -602,7 +629,7 @@ def test_chat_uses_agent_level_output_schema():
     )
     agent._executor.execute.return_value = resp
 
-    result = agent.chat("write something")
+    _result = agent.chat("write something")
     # Verify the request was built with the schema
     call_args = agent._executor.execute.call_args[0][0]
     assert call_args.structured_output is not None
@@ -646,6 +673,7 @@ def test_chat_no_schema_no_structured_output():
 # =============================================================================
 # T_EV — AGENT_START / AGENT_FINISH / LOOP_STEP events (P1.2)
 # =============================================================================
+
 
 def test_loop_emits_agent_start_and_finish():
     """T_EV.1: loop() emits AGENT_START before and AGENT_FINISH after the loop."""
@@ -691,11 +719,11 @@ def test_loop_emits_loop_step_for_tool_calls():
     mock_tool.name = "calc"
     mock_tool.run = MagicMock(return_value=42)
     from lazybridge.lazy_tool import LazyTool
+
     agent.tools = [mock_tool]
 
     # Provide a tool in the registry via tools= param
     from lazybridge.lazy_tool import NormalizedToolSet
-    from lazybridge.core.types import ToolDefinition
 
     fake_lazy_tool = MagicMock(spec=LazyTool)
     fake_lazy_tool.name = "calc"
@@ -736,6 +764,7 @@ def test_loop_no_loop_step_when_no_tool_calls():
 # T_AE — async-aware on_event in aloop() (P1.4)
 # =============================================================================
 
+
 @pytest.mark.asyncio
 async def test_aloop_awaits_async_on_event():
     """T_AE.1: aloop() with an async callback — the coroutine is awaited."""
@@ -774,6 +803,7 @@ async def test_aloop_sync_on_event_still_works():
 # T_LR — _last_response stores full CompletionResponse (P2.1)
 # =============================================================================
 
+
 def test_chat_sets_last_response():
     """_last_response is set after chat()."""
     agent = _make_agent()
@@ -808,6 +838,7 @@ async def test_aloop_sets_last_response():
 # =============================================================================
 # T_RESULT — agent.result property
 # =============================================================================
+
 
 def test_result_returns_none_before_any_call():
     """T_RESULT.1: agent.result is None before the agent has been called."""
@@ -853,10 +884,11 @@ def test_result_returns_pydantic_when_output_schema_active():
 
 # ── messages_to_str edge cases ────────────────────────────────────────────
 
+
 def test_messages_to_str_uses_role_enum(mock_execute):
     """_messages_to_str correctly matches Role.USER enum values."""
-    from lazybridge.lazy_agent import _messages_to_str
     from lazybridge.core.types import Message, Role
+    from lazybridge.lazy_agent import _messages_to_str
 
     # Message with Role enum
     msgs = [Message(role=Role.USER, content="hello")]
@@ -869,6 +901,7 @@ def test_messages_to_str_uses_role_enum(mock_execute):
 
 
 # ── chat() with context= override ────────────────────────────────────────
+
 
 @patch("lazybridge.core.executor.Executor.execute")
 @patch("lazybridge.core.providers.anthropic.AnthropicProvider._init_client")
@@ -892,6 +925,7 @@ def test_chat_context_override(mock_init, mock_exec):
 
 
 # ── tool_choice forwarding ────────────────────────────────────────────────
+
 
 @patch("lazybridge.core.executor.Executor.execute")
 @patch("lazybridge.core.providers.anthropic.AnthropicProvider._init_client")
