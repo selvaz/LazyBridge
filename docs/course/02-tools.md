@@ -91,6 +91,70 @@ print(resp.content)
 
 The agent will call both tools and combine the results.
 
+## Agent-level vs call-level tools
+
+Tools can be attached in two places — this is a critical design decision:
+
+```python
+# ── Call-level: tools passed to loop()/chat() ──
+# Good for: ad-hoc tool use, experimentation, one-off calls
+ai = LazyAgent("anthropic")
+resp = ai.loop("What time is it?", tools=[time_tool])
+
+# ── Agent-level: tools bound at construction ──
+# Good for: specialized agents, pipelines, reusable components
+ai = LazyAgent("anthropic", tools=[calculator, time_tool, search_tool])
+resp = ai.loop("What is 2+2 and what time is it?")  # tools always available
+```
+
+**Both are merged at runtime.** If an agent has agent-level tools AND you pass call-level tools, they're combined:
+
+```python
+# Agent always has calculator
+specialist = LazyAgent("anthropic", name="analyst", tools=[calculator])
+
+# This call also gets search — both are available
+resp = specialist.loop("Find GDP and compute growth rate", tools=[search_tool])
+```
+
+### Why agent-level tools matter for production
+
+When you build specialized agents for pipelines, bind their tools at construction. This makes the agent self-contained — the orchestrator doesn't need to know what tools each agent uses:
+
+```python
+# ── Specialized agents with bound tools ──
+researcher = LazyAgent("anthropic", name="researcher", tools=[web_search, arxiv_search])
+analyst = LazyAgent("anthropic", name="analyst", tools=[calculator, chart_tool])
+writer = LazyAgent("openai", name="writer")  # no tools — just writes
+
+# ── Orchestrator only sees agents-as-tools ──
+orchestrator = LazyAgent("anthropic", name="orchestrator")
+resp = orchestrator.loop(
+    "Research AI trends, analyze the data, then write a report",
+    tools=[
+        researcher.as_tool("research", "Search web and papers"),
+        analyst.as_tool("analyze", "Run calculations and make charts"),
+        writer.as_tool("write", "Write polished text"),
+    ],
+)
+```
+
+The orchestrator decides *which agent* to call. Each agent internally uses its own tools. This separation is what makes LazyBridge pipelines composable.
+
+### The same applies to sessions
+
+When using `LazySession.as_tool(mode="chain")` or `mode="parallel"`, each agent's bound tools are used automatically during pipeline execution:
+
+```python
+sess = LazySession()
+researcher = LazyAgent("anthropic", name="researcher", tools=[search], session=sess)
+writer = LazyAgent("openai", name="writer", session=sess)  # no tools
+
+# Chain runs: researcher (with search) → writer (no tools)
+pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
+result = pipeline.run({"task": "Write about quantum computing"})
+```
+
 ## Tool guidance
 
 Add extra instructions that the agent sees when the tool is available:

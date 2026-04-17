@@ -8,8 +8,9 @@ Build complex workflows by chaining agents in sequence, running them in parallel
 from lazybridge import LazyAgent, LazySession
 
 sess = LazySession()
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-writer = LazyAgent("openai", name="writer", session=sess)
+researcher = LazyAgent("anthropic", name="researcher", session=sess,
+                       tools=[web_search])  # tools bound to agent
+writer = LazyAgent("openai", name="writer", session=sess)  # no tools
 ```
 
 A session provides:
@@ -17,6 +18,8 @@ A session provides:
 - **Store** — shared key-value blackboard (`sess.store`)
 - **Events** — tracking/logging (`sess.events`)
 - **Graph** — pipeline topology for visualization (`sess.graph`)
+
+**Key pattern:** Bind tools at the agent level (not the session or pipeline level). Each agent carries its own tools. When the pipeline runs, each agent uses its bound tools automatically — the orchestrator doesn't need to know or manage them.
 
 ## Chain mode — sequential pipeline
 
