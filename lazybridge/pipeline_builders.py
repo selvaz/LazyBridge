@@ -402,7 +402,8 @@ def build_achain_func(
                 else:
                     coro = p.achat(current_task, **kw)
 
-                result = await asyncio.wait_for(coro, timeout=step_timeout) if step_timeout is not None else await coro
+                _skip_timeout = step_timeout is None or getattr(p, "_is_human", False)
+                result = await coro if _skip_timeout else await asyncio.wait_for(coro, timeout=step_timeout)
 
                 if schema is not None:
                     state = _ChainState(
