@@ -101,16 +101,15 @@ class QueryEngine:
 
         conn = duckdb.connect()
         try:
-            # First: get the true row count via a COUNT wrapper
-            count_sql = f"SELECT COUNT(*) FROM ({expanded_sql}) AS _q"
-            total_rows = conn.execute(count_sql).fetchone()[0]
-            truncated = total_rows > max_rows
-
-            # Then: fetch only max_rows+1 rows using DB-level LIMIT
-            limited_sql = f"SELECT * FROM ({expanded_sql}) AS _q LIMIT {max_rows}"
+            # Fetch max_rows+1 to detect truncation without a separate COUNT query
+            limited_sql = f"SELECT * FROM ({expanded_sql}) AS _q LIMIT {max_rows + 1}"
             result = conn.execute(limited_sql)
             columns = [desc[0] for desc in result.description]
             rows = result.fetchall()
+            truncated = len(rows) > max_rows
+            if truncated:
+                rows = rows[:max_rows]
+            total_rows = len(rows)
 
             data_json = [dict(zip(columns, row)) for row in rows]
             # Convert non-serializable types

@@ -464,6 +464,7 @@ class LazyAgent:
             stop_reason=resp.stop_reason,
             input_tokens=resp.usage.input_tokens,
             output_tokens=resp.usage.output_tokens,
+            cost_usd=resp.usage.cost_usd,
             content=resp.content,
         )
 
