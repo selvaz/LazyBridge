@@ -69,6 +69,7 @@ class DeepSeekProvider(OpenAIProvider):
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
+        """Return the default max_tokens for the given model."""
         resolved = (model or self.model or self.default_model or "").lower()
         if "reasoner" in resolved:
             return 64_000
@@ -170,6 +171,7 @@ class DeepSeekProvider(OpenAIProvider):
         )
 
     def complete(self, request: CompletionRequest) -> CompletionResponse:
+        """Execute a synchronous completion."""
         request = self._resolve_thinking(request)
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
@@ -189,6 +191,7 @@ class DeepSeekProvider(OpenAIProvider):
         return resp
 
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
+        """Stream a completion, yielding StreamChunk objects."""
         request = self._resolve_thinking(request)
         params = self._build_chat_params(request)
         params["stream"] = True
@@ -249,6 +252,7 @@ class DeepSeekProvider(OpenAIProvider):
                     yield final_chunk
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        """Async completion."""
         request = self._resolve_thinking(request)
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
@@ -267,6 +271,7 @@ class DeepSeekProvider(OpenAIProvider):
         return resp
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
+        """Async streaming completion."""
         request = self._resolve_thinking(request)
         params = self._build_chat_params(request)
         params["stream"] = True

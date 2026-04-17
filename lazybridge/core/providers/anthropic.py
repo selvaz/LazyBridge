@@ -96,6 +96,7 @@ class AnthropicProvider(BaseProvider):
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
+        """Return the default max_tokens for a given Anthropic model."""
         resolved = (model or self.model or self.default_model or "").lower()
         if "opus-4-6" in resolved:
             return 128_000
@@ -420,6 +421,7 @@ class AnthropicProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def complete(self, request: CompletionRequest) -> CompletionResponse:
+        """Execute a synchronous Anthropic Messages API call."""
         if self._should_force_streaming(request):
             return self._collect_streamed_response(request)
         betas = self._build_betas(request)
@@ -471,6 +473,7 @@ class AnthropicProvider(BaseProvider):
         return self._parse_response(response)
 
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
+        """Stream a completion, yielding StreamChunk objects."""
         betas = self._build_betas(request)
         params = self._build_params(request)
 
@@ -540,6 +543,7 @@ class AnthropicProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        """Async completion."""
         if self._should_force_streaming(request):
             return await self._acollect_streamed_response(request)
         betas = self._build_betas(request)
@@ -592,6 +596,7 @@ class AnthropicProvider(BaseProvider):
         return self._parse_response(response)
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
+        """Async streaming completion."""
         betas = self._build_betas(request)
         params = self._build_params(request)
 

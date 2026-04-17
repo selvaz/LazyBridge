@@ -98,6 +98,7 @@ class GoogleProvider(BaseProvider):
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
+        """Return the default max_tokens for the given model."""
         resolved = (model or self.model or self.default_model or "").lower()
         if "gemini-3" in resolved or "gemini-2.5" in resolved:
             return 65_536
@@ -577,6 +578,7 @@ class GoogleProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def complete(self, request: CompletionRequest) -> CompletionResponse:
+        """Execute a synchronous completion."""
         model = self._resolve_model(request)
         contents = self._messages_to_gemini(request)
         config = self._build_config(request)
@@ -597,6 +599,7 @@ class GoogleProvider(BaseProvider):
         return resp
 
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
+        """Stream a completion, yielding StreamChunk objects."""
         model = self._resolve_model(request)
         contents = self._messages_to_gemini(request)
         config = self._build_config(request)
@@ -672,6 +675,7 @@ class GoogleProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        """Async completion."""
         model = self._resolve_model(request)
         contents = self._messages_to_gemini(request)
         config = self._build_config(request)
@@ -691,6 +695,7 @@ class GoogleProvider(BaseProvider):
         return resp
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
+        """Async streaming completion."""
         model = self._resolve_model(request)
         contents = self._messages_to_gemini(request)
         config = self._build_config(request)

@@ -196,41 +196,51 @@ class GuardChain:
         self._guards = list(guards)
 
     def check_input(self, text: str) -> GuardAction:
+        original = text
         for g in self._guards:
             action = g.check_input(text)
             if not action.allowed:
                 return action
             if action.modified_text is not None:
                 text = action.modified_text
-        if text != text:  # pragma: no cover — unreachable but safe
+        if text != original:
             return GuardAction.modify(text)
         return GuardAction.allow()
 
     def check_output(self, text: str) -> GuardAction:
+        original = text
         for g in self._guards:
             action = g.check_output(text)
             if not action.allowed:
                 return action
             if action.modified_text is not None:
                 text = action.modified_text
+        if text != original:
+            return GuardAction.modify(text)
         return GuardAction.allow()
 
     async def acheck_input(self, text: str) -> GuardAction:
+        original = text
         for g in self._guards:
             action = await g.acheck_input(text) if hasattr(g, "acheck_input") else g.check_input(text)
             if not action.allowed:
                 return action
             if action.modified_text is not None:
                 text = action.modified_text
+        if text != original:
+            return GuardAction.modify(text)
         return GuardAction.allow()
 
     async def acheck_output(self, text: str) -> GuardAction:
+        original = text
         for g in self._guards:
             action = await g.acheck_output(text) if hasattr(g, "acheck_output") else g.check_output(text)
             if not action.allowed:
                 return action
             if action.modified_text is not None:
                 text = action.modified_text
+        if text != original:
+            return GuardAction.modify(text)
         return GuardAction.allow()
 
 

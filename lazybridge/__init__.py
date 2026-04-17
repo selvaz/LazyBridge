@@ -45,7 +45,7 @@ Pipeline as tool (expose a session to an orchestrator)::
     researcher = LazyAgent("anthropic", name="researcher", session=sess)
     writer     = LazyAgent("openai",    name="writer",     session=sess)
 
-    pipeline = sess.as_tool("research_pipeline", "Run the pipeline", entry_agent=researcher)
+    pipeline = sess.as_tool("research_pipeline", "Run the pipeline", mode="chain")
     orchestrator = LazyAgent("anthropic")
     orchestrator.loop("coordinate the work", tools=[pipeline])
 """
