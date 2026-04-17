@@ -109,8 +109,10 @@ LazySession.as_tool(                                 # CANONICAL — compose pip
     mode: str | None = None,               # "parallel" | "chain" (required unless using entry_agent=)
     participants: list[LazyAgent | LazyTool] | None = None,  # explicit order; defaults to session agents
     combiner: str = "concat",              # parallel only: "concat" | "last"
+    native_tools: list | None = None,      # forwarded to agents in chain mode
     entry_agent: LazyAgent | None = None,  # legacy single-agent delegation
     guidance: str | None = None,
+    run_id: str | None = None,             # checkpoint isolation for concurrent runs
 ) -> LazyTool
 
 LazySession.usage_summary() -> dict       # {"total": {...}, "by_agent": {...}} — requires tracking="verbose"

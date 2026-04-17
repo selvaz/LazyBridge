@@ -73,7 +73,11 @@ sess       = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
 writer     = LazyAgent("openai",    name="writer",     session=sess)
 
-search_tool = LazyTool.from_function(lambda query: f"Papers about {query}")
+def search(query: str) -> str:
+    """Search for papers."""
+    return f"Papers about {query}"
+
+search_tool = LazyTool.from_function(search)
 researcher.loop("Find top 3 AI papers this week", tools=[search_tool])
 result = writer.chat(
     "Write a blog post",

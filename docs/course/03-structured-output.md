@@ -80,11 +80,11 @@ print(ai.result.answer)  # same thing
 Two error types when structured output fails:
 
 ```python
-from lazybridge.core.structured import (
-    StructuredOutputError,         # base class
-    StructuredOutputParseError,    # JSON was invalid
+from lazybridge.core.types import (
+    StructuredOutputParseError,       # JSON was invalid
     StructuredOutputValidationError,  # JSON valid but doesn't match schema
 )
+from lazybridge import StructuredOutputError  # base class (also re-exported)
 
 try:
     result = ai.json("Generate data", MyModel)
