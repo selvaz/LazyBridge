@@ -517,6 +517,95 @@ class LazyAgent:
         return resp
 
     # ------------------------------------------------------------------
+    # Loop action protocol — unified loop logic for sync/async
+    # ------------------------------------------------------------------
+
+    _CALL_MODEL = "call_model"
+    _EXEC_TOOL = "exec_tool"
+    _EMIT_EVENT = "emit_event"
+    _VERIFY = "verify"
+
+    def _loop_logic(
+        self,
+        messages: str | list,
+        *,
+        tools: list | None,
+        native_tools: list[NativeTool | str] | None,
+        max_steps: int,
+        tool_runner: Callable | None,
+        on_event: Callable | None,
+        verify: Any,
+        max_verify: int,
+        method: str,
+        chat_kwargs: dict,
+    ):
+        """Generator that yields (action, *args) tuples at sync/async divergence points.
+
+        The caller (loop or aloop) sends back the result of each action.
+        This keeps all decision logic in one place.
+        """
+        _orig_q = _messages_to_str(messages)
+        _current_messages: str | list = messages
+        _attempts = max(1, max_verify) if verify is not None else 1
+        resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
+        step = 0
+
+        self._track(Event.AGENT_START, method=method, task=_orig_q[:200])
+
+        for _attempt in range(_attempts):
+            tool_set = self._build_tool_set(tools)
+            convo = _normalise_messages(_current_messages)
+
+            for step in range(max_steps):
+                resp = yield (self._CALL_MODEL, convo, tools, native_tools, chat_kwargs)
+
+                if on_event:
+                    yield (self._EMIT_EVENT, on_event, "step", {"step": step, "response": resp})
+
+                if not resp.tool_calls:
+                    break
+
+                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
+                convo.append(Message(role=Role.ASSISTANT, content=self._build_assistant_turn(resp)))
+
+                for tc in resp.tool_calls:
+                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
+                    if on_event:
+                        yield (self._EMIT_EVENT, on_event, "tool_call", tc)
+                    try:
+                        result = yield (self._EXEC_TOOL, tc, tool_set.registry, tool_runner)
+                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                        if on_event:
+                            yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
+                        convo.append(_tool_result_message(tc, result))
+                    except Exception as exc:
+                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
+                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
+                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+
+            if resp is None:  # pragma: no cover
+                raise AssertionError("loop produced no response — this is a bug, please report it")
+
+            if on_event:
+                yield (self._EMIT_EVENT, on_event, "done", resp)
+
+            if verify is None:
+                break
+
+            _raw = yield (self._VERIFY, verify, _orig_q, resp.content)
+            _verdict: str = str(_raw) if _raw is not None else ""
+            if _verdict[:30].lower().startswith("approved"):
+                break
+
+            _verify_log.append(_verdict)
+            if on_event:
+                yield (self._EMIT_EVENT, on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
+            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
+
+        return self._finalize_loop(resp, _verify_log, _attempts, verify, method, step)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
     # Guard helpers
     # ------------------------------------------------------------------
 
@@ -810,78 +899,40 @@ class LazyAgent:
             raise TypeError("stream=True is not supported in loop(). Use chat() for streaming.")
 
         messages = self._run_input_guard(guard, messages)
-        _orig_q = _messages_to_str(messages)
-        _current_messages: str | list = messages
-        _attempts = max(1, max_verify) if verify is not None else 1
-        resp: CompletionResponse | None = None
-        _verify_log: list[str] = []
-        step = 0
-
-        self._track(Event.AGENT_START, method="loop", task=_orig_q[:200])
-
-        for _attempt in range(_attempts):
-            # Build tool_set once for the execution registry used in _execute_tool().
-            # Do NOT pass tool_set.bridges to chat() — chat() calls _build_tool_set()
-            # internally and would add self.tools a second time, causing duplicate names.
-            tool_set = self._build_tool_set(tools)
-            convo = _normalise_messages(_current_messages)
-
-            for step in range(max_steps):
-                resp = self.chat(
-                    convo,
-                    tools=tools,  # pass originals; chat() merges with self.tools once
-                    native_tools=native_tools,
-                    **chat_kwargs,
-                )  # type: ignore[assignment]
-
-                if on_event:
-                    on_event("step", {"step": step, "response": resp})
-
-                if not resp.tool_calls:
-                    break
-
-                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
-                convo.append(Message(role=Role.ASSISTANT, content=self._build_assistant_turn(resp)))
-
-                for tc in resp.tool_calls:
-                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                    if on_event:
-                        on_event("tool_call", tc)
-                    try:
-                        result = self._execute_tool(tc, tool_set.registry, tool_runner)
-                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                        if on_event:
-                            on_event("tool_result", {"call": tc, "result": result})
-                        convo.append(_tool_result_message(tc, result))
-                    except Exception as exc:
-                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
-
-            if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug, please report it")
-
-            if on_event:
-                on_event("done", resp)
-
-            if verify is None:
-                break
-
-            _raw = (
-                verify.text(f"Question: {_orig_q}\nAnswer: {resp.content}")
-                if hasattr(verify, "text")
-                else verify(_orig_q, resp.content)
-            )
-            _verdict: str = str(_raw) if _raw is not None else ""
-            if _verdict[:30].lower().startswith("approved"):
-                break
-
-            _verify_log.append(_verdict)
-            if on_event:
-                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-
-        result = self._finalize_loop(resp, _verify_log, _attempts, verify, "loop", step)  # type: ignore[arg-type]
+        gen = self._loop_logic(
+            messages,
+            tools=tools,
+            native_tools=native_tools,
+            max_steps=max_steps,
+            tool_runner=tool_runner,
+            on_event=on_event,
+            verify=verify,
+            max_verify=max_verify,
+            method="loop",
+            chat_kwargs=chat_kwargs,
+        )
+        action = next(gen)
+        try:
+            while True:
+                tag = action[0]
+                if tag == self._CALL_MODEL:
+                    _, convo, t, nt, kw = action
+                    val = self.chat(convo, tools=t, native_tools=nt, **kw)
+                elif tag == self._EXEC_TOOL:
+                    _, tc, registry, runner = action
+                    val = self._execute_tool(tc, registry, runner)
+                elif tag == self._EMIT_EVENT:
+                    _, callback, name, payload = action
+                    callback(name, payload)
+                    val = None
+                elif tag == self._VERIFY:
+                    _, v, q, ans = action
+                    val = v.text(f"Question: {q}\nAnswer: {ans}") if hasattr(v, "text") else v(q, ans)
+                else:  # pragma: no cover
+                    val = None
+                action = gen.send(val)
+        except StopIteration as e:
+            result = e.value
         self._run_output_guard(guard, result)
         return result
 
@@ -916,77 +967,45 @@ class LazyAgent:
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
         messages = await self._arun_input_guard(guard, messages)
-        _orig_q = _messages_to_str(messages)
-        _current_messages: str | list = messages
-        _attempts = max(1, max_verify) if verify is not None else 1
-        resp: CompletionResponse | None = None
-        _verify_log: list[str] = []
-        step = 0
-
-        self._track(Event.AGENT_START, method="aloop", task=_orig_q[:200])
-
-        for _attempt in range(_attempts):
-            tool_set = self._build_tool_set(tools)
-            convo = _normalise_messages(_current_messages)
-
-            for step in range(max_steps):
-                resp = await self.achat(
-                    convo,
-                    tools=tools,  # pass originals; achat() merges with self.tools once
-                    native_tools=native_tools,
-                    **chat_kwargs,
-                )  # type: ignore[assignment]
-
-                if on_event:
-                    await _call_event_async(on_event, "step", {"step": step, "response": resp})
-
-                if not resp.tool_calls:
-                    break
-
-                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
-                convo.append(Message(role=Role.ASSISTANT, content=self._build_assistant_turn(resp)))
-
-                for tc in resp.tool_calls:
-                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                    if on_event:
-                        await _call_event_async(on_event, "tool_call", tc)
-                    try:
-                        result = await self._aexecute_tool(tc, tool_set.registry, tool_runner)
-                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                        if on_event:
-                            await _call_event_async(on_event, "tool_result", {"call": tc, "result": result})
-                        convo.append(_tool_result_message(tc, result))
-                    except Exception as exc:
-                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
-
-            if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug, please report it")
-
-            if on_event:
-                await _call_event_async(on_event, "done", resp)
-
-            if verify is None:
-                break
-
-            if hasattr(verify, "atext"):
-                _raw = await verify.atext(f"Question: {_orig_q}\nAnswer: {resp.content}")
-            elif inspect.iscoroutinefunction(verify):
-                _raw = await verify(_orig_q, resp.content)
-            else:
-                _raw = verify(_orig_q, resp.content)
-            _verdict: str = str(_raw) if _raw is not None else ""
-
-            if _verdict[:30].lower().startswith("approved"):
-                break
-
-            _verify_log.append(_verdict)
-            if on_event:
-                await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-
-        result = self._finalize_loop(resp, _verify_log, _attempts, verify, "aloop", step)  # type: ignore[arg-type]
+        gen = self._loop_logic(
+            messages,
+            tools=tools,
+            native_tools=native_tools,
+            max_steps=max_steps,
+            tool_runner=tool_runner,
+            on_event=on_event,
+            verify=verify,
+            max_verify=max_verify,
+            method="aloop",
+            chat_kwargs=chat_kwargs,
+        )
+        action = next(gen)
+        try:
+            while True:
+                tag = action[0]
+                if tag == self._CALL_MODEL:
+                    _, convo, t, nt, kw = action
+                    val = await self.achat(convo, tools=t, native_tools=nt, **kw)
+                elif tag == self._EXEC_TOOL:
+                    _, tc, registry, runner = action
+                    val = await self._aexecute_tool(tc, registry, runner)
+                elif tag == self._EMIT_EVENT:
+                    _, callback, name, payload = action
+                    await _call_event_async(callback, name, payload)
+                    val = None
+                elif tag == self._VERIFY:
+                    _, v, q, ans = action
+                    if hasattr(v, "atext"):
+                        val = await v.atext(f"Question: {q}\nAnswer: {ans}")
+                    elif inspect.iscoroutinefunction(v):
+                        val = await v(q, ans)
+                    else:
+                        val = v(q, ans)
+                else:  # pragma: no cover
+                    val = None
+                action = gen.send(val)
+        except StopIteration as e:
+            result = e.value
         await self._arun_output_guard(guard, result)
         return result
 
