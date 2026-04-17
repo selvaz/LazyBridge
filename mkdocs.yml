@@ -48,6 +48,7 @@ nav:
     - "8. Guardrails & Safety": course/08-guardrails.md
     - "9. Observability & Cost": course/09-observability.md
     - "10. Evals & Testing": course/10-evals.md
+    - "11. Advanced & Production": course/11-advanced.md
   - Reference:
     - API Quick Reference: reference.md
   - Troubleshooting: troubleshooting.md
