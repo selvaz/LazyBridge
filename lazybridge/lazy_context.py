@@ -85,7 +85,9 @@ class LazyContext:
         """
 
         def _read() -> str:
-            text = store.to_text(keys=keys) if (keys or store.keys()) else ""
+            if keys is not None and len(keys) == 0:
+                return ""
+            text = store.to_text(keys=keys) if (keys is not None or store.keys()) else ""
             if not text:
                 return ""
             label = prefix or "[store context]"

@@ -651,6 +651,8 @@ class LazyAgent:
         action = guard.check_output(resp.content)
         if not action.allowed:
             raise GuardError(action)
+        if action.modified_text is not None:
+            resp.content = action.modified_text
         return resp
 
     @staticmethod
@@ -680,6 +682,8 @@ class LazyAgent:
             action = guard.check_output(resp.content)
         if not action.allowed:
             raise GuardError(action)
+        if action.modified_text is not None:
+            resp.content = action.modified_text
         return resp
 
     # ------------------------------------------------------------------

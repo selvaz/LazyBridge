@@ -600,7 +600,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
         Direct file access (read_parquet, etc.) is blocked — use dataset('name') instead.
         """
         try:
-            result = rt.query_engine.execute(sql, max_rows=max_rows)
+            result = rt.query_engine.execute(sql, max_rows=min(max_rows, 50000))
             return result.model_dump(mode="json")
         except Exception as exc:
             return _error(exc)

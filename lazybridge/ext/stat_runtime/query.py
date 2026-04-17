@@ -88,7 +88,7 @@ class QueryEngine:
         """
         duckdb = _import_duckdb()
 
-        original_sql = sql.strip()
+        original_sql = sql.strip().rstrip(";")
 
         # Validate BEFORE macro expansion (checks run on user-provided SQL)
         self._validate(original_sql)
@@ -195,9 +195,10 @@ class QueryEngine:
                     f"Dataset '{dataset_name}' is not registered. "
                     f"Available: {[d.name for d in self._catalog.list_datasets()]}"
                 )
+            safe_uri = meta.uri.replace("'", "''")
             if meta.file_format == "csv":
-                return f"read_csv_auto('{meta.uri}')"
-            return f"read_parquet('{meta.uri}')"
+                return f"read_csv_auto('{safe_uri}')"
+            return f"read_parquet('{safe_uri}')"
 
         expanded = _DATASET_MACRO_RE.sub(_replacer, sql)
 

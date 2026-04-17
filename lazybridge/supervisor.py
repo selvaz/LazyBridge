@@ -269,7 +269,8 @@ class SupervisorAgent:
 
     async def achat(self, messages: str | list, **kw: Any) -> CompletionResponse:
         if self._ainput_fn is not None:
-            return self.chat(messages, **kw)
+            # TODO: async REPL with ainput_fn — for now run sync REPL in thread
+            return await asyncio.to_thread(self.chat, messages, **kw)
         return await asyncio.to_thread(self.chat, messages, **kw)
 
     def text(self, messages: str | list, **kw: Any) -> str:
