@@ -234,7 +234,7 @@ orchestrator.loop("Find AI papers", tools=[research_tool])
 # researcher is forced to use its search tools before responding
 ```
 
-### parallel_tool_calls
+### Parallel tool execution
 
 When the model returns multiple tool calls in one step, run them concurrently:
 
@@ -243,7 +243,7 @@ When the model returns multiple tool calls in one step, run them concurrently:
 resp = await ai.aloop(
     "Get weather for NYC, London, and Tokyo",
     tools=[weather_tool],
-    parallel_tool_calls=True,
+    tool_choice="parallel",
 )
 ```
 

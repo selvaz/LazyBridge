@@ -960,11 +960,11 @@ def test_as_tool_tool_choice_forwarded():
     assert tool._delegate.tool_choice == "required"
 
 
-# ── parallel_tool_calls ────────────────────────────────────────────────
+# ── tool_choice="parallel" ──────────────────────────────────────────────
 
 
 def test_loop_parallel_tool_calls_sequential():
-    """parallel_tool_calls=True in sync loop executes all tools (sequentially)."""
+    """tool_choice="parallel" in sync loop executes all tools (sequentially)."""
     agent = _make_agent()
 
     # Step 1: model returns 2 tool calls
@@ -995,14 +995,14 @@ def test_loop_parallel_tool_calls_sequential():
         tool_calls_received.append(name)
         return f"result_{name}"
 
-    resp = agent.loop("do both", tool_runner=tool_runner, parallel_tool_calls=True)
+    resp = agent.loop("do both", tool_runner=tool_runner, tool_choice="parallel")
     assert resp.content == "done with both"
     assert "a" in tool_calls_received
     assert "b" in tool_calls_received
 
 
 async def test_aloop_parallel_tool_calls():
-    """parallel_tool_calls=True in async loop runs tools concurrently."""
+    """tool_choice="parallel" in async loop runs tools concurrently via gather."""
     agent = _make_agent()
 
     step1 = CompletionResponse(
@@ -1031,6 +1031,6 @@ async def test_aloop_parallel_tool_calls():
         tool_calls_received.append(name)
         return f"result_{name}"
 
-    resp = await agent.aloop("do both", tool_runner=tool_runner, parallel_tool_calls=True)
+    resp = await agent.aloop("do both", tool_runner=tool_runner, tool_choice="parallel")
     assert resp.content == "parallel done"
     assert set(tool_calls_received) == {"a", "b"}

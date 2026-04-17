@@ -52,11 +52,11 @@ LazyAgent.loop(
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
     verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
-    parallel_tool_calls: bool = False,     # True: run multiple tool calls concurrently (async uses gather)
     **chat_kwargs,                         # forwarded to chat() on each step
+                                           # tool_choice="parallel" runs multiple tool calls concurrently
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async; parallel_tool_calls uses gather
+LazyAgent.aloop(...)  # async version → CompletionResponse; tool_choice="parallel" uses asyncio.gather()
 
 LazyAgent.chat_stream(messages, ...) -> Iterator[StreamChunk]     # dedicated streaming (preferred over chat(stream=True))
 LazyAgent.achat_stream(messages, ...) -> AsyncIterator[StreamChunk]  # async streaming

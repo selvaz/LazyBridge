@@ -537,7 +537,6 @@ class LazyAgent:
         on_event: Callable | None,
         verify: Any,
         max_verify: int,
-        parallel_tool_calls: bool,
         method: str,
         chat_kwargs: dict,
     ):
@@ -576,7 +575,8 @@ class LazyAgent:
                     if on_event:
                         yield (self._EMIT_EVENT, on_event, "tool_call", tc)
 
-                if parallel_tool_calls and len(resp.tool_calls) > 1:
+                _parallel = chat_kwargs.get("tool_choice") == "parallel"
+                if _parallel and len(resp.tool_calls) > 1:
                     results = yield (
                         self._EXEC_TOOLS_BATCH,
                         resp.tool_calls,
@@ -879,7 +879,6 @@ class LazyAgent:
         verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
-        parallel_tool_calls: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -909,10 +908,11 @@ class LazyAgent:
         max_verify:
             Maximum verify attempts.  If exceeded the last worker result is
             returned unchanged — no exception is raised.
-        parallel_tool_calls:
-            When True and the model returns multiple tool calls in one step,
-            execute them concurrently (async) or sequentially (sync).
-            Default False — tools run one at a time.
+
+        ``tool_choice`` values (passed via **chat_kwargs):
+            ``"auto"`` (default), ``"required"``, ``"none"``, ``"<tool_name>"``,
+            ``"parallel"`` — execute multiple tool calls concurrently
+            (async uses ``asyncio.gather()``).
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -929,7 +929,6 @@ class LazyAgent:
             on_event=on_event,
             verify=verify,
             max_verify=max_verify,
-            parallel_tool_calls=parallel_tool_calls,
             method="loop",
             chat_kwargs=chat_kwargs,
         )
@@ -979,7 +978,6 @@ class LazyAgent:
         verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
-        parallel_tool_calls: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -992,9 +990,6 @@ class LazyAgent:
             Return a string starting with ``"approved"`` to accept the answer.
         max_verify:
             Maximum verify attempts before returning the last result as-is.
-        parallel_tool_calls:
-            When True and the model returns multiple tool calls in one step,
-            execute them concurrently with asyncio.gather().
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -1011,7 +1006,6 @@ class LazyAgent:
             on_event=on_event,
             verify=verify,
             max_verify=max_verify,
-            parallel_tool_calls=parallel_tool_calls,
             method="aloop",
             chat_kwargs=chat_kwargs,
         )

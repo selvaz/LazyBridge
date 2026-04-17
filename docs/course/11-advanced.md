@@ -138,12 +138,11 @@ When the model returns multiple tool calls in one step, run them concurrently:
 
 ```python
 # Sequential (default) — tools run one after another
-resp = ai.loop("Get data for 5 cities", tools=[weather], parallel_tool_calls=False)
+resp = ai.loop("Get data for 5 cities", tools=[weather])
 
 # Parallel — all tool calls in a step run at the same time
-# Sync loop: executes sequentially but handles errors per-tool
-# Async loop: uses asyncio.gather() for true concurrency
-resp = await ai.aloop("Get data for 5 cities", tools=[weather], parallel_tool_calls=True)
+# Async uses asyncio.gather() for true concurrency
+resp = await ai.aloop("Get data for 5 cities", tools=[weather], tool_choice="parallel")
 ```
 
 Best for I/O-bound tools (API calls, web requests). Not useful for CPU-bound or dependent tools.
