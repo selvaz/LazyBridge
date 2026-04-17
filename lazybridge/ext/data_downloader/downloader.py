@@ -65,7 +65,7 @@ def _guess_freq(df: pd.DataFrame) -> str:
 
 def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
     """HTTP GET with retry logic."""
-    import requests
+    import requests  # type: ignore[import-untyped]
 
     for attempt in range(cfg.max_retries):
         try:

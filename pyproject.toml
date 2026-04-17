@@ -110,15 +110,6 @@ disallow_untyped_defs = false
 check_untyped_defs = false
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = "lazybridge.ext.*"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "lazybridge.lazy_tool"
-ignore_errors = true
-ignore_missing_imports = true
-
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------

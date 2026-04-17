@@ -176,22 +176,22 @@ def read_folder_docs(
         return f"[Error: path is neither a file nor a directory — {path}]"
 
     records: list[dict] = []
-    for path in files:
-        suffix = path.suffix.lower()
+    for fpath in files:
+        suffix = fpath.suffix.lower()
         reader = _EXT_READERS.get(suffix)
         if reader is None:
             content = f"[Unsupported extension: {suffix}]"
         else:
             try:
-                content = reader(path, html_mode)  # type: ignore[call-arg]
+                content = reader(fpath, html_mode)  # type: ignore[operator]
             except Exception as exc:
                 content = f"[Error reading file: {exc}]"
         records.append(
             {
-                "filename": path.name,
-                "relative_path": str(path.relative_to(root)),
+                "filename": fpath.name,
+                "relative_path": str(fpath.relative_to(root)),
                 "extension": suffix.lstrip("."),
-                "size_bytes": path.stat().st_size,
+                "size_bytes": fpath.stat().st_size,
                 "char_count": len(content),
                 "content": content,
             }

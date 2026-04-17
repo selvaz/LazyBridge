@@ -397,7 +397,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
                 query_sql = (
                     f"SELECT * FROM dataset('{dataset_name}') WHERE \"{group_col}\" = '{safe_value}'{order_clause}"
                 )
-                effective_dataset = None
+                effective_dataset = None # type: ignore[assignment]
 
             # --- Auto-detect time_col ---
             if not time_col and meta.time_column:
@@ -1048,7 +1048,7 @@ def stat_agent(
             description="Expert statistical analyst with low-level tool access",
             system="You are an expert statistical analyst. Use the available tools "
             "to fulfill the task precisely. Return results as structured data.",
-            tools=expert_tools,
+            tools=expert_tools, # type: ignore[arg-type]
             **agent_kwargs,
         )
 
@@ -1094,7 +1094,7 @@ def stat_agent(
         name=name,
         description="Statistical analyst with quantitative analysis capabilities",
         system=system or default_system,
-        tools=all_tools,
+        tools=all_tools, # type: ignore[arg-type]
         **agent_kwargs,
     )
 

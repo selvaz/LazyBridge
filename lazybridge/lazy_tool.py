@@ -199,8 +199,8 @@ class LazyTool:
         agent's loop() or chat() depending on its configuration.
         The agent's return value is passed directly back to the caller.
         """
-        tool_name = name or getattr(agent, "name", None) or getattr(agent, "id", "agent_tool")
-        tool_desc = description or getattr(agent, "description", None) or f"Delegate task to {tool_name}"
+        tool_name = str(name or getattr(agent, "name", None) or getattr(agent, "id", "agent_tool"))
+        tool_desc: str = description or getattr(agent, "description", None) or f"Delegate task to {tool_name}"
         delegate = _DelegateConfig(
             agent=agent,
             output_schema=output_schema,
@@ -235,6 +235,7 @@ class LazyTool:
             return self._compiled
         builder = self.schema_builder or _DEFAULT_BUILDER
         effective_llm = schema_llm or self.schema_llm
+        assert self.func is not None
         defn = builder.build(
             self.func,
             name=self.name,
@@ -272,6 +273,7 @@ class LazyTool:
         return self.func(**validated)
 
     def _run_delegate(self, arguments: dict[str, Any], parent: Any) -> Any:
+        assert self._delegate is not None
         task = arguments.get("task", "")
         agent = self._delegate.agent
         tools = getattr(agent, "tools", None) or []
@@ -327,6 +329,7 @@ class LazyTool:
         return result
 
     async def _arun_delegate(self, arguments: dict[str, Any], parent: Any) -> Any:
+        assert self._delegate is not None
         task = arguments.get("task", "")
         agent = self._delegate.agent
         tools = getattr(agent, "tools", None) or []
@@ -391,7 +394,7 @@ class LazyTool:
         }
         # Clear the cached schema so it is rebuilt with the new name/description.
         if self._delegate is None:
-            overrides["_compiled"] = None
+            overrides["_compiled"] = None  # type: ignore[assignment]
         elif self._compiled is not None:
             # Delegate tools have fixed {task: str} parameters — only name/description/strict
             # can meaningfully change.  Patch the cached ToolDefinition directly so that
@@ -404,7 +407,7 @@ class LazyTool:
             if strict is not None:
                 td_patch["strict"] = strict
             if td_patch:
-                overrides["_compiled"] = replace(self._compiled, **td_patch)
+                overrides["_compiled"] = replace(self._compiled, **td_patch)  # type: ignore[assignment]
         return replace(self, **overrides)  # type: ignore[arg-type]
 
     # ------------------------------------------------------------------
@@ -522,6 +525,7 @@ class LazyTool:
         _write_file(path, "\n".join(lines))
 
     def _save_agent(self, path: str) -> None:
+        assert self._delegate is not None
         agent = self._delegate.agent
         provider_alias = _provider_alias(agent)
         model = getattr(agent._executor, "model", None) or ""
@@ -571,6 +575,7 @@ class LazyTool:
 
     def _save_pipeline(self, path: str) -> None:
         """Code-gen a .py file that reconstructs a pipeline tool."""
+        assert self._pipeline is not None
         cfg = self._pipeline
         import textwrap
 
@@ -606,7 +611,7 @@ class LazyTool:
                 extra_imports.add("from pydantic import BaseModel, Field")
                 # Also extract imports from the schema's module
                 try:
-                    extra_imports.update(_extract_imports(schema))
+                    extra_imports.update(_extract_imports(schema))  # type: ignore[arg-type]
                 except Exception:
                     pass
                 body_lines.append(textwrap.dedent(schema_source))
@@ -615,7 +620,7 @@ class LazyTool:
             # Emit func source
             if func_source:
                 try:
-                    extra_imports.update(_extract_imports(func))
+                    extra_imports.update(_extract_imports(func))  # type: ignore[arg-type]
                 except Exception:
                     pass
                 body_lines.append(textwrap.dedent(func_source))
@@ -771,8 +776,8 @@ class LazyTool:
             func_name = p.func.__name__
 
             # Only emit the function def once (skip if same function reused)
-            func_id = id(p.func)
-            lines: list[str] = []
+            func_id = str(id(p.func))
+            lines = []  # type: ignore[no-redef]
             if func_id not in emitted_funcs:
                 emitted_funcs.add(func_id)
                 lines.append(source)
@@ -824,6 +829,7 @@ class LazyTool:
         emitted_funcs: set[str] | None = None,
     ) -> list[str] | None:
         """Recursively emit a nested pipeline as inline code."""
+        assert p._pipeline is not None
         cfg = p._pipeline
         lines: list[str] = []
         sub_vars: list[str] = []
@@ -1209,7 +1215,7 @@ class LazyTool:
 
         # Build a default system prompt from the schema if not provided
         if system is None:
-            schema_info = input_schema.model_json_schema()
+            schema_info = input_schema.model_json_schema()  # type: ignore[attr-defined]
             props = schema_info.get("properties", {})
             required = schema_info.get("required", [])
             field_lines = []
@@ -1244,7 +1250,7 @@ class LazyTool:
         pipeline = cls.chain(
             sub_agent,
             func_tool,
-            name=tool_name,
+            name=tool_name,  # type: ignore[arg-type]
             description=tool_desc,
             guidance=guidance,
             step_timeout=step_timeout,
@@ -1348,7 +1354,7 @@ def _extract_imports(func: Callable) -> list[str]:
             # For 'os.path.join', extract root name 'os'
             root = node
             while isinstance(root, ast.Attribute):
-                root = root.value
+                root = root.value  # type: ignore[assignment]
             if isinstance(root, ast.Name):
                 referenced_names.add(root.id)
 
@@ -1479,7 +1485,8 @@ def _clone_delegate_tool_for_invocation(tool: LazyTool) -> LazyTool:
     from lazybridge.pipeline_builders import _clone_for_invocation
 
     agent_clone = _clone_for_invocation(tool._delegate.agent)  # type: ignore[union-attr]
-    new_delegate = replace(tool._delegate, agent=agent_clone)  # type: ignore[union-attr]
+    assert tool._delegate is not None
+    new_delegate = replace(tool._delegate, agent=agent_clone)
     return replace(tool, _delegate=new_delegate)
 
 
