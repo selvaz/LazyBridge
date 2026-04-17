@@ -43,11 +43,14 @@ Schema generated automatically from type hints and docstring. No JSON dict, no d
 from lazybridge import LazyAgent, Memory
 
 ai  = LazyAgent("anthropic")
-mem = Memory()
+mem = Memory()  # auto-compresses when context gets large
 
 ai.chat("My name is Marco", memory=mem)
 resp = ai.chat("What's my name?", memory=mem)
 print(resp.content)   # "Marco"
+
+# After many turns, older messages are compressed automatically.
+# Recent turns stay raw. Full history always in mem.history.
 ```
 
 ## Structured output

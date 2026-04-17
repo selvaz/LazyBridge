@@ -59,12 +59,22 @@ resp = ai.chat("What's my name?", memory=mem)
 print(resp.content)   # "Marco"
 ```
 
-`Memory` accumulates turns automatically: each call appends the user message and the assistant response to the internal history. The next call sends the full history to the model.
+`Memory` accumulates turns automatically and monitors context size. When the conversation gets long, older turns are compressed into a dense summary while recent turns stay raw. The full history is always preserved internally.
 
 ```python
 print(len(mem))        # 4 — 2 user + 2 assistant messages
-print(mem.history)     # list of {"role": ..., "content": ...} dicts
+print(mem.history)     # full raw history (never truncated)
+print(mem.summary)     # compressed block (None if not compressed yet)
 mem.clear()            # reset the conversation
+```
+
+By default (`strategy="auto"`), compression kicks in when the estimated token count exceeds the budget. You can also force compression or disable it:
+
+```python
+Memory()                                    # auto — compresses when needed (default)
+Memory(strategy="full")                     # never compress
+Memory(strategy="rolling", window_turns=5)  # always use window + compression
+Memory(compressor=LazyAgent("openai", model="gpt-4o-mini"))  # LLM compression
 ```
 
 The same `Memory` instance can be shared across multiple agents:
