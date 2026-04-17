@@ -86,6 +86,52 @@ LazyAgent._last_output: str | None  # INTERNAL — plain text read by LazyContex
 LazyAgent._last_response: CompletionResponse | None  # ADVANCED — full response (.parsed, .usage, .tool_calls, .grounding_sources). Use when you need token counts or structured fields.
 ```
 
+## HumanAgent
+
+```python
+HumanAgent(
+    name: str = "human",
+    *,
+    description: str | None = None,
+    input_fn: Callable[[str], str] | None = None,      # default: input()
+    ainput_fn: Callable[[str], Awaitable[str]] | None = None,
+    mode: Literal["single", "dialogue"] = "single",    # dialogue: multi-turn until end_token
+    end_token: str = "done",                            # dialogue exit word
+    prompt_template: str = "{task}",
+    timeout: float | None = None,                       # seconds; None = forever
+    default: str | None = None,                         # response on timeout
+    session: LazySession | None = None,
+)
+
+# Same interface as LazyAgent — works in chains, parallel, as tools, as verify
+HumanAgent.chat(messages, **kw) -> CompletionResponse
+HumanAgent.achat(messages, **kw) -> CompletionResponse   # uses asyncio.to_thread
+HumanAgent.text(messages, **kw) -> str
+HumanAgent.as_tool(name, description, **kw) -> LazyTool
+HumanAgent.result: str | None
+```
+
+## SupervisorAgent
+
+```python
+SupervisorAgent(
+    name: str = "supervisor",
+    *,
+    description: str | None = None,
+    input_fn: Callable[[str], str] | None = None,
+    ainput_fn: Callable[[str], Awaitable[str]] | None = None,
+    tools: list[LazyTool] | None = None,     # tools the human can call interactively
+    agents: list | None = None,               # agents the human can retry with feedback
+    session: LazySession | None = None,       # for store/events access
+    timeout: float | None = None,
+    default: str | None = None,
+)
+
+# REPL commands: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)
+SupervisorAgent.chat(messages, **kw) -> CompletionResponse  # runs interactive REPL
+SupervisorAgent.as_tool(name, description, **kw) -> LazyTool
+```
+
 ## LazySession
 
 ```python

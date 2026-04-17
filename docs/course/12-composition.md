@@ -272,6 +272,37 @@ print(f"Cost: ${sess.usage_summary()['total']['cost_usd']:.4f}")
 
 ---
 
+## Pattern 8: Human-in-the-loop
+
+Humans participate as first-class agents in the pipeline:
+
+```python
+from lazybridge import HumanAgent, SupervisorAgent
+
+# Simple approval gate
+human = HumanAgent(name="reviewer")
+pipeline = LazyTool.chain(researcher, human, writer)
+
+# Supervisor with tools and retry
+supervisor = SupervisorAgent(
+    name="supervisor",
+    tools=[search_tool],
+    agents=[researcher, analyst],
+    session=sess,
+)
+pipeline = LazyTool.chain(researcher, analyst, supervisor, writer)
+
+# The supervisor can:
+# > search("query")                  — call tools
+# > retry researcher: add more data  — re-run agents with feedback
+# > store findings                   — inspect session store
+# > continue                         — pass output to writer
+```
+
+See [Module 13: Human-in-the-Loop](13-human-in-the-loop.md) for the full guide.
+
+---
+
 ## Decision matrix
 
 | I need... | Use |
@@ -287,6 +318,9 @@ print(f"Cost: ${sess.usage_summary()['total']['cost_usd']:.4f}")
 | Safety checks on input/output | `guard=my_guard` |
 | Cost tracking and observability | `LazySession(tracking="verbose", exporters=[...])` |
 | Quick 2-step script | Manual wiring with `LazyContext.from_agent()` |
+| Human approval gate | `HumanAgent` in chain |
+| Human with tools + retry | `SupervisorAgent(tools=[...], agents=[...])` |
+| Auto-approve after timeout | `HumanAgent(timeout=300, default="approved")` |
 
 ---
 
