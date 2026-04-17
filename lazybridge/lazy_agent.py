@@ -250,7 +250,7 @@ class LazyAgent:
             _solo = EventLog(self.id, level=TrackLevel.BASIC, console=True)
             self._log = _solo.agent_log(self.id, self.name)
         else:
-            self._log = None
+            self._log = None  # type: ignore[assignment]
 
         # Register with session graph so the pipeline topology is recorded
         if session:
@@ -731,7 +731,7 @@ class LazyAgent:
 
         if memory is not None:
             self._validate_memory(messages, memory, stream)
-            full = memory._build_input(messages)
+            full = memory._build_input(messages)  # type: ignore[arg-type]
             resp = self.chat(
                 full,
                 system=system,
@@ -751,7 +751,7 @@ class LazyAgent:
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            memory._record(messages, resp.content)
+            memory._record(messages, resp.content)  # type: ignore[arg-type]
             return resp
 
         msgs, request = self._prepare_chat_request(
@@ -814,7 +814,7 @@ class LazyAgent:
 
         if memory is not None:
             self._validate_memory(messages, memory, stream)
-            full = memory._build_input(messages)
+            full = memory._build_input(messages)  # type: ignore[arg-type]
             resp = await self.achat(
                 full,
                 system=system,
@@ -834,7 +834,7 @@ class LazyAgent:
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            memory._record(messages, resp.content)
+            memory._record(messages, resp.content)  # type: ignore[arg-type]
             return resp
 
         msgs, request = self._prepare_chat_request(

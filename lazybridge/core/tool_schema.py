@@ -733,7 +733,7 @@ class ToolSchemaBuilder:
         artifact = self._compile(
             func,
             name=effective_name,
-            description=desc_for_compile,
+            description=desc_for_compile or "",
             strict=strict,
             mode=mode,
             schema_llm=schema_llm,

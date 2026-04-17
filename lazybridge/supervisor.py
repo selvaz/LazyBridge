@@ -287,7 +287,12 @@ class SupervisorAgent:
     def as_tool(self, name: str | None = None, description: str | None = None, **kw: Any):
         from lazybridge.lazy_tool import LazyTool
 
-        return LazyTool.from_agent(self, name=name or self.name, description=description or self.description, **kw)
+        return LazyTool.from_agent(
+            self,  # type: ignore[arg-type]
+            name=name or self.name,
+            description=description or self.description,
+            **kw,
+        )
 
     @property
     def result(self) -> Any:

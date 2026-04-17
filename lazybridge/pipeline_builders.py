@@ -90,7 +90,7 @@ def _restore_checkpoint(store: Any, ckpt_key: str, task: str) -> tuple[int, _Cha
     if _handoff == "agent_context":
         _orig = saved.get("original_task", saved["output"])
         state = _ChainState(
-            text=_orig,
+            text=str(_orig),
             typed=None,
             ctx=LazyContext.from_text(f"[resumed previous output]\n{saved['output']}"),
         )

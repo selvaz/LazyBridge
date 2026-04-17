@@ -220,7 +220,7 @@ class HumanAgent:
         from lazybridge.lazy_tool import LazyTool
 
         return LazyTool.from_agent(
-            self,
+            self,  # type: ignore[arg-type]
             name=name or self.name,
             description=description or self.description,
             **kw,

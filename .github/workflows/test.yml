@@ -45,7 +45,7 @@ jobs:
           pip install mypy
 
       - name: Typecheck
-        run: mypy lazybridge/ --ignore-missing-imports
+        run: mypy lazybridge/
 
   unit:
     name: unit tests (Python ${{ matrix.python-version }})
