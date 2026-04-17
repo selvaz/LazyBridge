@@ -83,13 +83,14 @@ When using `agent.json()` or `output_schema=`, two error types can occur:
 
 ```python
 from lazybridge import LazyAgent
-from lazybridge.core.structured import StructuredOutputError
+from lazybridge.core.types import StructuredOutputParseError, StructuredOutputValidationError
 
 try:
     result = agent.json("generate data", MyModel)
-except StructuredOutputError as e:
-    print(f"Raw output: {e.raw}")
-    print(f"Error: {e}")
+except StructuredOutputParseError as e:
+    print(f"Invalid JSON: {e.raw}")
+except StructuredOutputValidationError as e:
+    print(f"Wrong shape: {e}")
 ```
 
 Both inherit from `StructuredOutputError`, so you can catch either specifically or broadly.

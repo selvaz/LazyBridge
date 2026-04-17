@@ -679,8 +679,8 @@ class LazySession:
                         sess.id = row[0]
                         sess.events.session_id = row[0]
                         sess.graph = GraphSchema(row[0])
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning("from_db: could not restore session_id: %s", exc)
         return sess
 
     def __repr__(self) -> str:

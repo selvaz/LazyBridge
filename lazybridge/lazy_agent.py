@@ -1184,7 +1184,8 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in text(). Use chat(stream=True) instead.")
         resp = self.chat(messages, **kwargs)
-        assert isinstance(resp, CompletionResponse)
+        if not isinstance(resp, CompletionResponse):
+            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         return resp.content
 
     # Appended to the system prompt on every json()/ajson() call so models
@@ -1201,7 +1202,8 @@ class LazyAgent:
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = self.chat(messages, output_schema=schema, **kwargs)
-        assert isinstance(resp, CompletionResponse)
+        if not isinstance(resp, CompletionResponse):
+            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         resp.raise_if_failed()
         return resp.parsed
 
@@ -1209,7 +1211,8 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in atext(). Use achat(stream=True) instead.")
         resp = await self.achat(messages, **kwargs)
-        assert isinstance(resp, CompletionResponse)
+        if not isinstance(resp, CompletionResponse):
+            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         return resp.content
 
     async def ajson(self, messages: str | list, schema: type | dict, **kwargs) -> Any:
@@ -1218,7 +1221,8 @@ class LazyAgent:
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = await self.achat(messages, output_schema=schema, **kwargs)
-        assert isinstance(resp, CompletionResponse)
+        if not isinstance(resp, CompletionResponse):
+            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         resp.raise_if_failed()
         return resp.parsed
 

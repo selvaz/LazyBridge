@@ -70,7 +70,7 @@ class GuardAction:
     allowed: bool = True
     message: str | None = None
     modified_text: str | None = None
-    metadata: dict = None  # type: ignore[assignment]
+    metadata: dict | None = None
 
     def __post_init__(self):
         if self.metadata is None:
@@ -284,7 +284,7 @@ class LLMGuard:
             verdict = self._agent.text(prompt).strip()
         except Exception as exc:
             _logger.warning("LLMGuard evaluation failed: %s", exc)
-            return GuardAction.allow(message="guard-error: evaluation failed")
+            return GuardAction.block(f"Guard error (fail-closed): {exc}")
 
         if verdict.upper().startswith("BLOCK"):
             reason = verdict[5:].strip().lstrip(":").strip() or "Blocked by LLM moderator"
@@ -297,7 +297,7 @@ class LLMGuard:
             verdict = (await self._agent.atext(prompt)).strip()
         except Exception as exc:
             _logger.warning("LLMGuard async evaluation failed: %s", exc)
-            return GuardAction.allow(message="guard-error: evaluation failed")
+            return GuardAction.block(f"Guard error (fail-closed): {exc}")
 
         if verdict.upper().startswith("BLOCK"):
             reason = verdict[5:].strip().lstrip(":").strip() or "Blocked by LLM moderator"
