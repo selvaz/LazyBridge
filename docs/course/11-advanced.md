@@ -669,6 +669,14 @@ ai.loop("...", native_tools=[NativeTool.WEB_SEARCH, NativeTool.CODE_EXECUTION])
 
 # Custom provider
 ai = LazyAgent(MyProvider(api_key="..."))
+
+# Smart Memory
+Memory()                                           # auto compression (default)
+Memory(strategy="full")                            # never compress
+Memory(strategy="rolling", window_turns=10)        # always window + compress
+Memory(compressor=LazyAgent("openai", model="gpt-4o-mini"))  # LLM compression
+mem.history                                        # full raw history
+mem.summary                                        # current compressed block
 ```
 
 ---

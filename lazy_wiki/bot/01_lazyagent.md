@@ -205,16 +205,25 @@ resp = ai.chat("what is my name?", memory=mem)
 # resp.content contains "Marco"
 
 len(mem)          # 4 (2 user + 2 assistant)
-mem.history       # list[dict] — read-only copy
+mem.history       # full raw history (never truncated)
+mem.summary       # compressed block or None
 mem.clear()       # reset
 
 # Shared across agents
 agent_a.chat("remember: deadline is Friday", memory=mem)
 agent_b.chat("what's the deadline?", memory=mem)
+
+# Smart compression (auto by default)
+mem = Memory()                           # auto — compresses when context gets large
+mem = Memory(strategy="full")            # never compress (backward compat)
+mem = Memory(strategy="rolling",         # always use window
+             window_turns=10)
+mem = Memory(compressor=LazyAgent(       # LLM compression for dense extraction
+    "openai", model="gpt-4o-mini"))
 ```
 
-`Memory._build_input(msg)` — returns history + new user msg without mutating.
-`Memory._record(user, assistant)` — appends a completed turn (called internally by chat() on success).
+`Memory` monitors context size continuously. When over budget, older turns are compressed into a structured fact block. Recent turns stay raw. Full history always in `mem.history`.
+
 `stream=True` + `memory` — history NOT updated (content unavailable in streaming chunks).
 
 ### Examples

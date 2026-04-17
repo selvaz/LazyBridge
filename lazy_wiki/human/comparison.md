@@ -526,7 +526,7 @@ LangChain is the most widely used framework (~100k+ LOC, hundreds of integration
 | Simple call boilerplate | ~10 lines (ChatOpenAI, HumanMessage, invoke) | 2 lines |
 | Tool loop | Chain + AgentExecutor + tool wrappers | `agent.loop(task, tools=[...])` |
 | Multi-provider | Different ChatXxx classes, same interface | Single `LazyAgent(provider)` string |
-| Memory | ConversationBufferMemory + chain wiring | `mem = Memory(); agent.chat(..., memory=mem)` |
+| Memory | ConversationBufferMemory + chain wiring | `Memory()` with auto compression — no config needed |
 | Output bridging | Manual chain composition | `LazyContext.from_agent(agent)` |
 | Shared state | Manual dict passing | `LazyStore` |
 | Native tools (web/code) | Wrapped tools, provider-specific config | `native_tools=[NativeTool.WEB_SEARCH]` |
