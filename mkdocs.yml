@@ -49,6 +49,7 @@ nav:
     - "9. Observability & Cost": course/09-observability.md
     - "10. Evals & Testing": course/10-evals.md
     - "11. Advanced & Production": course/11-advanced.md
+    - "12. Composition Patterns": course/12-composition.md
   - Reference:
     - API Quick Reference: reference.md
   - Troubleshooting: troubleshooting.md

@@ -23,6 +23,7 @@ A hands-on course that takes you from your first LLM call to production multi-ag
 | 9 | [Observability & Cost](09-observability.md) | Track tokens, costs, and export to OpenTelemetry | 20 min |
 | 10 | [Evals & Testing](10-evals.md) | Systematically test agent output quality | 20 min |
 | 11 | [Advanced & Production](11-advanced.md) | Custom providers, thinking, verify loops, tool persistence, full production pipeline | 40 min |
+| 12 | [Composition Patterns](12-composition.md) | When to nest, chain, parallelize, or let the LLM decide — the spirit of the framework | 25 min |
 
 ## How to use this course
 
