@@ -96,7 +96,7 @@ researcher = LazyAgent("anthropic", name="researcher", session=sess)
 writer     = LazyAgent("openai",    name="writer",     session=sess)
 
 # Step 1: researcher does its work
-researcher.loop("Find the top 3 developments in AI this week.")
+researcher.chat("Find the top 3 developments in AI this week.")
 
 # Step 2: writer reads researcher's output via LazyContext
 writer.chat(
@@ -124,4 +124,30 @@ print(sess.store.read_all())  # shared state
 | Context injection | [context.md](context.md) |
 | Conditional routing | [routing.md](routing.md) |
 | Full pipeline examples | [pipelines.md](pipelines.md) |
+| Session-free pipelines (`parallel`/`chain`) | [pipelines.md](pipelines.md) |
 | LazyBridge vs raw SDK | [comparison.md](comparison.md) |
+
+---
+
+## Choosing the right pattern
+
+| Goal | Pattern |
+|------|---------|
+| Single LLM call, no tools | `agent.chat()` or `agent.text()` |
+| Structured JSON output | `agent.json(messages, schema=MyModel)` |
+| Agent needs to use tools | `agent.loop(task, tools=[...])` |
+| Self-check / quality gate on output | `agent.loop(task, verify=judge)` |
+| Pass one agent's output to another | `LazyContext.from_agent(source)` |
+| Run agents concurrently (no shared state) | `LazyTool.parallel([a, b])` |
+| Run agents in sequence with handoff | `LazyTool.chain([a, b])` |
+| Shared blackboard between agents | `LazySession` + `LazyStore` |
+| Conditional routing | `LazyRouter` |
+
+### Common mistakes to avoid
+
+| Mistake | Why it's wrong | Do this instead |
+|---------|----------------|-----------------|
+| `loop()` without tools | `loop()` is for tool-calling agents | Use `chat()` or `text()` |
+| `verify="plain string"` | `verify=` expects an agent or callable | Pass a `LazyAgent` or function |
+| `LazyRouter` for approve/reject | Over-engineered for binary gates | Use `loop(verify=judge)` |
+| `LazySession` for single agent | Unnecessary overhead | Just use `LazyAgent` directly |

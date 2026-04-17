@@ -219,3 +219,87 @@ eu_search = base.specialize(
 orchestrator = LazyAgent("anthropic")
 orchestrator.loop("Compare today's AI news in the US vs EU", tools=[us_search, eu_search])
 ```
+
+---
+
+## Pipeline Tools — `LazyTool.parallel()` / `LazyTool.chain()`
+
+Session-free factory methods that compose agents and tools into a single `LazyTool`. No `LazySession` required. `LazySession.as_tool(mode=...)` is a thin wrapper over these — semantically identical.
+
+### `parallel()` — fan-out
+
+All participants run concurrently on the same task. Results are combined (default: concatenated with agent-name headers).
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+us     = LazyAgent("anthropic", name="us",     system="Report US AI news.")
+europe = LazyAgent("openai",    name="europe",  system="Report European AI news.")
+asia   = LazyAgent("google",    name="asia",    system="Report Asian AI news.")
+
+news_tool = LazyTool.parallel(
+    us, europe, asia,
+    name="world_news",
+    description="Parallel AI news summary from US, Europe, and Asia",
+    combiner="concat",          # "concat" (default) | "last"
+    concurrency_limit=3,        # max simultaneous API calls; None = all at once
+    step_timeout=30.0,          # per-participant timeout in seconds; None = no timeout
+)
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Produce a global AI news digest.", tools=[news_tool])
+```
+
+**`concurrency_limit`:** caps the number of participants running at the same time using `asyncio.Semaphore`. Use this when hitting API rate limits or when participants share a scarce resource. `None` (default) fires all coroutines simultaneously.
+
+**`step_timeout`:** wraps each participant coroutine with `asyncio.wait_for(coro, timeout=step_timeout)`. Timed-out participants return `"[ERROR: TimeoutError: ...]"` in `concat` mode (captured via `return_exceptions=True` in `asyncio.gather`). In `last` mode they propagate as `TimeoutError`.
+
+**Cloning:** participants are cloned per invocation. After the run, `us._last_output` is `None` — use the tool's return value or the orchestrator's response.
+
+### `chain()` — sequential handoff
+
+Participants run in order. Each step passes its output to the next.
+
+**Async-under-the-hood:** `chain()` uses `build_achain_func` — every step calls `achat()` / `aloop()` / `ajson()`, so the event loop is never blocked. `run()` drives it via `run_async()`; `arun()` awaits it directly.
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+researcher  = LazyAgent("anthropic", name="researcher",  system="Research AI topics in depth.")
+summariser  = LazyAgent("openai",    name="summariser",  system="Summarise research concisely.")
+fact_checker = LazyAgent("anthropic", name="checker",    system="Verify factual claims.")
+
+pipeline = LazyTool.chain(
+    researcher, summariser, fact_checker,
+    name="research_pipeline",
+    description="Research, summarise, and fact-check a topic.",
+    step_timeout=60.0,          # per-step timeout in seconds; asyncio.TimeoutError raised on breach
+)
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Produce a verified report on fusion energy.", tools=[pipeline])
+```
+
+**`step_timeout`:** wraps each step with `asyncio.wait_for(step_coro, timeout=step_timeout)`. Unlike parallel, a timeout in chain raises `asyncio.TimeoutError` immediately (no gathering). Use to prevent a hanging step from blocking the whole pipeline.
+
+**Handoff semantics:**
+
+| Previous step | Next step receives |
+|---|---|
+| Agent | Original task + previous agent's output injected as context |
+| Tool | Tool's output becomes the new task directly |
+
+### Cross-session validation
+
+Pass `session=` to validate that all participants belong to (or are compatible with) the same session. Checked at creation time, not at run time.
+
+```python
+# Raises ValueError if any participant is bound to a different session
+pipeline = LazyTool.parallel(a, b, name="...", description="...", session=my_session)
+```
+
+This also covers `LazyTool.from_agent()` delegate tools — the inner agent's session is checked.
+
+### `save()` restriction
+
+`parallel()` and `chain()` tools have `_is_pipeline_tool = True`. Calling `save()` raises `ValueError` — they are runtime compositions and cannot be serialized. Save individual participants via `agent.as_tool().save()` instead.

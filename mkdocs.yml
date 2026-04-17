@@ -1,0 +1,75 @@
+site_name: LazyBridge
+site_description: Zero-boilerplate multi-provider LLM agent framework
+site_url: https://selvaz.github.io/LazyBridge/
+repo_url: https://github.com/selvaz/LazyBridge
+repo_name: selvaz/LazyBridge
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting Started: quickstart.md
+  - Guide:
+    - Agents: agents.md
+    - Tools: tools.md
+    - Sessions & Pipelines: sessions.md
+    - Pipelines (advanced): pipelines.md
+    - Context Injection: context.md
+    - Routing: routing.md
+  - Course:
+    - Overview: course/index.md
+    - "1. Your First Agent": course/01-first-agent.md
+    - "2. Tools & Functions": course/02-tools.md
+    - "3. Structured Output": course/03-structured-output.md
+    - "4. Memory & Conversations": course/04-memory.md
+    - "5. Context Injection": course/05-context.md
+    - "6. Multi-Agent Pipelines": course/06-pipelines.md
+    - "7. Streaming": course/07-streaming.md
+    - "8. Guardrails & Safety": course/08-guardrails.md
+    - "9. Observability & Cost": course/09-observability.md
+    - "10. Evals & Testing": course/10-evals.md
+    - "11. Advanced & Production": course/11-advanced.md
+    - "12. Composition Patterns": course/12-composition.md
+  - Reference:
+    - API Quick Reference: reference.md
+  - Troubleshooting: troubleshooting.md
+  - Comparison: comparison.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/selvaz/LazyBridge

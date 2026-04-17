@@ -16,7 +16,6 @@ from lazybridge import (
     LazyContext,
     LazySession,
     LazyStore,
-    LazyTool,
     Memory,
     TrackLevel,
 )
@@ -33,6 +32,7 @@ def _agent(**kwargs) -> LazyAgent:
 
 
 # ── T.MA.01 — Memory: agent recalls earlier turns ─────────────────────────────
+
 
 @pytest.mark.live
 def test_memory_multi_turn():
@@ -51,6 +51,7 @@ def test_memory_multi_turn():
 
 # ── T.MA.02 — Memory: history length grows correctly ─────────────────────────
 
+
 @pytest.mark.live
 def test_memory_history_length():
     """Memory must accumulate exactly N user+assistant pairs after N calls."""
@@ -66,6 +67,7 @@ def test_memory_history_length():
 
 # ── T.MA.03 — LazyContext.from_agent: B sees A's last output ──────────────────
 
+
 @pytest.mark.live
 def test_context_from_agent():
     """Agent B must receive Agent A's output via LazyContext.from_agent."""
@@ -78,12 +80,11 @@ def test_context_from_agent():
         "What is THE_SECRET_WORD? Reply with just the word.",
         context=LazyContext.from_agent(a),
     )
-    assert "avocado" in resp.content.lower(), (
-        f"Agent B did not receive Agent A's context. Response: {resp.content!r}"
-    )
+    assert "avocado" in resp.content.lower(), f"Agent B did not receive Agent A's context. Response: {resp.content!r}"
 
 
 # ── T.MA.04 — LazyStore: shared blackboard between agents ─────────────────────
+
 
 @pytest.mark.live
 def test_lazystore_shared_state():
@@ -101,12 +102,11 @@ def test_lazystore_shared_state():
         "What is the value stored under 'answer'? Reply with just the number.",
         context=ctx,
     )
-    assert "42" in resp_b.content, (
-        f"Agent B did not read store correctly. Response: {resp_b.content!r}"
-    )
+    assert "42" in resp_b.content, f"Agent B did not read store correctly. Response: {resp_b.content!r}"
 
 
 # ── T.MA.05 — LazySession chain: researcher → writer pipeline ─────────────────
+
 
 @pytest.mark.live
 def test_session_chain_two_agents():
@@ -123,17 +123,20 @@ def test_session_chain_two_agents():
         participants=[researcher, writer],
     )
 
-    result = pipeline.run({"task": (
-        "Step 1 (researcher): list exactly two facts about the sun. "
-        "Step 2 (writer): summarise those facts in one sentence starting with 'SUN:'."
-    )})
-
-    assert "sun:" in result.lower(), (
-        f"Writer output not found in chain result: {result!r}"
+    result = pipeline.run(
+        {
+            "task": (
+                "Step 1 (researcher): list exactly two facts about the sun. "
+                "Step 2 (writer): summarise those facts in one sentence starting with 'SUN:'."
+            )
+        }
     )
+
+    assert "sun:" in result.lower(), f"Writer output not found in chain result: {result!r}"
 
 
 # ── T.MA.06 — LazySession parallel: two agents, results concatenated ──────────
+
 
 @pytest.mark.live
 def test_session_parallel_two_agents():
@@ -141,7 +144,7 @@ def test_session_parallel_two_agents():
     require_live_provider(_PROVIDER)
     sess = LazySession(console=True)
     alpha = LazyAgent(_PROVIDER, model=_MODEL, name="alpha", session=sess)
-    beta  = LazyAgent(_PROVIDER, model=_MODEL, name="beta",  session=sess)
+    beta = LazyAgent(_PROVIDER, model=_MODEL, name="beta", session=sess)
 
     pipeline = sess.as_tool(
         "dual_pipeline",
@@ -154,17 +157,17 @@ def test_session_parallel_two_agents():
     result = pipeline.run({"task": "Reply with only your agent name (alpha or beta)."})
 
     assert "[alpha]" in result, f"Alpha section missing: {result!r}"
-    assert "[beta]"  in result, f"Beta section missing: {result!r}"
+    assert "[beta]" in result, f"Beta section missing: {result!r}"
 
 
 # ── T.MA.07 — Parallel partial failure: one agent fails, other completes ──────
+
 
 @pytest.mark.live
 def test_session_parallel_partial_failure():
     """If one participant raises, the other's output must still appear."""
     require_live_provider(_PROVIDER)
     from unittest.mock import MagicMock
-    import asyncio
 
     sess = LazySession(console=True)
     good = LazyAgent(_PROVIDER, model=_MODEL, name="good_agent", session=sess)
@@ -173,22 +176,28 @@ def test_session_parallel_partial_failure():
     bad = MagicMock()
     bad.name = "bad_agent"
     bad.output_schema = None
+
     async def _fail(task, **kwargs):
         raise RuntimeError("simulated failure")
+
     bad.achat = MagicMock(side_effect=_fail)
 
     pipeline = sess.as_tool(
-        "partial_pipeline", "Parallel with one broken agent",
-        mode="parallel", participants=[good, bad], combiner="concat",
+        "partial_pipeline",
+        "Parallel with one broken agent",
+        mode="parallel",
+        participants=[good, bad],
+        combiner="concat",
     )
 
     result = pipeline.run({"task": "Say only 'ALIVE'."})
 
-    assert "alive" in result.lower(),  f"Good agent output missing: {result!r}"
-    assert "[ERROR:" in result,        f"Error marker missing: {result!r}"
+    assert "alive" in result.lower(), f"Good agent output missing: {result!r}"
+    assert "[ERROR:" in result, f"Error marker missing: {result!r}"
 
 
 # ── T.MA.08 — Nested pipeline as tool used by orchestrator ────────────────────
+
 
 @pytest.mark.live
 def test_nested_pipeline_as_tool_for_orchestrator():
@@ -209,18 +218,16 @@ def test_nested_pipeline_as_tool_for_orchestrator():
     # Outer orchestrator uses the pipeline as a tool
     orchestrator = LazyAgent(_PROVIDER, model=_MODEL, name="orchestrator", verbose=True)
     resp = orchestrator.loop(
-        "Use the summarise_pipeline tool with topic='Moon'. "
-        "Then reply with exactly: DONE=<the summary you received>.",
+        "Use the summarise_pipeline tool with topic='Moon'. Then reply with exactly: DONE=<the summary you received>.",
         tools=[pipeline_tool],
         max_tokens=256,
     )
 
-    assert "done=" in resp.content.lower(), (
-        f"Orchestrator did not complete the nested pipeline: {resp.content!r}"
-    )
+    assert "done=" in resp.content.lower(), f"Orchestrator did not complete the nested pipeline: {resp.content!r}"
 
 
 # ── T.MA.09 — Session tracking: events logged for both agents ─────────────────
+
 
 @pytest.mark.live
 def test_session_tracking_events():
@@ -239,13 +246,14 @@ def test_session_tracking_events():
     types_a = {e["event_type"] for e in events_a}
     types_b = {e["event_type"] for e in events_b}
 
-    assert "model_request"  in types_a, f"No model_request for agent_a: {events_a}"
+    assert "model_request" in types_a, f"No model_request for agent_a: {events_a}"
     assert "model_response" in types_a, f"No model_response for agent_a: {events_a}"
-    assert "model_request"  in types_b, f"No model_request for agent_b: {events_b}"
+    assert "model_request" in types_b, f"No model_request for agent_b: {events_b}"
     assert "model_response" in types_b, f"No model_response for agent_b: {events_b}"
 
 
 # ── T.MA.10 — Memory.from_history: restore and continue ──────────────────────
+
 
 @pytest.mark.live
 def test_memory_from_history_restore():
@@ -263,12 +271,11 @@ def test_memory_from_history_restore():
         memory=restored,
     )
 
-    assert "indigo" in resp.content.lower(), (
-        f"Restored memory did not carry context: {resp.content!r}"
-    )
+    assert "indigo" in resp.content.lower(), f"Restored memory did not carry context: {resp.content!r}"
 
 
 # ── T.MA.11 — LazyContext addition operator ───────────────────────────────────
+
 
 @pytest.mark.live
 def test_context_addition_operator():
@@ -284,5 +291,5 @@ def test_context_addition_operator():
     )
 
     content = resp.content.lower()
-    assert "blue"  in content, f"FACT_A missing from response: {resp.content!r}"
+    assert "blue" in content, f"FACT_A missing from response: {resp.content!r}"
     assert "green" in content, f"FACT_B missing from response: {resp.content!r}"

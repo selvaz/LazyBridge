@@ -119,7 +119,7 @@ Phase 4  Writing (Claude Sonnet + doc_tool + verify= quality gate, max 2 retries
 - `output_schema` on the synthesizer: chain calls `.json()` automatically, no manual parsing
 - `tools=[doc_tool]` on research agents: self-serve BM25 queries instead of injected context
 - `verify=` quality gate on `writer.loop()`: iterative self-correction up to `max_verify` times
-- `lazybridge.tools.doc_skills`: index local docs, expose as a `LazyTool`
+- `lazybridge.ext.doc_skills`: index local docs, expose as a `LazyTool`
 
 ### Running
 

@@ -1,4 +1,4 @@
-"""DeepSeek provider for uniAI.
+"""DeepSeek provider for LazyBridge.
 
 DeepSeek's API is fully compatible with the OpenAI SDK — it uses the same
 client with a custom base_url and different model names.
@@ -22,8 +22,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Iterator
 
-_logger = logging.getLogger(__name__)
-
 from lazybridge.core.providers.openai import OpenAIProvider, _safe_json_loads
 from lazybridge.core.types import (
     CompletionRequest,
@@ -34,6 +32,8 @@ from lazybridge.core.types import (
     UsageStats,
 )
 
+_logger = logging.getLogger(__name__)
+
 _DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 _DEEPSEEK_ENV_KEY = "DEEPSEEK_API_KEY"
 
@@ -43,7 +43,7 @@ _REASONING_MODELS = frozenset({"deepseek-reasoner"})
 # Price per 1M tokens (input, output). Approximate; verify at platform.deepseek.com/api-docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "deepseek-reasoner": (0.55, 2.19),
-    "deepseek-chat":     (0.14, 0.28),
+    "deepseek-chat": (0.14, 0.28),
 }
 
 
@@ -76,6 +76,7 @@ class DeepSeekProvider(OpenAIProvider):
 
     def _init_client(self, **kwargs) -> None:
         import os
+
         try:
             import openai as _openai
         except ImportError:
@@ -107,6 +108,7 @@ class DeepSeekProvider(OpenAIProvider):
                 # Auto-switch to reasoning model
                 import dataclasses
                 import warnings
+
                 warnings.warn(
                     f"DeepSeek: thinking requested but model '{model}' does not support "
                     "reasoning. Automatically switching to 'deepseek-reasoner'. "
@@ -123,9 +125,7 @@ class DeepSeekProvider(OpenAIProvider):
 
     def _parse_deepseek_chat_response(self, response, model: str) -> CompletionResponse:
         if not response.choices:
-            _logger.warning(
-                "DeepSeek response has no choices (content filter, quota, or API error)."
-            )
+            _logger.warning("DeepSeek response has no choices (content filter, quota, or API error).")
             usage = UsageStats(
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -146,11 +146,13 @@ class DeepSeekProvider(OpenAIProvider):
         tool_calls = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=_safe_json_loads(tc.function.arguments),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=_safe_json_loads(tc.function.arguments),
+                    )
+                )
         usage = UsageStats(
             input_tokens=response.usage.prompt_tokens if response.usage else 0,
             output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -180,16 +182,9 @@ class DeepSeekProvider(OpenAIProvider):
         resp = self._parse_deepseek_chat_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -248,16 +243,9 @@ class DeepSeekProvider(OpenAIProvider):
                         is_final=True,
                     )
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
@@ -272,16 +260,9 @@ class DeepSeekProvider(OpenAIProvider):
         resp = self._parse_deepseek_chat_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -339,14 +320,7 @@ class DeepSeekProvider(OpenAIProvider):
                         is_final=True,
                     )
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            final_chunk.validated = True
-                        except StructuredOutputError as exc:
-                            final_chunk.validation_error = str(exc)
-                            final_chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+
+                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
                     yield final_chunk

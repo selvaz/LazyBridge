@@ -56,89 +56,53 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# _ChainState — internal state propagated between chain steps
-# ---------------------------------------------------------------------------
-
-class _ChainState:
-    """Immutable-per-step state object for the chain pipeline.
-
-    Each step in a chain produces a new _ChainState that is passed to the
-    next step.  Separating state from logic makes the handoff contract
-    explicit and the loop body readable.
-
-    Attributes
-    ----------
-    text : str
-        Text representation of this step's output.  Always available.
-        Used as the next agent's task when ``ctx`` is None (tool → agent),
-        and by the final return when no typed object is available.
-    typed : Any | None
-        Typed Pydantic object produced by this step, or None.
-        Only set when the step was an agent with ``output_schema`` active.
-        The chain returns this directly if the *last* step set it.
-    ctx : LazyContext | None
-        If not None, the previous step was an agent and its output should
-        be injected as context into the next step.  The next agent then
-        receives the *original* task string as its message, with this
-        context merged into its system prompt.
-
-        If None, the previous step was a tool (or this is the first step),
-        and ``text`` is passed directly as the next agent's task.
-
-    Handoff semantics (decided by ``ctx``):
-        ctx is not None  →  agent → agent  →  inject context, keep original task
-        ctx is None      →  tool  → agent  →  use ``text`` as new task
-    """
-
-    __slots__ = ("text", "typed", "ctx")
-
-    def __init__(self, text: str, typed: Any, ctx: Any) -> None:
-        self.text = text
-        self.typed = typed
-        self.ctx = ctx
-
+# _ChainState lives in pipeline_builders.py; re-exported here for backward compatibility.
+# (Existing test imports like `from lazybridge.lazy_session import _ChainState` remain valid.)
+from lazybridge.pipeline_builders import _ChainState  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # TrackLevel
 # ---------------------------------------------------------------------------
 
+
 class TrackLevel(StrEnum):
-    OFF     = "off"
-    BASIC   = "basic"
+    OFF = "off"
+    BASIC = "basic"
     VERBOSE = "verbose"
-    FULL    = "full"   # synonym for VERBOSE
+    FULL = "full"  # synonym for VERBOSE
 
 
 # ---------------------------------------------------------------------------
 # Event types
 # ---------------------------------------------------------------------------
 
+
 class Event(StrEnum):
     """All event types emitted by LazyAgent during execution."""
-    MODEL_REQUEST  = "model_request"
+
+    MODEL_REQUEST = "model_request"
     MODEL_RESPONSE = "model_response"
-    TOOL_CALL      = "tool_call"
-    TOOL_RESULT    = "tool_result"
-    TOOL_ERROR     = "tool_error"
-    AGENT_START    = "agent_start"
-    AGENT_FINISH   = "agent_finish"
-    LOOP_STEP      = "loop_step"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    TOOL_ERROR = "tool_error"
+    AGENT_START = "agent_start"
+    AGENT_FINISH = "agent_finish"
+    LOOP_STEP = "loop_step"
     # verbose-only events (high volume — only emitted when tracking="verbose")
-    MESSAGES       = "messages"
+    MESSAGES = "messages"
     SYSTEM_CONTEXT = "system_context"
-    STREAM_CHUNK   = "stream_chunk"
+    STREAM_CHUNK = "stream_chunk"
 
 
 # These events flood the log at BASIC level; only emitted when tracking="verbose"/"full"
-_VERBOSE_ONLY = {Event.MESSAGES, Event.SYSTEM_CONTEXT, Event.STREAM_CHUNK}
+_VERBOSE_ONLY = {Event.MESSAGES, Event.SYSTEM_CONTEXT, Event.STREAM_CHUNK, Event.MODEL_RESPONSE}
 _VERBOSE_LEVELS = {TrackLevel.VERBOSE, TrackLevel.FULL}
 
 
 # ---------------------------------------------------------------------------
 # EventLog — SQLite-backed event tracking
 # ---------------------------------------------------------------------------
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -179,10 +143,12 @@ class EventLog:
         db: str | None = None,
         level: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
+        exporters: list | None = None,
     ) -> None:
         self.session_id = session_id
         self.level = TrackLevel(level) if not isinstance(level, TrackLevel) else level
         self._console = console
+        self._exporters: list = list(exporters or [])
         self._db = str(Path(db).resolve()) if db else None
         self._mem: list[dict] | None = [] if db is None else None  # in-memory fallback
         self._lock = threading.Lock()
@@ -212,6 +178,20 @@ class EventLog:
             conn.executescript(self._SCHEMA)
 
     # ------------------------------------------------------------------
+    # Exporter management (thread-safe via copy-on-write)
+    # ------------------------------------------------------------------
+
+    def add_exporter(self, exporter: Any) -> None:
+        """Register an event exporter. It will receive all future events."""
+        with self._lock:
+            self._exporters = [*self._exporters, exporter]
+
+    def remove_exporter(self, exporter: Any) -> None:
+        """Unregister an event exporter."""
+        with self._lock:
+            self._exporters = [e for e in self._exporters if e is not exporter]
+
+    # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
 
@@ -230,12 +210,12 @@ class EventLog:
         if self.level not in _VERBOSE_LEVELS and event_type in _VERBOSE_ONLY:
             return
         row = {
-            "timestamp":  _now(),
+            "timestamp": _now(),
             "session_id": self.session_id,
-            "agent_id":   agent_id,
+            "agent_id": agent_id,
             "agent_name": agent_name,
             "event_type": event_type,
-            "data":       data,
+            "data": data,
         }
         if self._db:
             try:
@@ -244,8 +224,12 @@ class EventLog:
                         "INSERT INTO events(timestamp, session_id, agent_id, agent_name,"
                         " event_type, data_json) VALUES (?,?,?,?,?,?)",
                         (
-                            row["timestamp"], self.session_id, agent_id,
-                            agent_name, event_type, _safe_json(data),
+                            row["timestamp"],
+                            self.session_id,
+                            agent_id,
+                            agent_name,
+                            event_type,
+                            _safe_json(data),
                         ),
                     )
             except Exception as exc:
@@ -257,40 +241,48 @@ class EventLog:
         if self._console:
             self._print_event(agent_name, event_type, data)
 
+        # Fan-out to registered exporters.
+        # Snapshot the list (copy-on-write guarantees the reference is stable)
+        # so iteration is safe even if another thread calls add/remove_exporter.
+        exporters = self._exporters
+        for exp in exporters:
+            try:
+                exp.export(row)
+            except Exception as exc:
+                _logger.debug("Exporter %s failed: %s", type(exp).__name__, exc)
+
     def _print_event(self, agent_name: str | None, event_type: str, data: dict) -> None:
         from datetime import datetime as _dt
+
         ts = _dt.now().strftime("%H:%M:%S")
         label = f"[{agent_name or '?':12s}]"
 
         if event_type == Event.MODEL_REQUEST:
             model = data.get("model", "")
-            msgs  = data.get("n_messages", "")
-            line  = f">> model_request   model={model}  msgs={msgs}"
+            msgs = data.get("n_messages", "")
+            line = f">> model_request   model={model}  msgs={msgs}"
         elif event_type == Event.MODEL_RESPONSE:
-            model   = data.get("model", "")
-            stop    = data.get("stop_reason", "")
-            in_t    = data.get("input_tokens", "")
-            out_t   = data.get("output_tokens", "")
+            model = data.get("model", "")
+            stop = data.get("stop_reason", "")
+            in_t = data.get("input_tokens", "")
+            out_t = data.get("output_tokens", "")
             content = data.get("content") or ""
             preview = content.replace("\n", " ").strip()
             if len(preview) > 200:
                 preview = preview[:200] + "…"
-            line = (
-                f"<< model_response  model={model}  stop={stop}  in={in_t} out={out_t}\n"
-                f"{'':26s}{label} {preview!r}"
-            )
+            line = f"<< model_response  model={model}  stop={stop}  in={in_t} out={out_t}\n{'':26s}{label} {preview!r}"
         elif event_type == Event.TOOL_CALL:
             name = data.get("name", "")
             args = str(data.get("arguments", ""))[:120]
             line = f">> tool_call       {name}({args})"
         elif event_type == Event.TOOL_RESULT:
-            name   = data.get("name", "")
+            name = data.get("name", "")
             result = str(data.get("result", ""))[:120]
-            line   = f"<< tool_result     {name} -> {result}"
+            line = f"<< tool_result     {name} -> {result}"
         elif event_type == Event.TOOL_ERROR:
-            name  = data.get("name", "")
+            name = data.get("name", "")
             error = str(data.get("error", ""))[:120]
-            line  = f"!! tool_error      {name}: {error}"
+            line = f"!! tool_error      {name}: {error}"
         else:
             line = f"   {event_type}"
 
@@ -338,11 +330,11 @@ class EventLog:
         # Reverse so result is chronological (oldest→newest), matching in-memory behaviour.
         return [
             {
-                "timestamp":  r[0],
-                "agent_id":   r[1],
+                "timestamp": r[0],
+                "agent_id": r[1],
                 "agent_name": r[2],
                 "event_type": r[3],
-                "data":       json.loads(r[4]),
+                "data": json.loads(r[4]),
             }
             for r in reversed(rows)
         ]
@@ -373,6 +365,7 @@ class _AgentLog:
 # LazySession
 # ---------------------------------------------------------------------------
 
+
 class LazySession:
     """Shared context for a multi-agent pipeline.
 
@@ -399,16 +392,72 @@ class LazySession:
         db: str | None = None,
         tracking: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
+        exporters: list | None = None,
     ) -> None:
         self.id = str(uuid.uuid4())
+        self._db = str(Path(db).resolve()) if db else None
         self.store = LazyStore(db=db)
-        self.events = EventLog(self.id, db=db, level=tracking, console=console)
+        self.events = EventLog(
+            self.id,
+            db=db,
+            level=tracking,
+            console=console,
+            exporters=exporters,
+        )
         self.graph = GraphSchema(self.id)
         self._agents: list[Any] = []  # ordered list of registered agents
 
     # ------------------------------------------------------------------
     # Agent registration (called by LazyAgent.__init__)
     # ------------------------------------------------------------------
+
+    def add_exporter(self, exporter: Any) -> None:
+        """Register an event exporter on this session's EventLog."""
+        self.events.add_exporter(exporter)
+
+    def remove_exporter(self, exporter: Any) -> None:
+        """Unregister an event exporter."""
+        self.events.remove_exporter(exporter)
+
+    # ------------------------------------------------------------------
+    # Usage summary
+    # ------------------------------------------------------------------
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Aggregate token counts and costs across all agents in this session.
+
+        Returns a dict with ``total`` and ``by_agent`` breakdowns::
+
+            {
+                "total": {"input_tokens": 1500, "output_tokens": 800, "cost_usd": 0.023},
+                "by_agent": {
+                    "researcher": {"input_tokens": 1000, ...},
+                    "writer":     {"input_tokens": 500,  ...},
+                },
+            }
+        """
+        events = self.events.get(event_type="model_response", limit=10000)
+        total = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        by_agent: dict[str, dict[str, Any]] = {}
+
+        for ev in events:
+            data = ev.get("data", {}) if isinstance(ev.get("data"), dict) else {}
+            agent_name = ev.get("agent_name", "unknown")
+
+            if agent_name not in by_agent:
+                by_agent[agent_name] = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+
+            for key in ("input_tokens", "output_tokens"):
+                val = data.get(key, 0) or 0
+                total[key] += val
+                by_agent[agent_name][key] += val
+
+            cost = data.get("cost_usd")
+            if cost is not None:
+                total["cost_usd"] += cost
+                by_agent[agent_name]["cost_usd"] += cost
+
+        return {"total": total, "by_agent": by_agent}
 
     def _register_agent(self, agent: LazyAgent) -> None:
         self.graph.add_agent(agent)
@@ -445,6 +494,7 @@ class LazySession:
         native_tools: list[Any] | None = None,
         entry_agent: Any | None = None,
         guidance: str | None = None,
+        run_id: str | None = None,
     ) -> LazyTool:
         """Expose agents (or nested pipeline tools) as a single LazyTool.
 
@@ -502,185 +552,55 @@ class LazySession:
             Legacy single-agent delegation (kept for backward compatibility).
         guidance:
             Optional hint injected into the tool description for the LLM.
+            Propagated unchanged to the underlying ``LazyTool``.
+
+        Note — implementation:
+            ``mode="parallel"`` and ``mode="chain"`` are thin wrappers over
+            ``LazyTool.parallel()`` / ``LazyTool.chain()``.  The returned tool
+            has ``_is_pipeline_tool = True`` — ``save()`` raises ``ValueError``
+            on it.  Cross-session conflicts are validated at creation time;
+            this includes ``LazyTool.from_agent()`` participants (their inner
+            agent's session is also checked).
         """
         from lazybridge.lazy_tool import LazyTool
 
         # ── Legacy path ────────────────────────────────────────────────────
         if mode is None:
             if entry_agent is None:
-                raise ValueError(
-                    "Provide mode='parallel'|'chain', or entry_agent= for single-agent delegation."
-                )
-            return LazyTool.from_agent(
-                entry_agent, name=name, description=description, guidance=guidance
-            )
+                raise ValueError("Provide mode='parallel'|'chain', or entry_agent= for single-agent delegation.")
+            return LazyTool.from_agent(entry_agent, name=name, description=description, guidance=guidance)
 
         # ── Resolve participant list ────────────────────────────────────────
         _parts: list[Any] = participants if participants is not None else list(self._agents)
         if not _parts:
-            raise ValueError(
-                "No participants found. Pass participants= or register agents in the session first."
-            )
+            raise ValueError("No participants found. Pass participants= or register agents in the session first.")
 
         _native = native_tools or []
 
-        # ── Parallel mode ──────────────────────────────────────────────────
+        # ── Parallel / chain modes — thin wrappers over LazyTool factory ──
         if mode == "parallel":
-            if combiner not in ("concat", "last"):
-                raise ValueError(
-                    f"Invalid combiner {combiner!r} for parallel mode. Use 'concat' or 'last'."
-                )
+            return LazyTool.parallel(
+                *_parts,
+                name=name,
+                description=description,
+                combiner=combiner,
+                native_tools=_native or None,
+                session=self,
+                guidance=guidance,
+            )
 
-            def _run_parallel(task: str) -> str:
-                from lazybridge.lazy_run import run_async
-
-                async def _gather() -> str:
-                    coros = []
-                    for p in _parts:
-                        if hasattr(p, "achat"):          # LazyAgent
-                            kw = {"native_tools": _native} if _native else {}
-                            schema = getattr(p, "output_schema", None)
-                            _has_tools = bool(
-                                getattr(p, "tools", None) or
-                                getattr(p, "native_tools", None) or
-                                kw.get("native_tools")
-                            )
-                            if schema is not None:
-                                coros.append(p.ajson(task, schema, **kw))
-                            elif _has_tools:
-                                # Agent has tools — use aloop() so it can invoke them.
-                                # Mirrors the same check in _run_chain.
-                                coros.append(p.aloop(task, **kw))
-                            else:
-                                coros.append(p.achat(task, **kw))
-                        else:                            # LazyTool
-                            coros.append(p.arun({"task": task}))
-                    results = await asyncio.gather(*coros, return_exceptions=True)
-                    if not results:
-                        return ""
-
-                    def _to_text(r: Any) -> str:
-                        if isinstance(r, BaseException):
-                            return f"[ERROR: {type(r).__name__}: {r}]"
-                        if hasattr(r, "model_dump_json"):  # Pydantic model
-                            return r.model_dump_json(indent=2)
-                        if hasattr(r, "content"):          # CompletionResponse
-                            return r.content
-                        return str(r)
-
-                    if combiner == "last":
-                        return _to_text(results[-1])
-                    # combiner == "concat" (validated at creation time)
-                    parts_out = []
-                    for p, r in zip(_parts, results):
-                        pname = getattr(p, "name", "?")
-                        parts_out.append(f"[{pname}]\n{_to_text(r)}")
-                    return "\n\n".join(parts_out)
-
-                return run_async(_gather())
-
-            return LazyTool.from_function(_run_parallel, name=name, description=description)
-
-        # ── Chain mode ─────────────────────────────────────────────────────
         if mode == "chain":
-            def _run_chain(task: str) -> Any:
-                from lazybridge.lazy_context import LazyContext
-
-                # _ChainState carries the result of each step to the next.
-                # See _ChainState docstring for the full handoff contract.
-                #
-                # Short version:
-                #   state.ctx is not None  →  previous step was an agent
-                #                              inject ctx into next agent's system prompt
-                #                              keep original task as the message
-                #   state.ctx is None      →  previous step was a tool (or first step)
-                #                              use state.text directly as next agent's message
-                #
-                # Call dispatch (per agent step, in priority order):
-                #   output_schema set  → json()  — structured output + JSON suffix enforcement
-                #   tools/native_tools → loop()  — tool-calling loop required
-                #   else               → chat()  — single turn, no tools
-                #
-                # Final return:
-                #   state.typed  →  Pydantic object if last step had output_schema
-                #   state.text   →  plain string otherwise
-
-                state = _ChainState(text=task, typed=None, ctx=None)
-
-                for p in _parts:
-                    if hasattr(p, "chat"):                      # LazyAgent
-                        kw: dict[str, Any] = {}
-                        if _native:
-                            kw["native_tools"] = _native
-
-                        if state.ctx is not None:
-                            # Previous step was an agent: inject its context so the
-                            # current agent sees prior results in its system prompt,
-                            # while still receiving the *original* task as its message.
-                            # Keeping the original task preserves the pipeline's goal
-                            # across all agent steps — the context is additive, not
-                            # a replacement.
-                            kw["context"] = state.ctx
-                            current_task = task
-                        else:
-                            # Previous step was a tool (or first step): the tool's
-                            # output is the raw material to process, so it becomes
-                            # the agent's message directly.
-                            current_task = state.text
-
-                        schema = getattr(p, "output_schema", None)
-                        _has_tools = bool(
-                            getattr(p, "tools", None) or
-                            getattr(p, "native_tools", None) or
-                            kw.get("native_tools")
-                        )
-
-                        if schema is not None:
-                            result = p.json(current_task, schema, **kw)
-                            state = _ChainState(
-                                text=(
-                                    result.model_dump_json()
-                                    if hasattr(result, "model_dump_json")
-                                    else str(result)
-                                ),
-                                typed=result,
-                                ctx=LazyContext.from_agent(p),
-                            )
-                        elif _has_tools:
-                            resp = p.loop(current_task, **kw)
-                            state = _ChainState(
-                                text=resp.content if hasattr(resp, "content") else str(resp),
-                                typed=None,
-                                ctx=LazyContext.from_agent(p),
-                            )
-                        else:
-                            resp = p.chat(current_task, **kw)
-                            state = _ChainState(
-                                text=resp.content if hasattr(resp, "content") else str(resp),
-                                typed=None,
-                                ctx=LazyContext.from_agent(p),
-                            )
-
-                    elif hasattr(p, "run"):                     # LazyTool (nested pipeline)
-                        result = p.run({"task": state.text})
-                        # ctx=None signals to the next agent: use text as task,
-                        # not as context — tool output is data, not interpretation.
-                        state = _ChainState(text=str(result), typed=None, ctx=None)
-
-                    else:
-                        raise TypeError(
-                            f"Chain participant {p!r} is not a LazyAgent (needs .chat()) "
-                            f"or a LazyTool (needs .run()). "
-                            f"Participants must be LazyAgent instances or LazyTool objects."
-                        )
-
-                # Return the typed Pydantic object if the last step produced one,
-                # otherwise the plain text output.
-                # When this chain is used as a tool inside loop(), the executor
-                # serialises Pydantic objects via model_dump_json() automatically.
-                return state.typed if state.typed is not None else state.text
-
-            return LazyTool.from_function(_run_chain, name=name, description=description)
+            return LazyTool.chain(
+                *_parts,
+                name=name,
+                description=description,
+                native_tools=_native or None,
+                session=self,
+                guidance=guidance,
+                store=self.store if self._db else None,
+                chain_id=name,
+                run_id=run_id,
+            )
 
         raise ValueError(f"Unknown mode {mode!r}. Use 'parallel' or 'chain'.")
 
@@ -701,6 +621,66 @@ class LazySession:
         sess.id = data.get("session_id", sess.id)
         # Rebind EventLog so events logged after restore use the correct session_id.
         sess.events.session_id = sess.id
+        return sess
+
+    @classmethod
+    def from_db(
+        cls,
+        db: str,
+        *,
+        session_id: str | None = None,
+        tracking: TrackLevel | str = TrackLevel.BASIC,
+        **kwargs: Any,
+    ) -> LazySession:
+        """Resume a session from an existing SQLite database.
+
+        The store entries and event log history persisted in *db* are
+        automatically available on the returned session.  Agents must be
+        re-created and registered separately (pass ``session=`` to
+        ``LazyAgent(...)``).
+
+        Usage::
+
+            sess = LazySession.from_db("pipeline.db")
+            researcher = LazyAgent("anthropic", name="researcher", session=sess)
+            pipeline = sess.as_tool("pipeline", "...", mode="chain")
+            pipeline.run({"task": "..."})  # resumes from last checkpoint
+
+        Parameters
+        ----------
+        db:
+            Path to an existing SQLite database previously created by a
+            ``LazySession(db=...)`` call.
+        session_id:
+            Bind to a specific session by ID.  When provided, only events
+            from that session are visible via ``events.get()``.  When
+            ``None`` (default), the most recent session_id in the database
+            is used automatically.
+        tracking:
+            Tracking level for new events logged on the resumed session.
+        """
+        if not Path(db).exists():
+            raise FileNotFoundError(f"No database found at {db!r}")
+        sess = cls(db=db, tracking=tracking, **kwargs)
+        try:
+            with sess.events._conn() as conn:
+                if session_id is not None:
+                    row = conn.execute(
+                        "SELECT session_id FROM events WHERE session_id = ? LIMIT 1",
+                        (session_id,),
+                    ).fetchone()
+                    if row is not None:
+                        sess.id = session_id
+                        sess.events.session_id = session_id
+                        sess.graph = GraphSchema(session_id)
+                else:
+                    row = conn.execute("SELECT session_id FROM events ORDER BY id DESC LIMIT 1").fetchone()
+                    if row is not None:
+                        sess.id = row[0]
+                        sess.events.session_id = row[0]
+                        sess.graph = GraphSchema(row[0])
+        except Exception:
+            pass
         return sess
 
     def __repr__(self) -> str:

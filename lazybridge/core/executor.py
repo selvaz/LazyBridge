@@ -28,6 +28,7 @@ from lazybridge.core.types import (
 # Provider resolution
 # ---------------------------------------------------------------------------
 
+
 def _resolve_provider(
     provider: str | BaseProvider,
     api_key: str | None = None,
@@ -53,10 +54,7 @@ def _resolve_provider(
     }
     key = provider.lower().strip()
     if key not in registry:
-        raise ValueError(
-            f"Unknown provider '{provider}'. "
-            f"Supported: {', '.join(sorted(set(registry.keys())))}."
-        )
+        raise ValueError(f"Unknown provider '{provider}'. Supported: {', '.join(sorted(set(registry.keys())))}.")
     return registry[key](api_key=api_key, model=model, **kwargs)
 
 
@@ -64,28 +62,37 @@ def _resolve_provider(
 # Retry helpers
 # ---------------------------------------------------------------------------
 
+
 def _is_retryable(exc: Exception) -> bool:
     for attr in ("status_code", "status", "http_status", "code"):
         code = getattr(exc, attr, None)
         if isinstance(code, int) and (code == 429 or 500 <= code < 600):
             return True
     s = str(exc).lower()
-    patterns = ("rate limit", "ratelimit", "too many requests",
-                "server error", "service unavailable", "timeout",
-                "connection", "network", "502", "503", "504")
+    patterns = (
+        "rate limit",
+        "ratelimit",
+        "too many requests",
+        "server error",
+        "service unavailable",
+        "timeout",
+        "connection",
+        "network",
+        "502",
+        "503",
+        "504",
+    )
     return any(p in s for p in patterns)
 
 
 # Warning template reused by both sync and async retry loops
-_RETRY_WARN = (
-    "Executor: transient error on attempt {attempt}/{total} "
-    "({exc_type}: {exc}). Retrying in {delay:.1f}s."
-)
+_RETRY_WARN = "Executor: transient error on attempt {attempt}/{total} ({exc_type}: {exc}). Retrying in {delay:.1f}s."
 
 
 # ---------------------------------------------------------------------------
 # Executor
 # ---------------------------------------------------------------------------
+
 
 class Executor:
     """Thin, stateless execution layer over a provider.
@@ -129,13 +136,17 @@ class Executor:
                 if attempt >= self._max_retries or not _is_retryable(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
-                delay = self._retry_delay * (2 ** attempt) * (0.9 + random.random() * 0.2)
+                delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
                 warnings.warn(
                     _RETRY_WARN.format(
-                        attempt=attempt + 1, total=self._max_retries + 1,
-                        exc_type=type(exc).__name__, exc=exc, delay=delay,
+                        attempt=attempt + 1,
+                        total=self._max_retries + 1,
+                        exc_type=type(exc).__name__,
+                        exc=exc,
+                        delay=delay,
                     ),
-                    UserWarning, stacklevel=2,
+                    UserWarning,
+                    stacklevel=2,
                 )
                 time.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover
@@ -157,13 +168,17 @@ class Executor:
                 if attempt >= self._max_retries or not _is_retryable(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
-                delay = self._retry_delay * (2 ** attempt) * (0.9 + random.random() * 0.2)
+                delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
                 warnings.warn(
                     _RETRY_WARN.format(
-                        attempt=attempt + 1, total=self._max_retries + 1,
-                        exc_type=type(exc).__name__, exc=exc, delay=delay,
+                        attempt=attempt + 1,
+                        total=self._max_retries + 1,
+                        exc_type=type(exc).__name__,
+                        exc=exc,
+                        delay=delay,
                     ),
-                    UserWarning, stacklevel=2,
+                    UserWarning,
+                    stacklevel=2,
                 )
                 await asyncio.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover

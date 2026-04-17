@@ -1,4 +1,4 @@
-﻿"""Shared helpers for opt-in live provider tests."""
+"""Shared helpers for opt-in live provider tests."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import importlib.util
 import os
 
 import pytest
-
 
 LIVE_MODELS = {
     "openai": "gpt-4.1-mini",

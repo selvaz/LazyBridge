@@ -119,7 +119,7 @@ class BaseProvider(ABC):
         self.model = model or self.default_model
         self._init_client(**kwargs)
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs) -> None:  # noqa: B027
         """Initialise the provider SDK client.
 
         Override this to create your SDK client and store it on ``self``::
@@ -238,8 +238,7 @@ class BaseProvider(ABC):
                 supported.append(tool)
             else:
                 warnings.warn(
-                    f"{self.__class__.__name__} does not support native tool "
-                    f"'{tool.value}'. Skipping.",
+                    f"{self.__class__.__name__} does not support native tool '{tool.value}'. Skipping.",
                     UserWarning,
                     stacklevel=3,
                 )

@@ -34,11 +34,17 @@ except ImportError:
     _openai = None  # type: ignore
 
 # Reasoning models that use `reasoning_effort` instead of `temperature`
-_REASONING_MODELS = frozenset({
-    "o1", "o1-mini", "o1-pro",
-    "o3", "o3-mini", "o3-pro",
-    "o4-mini",
-})
+_REASONING_MODELS = frozenset(
+    {
+        "o1",
+        "o1-mini",
+        "o1-pro",
+        "o3",
+        "o3-mini",
+        "o3-pro",
+        "o4-mini",
+    }
+)
 
 # Responses API native tool type strings
 _RESPONSES_NATIVE_MAP: dict[NativeTool, dict] = {
@@ -59,18 +65,18 @@ _EFFORT_MAP = {
 
 # Price per 1M tokens (input, output). Approximate; verify at platform.openai.com/docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gpt-5":        (2.50,  10.0),
-    "gpt-4o-mini":  (0.15,   0.60),
-    "gpt-4o":       (2.50,  10.0),
-    "gpt-4-turbo":  (10.0,  30.0),
-    "gpt-4":        (30.0,  60.0),
-    "gpt-3.5":      (0.50,   1.50),
-    "o4-mini":      (1.10,   4.40),
-    "o3-mini":      (1.10,   4.40),
-    "o3":           (10.0,  40.0),
-    "o1-mini":      (3.0,   12.0),
-    "o1-pro":       (150.0, 600.0),
-    "o1":           (15.0,  60.0),
+    "gpt-5": (2.50, 10.0),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.0),
+    "gpt-4-turbo": (10.0, 30.0),
+    "gpt-4": (30.0, 60.0),
+    "gpt-3.5": (0.50, 1.50),
+    "o4-mini": (1.10, 4.40),
+    "o3-mini": (1.10, 4.40),
+    "o3": (10.0, 40.0),
+    "o1-mini": (3.0, 12.0),
+    "o1-pro": (150.0, 600.0),
+    "o1": (15.0, 60.0),
 }
 
 
@@ -98,12 +104,14 @@ class OpenAIProvider(BaseProvider):
     """
 
     default_model = "gpt-5.4"
-    supported_native_tools: frozenset[NativeTool] = frozenset({
-        NativeTool.WEB_SEARCH,
-        NativeTool.CODE_EXECUTION,
-        NativeTool.FILE_SEARCH,
-        NativeTool.COMPUTER_USE,
-    })
+    supported_native_tools: frozenset[NativeTool] = frozenset(
+        {
+            NativeTool.WEB_SEARCH,
+            NativeTool.CODE_EXECUTION,
+            NativeTool.FILE_SEARCH,
+            NativeTool.COMPUTER_USE,
+        }
+    )
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         model_l = model.lower()
@@ -122,14 +130,19 @@ class OpenAIProvider(BaseProvider):
             return 16_384
         if self._is_reasoning_model(resolved):
             if resolved.startswith("o1") and "mini" in resolved:
-                return 65_536   # o1-mini
-            return 100_000      # o1, o1-pro, o3, o3-mini, o4-mini
+                return 65_536  # o1-mini
+            return 100_000  # o1, o1-pro, o3, o3-mini, o4-mini
         return 16_384
 
     def _init_client(self, **kwargs) -> None:
         if _openai is None:
             raise ImportError("openai package not installed. Run: pip install openai")
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError(
+                "OpenAI API key not found. Set the OPENAI_API_KEY environment "
+                "variable, or pass api_key= to LazyAgent/OpenAIProvider."
+            )
         base_url = kwargs.pop("base_url", None)
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
         self._async_client = _openai.AsyncOpenAI(api_key=key, base_url=base_url, **kwargs)
@@ -139,10 +152,7 @@ class OpenAIProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _is_reasoning_model(self, model: str) -> bool:
-        return (
-            model in _REASONING_MODELS
-            or model.startswith(("o1", "o3", "o4", "gpt-5"))
-        )
+        return model in _REASONING_MODELS or model.startswith(("o1", "o3", "o4", "gpt-5"))
 
     @staticmethod
     def _populate_reasoning_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
@@ -173,6 +183,7 @@ class OpenAIProvider(BaseProvider):
                     ToolResultContent,
                     ToolUseContent,
                 )
+
                 # Build content list for multimodal messages
                 parts: list[dict[str, Any]] = []
                 tool_calls_in_msg: list[dict[str, Any]] = []
@@ -184,32 +195,39 @@ class OpenAIProvider(BaseProvider):
                         pass  # OpenAI doesn't expose reasoning in messages
                     elif isinstance(block, ImageContent):
                         if block.url:
-                            parts.append({
-                                "type": "image_url",
-                                "image_url": {"url": block.url},
-                            })
+                            parts.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": block.url},
+                                }
+                            )
                         elif block.base64_data:
-                            parts.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{block.media_type};base64,{block.base64_data}"
-                                },
-                            })
+                            parts.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:{block.media_type};base64,{block.base64_data}"},
+                                }
+                            )
                     elif isinstance(block, ToolUseContent):
-                        tool_calls_in_msg.append({
-                            "id": block.id,
-                            "type": "function",
-                            "function": {
-                                "name": block.name,
-                                "arguments": json.dumps(block.input),
-                            },
-                        })
+                        tool_calls_in_msg.append(
+                            {
+                                "id": block.id,
+                                "type": "function",
+                                "function": {
+                                    "name": block.name,
+                                    "arguments": json.dumps(block.input),
+                                },
+                            }
+                        )
                     elif isinstance(block, ToolResultContent):
-                        tool_results_in_msg.append({
-                            "tool_call_id": block.tool_use_id,
-                            "content": block.content if isinstance(block.content, str)
-                                       else json.dumps(block.content),
-                        })
+                        tool_results_in_msg.append(
+                            {
+                                "tool_call_id": block.tool_use_id,
+                                "content": block.content
+                                if isinstance(block.content, str)
+                                else json.dumps(block.content),
+                            }
+                        )
 
                 if tool_results_in_msg:
                     if parts:  # text present in the same message: emit it first
@@ -222,10 +240,14 @@ class OpenAIProvider(BaseProvider):
                         m["content"] = parts
                     messages.append(m)
                 else:
-                    messages.append({
-                        "role": msg.role.value,
-                        "content": parts[0]["text"] if (len(parts) == 1 and parts[0].get("type") == "text") else (parts if parts else ""),
-                    })
+                    messages.append(
+                        {
+                            "role": msg.role.value,
+                            "content": parts[0]["text"]
+                            if (len(parts) == 1 and parts[0].get("type") == "text")
+                            else (parts if parts else ""),
+                        }
+                    )
         return messages
 
     def _build_function_tools(self, request: CompletionRequest) -> list[dict]:
@@ -287,12 +309,13 @@ class OpenAIProvider(BaseProvider):
           - text messages: {"role": "user|assistant|system", "content": ...}
         """
         from lazybridge.core.types import (
+            ImageContent,
             TextContent,
             ThinkingContent,
-            ImageContent,
-            ToolUseContent,
             ToolResultContent,
+            ToolUseContent,
         )
+
         items: list[dict[str, Any]] = []
         if request.system:
             items.append({"role": "system", "content": request.system})
@@ -315,36 +338,46 @@ class OpenAIProvider(BaseProvider):
                     if block.url:
                         text_parts.append({"type": "input_image", "image_url": block.url})
                     elif block.base64_data:
-                        text_parts.append({
-                            "type": "input_image",
-                            "image_url": f"data:{block.media_type};base64,{block.base64_data}",
-                        })
+                        text_parts.append(
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{block.media_type};base64,{block.base64_data}",
+                            }
+                        )
                 elif isinstance(block, ToolUseContent):
                     # Model decided to call a function — emit any preceding text first
                     if text_parts:
-                        items.append({"role": msg.role.value,
-                                      "content": text_parts[0]["text"] if len(text_parts) == 1
-                                      else text_parts})
+                        items.append(
+                            {
+                                "role": msg.role.value,
+                                "content": text_parts[0]["text"] if len(text_parts) == 1 else text_parts,
+                            }
+                        )
                         text_parts = []
-                    items.append({
-                        "type": "function_call",
-                        "call_id": block.id,
-                        "name": block.name,
-                        "arguments": json.dumps(block.input),
-                    })
+                    items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": block.id,
+                            "name": block.name,
+                            "arguments": json.dumps(block.input),
+                        }
+                    )
                 elif isinstance(block, ToolResultContent):
-                    items.append({
-                        "type": "function_call_output",
-                        "call_id": block.tool_use_id,
-                        "output": block.content if isinstance(block.content, str)
-                                  else json.dumps(block.content),
-                    })
+                    items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": block.tool_use_id,
+                            "output": block.content if isinstance(block.content, str) else json.dumps(block.content),
+                        }
+                    )
 
             if text_parts:
-                items.append({
-                    "role": msg.role.value,
-                    "content": text_parts[0]["text"] if len(text_parts) == 1 else text_parts,
-                })
+                items.append(
+                    {
+                        "role": msg.role.value,
+                        "content": text_parts[0]["text"] if len(text_parts) == 1 else text_parts,
+                    }
+                )
         return items
 
     def _build_responses_params(self, request: CompletionRequest) -> dict[str, Any]:
@@ -355,13 +388,15 @@ class OpenAIProvider(BaseProvider):
         tools: list[dict] = [_RESPONSES_NATIVE_MAP[nt] for nt in native]
         # User-defined function tools (flattened format required by Responses API)
         for t in request.tools:
-            tools.append({
-                "type": "function",
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-                **({"strict": True} if t.strict else {}),
-            })
+            tools.append(
+                {
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                    **({"strict": True} if t.strict else {}),
+                }
+            )
 
         params: dict[str, Any] = {
             "model": model,
@@ -389,6 +424,7 @@ class OpenAIProvider(BaseProvider):
         # Structured output via Responses API text.format
         if request.structured_output and isinstance(request.structured_output.schema, dict):
             from lazybridge.core.structured import normalize_json_schema
+
             schema = normalize_json_schema(request.structured_output.schema)
             strict = request.structured_output.strict
             params["text"] = {
@@ -404,9 +440,7 @@ class OpenAIProvider(BaseProvider):
     def _parse_chat_response(self, response: Any) -> CompletionResponse:
         model_name = getattr(response, "model", "") or ""
         if not response.choices:
-            _logger.warning(
-                "OpenAI response has no choices (content filter, quota, or API error)."
-            )
+            _logger.warning("OpenAI response has no choices (content filter, quota, or API error).")
             usage = UsageStats(
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -426,11 +460,13 @@ class OpenAIProvider(BaseProvider):
         tool_calls = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=_safe_json_loads(tc.function.arguments),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=_safe_json_loads(tc.function.arguments),
+                    )
+                )
         usage = UsageStats(
             input_tokens=response.usage.prompt_tokens if response.usage else 0,
             output_tokens=response.usage.completion_tokens if response.usage else 0,
@@ -450,25 +486,19 @@ class OpenAIProvider(BaseProvider):
         """Parse Responses API output."""
         content = ""
         tool_calls = []
-        grounding_sources = []
         for item in response.output:
             if item.type == "message":
                 for block in item.content:
                     if block.type == "output_text":
                         content += block.text
-                        # Extract url_citation annotations as grounding sources
-                        for ann in getattr(block, "annotations", []) or []:
-                            if getattr(ann, "type", None) == "url_citation":
-                                grounding_sources.append(GroundingSource(
-                                    url=getattr(ann, "url", "") or "",
-                                    title=getattr(ann, "title", None),
-                                ))
             elif item.type == "function_call":
-                tool_calls.append(ToolCall(
-                    id=item.call_id,
-                    name=item.name,
-                    arguments=_safe_json_loads(item.arguments),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=item.call_id,
+                        name=item.name,
+                        arguments=_safe_json_loads(item.arguments),
+                    )
+                )
         usage = UsageStats(
             input_tokens=getattr(response.usage, "input_tokens", 0),
             output_tokens=getattr(response.usage, "output_tokens", 0),
@@ -483,8 +513,26 @@ class OpenAIProvider(BaseProvider):
             model=getattr(response, "model", None),
             usage=usage,
             raw=response,
-            grounding_sources=grounding_sources,
+            grounding_sources=self._extract_grounding_from_output(response.output),
         )
+
+    @staticmethod
+    def _extract_grounding_from_output(output: Any) -> list[GroundingSource]:
+        """Extract url_citation annotations from Responses API output items."""
+        sources: list[GroundingSource] = []
+        for item in output or []:
+            if getattr(item, "type", None) == "message":
+                for block in getattr(item, "content", []) or []:
+                    if getattr(block, "type", None) == "output_text":
+                        for ann in getattr(block, "annotations", []) or []:
+                            if getattr(ann, "type", None) == "url_citation":
+                                sources.append(
+                                    GroundingSource(
+                                        url=getattr(ann, "url", "") or "",
+                                        title=getattr(ann, "title", None),
+                                    )
+                                )
+        return sources
 
     @staticmethod
     def _responses_stop_reason(response: Any, tool_calls: list) -> str:
@@ -500,8 +548,8 @@ class OpenAIProvider(BaseProvider):
 
     def _stream_responses_api(self, params: dict) -> Iterator[StreamChunk]:
         """Stream from the Responses API with parsing of official event types."""
-        fc_names: dict[str, str] = {}   # call_id → function name
-        fc_args: dict[str, str] = {}    # call_id → accumulated args JSON string
+        fc_names: dict[str, str] = {}  # call_id → function name
+        fc_args: dict[str, str] = {}  # call_id → accumulated args JSON string
         completed_response = None
 
         for event in self._client.responses.create(**params):
@@ -529,9 +577,7 @@ class OpenAIProvider(BaseProvider):
                 if call_id:
                     fc_args[call_id] = fc_args.get(call_id, "") + delta
 
-            elif etype == "response.completed":
-                completed_response = getattr(event, "response", None)
-            elif etype == "response.failed":
+            elif etype == "response.completed" or etype == "response.failed":
                 completed_response = getattr(event, "response", None)
 
         # Build final chunk
@@ -553,23 +599,16 @@ class OpenAIProvider(BaseProvider):
                 usage = self._populate_reasoning_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
-                    usage.input_tokens, usage.output_tokens,
+                    usage.input_tokens,
+                    usage.output_tokens,
                 )
-            # Extract grounding sources from completed response output
-            for item in getattr(completed_response, "output", []) or []:
-                if getattr(item, "type", None) == "message":
-                    for block in getattr(item, "content", []) or []:
-                        if getattr(block, "type", None) == "output_text":
-                            for ann in getattr(block, "annotations", []) or []:
-                                if getattr(ann, "type", None) == "url_citation":
-                                    grounding_sources.append(GroundingSource(
-                                        url=getattr(ann, "url", "") or "",
-                                        title=getattr(ann, "title", None),
-                                    ))
+            grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
         yield StreamChunk(
             stop_reason=self._responses_stop_reason(completed_response, tool_calls),
-            tool_calls=tool_calls, usage=usage, is_final=True,
+            tool_calls=tool_calls,
+            usage=usage,
+            is_final=True,
             grounding_sources=grounding_sources,
         )
 
@@ -602,9 +641,7 @@ class OpenAIProvider(BaseProvider):
                 if call_id:
                     fc_args[call_id] = fc_args.get(call_id, "") + delta
 
-            elif etype == "response.completed":
-                completed_response = getattr(event, "response", None)
-            elif etype == "response.failed":
+            elif etype == "response.completed" or etype == "response.failed":
                 completed_response = getattr(event, "response", None)
 
         tool_calls = []
@@ -625,23 +662,16 @@ class OpenAIProvider(BaseProvider):
                 usage = self._populate_reasoning_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
-                    usage.input_tokens, usage.output_tokens,
+                    usage.input_tokens,
+                    usage.output_tokens,
                 )
-            # Extract grounding sources from completed response output
-            for item in getattr(completed_response, "output", []) or []:
-                if getattr(item, "type", None) == "message":
-                    for block in getattr(item, "content", []) or []:
-                        if getattr(block, "type", None) == "output_text":
-                            for ann in getattr(block, "annotations", []) or []:
-                                if getattr(ann, "type", None) == "url_citation":
-                                    grounding_sources.append(GroundingSource(
-                                        url=getattr(ann, "url", "") or "",
-                                        title=getattr(ann, "title", None),
-                                    ))
+            grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
         yield StreamChunk(
             stop_reason=self._responses_stop_reason(completed_response, tool_calls),
-            tool_calls=tool_calls, usage=usage, is_final=True,
+            tool_calls=tool_calls,
+            usage=usage,
+            is_final=True,
             grounding_sources=grounding_sources,
         )
 
@@ -649,9 +679,7 @@ class OpenAIProvider(BaseProvider):
         # Responses API is the default for all requests.
         # Exception: Pydantic structured output stays on Chat Completions because
         # it requires beta.chat.completions.parse() for native object hydration.
-        if request.structured_output and not isinstance(request.structured_output.schema, dict):
-            return False
-        return True
+        return not (request.structured_output and not isinstance(request.structured_output.schema, dict))
 
     # ------------------------------------------------------------------
     # Sync API
@@ -663,26 +691,17 @@ class OpenAIProvider(BaseProvider):
             response = self._client.responses.create(**params)
             resp = self._parse_responses_response(response)
             if request.structured_output:
-                from lazybridge.core.structured import (
-                    StructuredOutputError,
-                    parse_structured_output,
-                )
-                try:
-                    resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(resp, resp.content, request.structured_output.schema)
             return resp
 
         params = self._build_chat_params(request)
 
         # Pydantic schema: use native beta.parse() on Chat Completions
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
+            from lazybridge.core.structured import apply_structured_validation
+
             schema = request.structured_output.schema
             params["response_format"] = schema
             response = self._client.beta.chat.completions.parse(**params)
@@ -692,12 +711,7 @@ class OpenAIProvider(BaseProvider):
                 resp.parsed = native_parsed
                 resp.validated = True
             else:
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             return resp
 
         response = self._client.chat.completions.create(**params)
@@ -714,16 +728,9 @@ class OpenAIProvider(BaseProvider):
                     yield chunk
                 else:
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            chunk.validated = True
-                        except StructuredOutputError as exc:
-                            chunk.validation_error = str(exc)
-                            chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+
+                        apply_structured_validation(chunk, text_accum, request.structured_output.schema)
                     yield chunk
             return
 
@@ -777,16 +784,9 @@ class OpenAIProvider(BaseProvider):
                     is_final=True,
                 )
                 if request.structured_output:
-                    from lazybridge.core.structured import (
-                        StructuredOutputError,
-                        parse_structured_output,
-                    )
-                    try:
-                        final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                        final_chunk.validated = True
-                    except StructuredOutputError as exc:
-                        final_chunk.validation_error = str(exc)
-                        final_chunk.validated = False
+                    from lazybridge.core.structured import apply_structured_validation
+
+                    apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         if final_chunk is not None:
             final_chunk.usage = final_chunk.usage or final_usage
             yield final_chunk
@@ -801,26 +801,17 @@ class OpenAIProvider(BaseProvider):
             response = await self._async_client.responses.create(**params)
             resp = self._parse_responses_response(response)
             if request.structured_output:
-                from lazybridge.core.structured import (
-                    StructuredOutputError,
-                    parse_structured_output,
-                )
-                try:
-                    resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(resp, resp.content, request.structured_output.schema)
             return resp
 
         params = self._build_chat_params(request)
 
         # Pydantic schema: use native beta.parse() on Chat Completions
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
+            from lazybridge.core.structured import apply_structured_validation
+
             schema = request.structured_output.schema
             params["response_format"] = schema
             response = await self._async_client.beta.chat.completions.parse(**params)
@@ -830,12 +821,7 @@ class OpenAIProvider(BaseProvider):
                 resp.parsed = native_parsed
                 resp.validated = True
             else:
-                try:
-                    resp.parsed = parse_structured_output(resp.content, schema)
-                    resp.validated = True
-                except StructuredOutputError as exc:
-                    resp.validation_error = str(exc)
-                    resp.validated = False
+                apply_structured_validation(resp, resp.content, schema)
             return resp
 
         response = await self._async_client.chat.completions.create(**params)
@@ -852,16 +838,9 @@ class OpenAIProvider(BaseProvider):
                     yield chunk
                 else:
                     if request.structured_output:
-                        from lazybridge.core.structured import (
-                            StructuredOutputError,
-                            parse_structured_output,
-                        )
-                        try:
-                            chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                            chunk.validated = True
-                        except StructuredOutputError as exc:
-                            chunk.validation_error = str(exc)
-                            chunk.validated = False
+                        from lazybridge.core.structured import apply_structured_validation
+
+                        apply_structured_validation(chunk, text_accum, request.structured_output.schema)
                     yield chunk
             return
 
@@ -913,16 +892,9 @@ class OpenAIProvider(BaseProvider):
                     is_final=True,
                 )
                 if request.structured_output:
-                    from lazybridge.core.structured import (
-                        StructuredOutputError,
-                        parse_structured_output,
-                    )
-                    try:
-                        final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                        final_chunk.validated = True
-                    except StructuredOutputError as exc:
-                        final_chunk.validation_error = str(exc)
-                        final_chunk.validated = False
+                    from lazybridge.core.structured import apply_structured_validation
+
+                    apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         if final_chunk is not None:
             final_chunk.usage = final_chunk.usage or final_usage
             yield final_chunk

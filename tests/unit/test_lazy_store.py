@@ -1,13 +1,15 @@
 """Unit tests for LazyStore — in-memory backend, no API calls."""
+
 from __future__ import annotations
 
 import threading
+
 import pytest
 
 from lazybridge.lazy_store import LazyStore
 
-
 # ── T2.01 — write + read round-trip ──────────────────────────────────────────
+
 
 def test_write_read_roundtrip():
     store = LazyStore()
@@ -35,6 +37,7 @@ def test_read_missing_returns_default():
 
 # ── T2.02 — __setitem__ delegates to write (same JSON validation) ─────────────
 
+
 def test_setitem_delegates_to_write():
     store = LazyStore()
     store["key"] = "via setitem"
@@ -44,10 +47,11 @@ def test_setitem_delegates_to_write():
 def test_setitem_non_serializable_raises():
     store = LazyStore()
     with pytest.raises(TypeError, match="not JSON-serializable"):
-        store["bad"] = object()          # non-serializable
+        store["bad"] = object()  # non-serializable
 
 
 # ── T2.03 — __getitem__: missing key raises KeyError ─────────────────────────
+
 
 def test_getitem_missing_raises_keyerror():
     store = LazyStore()
@@ -63,6 +67,7 @@ def test_getitem_existing_key():
 
 # ── T2.04 — write: non-JSON-serializable value raises TypeError ───────────────
 
+
 def test_write_non_serializable_raises():
     store = LazyStore()
     with pytest.raises(TypeError, match="not JSON-serializable"):
@@ -70,6 +75,7 @@ def test_write_non_serializable_raises():
 
 
 # ── T2.05 — write with agent_id → read_by_agent returns correct subset ────────
+
 
 def test_write_agent_id_filtering():
     store = LazyStore()
@@ -83,6 +89,7 @@ def test_write_agent_id_filtering():
 
 # ── T2.06 — delete removes key; no error on deleting non-existent key ─────────
 
+
 def test_delete_removes_key():
     store = LazyStore()
     store.write("key", "val")
@@ -93,10 +100,11 @@ def test_delete_removes_key():
 
 def test_delete_nonexistent_no_error():
     store = LazyStore()
-    store.delete("ghost")   # should not raise
+    store.delete("ghost")  # should not raise
 
 
 # ── T2.07 — clear empties all keys ───────────────────────────────────────────
+
 
 def test_clear_empties_store():
     store = LazyStore()
@@ -108,6 +116,7 @@ def test_clear_empties_store():
 
 # ── T2.08 — __contains__ ─────────────────────────────────────────────────────
 
+
 def test_contains_true_and_false():
     store = LazyStore()
     store.write("present", True)
@@ -116,6 +125,7 @@ def test_contains_true_and_false():
 
 
 # ── T2.09 — to_text format ───────────────────────────────────────────────────
+
 
 def test_to_text_format():
     store = LazyStore()
@@ -144,6 +154,7 @@ def test_to_text_filtered_keys():
 
 # ── T2.10 — thread safety: 50 threads write distinct keys ────────────────────
 
+
 def test_thread_safety_concurrent_writes():
     store = LazyStore()
     n = 50
@@ -169,9 +180,6 @@ def test_thread_safety_concurrent_writes():
 
 
 # ── T2.11 — async methods: awrite / aread / aread_all / akeys ────────────────
-
-import asyncio
-import pytest
 
 
 @pytest.mark.asyncio
@@ -243,6 +251,7 @@ async def test_async_clear():
 
 
 # ── T2.12 — SQLite backend: basic persistence ─────────────────────────────────
+
 
 def test_sqlite_write_read(tmp_path):
     db = str(tmp_path / "test.db")

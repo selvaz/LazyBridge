@@ -177,6 +177,10 @@ def as_tool(
 
 Wraps one or more agents (and/or nested `LazyTool`s) as a single `LazyTool`. The tool schema is always `{"task": str}`. The orchestrator passes a task string; the participants receive it.
 
+**Implementation note:** `as_tool(mode="parallel")` and `as_tool(mode="chain")` are thin wrappers over `LazyTool.parallel()` and `LazyTool.chain()` respectively — semantically identical. Use `LazyTool.parallel()` / `LazyTool.chain()` directly when you don't have a session. The returned tool has `_is_pipeline_tool = True`; `save()` raises `ValueError` on it.
+
+**Cross-session validation:** if participants are bound to different sessions, `as_tool()` raises `ValueError` at creation time. This also covers `LazyTool.from_agent()` tools — the inner agent's session is checked, not just direct `LazyAgent` participants.
+
 ### `mode="parallel"` — all agents receive the same task concurrently
 
 All participants run in parallel on the same input task. Their outputs are combined (default: concatenated with agent-name headers) and returned as a single string.
@@ -442,7 +446,58 @@ If you only need the combined text (not per-agent response objects), `sess.as_to
 
 ---
 
-## 8. Serialization
+## 8. Usage Summary — cost and token tracking
+
+```python
+summary = sess.usage_summary()
+# Returns:
+# {
+#     "total": {"input_tokens": 1500, "output_tokens": 800, "cost_usd": 0.023},
+#     "by_agent": {
+#         "researcher": {"input_tokens": 1000, "output_tokens": 500, "cost_usd": 0.015},
+#         "writer":     {"input_tokens": 500,  "output_tokens": 300, "cost_usd": 0.008},
+#     },
+# }
+```
+
+Aggregates token counts and costs from all `model_response` events in the session. Requires `tracking="verbose"` (model_response events are verbose-only).
+
+---
+
+## 9. Exporters — external observability
+
+Register exporters to forward events to external systems:
+
+```python
+from lazybridge import LazySession, CallbackExporter, OTelExporter, StructuredLogExporter
+
+# Simple callback
+events = []
+sess = LazySession(exporters=[CallbackExporter(events.append)])
+
+# Structured JSON logging (stdlib logging, no extra deps)
+sess = LazySession(exporters=[StructuredLogExporter()])
+
+# OpenTelemetry spans (requires: pip install lazybridge[otel])
+sess = LazySession(exporters=[OTelExporter(service_name="my-pipeline")])
+```
+
+Available exporters:
+- **`CallbackExporter(fn)`** — wraps any callable
+- **`FilteredExporter(inner, event_types={"tool_call", ...})`** — forwards only specified event types
+- **`JsonFileExporter("events.jsonl")`** — appends JSON lines to a file
+- **`StructuredLogExporter()`** — emits events as structured JSON via Python's logging module
+- **`OTelExporter()`** — maps events to OpenTelemetry spans (agent, tool, model spans with token/cost attributes)
+
+Add/remove at runtime:
+```python
+sess.add_exporter(my_exporter)
+sess.remove_exporter(my_exporter)
+```
+
+---
+
+## 10. Serialization
 
 ```python
 # Serialize graph topology to JSON (nodes + edges; live agents are NOT included)
@@ -457,3 +512,18 @@ print(sess2.graph.nodes())   # list of AgentNode descriptors, not LazyAgent inst
 ```
 
 `to_json()` delegates to `sess.graph.to_json()`. `from_json(text, **kwargs)` is a classmethod that creates a new `LazySession` (forwarding `**kwargs` to the constructor, e.g. `db=`), then replaces its `graph` with the deserialized `GraphSchema` and restores `session_id` from the JSON.
+
+### Resuming from a database
+
+```python
+# Resume latest session (default)
+sess = LazySession.from_db("pipeline.db")
+
+# Resume a specific session by ID
+sess = LazySession.from_db("pipeline.db", session_id="abc-123-...")
+```
+
+`from_db(db, *, session_id=None, tracking="basic")`:
+- If `session_id` is provided, binds to that specific session — only its events are visible via `events.get()`
+- If `session_id` is None, auto-detects the most recent session in the database
+- Raises `FileNotFoundError` if the database file doesn't exist

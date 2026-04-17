@@ -1,13 +1,15 @@
 """Unit tests for LazyRouter — T8.xx series."""
+
 from __future__ import annotations
 
 import pytest
-from lazybridge.lazy_router import LazyRouter
 
+from lazybridge.lazy_router import LazyRouter
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeAgent:
     def __init__(self, name: str, id: str = "abc") -> None:
@@ -18,6 +20,7 @@ class _FakeAgent:
 # ---------------------------------------------------------------------------
 # T8.01 — route() calls condition and returns correct agent
 # ---------------------------------------------------------------------------
+
 
 def test_route_returns_correct_agent():
     # T8.01
@@ -35,6 +38,7 @@ def test_route_returns_correct_agent():
 # T8.02 — route() raises KeyError for unknown key without default
 # ---------------------------------------------------------------------------
 
+
 def test_route_unknown_key_raises():
     # T8.02
     router = LazyRouter(
@@ -48,6 +52,7 @@ def test_route_unknown_key_raises():
 # ---------------------------------------------------------------------------
 # T8.03 — default fallback used when key missing
 # ---------------------------------------------------------------------------
+
 
 def test_route_default_fallback():
     # T8.03
@@ -64,6 +69,7 @@ def test_route_default_fallback():
 # T8.04 — condition returning non-str raises TypeError
 # ---------------------------------------------------------------------------
 
+
 def test_route_non_str_key_raises():
     # T8.04
     router = LazyRouter(
@@ -77,6 +83,7 @@ def test_route_non_str_key_raises():
 # ---------------------------------------------------------------------------
 # T8.05 — aroute() with sync condition
 # ---------------------------------------------------------------------------
+
 
 async def test_aroute_sync_condition():
     # T8.05
@@ -92,6 +99,7 @@ async def test_aroute_sync_condition():
 # ---------------------------------------------------------------------------
 # T8.06 — aroute() with async condition
 # ---------------------------------------------------------------------------
+
 
 async def test_aroute_async_condition():
     # T8.06
@@ -112,6 +120,7 @@ async def test_aroute_async_condition():
 # T8.07 — agent_names property
 # ---------------------------------------------------------------------------
 
+
 def test_agent_names():
     # T8.07
     a = _FakeAgent("alpha")
@@ -129,6 +138,7 @@ def test_agent_names():
 # ---------------------------------------------------------------------------
 # T8.08 — to_graph_node() structure
 # ---------------------------------------------------------------------------
+
 
 def test_to_graph_node_structure():
     # T8.08
@@ -152,6 +162,7 @@ def test_to_graph_node_structure():
 # T8.09 — repr includes name and route keys
 # ---------------------------------------------------------------------------
 
+
 def test_repr():
     # T8.09
     router = LazyRouter(
@@ -168,6 +179,7 @@ def test_repr():
 # T8.10 — default set but unknown — falls back correctly
 # ---------------------------------------------------------------------------
 
+
 def test_default_only_used_when_key_missing():
     # T8.10
     primary = _FakeAgent("primary")
@@ -177,5 +189,5 @@ def test_default_only_used_when_key_missing():
         routes={"primary": primary, "fallback": fallback},
         default="fallback",
     )
-    assert router.route(True) is primary   # key exists → no fallback
+    assert router.route(True) is primary  # key exists → no fallback
     assert router.route(False) is fallback  # key missing → use default

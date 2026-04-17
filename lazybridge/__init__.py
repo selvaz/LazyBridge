@@ -50,7 +50,7 @@ Pipeline as tool (expose a session to an orchestrator)::
     orchestrator.loop("coordinate the work", tools=[pipeline])
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from lazybridge.core.providers import BaseProvider
 from lazybridge.core.structured import StructuredOutputError
@@ -66,8 +66,19 @@ from lazybridge.core.types import (
     ToolCall,
     ToolDefinition,
     UsageStats,
+    Verifier,
+)
+from lazybridge.evals import EvalCase, EvalReport, EvalSuite
+from lazybridge.exporters import (
+    CallbackExporter,
+    EventExporter,
+    FilteredExporter,
+    JsonFileExporter,
+    OTelExporter,
+    StructuredLogExporter,
 )
 from lazybridge.graph.schema import EdgeType, GraphSchema, NodeType
+from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.lazy_agent import LazyAgent
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_router import LazyRouter
@@ -95,6 +106,17 @@ __all__ = [
     "LazyTool",
     "LazyRouter",
     "run_async",
+    # Guardrails
+    "Guard",
+    "GuardAction",
+    "GuardError",
+    "ContentGuard",
+    "GuardChain",
+    # Evals
+    "EvalSuite",
+    "EvalCase",
+    "EvalReport",
+    "LLMGuard",
     # Tool schema
     "ToolSchemaMode",
     "ToolSchemaBuilder",
@@ -105,6 +127,13 @@ __all__ = [
     # Session / tracking
     "TrackLevel",
     "Event",
+    # Exporters
+    "EventExporter",
+    "CallbackExporter",
+    "FilteredExporter",
+    "JsonFileExporter",
+    "StructuredLogExporter",
+    "OTelExporter",
     # Graph
     "GraphSchema",
     "NodeType",
@@ -119,6 +148,7 @@ __all__ = [
     "StructuredOutputConfig",
     "ThinkingConfig",
     "ToolCall",
+    "Verifier",
     "ToolDefinition",
     "UsageStats",
     "BaseProvider",

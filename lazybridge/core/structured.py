@@ -21,6 +21,7 @@ _logger = logging.getLogger(__name__)
 class StructuredOutputError(ValueError):
     """Raised when the model output cannot be parsed or validated against the schema."""
 
+
 _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "object": dict,
     "array": list,
@@ -162,6 +163,34 @@ def parse_structured_output(
             return schema.model_validate(data)  # type: ignore[attr-defined]
         except Exception as exc:
             raise StructuredOutputError(f"Validation error: {exc}") from exc
+
+
+def apply_structured_validation(
+    resp: Any,
+    content: str,
+    schema: type | dict[str, Any],
+) -> None:
+    """Parse *content* and set ``parsed``/``validated``/``validation_error`` on *resp*.
+
+    Centralised helper that replaces the identical try/except blocks duplicated
+    across every provider.  Mutates *resp* in place.
+
+    Parameters
+    ----------
+    resp:
+        A ``CompletionResponse`` or ``StreamChunk`` instance.
+    content:
+        The accumulated text to parse (may differ from ``resp.content`` in
+        streaming scenarios where text is collected separately).
+    schema:
+        Pydantic model class or raw JSON schema dict.
+    """
+    try:
+        resp.parsed = parse_structured_output(content, schema)
+        resp.validated = True
+    except StructuredOutputError as exc:
+        resp.validation_error = str(exc)
+        resp.validated = False
 
 
 def build_repair_messages(

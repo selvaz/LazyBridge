@@ -6,15 +6,14 @@ A `LazySession` is the shared container for a multi-agent pipeline. Create one w
 
 ## When do you need a session?
 
-| Scenario | Session needed? |
-|----------|----------------|
-| Single agent, one-off question | No |
-| Single agent with tools | No |
-| Two agents sharing results | Yes |
-| Agents running concurrently | Yes |
-| Persistent state across runs | Yes |
-| You want event tracking | Yes |
-| GUI pipeline visualization | Yes |
+| Scenario                                         | Session needed? |
+|--------------------------------------------------|-----------------|
+| Single agent, no shared state                    | No              |
+| Concurrent agents via `LazyTool.parallel()`      | No              |
+| Sequential pipeline via `LazyTool.chain()`       | No              |
+| Concurrent agents with shared state or tracking  | Yes             |
+| Need event log, cost tracking, or graph export   | Yes             |
+| Multi-agent pipeline with `LazyStore` blackboard | Yes             |
 
 ---
 
@@ -182,13 +181,104 @@ async def run():
     )
     # results[i] are CompletionResponse objects — full access to usage, tool_calls, etc.
     for r in results:
+        if isinstance(r, Exception):
+            print(f"  failed: {r}")
+            continue
         print(r.content[:200])
         print(f"  tokens: {r.usage.input_tokens}in / {r.usage.output_tokens}out")
 
 asyncio.run(run())
 ```
 
+`gather()` uses `return_exceptions=True` internally — always check for `Exception` objects in the results list.
+
 For most cases where you just want concurrent agents and a combined result, `sess.as_tool(mode="parallel")` is simpler.
+
+---
+
+## Checkpoint & resume
+
+Chain pipelines can automatically checkpoint progress after each step.
+If execution fails mid-chain, re-running resumes from the last completed step.
+
+### Enable checkpoints
+
+Pass `store=` to `LazyTool.chain()`, or use a SQLite-backed session:
+
+```python
+from lazybridge import LazyAgent, LazySession
+
+# SQLite session — checkpoints survive process restarts
+sess = LazySession(db="pipeline.db")
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer = LazyAgent("openai", name="writer", session=sess)
+
+# as_tool(mode="chain") auto-enables checkpoint when session has db=
+pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
+```
+
+### Resume after crash
+
+```python
+# Re-create session from existing database
+sess = LazySession.from_db("pipeline.db")
+
+# Re-create agents (same names, same order)
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer = LazyAgent("openai", name="writer", session=sess)
+
+# Pipeline resumes from last checkpoint automatically
+pipeline = sess.as_tool("pipeline", "Research then write", mode="chain")
+result = pipeline.run({"task": "Analyze fusion energy trends"})
+```
+
+### Nested pipelines
+
+Each chain checkpoints its own steps independently:
+
+```python
+from lazybridge import LazyStore
+from lazybridge.lazy_tool import LazyTool
+
+store = LazyStore(db="pipeline.db")
+sub = LazyTool.chain(step_a, step_b, name="sub", description="...",
+                     store=store, chain_id="sub")
+main = LazyTool.chain(researcher, sub, writer, name="main", description="...",
+                      store=store, chain_id="main")
+```
+
+If `sub` crashes during `step_b`, on resume `main` skips `researcher` and
+`sub` skips `step_a` — execution resumes from `step_b`.
+
+### How it works
+
+- After each completed step, the chain writes `{"step": i, "output": "..."}` to the store
+- On re-execution, it reads the checkpoint and skips completed steps
+- On successful completion, the checkpoint is cleared
+- Without `store=`, chains work exactly as before — no overhead
+
+### Checkpoint key isolation (run_id)
+
+By default, checkpoint keys use `_ckpt:{chain_id}`. If you run the same
+chain concurrently (e.g. parallel workers, retries, scheduled runs), they
+will collide on the same checkpoint key.
+
+Use `run_id` to isolate concurrent invocations:
+
+```python
+# Each worker gets its own checkpoint lane
+tool = LazyTool.chain(a, b, name="pipe", description="d",
+                      store=store, chain_id="pipe", run_id="worker-1")
+tool.run({"task": "analyze"})
+
+# Another worker, same chain, independent checkpoint
+tool2 = LazyTool.chain(a, b, name="pipe", description="d",
+                       store=store, chain_id="pipe", run_id="worker-2")
+tool2.run({"task": "analyze"})
+```
+
+When `run_id` is omitted, the legacy single-lane behavior applies.
+To resume a specific run, pass the same `run_id` value.
 
 ---
 
@@ -228,3 +318,40 @@ writer = LazyAgent("openai", session=sess2)
 ctx = LazyContext.from_store(sess2.store, keys=["phase1"])
 writer.chat("continue from this research", context=ctx)
 ```
+
+---
+
+## Usage tracking & cost
+
+Aggregate token usage and costs across all agents:
+
+```python
+sess = LazySession(tracking="verbose")
+# ... run agents ...
+summary = sess.usage_summary()
+print(f"Total cost: ${summary['total']['cost_usd']:.4f}")
+print(f"Total tokens: {summary['total']['input_tokens']} in / {summary['total']['output_tokens']} out")
+for name, usage in summary["by_agent"].items():
+    print(f"  {name}: ${usage['cost_usd']:.4f}")
+```
+
+Note: requires `tracking="verbose"` because `model_response` events (which contain token counts) are only emitted at verbose level.
+
+---
+
+## Exporters
+
+Forward events to external observability systems:
+
+```python
+from lazybridge import LazySession, CallbackExporter, OTelExporter
+
+# Log to OpenTelemetry (requires: pip install lazybridge[otel])
+sess = LazySession(exporters=[OTelExporter(service_name="my-pipeline")])
+
+# Or simple callback for custom handling
+events = []
+sess = LazySession(exporters=[CallbackExporter(events.append)])
+```
+
+See the API reference for all available exporters.

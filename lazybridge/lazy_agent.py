@@ -43,7 +43,7 @@ import logging
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any
+from typing import Any, Literal, overload
 
 from lazybridge.core.executor import Executor
 from lazybridge.core.types import (
@@ -62,7 +62,9 @@ from lazybridge.core.types import (
     ToolDefinition,
     ToolResultContent,
     ToolUseContent,
+    Verifier,
 )
+from lazybridge.guardrails import Guard, GuardError
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_session import Event, EventLog, LazySession, TrackLevel
 from lazybridge.lazy_tool import LazyTool, NormalizedToolSet
@@ -73,6 +75,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Message normalisation helpers
 # ---------------------------------------------------------------------------
+
 
 def _normalise_messages(messages: str | list) -> list[Message]:
     if isinstance(messages, str):
@@ -86,7 +89,8 @@ def _normalise_messages(messages: str | list) -> list[Message]:
                 warnings.warn(
                     "Message dict is missing the 'role' key; defaulting to 'user'. "
                     "Pass role='user'|'assistant'|'system' explicitly.",
-                    UserWarning, stacklevel=3,
+                    UserWarning,
+                    stacklevel=3,
                 )
             role = Role(m.get("role", "user"))
             result.append(Message(role=role, content=m.get("content", "")))
@@ -100,7 +104,7 @@ def _messages_to_str(messages: str | list) -> str:
     if isinstance(messages, str):
         return messages
     for m in messages:
-        if isinstance(m, Message) and str(m.role) in ("user", "Role.USER"):
+        if isinstance(m, Message) and m.role == Role.USER:
             return m.content if isinstance(m.content, str) else str(m.content)
         if isinstance(m, dict) and m.get("role") == "user":
             return str(m.get("content", ""))
@@ -116,6 +120,7 @@ def _serialise_tool_result(result: Any) -> str:
         return result.model_dump_json()
     if isinstance(result, dict):
         import json
+
         try:
             return json.dumps(result)
         except (TypeError, ValueError):
@@ -147,6 +152,7 @@ async def _call_event_async(callback: Callable, name: str, payload: Any) -> None
 # ---------------------------------------------------------------------------
 # LazyAgent
 # ---------------------------------------------------------------------------
+
 
 class LazyAgent:
     """Unified LLM agent with optional session, context injection, and tool loops.
@@ -223,9 +229,7 @@ class LazyAgent:
         self.context = context
         self.tools: list[LazyTool | ToolDefinition | dict] = tools or []
         self.output_schema: type | dict | None = output_schema
-        self.native_tools: list[NativeTool] = [
-            NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])
-        ]
+        self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         self.session = session
 
         # Stores the last text output; read by LazyContext.from_agent() when
@@ -392,8 +396,300 @@ class LazyAgent:
         self._last_output = "".join(parts)
 
     # ------------------------------------------------------------------
+    # Shared helpers for chat/achat and loop/aloop (sync/async dedup)
+    # ------------------------------------------------------------------
+
+    def _validate_memory(self, messages: str | list, memory: Memory | None, stream: bool) -> None:
+        """Shared validation for memory parameter. Raises on invalid combos."""
+        if memory is None:
+            return
+        if not isinstance(messages, str):
+            raise TypeError(
+                "memory= requires messages to be a str. For list messages manage history manually via chat(list)."
+            )
+        if stream:
+            raise TypeError(
+                "stream=True is not compatible with memory=. "
+                "Consume the stream manually and call memory._record() yourself."
+            )
+
+    def _prepare_chat_request(
+        self,
+        messages: str | list,
+        *,
+        system: str | None,
+        tools: list | None,
+        native_tools: list[NativeTool | str] | None,
+        output_schema: type | dict | None,
+        thinking: bool | ThinkingConfig,
+        skills: list[str] | None,
+        stream: bool,
+        model: str | None,
+        max_tokens: int | None,
+        temperature: float | None,
+        tool_choice: str | None,
+        context: LazyContext | Callable[[], str] | None,
+        **kwargs: Any,
+    ) -> tuple[list[Message], CompletionRequest]:
+        """Build messages and request — shared between chat() and achat()."""
+        msgs = _normalise_messages(messages)
+        tool_set = self._build_tool_set(tools)
+        effective_system = self._build_effective_system(system, context, tool_set)
+        effective_schema = output_schema if output_schema is not None else self.output_schema
+
+        request = self._build_request(
+            msgs,
+            system=effective_system,
+            tools=tool_set.definitions,
+            native_tools=self._merge_native_tools(native_tools),
+            output_schema=effective_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=stream,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            **kwargs,
+        )
+        return msgs, request
+
+    def _record_response(self, resp: CompletionResponse) -> None:
+        """Store response and track model_response event — shared between chat/achat."""
+        self._last_output = resp.content
+        self._last_response = resp
+        self._track(
+            Event.MODEL_RESPONSE,
+            model=resp.model or self._model_name,
+            stop_reason=resp.stop_reason,
+            input_tokens=resp.usage.input_tokens,
+            output_tokens=resp.usage.output_tokens,
+            content=resp.content,
+        )
+
+    @staticmethod
+    def _build_assistant_turn(resp: CompletionResponse) -> Any:
+        """Build assistant message content with thinking + text + tool-use blocks.
+
+        Shared between loop() and aloop() to avoid duplicating the
+        thought_signature forwarding logic (required for Gemini).
+        """
+        _tc_blocks = [
+            ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments, thought_signature=tc.thought_signature)
+            for tc in resp.tool_calls
+        ]
+        _thinking_blocks: list[Any] = [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
+        if resp.tool_calls:
+            _text_blocks: list[Any] = [TextContent(text=resp.content)] if resp.content else []
+            return _thinking_blocks + _text_blocks + _tc_blocks
+        return resp.content or ""
+
+    def _finalize_loop(
+        self,
+        resp: CompletionResponse,
+        verify_log: list[str],
+        attempts: int,
+        verify: Any,
+        method: str,
+        step: int,
+    ) -> CompletionResponse:
+        """Shared loop finalization — warn if verify exhausted, store result."""
+        if verify is not None and len(verify_log) == attempts:
+            import warnings
+
+            warnings.warn(
+                f"{method}() verify exhausted after {attempts} attempt(s) without approval. "
+                "Returning last result unchanged. "
+                "Increase max_verify= or review your verify function.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+        resp.verify_log = verify_log  # type: ignore[union-attr]
+        self._last_output = resp.content
+        self._last_response = resp
+        self._track(
+            Event.AGENT_FINISH,
+            method=method,
+            stop_reason=resp.stop_reason,
+            n_steps=step + 1,
+        )
+        return resp
+
+    # ------------------------------------------------------------------
+    # Loop action protocol — unified loop logic for sync/async
+    # ------------------------------------------------------------------
+
+    _CALL_MODEL = "call_model"
+    _EXEC_TOOL = "exec_tool"
+    _EXEC_TOOLS_BATCH = "exec_tools_batch"
+    _EMIT_EVENT = "emit_event"
+    _VERIFY = "verify"
+
+    def _loop_logic(
+        self,
+        messages: str | list,
+        *,
+        tools: list | None,
+        native_tools: list[NativeTool | str] | None,
+        max_steps: int,
+        tool_runner: Callable | None,
+        on_event: Callable | None,
+        verify: Any,
+        max_verify: int,
+        method: str,
+        chat_kwargs: dict,
+    ):
+        """Generator that yields (action, *args) tuples at sync/async divergence points.
+
+        The caller (loop or aloop) sends back the result of each action.
+        This keeps all decision logic in one place.
+        """
+        _orig_q = _messages_to_str(messages)
+        _current_messages: str | list = messages
+        _attempts = max(1, max_verify) if verify is not None else 1
+        resp: CompletionResponse | None = None
+        _verify_log: list[str] = []
+        step = 0
+
+        self._track(Event.AGENT_START, method=method, task=_orig_q[:200])
+
+        for _attempt in range(_attempts):
+            tool_set = self._build_tool_set(tools)
+            convo = _normalise_messages(_current_messages)
+
+            for step in range(max_steps):
+                resp = yield (self._CALL_MODEL, convo, tools, native_tools, chat_kwargs)
+
+                if on_event:
+                    yield (self._EMIT_EVENT, on_event, "step", {"step": step, "response": resp})
+
+                if not resp.tool_calls:
+                    break
+
+                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
+                convo.append(Message(role=Role.ASSISTANT, content=self._build_assistant_turn(resp)))
+
+                for tc in resp.tool_calls:
+                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
+                    if on_event:
+                        yield (self._EMIT_EVENT, on_event, "tool_call", tc)
+
+                _parallel = chat_kwargs.get("tool_choice") == "parallel"
+                if _parallel and len(resp.tool_calls) > 1:
+                    results = yield (
+                        self._EXEC_TOOLS_BATCH,
+                        resp.tool_calls,
+                        tool_set.registry,
+                        tool_runner,
+                    )
+                    for tc, (result, error) in zip(resp.tool_calls, results):
+                        if error is not None:
+                            self._track(Event.TOOL_ERROR, name=tc.name, error=str(error))
+                            convo.append(_tool_result_message(tc, f"Error: {error}", is_error=True))
+                        else:
+                            self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                            if on_event:
+                                yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
+                            convo.append(_tool_result_message(tc, result))
+                else:
+                    for tc in resp.tool_calls:
+                        try:
+                            result = yield (self._EXEC_TOOL, tc, tool_set.registry, tool_runner)
+                            self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                            if on_event:
+                                yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
+                            convo.append(_tool_result_message(tc, result))
+                        except Exception as exc:
+                            _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
+                            self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
+                            convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+
+            if resp is None:  # pragma: no cover
+                raise AssertionError("loop produced no response — this is a bug, please report it")
+
+            if on_event:
+                yield (self._EMIT_EVENT, on_event, "done", resp)
+
+            if verify is None:
+                break
+
+            _raw = yield (self._VERIFY, verify, _orig_q, resp.content)
+            _verdict: str = str(_raw) if _raw is not None else ""
+            if _verdict[:30].lower().startswith("approved"):
+                break
+
+            _verify_log.append(_verdict)
+            if on_event:
+                yield (self._EMIT_EVENT, on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
+            _current_messages = f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
+
+        return self._finalize_loop(resp, _verify_log, _attempts, verify, method, step)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
+    # Guard helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_input_guard(guard: Guard | None, messages: str | list) -> str | list:
+        """Run input guard on the user message text. Returns (possibly modified) messages."""
+        if guard is None:
+            return messages
+        text = messages if isinstance(messages, str) else _messages_to_str(messages)
+        action = guard.check_input(text)
+        if not action.allowed:
+            raise GuardError(action)
+        if action.modified_text is not None and isinstance(messages, str):
+            return action.modified_text
+        return messages
+
+    @staticmethod
+    def _run_output_guard(guard: Guard | None, resp: CompletionResponse) -> CompletionResponse:
+        """Run output guard on the response content. Raises GuardError if blocked."""
+        if guard is None or not resp.content:
+            return resp
+        action = guard.check_output(resp.content)
+        if not action.allowed:
+            raise GuardError(action)
+        return resp
+
+    @staticmethod
+    async def _arun_input_guard(guard: Guard | None, messages: str | list) -> str | list:
+        """Async input guard. Uses acheck_input if available, else check_input."""
+        if guard is None:
+            return messages
+        text = messages if isinstance(messages, str) else _messages_to_str(messages)
+        if hasattr(guard, "acheck_input"):
+            action = await guard.acheck_input(text)
+        else:
+            action = guard.check_input(text)
+        if not action.allowed:
+            raise GuardError(action)
+        if action.modified_text is not None and isinstance(messages, str):
+            return action.modified_text
+        return messages
+
+    @staticmethod
+    async def _arun_output_guard(guard: Guard | None, resp: CompletionResponse) -> CompletionResponse:
+        """Async output guard. Uses acheck_output if available, else check_output."""
+        if guard is None or not resp.content:
+            return resp
+        if hasattr(guard, "acheck_output"):
+            action = await guard.acheck_output(resp.content)
+        else:
+            action = guard.check_output(resp.content)
+        if not action.allowed:
+            raise GuardError(action)
+        return resp
+
+    # ------------------------------------------------------------------
     # chat() — single turn
     # ------------------------------------------------------------------
+
+    @overload
+    def chat(self, messages: str | list, *, stream: Literal[False] = ..., **kwargs: Any) -> CompletionResponse: ...
+    @overload
+    def chat(self, messages: str | list, *, stream: Literal[True], **kwargs: Any) -> Iterator[StreamChunk]: ...
 
     def chat(
         self,
@@ -412,6 +708,7 @@ class LazyAgent:
         temperature: float | None = None,
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
+        guard: Guard | None = None,
         **kwargs: Any,
     ) -> CompletionResponse | Iterator[StreamChunk]:
         """Send a single-turn chat request.
@@ -420,47 +717,49 @@ class LazyAgent:
 
             mem = Memory()
             ai.chat("ciao", memory=mem)
-            ai.chat("ricordi?", memory=mem)   # history inclusa automaticamente
+            ai.chat("ricordi?", memory=mem)   # history included automatically
 
         ``tool_choice`` controls tool selection: ``"auto"`` (default), ``"none"``,
         ``"required"`` (force at least one tool call), or a specific tool name.
 
         ``context`` overrides the agent-level context for this call only.
+
+        ``guard`` runs input validation before the LLM call and output validation
+        after. Raises ``GuardError`` if the guard blocks content.
         """
+        messages = self._run_input_guard(guard, messages)
+
         if memory is not None:
-            if not isinstance(messages, str):
-                raise TypeError(
-                    "memory= requires messages to be a str. "
-                    "For list messages manage history manually via chat(list)."
-                )
-            if stream:
-                raise TypeError(
-                    "stream=True is not compatible with memory=. "
-                    "Consume the stream manually and call memory._record() yourself."
-                )
+            self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
-            resp = self.chat(full, system=system, tools=tools, native_tools=native_tools,
-                             output_schema=output_schema, thinking=thinking, skills=skills,
-                             stream=False, model=model, max_tokens=max_tokens,
-                             temperature=temperature, tool_choice=tool_choice,
-                             context=context, **kwargs)
+            resp = self.chat(
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                guard=guard,
+                **kwargs,
+            )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
             memory._record(messages, resp.content)
             return resp
 
-        msgs = _normalise_messages(messages)
-        tool_set = self._build_tool_set(tools)
-        effective_system = self._build_effective_system(system, context, tool_set)
-        # Agent-level output_schema is the default; call-level takes precedence.
-        effective_schema = output_schema if output_schema is not None else self.output_schema
-
-        request = self._build_request(
-            msgs,
-            system=effective_system,
-            tools=tool_set.definitions,
-            native_tools=self._merge_native_tools(native_tools),
-            output_schema=effective_schema,
+        msgs, request = self._prepare_chat_request(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
             thinking=thinking,
             skills=skills,
             stream=stream,
@@ -468,6 +767,7 @@ class LazyAgent:
             max_tokens=max_tokens,
             temperature=temperature,
             tool_choice=tool_choice,
+            context=context,
             **kwargs,
         )
 
@@ -476,15 +776,18 @@ class LazyAgent:
             return self._stream_and_track(self._executor.stream(request))
 
         resp = self._executor.execute(request)
-        self._last_output = resp.content
-        self._last_response = resp
-        self._track(Event.MODEL_RESPONSE,
-                    model=resp.model or self._model_name,
-                    stop_reason=resp.stop_reason,
-                    input_tokens=resp.usage.input_tokens,
-                    output_tokens=resp.usage.output_tokens,
-                    content=resp.content)
+        self._record_response(resp)
+        self._run_output_guard(guard, resp)
         return resp
+
+    @overload
+    async def achat(
+        self, messages: str | list, *, stream: Literal[False] = ..., **kwargs: Any
+    ) -> CompletionResponse: ...
+    @overload
+    async def achat(
+        self, messages: str | list, *, stream: Literal[True], **kwargs: Any
+    ) -> AsyncIterator[StreamChunk]: ...
 
     async def achat(
         self,
@@ -503,43 +806,43 @@ class LazyAgent:
         temperature: float | None = None,
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
+        guard: Guard | None = None,
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
-        """Async version of chat(). Accepts memory= and tool_choice=."""
+        """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
+        messages = await self._arun_input_guard(guard, messages)
+
         if memory is not None:
-            if not isinstance(messages, str):
-                raise TypeError(
-                    "memory= requires messages to be a str. "
-                    "For list messages manage history manually via achat(list)."
-                )
-            if stream:
-                raise TypeError(
-                    "stream=True is not compatible with memory=. "
-                    "Consume the stream manually and call memory._record() yourself."
-                )
+            self._validate_memory(messages, memory, stream)
             full = memory._build_input(messages)
-            resp = await self.achat(full, system=system, tools=tools, native_tools=native_tools,
-                                    output_schema=output_schema, thinking=thinking, skills=skills,
-                                    stream=False, model=model, max_tokens=max_tokens,
-                                    temperature=temperature, tool_choice=tool_choice,
-                                    context=context, **kwargs)
+            resp = await self.achat(
+                full,
+                system=system,
+                tools=tools,
+                native_tools=native_tools,
+                output_schema=output_schema,
+                thinking=thinking,
+                skills=skills,
+                stream=False,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                context=context,
+                guard=guard,
+                **kwargs,
+            )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
             memory._record(messages, resp.content)
             return resp
 
-        msgs = _normalise_messages(messages)
-        tool_set = self._build_tool_set(tools)
-        effective_system = self._build_effective_system(system, context, tool_set)
-        # Agent-level output_schema is the default; call-level takes precedence.
-        effective_schema = output_schema if output_schema is not None else self.output_schema
-
-        request = self._build_request(
-            msgs,
-            system=effective_system,
-            tools=tool_set.definitions,
-            native_tools=self._merge_native_tools(native_tools),
-            output_schema=effective_schema,
+        msgs, request = self._prepare_chat_request(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
             thinking=thinking,
             skills=skills,
             stream=stream,
@@ -547,6 +850,7 @@ class LazyAgent:
             max_tokens=max_tokens,
             temperature=temperature,
             tool_choice=tool_choice,
+            context=context,
             **kwargs,
         )
 
@@ -555,14 +859,8 @@ class LazyAgent:
             return self._astream_and_track(self._executor.astream(request))
 
         resp = await self._executor.aexecute(request)
-        self._last_output = resp.content
-        self._last_response = resp
-        self._track(Event.MODEL_RESPONSE,
-                    model=resp.model or self._model_name,
-                    stop_reason=resp.stop_reason,
-                    input_tokens=resp.usage.input_tokens,
-                    output_tokens=resp.usage.output_tokens,
-                    content=resp.content)
+        self._record_response(resp)
+        await self._arun_output_guard(guard, resp)
         return resp
 
     # ------------------------------------------------------------------
@@ -578,8 +876,9 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: "LazyAgent | Callable[[str, str], str] | None" = None,
+        verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
+        guard: Guard | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -609,112 +908,63 @@ class LazyAgent:
         max_verify:
             Maximum verify attempts.  If exceeded the last worker result is
             returned unchanged — no exception is raised.
+
+        ``tool_choice`` values (passed via **chat_kwargs):
+            ``"auto"`` (default), ``"required"``, ``"none"``, ``"<tool_name>"``,
+            ``"parallel"`` — execute multiple tool calls concurrently
+            (async uses ``asyncio.gather()``).
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in loop(). Use chat() for streaming.")
 
-        _orig_q = _messages_to_str(messages)
-        _current_messages: str | list = messages
-        _attempts = max(1, max_verify) if verify is not None else 1
-        resp: CompletionResponse | None = None
-        _verify_log: list[str] = []
-        step = 0
-
-        self._track(Event.AGENT_START, method="loop", task=_orig_q[:200])
-
-        for _attempt in range(_attempts):
-            # Build tool_set once for the execution registry used in _execute_tool().
-            # Do NOT pass tool_set.bridges to chat() — chat() calls _build_tool_set()
-            # internally and would add self.tools a second time, causing duplicate names.
-            tool_set = self._build_tool_set(tools)
-            convo = _normalise_messages(_current_messages)
-
-            for step in range(max_steps):
-                resp = self.chat(
-                    convo,
-                    tools=tools,  # pass originals; chat() merges with self.tools once
-                    native_tools=native_tools,
-                    **chat_kwargs,
-                )  # type: ignore[assignment]
-
-                if on_event:
-                    on_event("step", {"step": step, "response": resp})
-
-                if not resp.tool_calls:
-                    break
-
-                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
-
-                # Append the assistant's turn (with tool-use blocks).
-                # Build content list explicitly so text + thinking + tool blocks are never lost.
-                # thought_signature is forwarded for Gemini thinking models — it is an opaque
-                # token that must be re-emitted verbatim on the next turn or the API returns
-                # 400 INVALID_ARGUMENT ("missing thought_signature in functionCall parts").
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
-                                             thought_signature=tc.thought_signature)
-                              for tc in resp.tool_calls]
-                _thinking_blocks: list[Any] = (
-                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
-                )
-                if resp.tool_calls:
-                    _text_blocks: list[Any] = (
-                        [TextContent(text=resp.content)] if resp.content else []
-                    )
-                    _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
-                else:
-                    _asst_content = resp.content or ""
-                convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
-
-                # Execute each tool call and append the result
-                for tc in resp.tool_calls:
-                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                    if on_event:
-                        on_event("tool_call", tc)
-                    try:
-                        result = self._execute_tool(tc, tool_set.registry, tool_runner)
-                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                        if on_event:
-                            on_event("tool_result", {"call": tc, "result": result})
-                        convo.append(_tool_result_message(tc, result))
-                    except Exception as exc:
-                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
-
-            if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug, please report it")
-
-            if on_event:
-                on_event("done", resp)
-
-            if verify is None:
-                break
-
-            _raw = (
-                verify.text(f"Question: {_orig_q}\nAnswer: {resp.content}")
-                if hasattr(verify, "text")
-                else verify(_orig_q, resp.content)
-            )
-            _verdict: str = str(_raw) if _raw is not None else ""
-            if _verdict[:30].lower().startswith("approved"):
-                break
-
-            _verify_log.append(_verdict)
-            if on_event:
-                on_event("verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-            )
-
-        resp.verify_log = _verify_log  # type: ignore[union-attr]
-        self._last_output = resp.content  # type: ignore[union-attr]
-        self._last_response = resp  # type: ignore[union-attr]
-        self._track(Event.AGENT_FINISH, method="loop",
-                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
-                    n_steps=step + 1)
-        return resp  # type: ignore[return-value]
+        messages = self._run_input_guard(guard, messages)
+        gen = self._loop_logic(
+            messages,
+            tools=tools,
+            native_tools=native_tools,
+            max_steps=max_steps,
+            tool_runner=tool_runner,
+            on_event=on_event,
+            verify=verify,
+            max_verify=max_verify,
+            method="loop",
+            chat_kwargs=chat_kwargs,
+        )
+        action = next(gen)
+        try:
+            while True:
+                tag = action[0]
+                if tag == self._CALL_MODEL:
+                    _, convo, t, nt, kw = action
+                    val = self.chat(convo, tools=t, native_tools=nt, **kw)
+                elif tag == self._EXEC_TOOL:
+                    _, tc, registry, runner = action
+                    val = self._execute_tool(tc, registry, runner)
+                elif tag == self._EXEC_TOOLS_BATCH:
+                    _, calls, registry, runner = action
+                    val = []
+                    for tc in calls:
+                        try:
+                            r = self._execute_tool(tc, registry, runner)
+                            val.append((r, None))
+                        except Exception as exc:
+                            val.append((None, exc))
+                elif tag == self._EMIT_EVENT:
+                    _, callback, name, payload = action
+                    callback(name, payload)
+                    val = None
+                elif tag == self._VERIFY:
+                    _, v, q, ans = action
+                    val = v.text(f"Question: {q}\nAnswer: {ans}") if hasattr(v, "text") else v(q, ans)
+                else:  # pragma: no cover
+                    val = None
+                action = gen.send(val)
+        except StopIteration as e:
+            result = e.value
+        self._run_output_guard(guard, result)
+        return result
 
     async def aloop(
         self,
@@ -725,8 +975,9 @@ class LazyAgent:
         max_steps: int = 8,
         tool_runner: Callable[[str, dict], Any] | None = None,
         on_event: Callable[[str, Any], None] | None = None,
-        verify: "LazyAgent | Callable[..., Any] | None" = None,
+        verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
+        guard: Guard | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -745,101 +996,61 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
-        _orig_q = _messages_to_str(messages)
-        _current_messages: str | list = messages
-        _attempts = max(1, max_verify) if verify is not None else 1
-        resp: CompletionResponse | None = None
-        _verify_log: list[str] = []
-        step = 0
+        messages = await self._arun_input_guard(guard, messages)
+        gen = self._loop_logic(
+            messages,
+            tools=tools,
+            native_tools=native_tools,
+            max_steps=max_steps,
+            tool_runner=tool_runner,
+            on_event=on_event,
+            verify=verify,
+            max_verify=max_verify,
+            method="aloop",
+            chat_kwargs=chat_kwargs,
+        )
+        action = next(gen)
+        try:
+            while True:
+                tag = action[0]
+                if tag == self._CALL_MODEL:
+                    _, convo, t, nt, kw = action
+                    val = await self.achat(convo, tools=t, native_tools=nt, **kw)
+                elif tag == self._EXEC_TOOL:
+                    _, tc, registry, runner = action
+                    val = await self._aexecute_tool(tc, registry, runner)
+                elif tag == self._EXEC_TOOLS_BATCH:
+                    _, calls, registry, runner = action
+                    import asyncio
 
-        self._track(Event.AGENT_START, method="aloop", task=_orig_q[:200])
+                    async def _run_one(c, _reg=registry, _run=runner):
+                        try:
+                            r = await self._aexecute_tool(c, _reg, _run)
+                            return (r, None)
+                        except Exception as exc:
+                            return (None, exc)
 
-        for _attempt in range(_attempts):
-            tool_set = self._build_tool_set(tools)
-            convo = _normalise_messages(_current_messages)
-
-            for step in range(max_steps):
-                resp = await self.achat(
-                    convo,
-                    tools=tools,  # pass originals; achat() merges with self.tools once
-                    native_tools=native_tools,
-                    **chat_kwargs,
-                )  # type: ignore[assignment]
-
-                if on_event:
-                    await _call_event_async(on_event, "step", {"step": step, "response": resp})
-
-                if not resp.tool_calls:
-                    break
-
-                self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
-
-                _tc_blocks = [ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments,
-                                             thought_signature=tc.thought_signature)
-                              for tc in resp.tool_calls]
-                _thinking_blocks: list[Any] = (
-                    [ThinkingContent(thinking=resp.thinking)] if resp.thinking else []
-                )
-                if resp.tool_calls:
-                    _text_blocks: list[Any] = (
-                        [TextContent(text=resp.content)] if resp.content else []
-                    )
-                    _asst_content: Any = _thinking_blocks + _text_blocks + _tc_blocks
-                else:
-                    _asst_content = resp.content or ""
-                convo.append(Message(role=Role.ASSISTANT, content=_asst_content))
-
-                for tc in resp.tool_calls:
-                    self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
-                    if on_event:
-                        await _call_event_async(on_event, "tool_call", tc)
-                    try:
-                        result = await self._aexecute_tool(tc, tool_set.registry, tool_runner)
-                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                        if on_event:
-                            await _call_event_async(on_event, "tool_result", {"call": tc, "result": result})
-                        convo.append(_tool_result_message(tc, result))
-                    except Exception as exc:
-                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
-
-            if resp is None:  # pragma: no cover
-                raise AssertionError("loop produced no response — this is a bug, please report it")
-
-            if on_event:
-                await _call_event_async(on_event, "done", resp)
-
-            if verify is None:
-                break
-
-            if hasattr(verify, "atext"):
-                _raw = await verify.atext(
-                    f"Question: {_orig_q}\nAnswer: {resp.content}"
-                )
-            elif inspect.iscoroutinefunction(verify):
-                _raw = await verify(_orig_q, resp.content)
-            else:
-                _raw = verify(_orig_q, resp.content)
-            _verdict: str = str(_raw) if _raw is not None else ""
-
-            if _verdict[:30].lower().startswith("approved"):
-                break
-
-            _verify_log.append(_verdict)
-            if on_event:
-                await _call_event_async(on_event, "verify_rejected", {"attempt": _attempt + 1, "verdict": _verdict})
-            _current_messages = (
-                f"{_orig_q}\n\nPrevious attempt rejected: {_verdict or '(no verdict)'}\nTry again."
-            )
-
-        resp.verify_log = _verify_log  # type: ignore[union-attr]
-        self._last_output = resp.content  # type: ignore[union-attr]
-        self._last_response = resp  # type: ignore[union-attr]
-        self._track(Event.AGENT_FINISH, method="aloop",
-                    stop_reason=resp.stop_reason,  # type: ignore[union-attr]
-                    n_steps=step + 1)
-        return resp  # type: ignore[return-value]
+                    val = await asyncio.gather(*[_run_one(c) for c in calls])
+                    val = list(val)
+                elif tag == self._EMIT_EVENT:
+                    _, callback, name, payload = action
+                    await _call_event_async(callback, name, payload)
+                    val = None
+                elif tag == self._VERIFY:
+                    _, v, q, ans = action
+                    if hasattr(v, "atext"):
+                        val = await v.atext(f"Question: {q}\nAnswer: {ans}")
+                    elif inspect.iscoroutinefunction(v):
+                        val = await v(q, ans)
+                    else:
+                        val = v(q, ans)
+                else:  # pragma: no cover
+                    val = None
+                action = gen.send(val)
+        except StopIteration as e:
+            result = e.value
+        await self._arun_output_guard(guard, result)
+        return result
 
     # ------------------------------------------------------------------
     # Tool execution helpers
@@ -857,10 +1068,7 @@ class LazyAgent:
         # Fallback to user-provided runner (e.g. native tool handling)
         if runner:
             return runner(call.name, call.arguments)
-        raise RuntimeError(
-            f"No handler for tool '{call.name}'. "
-            "Add a LazyTool with that name or provide tool_runner."
-        )
+        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
 
     async def _aexecute_tool(
         self,
@@ -877,10 +1085,7 @@ class LazyAgent:
             if inspect.isawaitable(result):
                 return await result
             return result
-        raise RuntimeError(
-            f"No handler for tool '{call.name}'. "
-            "Add a LazyTool with that name or provide tool_runner."
-        )
+        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
 
     # ------------------------------------------------------------------
     # as_tool() — expose this agent as a LazyTool
@@ -895,12 +1100,16 @@ class LazyAgent:
         output_schema: type | dict | None = None,
         native_tools: list[NativeTool | str] | None = None,
         system_prompt: str | None = None,
+        tool_choice: str | None = None,
         strict: bool = False,
     ) -> LazyTool:
         """Wrap this agent as a LazyTool for use in another agent's loop.
 
         The tool's schema is always ``{"task": str}``.
         The task string is forwarded to this agent's loop() or chat().
+
+        ``tool_choice`` controls tool selection in the inner loop:
+        ``"required"`` forces tool use, ``"<name>"`` forces a specific tool.
         """
         return LazyTool.from_agent(
             self,
@@ -910,6 +1119,7 @@ class LazyAgent:
             output_schema=output_schema,
             native_tools=native_tools,
             system_prompt=system_prompt,
+            tool_choice=tool_choice,
             strict=strict,
         )
 
@@ -989,11 +1199,10 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in json(). Use chat(stream=True) instead.")
         existing = kwargs.pop("system", None)
-        kwargs["system"] = (
-            f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        )
+        kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = self.chat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
+        resp.raise_if_failed()
         return resp.parsed
 
     async def atext(self, messages: str | list, **kwargs) -> str:
@@ -1007,12 +1216,102 @@ class LazyAgent:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in ajson(). Use achat(stream=True) instead.")
         existing = kwargs.pop("system", None)
-        kwargs["system"] = (
-            f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        )
+        kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
         resp = await self.achat(messages, output_schema=schema, **kwargs)
         assert isinstance(resp, CompletionResponse)
+        resp.raise_if_failed()
         return resp.parsed
+
+    # ------------------------------------------------------------------
+    # Dedicated streaming methods (unambiguous return types)
+    # ------------------------------------------------------------------
+
+    def chat_stream(
+        self,
+        messages: str | list,
+        *,
+        system: str | None = None,
+        tools: list | None = None,
+        native_tools: list[NativeTool | str] | None = None,
+        output_schema: type | dict | None = None,
+        thinking: bool | ThinkingConfig = False,
+        skills: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        tool_choice: str | None = None,
+        context: LazyContext | Callable[[], str] | None = None,
+        **kwargs: Any,
+    ) -> Iterator[StreamChunk]:
+        """Stream a chat response. Always returns ``Iterator[StreamChunk]``.
+
+        This is the recommended way to stream — the return type is unambiguous,
+        unlike ``chat(stream=True)`` which returns a union type.
+
+        Usage::
+
+            for chunk in agent.chat_stream("tell me a story"):
+                print(chunk.delta, end="", flush=True)
+        """
+        result = self.chat(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=True,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
+        )
+        return result  # type: ignore[return-value]
+
+    async def achat_stream(
+        self,
+        messages: str | list,
+        *,
+        system: str | None = None,
+        tools: list | None = None,
+        native_tools: list[NativeTool | str] | None = None,
+        output_schema: type | dict | None = None,
+        thinking: bool | ThinkingConfig = False,
+        skills: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        tool_choice: str | None = None,
+        context: LazyContext | Callable[[], str] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Async stream. Always returns ``AsyncIterator[StreamChunk]``.
+
+        Usage::
+
+            async for chunk in await agent.achat_stream("tell me a story"):
+                print(chunk.delta, end="", flush=True)
+        """
+        result = await self.achat(
+            messages,
+            system=system,
+            tools=tools,
+            native_tools=native_tools,
+            output_schema=output_schema,
+            thinking=thinking,
+            skills=skills,
+            stream=True,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            context=context,
+            **kwargs,
+        )
+        return result  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Guidance rendering
@@ -1033,8 +1332,5 @@ class LazyAgent:
     def __repr__(self) -> str:
         session_info = f", session={self.session.id[:8]}..." if self.session else ""
         return (
-            f"LazyAgent(name={self.name!r}, "
-            f"provider={self._provider_name!r}, "
-            f"model={self._model_name!r}"
-            f"{session_info})"
+            f"LazyAgent(name={self.name!r}, provider={self._provider_name!r}, model={self._model_name!r}{session_info})"
         )

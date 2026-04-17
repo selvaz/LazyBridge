@@ -76,6 +76,26 @@ newsletter = editor.loop(
 print(newsletter.content)
 ```
 
+**Session-free alternative:** if you don't need a session, `LazyTool.parallel()` is equivalent:
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+gather_news = LazyTool.parallel(
+    LazyAgent("anthropic", name="us_news"),
+    LazyAgent("openai",    name="eu_news"),
+    LazyAgent("google",    name="asia_news"),
+    name="gather_global_news",
+    description="Simultaneously gather AI news from US, Europe, and Asia",
+    combiner="concat",
+    concurrency_limit=3,   # optional: max simultaneous API calls (useful against rate limits)
+    step_timeout=30.0,     # optional: per-agent timeout in seconds
+)
+# same tool, no session required
+```
+
+> **Cloning:** agents are cloned per invocation — `us_news._last_output` is `None` after the run. Use the editor's response or the tool's return value.
+
 ---
 
 ## Pipeline 3 — Decoupled Analysis (Network, Pattern C)
@@ -124,18 +144,26 @@ drafter = LazyAgent(
     system="You are a precise technical writer. Be accurate and concise.",
 )
 
+judge = LazyAgent(
+    "anthropic",
+    system=(
+        "You are a quality reviewer. "
+        "Reply 'approved' if the summary is accurate, self-contained, "
+        "and exactly 200 words. Otherwise reply 'rejected: <reason>'."
+    ),
+)
+
 result = drafter.loop(
     "Write a 200-word intro to transformer architecture.",
-    verify=(
-        "Check this text: is it accurate, clearly written, and under 200 words? "
-        "Reply with APPROVED or REJECTED and a one-sentence reason."
-    ),
+    verify=judge,
     max_verify=3,   # retry up to 3 times before accepting as-is
 )
 print(result.content)
 ```
 
-The judge sees each draft and replies `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's reason appended as feedback. On `APPROVED` (or after `max_verify` attempts), returns the current output.
+The judge agent sees each draft and replies `approved` or `rejected: <reason>`. On rejection, `loop()` re-runs with the judge's reason appended as feedback. On approval (or after `max_verify` attempts), returns the current output.
+
+> **Exhaustion warning:** if all `max_verify` attempts are rejected, `loop()` emits a `UserWarning` — `"loop() verify exhausted after N attempt(s) without approval."` — and returns the last result unchanged. No exception is raised.
 
 *Use this when*: the review is a quality gate on a single agent's output — accuracy, length, format, policy compliance.
 
@@ -192,7 +220,8 @@ An outer orchestrator manages two inner pipelines, each exposed as a single tool
 ```python
 from lazybridge import LazyAgent, LazySession
 
-# Inner pipeline A: research → summarise (chain: summariser receives researcher's output)
+# Inner pipeline A: research → summarise
+# Option 1: with session (tracks events, uses existing session agents)
 sess_a = LazySession()
 research_tool = sess_a.as_tool(
     "research",
@@ -203,6 +232,16 @@ research_tool = sess_a.as_tool(
         LazyAgent("openai",    name="summariser", session=sess_a),
     ],
 )
+
+# Option 2: session-free (simpler, no tracking overhead)
+# research_tool = LazyTool.chain(
+#     LazyAgent("anthropic", name="researcher"),
+#     LazyAgent("openai",    name="summariser"),
+#     name="research",
+#     description="Deep-research any topic and return a concise summary.",
+#     step_timeout=60.0,   # optional: per-step timeout in seconds
+# )
+# chain() is async-under-the-hood — uses achat/aloop, never blocks the event loop
 
 # Inner pipeline B: fact-checking (single agent, exposed as tool)
 sess_b = LazySession()
@@ -234,7 +273,7 @@ BM25 retrieval. No vector database, no embeddings API — everything runs locall
 See [`lazy_wiki/human/tools.md`](tools.md) for the full guide.
 
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool, skill_pipeline
+from lazybridge.ext.doc_skills import build_skill, skill_tool, skill_pipeline
 from lazybridge import LazyAgent
 
 # Step 1 — build the skill bundle (run once, or when docs change)

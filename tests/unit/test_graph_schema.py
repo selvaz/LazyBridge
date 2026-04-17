@@ -1,14 +1,13 @@
 """Unit tests for GraphSchema — T11.xx series."""
+
 from __future__ import annotations
 
-import json
-import pytest
 from lazybridge.graph.schema import AgentNode, EdgeType, GraphSchema, NodeType, RouterNode
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeAgent:
     def __init__(self, name: str, id: str, provider: str = "anthropic", model: str = "m") -> None:
@@ -37,6 +36,7 @@ class _FakeRouter:
 # T11.01 — add_agent registers node
 # ---------------------------------------------------------------------------
 
+
 def test_add_agent_registers_node():
     # T11.01
     g = GraphSchema("sess-1")
@@ -50,6 +50,7 @@ def test_add_agent_registers_node():
 # ---------------------------------------------------------------------------
 # T11.02 — add_router registers RouterNode
 # ---------------------------------------------------------------------------
+
 
 def test_add_router_registers_node():
     # T11.02
@@ -65,6 +66,7 @@ def test_add_router_registers_node():
 # ---------------------------------------------------------------------------
 # T11.03 — add_edge stores edge
 # ---------------------------------------------------------------------------
+
 
 def test_add_edge_stored():
     # T11.03
@@ -82,6 +84,7 @@ def test_add_edge_stored():
 # T11.04 — to_dict includes session_id, nodes, edges
 # ---------------------------------------------------------------------------
 
+
 def test_to_dict_structure():
     # T11.04
     g = GraphSchema("sess-4")
@@ -97,6 +100,7 @@ def test_to_dict_structure():
 # ---------------------------------------------------------------------------
 # T11.05 — to_json / from_json round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_json_round_trip():
     # T11.05
@@ -119,6 +123,7 @@ def test_json_round_trip():
 # T11.06 — from_dict restores RouterNode by type field
 # ---------------------------------------------------------------------------
 
+
 def test_from_dict_restores_router_node():
     # T11.06
     data = {
@@ -137,6 +142,7 @@ def test_from_dict_restores_router_node():
 # ---------------------------------------------------------------------------
 # T11.07 — edges_from / edges_to filter correctly
 # ---------------------------------------------------------------------------
+
 
 def test_edges_from_and_to():
     # T11.07
@@ -158,6 +164,7 @@ def test_edges_from_and_to():
 # ---------------------------------------------------------------------------
 # T11.08 — save / from_file round-trip (JSON)
 # ---------------------------------------------------------------------------
+
 
 def test_save_and_load_json(tmp_path):
     # T11.08

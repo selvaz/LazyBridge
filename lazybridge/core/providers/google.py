@@ -1,4 +1,4 @@
-"""Google Gemini provider for uniAI.
+"""Google Gemini provider for LazyBridge.
 
 Uses the ``google-genai`` SDK (not the legacy ``google-generativeai``).
 
@@ -58,7 +58,7 @@ from lazybridge.core.types import (
 try:
     from google import genai as _genai
     from google.genai import types as _gtypes
-except ImportError:
+except Exception:
     _genai = None  # type: ignore
     _gtypes = None  # type: ignore
 
@@ -66,14 +66,14 @@ _logger = logging.getLogger(__name__)
 
 # Price per 1M tokens (input, output). Approximate; verify at ai.google.dev/gemini-api/docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gemini-3.1-pro":      (1.25,  10.0),
-    "gemini-3.1-flash":    (0.075,  0.30),
-    "gemini-2.5-pro":      (1.25,  10.0),
-    "gemini-2.5-flash":    (0.075,  0.30),
-    "gemini-2.0-flash":    (0.075,  0.30),
-    "gemini-2.0-pro":      (1.25,  10.0),
-    "gemini-1.5-pro":      (1.25,   5.0),
-    "gemini-1.5-flash":    (0.075,  0.30),
+    "gemini-3.1-pro": (1.25, 10.0),
+    "gemini-3.1-flash": (0.075, 0.30),
+    "gemini-2.5-pro": (1.25, 10.0),
+    "gemini-2.5-flash": (0.075, 0.30),
+    "gemini-2.0-flash": (0.075, 0.30),
+    "gemini-2.0-pro": (1.25, 10.0),
+    "gemini-1.5-pro": (1.25, 5.0),
+    "gemini-1.5-flash": (0.075, 0.30),
 }
 
 
@@ -103,17 +103,17 @@ class GoogleProvider(BaseProvider):
             return 65_536
         return 8_192
 
-    supported_native_tools: frozenset[NativeTool] = frozenset({
-        NativeTool.WEB_SEARCH,
-        NativeTool.GOOGLE_SEARCH,
-        NativeTool.GOOGLE_MAPS,
-    })
+    supported_native_tools: frozenset[NativeTool] = frozenset(
+        {
+            NativeTool.WEB_SEARCH,
+            NativeTool.GOOGLE_SEARCH,
+            NativeTool.GOOGLE_MAPS,
+        }
+    )
 
     def _init_client(self, **kwargs) -> None:
         if _genai is None:
-            raise ImportError(
-                "google-genai package not installed. Run: pip install google-genai"
-            )
+            raise ImportError("google-genai package not installed. Run: pip install google-genai")
         key = self.api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not key:
             raise ValueError(
@@ -146,6 +146,7 @@ class GoogleProvider(BaseProvider):
             ToolResultContent,
             ToolUseContent,
         )
+
         contents = []
         for msg in request.messages:
             if msg.role == Role.SYSTEM:
@@ -154,9 +155,7 @@ class GoogleProvider(BaseProvider):
             # Gemini supports only two roles; validate suspicious combinations.
             if isinstance(msg.content, list):
                 has_tool_result = any(isinstance(b, ToolResultContent) for b in msg.content)
-                has_other = any(
-                    isinstance(b, (TextContent, ImageContent)) for b in msg.content
-                )
+                has_other = any(isinstance(b, (TextContent, ImageContent)) for b in msg.content)
                 if msg.role == Role.TOOL and has_other:
                     warnings.warn(
                         "Role.TOOL message contains text/image blocks — only "
@@ -177,10 +176,12 @@ class GoogleProvider(BaseProvider):
             gemini_role = "user" if msg.role in (Role.USER, Role.TOOL) else "model"
 
             if isinstance(msg.content, str):
-                contents.append(_gtypes.Content(
-                    role=gemini_role,
-                    parts=[_gtypes.Part.from_text(text=msg.content)],
-                ))
+                contents.append(
+                    _gtypes.Content(
+                        role=gemini_role,
+                        parts=[_gtypes.Part.from_text(text=msg.content)],
+                    )
+                )
                 continue
 
             # Accumulate parts in two buckets:
@@ -201,17 +202,22 @@ class GoogleProvider(BaseProvider):
                 elif isinstance(block, ImageContent):
                     if msg.role != Role.TOOL:  # same
                         if block.url:
-                            normal_parts.append(_gtypes.Part.from_uri(
-                                file_uri=block.url,
-                                mime_type=block.media_type,
-                            ))
+                            normal_parts.append(
+                                _gtypes.Part.from_uri(
+                                    file_uri=block.url,
+                                    mime_type=block.media_type,
+                                )
+                            )
                         elif block.base64_data:
                             import base64
+
                             data = base64.b64decode(block.base64_data)
-                            normal_parts.append(_gtypes.Part.from_bytes(
-                                data=data,
-                                mime_type=block.media_type,
-                            ))
+                            normal_parts.append(
+                                _gtypes.Part.from_bytes(
+                                    data=data,
+                                    mime_type=block.media_type,
+                                )
+                            )
 
                 elif isinstance(block, ToolUseContent):
                     raw_part = getattr(block, "thought_signature", None)
@@ -220,26 +226,24 @@ class GoogleProvider(BaseProvider):
                         # thought_signature that thinking models embed in function calls.
                         normal_parts.append(raw_part)
                     else:
-                        normal_parts.append(_gtypes.Part.from_function_call(
-                            name=block.name,
-                            args=block.input,
-                        ))
+                        normal_parts.append(
+                            _gtypes.Part.from_function_call(
+                                name=block.name,
+                                args=block.input,
+                            )
+                        )
 
                 elif isinstance(block, ToolResultContent):
-                    content_str = (
-                        block.content
-                        if isinstance(block.content, str)
-                        else json.dumps(block.content)
-                    )
+                    content_str = block.content if isinstance(block.content, str) else json.dumps(block.content)
                     tool_fn_name = (
-                        getattr(block, "tool_name", None)
-                        or getattr(block, "name", None)
-                        or block.tool_use_id
+                        getattr(block, "tool_name", None) or getattr(block, "name", None) or block.tool_use_id
                     )
-                    function_response_parts.append(_gtypes.Part.from_function_response(
-                        name=tool_fn_name,
-                        response={"result": content_str, "error": block.is_error},
-                    ))
+                    function_response_parts.append(
+                        _gtypes.Part.from_function_response(
+                            name=tool_fn_name,
+                            response={"result": content_str, "error": block.is_error},
+                        )
+                    )
 
             # Emit text/image/function_call first (if any)
             if normal_parts:
@@ -264,11 +268,13 @@ class GoogleProvider(BaseProvider):
         """Convert ToolDefinitions to Gemini FunctionDeclarations."""
         decls = []
         for t in request.tools:
-            decls.append(_gtypes.FunctionDeclaration(
-                name=t.name,
-                description=t.description,
-                parameters=t.parameters,
-            ))
+            decls.append(
+                _gtypes.FunctionDeclaration(
+                    name=t.name,
+                    description=t.description,
+                    parameters=t.parameters,
+                )
+            )
         return decls
 
     def _build_tools_config(self, request: CompletionRequest) -> list[Any]:
@@ -295,9 +301,7 @@ class GoogleProvider(BaseProvider):
         tools = []
         native = self._check_native_tools(request.native_tools)
 
-        google_search_requested = any(
-            nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native
-        )
+        google_search_requested = any(nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native)
         google_maps_requested = NativeTool.GOOGLE_MAPS in native
 
         if google_search_requested:
@@ -322,15 +326,20 @@ class GoogleProvider(BaseProvider):
                     tools.append(_gtypes.Tool(google_search=_gtypes.GoogleSearch(**kwargs)))
                 else:
                     try:
-                        tools.append(_gtypes.Tool(
-                            google_search_retrieval=_gtypes.GoogleSearchRetrieval(
-                                dynamic_retrieval_config=_gtypes.DynamicRetrievalConfig(
-                                    dynamic_threshold=float(dynamic_threshold),
+                        tools.append(
+                            _gtypes.Tool(
+                                google_search_retrieval=_gtypes.GoogleSearchRetrieval(
+                                    dynamic_retrieval_config=_gtypes.DynamicRetrievalConfig(
+                                        dynamic_threshold=float(dynamic_threshold),
+                                    )
                                 )
                             )
-                        ))
+                        )
                     except AttributeError as exc:
-                        _logger.debug("Google SDK DynamicRetrievalConfig not supported, falling back to plain GoogleSearch: %s", exc)
+                        _logger.debug(
+                            "Google SDK DynamicRetrievalConfig not supported, falling back to plain GoogleSearch: %s",
+                            exc,
+                        )
                         # Older SDK version — fall back to plain GoogleSearch
                         tools.append(_gtypes.Tool(google_search=_gtypes.GoogleSearch()))
             else:
@@ -391,9 +400,7 @@ class GoogleProvider(BaseProvider):
             kwargs["max_output_tokens"] = request.max_tokens
 
         native = self._check_native_tools(request.native_tools)
-        google_search_active = any(
-            nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native
-        )
+        google_search_active = any(nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native)
         google_maps_active = NativeTool.GOOGLE_MAPS in native
 
         tools = self._build_tools_config(request)
@@ -446,14 +453,14 @@ class GoogleProvider(BaseProvider):
                     try:
                         kwargs["response_schema"] = schema.model_json_schema()  # type: ignore[attr-defined]
                     except AttributeError as exc:
-                        _logger.debug("model_json_schema() not available on %r, passing schema object directly: %s", schema, exc)
+                        _logger.debug(
+                            "model_json_schema() not available on %r, passing schema object directly: %s", schema, exc
+                        )
                         kwargs["response_schema"] = schema
 
         return _gtypes.GenerateContentConfig(**kwargs)
 
-    def _extract_grounding_metadata(
-        self, candidate: Any
-    ) -> tuple[list[GroundingSource], list[str], str | None]:
+    def _extract_grounding_metadata(self, candidate: Any) -> tuple[list[GroundingSource], list[str], str | None]:
         """Extract grounding sources, search queries, and search entry point from a candidate.
 
         Returns:
@@ -479,10 +486,12 @@ class GoogleProvider(BaseProvider):
             maps = getattr(chunk, "maps", None)
             source = web or maps
             if source:
-                grounding_sources.append(GroundingSource(
-                    url=getattr(source, "uri", "") or "",
-                    title=getattr(source, "title", None),
-                ))
+                grounding_sources.append(
+                    GroundingSource(
+                        url=getattr(source, "uri", "") or "",
+                        title=getattr(source, "title", None),
+                    )
+                )
 
         # web_search_queries — the actual queries issued by the grounding tool
         queries = getattr(gm, "web_search_queries", None)
@@ -503,9 +512,7 @@ class GoogleProvider(BaseProvider):
         tool_calls: list[ToolCall] = []
 
         if not response.candidates:
-            _logger.warning(
-                "Google response has no candidates (safety block or API error)."
-            )
+            _logger.warning("Google response has no candidates (safety block or API error).")
             usage = UsageStats()
             if response.usage_metadata:
                 um = response.usage_metadata
@@ -533,12 +540,14 @@ class GoogleProvider(BaseProvider):
                 # Thinking models (e.g. gemini-3.1-*) embed an opaque thought_signature
                 # inside the function_call Part; reconstructing the Part from scratch
                 # loses that token and causes 400 INVALID_ARGUMENT on the next turn.
-                tool_calls.append(ToolCall(
-                    id=getattr(fc, "id", fc.name),
-                    name=fc.name,
-                    arguments=dict(fc.args) if fc.args else {},
-                    thought_signature=part,   # raw SDK Part — preserved verbatim
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=getattr(fc, "id", fc.name),
+                        name=fc.name,
+                        arguments=dict(fc.args) if fc.args else {},
+                        thought_signature=part,  # raw SDK Part — preserved verbatim
+                    )
+                )
 
         usage = UsageStats()
         if response.usage_metadata:
@@ -548,9 +557,7 @@ class GoogleProvider(BaseProvider):
             usage.thinking_tokens = getattr(um, "thoughts_token_count", 0) or 0
         usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
 
-        grounding_sources, web_search_queries, search_entry_point = (
-            self._extract_grounding_metadata(candidate)
-        )
+        grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(candidate)
 
         return CompletionResponse(
             content=content,
@@ -583,16 +590,9 @@ class GoogleProvider(BaseProvider):
         resp = self._parse_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -625,7 +625,7 @@ class GoogleProvider(BaseProvider):
                         "id": call_id,
                         "name": fc.name,
                         "args": dict(fc.args) if fc.args else {},
-                        "thought_signature": part,   # raw Part preserved verbatim
+                        "thought_signature": part,  # raw Part preserved verbatim
                     }
 
         # Final chunk: usage + accumulated tool calls + grounding metadata
@@ -639,16 +639,15 @@ class GoogleProvider(BaseProvider):
             )
             usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
         tool_calls = [
-            ToolCall(id=d["id"], name=d["name"], arguments=d["args"],
-                     thought_signature=d.get("thought_signature"))
+            ToolCall(id=d["id"], name=d["name"], arguments=d["args"], thought_signature=d.get("thought_signature"))
             for d in tool_call_accum.values()
         ]
         grounding_sources: list[GroundingSource] = []
         web_search_queries: list[str] = []
         search_entry_point: str | None = None
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            grounding_sources, web_search_queries, search_entry_point = (
-                self._extract_grounding_metadata(last_chunk.candidates[0])
+            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
+                last_chunk.candidates[0]
             )
         final_chunk = StreamChunk(
             stop_reason="end_turn",
@@ -660,16 +659,9 @@ class GoogleProvider(BaseProvider):
             search_entry_point=search_entry_point,
         )
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                final_chunk.validated = True
-            except StructuredOutputError as exc:
-                final_chunk.validation_error = str(exc)
-                final_chunk.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         yield final_chunk
 
     # ------------------------------------------------------------------
@@ -689,16 +681,9 @@ class GoogleProvider(BaseProvider):
         resp = self._parse_response(response, model)
 
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                resp.parsed = parse_structured_output(resp.content, request.structured_output.schema)
-                resp.validated = True
-            except StructuredOutputError as exc:
-                resp.validation_error = str(exc)
-                resp.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
 
         return resp
 
@@ -731,7 +716,7 @@ class GoogleProvider(BaseProvider):
                         "id": call_id,
                         "name": fc.name,
                         "args": dict(fc.args) if fc.args else {},
-                        "thought_signature": part,   # raw Part preserved verbatim
+                        "thought_signature": part,  # raw Part preserved verbatim
                     }
 
         usage = None
@@ -744,16 +729,15 @@ class GoogleProvider(BaseProvider):
             )
             usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
         tool_calls = [
-            ToolCall(id=d["id"], name=d["name"], arguments=d["args"],
-                     thought_signature=d.get("thought_signature"))
+            ToolCall(id=d["id"], name=d["name"], arguments=d["args"], thought_signature=d.get("thought_signature"))
             for d in tool_call_accum.values()
         ]
         grounding_sources: list[GroundingSource] = []
         web_search_queries: list[str] = []
         search_entry_point: str | None = None
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            grounding_sources, web_search_queries, search_entry_point = (
-                self._extract_grounding_metadata(last_chunk.candidates[0])
+            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
+                last_chunk.candidates[0]
             )
         final_chunk = StreamChunk(
             stop_reason="end_turn",
@@ -765,14 +749,7 @@ class GoogleProvider(BaseProvider):
             search_entry_point=search_entry_point,
         )
         if request.structured_output:
-            from lazybridge.core.structured import (
-                StructuredOutputError,
-                parse_structured_output,
-            )
-            try:
-                final_chunk.parsed = parse_structured_output(text_accum, request.structured_output.schema)
-                final_chunk.validated = True
-            except StructuredOutputError as exc:
-                final_chunk.validation_error = str(exc)
-                final_chunk.validated = False
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
         yield final_chunk

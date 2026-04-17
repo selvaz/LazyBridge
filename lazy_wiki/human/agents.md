@@ -141,6 +141,39 @@ result = ai.loop(
 print(result.content)
 ```
 
+### Agent-level vs call-level tools
+
+Tools can be attached at **agent construction** or **per-call**. Both are valid — they are merged at runtime:
+
+```python
+# Agent-level — tools are always available on every call
+specialist = LazyAgent("anthropic", tools=[calculator, search])
+specialist.loop("Find data and compute the average")  # both tools available
+
+# Call-level — tools only for this specific call
+generalist = LazyAgent("anthropic")
+generalist.loop("Calculate 2+2", tools=[calculator])  # only calculator here
+generalist.loop("Search for news", tools=[search])    # only search here
+
+# Both combined — agent tools + call tools merged
+specialist.loop("Extra task", tools=[extra_tool])  # calculator + search + extra_tool
+```
+
+**When to use agent-level tools:** Building specialized agents for pipelines. The agent becomes self-contained — the orchestrator doesn't need to manage its tools:
+
+```python
+# Each agent owns its capabilities
+researcher = LazyAgent("anthropic", name="researcher", tools=[web_search, arxiv_tool])
+analyst = LazyAgent("openai", name="analyst", tools=[calculator, chart_tool])
+
+# Orchestrator just calls agents — doesn't know about their internal tools
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Research and analyze AI trends", tools=[
+    researcher.as_tool("research", "Search the web and papers"),
+    analyst.as_tool("analyze", "Run calculations"),
+])
+```
+
 ### When to use chat() vs loop()
 
 | Use case | Method |
@@ -151,20 +184,28 @@ print(result.content)
 
 ### Built-in self-checking with verify=
 
-Pass a judge prompt to `verify=` and `loop()` retries automatically if the output is rejected — no manual retry code needed:
+Pass a `LazyAgent` judge (or any callable) to `verify=` and `loop()` retries automatically if the output is rejected — no manual retry code needed:
 
 ```python
+judge = LazyAgent(
+    "anthropic",
+    system=(
+        "You are a quality reviewer. "
+        "Reply 'approved' if the summary is accurate, self-contained, "
+        "and exactly 200 words. Otherwise reply 'rejected: <reason>'."
+    ),
+)
+
 result = ai.loop(
     "Write a 200-word summary of transformer architecture.",
     tools=[search],
-    verify="Check the summary is accurate, self-contained, and exactly 200 words. "
-           "Reply with APPROVED or REJECTED and a reason.",
-    max_verify=2,   # retry up to 2 times (default: 1)
+    verify=judge,
+    max_verify=2,   # retry up to 2 times (default: 3)
 )
 print(result.content)
 ```
 
-The verify prompt sees the output and returns `APPROVED` or `REJECTED`. On `REJECTED`, `loop()` re-runs with the judge's feedback appended. On `APPROVED` (or after `max_verify` attempts), returns the result normally.
+The judge sees the output and returns `approved` or `rejected: <reason>`. On rejection, `loop()` re-runs with the judge's feedback appended. On approval (or after `max_verify` attempts), returns the result normally.
 
 Use this for:
 - Output length or format constraints
@@ -195,10 +236,11 @@ print(summary.bullets)
 
 ## Streaming
 
-Receive output token by token as it's generated.
+Receive output token by token as it's generated. Use the dedicated streaming methods for clear return types:
 
 ```python
-for chunk in ai.chat("Write me a haiku about Python.", stream=True):
+# Preferred — return type is always Iterator[StreamChunk]
+for chunk in ai.chat_stream("Write me a haiku about Python."):
     print(chunk.delta, end="", flush=True)
 print()  # newline at end
 ```
@@ -206,9 +248,12 @@ print()  # newline at end
 Async streaming:
 
 ```python
-async for chunk in await ai.achat("Write a haiku", stream=True):
+# Preferred — return type is always AsyncIterator[StreamChunk]
+async for chunk in await ai.achat_stream("Write a haiku"):
     print(chunk.delta, end="", flush=True)
 ```
+
+The `chat(stream=True)` form still works but returns a union type (`CompletionResponse | Iterator[StreamChunk]`), which requires runtime type checks. Prefer `chat_stream()` / `achat_stream()` for new code.
 
 ---
 

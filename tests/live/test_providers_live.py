@@ -1,13 +1,11 @@
-﻿"""Opt-in live smoke tests for real model providers."""
+"""Opt-in live smoke tests for real model providers."""
 
 from __future__ import annotations
 
 import pytest
 
 from lazybridge import LazyAgent, LazyTool
-
 from tests.live.helpers import live_model, require_live_provider
-
 
 LIVE_PROMPT = (
     "You MUST call the add_numbers tool with a=24681 and b=13579. "

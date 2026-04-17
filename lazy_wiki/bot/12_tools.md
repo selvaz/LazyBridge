@@ -1,23 +1,25 @@
-# lazybridge.tools — Ready-made tools
+# lazybridge.ext — Ready-made extensions
 
 ## Overview
 
-`lazybridge.tools` is a subpackage of ready-made LazyBridge-compatible tools.
+`lazybridge.ext` is a subpackage of ready-made LazyBridge-compatible extensions.
 Each tool is a standalone module exposing plain Python functions that can be
 called directly or wrapped as a `LazyTool` for any agent or pipeline.
 
 ```
 lazybridge/
-  tools/
-    __init__.py
-    doc_skills.py   ← BM25 local documentation skill
-    read_docs.py    ← multi-format document reader
+  ext/
+    doc_skills/    ← BM25 local documentation skill
+    read_docs/     ← multi-format document reader
+    stat_runtime/  ← econometrics & time-series
+    data_downloader/ ← market data ingestion
+    quant_agent/   ← pre-configured quant agent
 ```
 
 Import pattern:
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool, skill_pipeline
-from lazybridge.tools.read_docs  import read_folder_docs
+from lazybridge.ext.doc_skills import build_skill, skill_tool, skill_pipeline
+from lazybridge.ext.read_docs  import read_folder_docs
 ```
 
 Optional dependencies for `read_docs`:
@@ -27,7 +29,7 @@ pip install lazybridge[tools]   # pypdf, python-docx, trafilatura
 
 ---
 
-## tools.doc_skills
+## doc_skills
 
 Local documentation skill runtime. Index a folder of docs once, query them
 from any agent using full BM25 retrieval. No vector DB, no embeddings API.
@@ -45,7 +47,7 @@ from any agent using full BM25 retrieval. No vector DB, no embeddings API.
 ### build_skill
 
 ```python
-from lazybridge.tools.doc_skills import build_skill
+from lazybridge.ext.doc_skills import build_skill
 
 meta = build_skill(
     source_dirs    = ["./docs", "./reference"],
@@ -80,7 +82,7 @@ generated_skills/my-project/
 ### query_skill
 
 ```python
-from lazybridge.tools.doc_skills import query_skill
+from lazybridge.ext.doc_skills import query_skill
 
 brief = query_skill(
     skill_dir     = "./generated_skills/my-project",
@@ -115,7 +117,7 @@ k1=1.5, b=0.75
 ### skill_tool
 
 ```python
-from lazybridge.tools.doc_skills import skill_tool
+from lazybridge.ext.doc_skills import skill_tool
 from lazybridge import LazyAgent
 
 tool = skill_tool(
@@ -131,7 +133,7 @@ resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
 ### skill_builder_tool
 
 ```python
-from lazybridge.tools.doc_skills import skill_builder_tool
+from lazybridge.ext.doc_skills import skill_builder_tool
 
 builder = skill_builder_tool()
 orchestrator.loop(
@@ -145,7 +147,7 @@ orchestrator.loop(
 Two-step chain: `skill_router` → `skill_executor`.
 
 ```python
-from lazybridge.tools.doc_skills import skill_pipeline
+from lazybridge.ext.doc_skills import skill_pipeline
 from lazybridge import LazyAgent
 
 pipeline = skill_pipeline(
@@ -181,7 +183,7 @@ detects tools and calls `loop()` automatically.
 
 ---
 
-## tools.read_docs
+## read_docs
 
 Multi-format document reader. Returns LLM-ready text from any combination of
 `.txt`, `.md`, `.pdf`, `.docx`, `.html` files.
@@ -193,7 +195,7 @@ Multi-format document reader. Returns LLM-ready text from any combination of
 | `read_folder_docs(path, ...)` | Read a file or folder, return text or JSON |
 
 ```python
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.read_docs import read_folder_docs
 
 # Single file
 text = read_folder_docs("/reports/q4.pdf")

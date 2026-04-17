@@ -50,12 +50,16 @@ LazyAgent.loop(
     max_steps: int = 8,                    # hard cap; raises ValueError if < 1
     tool_runner: Callable[[str, dict], Any] | None = None,  # fallback for tools not in registry
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
-    verify: LazyAgent | Callable[[str, str], str] | None = None,  # judge: return "APPROVED..." or "RETRY: <reason>"
+    verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
     **chat_kwargs,                         # forwarded to chat() on each step
+                                           # tool_choice="parallel" runs multiple tool calls concurrently
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async
+LazyAgent.aloop(...)  # async version → CompletionResponse; tool_choice="parallel" uses asyncio.gather()
+
+LazyAgent.chat_stream(messages, ...) -> Iterator[StreamChunk]     # dedicated streaming (preferred over chat(stream=True))
+LazyAgent.achat_stream(messages, ...) -> AsyncIterator[StreamChunk]  # async streaming
 
 LazyAgent.text(messages: str | list, **kwargs) -> str
 LazyAgent.json(messages: str | list, schema: type | dict, **kwargs) -> Any
@@ -70,6 +74,7 @@ LazyAgent.as_tool(
     output_schema: type | dict | None = None,
     native_tools: list | None = None,
     system_prompt: str | None = None,     # override agent's system for this tool invocation
+    tool_choice: str | None = None,      # "required"|"none"|"<name>" — forwarded to inner loop()
     strict: bool = False,
 ) -> LazyTool
 
@@ -108,8 +113,34 @@ LazySession.as_tool(                                 # CANONICAL — compose pip
     guidance: str | None = None,
 ) -> LazyTool
 
+LazySession.usage_summary() -> dict       # {"total": {...}, "by_agent": {...}} — requires tracking="verbose"
+LazySession.add_exporter(exporter) -> None
+LazySession.remove_exporter(exporter) -> None
 LazySession.to_json() -> str
 LazySession.from_json(text: str, **kwargs) -> LazySession  # classmethod
+```
+
+### Exporters
+
+```python
+CallbackExporter(fn: Callable)                     # wraps any callable
+FilteredExporter(inner, event_types={"tool_call"})  # forwards only specified types
+JsonFileExporter("events.jsonl")                    # appends JSON lines to file
+StructuredLogExporter(logger_name="lazybridge.events")  # JSON via stdlib logging
+OTelExporter(service_name="my-app", tracer=None)   # OpenTelemetry spans (pip install lazybridge[otel])
+```
+
+### Verifier Protocol
+
+```python
+from lazybridge import Verifier
+
+class MyJudge:
+    def text(self, messages: str) -> str:
+        return "approved" if ok else "retry: fix X"
+
+# Any object with .text() satisfies Verifier — including LazyAgent itself
+agent.loop("task", verify=MyJudge())
 ```
 
 ### EventLog (`sess.events`)
@@ -166,6 +197,32 @@ LazyTool.from_agent(
     strict: bool = False,
 ) -> LazyTool  # schema always {"task": str}
 
+LazyTool.parallel(
+    *participants: LazyAgent | LazyTool,  # at least one required
+    name: str,
+    description: str,
+    combiner: str = "concat",             # "concat" | "last"
+    native_tools: list | None = None,
+    session: LazySession | None = None,   # validation-only; raises on cross-session conflict
+    guidance: str | None = None,
+    concurrency_limit: int | None = None, # max simultaneous participants; None = all at once
+    step_timeout: float | None = None,    # per-participant timeout (seconds); None = no timeout
+) -> LazyTool  # all participants run concurrently; cloned per invocation
+               # original agent._last_output is None after run — use return value
+               # timed-out participants appear as "[ERROR: TimeoutError: ...]" in concat output
+
+LazyTool.chain(
+    *participants: LazyAgent | LazyTool,  # at least one required
+    name: str,
+    description: str,
+    native_tools: list | None = None,
+    session: LazySession | None = None,   # validation-only; raises on cross-session conflict
+    guidance: str | None = None,
+    step_timeout: float | None = None,    # per-step timeout (seconds); asyncio.TimeoutError raised on breach
+) -> LazyTool  # participants run sequentially; each receives previous output
+               # async-under-the-hood: uses achat/aloop/ajson — never blocks the event loop
+               # cloned per invocation — original agent._last_output is None after run
+
 LazyTool.run(arguments: dict, parent: LazyAgent | None = None) -> Any
 LazyTool.arun(arguments: dict, parent: LazyAgent | None = None) -> Any  # async
 
@@ -182,6 +239,7 @@ LazyTool.specialize(
 LazyTool.save(path: str) -> None          # generate human-readable .py file
 LazyTool.load(path: str) -> LazyTool      # classmethod; only loads LazyBridge-generated files
 # save() works for from_function() and from_agent() tools
+# save() raises ValueError for parallel() / chain() tools (_is_pipeline_tool=True)
 # load() requires sentinel header — rejects arbitrary .py files (security)
 # NEVER expose LazyTool.load as an agent tool — it executes the file
 ```

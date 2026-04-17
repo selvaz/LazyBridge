@@ -251,7 +251,7 @@ Key benefits:
 - No JSON mode configuration
 - No manual `json.loads`
 - No try/except
-- Retry on parse failure built in
+- Fail-fast validation (raises on parse/validation error)
 - Returns typed Pydantic instance directly
 
 ---
@@ -503,7 +503,7 @@ Beyond line count:
 | Pipeline topology | Not captured | `sess.graph.to_json()` for GUI |
 | Testing context | Baked into prompt strings | `ctx()` → testable string |
 | Retry logic | Write your own | `max_retries=3` |
-| Structured output retry | Write your own | Built-in with `output_schema=` |
+| Structured output validation | Write your own | Built-in with `output_schema=` — validates and raises clear errors |
 
 The core design principle: **write what you want to happen, not how to make it happen**.
 

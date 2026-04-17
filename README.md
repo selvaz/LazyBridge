@@ -83,6 +83,34 @@ print(result.content)
 print(sess.graph.to_json())   # serializable pipeline topology for GUI
 ```
 
+For concurrent or sequential pipelines without a session, use `LazyTool.parallel()` / `LazyTool.chain()`:
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+# Fan-out: all agents run in parallel; concurrency_limit prevents rate-limit storms
+gather = LazyTool.parallel(
+    LazyAgent("anthropic", name="us"),
+    LazyAgent("openai",    name="eu"),
+    LazyAgent("google",    name="asia"),
+    name="gather_news",
+    description="Gather AI news from US, EU, and Asia simultaneously",
+    concurrency_limit=3,   # max 3 simultaneous API calls
+    step_timeout=30.0,     # per-agent timeout in seconds
+)
+
+# Sequential: async-under-the-hood — never blocks the event loop
+pipeline = LazyTool.chain(
+    LazyAgent("anthropic", name="researcher"),
+    LazyAgent("openai",    name="summariser"),
+    name="research_pipeline",
+    description="Research a topic and return a concise summary.",
+    step_timeout=60.0,     # per-step timeout in seconds
+)
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Summarise AI advances in 2024.", tools=[pipeline])
+```
+
 ## Native provider tools (web search, code execution, …)
 
 ```python
@@ -102,7 +130,7 @@ for src in resp.grounding_sources:
 |---|---|---|
 | Anthropic | `"anthropic"` / `"claude"` | claude-sonnet-4-6 |
 | OpenAI | `"openai"` / `"gpt"` | gpt-5.4 |
-| Google | `"google"` / `"gemini"` | gemini-2.5-flash |
+| Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
 | DeepSeek | `"deepseek"` | deepseek-chat |
 
 ## Installation
@@ -123,13 +151,13 @@ Drop-in tools for common agent tasks — each in its own folder with a README an
 
 | Module | What it does |
 |---|---|
-| `lazybridge.tools.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
-| `lazybridge.tools.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
+| `lazybridge.ext.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
+| `lazybridge.ext.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
 
 ### doc_skills — example
 
 ```python
-from lazybridge.tools.doc_skills import build_skill, skill_tool
+from lazybridge.ext.doc_skills import build_skill, skill_tool
 from lazybridge import LazyAgent
 
 # Index your docs once — bundle persists to disk
@@ -144,7 +172,7 @@ print(resp.content)
 ### read_docs — example
 
 ```python
-from lazybridge.tools.read_docs import read_folder_docs
+from lazybridge.ext.read_docs import read_folder_docs
 from lazybridge import LazyAgent, LazyTool
 
 docs_tool = LazyTool.from_function(read_folder_docs)
@@ -171,9 +199,9 @@ LazyBridge/
 │   ├── memory.py             # Memory — stateful conversation history
 │   ├── graph/                # GraphSchema — serializable pipeline topology
 │   └── core/                 # Provider adapters, executor, tool schema builder
-├── tools/           # Tests and READMEs for lazybridge.tools
-│   ├── doc_skills/           # test_doc_skills.py + README
-│   └── read_docs/            # README
+├── tests/           # Tests for lazybridge.ext modules
+│   ├── doc_skills/           # test_doc_skills.py
+│   └── read_docs/            # test_read_docs.py
 └── lazy_wiki/
     ├── bot/                  # LLM-optimised reference (exhaustive, structured)
     └── human/                # Human-readable guides and SDK comparison
