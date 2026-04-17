@@ -79,6 +79,7 @@ from lazybridge.exporters import (
 )
 from lazybridge.graph.schema import EdgeType, GraphSchema, NodeType
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
+from lazybridge.human import HumanAgent
 from lazybridge.lazy_agent import LazyAgent
 from lazybridge.lazy_context import LazyContext
 from lazybridge.lazy_router import LazyRouter
@@ -94,10 +95,13 @@ from lazybridge.lazy_tool import (
     ToolSchemaMode,
 )
 from lazybridge.memory import Memory
+from lazybridge.supervisor import SupervisorAgent
 
 __all__ = [
     # Main classes
     "LazyAgent",
+    "HumanAgent",
+    "SupervisorAgent",
     "Memory",
     "LazySession",
     "LazyContext",

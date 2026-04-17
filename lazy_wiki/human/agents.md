@@ -417,3 +417,59 @@ async def main():
 
 asyncio.run(main())
 ```
+
+---
+
+## Human agents
+
+LazyBridge provides two classes for human participation in pipelines:
+
+### HumanAgent — simple approval / review
+
+```python
+from lazybridge import HumanAgent, LazyTool, LazyAgent
+
+human = HumanAgent(name="reviewer")
+
+# In a chain — pipeline pauses for human input
+pipeline = LazyTool.chain(
+    LazyAgent("anthropic", name="researcher"),
+    human,
+    LazyAgent("openai", name="writer"),
+    name="reviewed", description="Research, review, write",
+)
+result = pipeline.run({"task": "AI safety report"})
+
+# Dialogue mode — multi-turn until "done"
+human = HumanAgent(name="reviewer", mode="dialogue")
+
+# As a verify judge
+agent.loop("Write code", verify=human, max_verify=3)
+
+# With timeout (auto-approve after 5 min)
+human = HumanAgent(name="approver", timeout=300, default="approved")
+```
+
+### SupervisorAgent — human with superpowers
+
+```python
+from lazybridge import SupervisorAgent, LazySession
+
+sess = LazySession()
+researcher = LazyAgent("anthropic", name="researcher", tools=[search], session=sess)
+
+supervisor = SupervisorAgent(
+    name="supervisor",
+    tools=[search_tool],           # human can call tools
+    agents=[researcher],           # human can retry agents
+    session=sess,                  # human can read store
+)
+
+# In the REPL:
+# > search("AI safety 2026")         — call a tool
+# > retry researcher: add 2026 data  — re-run an agent with feedback
+# > store findings                   — inspect session store
+# > continue                         — pass output forward
+```
+
+Both classes work everywhere a LazyAgent works: chains, parallel, as_tool(), verify, LazyContext.from_agent().
