@@ -939,3 +939,98 @@ def test_tool_choice_forwarded_to_request(mock_init, mock_exec):
     call_args = mock_exec.call_args
     request = call_args[0][0]
     assert request.tool_choice == "required"
+
+
+# ── tool_choice on as_tool() ────────────────────────────────────────────
+
+
+def test_as_tool_tool_choice_forwarded():
+    """as_tool(tool_choice=) forwards to the inner loop() call."""
+    agent = _make_agent()
+    # Give the agent a tool so loop() is triggered (not chat())
+    dummy_tool = MagicMock(spec=["name", "definition", "guidance", "run", "arun"])
+    dummy_tool.name = "dummy"
+    dummy_tool.guidance = None
+    dummy_tool.definition = MagicMock()
+    dummy_tool.definition.name = "dummy"
+    agent.tools = [dummy_tool]
+
+    tool = agent.as_tool("test_agent", "test desc", tool_choice="required")
+    assert tool._delegate is not None
+    assert tool._delegate.tool_choice == "required"
+
+
+# ── parallel_tool_calls ────────────────────────────────────────────────
+
+
+def test_loop_parallel_tool_calls_sequential():
+    """parallel_tool_calls=True in sync loop executes all tools (sequentially)."""
+    agent = _make_agent()
+
+    # Step 1: model returns 2 tool calls
+    step1 = CompletionResponse(
+        content="",
+        tool_calls=[
+            ToolCall(id="t1", name="a", arguments={"x": 1}),
+            ToolCall(id="t2", name="b", arguments={"x": 2}),
+        ],
+        stop_reason="tool_use",
+        usage=UsageStats(),
+    )
+    # Step 2: final response
+    step2 = CompletionResponse(content="done with both", usage=UsageStats())
+
+    call_count = 0
+
+    def fake_execute(request):
+        nonlocal call_count
+        call_count += 1
+        return step1 if call_count == 1 else step2
+
+    agent._executor.execute = MagicMock(side_effect=fake_execute)
+
+    tool_calls_received = []
+
+    def tool_runner(name, args):
+        tool_calls_received.append(name)
+        return f"result_{name}"
+
+    resp = agent.loop("do both", tool_runner=tool_runner, parallel_tool_calls=True)
+    assert resp.content == "done with both"
+    assert "a" in tool_calls_received
+    assert "b" in tool_calls_received
+
+
+async def test_aloop_parallel_tool_calls():
+    """parallel_tool_calls=True in async loop runs tools concurrently."""
+    agent = _make_agent()
+
+    step1 = CompletionResponse(
+        content="",
+        tool_calls=[
+            ToolCall(id="t1", name="a", arguments={"x": 1}),
+            ToolCall(id="t2", name="b", arguments={"x": 2}),
+        ],
+        stop_reason="tool_use",
+        usage=UsageStats(),
+    )
+    step2 = CompletionResponse(content="parallel done", usage=UsageStats())
+
+    call_count = 0
+
+    async def fake_aexecute(request):
+        nonlocal call_count
+        call_count += 1
+        return step1 if call_count == 1 else step2
+
+    agent._executor.aexecute = fake_aexecute
+
+    tool_calls_received = []
+
+    def tool_runner(name, args):
+        tool_calls_received.append(name)
+        return f"result_{name}"
+
+    resp = await agent.aloop("do both", tool_runner=tool_runner, parallel_tool_calls=True)
+    assert resp.content == "parallel done"
+    assert set(tool_calls_received) == {"a", "b"}

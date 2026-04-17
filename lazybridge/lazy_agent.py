@@ -522,6 +522,7 @@ class LazyAgent:
 
     _CALL_MODEL = "call_model"
     _EXEC_TOOL = "exec_tool"
+    _EXEC_TOOLS_BATCH = "exec_tools_batch"
     _EMIT_EVENT = "emit_event"
     _VERIFY = "verify"
 
@@ -536,6 +537,7 @@ class LazyAgent:
         on_event: Callable | None,
         verify: Any,
         max_verify: int,
+        parallel_tool_calls: bool,
         method: str,
         chat_kwargs: dict,
     ):
@@ -573,16 +575,35 @@ class LazyAgent:
                     self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
                     if on_event:
                         yield (self._EMIT_EVENT, on_event, "tool_call", tc)
-                    try:
-                        result = yield (self._EXEC_TOOL, tc, tool_set.registry, tool_runner)
-                        self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
-                        if on_event:
-                            yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
-                        convo.append(_tool_result_message(tc, result))
-                    except Exception as exc:
-                        _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
-                        self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
-                        convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
+
+                if parallel_tool_calls and len(resp.tool_calls) > 1:
+                    results = yield (
+                        self._EXEC_TOOLS_BATCH,
+                        resp.tool_calls,
+                        tool_set.registry,
+                        tool_runner,
+                    )
+                    for tc, (result, error) in zip(resp.tool_calls, results):
+                        if error is not None:
+                            self._track(Event.TOOL_ERROR, name=tc.name, error=str(error))
+                            convo.append(_tool_result_message(tc, f"Error: {error}", is_error=True))
+                        else:
+                            self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                            if on_event:
+                                yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
+                            convo.append(_tool_result_message(tc, result))
+                else:
+                    for tc in resp.tool_calls:
+                        try:
+                            result = yield (self._EXEC_TOOL, tc, tool_set.registry, tool_runner)
+                            self._track(Event.TOOL_RESULT, name=tc.name, result=str(result)[:500])
+                            if on_event:
+                                yield (self._EMIT_EVENT, on_event, "tool_result", {"call": tc, "result": result})
+                            convo.append(_tool_result_message(tc, result))
+                        except Exception as exc:
+                            _logger.debug("Tool %r raised: %s", tc.name, exc, exc_info=True)
+                            self._track(Event.TOOL_ERROR, name=tc.name, error=str(exc))
+                            convo.append(_tool_result_message(tc, f"Error: {exc}", is_error=True))
 
             if resp is None:  # pragma: no cover
                 raise AssertionError("loop produced no response — this is a bug, please report it")
@@ -858,6 +879,7 @@ class LazyAgent:
         verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
+        parallel_tool_calls: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -887,11 +909,10 @@ class LazyAgent:
         max_verify:
             Maximum verify attempts.  If exceeded the last worker result is
             returned unchanged — no exception is raised.
-
-        Note — concurrent use (``LazyTool.parallel`` / ``LazyTool.chain``):
-            Pipeline builders clone the agent per invocation.  Read the return
-            value or ``resp.parsed``; ``agent.result`` reflects the **clone**,
-            not the original agent.
+        parallel_tool_calls:
+            When True and the model returns multiple tool calls in one step,
+            execute them concurrently (async) or sequentially (sync).
+            Default False — tools run one at a time.
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -908,6 +929,7 @@ class LazyAgent:
             on_event=on_event,
             verify=verify,
             max_verify=max_verify,
+            parallel_tool_calls=parallel_tool_calls,
             method="loop",
             chat_kwargs=chat_kwargs,
         )
@@ -921,6 +943,15 @@ class LazyAgent:
                 elif tag == self._EXEC_TOOL:
                     _, tc, registry, runner = action
                     val = self._execute_tool(tc, registry, runner)
+                elif tag == self._EXEC_TOOLS_BATCH:
+                    _, calls, registry, runner = action
+                    val = []
+                    for tc in calls:
+                        try:
+                            r = self._execute_tool(tc, registry, runner)
+                            val.append((r, None))
+                        except Exception as exc:
+                            val.append((None, exc))
                 elif tag == self._EMIT_EVENT:
                     _, callback, name, payload = action
                     callback(name, payload)
@@ -948,6 +979,7 @@ class LazyAgent:
         verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
+        parallel_tool_calls: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -960,6 +992,9 @@ class LazyAgent:
             Return a string starting with ``"approved"`` to accept the answer.
         max_verify:
             Maximum verify attempts before returning the last result as-is.
+        parallel_tool_calls:
+            When True and the model returns multiple tool calls in one step,
+            execute them concurrently with asyncio.gather().
         """
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -976,6 +1011,7 @@ class LazyAgent:
             on_event=on_event,
             verify=verify,
             max_verify=max_verify,
+            parallel_tool_calls=parallel_tool_calls,
             method="aloop",
             chat_kwargs=chat_kwargs,
         )
@@ -989,6 +1025,19 @@ class LazyAgent:
                 elif tag == self._EXEC_TOOL:
                     _, tc, registry, runner = action
                     val = await self._aexecute_tool(tc, registry, runner)
+                elif tag == self._EXEC_TOOLS_BATCH:
+                    _, calls, registry, runner = action
+                    import asyncio
+
+                    async def _run_one(c, _reg=registry, _run=runner):
+                        try:
+                            r = await self._aexecute_tool(c, _reg, _run)
+                            return (r, None)
+                        except Exception as exc:
+                            return (None, exc)
+
+                    val = await asyncio.gather(*[_run_one(c) for c in calls])
+                    val = list(val)
                 elif tag == self._EMIT_EVENT:
                     _, callback, name, payload = action
                     await _call_event_async(callback, name, payload)
@@ -1057,12 +1106,16 @@ class LazyAgent:
         output_schema: type | dict | None = None,
         native_tools: list[NativeTool | str] | None = None,
         system_prompt: str | None = None,
+        tool_choice: str | None = None,
         strict: bool = False,
     ) -> LazyTool:
         """Wrap this agent as a LazyTool for use in another agent's loop.
 
         The tool's schema is always ``{"task": str}``.
         The task string is forwarded to this agent's loop() or chat().
+
+        ``tool_choice`` controls tool selection in the inner loop:
+        ``"required"`` forces tool use, ``"<name>"`` forces a specific tool.
         """
         return LazyTool.from_agent(
             self,
@@ -1072,6 +1125,7 @@ class LazyAgent:
             output_schema=output_schema,
             native_tools=native_tools,
             system_prompt=system_prompt,
+            tool_choice=tool_choice,
             strict=strict,
         )
 

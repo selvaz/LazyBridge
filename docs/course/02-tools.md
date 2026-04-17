@@ -211,6 +211,42 @@ resp = ai.loop("What's 42 * 17?", tools=tools, on_event=on_event)
 
 Events: `"step"`, `"tool_call"`, `"tool_result"`, `"done"`, `"verify_rejected"`
 
+### tool_choice
+
+Control whether the agent must use a tool:
+
+```python
+resp = ai.loop("hello", tools=tools, tool_choice="required")   # must use at least one
+resp = ai.chat("hello", tools=tools, tool_choice="none")       # no tools allowed
+resp = ai.loop("calc", tools=tools, tool_choice="calculator")  # force a specific tool
+```
+
+### tool_choice on as_tool()
+
+Force tool use when an agent is exposed as a tool for an orchestrator:
+
+```python
+researcher = LazyAgent("anthropic", tools=[web_search, arxiv])
+research_tool = researcher.as_tool("research", "Find info", tool_choice="required")
+
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Find AI papers", tools=[research_tool])
+# researcher is forced to use its search tools before responding
+```
+
+### parallel_tool_calls
+
+When the model returns multiple tool calls in one step, run them concurrently:
+
+```python
+# All 3 weather lookups run at the same time (async uses gather)
+resp = await ai.aloop(
+    "Get weather for NYC, London, and Tokyo",
+    tools=[weather_tool],
+    parallel_tool_calls=True,
+)
+```
+
 ## Native provider tools
 
 Some providers have built-in tools (web search, code execution). Use them without writing any code:

@@ -89,6 +89,7 @@ class _DelegateConfig:
     output_schema: type | dict | None = None
     native_tools: list | None = None
     system_prompt: str | None = None
+    tool_choice: str | None = None
 
 
 @dataclass
@@ -189,6 +190,7 @@ class LazyTool:
         output_schema: type | dict | None = None,
         native_tools: list | None = None,
         system_prompt: str | None = None,
+        tool_choice: str | None = None,
         strict: bool = False,
     ) -> LazyTool:
         """Wrap a LazyAgent as a tool with schema ``{"task": str}``.
@@ -204,6 +206,7 @@ class LazyTool:
             output_schema=output_schema,
             native_tools=native_tools,
             system_prompt=system_prompt,
+            tool_choice=tool_choice,
         )
         # Schema is always {"task": str} for delegated agents
         fixed_def = ToolDefinition(
@@ -274,6 +277,12 @@ class LazyTool:
         tools = getattr(agent, "tools", None) or []
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
+        tc = self._delegate.tool_choice
+        kw: dict[str, Any] = {}
+        if sys:
+            kw["system"] = sys
+        if tc:
+            kw["tool_choice"] = tc
 
         if self._delegate.output_schema:
             if tools or native:
@@ -282,10 +291,10 @@ class LazyTool:
                     tools=tools,
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
-                    **({"system": sys} if sys else {}),
+                    **kw,
                 )
             else:
-                resp = agent.chat(task, output_schema=self._delegate.output_schema, **({"system": sys} if sys else {}))
+                resp = agent.chat(task, output_schema=self._delegate.output_schema, **kw)
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -295,9 +304,9 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = agent.loop(task, tools=tools, native_tools=native, **({"system": sys} if sys else {}))
+            resp = agent.loop(task, tools=tools, native_tools=native, **kw)
         else:
-            resp = agent.chat(task, **({"system": sys} if sys else {}))
+            resp = agent.chat(task, **kw)
         return resp.content
 
     # ------------------------------------------------------------------
@@ -323,6 +332,12 @@ class LazyTool:
         tools = getattr(agent, "tools", None) or []
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
+        tc = self._delegate.tool_choice
+        kw: dict[str, Any] = {}
+        if sys:
+            kw["system"] = sys
+        if tc:
+            kw["tool_choice"] = tc
 
         if self._delegate.output_schema:
             if tools or native:
@@ -331,12 +346,10 @@ class LazyTool:
                     tools=tools,
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
-                    **({"system": sys} if sys else {}),
+                    **kw,
                 )
             else:
-                resp = await agent.achat(
-                    task, output_schema=self._delegate.output_schema, **({"system": sys} if sys else {})
-                )
+                resp = await agent.achat(task, output_schema=self._delegate.output_schema, **kw)
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -346,9 +359,9 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = await agent.aloop(task, tools=tools, native_tools=native, **({"system": sys} if sys else {}))
+            resp = await agent.aloop(task, tools=tools, native_tools=native, **kw)
         else:
-            resp = await agent.achat(task, **({"system": sys} if sys else {}))
+            resp = await agent.achat(task, **kw)
         return resp.content
 
     # ------------------------------------------------------------------

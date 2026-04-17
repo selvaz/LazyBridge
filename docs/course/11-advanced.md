@@ -118,6 +118,36 @@ resp = ai.chat("Summarize this", tools=my_tools, tool_choice="none")
 resp = ai.loop("Get data", tools=[search, calculator], tool_choice="search")
 ```
 
+### tool_choice on as_tool()
+
+Force tool use when an agent is wrapped as a tool — the orchestrator doesn't need to know:
+
+```python
+# Researcher ALWAYS searches before answering
+researcher = LazyAgent("anthropic", tools=[web_search, arxiv])
+research_tool = researcher.as_tool("research", "Find information", tool_choice="required")
+
+# Orchestrator just calls the tool — doesn't know about tool_choice
+orchestrator = LazyAgent("anthropic")
+orchestrator.loop("Find AI safety papers", tools=[research_tool])
+```
+
+### Parallel Tool Execution
+
+When the model returns multiple tool calls in one step, run them concurrently:
+
+```python
+# Sequential (default) — tools run one after another
+resp = ai.loop("Get data for 5 cities", tools=[weather], parallel_tool_calls=False)
+
+# Parallel — all tool calls in a step run at the same time
+# Sync loop: executes sequentially but handles errors per-tool
+# Async loop: uses asyncio.gather() for true concurrency
+resp = await ai.aloop("Get data for 5 cities", tools=[weather], parallel_tool_calls=True)
+```
+
+Best for I/O-bound tools (API calls, web requests). Not useful for CPU-bound or dependent tools.
+
 ---
 
 ## Part B — Tool System Internals

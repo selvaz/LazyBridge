@@ -52,11 +52,11 @@ LazyAgent.loop(
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
     verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
-                                           # exhausting all attempts emits UserWarning and returns last result
+    parallel_tool_calls: bool = False,     # True: run multiple tool calls concurrently (async uses gather)
     **chat_kwargs,                         # forwarded to chat() on each step
 ) -> CompletionResponse
 
-LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async; same UserWarning on exhaustion
+LazyAgent.aloop(...)  # async version → CompletionResponse; verify callable may be async; parallel_tool_calls uses gather
 
 LazyAgent.chat_stream(messages, ...) -> Iterator[StreamChunk]     # dedicated streaming (preferred over chat(stream=True))
 LazyAgent.achat_stream(messages, ...) -> AsyncIterator[StreamChunk]  # async streaming
@@ -74,6 +74,7 @@ LazyAgent.as_tool(
     output_schema: type | dict | None = None,
     native_tools: list | None = None,
     system_prompt: str | None = None,     # override agent's system for this tool invocation
+    tool_choice: str | None = None,      # "required"|"none"|"<name>" — forwarded to inner loop()
     strict: bool = False,
 ) -> LazyTool
 
