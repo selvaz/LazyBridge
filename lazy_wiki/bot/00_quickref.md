@@ -429,14 +429,18 @@ GraphSchema.from_file(path: str) -> GraphSchema    # classmethod
 ### Memory
 
 ```python
-Memory()                          # create empty
-Memory.from_history(messages: list[dict]) -> Memory  # restore from serialised history
-mem.history                       # list[dict] — read-only copy of messages
-len(mem)                          # total messages (user + assistant)
-mem.clear()                       # reset
-# Internal (used by chat()):
-mem._build_input(msg: str)        # → list[dict] history + new user msg (no mutation)
-mem._record(user, assistant)      # append completed turn
+Memory(
+    *,
+    strategy: Literal["full", "rolling", "auto"] = "auto",  # auto: compress when over budget
+    max_context_tokens: int = 4000,     # token budget (len/4 estimate)
+    window_turns: int = 10,             # recent turns kept raw
+    compressor: LazyAgent | None = None, # LLM for semantic compression (optional)
+)
+Memory.from_history(messages, **kwargs) -> Memory  # restore with strategy
+mem.history     # list[dict] — full raw history (never truncated)
+mem.summary     # str | None — current compressed block
+len(mem)        # total stored messages
+mem.clear()     # reset history + compression
 ```
 
 ### NativeTool (StrEnum)

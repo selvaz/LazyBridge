@@ -98,10 +98,71 @@ print(f"Total turns: {len(mem.history)}")  # 10 (5 questions + 5 answers)
 
 ---
 
+## Smart compression
+
+By default (`strategy="auto"`), Memory monitors context size and automatically compresses older turns when the token budget is exceeded. Recent turns are kept raw. The full history is always preserved.
+
+```python
+# Auto (default) — just works, compresses when needed
+mem = Memory()
+
+# Full — never compress, send everything (backward compat)
+mem = Memory(strategy="full")
+
+# Rolling — always use window + compression
+mem = Memory(strategy="rolling", window_turns=10)
+```
+
+What the provider receives when compression is active:
+
+```
+[Memory — 23 earlier turns]
+Topics: Python, Django, API, authentication
+Last discussed: How to handle JWT tokens
+─────────────────── (compressed block above)
+user: Can you also add rate limiting?     ← window (raw)
+assistant: Sure, here's how...            ← window (raw)
+user: What about caching?                 ← new message
+```
+
+### LLM compressor (more accurate)
+
+Use a cheap model to extract entities, facts, and decisions:
+
+```python
+compressor = LazyAgent("openai", model="gpt-4o-mini")
+mem = Memory(compressor=compressor)
+
+# The compressor produces structured output like:
+# entities: Marco (developer), LazyBridge (project)
+# facts: budget=50k, deadline=Q3
+# decisions: chose Anthropic, rejected LangChain
+```
+
+### Configuring the budget
+
+```python
+# Custom token budget and window size
+mem = Memory(
+    max_context_tokens=8000,  # compress when over 8k tokens
+    window_turns=15,          # keep last 15 turn pairs raw
+)
+```
+
+### Accessing the full history
+
+The raw history is never lost:
+
+```python
+mem.history    # complete list of all messages (never truncated)
+mem.summary    # current compressed block (or None if not compressed)
+```
+
 ## Exercise
 
 1. Build a simple chatbot loop that remembers the conversation
 2. Ask the agent personal questions across multiple turns and verify it remembers
-3. Save the memory to a file and restore it in a new script
+3. Try `Memory(strategy="rolling", window_turns=3)` with 10+ turns — verify the compressed block appears
+4. Save the memory to a file and restore it in a new script
 
 **Next:** [Module 5: Context Injection](05-context.md) — compose context from multiple sources.
