@@ -314,7 +314,7 @@ def veo_tool(
             cfg["last_frame"] = _load_image(last_frame)
         if reference_images:
             cfg["reference_images"] = [
-                _gtypes.VideoGenerationReferenceImage(image=_load_image(p), reference_type="asset")
+                _gtypes.VideoGenerationReferenceImage(image=_load_image(p), reference_type="asset")  # type: ignore[arg-type]
                 for p in reference_images
             ]
 
@@ -338,15 +338,17 @@ def veo_tool(
         if getattr(operation, "error", None):
             raise VeoError(f"Veo generation failed: {operation.error}")
 
-        if not getattr(operation, "response", None) or not operation.response.generated_videos:
+        resp = getattr(operation, "response", None)
+        if not resp or not resp.generated_videos:
             raise VeoError("Veo generation completed without producing a video")
 
         # ── Save ──────────────────────────────────────────────────────────────
 
         filename = outdir / f"veo_{uuid.uuid4().hex[:10]}.mp4"
-        video = operation.response.generated_videos[0]
-        client.files.download(file=video.video)
-        video.video.save(str(filename))
+        video = resp.generated_videos[0]
+        vid = video.video
+        client.files.download(file=vid)  # type: ignore[arg-type]
+        vid.save(str(filename))  # type: ignore[union-attr]
 
         return {
             "ok": True,

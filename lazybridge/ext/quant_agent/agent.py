@@ -303,7 +303,7 @@ def quant_agent(
         name=name,
         description="Quantitative analyst with data download and statistical analysis capabilities",
         system=system or QUANT_SYSTEM_PROMPT,
-        tools=all_tools, # type: ignore[arg-type]
+        tools=all_tools,  # type: ignore[arg-type]
         **agent_kwargs,
     )
 
