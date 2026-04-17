@@ -272,7 +272,7 @@ class GoogleProvider(BaseProvider):
                 _gtypes.FunctionDeclaration(
                     name=t.name,
                     description=t.description,
-                    parameters=t.parameters,
+                    parameters=t.parameters,  # type: ignore[arg-type]
                 )
             )
         return decls
@@ -381,7 +381,7 @@ class GoogleProvider(BaseProvider):
                 "xhigh": "high",
                 "max": "high",
             }.get(request.thinking.effort, "high")
-            return _gtypes.ThinkingConfig(thinking_level=level)
+            return _gtypes.ThinkingConfig(thinking_level=level)  # type: ignore[arg-type]
         # budget=-1 → model decides automatically; 0 → no thinking
         budget = request.thinking.budget_tokens if request.thinking.budget_tokens is not None else -1
         return _gtypes.ThinkingConfig(thinking_budget=budget)
@@ -612,15 +612,18 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            for part in chunk.candidates[0].content.parts:
+            candidate = chunk.candidates[0]  # type: ignore[index]
+            if not candidate.content or not candidate.content.parts:
+                continue
+            for part in candidate.content.parts:
                 if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=part.thought)
+                    yield StreamChunk(thinking_delta=str(part.thought))
                 elif hasattr(part, "text") and part.text:
                     text_accum += part.text
                     yield StreamChunk(delta=part.text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = getattr(fc, "id", None) or fc.name
+                    call_id = str(getattr(fc, "id", None) or fc.name)
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
@@ -647,7 +650,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_chunk.candidates[0]
+                last_chunk.candidates[0]  # type: ignore[index]
             )
         final_chunk = StreamChunk(
             stop_reason="end_turn",
@@ -703,15 +706,18 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            for part in chunk.candidates[0].content.parts:
+            candidate = chunk.candidates[0]  # type: ignore[index]
+            if not candidate.content or not candidate.content.parts:
+                continue
+            for part in candidate.content.parts:
                 if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=part.thought)
+                    yield StreamChunk(thinking_delta=str(part.thought))
                 elif hasattr(part, "text") and part.text:
                     text_accum += part.text
                     yield StreamChunk(delta=part.text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = getattr(fc, "id", None) or fc.name
+                    call_id = str(getattr(fc, "id", None) or fc.name)
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
@@ -737,7 +743,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_chunk.candidates[0]
+                last_chunk.candidates[0]  # type: ignore[index]
             )
         final_chunk = StreamChunk(
             stop_reason="end_turn",

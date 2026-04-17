@@ -474,6 +474,7 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        ctx: Any
         if betas:
             ctx = self._client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
@@ -594,6 +595,7 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        ctx: Any
         if betas:
             ctx = self._async_client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
