@@ -217,13 +217,37 @@ class BaseProvider(ABC):
     # Helpers — stable, callable from subclasses
     # ------------------------------------------------------------------
 
+    #: Tier aliases (audit F2).  Each provider populates this with the
+    #: concrete model it considers "top"/"expensive"/"medium"/"cheap"/
+    #: "super_cheap" so users can write ``LazyAgent("anthropic",
+    #: model="cheap")`` without hard-coding preview / date-pinned names.
+    #: A string not in this dict is treated as a literal model name
+    #: (passthrough).
+    _TIER_ALIASES: dict[str, str] = {}
+
+    #: Optional fallback chain.  If a concrete model in the key is
+    #: unavailable (provider returns 404 / "model not found"), the
+    #: provider should try each model in the list in order.  Wiring
+    #: into a retry path is per-provider and not yet active; the tables
+    #: are populated so the data is ready when that path lands.
+    _FALLBACKS: dict[str, list[str]] = {}
+
     def _resolve_model(self, request: CompletionRequest) -> str:
         """Return the effective model: request → instance → class default.
 
-        Always use this inside ``complete`` / ``stream`` instead of reading
-        ``self.model`` directly so that per-request overrides are respected.
+        Tier aliases (``"top"``, ``"cheap"`` etc.) are resolved here via
+        ``_TIER_ALIASES``; everything else is a passthrough.  Always use
+        this inside ``complete`` / ``stream`` instead of reading
+        ``self.model`` directly so that per-request overrides and
+        per-provider tier tables are respected.
         """
-        return request.model or self.model or self.default_model
+        name = request.model or self.model or self.default_model
+        # Empty / None defaults to class default.
+        if not name:
+            return name
+        # Tier alias?  Resolve to the concrete model.
+        resolved = self._TIER_ALIASES.get(name, name)
+        return resolved
 
     def _check_native_tools(self, tools: list[NativeTool]) -> list[NativeTool]:
         """Filter ``tools`` to only those declared in ``supported_native_tools``.

@@ -87,6 +87,23 @@ class AnthropicProvider(BaseProvider):
     """
 
     default_model = "claude-sonnet-4-6"
+
+    # Tier aliases — ``LazyAgent("anthropic", model="top")`` resolves here.
+    # Update this table when new models ship; the matrix in
+    # lazy_wiki/human/agents.md mirrors it (audit F2).
+    _TIER_ALIASES = {
+        "top":         "claude-opus-4-7",
+        "expensive":   "claude-opus-4-6",
+        "medium":      "claude-sonnet-4-6",
+        "cheap":       "claude-haiku-4-5",
+        "super_cheap": "claude-3-haiku",
+    }
+    _FALLBACKS = {
+        "claude-opus-4-7":   ["claude-opus-4-6", "claude-sonnet-4-6"],
+        "claude-opus-4-6":   ["claude-opus-4-5", "claude-sonnet-4-6"],
+        "claude-sonnet-4-6": ["claude-sonnet-4-5", "claude-3-5-sonnet"],
+        "claude-haiku-4-5":  ["claude-3-5-haiku"],
+    }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {
             NativeTool.WEB_SEARCH,

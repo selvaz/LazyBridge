@@ -59,6 +59,20 @@ class DeepSeekProvider(OpenAIProvider):
     """
 
     default_model = "deepseek-chat"
+
+    # Tier aliases (audit F2).  DeepSeek has fewer distinct tiers than
+    # its peers; multiple aliases point at the same concrete model —
+    # documented in the matrix (lazy_wiki/human/agents.md).
+    _TIER_ALIASES = {
+        "top":         "deepseek-reasoner",
+        "expensive":   "deepseek-reasoner",
+        "medium":      "deepseek-chat",
+        "cheap":       "deepseek-chat",
+        "super_cheap": "deepseek-chat",
+    }
+    _FALLBACKS = {
+        "deepseek-reasoner": ["deepseek-chat"],
+    }
     supported_native_tools: frozenset[NativeTool] = frozenset()  # No native server tools
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:

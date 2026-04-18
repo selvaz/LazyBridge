@@ -105,6 +105,21 @@ class GoogleProvider(BaseProvider):
 
     default_model = "gemini-3.1-pro-preview"
 
+    # Tier aliases (audit F2).
+    _TIER_ALIASES = {
+        "top":         "gemini-3.1-pro-preview",
+        "expensive":   "gemini-3.1-pro",
+        "medium":      "gemini-3.1-flash",
+        "cheap":       "gemini-1.5-flash",
+        "super_cheap": "gemini-1.5-flash-8b",
+    }
+    _FALLBACKS = {
+        "gemini-3.1-pro-preview": ["gemini-3.1-pro", "gemini-3.1-flash"],
+        "gemini-3.1-pro":         ["gemini-3.1-flash"],
+        "gemini-3.1-flash":       ["gemini-1.5-flash"],
+        "gemini-1.5-flash":       ["gemini-1.5-flash-8b"],
+    }
+
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
