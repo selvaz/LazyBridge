@@ -6,6 +6,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`lazybridge.gui` umbrella** — core, stdlib-only package for per-object GUIs. Importing it installs a ``.gui()`` method on ``LazyAgent``, ``LazyTool``, and ``LazySession``; calling it spins up (or reuses) a single shared HTTP server and opens a browser tab. Each panel has an **Inspect/Edit** tab and a live **Test** tab:
+  - `AgentPanel` — read provider/model/name/description; live-edit `system` prompt; toggle which session-scoped tools are enabled on the agent; run live `chat` / `loop` / `text` against the real provider (usage + cost surfaced inline).
+  - `ToolPanel` — schema-driven form (one typed input per parameter) that invokes `tool.run(args)` on submit; works for function-backed tools and for pipeline tools (`LazyTool.chain` / `.parallel`).
+  - `SessionPanel` — session id, tracking level, registered agents, current store keys. `session.gui()` also auto-registers a panel for every agent and tool already in the session so they appear in the sidebar immediately.
+  - Shared primitives: `GuiServer`, `Panel` (ABC), `get_server`, `close_server`, `is_running` — exposed so third parties can add their own panels (and so the planned whole-pipeline GUI can embed existing panels as sub-views).
+  - Security: 127.0.0.1-bound, 24-byte urlsafe token required on every `/api/*` request; `ThreadingHTTPServer` spawns a thread per request so long live test calls don't block sidebar polling.
+  - 47 new tests in `tests/unit/gui/` covering the server + panel plumbing, each panel kind, the monkey-patch installer, and the end-to-end HTTP round-trip for `tool.gui()`.
+- `examples/gui_demo.py` — researcher + writer + shared search tool, opens `session.gui()`.
+- `lazybridge.gui.human` — optional, **stdlib-only** browser UI for `HumanAgent` and `SupervisorAgent`. Exposes `WebInputServer` and a one-call `web_input_fn()` factory that returns a drop-in `input_fn`. Each REPL prompt renders on a local `127.0.0.1:<ephemeral>` page with the previous agent output, optional quick-command chips, and a submit textarea; Ctrl/⌘-Enter submits. Token-gated (random 24-byte urlsafe) and localhost-bound. Covered by 14 unit tests in `tests/unit/gui/human/test_web_input.py`, including an end-to-end integration with `SupervisorAgent`.
+- `examples/human_gui_demo.py` — runnable `researcher → SupervisorAgent → writer` pipeline using the browser UI.
+
+### Documentation
+- `README.md` — new **Human-in-the-loop** section showcasing `SupervisorAgent` in a `researcher → supervisor → writer` chain, plus an entry in the Documentation table.
+- `lazy_wiki/bot/13_supervisor.md` — new LLM-oriented reference for `HumanAgent` / `SupervisorAgent` (constructors, methods, REPL commands, scripted-input patterns for tests).
+- `lazy_wiki/bot/INDEX.md` — `HumanAgent` and `SupervisorAgent` added to the class table, import block, and reading order.
+- `lazy_wiki/human/quickstart.md` — cross-reference rows for human-in-the-loop supervision in both the "Next steps" and "Choosing the right pattern" tables.
+- `mkdocs.yml` — new Guide nav entry "Human-in-the-Loop" pointing at the existing module 13 walkthrough.
+- `examples/supervised_pipeline.py` — runnable, non-interactive demo wiring `researcher → SupervisorAgent → writer` via scripted `input_fn`, exercising `continue`, `retry`, and tool-call commands.
+- `lazybridge/gui/human/README.md` — full API reference for the new browser UI extension; cross-linked from `README.md`, `lazy_wiki/human/agents.md`, and `lazy_wiki/bot/13_supervisor.md`.
+
+### Added (prior, now surfaced)
+- `HumanAgent` and `SupervisorAgent` (`lazybridge/human.py`, `lazybridge/supervisor.py`) — human-in-the-loop participants that slot into chains, parallel tools, `as_tool()`, and `verify=`. Exported from `lazybridge` top-level.
+
+---
+
+## [0.6.0] — Claude Opus 4.7 support + version bump
+
+See commit `20f7130` for details.
+
+---
+
 ## [0.5.0] — 2026-04-14
 
 ### Breaking Changes

@@ -131,6 +131,55 @@ for src in resp.grounding_sources:
     print(src.url, src.title)
 ```
 
+## Human-in-the-loop
+
+Humans participate as first-class agents — no callbacks, no hooks. `HumanAgent` is a simple approval/review gate; `SupervisorAgent` is a REPL that lets the human call tools, retry upstream agents with feedback, and inspect the session store before deciding to continue.
+
+```python
+from lazybridge import LazyAgent, LazyTool, LazySession, SupervisorAgent
+
+sess = LazySession()
+
+def search(query: str) -> str:
+    """Search the web."""
+    return f"results for {query}"
+
+search_tool = LazyTool.from_function(search)
+researcher  = LazyAgent("anthropic", name="researcher", tools=[search_tool], session=sess)
+writer      = LazyAgent("openai",    name="writer",     session=sess)
+
+supervisor = SupervisorAgent(
+    name="supervisor",
+    tools=[search_tool],     # human can call tools
+    agents=[researcher],     # human can retry upstream agents with feedback
+    session=sess,            # human can read the shared store
+)
+
+pipeline = LazyTool.chain(
+    researcher, supervisor, writer,
+    name="supervised_pipeline",
+    description="Research, supervise, write",
+)
+pipeline.run({"task": "AI safety report"})
+# REPL commands: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)
+```
+
+Full walkthrough in [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) and [`lazy_wiki/human/agents.md`](lazy_wiki/human/agents.md#human-agents).
+
+Prefer a browser to stdin? Stdlib-only, opt-in:
+
+```python
+from lazybridge.gui import panel_input_fn
+
+fn = panel_input_fn(name="reviewer")   # shared-server panel
+supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
+```
+
+The same browser tab hosts panels for every LazyBridge object —
+`import lazybridge.gui` and any `agent.gui()` / `tool.gui()` /
+`session.gui()` call registers a new panel on the shared server. See
+[`lazybridge/gui/README.md`](lazybridge/gui/README.md).
+
 ## Supported providers
 
 | Provider | String | Default model |
@@ -139,6 +188,24 @@ for src in resp.grounding_sources:
 | OpenAI | `"openai"` / `"gpt"` | gpt-5.4 |
 | Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
 | DeepSeek | `"deepseek"` | deepseek-chat |
+
+### Model tiers
+
+Pass a tier string as `model=` instead of a literal model name and let
+the provider pick the right concrete model:
+
+| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
+| --- | --- | --- | --- | --- |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+
+Tiers are **provider-relative** — `"medium"` on Anthropic is not the
+same price/capability as `"medium"` on OpenAI. Literal model names
+still work unchanged. Full documentation:
+[`lazy_wiki/human/agents.md` → Model tiers](lazy_wiki/human/agents.md#model-tiers).
 
 ## Installation
 
@@ -160,6 +227,7 @@ Drop-in tools for common agent tasks — each in its own folder with a README an
 |---|---|
 | `lazybridge.ext.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
 | `lazybridge.ext.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
+| `lazybridge.gui.human` | Optional browser UI for `HumanAgent` / `SupervisorAgent`. Stdlib-only, no extra install. |
 
 ### doc_skills — example
 
@@ -222,6 +290,7 @@ LazyBridge/
 | SDK comparison | [`lazy_wiki/human/comparison.md`](lazy_wiki/human/comparison.md) |
 | LLM / AI assistant | [`lazy_wiki/bot/INDEX.md`](lazy_wiki/bot/INDEX.md) |
 | Full API reference | [`lazy_wiki/bot/00_quickref.md`](lazy_wiki/bot/00_quickref.md) |
+| Human-in-the-loop (`HumanAgent` / `SupervisorAgent`) | [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) |
 
 ## License
 

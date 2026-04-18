@@ -17,6 +17,17 @@ sess = LazySession()
 ai = LazyAgent("anthropic", session=sess)
 ```
 
+After `import lazybridge.gui`, every agent also gains a `.gui()` method
+that opens a browser panel for live editing (system prompt, model,
+enabled tools) and test invocations:
+
+```python
+import lazybridge.gui
+ai.gui()  # returns a URL and opens a tab on 127.0.0.1:<ephemeral>
+```
+
+Full GUI reference: `lazybridge/gui/README.md`.
+
 ---
 
 ## 2. Constructor — every parameter
@@ -319,9 +330,17 @@ def loop(
     on_event: Callable[[str, Any], None] | None = None,
     verify: LazyAgent | Callable[[str, str], str] | None = None,
     max_verify: int = 3,
+    tool_timeout: float | None = None,
     **chat_kwargs,
 ) -> CompletionResponse:
 ```
+
+**`tool_timeout`:** per-tool budget in seconds.  When set, a tool call
+that exceeds the budget raises `TimeoutError` instead of hanging the
+loop.  Works for both the registry path and `tool_runner`.  Sync
+tools run in a one-shot `ThreadPoolExecutor` shut down with
+`wait=False` so the runaway worker can't block the caller; async
+tools use `asyncio.wait_for`.  `None` / `0` disables the budget.
 
 Call-level `tools` are merged with agent-level `self.tools`. `**chat_kwargs` are forwarded to every internal `chat()` call (e.g. `system`, `context`, `temperature`). `max_steps` must be >= 1 or `ValueError` is raised.
 

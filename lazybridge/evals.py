@@ -127,10 +127,24 @@ def llm_judge(
             verdict = judge_agent.text(prompt).strip().upper()
             return verdict.startswith("PASS")
         except Exception as exc:
+            # Previously this swallowed the exception and returned False,
+            # making "judge crashed" indistinguishable from "judge said
+            # FAIL" in EvalReport.  Raise through a marker exception so
+            # EvalSuite.run / arun captures it in EvalResult.error (audit
+            # L11) and EvalReport.errors counts it separately.
             _logger.warning("LLM judge failed: %s", exc)
-            return False
+            raise JudgeError(str(exc)) from exc
 
     return _check
+
+
+class JudgeError(RuntimeError):
+    """Raised by :func:`llm_judge` when the judge agent itself errors out.
+
+    Distinguishes "the judge crashed" from "the judge returned FAIL" in
+    :class:`EvalReport`.  Callers generally don't catch this — the suite
+    runner does, and records it under :attr:`EvalResult.error`.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +219,12 @@ class EvalReport:
     @property
     def failed(self) -> int:
         return self.total - self.passed
+
+    @property
+    def errors(self) -> int:
+        """Cases where the check itself raised (e.g. judge crashed) —
+        distinct from pure FAIL verdicts (audit L11)."""
+        return sum(1 for r in self.results if r.error is not None)
 
     @property
     def pass_rate(self) -> float:

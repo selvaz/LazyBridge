@@ -7,6 +7,7 @@ LazyBridge integration (stat_runtime catalog registration, Pydantic results).
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -83,7 +84,12 @@ def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
             )
             if attempt == cfg.max_retries - 1:
                 raise
-            time.sleep(cfg.retry_sleep * (2**attempt))
+            # Exponential backoff with ±25% jitter — prevents a
+            # thundering herd when many workers retry after the same
+            # rate-limit window (audit L10).  Matches the jitter
+            # formula used in lazybridge.core.executor.
+            delay = cfg.retry_sleep * (2**attempt) * (0.75 + random.random() * 0.5)
+            time.sleep(delay)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +232,14 @@ class CacheManager:
             return None
         try:
             return pd.read_parquet(p)
-        except Exception:
+        except Exception as exc:
+            # Don't crash the whole batch on one bad parquet file — but
+            # leave a breadcrumb at DEBUG so operators can diagnose the
+            # root cause (corrupt / partial write / schema drift).
+            _logger.debug(
+                "load(%r): pd.read_parquet(%s) failed — %s: %s",
+                ticker, p, type(exc).__name__, exc,
+            )
             return None
 
     def save(self, ticker: str, df: pd.DataFrame) -> str:

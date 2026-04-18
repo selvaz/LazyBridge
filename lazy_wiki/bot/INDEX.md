@@ -16,6 +16,10 @@
 | BaseProvider | 11_custom_provider.md | **Stable** extension point — integrate any LLM backend | all |
 | tools.doc_skills | 12_tools.md | BM25 local documentation skill — build_skill, skill_tool, skill_pipeline | A, B |
 | tools.read_docs | 12_tools.md | Multi-format document reader — .txt .md .pdf .docx .html | A, B |
+| HumanAgent | 13_supervisor.md | Human-in-the-loop participant: approval, dialogue, verify, timeouts | A, B, C |
+| SupervisorAgent | 13_supervisor.md | Human REPL with superpowers: continue / retry \<agent\> / store \<key\> / \<tool\>(args) | A, B, C |
+| gui.human | 13_supervisor.md | Optional browser UI for HumanAgent / SupervisorAgent — stdlib-only (deprecated; use `lazybridge.gui.panel_input_fn`) | A, B, C |
+| lazybridge.gui | 00_quickref.md | Shared browser GUI for every LazyBridge object via `.gui()` | A, B, C |
 
 ## Communication rules (critical)
 
@@ -43,6 +47,7 @@
 | Schema generation (type mapping, LLM modes, artifacts) | `10_tool_schema.md` |
 | Custom provider integration | `11_custom_provider.md` |
 | Ready-made tools (doc_skills, read_docs) | `12_tools.md` |
+| Human approval & overrides (HumanAgent, SupervisorAgent) | `13_supervisor.md` |
 
 ## Providers supported
 
@@ -62,6 +67,7 @@ from lazybridge import (
     LazyAgent, LazySession, LazyTool, LazyContext,
     LazyStore, LazyRouter, GraphSchema,
     TrackLevel, Event,
+    HumanAgent, SupervisorAgent,
 )
 # Advanced types:
 from lazybridge.core.types import (

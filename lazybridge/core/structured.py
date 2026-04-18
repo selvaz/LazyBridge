@@ -64,11 +64,44 @@ def _enum_match(data: Any, value: Any) -> bool:
 
 
 def _validate_schema(data: Any, schema: dict[str, Any]) -> str | None:
-    """Minimal JSON Schema subset validator. Returns an error string or None.
+    """Validate ``data`` against a JSON Schema dict.
 
-    Supported keywords: type, required, enum, additionalProperties,
-    properties (recursive), items (array elements).
+    If the optional ``jsonschema`` library is installed, delegate to it
+    for full Draft-2020 coverage — ``pattern``, ``minLength``, ``maximum``,
+    ``format``, etc. are all enforced.  Otherwise we fall back to a
+    minimal subset validator (audit M9).
+
+    Fallback-validator supported keywords: ``type``, ``required``,
+    ``enum``, ``additionalProperties``, ``properties`` (recursive),
+    ``items`` (array elements).  All others are silently ignored.
     """
+    try:
+        import jsonschema as _jsonschema  # type: ignore
+    except Exception:
+        _jsonschema = None
+
+    if _jsonschema is not None:
+        try:
+            _jsonschema.validate(instance=data, schema=schema)
+            return None
+        except _jsonschema.ValidationError as exc:
+            # Mirror the "human" messages the fallback validator produces.
+            path = ".".join(str(p) for p in exc.absolute_path)
+            return f"field '{path}': {exc.message}" if path else exc.message
+        except _jsonschema.SchemaError as exc:
+            # Malformed schema — fall through to the subset validator so
+            # the caller still gets a best-effort check.
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "jsonschema rejected schema; falling back to subset validator: %s",
+                exc,
+            )
+
+    return _validate_schema_subset(data, schema)
+
+
+def _validate_schema_subset(data: Any, schema: dict[str, Any]) -> str | None:
+    """Minimal JSON Schema subset validator (see :func:`_validate_schema`)."""
     schema_type = schema.get("type")
     if schema_type:
         expected = _TYPE_MAP.get(schema_type)

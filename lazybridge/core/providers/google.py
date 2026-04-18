@@ -77,6 +77,21 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 }
 
 
+def _synthesize_fc_id(function_call: Any, index: int) -> str:
+    """Return a non-colliding id for a Gemini ``function_call`` part.
+
+    Gemini may omit ``fc.id`` — in which case the previous implementation
+    fell back to ``fc.name``, causing collisions when the model called
+    the same function multiple times in a single turn.  We synthesise
+    ``"{name}-{index}"`` on the missing-id path so every tool call in a
+    turn has a unique identifier.
+    """
+    fc_id = getattr(function_call, "id", None)
+    if fc_id:
+        return str(fc_id)
+    return f"{function_call.name}-{index}"
+
+
 class GoogleProvider(BaseProvider):
     """Google Gemini provider.
 
@@ -89,6 +104,21 @@ class GoogleProvider(BaseProvider):
     """
 
     default_model = "gemini-3.1-pro-preview"
+
+    # Tier aliases (audit F2).
+    _TIER_ALIASES = {
+        "top":         "gemini-3.1-pro-preview",
+        "expensive":   "gemini-3.1-pro",
+        "medium":      "gemini-3.1-flash",
+        "cheap":       "gemini-1.5-flash",
+        "super_cheap": "gemini-1.5-flash-8b",
+    }
+    _FALLBACKS = {
+        "gemini-3.1-pro-preview": ["gemini-3.1-pro", "gemini-3.1-flash"],
+        "gemini-3.1-pro":         ["gemini-3.1-flash"],
+        "gemini-3.1-flash":       ["gemini-1.5-flash"],
+        "gemini-1.5-flash":       ["gemini-1.5-flash-8b"],
+    }
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         model_l = model.lower()
@@ -404,6 +434,18 @@ class GoogleProvider(BaseProvider):
         google_search_active = any(nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native)
         google_maps_active = NativeTool.GOOGLE_MAPS in native
 
+        # Fail fast on the grounding+structured-output conflict BEFORE we
+        # build tools / call into the SDK (audit M6).  The Gemini API
+        # rejects this combination with 400 INVALID_ARGUMENT, and the
+        # user-facing error is clearer raised here.
+        if request.structured_output and google_search_active:
+            raise ValueError(
+                "Gemini cannot combine google_search grounding with structured "
+                "output. Either drop native_tools=[NativeTool.GOOGLE_SEARCH] "
+                "for this call, or drop output_schema / structured_output — "
+                "the two features are mutually exclusive in the Gemini API."
+            )
+
         tools = self._build_tools_config(request)
         if tools:
             kwargs["tools"] = tools
@@ -432,32 +474,22 @@ class GoogleProvider(BaseProvider):
         if thinking:
             kwargs["thinking_config"] = thinking
 
-        # Structured output
+        # Structured output (grounding+SO conflict already checked above).
         if request.structured_output:
-            # The Gemini API does not support combining google_search grounding with
-            # response_mime_type="application/json". Doing so raises 400 INVALID_ARGUMENT.
-            if google_search_active:
-                warnings.warn(
-                    "Google Search grounding is incompatible with structured output "
-                    "(response_mime_type='application/json'). The structured output "
-                    "schema will be ignored for this request.",
-                    UserWarning,
-                    stacklevel=4,
-                )
+            schema = request.structured_output.schema
+            kwargs["response_mime_type"] = "application/json"
+            if isinstance(schema, dict):
+                kwargs["response_schema"] = schema
             else:
-                schema = request.structured_output.schema
-                kwargs["response_mime_type"] = "application/json"
-                if isinstance(schema, dict):
+                # Explicit model_json_schema() — don't rely on implicit SDK coercion
+                try:
+                    kwargs["response_schema"] = schema.model_json_schema()  # type: ignore[attr-defined]
+                except AttributeError as exc:
+                    _logger.debug(
+                        "model_json_schema() not available on %r, passing schema object directly: %s",
+                        schema, exc,
+                    )
                     kwargs["response_schema"] = schema
-                else:
-                    # Explicit model_json_schema() — don't rely on implicit SDK coercion
-                    try:
-                        kwargs["response_schema"] = schema.model_json_schema()  # type: ignore[attr-defined]
-                    except AttributeError as exc:
-                        _logger.debug(
-                            "model_json_schema() not available on %r, passing schema object directly: %s", schema, exc
-                        )
-                        kwargs["response_schema"] = schema
 
         return _gtypes.GenerateContentConfig(**kwargs)
 
@@ -530,6 +562,9 @@ class GoogleProvider(BaseProvider):
             )
 
         candidate = response.candidates[0]
+        _fn_call_idx = 0  # local counter for synthesising unique ids when
+                          # Gemini omits fc.id and the same function is
+                          # called multiple times in one turn.
         for part in candidate.content.parts:
             if hasattr(part, "text") and part.text:
                 content += part.text
@@ -541,9 +576,11 @@ class GoogleProvider(BaseProvider):
                 # Thinking models (e.g. gemini-3.1-*) embed an opaque thought_signature
                 # inside the function_call Part; reconstructing the Part from scratch
                 # loses that token and causes 400 INVALID_ARGUMENT on the next turn.
+                fc_id = _synthesize_fc_id(fc, _fn_call_idx)
+                _fn_call_idx += 1
                 tool_calls.append(
                     ToolCall(
-                        id=getattr(fc, "id", fc.name),
+                        id=fc_id,
                         name=fc.name,
                         arguments=dict(fc.args) if fc.args else {},
                         thought_signature=part,  # raw SDK Part — preserved verbatim

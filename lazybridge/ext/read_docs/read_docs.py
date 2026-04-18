@@ -116,6 +116,8 @@ def read_folder_docs(
     html_mode: str = "parsed",
     recursive: bool = False,
     output_format: str = "text",
+    *,
+    base_dir: str | None = None,
 ) -> str:
     """Read documents from a file or folder and return their text content.
 
@@ -153,6 +155,20 @@ def read_folder_docs(
     """
     target = Path(path).expanduser().resolve()
 
+    # When exposed as an agent tool, `path` is LLM-controlled and therefore
+    # untrusted. If the caller supplies `base_dir`, refuse any path that
+    # resolves outside that sandbox — this closes the path-traversal hole
+    # flagged as audit M11.
+    if base_dir is not None:
+        base = Path(base_dir).expanduser().resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            return (
+                f"[Error: refused — path {str(target)!r} escapes "
+                f"base_dir {str(base)!r}]"
+            )
+
     if not target.exists():
         return f"[Error: path not found — {path}]"
 
@@ -169,7 +185,16 @@ def read_folder_docs(
         if ".html" in exts:
             exts.add(".htm")
         glob_pattern = "**/*" if recursive else "*"
-        files = sorted(f for f in root.glob(glob_pattern) if f.is_file() and f.suffix.lower() in exts)
+        # Walk the tree without following symlinks (audit M12). Doing so
+        # closes symlink-loop hangs and prevents a symlink in the indexed
+        # folder from silently widening the read surface to other
+        # directories.
+        files = sorted(
+            f for f in root.glob(glob_pattern)
+            if f.is_file()
+            and not f.is_symlink()
+            and f.suffix.lower() in exts
+        )
         if not files:
             return f"[No documents found in '{path}' matching extensions: {extensions}]"
     else:

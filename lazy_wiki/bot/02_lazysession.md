@@ -19,7 +19,24 @@ LazySession(
     db: str | None = None,
     tracking: TrackLevel | str = TrackLevel.BASIC,
     console: bool = False,
+    exporters: list | None = None,
+    redact: Callable[[str, dict], dict] | None = None,
 )
+```
+
+**`redact`**: optional callable `(event_type, data) → data'` invoked
+before each event is stored / exported.  Use it to mask API keys, PII,
+or large blobs inside tool arguments and results.  A crashing
+redactor logs a warning and falls back to the original payload —
+events are never dropped.
+
+```python
+def _redact(event_type, data):
+    if event_type == "tool_call" and "arguments" in data:
+        data = {**data, "arguments": {k: "[REDACTED]" for k in data["arguments"]}}
+    return data
+
+sess = LazySession(redact=_redact)
 ```
 
 ```python

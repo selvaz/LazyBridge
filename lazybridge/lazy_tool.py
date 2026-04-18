@@ -139,6 +139,16 @@ class LazyTool:
     _compiled: ToolDefinition | None = field(default=None, repr=False)
     _is_pipeline_tool: bool = field(default=False, repr=False, compare=False)
     _pipeline: _PipelineConfig | None = field(default=None, repr=False, compare=False)
+    # Guards the compute-and-cache block in definition() so concurrent
+    # first-calls don't both run the schema builder (audit M3).
+    _compile_lock: Any = field(
+        default=None, repr=False, compare=False, init=False,
+    )
+
+    def __post_init__(self) -> None:
+        import threading as _threading
+        if self._compile_lock is None:
+            self._compile_lock = _threading.Lock()
 
     # ------------------------------------------------------------------
     # Factory: from plain Python function
@@ -233,19 +243,25 @@ class LazyTool:
         """Return the ToolDefinition for this tool (cached after first call)."""
         if self._compiled is not None:
             return self._compiled
-        builder = self.schema_builder or _DEFAULT_BUILDER
-        effective_llm = schema_llm or self.schema_llm
-        assert self.func is not None
-        defn = builder.build(
-            self.func,
-            name=self.name,
-            description=self.description,
-            strict=self.strict,
-            mode=self.schema_mode,
-            schema_llm=effective_llm,
-        )
-        self._compiled = defn
-        return defn
+        # Double-checked locking: concurrent first-callers must not both
+        # trigger the schema builder (which, in LLM / HYBRID modes, costs
+        # a real LLM call).  See audit M3.
+        with self._compile_lock:
+            if self._compiled is not None:
+                return self._compiled
+            builder = self.schema_builder or _DEFAULT_BUILDER
+            effective_llm = schema_llm or self.schema_llm
+            assert self.func is not None
+            defn = builder.build(
+                self.func,
+                name=self.name,
+                description=self.description,
+                strict=self.strict,
+                mode=self.schema_mode,
+                schema_llm=effective_llm,
+            )
+            self._compiled = defn
+            return defn
 
     def compile(self, schema_llm: Any = None) -> LazyTool:
         """Freeze schema and return self (for chaining)."""

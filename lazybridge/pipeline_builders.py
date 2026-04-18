@@ -115,10 +115,28 @@ def _save_checkpoint(store: Any, ckpt_key: str, step: int, state: _ChainState, t
 
 
 def _clear_checkpoint(store: Any, ckpt_key: str) -> None:
-    """Remove checkpoint after successful completion."""
+    """Remove checkpoint after successful completion.
+
+    Previously wrote ``None`` which left a tombstone entry behind and
+    polluted ``LazyStore`` introspection over long-running systems (ChatGPT
+    audit F4).  Now actually deletes the key when the store supports it.
+    """
     if store is None:
         return
-    store.write(ckpt_key, None)
+    if hasattr(store, "delete"):
+        try:
+            store.delete(ckpt_key)
+            return
+        except KeyError:
+            # Key already gone — treat as success.
+            return
+        except Exception as exc:
+            _logger.debug("Checkpoint delete failed, falling back to write(None): %s", exc)
+    # Legacy fallback for store backends that don't implement delete().
+    try:
+        store.write(ckpt_key, None)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +208,22 @@ def build_parallel_func(
             results = await asyncio.gather(*coros, return_exceptions=True)
             if not results:
                 return ""
+
+            # Surface timeouts / failures programmatically via the logger so
+            # operators can distinguish "participant raised" from "participant
+            # returned a string containing the word 'error'".  Audit M4.
+            failures = [
+                (getattr(p, "name", "?"), r)
+                for p, r in zip(parts, results)
+                if isinstance(r, BaseException)
+            ]
+            if failures:
+                _logger.warning(
+                    "LazyTool.parallel: %d/%d participant(s) failed: %s",
+                    len(failures),
+                    len(results),
+                    ", ".join(f"{name}={type(r).__name__}" for name, r in failures),
+                )
 
             def _to_text(r: Any) -> str:
                 if isinstance(r, BaseException):

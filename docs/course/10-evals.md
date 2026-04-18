@@ -74,7 +74,7 @@ Use another LLM to evaluate output quality:
 ```python
 from lazybridge.evals import llm_judge
 
-judge = LazyAgent("openai", model="gpt-4o-mini")
+judge = LazyAgent("openai", model="cheap")
 
 suite = EvalSuite(cases=[
     EvalCase(

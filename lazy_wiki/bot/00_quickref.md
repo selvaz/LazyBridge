@@ -1,5 +1,19 @@
 # LazyBridge — Complete API Quick Reference
 
+## Model tiers (provider-relative)
+
+| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
+| --- | --- | --- | --- | --- |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat |
+
+`LazyAgent(provider, model="<tier>")` resolves to the concrete model
+above; literal model names pass through; unknown tier strings pass
+through as literals.  Canonical matrix: `lazy_wiki/human/agents.md`.
+
 ## LazyAgent
 
 ```python
@@ -52,6 +66,7 @@ LazyAgent.loop(
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
     verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
+    tool_timeout: float | None = None,     # per-tool timeout in seconds; TimeoutError on breach
     **chat_kwargs,                         # forwarded to chat() on each step
                                            # tool_choice="parallel" runs multiple tool calls concurrently
 ) -> CompletionResponse
@@ -140,6 +155,10 @@ LazySession(
     db: str | None = None,                 # SQLite path; None = in-memory
     tracking: TrackLevel | str = TrackLevel.BASIC,  # OFF | BASIC | VERBOSE | FULL
     console: bool = False,                 # print events to stdout in real-time
+    exporters: list | None = None,         # event exporters (CallbackExporter, …)
+    redact: Callable[[str, dict], dict] | None = None,
+                                           # mask sensitive tool args/results in
+                                           # event payloads before store/export
 )
 
 LazySession.id: str

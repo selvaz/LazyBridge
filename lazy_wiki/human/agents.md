@@ -33,6 +33,55 @@ ai = LazyAgent(
 
 ---
 
+## Model tiers
+
+Instead of hard-coding preview / date-pinned model names that age
+quickly (`claude-opus-4-7`, `gemini-3.1-pro-preview`, …), pass a **tier
+string** as `model=` and let the provider pick the right concrete
+model for you. Five tiers cover the full price/capability spectrum:
+
+| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
+| --- | --- | --- | --- | --- |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+
+<!-- BEGIN GENERATED TIER MATRIX -->
+<!-- The table above is kept in sync with the provider adapters by
+     `tools/generate_tier_matrix.py`. Any edit should flow from that
+     script; a drift-guard test
+     (tests/unit/gui/test_audit_c2_tier_matrix.py) re-parses this
+     section and fails CI if the table diverges from the tables in
+     lazybridge.core.providers.*. -->
+<!-- END GENERATED TIER MATRIX -->
+
+```python
+LazyAgent("anthropic", model="top")       # claude-opus-4-7
+LazyAgent("chatgpt",   model="cheap")     # gpt-4o-mini
+LazyAgent("gemini",    model="medium")    # gemini-3.1-flash
+LazyAgent("deepseek",  model="super_cheap")  # deepseek-chat
+
+# Literal model names still work — nothing breaks if you prefer to pin.
+LazyAgent("anthropic", model="claude-opus-4-7")
+```
+
+Notes:
+
+- Tiers are **provider-relative**. `"medium"` on Anthropic is not the
+  same price or capability as `"medium"` on OpenAI — it's the middle
+  of each provider's own range. Consult each provider's pricing page
+  (linked from their docs) for concrete numbers.
+- Unknown tier strings pass through as literal model names, so a
+  future provider adding its own tier doesn't break cross-provider
+  code.
+- Where a provider has fewer distinct tiers than five (DeepSeek today),
+  multiple aliases point at the same concrete model — explicitly noted
+  in the table above.
+
+---
+
 ## chat() — single turn
 
 Send a message, get a response. No tool calls, no loop.
@@ -150,6 +199,24 @@ result = ai.loop(
 )
 print(result.content)
 ```
+
+### Per-tool timeout
+
+A misbehaving tool should never hang the whole loop. Pass
+`tool_timeout=` (seconds) and each tool invocation gets its own
+budget — breaches raise `TimeoutError` that the loop propagates:
+
+```python
+result = ai.loop(
+    "Find fresh news about fusion energy.",
+    tools=[search],
+    tool_timeout=15,   # any single tool call that exceeds 15s fails hard
+)
+```
+
+Sync tools run in a one-shot worker thread shut down with
+`wait=False`, so the caller gets control back even if the tool ignores
+the timeout. Async tools use `asyncio.wait_for` and cancel cleanly.
 
 ### Agent-level vs call-level tools
 
@@ -412,6 +479,35 @@ print(resp.stop_reason)
 
 ---
 
+## Inspect and test in a browser — `.gui()`
+
+After `import lazybridge.gui`, every `LazyAgent` gains a `.gui()`
+method that opens a local web tab for live inspection and testing:
+
+```python
+import lazybridge.gui
+
+ai.gui()                          # returns URL, opens browser tab
+```
+
+The panel shows the agent's name, provider/model, and system prompt,
+and lets you:
+
+- Edit the `system` prompt live — takes effect on the next call.
+- Switch the `model` (including tier aliases like `"cheap"`).
+- Toggle which session-scoped tools the agent has access to.
+- Run `chat` / `loop` / `text` against the real provider from a
+  textarea; results stream back with token counts and cost.
+- Export the current state as a Python `LazyAgent(...)` snippet you
+  can paste back into code.
+
+The same tab hosts panels for `LazyTool`, `LazySession`, `LazyRouter`,
+`LazyStore`, and `Memory` — call `.gui()` on any of them and the new
+panel appears in the sidebar. Full reference:
+[`lazybridge/gui/README.md`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/gui/README.md).
+
+---
+
 ## Async
 
 Every method has an async counterpart:
@@ -483,3 +579,32 @@ supervisor = SupervisorAgent(
 ```
 
 Both classes work everywhere a LazyAgent works: chains, parallel, as_tool(), verify, LazyContext.from_agent().
+
+### Optional browser UI — `lazybridge.gui.panel_input_fn`
+
+Prefer a browser tab over stdin? Swap the default `input_fn` for the
+one provided by the `lazybridge.gui` module. The human prompt appears
+as a panel in the same shared GUI tab as your agents and tools:
+
+```python
+from lazybridge import SupervisorAgent
+from lazybridge.gui import panel_input_fn
+
+fn = panel_input_fn(name="reviewer")          # shared-server panel
+supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
+# ... run the pipeline ...
+fn.panel.close()
+```
+
+The legacy dedicated-port entry point at `lazybridge.gui.human.web_input_fn`
+still works (for users who want *only* human input without the rest
+of the GUI) but emits a `DeprecationWarning` on import; prefer
+`panel_input_fn` for new code.
+```
+
+The page renders each prompt with the previous agent's output, optional
+quick-command chips, and a textarea. Ctrl/⌘-Enter submits. Works the same
+way for `HumanAgent`. Full API and security notes:
+[`lazybridge/gui/human/README.md`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/gui/human/README.md).
+Runnable pipeline:
+[`examples/human_gui_demo.py`](https://github.com/selvaz/LazyBridge/blob/main/examples/human_gui_demo.py).

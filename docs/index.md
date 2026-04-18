@@ -35,10 +35,20 @@ LazyAgent("deepseek")
 | Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
 | DeepSeek | `"deepseek"` | deepseek-chat |
 
+Or pick a **tier** — `top`, `expensive`, `medium`, `cheap`,
+`super_cheap` — and let the provider choose the concrete model:
+
+```python
+LazyAgent("anthropic", model="cheap")     # claude-haiku-4-5
+LazyAgent("chatgpt",   model="medium")    # gpt-4o
+```
+
+Full matrix: [Model tiers](agents.md#model-tiers).
+
 ## Next steps
 
 - [Getting Started](quickstart.md) --- installation and first steps
-- [Agents](agents.md) --- chat, tools, streaming, structured output
+- [Agents](agents.md) --- chat, tools, streaming, structured output, `.gui()`
 - [Sessions & Pipelines](sessions.md) --- multi-agent orchestration
 - [API Reference](reference.md) --- complete API surface
 - [Troubleshooting](troubleshooting.md) --- common errors and fixes

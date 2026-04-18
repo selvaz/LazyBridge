@@ -104,6 +104,21 @@ class OpenAIProvider(BaseProvider):
     """
 
     default_model = "gpt-5.4"
+
+    # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
+    _TIER_ALIASES = {
+        "top":         "gpt-5.4",
+        "expensive":   "gpt-5",
+        "medium":      "gpt-4o",
+        "cheap":       "gpt-4o-mini",
+        "super_cheap": "gpt-3.5-turbo",
+    }
+    _FALLBACKS = {
+        "gpt-5.4":      ["gpt-5", "gpt-4o"],
+        "gpt-5":        ["gpt-4o", "gpt-4-turbo"],
+        "gpt-4o":       ["gpt-4-turbo", "gpt-3.5-turbo"],
+        "gpt-4o-mini":  ["gpt-3.5-turbo"],
+    }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {
             NativeTool.WEB_SEARCH,
@@ -743,7 +758,22 @@ class OpenAIProvider(BaseProvider):
 
         # For Pydantic schema streaming, instruct the model to output JSON.
         # (beta.chat.completions.parse() is not available in streaming mode.)
+        # The advertised schema is lost on this path — the model emits some
+        # JSON, and structured.apply_structured_validation re-validates
+        # against our subset validator on the final chunk.  Warn the
+        # caller so this "best-effort" behaviour isn't a surprise
+        # (audit M13).
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
+            import warnings as _warnings
+
+            _warnings.warn(
+                "OpenAI streaming with a Pydantic output_schema is best-effort: "
+                "the schema is enforced at validation time, not by the model's "
+                "response_format. Expect occasional parse/validation failures on "
+                "long completions.  Use stream=False for strict Pydantic parsing.",
+                UserWarning,
+                stacklevel=4,
+            )
             params["response_format"] = {"type": "json_object"}
 
         text_accum = ""
@@ -790,9 +820,27 @@ class OpenAIProvider(BaseProvider):
                     from lazybridge.core.structured import apply_structured_validation
 
                     apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-        if final_chunk is not None:
-            final_chunk.usage = final_chunk.usage or final_usage
-            yield final_chunk
+        if final_chunk is None:
+            # Stream ended without a finish_reason (interrupted / truncated).
+            # Emit a best-effort final chunk so consumers that depend on the
+            # is_final marker (usage, tool_calls, structured-output validation)
+            # don't hang forever waiting for it.
+            tool_calls = [
+                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+                for v in tool_call_accum.values()
+            ]
+            final_chunk = StreamChunk(
+                stop_reason="incomplete",
+                tool_calls=tool_calls,
+                usage=final_usage,
+                is_final=True,
+            )
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+        final_chunk.usage = final_chunk.usage or final_usage
+        yield final_chunk
 
     # ------------------------------------------------------------------
     # Async API
@@ -900,6 +948,22 @@ class OpenAIProvider(BaseProvider):
                     from lazybridge.core.structured import apply_structured_validation
 
                     apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-        if final_chunk is not None:
-            final_chunk.usage = final_chunk.usage or final_usage
-            yield final_chunk
+        if final_chunk is None:
+            # Interrupted / truncated async stream — emit a best-effort final
+            # chunk so awaiters don't hang.
+            tool_calls = [
+                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+                for v in tool_call_accum.values()
+            ]
+            final_chunk = StreamChunk(
+                stop_reason="incomplete",
+                tool_calls=tool_calls,
+                usage=final_usage,
+                is_final=True,
+            )
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+        final_chunk.usage = final_chunk.usage or final_usage
+        yield final_chunk

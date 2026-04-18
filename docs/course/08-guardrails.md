@@ -94,7 +94,7 @@ Use another LLM to judge content:
 ```python
 from lazybridge import LLMGuard
 
-moderator = LazyAgent("openai", model="gpt-4o-mini")
+moderator = LazyAgent("openai", model="cheap")
 guard = LLMGuard(
     moderator,
     policy="Block any request related to weapons, illegal activity, or self-harm.",

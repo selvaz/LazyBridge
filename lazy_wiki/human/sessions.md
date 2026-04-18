@@ -354,4 +354,36 @@ events = []
 sess = LazySession(exporters=[CallbackExporter(events.append)])
 ```
 
+## Redacting sensitive tool payloads
+
+Tool arguments and results flow through the event log. Pass a
+`redact=` callable to mask API keys, PII, or large blobs before they
+reach the SQLite store, the console, or any registered exporter:
+
+```python
+def _redact(event_type: str, data: dict) -> dict:
+    if event_type == "tool_call" and "arguments" in data:
+        data = {**data, "arguments": {k: "[REDACTED]" for k in data["arguments"]}}
+    return data
+
+sess = LazySession(redact=_redact)
+```
+
+A redactor that raises is swallowed with a warning — the original
+payload is used, so events are never dropped silently.
+
+## Inspecting a session in a browser — `.gui()`
+
+After `import lazybridge.gui`, `LazySession` gets a `.gui()` method
+that opens a sidebar showing every agent, tool, and store-key in the
+session plus a live event timeline on any pipeline the session
+contains:
+
+```python
+import lazybridge.gui
+sess.gui()   # opens a browser tab on 127.0.0.1:<ephemeral>
+```
+
+Details and API: [`lazybridge/gui/README.md`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/gui/README.md).
+
 See the API reference for all available exporters.

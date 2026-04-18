@@ -38,6 +38,7 @@ Quick start::
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import uuid
@@ -380,20 +381,25 @@ class LazyAgent:
     # ------------------------------------------------------------------
 
     def _stream_and_track(self, gen: Iterator[StreamChunk]) -> Iterator[StreamChunk]:
+        # Reset and accumulate inside the loop so `_last_output` always
+        # reflects the bytes the caller actually received — even if the
+        # caller breaks out of the iterator early.
+        self._last_output = ""
         parts: list[str] = []
         for chunk in gen:
             if chunk.delta is not None:
                 parts.append(chunk.delta)
+                self._last_output = "".join(parts)
             yield chunk
-        self._last_output = "".join(parts)
 
     async def _astream_and_track(self, gen: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        self._last_output = ""
         parts: list[str] = []
         async for chunk in gen:
             if chunk.delta is not None:
                 parts.append(chunk.delta)
+                self._last_output = "".join(parts)
             yield chunk
-        self._last_output = "".join(parts)
 
     # ------------------------------------------------------------------
     # Shared helpers for chat/achat and loop/aloop (sync/async dedup)
@@ -781,8 +787,10 @@ class LazyAgent:
             return self._stream_and_track(self._executor.stream(request))
 
         resp = self._executor.execute(request)
-        self._record_response(resp)
+        # Run the output guard BEFORE recording so blocked content does
+        # not leak into Event.MODEL_RESPONSE payloads or exporters.
         self._run_output_guard(guard, resp)
+        self._record_response(resp)
         return resp
 
     @overload
@@ -864,8 +872,9 @@ class LazyAgent:
             return self._astream_and_track(self._executor.astream(request))
 
         resp = await self._executor.aexecute(request)
-        self._record_response(resp)
+        # Output guard runs before _record_response — see sync path above.
         await self._arun_output_guard(guard, resp)
+        self._record_response(resp)
         return resp
 
     # ------------------------------------------------------------------
@@ -884,6 +893,7 @@ class LazyAgent:
         verify: Verifier | Callable[[str, str], str] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
+        tool_timeout: float | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -946,13 +956,13 @@ class LazyAgent:
                     val = self.chat(convo, tools=t, native_tools=nt, **kw)
                 elif tag == self._EXEC_TOOL:
                     _, tc, registry, runner = action
-                    val = self._execute_tool(tc, registry, runner)
+                    val = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
                 elif tag == self._EXEC_TOOLS_BATCH:
                     _, calls, registry, runner = action
                     val = []
                     for tc in calls:
                         try:
-                            r = self._execute_tool(tc, registry, runner)
+                            r = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
                             val.append((r, None))
                         except Exception as exc:
                             val.append((None, exc))
@@ -983,6 +993,7 @@ class LazyAgent:
         verify: Verifier | Callable[..., Any] | None = None,
         max_verify: int = 3,
         guard: Guard | None = None,
+        tool_timeout: float | None = None,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -1023,14 +1034,13 @@ class LazyAgent:
                     val = await self.achat(convo, tools=t, native_tools=nt, **kw)
                 elif tag == self._EXEC_TOOL:
                     _, tc, registry, runner = action
-                    val = await self._aexecute_tool(tc, registry, runner)
+                    val = await self._aexecute_tool(tc, registry, runner, tool_timeout=tool_timeout)
                 elif tag == self._EXEC_TOOLS_BATCH:
                     _, calls, registry, runner = action
-                    import asyncio
 
-                    async def _run_one(c, _reg=registry, _run=runner):
+                    async def _run_one(c, _reg=registry, _run=runner, _tt=tool_timeout):
                         try:
-                            r = await self._aexecute_tool(c, _reg, _run)
+                            r = await self._aexecute_tool(c, _reg, _run, tool_timeout=_tt)
                             return (r, None)
                         except Exception as exc:
                             return (None, exc)
@@ -1066,31 +1076,78 @@ class LazyAgent:
         call: ToolCall,
         registry: dict[str, LazyTool],
         runner: Callable | None,
+        *,
+        tool_timeout: float | None = None,
     ) -> Any:
-        # Registry lookup first (LazyTool with a known callable)
-        if call.name in registry:
-            return registry[call.name].run(call.arguments, parent=self)
-        # Fallback to user-provided runner (e.g. native tool handling)
-        if runner:
-            return runner(call.name, call.arguments)
-        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
+        """Run a tool call, optionally bounded by ``tool_timeout``.
+
+        When ``tool_timeout`` is set, the call runs in a worker thread and
+        times out cleanly with :class:`TimeoutError` rather than hanging
+        the loop indefinitely (ChatGPT audit F5).
+        """
+        def _call() -> Any:
+            # Registry lookup first (LazyTool with a known callable)
+            if call.name in registry:
+                return registry[call.name].run(call.arguments, parent=self)
+            # Fallback to user-provided runner (e.g. native tool handling)
+            if runner:
+                return runner(call.name, call.arguments)
+            raise RuntimeError(
+                f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner."
+            )
+
+        if tool_timeout is None or tool_timeout <= 0:
+            return _call()
+
+        import concurrent.futures as _futures
+        # Can't use `with ThreadPoolExecutor(...)` — __exit__ waits for
+        # the worker to finish, negating the timeout. Create the pool
+        # manually and call shutdown(wait=False) so the runaway thread
+        # doesn't block the caller. The worker thread may leak (Python
+        # has no thread-kill primitive); this is the documented trade-off.
+        pool = _futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(_call)
+        try:
+            return future.result(timeout=tool_timeout)
+        except _futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(
+                f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s"
+            ) from exc
+        finally:
+            pool.shutdown(wait=False)
 
     async def _aexecute_tool(
         self,
         call: ToolCall,
         registry: dict[str, LazyTool],
         runner: Callable | None,
+        *,
+        tool_timeout: float | None = None,
     ) -> Any:
-        # Registry lookup first — LazyTool.arun() is always a coroutine
-        if call.name in registry:
-            return await registry[call.name].arun(call.arguments, parent=self)
-        # Fallback: runner may be sync or async
-        if runner:
-            result = runner(call.name, call.arguments)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-        raise RuntimeError(f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner.")
+        """Async counterpart of :meth:`_execute_tool` with ``tool_timeout`` support."""
+        async def _acall() -> Any:
+            # Registry lookup first — LazyTool.arun() is always a coroutine
+            if call.name in registry:
+                return await registry[call.name].arun(call.arguments, parent=self)
+            # Fallback: runner may be sync or async
+            if runner:
+                result = runner(call.name, call.arguments)
+                if inspect.isawaitable(result):
+                    return await result
+                return result
+            raise RuntimeError(
+                f"No handler for tool '{call.name}'. Add a LazyTool with that name or provide tool_runner."
+            )
+
+        if tool_timeout is None or tool_timeout <= 0:
+            return await _acall()
+        try:
+            return await asyncio.wait_for(_acall(), timeout=tool_timeout)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s"
+            ) from exc
 
     # ------------------------------------------------------------------
     # as_tool() — expose this agent as a LazyTool

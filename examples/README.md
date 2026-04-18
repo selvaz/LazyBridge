@@ -131,3 +131,56 @@ export GOOGLE_API_KEY=...
 python examples/write_paper.py
 # Output → artifacts/lazybridge_paper.md
 ```
+
+---
+
+## Supervised Pipeline — human-in-the-loop with SupervisorAgent
+
+`supervised_pipeline.py` wires `researcher → SupervisorAgent → writer` via `LazyTool.chain(...)`. The supervisor is driven by a scripted `input_fn` that replays three REPL commands (`search(...)`, `retry researcher: ...`, `continue`), so the script runs non-interactively under CI. Remove the `input_fn=` argument to get the real terminal REPL.
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/supervised_pipeline.py
+```
+
+Reference: [`docs/course/13-human-in-the-loop.md`](../docs/course/13-human-in-the-loop.md) · [`lazy_wiki/bot/13_supervisor.md`](../lazy_wiki/bot/13_supervisor.md).
+
+---
+
+## Human-in-the-loop with a browser UI
+
+`human_gui_demo.py` is the same `researcher → supervisor → writer` chain
+as `supervised_pipeline.py`, except the supervisor's REPL runs in a local
+browser tab instead of stdin. Stdlib-only (no extra `pip install`).
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/human_gui_demo.py
+```
+
+The script prints a `http://127.0.0.1:<port>/?t=<token>` URL and opens the
+page automatically. Each REPL prompt renders on the page with the previous
+output and a textarea; Ctrl/⌘-Enter submits. Details:
+[`lazybridge/gui/human/README.md`](../lazybridge/gui/human/README.md).
+
+---
+
+## Shared GUI for every LazyBridge object
+
+`gui_demo.py` opens a single browser tab that hosts live panels for
+every `LazyAgent`, `LazyTool`, and `LazySession` you call `.gui()` on.
+Inspect state, edit system prompts, run chat/loop/text against the
+real provider, invoke tools from a schema-generated form.
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/gui_demo.py
+```
+
+Full API: [`lazybridge/gui/README.md`](../lazybridge/gui/README.md).
