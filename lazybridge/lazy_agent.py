@@ -1450,7 +1450,7 @@ class LazyAgent:
 
         task = messages  # keep original task for judge context
         _verify_log: list[str] = []
-        for attempt in range(max_verify if verify is not None else 1):
+        for _attempt in range(max_verify if verify is not None else 1):
             resp = self.chat(messages, output_schema=effective_schema, **kwargs)
             if not isinstance(resp, CompletionResponse):
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
@@ -1545,7 +1545,7 @@ class LazyAgent:
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
 
         task = messages
-        for attempt in range(max_verify if verify is not None else 1):
+        for _attempt in range(max_verify if verify is not None else 1):
             resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
             if not isinstance(resp, CompletionResponse):
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
