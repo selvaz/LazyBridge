@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from lazybridge.ext.human_gui.templates import PAGE_TEMPLATE
+from lazybridge.gui.human.templates import PAGE_TEMPLATE
 
 _logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ def _make_handler(server: WebInputServer) -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
         # Suppress default stderr access log; route to our logger instead.
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-            _logger.debug("human_gui " + format, *args)
+            _logger.debug("gui.human " + format, *args)
 
         def _check_token(self) -> bool:
             # Token can be in query string (?t=...) or X-Token header.

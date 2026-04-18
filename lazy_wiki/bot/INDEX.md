@@ -18,7 +18,7 @@
 | tools.read_docs | 12_tools.md | Multi-format document reader — .txt .md .pdf .docx .html | A, B |
 | HumanAgent | 13_supervisor.md | Human-in-the-loop participant: approval, dialogue, verify, timeouts | A, B, C |
 | SupervisorAgent | 13_supervisor.md | Human REPL with superpowers: continue / retry \<agent\> / store \<key\> / \<tool\>(args) | A, B, C |
-| ext.human_gui | 13_supervisor.md | Optional browser UI for HumanAgent / SupervisorAgent — stdlib-only | A, B, C |
+| gui.human | 13_supervisor.md | Optional browser UI for HumanAgent / SupervisorAgent — stdlib-only | A, B, C |
 
 ## Communication rules (critical)
 

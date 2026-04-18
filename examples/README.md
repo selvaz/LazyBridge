@@ -165,4 +165,4 @@ python examples/human_gui_demo.py
 The script prints a `http://127.0.0.1:<port>/?t=<token>` URL and opens the
 page automatically. Each REPL prompt renders on the page with the previous
 output and a textarea; Ctrl/⌘-Enter submits. Details:
-[`lazybridge/ext/human_gui/README.md`](../lazybridge/ext/human_gui/README.md).
+[`lazybridge/gui/human/README.md`](../lazybridge/gui/human/README.md).

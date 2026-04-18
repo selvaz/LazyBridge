@@ -9,7 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- `lazybridge.ext.human_gui` — optional, **stdlib-only** browser UI for `HumanAgent` and `SupervisorAgent`. Exposes `WebInputServer` and a one-call `web_input_fn()` factory that returns a drop-in `input_fn`. Each REPL prompt renders on a local `127.0.0.1:<ephemeral>` page with the previous agent output, optional quick-command chips, and a submit textarea; Ctrl/⌘-Enter submits. Token-gated (random 24-byte urlsafe) and localhost-bound. Covered by 14 unit tests in `tests/unit/ext/human_gui/test_web_input.py`, including an end-to-end integration with `SupervisorAgent`.
+- `lazybridge.gui.human` — optional, **stdlib-only** browser UI for `HumanAgent` and `SupervisorAgent`. Lives under the new `lazybridge.gui` umbrella (reserved for future per-object GUIs: agent, tool, pipeline, session). Exposes `WebInputServer` and a one-call `web_input_fn()` factory that returns a drop-in `input_fn`. Each REPL prompt renders on a local `127.0.0.1:<ephemeral>` page with the previous agent output, optional quick-command chips, and a submit textarea; Ctrl/⌘-Enter submits. Token-gated (random 24-byte urlsafe) and localhost-bound. Covered by 14 unit tests in `tests/unit/gui/human/test_web_input.py`, including an end-to-end integration with `SupervisorAgent`.
 - `examples/human_gui_demo.py` — runnable `researcher → SupervisorAgent → writer` pipeline using the browser UI.
 
 ### Documentation
@@ -19,7 +19,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `lazy_wiki/human/quickstart.md` — cross-reference rows for human-in-the-loop supervision in both the "Next steps" and "Choosing the right pattern" tables.
 - `mkdocs.yml` — new Guide nav entry "Human-in-the-Loop" pointing at the existing module 13 walkthrough.
 - `examples/supervised_pipeline.py` — runnable, non-interactive demo wiring `researcher → SupervisorAgent → writer` via scripted `input_fn`, exercising `continue`, `retry`, and tool-call commands.
-- `lazybridge/ext/human_gui/README.md` — full API reference for the new browser UI extension; cross-linked from `README.md`, `lazy_wiki/human/agents.md`, and `lazy_wiki/bot/13_supervisor.md`.
+- `lazybridge/gui/human/README.md` — full API reference for the new browser UI extension; cross-linked from `README.md`, `lazy_wiki/human/agents.md`, and `lazy_wiki/bot/13_supervisor.md`.
 
 ### Added (prior, now surfaced)
 - `HumanAgent` and `SupervisorAgent` (`lazybridge/human.py`, `lazybridge/supervisor.py`) — human-in-the-loop participants that slot into chains, parallel tools, `as_tool()`, and `verify=`. Exported from `lazybridge` top-level.

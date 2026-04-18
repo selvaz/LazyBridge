@@ -1,4 +1,4 @@
-"""Tests for lazybridge.ext.human_gui.WebInputServer and web_input_fn."""
+"""Tests for lazybridge.gui.human.WebInputServer and web_input_fn."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import urllib.request
 
 import pytest
 
-from lazybridge.ext.human_gui import WebInputServer, web_input_fn
+from lazybridge.gui.human import WebInputServer, web_input_fn
 
 
 @pytest.fixture

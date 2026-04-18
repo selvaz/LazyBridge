@@ -1,4 +1,4 @@
-"""lazybridge.ext.human_gui — Optional browser-based I/O for HumanAgent / SupervisorAgent.
+"""lazybridge.gui.human — Optional browser-based I/O for HumanAgent / SupervisorAgent.
 
 Stdlib-only. Provides a drop-in ``input_fn`` that opens a local web page
 instead of reading from stdin, so a human can review the previous output,
@@ -8,7 +8,7 @@ response from the browser.
 Quick start::
 
     from lazybridge import SupervisorAgent, LazyTool
-    from lazybridge.ext.human_gui import web_input_fn
+    from lazybridge.gui.human import web_input_fn
 
     fn = web_input_fn()                              # opens a browser tab
     supervisor = SupervisorAgent(name="sup", input_fn=fn)
@@ -25,6 +25,6 @@ random token on every request.  It is intended for local developer use,
 not for production exposure.
 """
 
-from lazybridge.ext.human_gui.server import WebInputServer, web_input_fn
+from lazybridge.gui.human.server import WebInputServer, web_input_fn
 
 __all__ = ["WebInputServer", "web_input_fn"]

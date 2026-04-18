@@ -103,10 +103,10 @@ async def ws_input(prompt: str) -> str:
 human = HumanAgent(name="reviewer", ainput_fn=ws_input)
 ```
 
-### Optional: browser UI via `lazybridge.ext.human_gui`
+### Optional: browser UI via `lazybridge.gui.human`
 
 ```python
-from lazybridge.ext.human_gui import web_input_fn
+from lazybridge.gui.human import web_input_fn
 
 fn = web_input_fn()  # opens a local tab on 127.0.0.1:<ephemeral>
 human = HumanAgent(name="reviewer", input_fn=fn)
@@ -116,7 +116,7 @@ fn.server.close()
 
 Stdlib-only (http.server, threading, queue, webbrowser, secrets). 127.0.0.1-bound,
 random-token-gated. Supports `ainput_fn` via `server.ainput_fn`.
-Details: [`lazybridge/ext/human_gui/README.md`](../../lazybridge/ext/human_gui/README.md).
+Details: [`lazybridge/gui/human/README.md`](../../lazybridge/gui/human/README.md).
 
 ---
 
@@ -262,4 +262,4 @@ Every REPL prompt consumes one line from `inputs`. This pattern lets the same fi
 - Tool wrapping (`as_tool()`): [`03_lazytool.md`](03_lazytool.md)
 - Runnable example: [`examples/supervised_pipeline.py`](../../examples/supervised_pipeline.py)
 - Scripted-input test pattern: `tests/unit/test_human.py:179–268`
-- Browser-based I/O (optional): [`lazybridge/ext/human_gui/README.md`](../../lazybridge/ext/human_gui/README.md), runnable via [`examples/human_gui_demo.py`](../../examples/human_gui_demo.py)
+- Browser-based I/O (optional): [`lazybridge/gui/human/README.md`](../../lazybridge/gui/human/README.md), runnable via [`examples/human_gui_demo.py`](../../examples/human_gui_demo.py)

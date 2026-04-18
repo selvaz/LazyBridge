@@ -1,6 +1,6 @@
 """Human-in-the-loop with a browser UI instead of stdin.
 
-Wires ``lazybridge.ext.human_gui`` into a ``researcher → SupervisorAgent → writer``
+Wires ``lazybridge.gui.human`` into a ``researcher → SupervisorAgent → writer``
 chain. The supervisor's REPL runs entirely in a browser tab opened on a
 local ephemeral port — no TTY required, no extra dependencies.
 
@@ -24,7 +24,7 @@ Close the tab or interrupt with Ctrl+C to stop.
 from __future__ import annotations
 
 from lazybridge import LazyAgent, LazySession, LazyTool, SupervisorAgent
-from lazybridge.ext.human_gui import web_input_fn
+from lazybridge.gui.human import web_input_fn
 
 
 def search(query: str) -> str:

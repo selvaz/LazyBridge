@@ -1,4 +1,4 @@
-# human_gui — Browser-based input for HumanAgent / SupervisorAgent
+# gui.human — Browser-based input for HumanAgent / SupervisorAgent
 
 Stdlib-only, opt-in, zero extra dependencies. Provides a drop-in `input_fn`
 that opens a local web page instead of reading from stdin, so a human can
@@ -12,7 +12,7 @@ accept an `input_fn=` callback — this module just supplies a nicer one.
 
 ```python
 from lazybridge import SupervisorAgent, LazyTool, LazySession, LazyAgent
-from lazybridge.ext.human_gui import web_input_fn
+from lazybridge.gui.human import web_input_fn
 
 sess = LazySession()
 researcher = LazyAgent("anthropic", name="researcher", session=sess)
@@ -45,7 +45,7 @@ tab polls `/prompt` every 500 ms and refreshes when a new prompt arrives.
 ## Public API
 
 ```python
-from lazybridge.ext.human_gui import WebInputServer, web_input_fn
+from lazybridge.gui.human import WebInputServer, web_input_fn
 
 WebInputServer(
     *,
@@ -83,4 +83,4 @@ This is a **developer tool**. Do not expose the server outside localhost.
 
 The GUI is optional; CI runs `SupervisorAgent` with a scripted `input_fn`
 (see `tests/unit/test_human.py`). The web server itself has its own
-integration tests under `tests/unit/ext/human_gui/test_web_input.py`.
+integration tests under `tests/unit/gui/human/test_web_input.py`.
