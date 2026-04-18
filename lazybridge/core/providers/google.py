@@ -77,6 +77,21 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 }
 
 
+def _synthesize_fc_id(function_call: Any, index: int) -> str:
+    """Return a non-colliding id for a Gemini ``function_call`` part.
+
+    Gemini may omit ``fc.id`` — in which case the previous implementation
+    fell back to ``fc.name``, causing collisions when the model called
+    the same function multiple times in a single turn.  We synthesise
+    ``"{name}-{index}"`` on the missing-id path so every tool call in a
+    turn has a unique identifier.
+    """
+    fc_id = getattr(function_call, "id", None)
+    if fc_id:
+        return str(fc_id)
+    return f"{function_call.name}-{index}"
+
+
 class GoogleProvider(BaseProvider):
     """Google Gemini provider.
 
@@ -530,6 +545,9 @@ class GoogleProvider(BaseProvider):
             )
 
         candidate = response.candidates[0]
+        _fn_call_idx = 0  # local counter for synthesising unique ids when
+                          # Gemini omits fc.id and the same function is
+                          # called multiple times in one turn.
         for part in candidate.content.parts:
             if hasattr(part, "text") and part.text:
                 content += part.text
@@ -541,9 +559,11 @@ class GoogleProvider(BaseProvider):
                 # Thinking models (e.g. gemini-3.1-*) embed an opaque thought_signature
                 # inside the function_call Part; reconstructing the Part from scratch
                 # loses that token and causes 400 INVALID_ARGUMENT on the next turn.
+                fc_id = _synthesize_fc_id(fc, _fn_call_idx)
+                _fn_call_idx += 1
                 tool_calls.append(
                     ToolCall(
-                        id=getattr(fc, "id", fc.name),
+                        id=fc_id,
                         name=fc.name,
                         arguments=dict(fc.args) if fc.args else {},
                         thought_signature=part,  # raw SDK Part — preserved verbatim

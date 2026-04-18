@@ -12,6 +12,9 @@ Exposes three things in the browser:
 
 from __future__ import annotations
 
+import threading
+import time
+import uuid
 from typing import Any
 
 from lazybridge.gui._panel import Panel
@@ -27,6 +30,12 @@ class AgentPanel(Panel):
         #: Explicit tool-scope override. When ``None``, tools are drawn
         #: from the enclosing :class:`LazySession` at render time.
         self._available_tools_override = available_tools
+        # Background test-run bookkeeping. A test that hits the real
+        # provider must NOT block the HTTP handler thread (audit H5);
+        # actions kick off a worker thread and surface progress through
+        # ``render_state()`` + SSE notifications.
+        self._test_lock = threading.Lock()
+        self._last_test: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Panel protocol
@@ -39,7 +48,9 @@ class AgentPanel(Panel):
     @property
     def label(self) -> str:
         prov = getattr(self._agent, "_provider_name", "?")
-        return f"{self._agent.name} · {prov}"
+        running = self._is_running()
+        marker = " · running" if running else ""
+        return f"{self._agent.name} · {prov}{marker}"
 
     # ------------------------------------------------------------------
 
@@ -105,7 +116,7 @@ class AgentPanel(Panel):
         agent = self._agent
         tools = [self._tool_descriptor(t) for t in (getattr(agent, "tools", None) or [])]
         available = [self._tool_descriptor(t) for t in self._available_tools()]
-        return {
+        state: dict[str, Any] = {
             "name": agent.name,
             "description": getattr(agent, "description", None) or "",
             "provider": getattr(agent, "_provider_name", "?"),
@@ -119,6 +130,10 @@ class AgentPanel(Panel):
             "session_id": getattr(getattr(agent, "session", None), "id", None),
             "last_output": self._last_output_preview(),
         }
+        with self._test_lock:
+            if self._last_test is not None:
+                state["last_test"] = dict(self._last_test)
+        return state
 
     # ------------------------------------------------------------------
 
@@ -202,12 +217,90 @@ class AgentPanel(Panel):
                 raise ValueError("'message' is required")
             if mode not in {"chat", "loop", "text"}:
                 raise ValueError(f"unsupported mode {mode!r} — choose chat | loop | text")
-            return self._run_test(mode, message)
+            sync = bool(args.get("sync", False))
+            if sync:
+                # Synchronous path preserved for programmatic callers and
+                # unit tests that want the result inline.
+                return self._run_test(mode, message)
+            if self._is_running():
+                raise ValueError("A test is already in flight — wait or call clear_test first")
+            return self._start_test(mode, message)
+
+        if action == "clear_test":
+            with self._test_lock:
+                self._last_test = None
+            self.notify()
+            return {"ok": True}
 
         if action == "export_python":
             return {"snippet": self._export_python()}
 
         return super().handle_action(action, args)
+
+    # ------------------------------------------------------------------
+    # Background test execution (audit H5)
+    # ------------------------------------------------------------------
+
+    def _is_running(self) -> bool:
+        with self._test_lock:
+            return self._last_test is not None and self._last_test.get("status") == "running"
+
+    def _start_test(self, mode: str, message: str) -> dict[str, Any]:
+        run_id = str(uuid.uuid4())[:8]
+        with self._test_lock:
+            self._last_test = {
+                "run_id": run_id,
+                "status": "running",
+                "mode": mode,
+                "message": message,
+                "started_at": time.time(),
+                "finished_at": None,
+                "content": None,
+                "parsed": None,
+                "stop_reason": None,
+                "model": None,
+                "usage": {},
+                "tool_calls": [],
+                "error": None,
+            }
+        # Notify subscribers so the sidebar picks up the "· running" label
+        # and the active panel re-renders.
+        self.notify()
+        t = threading.Thread(
+            target=self._test_in_thread,
+            name=f"lazybridge-gui-agenttest-{self._agent.name}-{run_id}",
+            daemon=True,
+            args=(run_id, mode, message),
+        )
+        t.start()
+        return {"started": True, "run_id": run_id}
+
+    def _test_in_thread(self, run_id: str, mode: str, message: str) -> None:
+        try:
+            payload = self._run_test(mode, message)
+            status = "done"
+            error = None
+        except Exception as exc:
+            payload = {}
+            status = "error"
+            error = f"{type(exc).__name__}: {exc}"
+        with self._test_lock:
+            if self._last_test is None or self._last_test.get("run_id") != run_id:
+                return  # a clear_test or a newer run happened — drop result
+            self._last_test.update(
+                {
+                    "status": status,
+                    "finished_at": time.time(),
+                    "content": payload.get("content"),
+                    "parsed": payload.get("parsed"),
+                    "stop_reason": payload.get("stop_reason"),
+                    "model": payload.get("model"),
+                    "usage": payload.get("usage", {}),
+                    "tool_calls": payload.get("tool_calls", []),
+                    "error": error,
+                }
+            )
+        self.notify()
 
     # ------------------------------------------------------------------
 

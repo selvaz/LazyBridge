@@ -380,20 +380,25 @@ class LazyAgent:
     # ------------------------------------------------------------------
 
     def _stream_and_track(self, gen: Iterator[StreamChunk]) -> Iterator[StreamChunk]:
+        # Reset and accumulate inside the loop so `_last_output` always
+        # reflects the bytes the caller actually received — even if the
+        # caller breaks out of the iterator early.
+        self._last_output = ""
         parts: list[str] = []
         for chunk in gen:
             if chunk.delta is not None:
                 parts.append(chunk.delta)
+                self._last_output = "".join(parts)
             yield chunk
-        self._last_output = "".join(parts)
 
     async def _astream_and_track(self, gen: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        self._last_output = ""
         parts: list[str] = []
         async for chunk in gen:
             if chunk.delta is not None:
                 parts.append(chunk.delta)
+                self._last_output = "".join(parts)
             yield chunk
-        self._last_output = "".join(parts)
 
     # ------------------------------------------------------------------
     # Shared helpers for chat/achat and loop/aloop (sync/async dedup)

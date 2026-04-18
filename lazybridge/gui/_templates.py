@@ -172,13 +172,14 @@ PAGE_TEMPLATE = """<!doctype html>
       sbStatus.textContent = panelList.length + " panel(s)";
       sbStatus.className = "status ok";
       // Human panels change state server-side (prompt arrives without any
-      // client action).  Pipeline panels do the same while a run is in
-      // flight (label ends with "· running").  Auto-refresh the active
-      // one on every poll in those cases.
+      // client action).  Pipeline and agent panels do the same while a
+      // run is in flight (label ends with "· running").  Auto-refresh
+      // the active one on every poll in those cases.
       if (activePanelId) {{
         const active = panelList.find(p => p.id === activePanelId);
         if (active && (active.kind === "human"
-                       || (active.kind === "pipeline" && active.label.endsWith("· running")))) {{
+                       || ((active.kind === "pipeline" || active.kind === "agent")
+                           && active.label.endsWith("· running")))) {{
           loadPanel(activePanelId);
         }}
       }}
@@ -380,7 +381,7 @@ PAGE_TEMPLATE = """<!doctype html>
       }}
     }});
 
-    // ---------- Test ----------
+    // ---------- Test (async, non-blocking) ----------
     const test = makeSection("Test — runs live against " + state.provider);
     test.innerHTML += `
       <label>Mode</label>
@@ -393,41 +394,63 @@ PAGE_TEMPLATE = """<!doctype html>
       <textarea id="agent-msg" class="large" placeholder="Write a prompt, then press Run…"></textarea>
       <div class="row">
         <button id="agent-run">Run</button>
+        <button id="agent-clear" class="secondary">Clear last result</button>
         <span class="status" id="agent-run-status"></span>
       </div>
       <label>Response</label>
       <pre id="agent-response" class="status">—</pre>
     `;
     root.appendChild(test);
-
-    test.querySelector("#agent-run").addEventListener("click", async () => {{
-      const mode = test.querySelector("#agent-mode").value;
-      const msg = test.querySelector("#agent-msg").value;
-      const btn = test.querySelector("#agent-run");
-      const st = test.querySelector("#agent-run-status");
-      const out = test.querySelector("#agent-response");
-      if (!msg.trim()) {{
-        st.textContent = "Message is empty"; st.className = "status warn";
-        return;
-      }}
-      btn.disabled = true;
-      st.textContent = "Running " + mode + "…"; st.className = "status";
-      out.textContent = "…";
-      const t0 = Date.now();
-      try {{
-        const res = await action(state.id, "test", {{mode, message: msg}});
-        const dt = ((Date.now() - t0) / 1000).toFixed(1);
-        out.textContent = res.content || JSON.stringify(res.parsed ?? res, null, 2);
-        const usage = res.usage || {{}};
-        const cost = usage.cost_usd != null ? ` • $${{usage.cost_usd.toFixed(6)}}` : "";
-        st.textContent = `Done in ${{dt}}s • ${{usage.input_tokens || 0}} in / ${{usage.output_tokens || 0}} out${{cost}}`;
+    const lastTest = state.last_test || null;
+    const btnRun = test.querySelector("#agent-run");
+    const btnClear = test.querySelector("#agent-clear");
+    const st = test.querySelector("#agent-run-status");
+    const out = test.querySelector("#agent-response");
+    const modeEl = test.querySelector("#agent-mode");
+    const msgEl = test.querySelector("#agent-msg");
+    if (lastTest) {{
+      if (lastTest.message) msgEl.value = lastTest.message;
+      if (lastTest.mode) modeEl.value = lastTest.mode;
+      if (lastTest.status === "running") {{
+        btnRun.disabled = true;
+        st.textContent = "Running " + lastTest.mode + "… (non-blocking)";
+        st.className = "status";
+        out.textContent = "…";
+      }} else if (lastTest.status === "done") {{
+        const dt = ((lastTest.finished_at - lastTest.started_at)).toFixed(1);
+        const u = lastTest.usage || {{}};
+        const cost = u.cost_usd != null ? ` • $${{u.cost_usd.toFixed(6)}}` : "";
+        st.textContent = `Done in ${{dt}}s • ${{u.input_tokens || 0}} in / ${{u.output_tokens || 0}} out${{cost}}`;
         st.className = "status ok";
-      }} catch (e) {{
-        out.textContent = e.message;
+        out.textContent = lastTest.content
+          || (lastTest.parsed != null ? JSON.stringify(lastTest.parsed, null, 2) : "—");
+      }} else if (lastTest.status === "error") {{
         st.textContent = "Failed"; st.className = "status bad";
-      }} finally {{
-        btn.disabled = false;
+        out.textContent = lastTest.error || "(no error message)";
       }}
+    }}
+    btnRun.addEventListener("click", async () => {{
+      const mode = modeEl.value;
+      const msg = msgEl.value;
+      if (!msg.trim()) {{ st.textContent = "Message is empty"; st.className = "status warn"; return; }}
+      btnRun.disabled = true;
+      st.textContent = "Starting…"; st.className = "status";
+      out.textContent = "…";
+      try {{
+        await action(state.id, "test", {{mode, message: msg}});
+        // Refresh immediately so the running state is visible; SSE and
+        // auto-refresh keep it up to date until completion.
+        loadPanel(state.id);
+      }} catch (e) {{
+        st.textContent = "Start failed: " + e.message; st.className = "status bad";
+        btnRun.disabled = false;
+      }}
+    }});
+    btnClear.addEventListener("click", async () => {{
+      try {{
+        await action(state.id, "clear_test", {{}});
+        loadPanel(state.id);
+      }} catch (e) {{ st.textContent = e.message; st.className = "status bad"; }}
     }});
   }}
 

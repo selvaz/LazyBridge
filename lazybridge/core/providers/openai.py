@@ -790,9 +790,27 @@ class OpenAIProvider(BaseProvider):
                     from lazybridge.core.structured import apply_structured_validation
 
                     apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-        if final_chunk is not None:
-            final_chunk.usage = final_chunk.usage or final_usage
-            yield final_chunk
+        if final_chunk is None:
+            # Stream ended without a finish_reason (interrupted / truncated).
+            # Emit a best-effort final chunk so consumers that depend on the
+            # is_final marker (usage, tool_calls, structured-output validation)
+            # don't hang forever waiting for it.
+            tool_calls = [
+                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+                for v in tool_call_accum.values()
+            ]
+            final_chunk = StreamChunk(
+                stop_reason="incomplete",
+                tool_calls=tool_calls,
+                usage=final_usage,
+                is_final=True,
+            )
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+        final_chunk.usage = final_chunk.usage or final_usage
+        yield final_chunk
 
     # ------------------------------------------------------------------
     # Async API
@@ -900,6 +918,22 @@ class OpenAIProvider(BaseProvider):
                     from lazybridge.core.structured import apply_structured_validation
 
                     apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-        if final_chunk is not None:
-            final_chunk.usage = final_chunk.usage or final_usage
-            yield final_chunk
+        if final_chunk is None:
+            # Interrupted / truncated async stream — emit a best-effort final
+            # chunk so awaiters don't hang.
+            tool_calls = [
+                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+                for v in tool_call_accum.values()
+            ]
+            final_chunk = StreamChunk(
+                stop_reason="incomplete",
+                tool_calls=tool_calls,
+                usage=final_usage,
+                is_final=True,
+            )
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+        final_chunk.usage = final_chunk.usage or final_usage
+        yield final_chunk

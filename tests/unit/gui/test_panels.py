@@ -169,7 +169,7 @@ def test_agent_panel_test_mode_chat():
     )
     agent.chat = MagicMock(return_value=resp)
     panel = AgentPanel(agent)
-    out = panel.handle_action("test", {"mode": "chat", "message": "hi"})
+    out = panel.handle_action("test", {"mode": "chat", "message": "hi", "sync": True})
     agent.chat.assert_called_once_with("hi")
     assert out["content"] == "hello!"
     assert out["usage"] == {
@@ -181,20 +181,20 @@ def test_agent_panel_test_mode_chat():
 def test_agent_panel_test_empty_message_rejected():
     panel = AgentPanel(_bare_agent())
     with pytest.raises(ValueError):
-        panel.handle_action("test", {"mode": "chat", "message": "   "})
+        panel.handle_action("test", {"mode": "chat", "message": "   ", "sync": True})
 
 
 def test_agent_panel_test_invalid_mode():
     panel = AgentPanel(_bare_agent())
     with pytest.raises(ValueError):
-        panel.handle_action("test", {"mode": "stream", "message": "hi"})
+        panel.handle_action("test", {"mode": "stream", "message": "hi", "sync": True})
 
 
 def test_agent_panel_test_mode_text_returns_content_only():
     agent = _bare_agent()
     agent.text = MagicMock(return_value="plain")
     panel = AgentPanel(agent)
-    out = panel.handle_action("test", {"mode": "text", "message": "hi"})
+    out = panel.handle_action("test", {"mode": "text", "message": "hi", "sync": True})
     assert out == {"content": "plain"}
 
 
@@ -203,7 +203,7 @@ def test_agent_panel_test_mode_loop():
     resp = CompletionResponse(content="looped", usage=UsageStats())
     agent.loop = MagicMock(return_value=resp)
     panel = AgentPanel(agent)
-    out = panel.handle_action("test", {"mode": "loop", "message": "hi"})
+    out = panel.handle_action("test", {"mode": "loop", "message": "hi", "sync": True})
     agent.loop.assert_called_once_with("hi")
     assert out["content"] == "looped"
 
