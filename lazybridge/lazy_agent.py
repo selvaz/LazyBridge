@@ -566,6 +566,7 @@ class LazyAgent:
         max_verify: int,
         method: str,
         chat_kwargs: dict,
+        force_final_after_tools: bool = False,
     ):
         """Generator that yields (action, *args) tuples at sync/async divergence points.
 
@@ -595,7 +596,12 @@ class LazyAgent:
 
             for step in range(max_steps):
                 kw = chat_kwargs if (step == 0 or not _tool_was_called) else _auto_kwargs
-                resp = yield (self._CALL_MODEL, convo, tools, native_tools, kw)
+                # When force_final_after_tools is set (e.g. from json()), strip tools
+                # from the model call after the first tool round so the model is
+                # forced to produce a final answer rather than calling tools again.
+                step_tools = [] if (force_final_after_tools and _tool_was_called) else tools
+                step_native_tools = [] if (force_final_after_tools and _tool_was_called) else native_tools
+                resp = yield (self._CALL_MODEL, convo, step_tools, step_native_tools, kw)
 
                 if on_event:
                     yield (self._EMIT_EVENT, on_event, "step", {"step": step, "response": resp})
@@ -1035,6 +1041,7 @@ class LazyAgent:
         max_verify: int = 3,
         guard: Guard | None = None,
         tool_timeout: float | None = None,
+        force_final_after_tools: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Agentic loop: chat → execute tool calls → repeat until done.
@@ -1101,6 +1108,7 @@ class LazyAgent:
             max_verify=max_verify,
             method="loop",
             chat_kwargs=chat_kwargs,
+            force_final_after_tools=force_final_after_tools,
         )
         action = next(gen)
         try:
@@ -1151,6 +1159,7 @@ class LazyAgent:
         max_verify: int = 3,
         guard: Guard | None = None,
         tool_timeout: float | None = None,
+        force_final_after_tools: bool = False,
         **chat_kwargs: Any,
     ) -> CompletionResponse:
         """Async version of loop().
@@ -1191,6 +1200,7 @@ class LazyAgent:
             max_verify=max_verify,
             method="aloop",
             chat_kwargs=chat_kwargs,
+            force_final_after_tools=force_final_after_tools,
         )
         action = next(gen)
         try:
@@ -1489,7 +1499,7 @@ class LazyAgent:
         _verify_log: list[str] = []
         for _attempt in range(max_verify if verify is not None else 1):
             if has_tools:
-                resp = self.loop(messages, **kwargs)
+                resp = self.loop(messages, force_final_after_tools=True, **kwargs)
                 from lazybridge.core.structured import apply_structured_validation, build_repair_messages
 
                 apply_structured_validation(resp, resp.content, effective_schema)
@@ -1611,7 +1621,7 @@ class LazyAgent:
         task = messages
         for _attempt in range(max_verify if verify is not None else 1):
             if has_tools:
-                resp = await self.aloop(messages, **kwargs)
+                resp = await self.aloop(messages, force_final_after_tools=True, **kwargs)
                 from lazybridge.core.structured import apply_structured_validation, build_repair_messages
 
                 apply_structured_validation(resp, resp.content, effective_schema)
