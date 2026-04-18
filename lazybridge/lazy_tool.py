@@ -315,6 +315,7 @@ class LazyTool:
                     tools=tools,
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
+                    force_final_after_tools=True,
                     **kw,
                 )
             else:
@@ -328,7 +329,10 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = agent.loop(task, tools=tools, native_tools=native, **kw)
+            # force_final_after_tools: delegate agents act as tools — they
+            # should gather data in one tool round then return a final answer,
+            # not keep calling sub-tools indefinitely.
+            resp = agent.loop(task, tools=tools, native_tools=native, force_final_after_tools=True, **kw)
         else:
             resp = agent.chat(task, **kw)
         return resp.content
@@ -371,6 +375,7 @@ class LazyTool:
                     tools=tools,
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
+                    force_final_after_tools=True,
                     **kw,
                 )
             else:
@@ -384,7 +389,7 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = await agent.aloop(task, tools=tools, native_tools=native, **kw)
+            resp = await agent.aloop(task, tools=tools, native_tools=native, force_final_after_tools=True, **kw)
         else:
             resp = await agent.achat(task, **kw)
         return resp.content
