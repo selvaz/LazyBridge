@@ -171,6 +171,14 @@ PAGE_TEMPLATE = """<!doctype html>
       renderSidebar(panelList);
       sbStatus.textContent = panelList.length + " panel(s)";
       sbStatus.className = "status ok";
+      // Human panels change state server-side (prompt arrives without any
+      // client action), so auto-refresh the active one on every poll.
+      if (activePanelId) {{
+        const active = panelList.find(p => p.id === activePanelId);
+        if (active && active.kind === "human") {{
+          loadPanel(activePanelId);
+        }}
+      }}
     }} catch (e) {{
       sbStatus.textContent = "Connection error: " + e.message;
       sbStatus.className = "status bad";
@@ -221,8 +229,14 @@ PAGE_TEMPLATE = """<!doctype html>
     inspect.innerHTML += `
       <label>Name (read-only)</label>
       <input type="text" value="${{escapeHtml(state.name)}}" disabled>
-      <label>Provider / model (read-only)</label>
-      <input type="text" value="${{escapeHtml(state.provider + ' / ' + state.model)}}" disabled>
+      <label>Provider (read-only)</label>
+      <input type="text" value="${{escapeHtml(state.provider)}}" disabled>
+      <label>Model</label>
+      <input type="text" id="agent-model" value="${{escapeHtml(state.model || "")}}">
+      <div class="row">
+        <button id="agent-save-model">Save model</button>
+        <span class="status" id="agent-model-status"></span>
+      </div>
       <label>System prompt</label>
       <textarea id="agent-system" class="large">${{escapeHtml(state.system || "")}}</textarea>
       <div class="row">
@@ -232,8 +246,53 @@ PAGE_TEMPLATE = """<!doctype html>
       <label>Tools enabled on this agent</label>
       <div class="checkbox-list" id="agent-tools"></div>
       <span class="status" id="agent-tools-status"></span>
+      <label>Provider-native tools</label>
+      <div class="checkbox-list" id="agent-native-tools"></div>
+      <span class="status" id="agent-native-tools-status"></span>
     `;
     root.appendChild(inspect);
+
+    // Native tools
+    const nativeBox = inspect.querySelector("#agent-native-tools");
+    const nativeEnabled = new Set(state.native_tools || []);
+    const nativeAvail = state.available_native_tools || [];
+    if (nativeAvail.length === 0) {{
+      nativeBox.innerHTML = '<div class="status">No provider-native tools available in this build.</div>';
+    }} else {{
+      for (const n of nativeAvail) {{
+        const checked = nativeEnabled.has(n) ? "checked" : "";
+        nativeBox.innerHTML += `<label><input type="checkbox" data-native="${{escapeHtml(n)}}" ${{checked}}>
+          <span><strong>${{escapeHtml(n)}}</strong></span>
+        </label>`;
+      }}
+    }}
+    nativeBox.addEventListener("change", async (e) => {{
+      if (e.target.tagName !== "INPUT") return;
+      const name = e.target.dataset.native;
+      const checked = e.target.checked;
+      const st = inspect.querySelector("#agent-native-tools-status");
+      st.textContent = "Updating…"; st.className = "status";
+      try {{
+        await action(state.id, "toggle_native_tool", {{name, enabled: checked}});
+        st.textContent = (checked ? "Enabled " : "Disabled ") + name; st.className = "status ok";
+      }} catch (err) {{
+        st.textContent = "Failed: " + err.message; st.className = "status bad";
+        e.target.checked = !checked;
+      }}
+    }});
+
+    inspect.querySelector("#agent-save-model").addEventListener("click", async () => {{
+      const val = inspect.querySelector("#agent-model").value.trim();
+      const st = inspect.querySelector("#agent-model-status");
+      if (!val) {{ st.textContent = "Model is empty"; st.className = "status warn"; return; }}
+      st.textContent = "Saving…"; st.className = "status";
+      try {{
+        await action(state.id, "update_model", {{value: val}});
+        st.textContent = "Saved ✓"; st.className = "status ok";
+      }} catch (e) {{
+        st.textContent = "Save failed: " + e.message; st.className = "status bad";
+      }}
+    }});
 
     // Tools checklist
     const toolsBox = inspect.querySelector("#agent-tools");
@@ -418,6 +477,82 @@ PAGE_TEMPLATE = """<!doctype html>
     }});
   }}
 
+  function renderPipeline(root, state) {{
+    const inspect = makeSection("Pipeline — " + state.label);
+    const tags = [];
+    if (state.mode) tags.push(`<span class="pill">${{escapeHtml(state.mode)}}</span>`);
+    if (state.combiner) tags.push(`<span class="pill">combiner: ${{escapeHtml(state.combiner)}}</span>`);
+    if (state.concurrency_limit != null) tags.push(`<span class="pill">concurrency ≤ ${{state.concurrency_limit}}</span>`);
+    if (state.step_timeout != null) tags.push(`<span class="pill">step timeout ${{state.step_timeout}}s</span>`);
+    inspect.innerHTML += `
+      <div class="row">${{tags.join(" ")}}</div>
+      <label>Description</label>
+      <textarea disabled>${{escapeHtml(state.description || "")}}</textarea>
+      ${{state.guidance ? `<label>Guidance</label><textarea disabled>${{escapeHtml(state.guidance)}}</textarea>` : ""}}
+      <label>Participants (${{(state.participants || []).length}})</label>
+    `;
+    const ul = document.createElement("ul");
+    ul.style.paddingLeft = "1rem";
+    for (const p of state.participants || []) {{
+      const li = document.createElement("li");
+      li.style.margin = "0.2rem 0";
+      const tag = p.kind === "agent"
+        ? `<span class="pill">agent</span> <strong>${{escapeHtml(p.name)}}</strong>
+           <span class="status">${{escapeHtml(p.provider || "")}}/${{escapeHtml(p.model || "")}}</span>`
+        : `<span class="pill">${{escapeHtml(p.kind)}}</span> <strong>${{escapeHtml(p.name)}}</strong>`;
+      li.innerHTML = tag;
+      if (p.panel_id) {{
+        li.style.cursor = "pointer";
+        li.addEventListener("click", () => loadPanel(p.panel_id));
+        li.title = "Open " + p.panel_id;
+      }}
+      ul.appendChild(li);
+    }}
+    inspect.appendChild(ul);
+    root.appendChild(inspect);
+
+    // --------- Test ---------
+    const test = makeSection("Test — runs the pipeline live");
+    test.innerHTML += `
+      <label>Task</label>
+      <textarea id="pipeline-task" class="large" placeholder="Write the initial task and hit Run…"></textarea>
+      <div class="row">
+        <button id="pipeline-run">Run</button>
+        <span class="status" id="pipeline-status"></span>
+      </div>
+      <label>Result</label>
+      <pre id="pipeline-result">—</pre>
+    `;
+    root.appendChild(test);
+
+    test.querySelector("#pipeline-run").addEventListener("click", async () => {{
+      const task = test.querySelector("#pipeline-task").value;
+      if (!task.trim()) {{
+        test.querySelector("#pipeline-status").textContent = "Task is empty";
+        test.querySelector("#pipeline-status").className = "status warn";
+        return;
+      }}
+      const btn = test.querySelector("#pipeline-run");
+      const st = test.querySelector("#pipeline-status");
+      const out = test.querySelector("#pipeline-result");
+      btn.disabled = true;
+      st.textContent = "Running…"; st.className = "status";
+      out.textContent = "…";
+      const t0 = Date.now();
+      try {{
+        const res = await action(state.id, "run", {{task}});
+        const dt = ((Date.now() - t0) / 1000).toFixed(1);
+        out.textContent = typeof res.result === "string" ? res.result : JSON.stringify(res.result, null, 2);
+        st.textContent = "Done in " + dt + "s"; st.className = "status ok";
+      }} catch (e) {{
+        out.textContent = e.message;
+        st.textContent = "Failed"; st.className = "status bad";
+      }} finally {{
+        btn.disabled = false;
+      }}
+    }});
+  }}
+
   function renderSession(root, state) {{
     const inspect = makeSection("Session — " + state.label);
     inspect.innerHTML += `
@@ -431,10 +566,76 @@ PAGE_TEMPLATE = """<!doctype html>
     root.appendChild(inspect);
   }}
 
+  function renderHuman(root, state) {{
+    const inspect = makeSection("Human input — " + state.name);
+    if (state.closed) {{
+      inspect.innerHTML += '<div class="status warn">This human panel is closed.</div>';
+      root.appendChild(inspect);
+      return;
+    }}
+    if (state.prompt === null || state.prompt === undefined) {{
+      inspect.innerHTML += '<div class="status">Idle — waiting for the next prompt…</div>';
+      root.appendChild(inspect);
+      return;
+    }}
+    const quick = (state.quick_commands || []).map(c =>
+      `<span class="pill" data-cmd="${{escapeHtml(c)}}" style="cursor:pointer">${{escapeHtml(c)}}</span>`
+    ).join(" ");
+    inspect.innerHTML += `
+      <label>Previous output</label>
+      <pre>${{escapeHtml(state.prompt)}}</pre>
+      ${{quick ? `<label>Quick commands</label><div class="row">${{quick}}</div>` : ""}}
+      <label>Your response</label>
+      <textarea id="human-response" class="large"></textarea>
+      <div class="row">
+        <button id="human-submit">Submit (⌘/Ctrl-Enter)</button>
+        <span class="status" id="human-status">Seq ${{state.seq}}</span>
+      </div>
+    `;
+    root.appendChild(inspect);
+    const ta = inspect.querySelector("#human-response");
+    ta.focus();
+    ta.addEventListener("keydown", e => {{
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {{
+        e.preventDefault();
+        submitBtn.click();
+      }}
+    }});
+    inspect.querySelectorAll("[data-cmd]").forEach(el => {{
+      el.addEventListener("click", () => {{
+        const existing = ta.value.trim();
+        ta.value = existing ? existing + "\\n" + el.dataset.cmd : el.dataset.cmd;
+        ta.focus();
+      }});
+    }});
+    const submitBtn = inspect.querySelector("#human-submit");
+    submitBtn.addEventListener("click", async () => {{
+      const st = inspect.querySelector("#human-status");
+      submitBtn.disabled = true;
+      st.textContent = "Submitting…"; st.className = "status";
+      try {{
+        const res = await action(state.id, "submit", {{seq: state.seq, response: ta.value}});
+        if (res.accepted) {{
+          st.textContent = "Submitted ✓"; st.className = "status ok";
+          // The panel will become idle again on the next poll.
+          setTimeout(() => loadPanel(state.id), 400);
+        }} else {{
+          st.textContent = "Submission rejected (stale prompt)"; st.className = "status warn";
+          submitBtn.disabled = false;
+        }}
+      }} catch (e) {{
+        st.textContent = "Failed: " + e.message; st.className = "status bad";
+        submitBtn.disabled = false;
+      }}
+    }});
+  }}
+
   const PANEL_RENDERERS = {{
     agent: renderAgent,
     tool: renderTool,
+    pipeline: renderPipeline,
     session: renderSession,
+    human: renderHuman,
   }};
 
   // ------------------------------------------------------------------

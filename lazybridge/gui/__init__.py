@@ -37,6 +37,8 @@ from lazybridge.gui._global import GuiServer, close_server, get_server, is_runni
 from lazybridge.gui._install import install_gui_methods, uninstall_gui_methods
 from lazybridge.gui._panel import Panel
 from lazybridge.gui.agent import AgentPanel
+from lazybridge.gui.human_panel import HumanInputPanel, panel_input_fn
+from lazybridge.gui.pipeline import PipelinePanel
 from lazybridge.gui.session import SessionPanel
 from lazybridge.gui.tool import ToolPanel
 
@@ -49,7 +51,10 @@ __all__ = [
     "Panel",
     "AgentPanel",
     "ToolPanel",
+    "PipelinePanel",
     "SessionPanel",
+    "HumanInputPanel",
+    "panel_input_fn",
     "get_server",
     "close_server",
     "is_running",

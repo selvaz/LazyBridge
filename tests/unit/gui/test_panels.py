@@ -76,7 +76,10 @@ def test_agent_panel_render_state_basic():
     assert state["system"] == "you are helpful"
     assert state["tools"] == []
     assert state["available_tools"] == []
-    assert state["has_native_tools"] is False
+    assert state["native_tools"] == []
+    # available_native_tools is populated from the NativeTool enum; should
+    # contain at least web search.
+    assert any("web" in n.lower() for n in state["available_native_tools"])
 
 
 def test_agent_panel_update_system_mutates_agent():

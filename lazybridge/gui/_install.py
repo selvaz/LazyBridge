@@ -19,6 +19,7 @@ def install_gui_methods() -> None:
 
     from lazybridge.gui._global import get_server
     from lazybridge.gui.agent import AgentPanel
+    from lazybridge.gui.pipeline import PipelinePanel, is_pipeline_tool
     from lazybridge.gui.session import SessionPanel
     from lazybridge.gui.tool import ToolPanel
     from lazybridge.lazy_agent import LazyAgent
@@ -47,9 +48,15 @@ def install_gui_methods() -> None:
         return server.register(panel)
 
     def _tool_gui(self: Any, *, open_browser: bool = True) -> str:
-        """Open the tool's GUI panel and return its URL."""
+        """Open the tool's GUI panel and return its URL.
+
+        Pipeline tools (``LazyTool.chain`` / ``LazyTool.parallel``) get a
+        richer :class:`PipelinePanel` showing the topology; function-backed
+        tools and ``from_agent`` tools get the standard :class:`ToolPanel`.
+        """
         server = get_server(open_browser=open_browser)
-        return server.register(ToolPanel(self))
+        panel = PipelinePanel(self) if is_pipeline_tool(self) else ToolPanel(self)
+        return server.register(panel)
 
     def _session_gui(self: Any, *, open_browser: bool = True) -> str:
         """Open the session's GUI panel and return its URL.
@@ -62,7 +69,8 @@ def install_gui_methods() -> None:
         for agent in list(getattr(self, "_agents", []) or []):
             server.register(AgentPanel(agent))
             for tool in list(getattr(agent, "tools", None) or []):
-                server.register(ToolPanel(tool))
+                sub_panel = PipelinePanel(tool) if is_pipeline_tool(tool) else ToolPanel(tool)
+                server.register(sub_panel)
         return session_url
 
     LazyAgent.gui = _agent_gui  # type: ignore[attr-defined]

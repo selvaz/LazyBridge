@@ -78,6 +78,29 @@ class AgentPanel(Panel):
             return None
         return out if len(out) <= 2000 else out[:2000] + "…"
 
+    def _native_tool_names(self) -> list[str]:
+        """Return the string value of every :class:`NativeTool` member.
+
+        Import is deferred so :mod:`lazybridge.gui` stays importable even if
+        ``lazybridge.core.types`` shape drifts.
+        """
+        try:
+            from lazybridge.core.types import NativeTool
+        except Exception:  # pragma: no cover - defensive
+            return []
+        names: list[str] = []
+        for member in NativeTool:
+            value = getattr(member, "value", None) or getattr(member, "name", None)
+            if value:
+                names.append(str(value))
+        return names
+
+    def _enabled_native_tool_values(self) -> list[str]:
+        result: list[str] = []
+        for t in (getattr(self._agent, "native_tools", None) or []):
+            result.append(str(getattr(t, "value", None) or getattr(t, "name", None) or t))
+        return result
+
     def render_state(self) -> dict[str, Any]:
         agent = self._agent
         tools = [self._tool_descriptor(t) for t in (getattr(agent, "tools", None) or [])]
@@ -90,7 +113,8 @@ class AgentPanel(Panel):
             "system": getattr(agent, "system", None) or "",
             "tools": tools,
             "available_tools": available,
-            "has_native_tools": bool(getattr(agent, "native_tools", None)),
+            "native_tools": self._enabled_native_tool_values(),
+            "available_native_tools": self._native_tool_names(),
             "has_output_schema": getattr(agent, "output_schema", None) is not None,
             "session_id": getattr(getattr(agent, "session", None), "id", None),
             "last_output": self._last_output_preview(),
@@ -103,6 +127,48 @@ class AgentPanel(Panel):
             value = str(args.get("value", ""))
             self._agent.system = value
             return {"ok": True, "system": value}
+
+        if action == "update_model":
+            value = args.get("value")
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("'value' must be a non-empty string")
+            # Update the executor's bound model — `agent._model_name` reads
+            # `self._executor.model` on every call, so this takes effect
+            # on the next chat/loop.
+            executor = getattr(self._agent, "_executor", None)
+            if executor is None:
+                raise ValueError("agent has no executor to update")
+            executor.model = value.strip()
+            return {"ok": True, "model": executor.model}
+
+        if action == "toggle_native_tool":
+            name = args.get("name")
+            enabled = bool(args.get("enabled"))
+            if not isinstance(name, str):
+                raise ValueError("'name' is required")
+            try:
+                from lazybridge.core.types import NativeTool
+            except Exception as exc:  # pragma: no cover
+                raise ValueError(f"NativeTool unavailable: {exc}") from exc
+            # Match the member by .value or .name, case-insensitive.
+            target = None
+            for member in NativeTool:
+                if str(getattr(member, "value", "")).lower() == name.lower() \
+                        or str(getattr(member, "name", "")).lower() == name.lower():
+                    target = member
+                    break
+            if target is None:
+                raise ValueError(f"Unknown native tool {name!r}")
+            current = list(getattr(self._agent, "native_tools", None) or [])
+            # Normalise: drop any existing entry matching target.
+            current = [
+                t for t in current
+                if str(getattr(t, "value", getattr(t, "name", t))).lower() != name.lower()
+            ]
+            if enabled:
+                current.append(target)
+            self._agent.native_tools = current
+            return {"ok": True, "native_tools": self._enabled_native_tool_values()}
 
         if action == "toggle_tool":
             name = args.get("name")
