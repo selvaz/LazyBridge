@@ -33,6 +33,55 @@ ai = LazyAgent(
 
 ---
 
+## Model tiers
+
+Instead of hard-coding preview / date-pinned model names that age
+quickly (`claude-opus-4-7`, `gemini-3.1-pro-preview`, …), pass a **tier
+string** as `model=` and let the provider pick the right concrete
+model for you. Five tiers cover the full price/capability spectrum:
+
+| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
+| --- | --- | --- | --- | --- |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+
+<!-- BEGIN GENERATED TIER MATRIX -->
+<!-- The table above is kept in sync with the provider adapters by
+     `tools/generate_tier_matrix.py`. Any edit should flow from that
+     script; a drift-guard test
+     (tests/unit/gui/test_audit_c2_tier_matrix.py) re-parses this
+     section and fails CI if the table diverges from the tables in
+     lazybridge.core.providers.*. -->
+<!-- END GENERATED TIER MATRIX -->
+
+```python
+LazyAgent("anthropic", model="top")       # claude-opus-4-7
+LazyAgent("chatgpt",   model="cheap")     # gpt-4o-mini
+LazyAgent("gemini",    model="medium")    # gemini-3.1-flash
+LazyAgent("deepseek",  model="super_cheap")  # deepseek-chat
+
+# Literal model names still work — nothing breaks if you prefer to pin.
+LazyAgent("anthropic", model="claude-opus-4-7")
+```
+
+Notes:
+
+- Tiers are **provider-relative**. `"medium"` on Anthropic is not the
+  same price or capability as `"medium"` on OpenAI — it's the middle
+  of each provider's own range. Consult each provider's pricing page
+  (linked from their docs) for concrete numbers.
+- Unknown tier strings pass through as literal model names, so a
+  future provider adding its own tier doesn't break cross-provider
+  code.
+- Where a provider has fewer distinct tiers than five (DeepSeek today),
+  multiple aliases point at the same concrete model — explicitly noted
+  in the table above.
+
+---
+
 ## chat() — single turn
 
 Send a message, get a response. No tool calls, no loop.

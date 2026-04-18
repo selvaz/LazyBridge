@@ -186,6 +186,24 @@ See [`lazybridge/gui/human/README.md`](lazybridge/gui/human/README.md).
 | Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
 | DeepSeek | `"deepseek"` | deepseek-chat |
 
+### Model tiers
+
+Pass a tier string as `model=` instead of a literal model name and let
+the provider pick the right concrete model:
+
+| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
+| --- | --- | --- | --- | --- |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+
+Tiers are **provider-relative** — `"medium"` on Anthropic is not the
+same price/capability as `"medium"` on OpenAI. Literal model names
+still work unchanged. Full documentation:
+[`lazy_wiki/human/agents.md` → Model tiers](lazy_wiki/human/agents.md#model-tiers).
+
 ## Installation
 
 ```bash

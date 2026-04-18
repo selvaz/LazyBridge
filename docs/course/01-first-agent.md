@@ -97,6 +97,17 @@ ai = LazyAgent("openai", model="gpt-4o-mini")
 ai = LazyAgent("google", model="gemini-2.5-flash")
 ```
 
+Or pick a provider-relative **tier** — `"top"`, `"expensive"`,
+`"medium"`, `"cheap"`, or `"super_cheap"` — and let the provider pick
+the concrete model:
+
+```python
+ai = LazyAgent("anthropic", model="cheap")      # claude-haiku-4-5
+ai = LazyAgent("chatgpt",   model="top")        # gpt-5.4
+```
+
+Full tier matrix: [Model tiers](../agents.md#model-tiers).
+
 ## The `result` property
 
 After any call, `agent.result` gives you the canonical output:
