@@ -81,15 +81,16 @@ def test_pipeline_panel_render_state_parallel_with_agents():
 
 
 def test_pipeline_panel_run_action(monkeypatch):
-    """Panel's 'run' action invokes tool.run({'task': ...}) and returns the result."""
+    """Panel's 'run' action starts a background run and tool.run() receives {'task': ...}."""
+    import time
+
     chain = LazyTool.chain(
         LazyTool.from_function(_echo),
         LazyTool.from_function(_upper),
         name="pipe", description="echo then upper",
     )
     # `LazyTool.chain` is built for agent-participants; function-tools have
-    # their own `(x: str)` signature.  Here we only assert that the panel
-    # forwards the task correctly — mock the underlying run() so we don't
+    # their own `(x: str)` signature.  Mock the underlying run() so we don't
     # exercise the whole chain resolver.
     calls = []
 
@@ -100,7 +101,17 @@ def test_pipeline_panel_run_action(monkeypatch):
     monkeypatch.setattr(chain, "run", fake_run)
     panel = PipelinePanel(chain)
     out = panel.handle_action("run", {"task": "hi"})
-    assert out == {"result": "final result"}
+    assert out["started"] is True
+    # Wait for the background run to complete.
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        lr = panel.render_state().get("last_run") or {}
+        if lr.get("status") == "done":
+            break
+        time.sleep(0.01)
+    lr = panel.render_state()["last_run"]
+    assert lr["status"] == "done"
+    assert lr["result"] == "final result"
     assert calls == [{"task": "hi"}]
 
 

@@ -172,10 +172,13 @@ PAGE_TEMPLATE = """<!doctype html>
       sbStatus.textContent = panelList.length + " panel(s)";
       sbStatus.className = "status ok";
       // Human panels change state server-side (prompt arrives without any
-      // client action), so auto-refresh the active one on every poll.
+      // client action).  Pipeline panels do the same while a run is in
+      // flight (label ends with "· running").  Auto-refresh the active
+      // one on every poll in those cases.
       if (activePanelId) {{
         const active = panelList.find(p => p.id === activePanelId);
-        if (active && active.kind === "human") {{
+        if (active && (active.kind === "human"
+                       || (active.kind === "pipeline" && active.label.endsWith("· running")))) {{
           loadPanel(activePanelId);
         }}
       }}
@@ -558,39 +561,104 @@ PAGE_TEMPLATE = """<!doctype html>
       <textarea id="pipeline-task" class="large" placeholder="Write the initial task and hit Run…"></textarea>
       <div class="row">
         <button id="pipeline-run">Run</button>
+        <button id="pipeline-clear" class="secondary">Clear last run</button>
         <span class="status" id="pipeline-status"></span>
+      </div>
+      <label>Progress</label>
+      <div id="pipeline-timeline" class="panel" style="margin:0;background:var(--bg)">
+        <div class="status">No run yet.</div>
       </div>
       <label>Result</label>
       <pre id="pipeline-result">—</pre>
     `;
     root.appendChild(test);
 
+    // Render the "last_run" payload attached to the state (if any).
+    const lastRun = state.last_run || null;
+    const participantNames = state.participant_names || [];
+    renderPipelineTimeline(test.querySelector("#pipeline-timeline"), participantNames, lastRun);
+    const resultPre = test.querySelector("#pipeline-result");
+    const statusEl = test.querySelector("#pipeline-status");
+    if (lastRun) {{
+      resultPre.textContent = lastRun.result != null
+        ? (typeof lastRun.result === "string" ? lastRun.result : JSON.stringify(lastRun.result, null, 2))
+        : (lastRun.error || "…");
+      if (lastRun.status === "running") {{
+        statusEl.textContent = "Running…"; statusEl.className = "status";
+      }} else if (lastRun.status === "done") {{
+        const dt = ((lastRun.finished_at - lastRun.started_at)).toFixed(1);
+        statusEl.textContent = "Done in " + dt + "s"; statusEl.className = "status ok";
+      }} else if (lastRun.status === "error") {{
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }}
+
     test.querySelector("#pipeline-run").addEventListener("click", async () => {{
       const task = test.querySelector("#pipeline-task").value;
       if (!task.trim()) {{
-        test.querySelector("#pipeline-status").textContent = "Task is empty";
-        test.querySelector("#pipeline-status").className = "status warn";
+        statusEl.textContent = "Task is empty"; statusEl.className = "status warn";
         return;
       }}
-      const btn = test.querySelector("#pipeline-run");
-      const st = test.querySelector("#pipeline-status");
-      const out = test.querySelector("#pipeline-result");
-      btn.disabled = true;
-      st.textContent = "Running…"; st.className = "status";
-      out.textContent = "…";
-      const t0 = Date.now();
+      statusEl.textContent = "Starting…"; statusEl.className = "status";
+      resultPre.textContent = "…";
       try {{
-        const res = await action(state.id, "run", {{task}});
-        const dt = ((Date.now() - t0) / 1000).toFixed(1);
-        out.textContent = typeof res.result === "string" ? res.result : JSON.stringify(res.result, null, 2);
-        st.textContent = "Done in " + dt + "s"; st.className = "status ok";
+        await action(state.id, "run", {{task}});
+        // Refresh once so the running state becomes visible right away;
+        // subsequent refreshes happen via the auto-refresh hook below.
+        loadPanel(state.id);
       }} catch (e) {{
-        out.textContent = e.message;
-        st.textContent = "Failed"; st.className = "status bad";
-      }} finally {{
-        btn.disabled = false;
+        resultPre.textContent = e.message;
+        statusEl.textContent = "Start failed"; statusEl.className = "status bad";
       }}
     }});
+    test.querySelector("#pipeline-clear").addEventListener("click", async () => {{
+      try {{
+        await action(state.id, "clear_run", {{}});
+        loadPanel(state.id);
+      }} catch (e) {{ statusEl.textContent = e.message; statusEl.className = "status bad"; }}
+    }});
+  }}
+
+  // Render a per-participant timeline from the last_run event buffer.
+  function renderPipelineTimeline(root, names, lastRun) {{
+    if (!lastRun) {{
+      root.innerHTML = '<div class="status">No run yet.</div>';
+      return;
+    }}
+    const events = lastRun.events || [];
+    // Build a map: agent_name → {{ started_at, finished_at, stop_reason, n_steps, status }}
+    const byAgent = {{}};
+    for (const n of names) {{
+      byAgent[n] = {{ name: n, status: "pending" }};
+    }}
+    for (const ev of events) {{
+      const bucket = byAgent[ev.agent_name] || (byAgent[ev.agent_name] = {{ name: ev.agent_name }});
+      if (ev.event_type === "agent_start") {{
+        bucket.started_at = ev.ts;
+        bucket.status = bucket.status === "finished" ? "restarted" : "running";
+      }} else if (ev.event_type === "agent_finish") {{
+        bucket.finished_at = ev.ts;
+        bucket.status = "finished";
+        if (ev.stop_reason !== undefined) bucket.stop_reason = ev.stop_reason;
+        if (ev.n_steps !== undefined) bucket.n_steps = ev.n_steps;
+      }}
+    }}
+    const rows = Object.values(byAgent).map(b => {{
+      const dur = (b.started_at && b.finished_at) ? (b.finished_at - b.started_at).toFixed(1) + "s" : "";
+      const icon = b.status === "finished" ? "✓" : b.status === "running" ? "…" : "·";
+      const cls = b.status === "finished" ? "ok" : b.status === "running" ? "" : "";
+      const extras = [dur, b.stop_reason, b.n_steps != null ? (b.n_steps + " step(s)") : null]
+        .filter(x => x).map(x => `<span class="status">${{escapeHtml(String(x))}}</span>`).join(" ");
+      return `<div class="row" style="margin:0.15rem 0">
+        <span style="font-family:ui-monospace,monospace;min-width:1.5rem">${{icon}}</span>
+        <strong>${{escapeHtml(b.name)}}</strong>
+        <span class="status ${{cls}}">${{escapeHtml(b.status)}}</span>
+        ${{extras}}
+      </div>`;
+    }}).join("");
+    const captured = lastRun.captured_from_session ? "" :
+      '<div class="status warn" style="margin-top:0.5rem">Session-less pipeline: per-step timeline unavailable, showing final result only.</div>';
+    root.innerHTML = rows + captured;
   }}
 
   function renderSession(root, state) {{
