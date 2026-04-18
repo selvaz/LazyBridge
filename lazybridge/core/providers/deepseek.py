@@ -189,14 +189,21 @@ class DeepSeekProvider(OpenAIProvider):
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
 
-        # DeepSeek structured output: JSON mode only (not full schema enforcement)
-        if request.structured_output:
+        # deepseek-reasoner does not support tool_choice — strip it silently.
+        if self._is_reasoning_model(model):
+            params.pop("tool_choice", None)
+
+        # DeepSeek structured output: JSON mode only (not full schema enforcement).
+        # Skip when tools are present — tool calls return empty content, which
+        # breaks JSON parsing. The json() caller uses loop() + repair instead.
+        has_tools = bool(params.get("tools"))
+        if request.structured_output and not has_tools:
             params["response_format"] = {"type": "json_object"}
 
         response = self._client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
 
-        if request.structured_output:
+        if request.structured_output and not resp.tool_calls:
             from lazybridge.core.structured import apply_structured_validation
 
             apply_structured_validation(resp, resp.content, request.structured_output.schema)
@@ -270,13 +277,17 @@ class DeepSeekProvider(OpenAIProvider):
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
 
-        if request.structured_output:
+        if self._is_reasoning_model(model):
+            params.pop("tool_choice", None)
+
+        has_tools = bool(params.get("tools"))
+        if request.structured_output and not has_tools:
             params["response_format"] = {"type": "json_object"}
 
         response = await self._async_client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
 
-        if request.structured_output:
+        if request.structured_output and not resp.tool_calls:
             from lazybridge.core.structured import apply_structured_validation
 
             apply_structured_validation(resp, resp.content, request.structured_output.schema)
