@@ -1,4 +1,14 @@
-# gui.human — Browser-based input for HumanAgent / SupervisorAgent
+# gui.human — Browser-based input for HumanAgent / SupervisorAgent (legacy)
+
+> **Prefer `lazybridge.gui.panel_input_fn`** — it registers the human
+> prompt as a panel on the shared LazyBridge GUI server, so the
+> reviewer sees the prompt in the same browser tab as your agents,
+> tools, and sessions.  Full docs: [`../README.md`](../README.md).
+>
+> This module runs its own dedicated HTTP port and browser tab; it
+> stays available for users that want *only* human input without the
+> rest of the GUI stack, but it emits a `DeprecationWarning` on import
+> and will be removed in a future release.
 
 Stdlib-only, opt-in, zero extra dependencies. Provides a drop-in `input_fn`
 that opens a local web page instead of reading from stdin, so a human can

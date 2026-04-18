@@ -66,6 +66,7 @@ LazyAgent.loop(
     on_event: Callable[[str, Any], None] | None = None,  # events: "step"|"tool_call"|"tool_result"|"done"|"verify_rejected"
     verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
+    tool_timeout: float | None = None,     # per-tool timeout in seconds; TimeoutError on breach
     **chat_kwargs,                         # forwarded to chat() on each step
                                            # tool_choice="parallel" runs multiple tool calls concurrently
 ) -> CompletionResponse
@@ -154,6 +155,10 @@ LazySession(
     db: str | None = None,                 # SQLite path; None = in-memory
     tracking: TrackLevel | str = TrackLevel.BASIC,  # OFF | BASIC | VERBOSE | FULL
     console: bool = False,                 # print events to stdout in real-time
+    exporters: list | None = None,         # event exporters (CallbackExporter, …)
+    redact: Callable[[str, dict], dict] | None = None,
+                                           # mask sensitive tool args/results in
+                                           # event payloads before store/export
 )
 
 LazySession.id: str

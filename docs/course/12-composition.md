@@ -246,7 +246,7 @@ research_pipe = LazyTool.chain(
 )
 
 # ── Judge for quality gate ──
-judge = LazyAgent("openai", model="gpt-4o-mini")
+judge = LazyAgent("openai", model="cheap")
 
 # ── Orchestrator: combines everything ──
 orchestrator = LazyAgent("anthropic", name="orchestrator",

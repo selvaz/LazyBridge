@@ -200,6 +200,24 @@ result = ai.loop(
 print(result.content)
 ```
 
+### Per-tool timeout
+
+A misbehaving tool should never hang the whole loop. Pass
+`tool_timeout=` (seconds) and each tool invocation gets its own
+budget — breaches raise `TimeoutError` that the loop propagates:
+
+```python
+result = ai.loop(
+    "Find fresh news about fusion energy.",
+    tools=[search],
+    tool_timeout=15,   # any single tool call that exceeds 15s fails hard
+)
+```
+
+Sync tools run in a one-shot worker thread shut down with
+`wait=False`, so the caller gets control back even if the tool ignores
+the timeout. Async tools use `asyncio.wait_for` and cancel cleanly.
+
 ### Agent-level vs call-level tools
 
 Tools can be attached at **agent construction** or **per-call**. Both are valid — they are merged at runtime:
@@ -461,6 +479,35 @@ print(resp.stop_reason)
 
 ---
 
+## Inspect and test in a browser — `.gui()`
+
+After `import lazybridge.gui`, every `LazyAgent` gains a `.gui()`
+method that opens a local web tab for live inspection and testing:
+
+```python
+import lazybridge.gui
+
+ai.gui()                          # returns URL, opens browser tab
+```
+
+The panel shows the agent's name, provider/model, and system prompt,
+and lets you:
+
+- Edit the `system` prompt live — takes effect on the next call.
+- Switch the `model` (including tier aliases like `"cheap"`).
+- Toggle which session-scoped tools the agent has access to.
+- Run `chat` / `loop` / `text` against the real provider from a
+  textarea; results stream back with token counts and cost.
+- Export the current state as a Python `LazyAgent(...)` snippet you
+  can paste back into code.
+
+The same tab hosts panels for `LazyTool`, `LazySession`, `LazyRouter`,
+`LazyStore`, and `Memory` — call `.gui()` on any of them and the new
+panel appears in the sidebar. Full reference:
+[`lazybridge/gui/README.md`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/gui/README.md).
+
+---
+
 ## Async
 
 Every method has an async counterpart:
@@ -533,19 +580,26 @@ supervisor = SupervisorAgent(
 
 Both classes work everywhere a LazyAgent works: chains, parallel, as_tool(), verify, LazyContext.from_agent().
 
-### Optional browser UI — `lazybridge.gui.human`
+### Optional browser UI — `lazybridge.gui.panel_input_fn`
 
-Prefer a browser tab over stdin? Swap the default `input_fn` for the one
-provided by the `gui.human` module. Stdlib-only, no extra install.
+Prefer a browser tab over stdin? Swap the default `input_fn` for the
+one provided by the `lazybridge.gui` module. The human prompt appears
+as a panel in the same shared GUI tab as your agents and tools:
 
 ```python
 from lazybridge import SupervisorAgent
-from lazybridge.gui.human import web_input_fn
+from lazybridge.gui import panel_input_fn
 
-fn = web_input_fn()  # opens a local tab on 127.0.0.1:<ephemeral>
+fn = panel_input_fn(name="reviewer")          # shared-server panel
 supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
 # ... run the pipeline ...
-fn.server.close()
+fn.panel.close()
+```
+
+The legacy dedicated-port entry point at `lazybridge.gui.human.web_input_fn`
+still works (for users who want *only* human input without the rest
+of the GUI) but emits a `DeprecationWarning` on import; prefer
+`panel_input_fn` for new code.
 ```
 
 The page renders each prompt with the previous agent's output, optional

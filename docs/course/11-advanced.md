@@ -65,7 +65,7 @@ Add a quality gate that retries if the output doesn't pass review:
 from lazybridge import LazyAgent
 
 worker = LazyAgent("anthropic")
-judge = LazyAgent("openai", model="gpt-4o-mini")
+judge = LazyAgent("openai", model="cheap")
 
 # Verify with another agent — judge returns "APPROVED..." or feedback
 resp = worker.loop(
@@ -581,7 +581,7 @@ pipeline = LazyTool.chain(
 
 # --- 6. Create verified orchestrator ---
 
-judge = LazyAgent("openai", model="gpt-4o-mini")
+judge = LazyAgent("openai", model="cheap")
 orchestrator = LazyAgent(
     "anthropic",
     name="orchestrator",
@@ -674,7 +674,7 @@ ai = LazyAgent(MyProvider(api_key="..."))
 Memory()                                           # auto compression (default)
 Memory(strategy="full")                            # never compress
 Memory(strategy="rolling", window_turns=10)        # always window + compress
-Memory(compressor=LazyAgent("openai", model="gpt-4o-mini"))  # LLM compression
+Memory(compressor=LazyAgent("openai", model="cheap"))  # LLM compression
 mem.history                                        # full raw history
 mem.summary                                        # current compressed block
 ```

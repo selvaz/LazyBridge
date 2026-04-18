@@ -166,3 +166,21 @@ The script prints a `http://127.0.0.1:<port>/?t=<token>` URL and opens the
 page automatically. Each REPL prompt renders on the page with the previous
 output and a textarea; Ctrl/⌘-Enter submits. Details:
 [`lazybridge/gui/human/README.md`](../lazybridge/gui/human/README.md).
+
+---
+
+## Shared GUI for every LazyBridge object
+
+`gui_demo.py` opens a single browser tab that hosts live panels for
+every `LazyAgent`, `LazyTool`, and `LazySession` you call `.gui()` on.
+Inspect state, edit system prompts, run chat/loop/text against the
+real provider, invoke tools from a schema-generated form.
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/gui_demo.py
+```
+
+Full API: [`lazybridge/gui/README.md`](../lazybridge/gui/README.md).

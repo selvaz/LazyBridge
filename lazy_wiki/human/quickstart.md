@@ -51,6 +51,15 @@ ai_google   = LazyAgent("google")
 ai_deepseek = LazyAgent("deepseek")
 ```
 
+Pick a provider-relative tier instead of hard-coding a model name:
+
+```python
+ai_cheap = LazyAgent("anthropic", model="cheap")   # claude-haiku-4-5
+ai_top   = LazyAgent("chatgpt",   model="top")     # gpt-5.4
+```
+
+Full 5×4 tier matrix: [Model tiers](agents.md#model-tiers).
+
 ---
 
 ## Example 2 — Tool loop (function calling)
@@ -126,6 +135,7 @@ print(sess.store.read_all())  # shared state
 | Full pipeline examples | [pipelines.md](pipelines.md) |
 | Session-free pipelines (`parallel`/`chain`) | [pipelines.md](pipelines.md) |
 | Human-in-the-loop supervision | [agents.md#human-agents](agents.md#human-agents) |
+| Live browser inspector / tester (`.gui()`) | [lazybridge/gui/README.md](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/gui/README.md) |
 | LazyBridge vs raw SDK | [comparison.md](comparison.md) |
 
 ---

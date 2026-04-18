@@ -169,13 +169,16 @@ Full walkthrough in [`docs/course/13-human-in-the-loop.md`](docs/course/13-human
 Prefer a browser to stdin? Stdlib-only, opt-in:
 
 ```python
-from lazybridge.gui.human import web_input_fn
+from lazybridge.gui import panel_input_fn
 
-fn = web_input_fn()  # opens a local tab on 127.0.0.1:<ephemeral>
+fn = panel_input_fn(name="reviewer")   # shared-server panel
 supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
 ```
 
-See [`lazybridge/gui/human/README.md`](lazybridge/gui/human/README.md).
+The same browser tab hosts panels for every LazyBridge object —
+`import lazybridge.gui` and any `agent.gui()` / `tool.gui()` /
+`session.gui()` call registers a new panel on the shared server. See
+[`lazybridge/gui/README.md`](lazybridge/gui/README.md).
 
 ## Supported providers
 

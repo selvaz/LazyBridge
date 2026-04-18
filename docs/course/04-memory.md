@@ -130,7 +130,7 @@ user: What about caching?                 ← new message
 Use a cheap model to extract entities, facts, and decisions:
 
 ```python
-compressor = LazyAgent("openai", model="gpt-4o-mini")
+compressor = LazyAgent("openai", model="cheap")
 mem = Memory(compressor=compressor)
 
 # The compressor produces structured output like:
