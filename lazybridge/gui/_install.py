@@ -25,6 +25,7 @@ def install_gui_methods() -> None:
     from lazybridge.lazy_session import LazySession
     from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
+    from lazybridge.memory import Memory
 
     def _agent_gui(
         self: Any,
@@ -44,6 +45,7 @@ def install_gui_methods() -> None:
     LazySession.gui = _simple_gui  # type: ignore[attr-defined]
     LazyRouter.gui = _simple_gui  # type: ignore[attr-defined]
     LazyStore.gui = _simple_gui  # type: ignore[attr-defined]
+    Memory.gui = _simple_gui  # type: ignore[attr-defined]
 
     _INSTALLED = True
 
@@ -58,8 +60,9 @@ def uninstall_gui_methods() -> None:
     from lazybridge.lazy_session import LazySession
     from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
+    from lazybridge.memory import Memory
 
-    for cls in (LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore):
+    for cls in (LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore, Memory):
         if hasattr(cls, "gui"):
             delattr(cls, "gui")
     _INSTALLED = False

@@ -40,6 +40,7 @@ from lazybridge.gui._panel import Panel
 from lazybridge.gui.types import GuiEnabled
 from lazybridge.gui.agent import AgentPanel
 from lazybridge.gui.human_panel import HumanInputPanel, panel_input_fn
+from lazybridge.gui.memory import MemoryPanel
 from lazybridge.gui.pipeline import PipelinePanel
 from lazybridge.gui.router import RouterPanel
 from lazybridge.gui.session import SessionPanel
@@ -63,6 +64,7 @@ __all__ = [
     "panel_input_fn",
     "RouterPanel",
     "StorePanel",
+    "MemoryPanel",
     "get_server",
     "close_server",
     "is_running",

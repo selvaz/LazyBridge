@@ -103,6 +103,16 @@ def test_open_gui_dispatches_store():
     assert isinstance(get_server().get(panel_id), StorePanel)
 
 
+def test_open_gui_dispatches_memory():
+    from lazybridge.gui.memory import MemoryPanel
+    from lazybridge.memory import Memory
+
+    mem = Memory()
+    url = open_gui(mem, open_browser=False)
+    panel_id = url.split("#panel=")[1]
+    assert isinstance(get_server().get(panel_id), MemoryPanel)
+
+
 def test_open_gui_dispatches_session_and_pre_registers_children():
     sess = LazySession()
     a = _bare_agent("x")

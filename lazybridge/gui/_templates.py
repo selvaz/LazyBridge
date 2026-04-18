@@ -922,6 +922,92 @@ PAGE_TEMPLATE = """<!doctype html>
     }});
   }}
 
+  function renderMemory(root, state) {{
+    const inspect = makeSection("Memory — " + state.label);
+    const ratio = state.max_context_tokens > 0
+      ? Math.min(100, Math.round(state.token_estimate / state.max_context_tokens * 100))
+      : 0;
+    const barColor = ratio >= 100 ? "var(--bad)" : ratio >= 75 ? "var(--warn)" : "var(--ok)";
+    inspect.innerHTML += `
+      <label>Strategy</label>
+      <input type="text" value="${{escapeHtml(state.strategy)}}" disabled>
+      <label>Budget — ${{state.token_estimate}} / ${{state.max_context_tokens}} tokens (${{ratio}}%)</label>
+      <div style="height:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:999px;overflow:hidden">
+        <div style="height:100%;width:${{ratio}}%;background:${{barColor}};transition:width 0.3s"></div>
+      </div>
+      <div class="row">
+        <span class="pill">${{state.turn_count}} turn(s)</span>
+        <span class="pill">${{state.message_count}} message(s)</span>
+        ${{state.window_size ? `<span class="pill">window = ${{state.window_size}}</span>` : ""}}
+        ${{state.has_compressor ? '<span class="pill">LLM compressor</span>' : '<span class="pill">rule-based</span>'}}
+      </div>
+      ${{state.summary ? `<label>Compressed summary</label><pre>${{escapeHtml(state.summary)}}</pre>` : '<div class="status" style="margin-top:0.5rem">No compression yet.</div>'}}
+      <label>History (${{state.history.length}})</label>
+    `;
+    const hist = document.createElement("div");
+    hist.style.maxHeight = "24rem";
+    hist.style.overflowY = "auto";
+    hist.innerHTML = (state.history || []).map(m => `
+      <div style="margin:0.4rem 0;padding:0.5rem;border-left:3px solid var(--border);background:var(--bg);border-radius:4px">
+        <div class="status" style="font-size:0.75rem;text-transform:uppercase">${{escapeHtml(m.role)}}</div>
+        <pre style="padding:0.3rem 0 0;border:0;background:transparent">${{escapeHtml(m.preview)}}</pre>
+      </div>
+    `).join("") || '<div class="status">empty</div>';
+    inspect.appendChild(hist);
+    root.appendChild(inspect);
+
+    // --------- Test/edit ---------
+    const test = makeSection("Actions");
+    test.innerHTML += `
+      <div class="row">
+        <button id="mem-compress">Force recompress</button>
+        <button id="mem-export" class="secondary">Export history (JSON)</button>
+        <button id="mem-clear" class="secondary">Clear</button>
+        <span class="status" id="mem-status"></span>
+      </div>
+      <label>Output</label>
+      <pre id="mem-output">—</pre>
+    `;
+    root.appendChild(test);
+
+    const statusEl = test.querySelector("#mem-status");
+    const outEl = test.querySelector("#mem-output");
+    test.querySelector("#mem-compress").addEventListener("click", async () => {{
+      statusEl.textContent = "Compressing…"; statusEl.className = "status";
+      try {{
+        const res = await action(state.id, "force_compress", {{}});
+        outEl.textContent = res.summary || "(no change — below budget)";
+        statusEl.textContent = "Done ✓"; statusEl.className = "status ok";
+        loadPanel(state.id);
+      }} catch (e) {{
+        outEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+    test.querySelector("#mem-export").addEventListener("click", async () => {{
+      statusEl.textContent = "Exporting…"; statusEl.className = "status";
+      try {{
+        const res = await action(state.id, "export_history", {{}});
+        outEl.textContent = JSON.stringify(res.history, null, 2);
+        statusEl.textContent = "Exported ✓"; statusEl.className = "status ok";
+      }} catch (e) {{
+        outEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+    test.querySelector("#mem-clear").addEventListener("click", async () => {{
+      statusEl.textContent = "Clearing…"; statusEl.className = "status";
+      try {{
+        await action(state.id, "clear", {{}});
+        statusEl.textContent = "Cleared ✓"; statusEl.className = "status ok";
+        loadPanel(state.id);
+      }} catch (e) {{
+        outEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+  }}
+
   const PANEL_RENDERERS = {{
     agent: renderAgent,
     tool: renderTool,
@@ -930,6 +1016,7 @@ PAGE_TEMPLATE = """<!doctype html>
     human: renderHuman,
     router: renderRouter,
     store: renderStore,
+    memory: renderMemory,
   }};
 
   // ------------------------------------------------------------------

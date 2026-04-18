@@ -35,6 +35,7 @@ def open_gui(obj: Any, *, open_browser: bool = True, **kwargs: Any) -> str:
         The URL of the panel inside the shared tab.
     """
     from lazybridge.gui.agent import AgentPanel
+    from lazybridge.gui.memory import MemoryPanel
     from lazybridge.gui.pipeline import PipelinePanel, is_pipeline_tool
     from lazybridge.gui.router import RouterPanel
     from lazybridge.gui.session import SessionPanel
@@ -45,6 +46,7 @@ def open_gui(obj: Any, *, open_browser: bool = True, **kwargs: Any) -> str:
     from lazybridge.lazy_session import LazySession
     from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
+    from lazybridge.memory import Memory
 
     server = get_server(open_browser=open_browser)
 
@@ -68,8 +70,10 @@ def open_gui(obj: Any, *, open_browser: bool = True, **kwargs: Any) -> str:
         return server.register(RouterPanel(obj))
     if isinstance(obj, LazyStore):
         return server.register(StorePanel(obj))
+    if isinstance(obj, Memory):
+        return server.register(MemoryPanel(obj))
 
     raise TypeError(
         f"open_gui() does not know how to panelize {type(obj).__name__!r}. "
-        "Supported: LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore."
+        "Supported: LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore, Memory."
     )
