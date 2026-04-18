@@ -2,7 +2,7 @@
 
 Uses the ``google-genai`` SDK (not the legacy ``google-generativeai``).
 
-Default model: gemini-3.1-pro-preview. Pass model= to override.
+Default model: gemini-3.1-pro-preview (Gemini 3 preview series). Pass model= to override.
 
 Native tools supported:
   - Google Search grounding  (NativeTool.GOOGLE_SEARCH / NativeTool.WEB_SEARCH)
@@ -65,13 +65,19 @@ except Exception:
 _logger = logging.getLogger(__name__)
 
 # Price per 1M tokens (input, output). Approximate; verify at ai.google.dev/gemini-api/docs/pricing.
+# Ordered longest-prefix first so substring matching in _compute_cost is unambiguous.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gemini-3.1-pro": (1.25, 10.0),
-    "gemini-3.1-flash": (0.075, 0.30),
-    "gemini-2.5-pro": (1.25, 10.0),
-    "gemini-2.5-flash": (0.075, 0.30),
+    # Gemini 3 series (all preview as of 2026-04)
+    "gemini-3.1-flash-lite": (0.10, 0.40),   # gemini-3.1-flash-lite-preview
+    "gemini-3.1-pro": (2.00, 12.0),           # gemini-3.1-pro-preview ($2/$12 >200k tiered; use upper bound)
+    "gemini-3-flash": (0.50, 3.00),           # gemini-3-flash-preview
+    # Gemini 2.5 series (GA)
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (2.00, 12.0),
+    # Gemini 2.0 series (GA)
     "gemini-2.0-flash": (0.075, 0.30),
-    "gemini-2.0-pro": (1.25, 10.0),
+    # Gemini 1.5 series (legacy)
     "gemini-1.5-pro": (1.25, 5.0),
     "gemini-1.5-flash": (0.075, 0.30),
 }
@@ -105,19 +111,21 @@ class GoogleProvider(BaseProvider):
 
     default_model = "gemini-3.1-pro-preview"
 
-    # Tier aliases (audit F2).
+    # Tier aliases (audit F2). Gemini 3 preview series used where available.
     _TIER_ALIASES = {
         "top": "gemini-3.1-pro-preview",
-        "expensive": "gemini-3.1-pro",
-        "medium": "gemini-3.1-flash",
-        "cheap": "gemini-1.5-flash",
-        "super_cheap": "gemini-1.5-flash-8b",
+        "expensive": "gemini-3.1-pro-preview",
+        "medium": "gemini-3-flash-preview",
+        "cheap": "gemini-3.1-flash-lite-preview",
+        "super_cheap": "gemini-2.0-flash",
     }
     _FALLBACKS = {
-        "gemini-3.1-pro-preview": ["gemini-3.1-pro", "gemini-3.1-flash"],
-        "gemini-3.1-pro": ["gemini-3.1-flash"],
-        "gemini-3.1-flash": ["gemini-1.5-flash"],
-        "gemini-1.5-flash": ["gemini-1.5-flash-8b"],
+        "gemini-3.1-pro-preview": ["gemini-3-flash-preview", "gemini-2.5-pro"],
+        "gemini-3-flash-preview": ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"],
+        "gemini-3.1-flash-lite-preview": ["gemini-2.0-flash"],
+        "gemini-2.5-pro": ["gemini-2.5-flash"],
+        "gemini-2.5-flash": ["gemini-2.0-flash"],
+        "gemini-2.0-flash": ["gemini-1.5-flash"],
     }
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:

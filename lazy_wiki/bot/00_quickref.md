@@ -4,11 +4,11 @@
 
 | tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
 | --- | --- | --- | --- | --- |
-| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
-| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
-| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
-| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
-| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview *(same as expensive)* | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro-preview *(same as top)* | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3-flash-preview | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-3.1-flash-lite-preview | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-2.0-flash | deepseek-chat *(same as medium, cheap)* |
 
 `LazyAgent(provider, model="<tier>")` resolves to the concrete model
 above; literal model names pass through; unknown tier strings pass

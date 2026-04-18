@@ -520,7 +520,10 @@ class AnthropicProvider(BaseProvider):
                         resp = self._parse_response(response)
                         apply_structured_validation(resp, resp.content, schema)
                 else:
-                    response = self._client.messages.create(**params)
+                    if betas:
+                        response = self._client.beta.messages.create(**params, **self._beta_kwargs(betas))
+                    else:
+                        response = self._client.messages.create(**params)
                     resp = self._parse_response(response)
                     apply_structured_validation(resp, resp.content, schema)
             return resp
