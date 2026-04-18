@@ -193,8 +193,9 @@ def chat(
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
-    tool_choice: str | None = None,        # "auto"|"none"|"required"|"<tool_name>"
+    tool_choice: str | None = None,        # "auto"|"none"|"required"|"<tool_name>"|"parallel"
     context: LazyContext | Callable[[], str] | None = None,
+    guard: Guard | None = None,            # runs input validation before LLM, output after; raises GuardError on block
     **kwargs,
 ) -> CompletionResponse | Iterator[StreamChunk]:
 ```
@@ -331,6 +332,7 @@ def loop(
     verify: LazyAgent | Callable[[str, str], str] | None = None,
     max_verify: int = 3,
     tool_timeout: float | None = None,
+    guard: Guard | None = None,            # forwarded to each internal chat() call; guards every step
     **chat_kwargs,
 ) -> CompletionResponse:
 ```

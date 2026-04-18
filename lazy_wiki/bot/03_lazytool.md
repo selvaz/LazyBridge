@@ -83,6 +83,7 @@ def from_agent(
     output_schema: type | dict | None = None,
     native_tools: list | None = None,
     system_prompt: str | None = None,
+    tool_choice: str | None = None,       # "required"|"none"|"<name>" — forwarded to inner loop()
     strict: bool = False,
 ) -> LazyTool:
 ```

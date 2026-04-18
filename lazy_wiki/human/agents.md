@@ -600,7 +600,6 @@ The legacy dedicated-port entry point at `lazybridge.gui.human.web_input_fn`
 still works (for users who want *only* human input without the rest
 of the GUI) but emits a `DeprecationWarning` on import; prefer
 `panel_input_fn` for new code.
-```
 
 The page renders each prompt with the previous agent's output, optional
 quick-command chips, and a textarea. Ctrl/⌘-Enter submits. Works the same

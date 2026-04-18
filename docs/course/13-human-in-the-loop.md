@@ -296,6 +296,61 @@ In `LazyTool.parallel()`, terminal I/O is serialized with a lock so prompts don'
 
 ---
 
+## Browser UI — `panel_input_fn`
+
+Prefer a browser tab to the terminal? Swap the default `input()` for the GUI panel provided by `lazybridge.gui`:
+
+```python
+import lazybridge.gui
+from lazybridge.gui import panel_input_fn
+from lazybridge import SupervisorAgent, HumanAgent
+
+# SupervisorAgent — REPL appears as a panel in the shared GUI tab
+fn = panel_input_fn(name="supervisor")
+supervisor = SupervisorAgent(name="supervisor", input_fn=fn, tools=[...], agents=[...])
+
+# HumanAgent works the same way
+fn = panel_input_fn(name="reviewer")
+human = HumanAgent(name="reviewer", input_fn=fn)
+```
+
+The panel renders the previous agent's output, optional quick-command chips for `continue` / `retry` / `store`, and a submit textarea. Ctrl/⌘-Enter submits. The panel appears in the same sidebar as your agents and tools — no extra port needed.
+
+```python
+# Full example: browser-based supervised pipeline
+import lazybridge.gui
+from lazybridge import LazyAgent, LazyTool, LazySession, SupervisorAgent
+from lazybridge.gui import panel_input_fn
+
+sess = LazySession()
+researcher = LazyAgent("anthropic", name="researcher", tools=[search], session=sess)
+analyst    = LazyAgent("openai",    name="analyst",    session=sess)
+
+fn = panel_input_fn(name="supervisor")
+supervisor = SupervisorAgent(
+    name="supervisor",
+    tools=[search],
+    agents=[researcher, analyst],
+    session=sess,
+    input_fn=fn,
+)
+writer = LazyAgent("anthropic", name="writer", session=sess)
+
+pipeline = LazyTool.chain(
+    researcher, analyst, supervisor, writer,
+    name="supervised_pipeline",
+    description="Research, analyse, supervise, write",
+)
+
+sess.gui()              # open the full session panel
+result = pipeline.run({"task": "Q1 2026 AI trends report"})
+fn.panel.close()        # clean up the input panel when done
+```
+
+The legacy `lazybridge.gui.human.web_input_fn` still works but is deprecated — prefer `panel_input_fn` for new code.
+
+---
+
 ## Decision matrix
 
 | I need... | Use |

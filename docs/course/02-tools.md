@@ -211,15 +211,19 @@ resp = ai.loop("What's 42 * 17?", tools=tools, on_event=on_event)
 
 Events: `"step"`, `"tool_call"`, `"tool_result"`, `"done"`, `"verify_rejected"`
 
-### tool_choice
+### tool_timeout
 
-Control whether the agent must use a tool:
+A slow tool should never hang the entire loop. Pass `tool_timeout=` (seconds) to give each tool invocation its own budget:
 
 ```python
-resp = ai.loop("hello", tools=tools, tool_choice="required")   # must use at least one
-resp = ai.chat("hello", tools=tools, tool_choice="none")       # no tools allowed
-resp = ai.loop("calc", tools=tools, tool_choice="calculator")  # force a specific tool
+resp = ai.loop(
+    "Fetch and summarise these 5 URLs",
+    tools=[fetch_url],
+    tool_timeout=10.0,  # any single fetch that takes > 10s raises TimeoutError
+)
 ```
+
+Sync tools run in a one-shot worker thread (shut down with `wait=False` so the caller gets control back immediately); async tools use `asyncio.wait_for` and cancel cleanly. Pass `None` or `0` to disable the budget (default).
 
 ### tool_choice on as_tool()
 

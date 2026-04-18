@@ -145,6 +145,7 @@ print(sess.store.read_all())  # shared state
 | Goal | Pattern |
 |------|---------|
 | Single LLM call, no tools | `agent.chat()` or `agent.text()` |
+| Streaming output token-by-token | `agent.chat_stream(messages)` / `agent.achat_stream(messages)` |
 | Structured JSON output | `agent.json(messages, schema=MyModel)` |
 | Agent needs to use tools | `agent.loop(task, tools=[...])` |
 | Self-check / quality gate on output | `agent.loop(task, verify=judge)` |

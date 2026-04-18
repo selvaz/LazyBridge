@@ -148,6 +148,30 @@ sess.add_exporter(exporter)
 sess.remove_exporter(exporter)
 ```
 
+## Redacting sensitive event payloads
+
+Tool arguments and results flow through the event log. Use `redact=` to mask API keys, PII, or large blobs before they reach the store, console, or any exporter:
+
+```python
+def _redact(event_type: str, data: dict) -> dict:
+    if event_type == "tool_call" and "arguments" in data:
+        # Mask all argument values — keep keys so the schema is still visible
+        data = {**data, "arguments": {k: "[REDACTED]" for k in data["arguments"]}}
+    return data
+
+sess = LazySession(redact=_redact)
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+researcher.loop("Search for ...", tools=[search_tool])
+
+# event log shows: arguments: {"query": "[REDACTED]"}  — value hidden
+# but the rest of the event (agent name, timestamp, etc.) is intact
+```
+
+Key behaviours:
+- `redact=` receives `(event_type: str, data: dict)` and returns the modified dict
+- A redactor that **raises** is swallowed with a `UserWarning`; the original payload is used so events are never silently dropped
+- Applied before writing to SQLite, printing to console, and forwarding to exporters
+
 ## SQLite persistence
 
 Use a database for durable event storage:

@@ -42,7 +42,8 @@ Adds `RouterNode`. Call manually after constructing a `LazyRouter`.
 schema.add_edge(
     src_id: str,
     dst_id: str,
-    type: EdgeType | str = EdgeType.TOOL,
+    *,
+    kind: EdgeType | str = EdgeType.TOOL,
     label: str | None = None,
 ) -> None
 ```
@@ -95,7 +96,7 @@ a1 = LazyAgent("anthropic", name="researcher", session=sess)
 a2 = LazyAgent("openai",    name="writer",     session=sess)
 
 # agents auto-registered; add tool edge manually
-sess.graph.add_edge(a1.id, a2.id, type="context", label="researcher→writer")
+sess.graph.add_edge(a1.id, a2.id, kind="context", label="researcher→writer")
 
 # inspect
 print(sess.graph.to_json())

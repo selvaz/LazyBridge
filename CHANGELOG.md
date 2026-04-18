@@ -34,9 +34,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.6.0] — Claude Opus 4.7 support + version bump
+## [0.6.0] — Claude Opus 4.7 support + tier aliases
 
-See commit `20f7130` for details.
+### Added
+- Default model for `anthropic` / `claude` provider updated to `claude-opus-4-7`.
+- Tier-string aliases on `model=` for all four providers: `super_cheap`, `cheap`, `medium`, `expensive`, `top` resolve to the concrete model appropriate for each provider's current lineup. Literal model names pass through unchanged — no breaking change.
+- Fallback-on-404: when a tier-resolved model returns a "model not found" error, the provider falls back to the next candidate and emits a `UserWarning`. Prevents hard failures when preview models are retired.
+- `BaseProvider.resolve_model_alias()` — shared helper used by all provider adapters.
 
 ---
 

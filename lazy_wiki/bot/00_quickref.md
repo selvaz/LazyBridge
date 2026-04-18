@@ -4,11 +4,11 @@
 
 | tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
 | --- | --- | --- | --- | --- |
-| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner |
-| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner |
-| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat |
-| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat |
-| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat |
+| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
+| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
+| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
+| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
+| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
 
 `LazyAgent(provider, model="<tier>")` resolves to the concrete model
 above; literal model names pass through; unknown tier strings pass
@@ -49,8 +49,9 @@ LazyAgent.chat(
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
-    tool_choice: str | None = None,        # "auto"|"none"|"required"|"<tool_name>"
+    tool_choice: str | None = None,        # "auto"|"none"|"required"|"<tool_name>"|"parallel"
     context: LazyContext | Callable[[], str] | None = None,  # overrides agent-level context
+    guard: Guard | None = None,            # runs input + output validation; raises GuardError on block
     **kwargs,
 ) -> CompletionResponse | Iterator[StreamChunk]
 
@@ -67,6 +68,7 @@ LazyAgent.loop(
     verify: Verifier | Callable[[str, str], str] | None = None,  # judge: any object with .text() or a callable
     max_verify: int = 3,                   # max retry attempts when verify is set
     tool_timeout: float | None = None,     # per-tool timeout in seconds; TimeoutError on breach
+    guard: Guard | None = None,            # forwarded to each internal chat() call; guards input + output
     **chat_kwargs,                         # forwarded to chat() on each step
                                            # tool_choice="parallel" runs multiple tool calls concurrently
 ) -> CompletionResponse
@@ -99,6 +101,9 @@ LazyAgent.description: str | None
 LazyAgent.result: Any               # PUBLIC   — canonical last-value accessor: Pydantic if output_schema set, else str, else None. Always use this in pipeline code.
 LazyAgent._last_output: str | None  # INTERNAL — plain text read by LazyContext.from_agent(). Do not use directly in user code; use agent.result instead.
 LazyAgent._last_response: CompletionResponse | None  # ADVANCED — full response (.parsed, .usage, .tool_calls, .grounding_sources). Use when you need token counts or structured fields.
+
+# GUI — available after `import lazybridge.gui`
+LazyAgent.gui(*, open_browser: bool = True) -> str  # opens browser panel; returns URL
 ```
 
 ## HumanAgent
@@ -261,6 +266,7 @@ LazyTool.from_agent(
     output_schema: type | dict | None = None,
     native_tools: list | None = None,
     system_prompt: str | None = None,
+    tool_choice: str | None = None,       # "required"|"none"|"<name>" — forwarded to inner loop()
     strict: bool = False,
 ) -> LazyTool  # schema always {"task": str}
 
