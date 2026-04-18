@@ -1093,6 +1093,7 @@ class LazyAgent:
         chat_kwargs["memory"] = None
 
         messages = self._run_input_guard(guard, messages)
+        _mem_task = messages  # save original string for _record (before _build_input rebinds to list)
         if loop_memory is not None:
             self._validate_memory(messages, loop_memory, False)
             messages = loop_memory._build_input(messages)  # type: ignore[arg-type]
@@ -1111,39 +1112,41 @@ class LazyAgent:
             force_final_after_tools=force_final_after_tools,
         )
         action = next(gen)
-        try:
-            while True:
-                tag = action[0]
-                if tag == self._CALL_MODEL:
-                    _, convo, t, nt, kw = action
-                    val = self.chat(convo, tools=t, native_tools=nt, **kw)
-                elif tag == self._EXEC_TOOL:
-                    _, tc, registry, runner = action
-                    val = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
-                elif tag == self._EXEC_TOOLS_BATCH:
-                    _, calls, registry, runner = action
-                    val = []
-                    for tc in calls:
-                        try:
-                            r = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
-                            val.append((r, None))
-                        except Exception as exc:
-                            val.append((None, exc))
-                elif tag == self._EMIT_EVENT:
-                    _, callback, name, payload = action
-                    callback(name, payload)
-                    val = None
-                elif tag == self._VERIFY:
-                    _, v, q, ans = action
-                    val = v.text(f"Question: {q}\nAnswer: {ans}") if hasattr(v, "text") else v(q, ans)
-                else:  # pragma: no cover
-                    val = None
+        result: CompletionResponse | None = None
+        while True:
+            tag = action[0]
+            if tag == self._CALL_MODEL:
+                _, convo, t, nt, kw = action
+                val = self.chat(convo, tools=t, native_tools=nt, **kw)
+            elif tag == self._EXEC_TOOL:
+                _, tc, registry, runner = action
+                val = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
+            elif tag == self._EXEC_TOOLS_BATCH:
+                _, calls, registry, runner = action
+                val = []
+                for tc in calls:
+                    try:
+                        r = self._execute_tool(tc, registry, runner, tool_timeout=tool_timeout)
+                        val.append((r, None))
+                    except Exception as exc:
+                        val.append((None, exc))
+            elif tag == self._EMIT_EVENT:
+                _, callback, name, payload = action
+                callback(name, payload)
+                val = None
+            elif tag == self._VERIFY:
+                _, v, q, ans = action
+                val = v.text(f"Question: {q}\nAnswer: {ans}") if hasattr(v, "text") else v(q, ans)
+            else:  # pragma: no cover
+                val = None
+            try:
                 action = gen.send(val)
-        except StopIteration as e:
-            result = e.value
+            except StopIteration as e:
+                result = e.value
+                break
         self._run_output_guard(guard, result)
         if loop_memory is not None:
-            loop_memory._record(messages, result.content)  # type: ignore[arg-type]
+            loop_memory._record(_mem_task, result.content)  # type: ignore[arg-type]
         return result
 
     async def aloop(
@@ -1185,6 +1188,7 @@ class LazyAgent:
         chat_kwargs["memory"] = None
 
         messages = await self._arun_input_guard(guard, messages)
+        _mem_task = messages  # save original string for _record (before _build_input rebinds to list)
         if loop_memory is not None:
             self._validate_memory(messages, loop_memory, False)
             messages = loop_memory._build_input(messages)  # type: ignore[arg-type]
@@ -1203,47 +1207,49 @@ class LazyAgent:
             force_final_after_tools=force_final_after_tools,
         )
         action = next(gen)
-        try:
-            while True:
-                tag = action[0]
-                if tag == self._CALL_MODEL:
-                    _, convo, t, nt, kw = action
-                    val = await self.achat(convo, tools=t, native_tools=nt, **kw)
-                elif tag == self._EXEC_TOOL:
-                    _, tc, registry, runner = action
-                    val = await self._aexecute_tool(tc, registry, runner, tool_timeout=tool_timeout)
-                elif tag == self._EXEC_TOOLS_BATCH:
-                    _, calls, registry, runner = action
+        result: CompletionResponse | None = None
+        while True:
+            tag = action[0]
+            if tag == self._CALL_MODEL:
+                _, convo, t, nt, kw = action
+                val = await self.achat(convo, tools=t, native_tools=nt, **kw)
+            elif tag == self._EXEC_TOOL:
+                _, tc, registry, runner = action
+                val = await self._aexecute_tool(tc, registry, runner, tool_timeout=tool_timeout)
+            elif tag == self._EXEC_TOOLS_BATCH:
+                _, calls, registry, runner = action
 
-                    async def _run_one(c, _reg=registry, _run=runner, _tt=tool_timeout):
-                        try:
-                            r = await self._aexecute_tool(c, _reg, _run, tool_timeout=_tt)
-                            return (r, None)
-                        except Exception as exc:
-                            return (None, exc)
+                async def _run_one(c, _reg=registry, _run=runner, _tt=tool_timeout):
+                    try:
+                        r = await self._aexecute_tool(c, _reg, _run, tool_timeout=_tt)
+                        return (r, None)
+                    except Exception as exc:
+                        return (None, exc)
 
-                    val = await asyncio.gather(*[_run_one(c) for c in calls])
-                    val = list(val)
-                elif tag == self._EMIT_EVENT:
-                    _, callback, name, payload = action
-                    await _call_event_async(callback, name, payload)
-                    val = None
-                elif tag == self._VERIFY:
-                    _, v, q, ans = action
-                    if hasattr(v, "atext"):
-                        val = await v.atext(f"Question: {q}\nAnswer: {ans}")
-                    elif inspect.iscoroutinefunction(v):
-                        val = await v(q, ans)
-                    else:
-                        val = v(q, ans)
-                else:  # pragma: no cover
-                    val = None
+                val = await asyncio.gather(*[_run_one(c) for c in calls])
+                val = list(val)
+            elif tag == self._EMIT_EVENT:
+                _, callback, name, payload = action
+                await _call_event_async(callback, name, payload)
+                val = None
+            elif tag == self._VERIFY:
+                _, v, q, ans = action
+                if hasattr(v, "atext"):
+                    val = await v.atext(f"Question: {q}\nAnswer: {ans}")
+                elif inspect.iscoroutinefunction(v):
+                    val = await v(q, ans)
+                else:
+                    val = v(q, ans)
+            else:  # pragma: no cover
+                val = None
+            try:
                 action = gen.send(val)
-        except StopIteration as e:
-            result = e.value
+            except StopIteration as e:
+                result = e.value
+                break
         await self._arun_output_guard(guard, result)
         if loop_memory is not None:
-            loop_memory._record(messages, result.content)  # type: ignore[arg-type]
+            loop_memory._record(_mem_task, result.content)  # type: ignore[arg-type]
         return result
 
     # ------------------------------------------------------------------

@@ -108,12 +108,18 @@ class SupervisorAgent:
         self._last_output: str | None = None
         self._last_response: CompletionResponse | None = None
 
+        self._id: str | None = None
+
         if session:
             session._register_agent(self)
 
     @property
     def id(self) -> str:
-        return f"supervisor-{self.name}"
+        return self._id if self._id is not None else f"supervisor-{self.name}"
+
+    @id.setter
+    def id(self, value: str) -> None:
+        self._id = value
 
     @property
     def tools(self) -> list:
