@@ -102,22 +102,21 @@ class DeepSeekProvider(OpenAIProvider):
         return model in _REASONING_MODELS
 
     def _resolve_thinking(self, request: CompletionRequest) -> CompletionRequest:
-        """If thinking is enabled and model is not reasoner, switch to reasoner."""
+        """If thinking is enabled and model is not reasoner, error out.
+
+        Previously the provider auto-switched to ``deepseek-reasoner``
+        with only a warning — changing the model underneath the caller
+        is too surprising (audit M8).  The caller now has to pick the
+        reasoning model explicitly.
+        """
         if request.thinking and request.thinking.enabled:
             model = self._resolve_model(request)
             if model not in _REASONING_MODELS:
-                # Auto-switch to reasoning model
-                import dataclasses
-                import warnings
-
-                warnings.warn(
-                    f"DeepSeek: thinking requested but model '{model}' does not support "
-                    "reasoning. Automatically switching to 'deepseek-reasoner'. "
-                    "Pass model='deepseek-reasoner' explicitly to suppress this warning.",
-                    UserWarning,
-                    stacklevel=3,
+                raise ValueError(
+                    f"DeepSeek: thinking was requested but model {model!r} does "
+                    "not support reasoning. Pass model='deepseek-reasoner' "
+                    "explicitly, or drop thinking= for this call."
                 )
-                return dataclasses.replace(request, model="deepseek-reasoner")
         return request
 
     # ------------------------------------------------------------------

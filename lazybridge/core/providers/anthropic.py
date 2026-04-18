@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -302,10 +303,22 @@ class AnthropicProvider(BaseProvider):
         system = self._get_system(request)
         if system:
             params["system"] = system
-        # Opus 4.7 does not support temperature/top_p/top_k — skip silently
+        # Opus 4.7 does not support temperature/top_p/top_k — but we now
+        # warn rather than drop silently so users aren't surprised when
+        # their temperature setting has no effect (audit M7).
         no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
-        if request.temperature is not None and not no_sampling:
-            params["temperature"] = request.temperature
+        if request.temperature is not None:
+            if no_sampling:
+                warnings.warn(
+                    f"Anthropic model {model!r} does not support the temperature "
+                    "parameter; your temperature= value is being ignored. "
+                    "Drop it from the call or pick a different model to suppress "
+                    "this warning.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+            else:
+                params["temperature"] = request.temperature
         tools = self._build_tools(request)
         if tools:
             params["tools"] = tools
@@ -474,8 +487,16 @@ class AnthropicProvider(BaseProvider):
                             resp.validated = True
                         else:
                             apply_structured_validation(resp, resp.content, schema)
-                    except (AttributeError, NotImplementedError):
-                        # messages.parse() not available on this SDK version — fall back
+                    except (AttributeError, NotImplementedError) as _pe:
+                        # messages.parse() not available on this SDK version — fall back.
+                        # Log once at DEBUG so users diagnosing "why is validation
+                        # different?" can find the signal (audit L7).
+                        import logging as _logging
+                        _logging.getLogger(__name__).debug(
+                            "Anthropic SDK lacks messages.parse(); falling back to "
+                            "manual JSON parse for schema %r (%s)",
+                            getattr(schema, "__name__", schema), _pe,
+                        )
                         response = self._client.messages.create(**params)
                         resp = self._parse_response(response)
                         apply_structured_validation(resp, resp.content, schema)

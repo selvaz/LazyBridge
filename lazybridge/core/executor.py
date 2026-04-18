@@ -86,7 +86,7 @@ def _is_retryable(exc: Exception) -> bool:
 
 
 # Warning template reused by both sync and async retry loops
-_RETRY_WARN = "Executor: transient error on attempt {attempt}/{total} ({exc_type}: {exc}). Retrying in {delay:.1f}s."
+_RETRY_WARN = "Executor: transient error on attempt {attempt}/{total} ({exc_type}: {exc!r}). Retrying in {delay:.1f}s."
 
 
 # ---------------------------------------------------------------------------

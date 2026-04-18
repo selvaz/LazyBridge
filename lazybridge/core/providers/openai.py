@@ -743,7 +743,22 @@ class OpenAIProvider(BaseProvider):
 
         # For Pydantic schema streaming, instruct the model to output JSON.
         # (beta.chat.completions.parse() is not available in streaming mode.)
+        # The advertised schema is lost on this path — the model emits some
+        # JSON, and structured.apply_structured_validation re-validates
+        # against our subset validator on the final chunk.  Warn the
+        # caller so this "best-effort" behaviour isn't a surprise
+        # (audit M13).
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
+            import warnings as _warnings
+
+            _warnings.warn(
+                "OpenAI streaming with a Pydantic output_schema is best-effort: "
+                "the schema is enforced at validation time, not by the model's "
+                "response_format. Expect occasional parse/validation failures on "
+                "long completions.  Use stream=False for strict Pydantic parsing.",
+                UserWarning,
+                stacklevel=4,
+            )
             params["response_format"] = {"type": "json_object"}
 
         text_accum = ""
