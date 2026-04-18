@@ -141,9 +141,15 @@ def parse_structured_output(
     text = content.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        # drop first line (```json or ```) and last line (```)
-        inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
-        text = "\n".join(inner).strip()
+        if len(lines) == 1:
+            # Single-line: ```json {"a":1}``` or ```{"a":1}```
+            text = text.strip("`").strip()
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        else:
+            # Multi-line: drop first (```json) and last (```) lines
+            inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
+            text = "\n".join(inner).strip()
 
     # Step 2 — JSON parse
     try:

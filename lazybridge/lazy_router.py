@@ -31,8 +31,9 @@ Usage::
 from __future__ import annotations
 
 import inspect
+import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -50,6 +51,7 @@ class LazyRouter:
     routes: dict[str, Any]  # str → LazyAgent
     name: str = "router"
     default: str | None = None  # fallback key if condition returns unknown key
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     # ------------------------------------------------------------------
     # Routing
@@ -99,6 +101,7 @@ class LazyRouter:
         """Serialisable representation for GraphSchema."""
         return {
             "type": "router",
+            "id": self.id,
             "name": self.name,
             "routes": {k: getattr(a, "id", str(k)) for k, a in self.routes.items()},
             "default": self.default,
