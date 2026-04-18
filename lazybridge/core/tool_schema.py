@@ -531,6 +531,31 @@ def _call_schema_llm(schema_llm: Any, prompt: str, schema: type) -> Any:
 # ---------------------------------------------------------------------------
 
 
+#: Bounded FIFO cache for :func:`_flatten_refs`.  Keeps the most recent
+#: ~128 flattened results keyed by a SHA-256 digest of the input schema
+#: (canonical JSON).  Audit L1: without this, nested Pydantic schemas
+#: that $defs-reference each other were deep-copied on every flatten pass.
+_FLATTEN_CACHE_MAX = 128
+_flatten_cache: dict[str, dict] = {}
+_flatten_cache_order: list[str] = []
+
+
+def _flatten_cache_stats() -> tuple[int, int]:
+    """Return ``(size, hits_this_process)`` — introspection for tests."""
+    return (len(_flatten_cache), _flatten_cache_hits)
+
+
+_flatten_cache_hits = 0  # incremented on every cache hit
+
+
+def _flatten_cache_clear() -> None:
+    """Drop everything in the flatten cache (for tests and memory pressure)."""
+    global _flatten_cache_hits
+    _flatten_cache.clear()
+    _flatten_cache_order.clear()
+    _flatten_cache_hits = 0
+
+
 def _flatten_refs(schema: dict) -> dict:
     """Inline all ``$ref`` / ``$defs`` entries in a JSON Schema, returning a flat copy.
 
@@ -539,6 +564,11 @@ def _flatten_refs(schema: dict) -> dict:
 
     This is an opt-in post-processing step; providers that handle ``$ref``
     natively (Anthropic, OpenAI) do not require it.
+
+    The result is memoized (see :data:`_flatten_cache`) so repeat flattening
+    of the same schema — common when many tool invocations share one
+    Pydantic model — costs O(deepcopy of the result) instead of O(walk +
+    deepcopy of every $defs entry).
 
     Algorithm
     ---------
@@ -561,6 +591,26 @@ def _flatten_refs(schema: dict) -> dict:
     if not defs:
         return schema
 
+    # Cache key: canonical JSON of the input schema hashed to 16 chars.
+    # json.dumps with sort_keys=True is deterministic across dict insertion
+    # orders; default=repr tolerates non-JSON values by stringifying (these
+    # cache under their repr but that's still correct within one process).
+    try:
+        canon = json.dumps(schema, sort_keys=True, default=repr)
+    except Exception:
+        canon = None  # fall through to uncached slow path
+    if canon is not None:
+        global _flatten_cache_hits
+        key = hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+        cached = _flatten_cache.get(key)
+        if cached is not None:
+            _flatten_cache_hits += 1
+            # Deep-copy the cached value so callers can safely mutate
+            # what they receive without poisoning the cache.
+            return copy.deepcopy(cached)
+    else:
+        key = None  # type: ignore[assignment]
+
     def _resolve(node: Any, visited: frozenset[str]) -> Any:
         if isinstance(node, list):
             return [_resolve(item, visited) for item in node]
@@ -582,6 +632,17 @@ def _flatten_refs(schema: dict) -> dict:
     # Strip "$defs" from the output — all definitions are now inlined.
     # Each top-level value starts with an empty visited set (independent paths).
     flat = {k: _resolve(copy.deepcopy(v), frozenset()) for k, v in schema.items() if k != "$defs"}
+
+    # Publish to the cache if the input was JSON-serialisable.
+    if key is not None:
+        # Store an independent copy so future callers can mutate safely.
+        _flatten_cache[key] = copy.deepcopy(flat)
+        _flatten_cache_order.append(key)
+        # FIFO eviction: drop the oldest entries once we exceed the cap.
+        while len(_flatten_cache_order) > _FLATTEN_CACHE_MAX:
+            evicted = _flatten_cache_order.pop(0)
+            _flatten_cache.pop(evicted, None)
+
     return flat
 
 
