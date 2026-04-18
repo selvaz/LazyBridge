@@ -565,14 +565,23 @@ class LazyAgent:
         _verify_log: list[str] = []
         step = 0
 
+        # If tool_choice is a forced value ("required" or a specific tool name),
+        # apply it only on the first model call.  After a tool executes, revert
+        # to "auto" so the model can decide to produce the final answer.
+        _first_tool_choice = chat_kwargs.get("tool_choice")
+        _forced = _first_tool_choice not in (None, "auto", "none", "parallel")
+        _auto_kwargs: dict = {**chat_kwargs, "tool_choice": "auto"} if _forced else chat_kwargs
+
         self._track(Event.AGENT_START, method=method, task=_orig_q[:200])
 
         for _attempt in range(_attempts):
             tool_set = self._build_tool_set(tools)
             convo = _normalise_messages(_current_messages)
+            _tool_was_called = False
 
             for step in range(max_steps):
-                resp = yield (self._CALL_MODEL, convo, tools, native_tools, chat_kwargs)
+                kw = chat_kwargs if (step == 0 or not _tool_was_called) else _auto_kwargs
+                resp = yield (self._CALL_MODEL, convo, tools, native_tools, kw)
 
                 if on_event:
                     yield (self._EMIT_EVENT, on_event, "step", {"step": step, "response": resp})
@@ -583,6 +592,7 @@ class LazyAgent:
                 self._track(Event.LOOP_STEP, step=step, n_tool_calls=len(resp.tool_calls))
                 convo.append(Message(role=Role.ASSISTANT, content=self._build_assistant_turn(resp)))
 
+                _tool_was_called = True
                 for tc in resp.tool_calls:
                     self._track(Event.TOOL_CALL, name=tc.name, arguments=tc.arguments)
                     if on_event:
@@ -1466,9 +1476,21 @@ class LazyAgent:
         for _attempt in range(max_verify if verify is not None else 1):
             if has_tools:
                 resp = self.loop(messages, **kwargs)
-                from lazybridge.core.structured import apply_structured_validation
+                from lazybridge.core.structured import apply_structured_validation, build_repair_messages
 
                 apply_structured_validation(resp, resp.content, effective_schema)
+                if resp.validation_error:
+                    # Loop produced content but it failed schema validation.
+                    # Ask the model to reformat without re-running tools.
+                    repair_msgs = build_repair_messages(
+                        [{"role": "user", "content": str(messages)}],
+                        resp.content,
+                        effective_schema,
+                        resp.validation_error,
+                    )
+                    repair_resp = self.chat(repair_msgs, output_schema=effective_schema, memory=None)
+                    if isinstance(repair_resp, CompletionResponse):
+                        resp = repair_resp
                 resp.raise_if_failed()
             else:
                 resp = self.chat(messages, output_schema=effective_schema, **kwargs)
@@ -1573,9 +1595,19 @@ class LazyAgent:
         for _attempt in range(max_verify if verify is not None else 1):
             if has_tools:
                 resp = await self.aloop(messages, **kwargs)
-                from lazybridge.core.structured import apply_structured_validation
+                from lazybridge.core.structured import apply_structured_validation, build_repair_messages
 
                 apply_structured_validation(resp, resp.content, effective_schema)
+                if resp.validation_error:
+                    repair_msgs = build_repair_messages(
+                        [{"role": "user", "content": str(messages)}],
+                        resp.content,
+                        effective_schema,
+                        resp.validation_error,
+                    )
+                    repair_resp = await self.achat(repair_msgs, output_schema=effective_schema, memory=None)
+                    if isinstance(repair_resp, CompletionResponse):
+                        resp = repair_resp
                 resp.raise_if_failed()
             else:
                 resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
