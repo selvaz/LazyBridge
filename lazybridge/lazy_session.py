@@ -144,11 +144,18 @@ class EventLog:
         level: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
         exporters: list | None = None,
+        redact: Any = None,
     ) -> None:
         self.session_id = session_id
         self.level = TrackLevel(level) if not isinstance(level, TrackLevel) else level
         self._console = console
         self._exporters: list = list(exporters or [])
+        # Optional payload redactor: Callable[[event_type: str, data: dict], dict].
+        # Defaults to identity.  Use this to drop or mask sensitive fields
+        # (API tokens, PII) that flow through tool arguments / results
+        # before they reach the SQLite store, console, or exporters
+        # (ChatGPT audit F3).
+        self._redact = redact if callable(redact) else None
         self._db = str(Path(db).resolve()) if db else None
         self._mem: list[dict] | None = [] if db is None else None  # in-memory fallback
         self._lock = threading.Lock()
@@ -209,6 +216,17 @@ class EventLog:
             return
         if self.level not in _VERBOSE_LEVELS and event_type in _VERBOSE_ONLY:
             return
+        # Apply the user-supplied redactor, if any, to the payload BEFORE
+        # it reaches the store / console / exporters (audit F3).
+        if self._redact is not None:
+            try:
+                redacted = self._redact(event_type, dict(data))
+                if isinstance(redacted, dict):
+                    data = redacted
+            except Exception as exc:
+                _logger.warning(
+                    "EventLog redactor raised — keeping original payload: %s", exc
+                )
         row = {
             "timestamp": _now(),
             "session_id": self.session_id,
@@ -393,6 +411,7 @@ class LazySession:
         tracking: TrackLevel | str = TrackLevel.BASIC,
         console: bool = False,
         exporters: list | None = None,
+        redact: Any = None,
     ) -> None:
         self.id = str(uuid.uuid4())
         self._db = str(Path(db).resolve()) if db else None
@@ -403,6 +422,7 @@ class LazySession:
             level=tracking,
             console=console,
             exporters=exporters,
+            redact=redact,
         )
         self.graph = GraphSchema(self.id)
         self._agents: list[Any] = []  # ordered list of registered agents

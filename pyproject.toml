@@ -128,8 +128,14 @@ omit = [
 [tool.coverage.report]
 # Realistic floor given that the four provider adapters are only exercised
 # via focused unit tests (tests/unit/gui/test_audit_wave*.py) and live
-# tests (opt-in, skipped in CI). Raise this as provider-dedicated unit
-# tests land.
+# tests (opt-in, skipped in CI).
+#
+# Ratchet strategy (ChatGPT audit F1): raise this gate whenever a block
+# of provider-dedicated unit tests lands.  Target waypoints:
+#   50 — after one round of fake-response fixtures per provider
+#   60 — after tool-loop + structured-output coverage per provider
+#   70 — after streaming + native-tool coverage per provider
+# Don't raise the gate without the tests — it just breaks CI.
 fail_under = 40
 show_missing = true
 exclude_lines = [

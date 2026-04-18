@@ -115,10 +115,28 @@ def _save_checkpoint(store: Any, ckpt_key: str, step: int, state: _ChainState, t
 
 
 def _clear_checkpoint(store: Any, ckpt_key: str) -> None:
-    """Remove checkpoint after successful completion."""
+    """Remove checkpoint after successful completion.
+
+    Previously wrote ``None`` which left a tombstone entry behind and
+    polluted ``LazyStore`` introspection over long-running systems (ChatGPT
+    audit F4).  Now actually deletes the key when the store supports it.
+    """
     if store is None:
         return
-    store.write(ckpt_key, None)
+    if hasattr(store, "delete"):
+        try:
+            store.delete(ckpt_key)
+            return
+        except KeyError:
+            # Key already gone — treat as success.
+            return
+        except Exception as exc:
+            _logger.debug("Checkpoint delete failed, falling back to write(None): %s", exc)
+    # Legacy fallback for store backends that don't implement delete().
+    try:
+        store.write(ckpt_key, None)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
