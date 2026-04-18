@@ -28,6 +28,28 @@ from lazybridge.gui._templates import PAGE_TEMPLATE
 
 _logger = logging.getLogger(__name__)
 
+_STATIC_JS_PATH = (
+    __import__("pathlib").Path(__file__).resolve().parent / "_static" / "app.js"
+)
+_STATIC_JS_CACHE: str | None = None
+
+
+def _load_static_js() -> str:
+    """Lazily read ``lazybridge/gui/_static/app.js`` into memory once.
+
+    The file is static for the lifetime of the Python process — we read
+    it on first request and cache the contents so each GUI session pays
+    a single disk hit.
+    """
+    global _STATIC_JS_CACHE
+    if _STATIC_JS_CACHE is None:
+        try:
+            _STATIC_JS_CACHE = _STATIC_JS_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            _logger.error("Failed to read %s: %s", _STATIC_JS_PATH, exc)
+            _STATIC_JS_CACHE = f"// error loading app.js: {exc}"
+    return _STATIC_JS_CACHE
+
 
 class _Subscriber:
     """One SSE client.  Messages flow through a bounded queue; dropped
@@ -250,8 +272,24 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0].rstrip("/") or "/"
             if path in ("/", "/index.html"):
-                page = PAGE_TEMPLATE.format(title=title, token_json=json.dumps(token))
+                page = PAGE_TEMPLATE.format(
+                    title=title,
+                    token_json=json.dumps(token),
+                    token_raw=token,  # for the <script src="..?t=TOKEN"> query
+                )
                 self._send_text(page)
+                return
+            if path == "/static/app.js":
+                # External client script (audit L6).  Token-gated via the
+                # same ?t= query as every other /api/* call so the URL
+                # can't be fetched cross-origin from an unrelated tab.
+                if not self._check_token():
+                    self._send_json({"error": "unauthorized"}, status=401)
+                    return
+                self._send_text(
+                    _load_static_js(),
+                    content_type="application/javascript; charset=utf-8",
+                )
                 return
             if path == "/healthz":
                 self._send_json({"ok": True, "panels": len(server.panels()), "closed": server.closed})
