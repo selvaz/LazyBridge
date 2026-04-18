@@ -1,8 +1,9 @@
 """Human-in-the-loop with a browser UI instead of stdin.
 
-Wires ``lazybridge.gui.human`` into a ``researcher → SupervisorAgent → writer``
-chain. The supervisor's REPL runs entirely in a browser tab opened on a
-local ephemeral port — no TTY required, no extra dependencies.
+Uses ``lazybridge.gui.panel_input_fn`` to wire a ``researcher →
+SupervisorAgent → writer`` chain into the shared LazyBridge GUI: the
+supervisor's REPL appears as a panel in the same browser tab as the
+agents and tools.  No TTY required, no extra dependencies.
 
 Run::
 
@@ -24,7 +25,7 @@ Close the tab or interrupt with Ctrl+C to stop.
 from __future__ import annotations
 
 from lazybridge import LazyAgent, LazySession, LazyTool, SupervisorAgent
-from lazybridge.gui.human import web_input_fn
+from lazybridge.gui import panel_input_fn
 
 
 def search(query: str) -> str:
@@ -50,8 +51,11 @@ def main() -> None:
         system="You are a technical writer. Turn the supervisor's notes into a 3-sentence brief.",
     )
 
-    fn = web_input_fn(title="LazyBridge — Supervisor REPL")
-    print(f"Open this URL if the browser did not launch: {fn.server.url}")
+    fn = panel_input_fn(name="supervisor")
+    # panel_input_fn registers on the shared GUI server. Its URL is the
+    # server URL; print it so headless users can copy-paste.
+    from lazybridge.gui import get_server
+    print(f"Open this URL if the browser did not launch: {get_server().url}")
 
     supervisor = SupervisorAgent(
         name="supervisor",
@@ -74,7 +78,7 @@ def main() -> None:
         print("\n=== Writer output ===")
         print(result)
     finally:
-        fn.server.close()
+        fn.panel.close()
 
 
 if __name__ == "__main__":

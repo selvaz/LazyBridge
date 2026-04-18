@@ -70,7 +70,7 @@ class WebInputServer:
         self._prompt_lock = threading.Lock()
         self._current_prompt: dict[str, Any] | None = None  # {"seq", "prompt", "quick_commands"}
         self._current_seq = 0
-        self._response_q: "queue.Queue[str | _SentinelClosed]" = queue.Queue(maxsize=1)
+        self._response_q: queue.Queue[str | _SentinelClosed] = queue.Queue(maxsize=1)
         self._closed = threading.Event()
 
         handler_cls = _make_handler(self)
@@ -203,7 +203,7 @@ class WebInputServer:
             pass
         self._httpd.server_close()
 
-    def __enter__(self) -> "WebInputServer":
+    def __enter__(self) -> WebInputServer:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -236,11 +236,11 @@ def _make_handler(server: WebInputServer) -> type[BaseHTTPRequestHandler]:
     """Build a request-handler class bound to ``server``."""
 
     token = server.token
-    title = server._title  # noqa: SLF001 — intentional friend access
+    title = server._title
 
     class _Handler(BaseHTTPRequestHandler):
         # Suppress default stderr access log; route to our logger instead.
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: Any) -> None:
             _logger.debug("gui.human " + format, *args)
 
         def _check_token(self) -> bool:
@@ -274,7 +274,7 @@ def _make_handler(server: WebInputServer) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
 
         # ---- GET ------------------------------------------------------
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
                 page = PAGE_TEMPLATE.format(title=title, token_json=json.dumps(token))
@@ -287,12 +287,12 @@ def _make_handler(server: WebInputServer) -> type[BaseHTTPRequestHandler]:
                 if not self._check_token():
                     self._json({"error": "unauthorized"}, status=401)
                     return
-                self._json(server._snapshot_prompt())  # noqa: SLF001
+                self._json(server._snapshot_prompt())
                 return
             self._text("Not found", status=404, content_type="text/plain")
 
         # ---- POST -----------------------------------------------------
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             if path != "/submit":
                 self._text("Not found", status=404, content_type="text/plain")
@@ -312,7 +312,7 @@ def _make_handler(server: WebInputServer) -> type[BaseHTTPRequestHandler]:
             except (ValueError, KeyError, TypeError):
                 self._json({"error": "bad payload"}, status=400)
                 return
-            accepted = server._deliver_response(seq, response)  # noqa: SLF001
+            accepted = server._deliver_response(seq, response)
             self._json({"accepted": accepted})
 
     return _Handler

@@ -37,7 +37,6 @@ from lazybridge.gui._dispatch import open_gui
 from lazybridge.gui._global import GuiServer, close_server, get_server, is_running
 from lazybridge.gui._install import install_gui_methods, uninstall_gui_methods
 from lazybridge.gui._panel import Panel
-from lazybridge.gui.types import GuiEnabled
 from lazybridge.gui.agent import AgentPanel
 from lazybridge.gui.human_panel import HumanInputPanel, panel_input_fn
 from lazybridge.gui.memory import MemoryPanel
@@ -46,6 +45,7 @@ from lazybridge.gui.router import RouterPanel
 from lazybridge.gui.session import SessionPanel
 from lazybridge.gui.store import StorePanel
 from lazybridge.gui.tool import ToolPanel
+from lazybridge.gui.types import GuiEnabled
 
 # Install .gui() methods on LazyAgent / LazyTool / LazySession as a side
 # effect of importing this package. The install is idempotent.

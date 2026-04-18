@@ -232,7 +232,14 @@ class CacheManager:
             return None
         try:
             return pd.read_parquet(p)
-        except Exception:
+        except Exception as exc:
+            # Don't crash the whole batch on one bad parquet file — but
+            # leave a breadcrumb at DEBUG so operators can diagnose the
+            # root cause (corrupt / partial write / schema drift).
+            _logger.debug(
+                "load(%r): pd.read_parquet(%s) failed — %s: %s",
+                ticker, p, type(exc).__name__, exc,
+            )
             return None
 
     def save(self, ticker: str, df: pd.DataFrame) -> str:

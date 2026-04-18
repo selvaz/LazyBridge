@@ -327,7 +327,7 @@ class AgentPanel(Panel):
         if enabled_native:
             lines.append("from lazybridge.core.types import NativeTool")
         lines.append("")
-        lines.append(f"agent = LazyAgent(")
+        lines.append("agent = LazyAgent(")
         lines.append(f"    {provider!r},")
         lines.append(f"    name={name!r},")
         if model:

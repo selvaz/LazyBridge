@@ -12,7 +12,6 @@ from typing import Any
 
 from lazybridge.gui._panel import Panel
 
-
 _PREVIEW_LIMIT = 160
 
 #: Sentinel agent_id used for writes/deletes performed through the GUI.

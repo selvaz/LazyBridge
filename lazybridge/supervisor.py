@@ -268,9 +268,12 @@ class SupervisorAgent:
         return resp
 
     async def achat(self, messages: str | list, **kw: Any) -> CompletionResponse:
-        if self._ainput_fn is not None:
-            # TODO: async REPL with ainput_fn — for now run sync REPL in thread
-            return await asyncio.to_thread(self.chat, messages, **kw)
+        # Current implementation offloads the sync REPL to a worker thread
+        # regardless of whether ``ainput_fn`` is set — the two branches
+        # used to be separate in anticipation of a native async REPL but
+        # were bit-for-bit identical; collapsed here.  A future async
+        # REPL implementation should use ``self._ainput_fn`` when
+        # available and await directly on the event loop.
         return await asyncio.to_thread(self.chat, messages, **kw)
 
     def text(self, messages: str | list, **kw: Any) -> str:

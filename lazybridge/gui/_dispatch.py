@@ -41,12 +41,26 @@ def open_gui(obj: Any, *, open_browser: bool = True, **kwargs: Any) -> str:
     from lazybridge.gui.session import SessionPanel
     from lazybridge.gui.store import StorePanel
     from lazybridge.gui.tool import ToolPanel
+    from lazybridge.human import HumanAgent
     from lazybridge.lazy_agent import LazyAgent
     from lazybridge.lazy_router import LazyRouter
     from lazybridge.lazy_session import LazySession
     from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
     from lazybridge.memory import Memory
+    from lazybridge.supervisor import SupervisorAgent
+
+    # HumanAgent / SupervisorAgent are first-class agents but have no
+    # inspect-and-test panel (they ARE the interaction).  Route users
+    # to the real entry point with a clear error instead of silently
+    # falling through to the "unsupported type" message.
+    if isinstance(obj, (HumanAgent, SupervisorAgent)):
+        raise NotImplementedError(
+            f"{type(obj).__name__} has no inspect-and-test panel — it IS the "
+            "human interaction. Use `lazybridge.gui.panel_input_fn(name=...)` "
+            "to register a human-input panel on the shared GUI server, then "
+            "pass the returned callable as `input_fn=` on the agent."
+        )
 
     server = get_server(open_browser=open_browser)
 

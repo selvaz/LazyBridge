@@ -981,7 +981,7 @@ class LazyAgent:
         self._run_output_guard(guard, result)
         return result
 
-    async def aloop(  # noqa: D401 — see loop() docstring
+    async def aloop(
         self,
         messages: str | list,
         *,
@@ -1144,7 +1144,7 @@ class LazyAgent:
             return await _acall()
         try:
             return await asyncio.wait_for(_acall(), timeout=tool_timeout)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise TimeoutError(
                 f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s"
             ) from exc

@@ -56,7 +56,7 @@ class _Subscriber:
     notifications become a ``{"type": "refresh"}`` hint so the client
     re-syncs the next time it polls or reconnects."""
 
-    __slots__ = ("q", "alive")
+    __slots__ = ("alive", "q")
 
     def __init__(self) -> None:
         self.q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=64)
@@ -149,7 +149,7 @@ class GuiServer:
         """Add or replace ``panel`` and return its panel URL."""
         with self._panels_lock:
             self._panels[panel.id] = panel
-        panel._notifier = self._panel_notify  # noqa: SLF001 — friend access
+        panel._notifier = self._panel_notify
         self._broadcast({"type": "list"})
         return self.url_for(panel.id)
 
@@ -157,7 +157,7 @@ class GuiServer:
         with self._panels_lock:
             removed = self._panels.pop(panel_id, None)
         if removed is not None:
-            removed._notifier = None  # noqa: SLF001
+            removed._notifier = None
             self._broadcast({"type": "list"})
 
     def get(self, panel_id: str) -> Panel | None:
@@ -232,10 +232,10 @@ class GuiServer:
 
 def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
     token = server.token
-    title = server._title  # noqa: SLF001 — friend access by design
+    title = server._title
 
     class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: Any) -> None:
             _logger.debug("gui " + format, *args)
 
         # ------------------------------------------------------------------
@@ -269,7 +269,7 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
 
         # ------------------------------------------------------------------
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             path = self.path.split("?", 1)[0].rstrip("/") or "/"
             if path in ("/", "/index.html"):
                 page = PAGE_TEMPLATE.format(
@@ -364,7 +364,7 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
                 srv._remove_subscriber(sub)
 
         # ------------------------------------------------------------------
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             if not self._check_token():
                 self._send_json({"error": "unauthorized"}, status=401)

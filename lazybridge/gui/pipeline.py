@@ -293,7 +293,7 @@ class PipelinePanel(Panel):
 class _PipelineEventExporter:
     """CallbackExporter-compatible adapter that forwards filtered events."""
 
-    __slots__ = ("_panel_ref", "_names", "_run_id")
+    __slots__ = ("_names", "_panel_ref", "_run_id")
 
     def __init__(self, panel: PipelinePanel, names: set[str], run_id: str) -> None:
         self._panel_ref = panel
