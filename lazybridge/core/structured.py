@@ -34,7 +34,13 @@ _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 
 
 def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return a provider-safe JSON schema with closed objects by default."""
+    """Return a provider-safe JSON schema with closed objects by default.
+
+    Recursively sets ``additionalProperties: false`` on every object node,
+    including those inside ``$defs`` / ``definitions`` (Pydantic nested models),
+    ``properties`` values, ``items``, and ``anyOf`` / ``allOf`` / ``oneOf``
+    sub-schemas.
+    """
     if not isinstance(schema, dict):
         return schema
 
@@ -45,8 +51,19 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 prop_name: normalize_json_schema(prop_schema) if isinstance(prop_schema, dict) else prop_schema
                 for prop_name, prop_schema in value.items()
             }
+        elif key in ("$defs", "definitions") and isinstance(value, dict):
+            # Pydantic v2 puts nested model schemas here — must also be closed.
+            normalized[key] = {
+                def_name: normalize_json_schema(def_schema) if isinstance(def_schema, dict) else def_schema
+                for def_name, def_schema in value.items()
+            }
         elif key == "items" and isinstance(value, dict):
             normalized[key] = normalize_json_schema(value)
+        elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
+            normalized[key] = [
+                normalize_json_schema(sub) if isinstance(sub, dict) else sub
+                for sub in value
+            ]
         else:
             normalized[key] = value
 
