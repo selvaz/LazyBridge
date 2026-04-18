@@ -1057,6 +1057,9 @@ class LazyAgent:
         loop_memory: Memory | None = chat_kwargs.pop("memory", None)
         if loop_memory is None:
             loop_memory = self.memory
+        # Explicitly bypass agent-level memory inside internal chat() calls so
+        # chat() doesn't try to re-apply it to the already-built list messages.
+        chat_kwargs["memory"] = None
 
         messages = self._run_input_guard(guard, messages)
         if loop_memory is not None:
@@ -1146,6 +1149,7 @@ class LazyAgent:
         loop_memory: Memory | None = chat_kwargs.pop("memory", None)
         if loop_memory is None:
             loop_memory = self.memory
+        chat_kwargs["memory"] = None
 
         messages = await self._arun_input_guard(guard, messages)
         if loop_memory is not None:
