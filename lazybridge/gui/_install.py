@@ -20,10 +20,14 @@ def install_gui_methods() -> None:
     from lazybridge.gui._global import get_server
     from lazybridge.gui.agent import AgentPanel
     from lazybridge.gui.pipeline import PipelinePanel, is_pipeline_tool
+    from lazybridge.gui.router import RouterPanel
     from lazybridge.gui.session import SessionPanel
+    from lazybridge.gui.store import StorePanel
     from lazybridge.gui.tool import ToolPanel
     from lazybridge.lazy_agent import LazyAgent
+    from lazybridge.lazy_router import LazyRouter
     from lazybridge.lazy_session import LazySession
+    from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
 
     def _agent_gui(
@@ -61,8 +65,9 @@ def install_gui_methods() -> None:
     def _session_gui(self: Any, *, open_browser: bool = True) -> str:
         """Open the session's GUI panel and return its URL.
 
-        Also registers a panel for every agent already in the session so
-        they appear in the sidebar immediately.
+        Also registers a panel for every agent already in the session and
+        for the shared ``LazyStore`` so they appear in the sidebar
+        immediately.
         """
         server = get_server(open_browser=open_browser)
         session_url = server.register(SessionPanel(self))
@@ -71,11 +76,26 @@ def install_gui_methods() -> None:
             for tool in list(getattr(agent, "tools", None) or []):
                 sub_panel = PipelinePanel(tool) if is_pipeline_tool(tool) else ToolPanel(tool)
                 server.register(sub_panel)
+        store = getattr(self, "store", None)
+        if store is not None:
+            server.register(StorePanel(store, label=f"session store · {self.id[:8]}"))
         return session_url
+
+    def _router_gui(self: Any, *, open_browser: bool = True) -> str:
+        """Open the router's GUI panel and return its URL."""
+        server = get_server(open_browser=open_browser)
+        return server.register(RouterPanel(self))
+
+    def _store_gui(self: Any, *, open_browser: bool = True) -> str:
+        """Open the store's GUI panel and return its URL."""
+        server = get_server(open_browser=open_browser)
+        return server.register(StorePanel(self))
 
     LazyAgent.gui = _agent_gui  # type: ignore[attr-defined]
     LazyTool.gui = _tool_gui  # type: ignore[attr-defined]
     LazySession.gui = _session_gui  # type: ignore[attr-defined]
+    LazyRouter.gui = _router_gui  # type: ignore[attr-defined]
+    LazyStore.gui = _store_gui  # type: ignore[attr-defined]
 
     _INSTALLED = True
 
@@ -86,10 +106,12 @@ def uninstall_gui_methods() -> None:
     if not _INSTALLED:
         return
     from lazybridge.lazy_agent import LazyAgent
+    from lazybridge.lazy_router import LazyRouter
     from lazybridge.lazy_session import LazySession
+    from lazybridge.lazy_store import LazyStore
     from lazybridge.lazy_tool import LazyTool
 
-    for cls in (LazyAgent, LazyTool, LazySession):
+    for cls in (LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore):
         if hasattr(cls, "gui"):
             delattr(cls, "gui")
     _INSTALLED = False

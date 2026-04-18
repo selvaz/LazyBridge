@@ -39,7 +39,9 @@ from lazybridge.gui._panel import Panel
 from lazybridge.gui.agent import AgentPanel
 from lazybridge.gui.human_panel import HumanInputPanel, panel_input_fn
 from lazybridge.gui.pipeline import PipelinePanel
+from lazybridge.gui.router import RouterPanel
 from lazybridge.gui.session import SessionPanel
+from lazybridge.gui.store import StorePanel
 from lazybridge.gui.tool import ToolPanel
 
 # Install .gui() methods on LazyAgent / LazyTool / LazySession as a side
@@ -55,6 +57,8 @@ __all__ = [
     "SessionPanel",
     "HumanInputPanel",
     "panel_input_fn",
+    "RouterPanel",
+    "StorePanel",
     "get_server",
     "close_server",
     "is_running",

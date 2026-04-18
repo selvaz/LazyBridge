@@ -630,12 +630,198 @@ PAGE_TEMPLATE = """<!doctype html>
     }});
   }}
 
+  function renderRouter(root, state) {{
+    const inspect = makeSection("Router — " + state.label);
+    const rows = (state.routes || []).map(r => {{
+      const prov = r.provider ? ` <span class="status">${{escapeHtml(r.provider)}}/${{escapeHtml(r.model || "")}}</span>` : "";
+      const link = r.panel_id
+        ? `<span class="pill" data-panel="${{escapeHtml(r.panel_id)}}" style="cursor:pointer">→ ${{escapeHtml(r.agent_name)}}</span>`
+        : `<strong>${{escapeHtml(r.agent_name)}}</strong>`;
+      return `<li><code>${{escapeHtml(r.key)}}</code> → ${{link}}${{prov}}</li>`;
+    }}).join("");
+    inspect.innerHTML += `
+      <label>Default key</label>
+      <input type="text" value="${{escapeHtml(state.default || "")}}" disabled>
+      <label>Routes (${{(state.routes || []).length}})</label>
+      <ul style="padding-left:1rem">${{rows || "<li class=\\"status\\">none</li>"}}</ul>
+      <label>Condition</label>
+      <pre>${{escapeHtml(state.condition || "")}}</pre>
+    `;
+    root.appendChild(inspect);
+    inspect.querySelectorAll("[data-panel]").forEach(el => {{
+      el.addEventListener("click", () => loadPanel(el.dataset.panel));
+    }});
+
+    // --------- Test ---------
+    const test = makeSection("Test — route a value");
+    test.innerHTML += `
+      <label>Value to route</label>
+      <input type="text" id="router-value" placeholder="value passed to router.route(…)">
+      <div class="row">
+        <button id="router-route">Which agent?</button>
+        <button id="router-route-run" class="secondary">Route &amp; run</button>
+        <span class="status" id="router-status"></span>
+      </div>
+      <label>Optional prompt (for Route &amp; run)</label>
+      <textarea id="router-prompt" placeholder="Prompt passed to the routed agent's .chat()"></textarea>
+      <label>Result</label>
+      <pre id="router-result">—</pre>
+    `;
+    root.appendChild(test);
+
+    test.querySelector("#router-route").addEventListener("click", async () => {{
+      const value = test.querySelector("#router-value").value;
+      const st = test.querySelector("#router-status");
+      const out = test.querySelector("#router-result");
+      st.textContent = "Routing…"; st.className = "status";
+      out.textContent = "…";
+      try {{
+        const res = await action(state.id, "route", {{value}});
+        out.textContent = JSON.stringify(res, null, 2);
+        st.textContent = "Matched key: " + (res.matched_key || "(default)"); st.className = "status ok";
+      }} catch (e) {{
+        out.textContent = e.message;
+        st.textContent = "Failed"; st.className = "status bad";
+      }}
+    }});
+
+    test.querySelector("#router-route-run").addEventListener("click", async () => {{
+      const value = test.querySelector("#router-value").value;
+      const prompt = test.querySelector("#router-prompt").value;
+      const st = test.querySelector("#router-status");
+      const out = test.querySelector("#router-result");
+      if (!prompt.trim()) {{ st.textContent = "Prompt is empty"; st.className = "status warn"; return; }}
+      st.textContent = "Routing &amp; running…"; st.className = "status";
+      out.textContent = "…";
+      const t0 = Date.now();
+      try {{
+        const res = await action(state.id, "route_and_run", {{value, prompt}});
+        const dt = ((Date.now() - t0) / 1000).toFixed(1);
+        out.textContent = res.content || JSON.stringify(res, null, 2);
+        const u = res.usage || {{}};
+        const cost = u.cost_usd != null ? ` • $${{u.cost_usd.toFixed(6)}}` : "";
+        st.textContent = `${{res.agent_name}} · ${{dt}}s · ${{u.input_tokens || 0}} in / ${{u.output_tokens || 0}} out${{cost}}`;
+        st.className = "status ok";
+      }} catch (e) {{
+        out.textContent = e.message;
+        st.textContent = "Failed"; st.className = "status bad";
+      }}
+    }});
+  }}
+
+  function renderStore(root, state) {{
+    const inspect = makeSection("Store — " + state.label);
+    const rows = (state.entries || []).map(e => `
+      <tr>
+        <td style="padding:0.25rem 0.75rem 0.25rem 0"><code>${{escapeHtml(e.key)}}</code></td>
+        <td style="padding:0.25rem 0.75rem 0.25rem 0;max-width:32rem;word-break:break-word">${{escapeHtml(e.preview)}}</td>
+        <td style="padding:0.25rem 0;color:var(--muted);font-size:0.75rem">${{escapeHtml(e.agent_id || "")}}</td>
+      </tr>
+    `).join("");
+    inspect.innerHTML += `
+      <label>Backend</label>
+      <input type="text" value="${{escapeHtml(state.backend)}}" disabled>
+      <label>Entries (${{state.key_count}})</label>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.88rem">
+          <thead><tr><th align="left">Key</th><th align="left">Preview</th><th align="left">Agent</th></tr></thead>
+          <tbody>${{rows || `<tr><td colspan=3 class="status">empty</td></tr>`}}</tbody>
+        </table>
+      </div>
+      <div class="row"><button id="store-read-all" class="secondary">Read all as JSON</button></div>
+    `;
+    root.appendChild(inspect);
+
+    const readAllOut = document.createElement("pre");
+    readAllOut.textContent = "";
+    inspect.appendChild(readAllOut);
+    inspect.querySelector("#store-read-all").addEventListener("click", async () => {{
+      readAllOut.textContent = "…";
+      try {{
+        const res = await action(state.id, "read_all", {{}});
+        readAllOut.textContent = JSON.stringify(res.all, null, 2);
+      }} catch (e) {{
+        readAllOut.textContent = e.message;
+      }}
+    }});
+
+    // --------- Test (read / write / delete) ---------
+    const test = makeSection("Read / write / delete");
+    test.innerHTML += `
+      <label>Key</label>
+      <input type="text" id="store-key">
+      <label>Value</label>
+      <textarea id="store-value" placeholder="Value to write…"></textarea>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:0.35rem;margin:0">
+          <input type="checkbox" id="store-as-json"> parse as JSON
+        </label>
+      </div>
+      <div class="row">
+        <button id="store-read">Read</button>
+        <button id="store-write">Write</button>
+        <button id="store-delete" class="secondary">Delete</button>
+        <span class="status" id="store-status"></span>
+      </div>
+      <label>Result</label>
+      <pre id="store-result">—</pre>
+    `;
+    root.appendChild(test);
+
+    const keyEl = test.querySelector("#store-key");
+    const valueEl = test.querySelector("#store-value");
+    const jsonEl = test.querySelector("#store-as-json");
+    const resultEl = test.querySelector("#store-result");
+    const statusEl = test.querySelector("#store-status");
+
+    test.querySelector("#store-read").addEventListener("click", async () => {{
+      if (!keyEl.value.trim()) {{ statusEl.textContent = "Key is empty"; statusEl.className = "status warn"; return; }}
+      statusEl.textContent = "Reading…"; statusEl.className = "status";
+      try {{
+        const res = await action(state.id, "read", {{key: keyEl.value.trim()}});
+        resultEl.textContent = JSON.stringify(res.value, null, 2);
+        statusEl.textContent = "Read ✓"; statusEl.className = "status ok";
+      }} catch (e) {{
+        resultEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+    test.querySelector("#store-write").addEventListener("click", async () => {{
+      if (!keyEl.value.trim()) {{ statusEl.textContent = "Key is empty"; statusEl.className = "status warn"; return; }}
+      statusEl.textContent = "Writing…"; statusEl.className = "status";
+      try {{
+        const res = await action(state.id, "write",
+                                 {{key: keyEl.value.trim(), value: valueEl.value, as_json: jsonEl.checked}});
+        statusEl.textContent = "Wrote ✓ " + res.key; statusEl.className = "status ok";
+        loadPanel(state.id);  // refresh list
+      }} catch (e) {{
+        resultEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+    test.querySelector("#store-delete").addEventListener("click", async () => {{
+      if (!keyEl.value.trim()) {{ statusEl.textContent = "Key is empty"; statusEl.className = "status warn"; return; }}
+      statusEl.textContent = "Deleting…"; statusEl.className = "status";
+      try {{
+        const res = await action(state.id, "delete", {{key: keyEl.value.trim()}});
+        statusEl.textContent = res.ok ? ("Deleted ✓ " + res.key) : ("Not found: " + res.reason);
+        statusEl.className = res.ok ? "status ok" : "status warn";
+        loadPanel(state.id);
+      }} catch (e) {{
+        resultEl.textContent = e.message;
+        statusEl.textContent = "Failed"; statusEl.className = "status bad";
+      }}
+    }});
+  }}
+
   const PANEL_RENDERERS = {{
     agent: renderAgent,
     tool: renderTool,
     pipeline: renderPipeline,
     session: renderSession,
     human: renderHuman,
+    router: renderRouter,
+    store: renderStore,
   }};
 
   // ------------------------------------------------------------------
