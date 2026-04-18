@@ -315,12 +315,26 @@ class LazyAgent:
         return "\n\n".join(parts) if parts else None
 
     def _build_tool_set(self, tools: list | None) -> NormalizedToolSet:
-        """Merge call-level tools with agent-level tools and normalise."""
+        """Merge call-level tools with agent-level tools and normalise.
+
+        tools=None  → use agent-level tools only (default).
+        tools=[t]   → merge call-level with agent-level tools.
+        tools=[]    → explicitly no tools; overrides agent-level tools.
+        """
+        if tools is not None and len(tools) == 0:
+            return NormalizedToolSet([], [], {})
         all_tools = list(tools or []) + list(self.tools)
         return NormalizedToolSet.from_list(all_tools) if all_tools else NormalizedToolSet([], [], {})
 
     def _merge_native_tools(self, call_level: list[NativeTool | str] | None) -> list[NativeTool]:
-        """Return agent-level native tools plus any call-level extras (deduplicated)."""
+        """Return agent-level native tools plus any call-level extras (deduplicated).
+
+        call_level=None  → use agent-level native tools only.
+        call_level=[]    → explicitly no native tools; overrides agent-level.
+        call_level=[t]   → merge call-level with agent-level (deduplicated).
+        """
+        if call_level is not None and len(call_level) == 0:
+            return []
         call = [NativeTool(t) if isinstance(t, str) else t for t in (call_level or [])]
         seen: set[str] = set()
         merged: list[NativeTool] = []
@@ -1488,7 +1502,10 @@ class LazyAgent:
                         effective_schema,
                         resp.validation_error,
                     )
-                    repair_resp = self.chat(repair_msgs, output_schema=effective_schema, memory=None)
+                    repair_resp = self.chat(
+                        repair_msgs, output_schema=effective_schema,
+                        memory=None, tools=[], native_tools=[],
+                    )
                     if isinstance(repair_resp, CompletionResponse):
                         resp = repair_resp
                 resp.raise_if_failed()
@@ -1605,7 +1622,10 @@ class LazyAgent:
                         effective_schema,
                         resp.validation_error,
                     )
-                    repair_resp = await self.achat(repair_msgs, output_schema=effective_schema, memory=None)
+                    repair_resp = await self.achat(
+                        repair_msgs, output_schema=effective_schema,
+                        memory=None, tools=[], native_tools=[],
+                    )
                     if isinstance(repair_resp, CompletionResponse):
                         resp = repair_resp
                 resp.raise_if_failed()
