@@ -1287,12 +1287,15 @@ class LazyAgent:
         "No preamble, no explanation, no markdown — JSON only."
     )
 
-    def json(self, messages: str | list, schema: type | dict, **kwargs) -> Any:
+    def json(self, messages: str | list, schema: type | dict | None = None, **kwargs) -> Any:
+        effective_schema = schema if schema is not None else self.output_schema
+        if effective_schema is None:
+            raise TypeError("json() requires a schema — pass schema= or set output_schema= on the agent.")
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in json(). Use chat(stream=True) instead.")
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        resp = self.chat(messages, output_schema=schema, **kwargs)
+        resp = self.chat(messages, output_schema=effective_schema, **kwargs)
         if not isinstance(resp, CompletionResponse):
             raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         resp.raise_if_failed()
@@ -1306,12 +1309,15 @@ class LazyAgent:
             raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         return resp.content
 
-    async def ajson(self, messages: str | list, schema: type | dict, **kwargs) -> Any:
+    async def ajson(self, messages: str | list, schema: type | dict | None = None, **kwargs) -> Any:
+        effective_schema = schema if schema is not None else self.output_schema
+        if effective_schema is None:
+            raise TypeError("ajson() requires a schema — pass schema= or set output_schema= on the agent.")
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in ajson(). Use achat(stream=True) instead.")
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        resp = await self.achat(messages, output_schema=schema, **kwargs)
+        resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
         if not isinstance(resp, CompletionResponse):
             raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
         resp.raise_if_failed()
