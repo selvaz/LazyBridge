@@ -28,9 +28,7 @@ from lazybridge.gui._templates import PAGE_TEMPLATE
 
 _logger = logging.getLogger(__name__)
 
-_STATIC_JS_PATH = (
-    __import__("pathlib").Path(__file__).resolve().parent / "_static" / "app.js"
-)
+_STATIC_JS_PATH = __import__("pathlib").Path(__file__).resolve().parent / "_static" / "app.js"
 _STATIC_JS_CACHE: str | None = None
 
 
@@ -298,17 +296,14 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"error": "unauthorized"}, status=401)
                 return
             if path == "/api/panels":
-                panels = [
-                    {"id": p.id, "kind": p.kind, "label": p.label, "group": p.group}
-                    for p in server.panels()
-                ]
+                panels = [{"id": p.id, "kind": p.kind, "label": p.label, "group": p.group} for p in server.panels()]
                 self._send_json({"panels": panels})
                 return
             if path == "/api/events":
                 self._serve_sse(server)
                 return
             if path.startswith("/api/panel/"):
-                panel_id = path[len("/api/panel/"):]
+                panel_id = path[len("/api/panel/") :]
                 panel = server.get(panel_id)
                 if panel is None:
                     self._send_json({"error": "unknown panel"}, status=404)
@@ -319,8 +314,7 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
                     _logger.exception("render_state failed for %s", panel_id)
                     self._send_json({"error": "render_state failed", "detail": str(exc)}, status=500)
                     return
-                payload = {"id": panel.id, "kind": panel.kind, "label": panel.label,
-                           "group": panel.group, **state}
+                payload = {"id": panel.id, "kind": panel.kind, "label": panel.label, "group": panel.group, **state}
                 self._send_json(payload)
                 return
             self._send_text("Not found", status=404, content_type="text/plain")
@@ -372,7 +366,7 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
             if not path.startswith("/api/panel/") or not path.endswith("/action"):
                 self._send_text("Not found", status=404, content_type="text/plain")
                 return
-            panel_id = path[len("/api/panel/"):-len("/action")]
+            panel_id = path[len("/api/panel/") : -len("/action")]
             panel = server.get(panel_id)
             if panel is None:
                 self._send_json({"error": "unknown panel"}, status=404)

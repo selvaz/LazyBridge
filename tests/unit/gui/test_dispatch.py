@@ -80,7 +80,8 @@ def test_open_gui_dispatches_pipeline_tool():
     chain = LazyTool.chain(
         LazyTool.from_function(_echo),
         LazyTool.from_function(_echo),
-        name="pipeD", description="x",
+        name="pipeD",
+        description="x",
     )
     open_gui(chain, open_browser=False)
     assert isinstance(get_server().get("pipeline-pipeD"), PipelinePanel)

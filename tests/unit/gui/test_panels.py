@@ -103,6 +103,7 @@ def test_agent_panel_available_tools_uses_override():
 
 def test_agent_panel_available_tools_from_session():
     """When no override is given, panel pulls tools from the session's agents."""
+
     def search(q: str) -> str:
         """Search."""
         return q
@@ -172,9 +173,7 @@ def test_agent_panel_test_mode_chat():
     out = panel.handle_action("test", {"mode": "chat", "message": "hi", "sync": True})
     agent.chat.assert_called_once_with("hi")
     assert out["content"] == "hello!"
-    assert out["usage"] == {
-        "input_tokens": 3, "output_tokens": 2, "thinking_tokens": 0, "cost_usd": None
-    }
+    assert out["usage"] == {"input_tokens": 3, "output_tokens": 2, "thinking_tokens": 0, "cost_usd": None}
     assert out["tool_calls"] == [{"name": "fn", "arguments": {"a": 1}}]
 
 
@@ -267,7 +266,5 @@ def test_session_panel_lists_agents_and_store_keys():
     agent.session = sess
     state = SessionPanel(sess).render_state()
     assert state["id"] == "s-1"
-    assert state["agents"] == [
-        {"id": f"agent-{agent.id}", "name": "r", "provider": "anthropic", "model": "claude-x"}
-    ]
+    assert state["agents"] == [{"id": f"agent-{agent.id}", "name": "r", "provider": "anthropic", "model": "claude-x"}]
     assert state["store_keys"] == ["foo", "bar"]

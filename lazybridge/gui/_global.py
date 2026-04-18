@@ -33,9 +33,7 @@ def get_server(
     global _server
     with _lock:
         if _server is None or _server.closed:
-            _server = GuiServer(
-                host=host, port=port, open_browser=open_browser, title=title
-            )
+            _server = GuiServer(host=host, port=port, open_browser=open_browser, title=title)
     return _server
 
 

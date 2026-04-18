@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 
 from lazybridge.gui.pipeline import PipelinePanel
@@ -45,11 +44,13 @@ def test_pipeline_panel_captures_events_from_multiple_sessions():
     def _run(args):
         # alpha's events go to sess_a; beta's to sess_b.
         sess_a.events.log("agent_start", agent_id=a1.id, agent_name=a1.name)
-        sess_a.events.log("agent_finish", agent_id=a1.id, agent_name=a1.name,
-                          method="chat", stop_reason="end_turn", n_steps=1)
+        sess_a.events.log(
+            "agent_finish", agent_id=a1.id, agent_name=a1.name, method="chat", stop_reason="end_turn", n_steps=1
+        )
         sess_b.events.log("agent_start", agent_id=a2.id, agent_name=a2.name)
-        sess_b.events.log("agent_finish", agent_id=a2.id, agent_name=a2.name,
-                          method="chat", stop_reason="end_turn", n_steps=1)
+        sess_b.events.log(
+            "agent_finish", agent_id=a2.id, agent_name=a2.name, method="chat", stop_reason="end_turn", n_steps=1
+        )
         return "multi-session done"
 
     tool = _pipeline_tool([a1, a2], _run)
@@ -88,6 +89,4 @@ def test_pipeline_panel_deduplicates_sessions():
     panel = PipelinePanel(tool)
     panel.handle_action("run", {"task": "hi"})
     assert panel._run_done.wait(timeout=2.0)
-    assert len(added) == 1, (
-        f"exporter attached {len(added)} times for one session — dedup failed"
-    )
+    assert len(added) == 1, f"exporter attached {len(added)} times for one session — dedup failed"

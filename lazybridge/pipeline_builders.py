@@ -212,11 +212,7 @@ def build_parallel_func(
             # Surface timeouts / failures programmatically via the logger so
             # operators can distinguish "participant raised" from "participant
             # returned a string containing the word 'error'".  Audit M4.
-            failures = [
-                (getattr(p, "name", "?"), r)
-                for p, r in zip(parts, results)
-                if isinstance(r, BaseException)
-            ]
+            failures = [(getattr(p, "name", "?"), r) for p, r in zip(parts, results) if isinstance(r, BaseException)]
             if failures:
                 _logger.warning(
                     "LazyTool.parallel: %d/%d participant(s) failed: %s",

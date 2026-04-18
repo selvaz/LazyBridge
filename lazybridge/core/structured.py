@@ -92,6 +92,7 @@ def _validate_schema(data: Any, schema: dict[str, Any]) -> str | None:
             # Malformed schema — fall through to the subset validator so
             # the caller still gets a best-effort check.
             import logging as _logging
+
             _logging.getLogger(__name__).debug(
                 "jsonschema rejected schema; falling back to subset validator: %s",
                 exc,

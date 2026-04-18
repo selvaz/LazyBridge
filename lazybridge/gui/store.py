@@ -63,8 +63,7 @@ class StorePanel(Panel):
             except Exception:
                 return []
             return [
-                {"key": k, "preview": self._preview(v), "agent_id": None, "written_at": None}
-                for k, v in data.items()
+                {"key": k, "preview": self._preview(v), "agent_id": None, "written_at": None} for k, v in data.items()
             ]
         for e in raw_entries:
             entries.append(

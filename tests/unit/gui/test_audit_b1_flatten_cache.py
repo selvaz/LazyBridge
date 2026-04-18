@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 from lazybridge.core import tool_schema as ts
@@ -22,7 +20,7 @@ def _recursive_schema() -> dict:
     return {
         "type": "object",
         "properties": {
-            "first":  {"$ref": "#/$defs/Node"},
+            "first": {"$ref": "#/$defs/Node"},
             "second": {"$ref": "#/$defs/Node"},
             "nested": {
                 "type": "object",
@@ -73,11 +71,13 @@ def test_flatten_refs_fifo_eviction_bounded():
     ts._FLATTEN_CACHE_MAX = 3  # type: ignore[assignment]
     try:
         for i in range(5):
-            ts._flatten_refs({
-                "type": "object",
-                "properties": {"x": {"$ref": "#/$defs/N"}},
-                "$defs": {"N": {"type": "integer", "const": i}},
-            })
+            ts._flatten_refs(
+                {
+                    "type": "object",
+                    "properties": {"x": {"$ref": "#/$defs/N"}},
+                    "$defs": {"N": {"type": "integer", "const": i}},
+                }
+            )
         size, _ = ts._flatten_cache_stats()
         assert size == 3, f"cache grew past cap: {size}"
     finally:

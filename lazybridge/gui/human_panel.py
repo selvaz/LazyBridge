@@ -86,10 +86,12 @@ class HumanInputPanel(Panel):
                     "closed": self._closed.is_set(),
                 }
             data = dict(self._current_prompt)
-            data.update({
-                "name": self._name,
-                "closed": self._closed.is_set(),
-            })
+            data.update(
+                {
+                    "name": self._name,
+                    "closed": self._closed.is_set(),
+                }
+            )
             return data
 
     def handle_action(self, action: str, args: dict[str, Any]) -> dict[str, Any]:

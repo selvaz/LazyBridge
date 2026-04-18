@@ -46,9 +46,7 @@ class PipelinePanel(Panel):
 
     def __init__(self, tool: Any) -> None:
         if not is_pipeline_tool(tool):
-            raise ValueError(
-                f"Tool {tool.name!r} is not a pipeline tool; use ToolPanel instead."
-            )
+            raise ValueError(f"Tool {tool.name!r} is not a pipeline tool; use ToolPanel instead.")
         self._tool = tool
         self._run_lock = threading.Lock()
         self._last_run: dict[str, Any] | None = None
@@ -170,7 +168,10 @@ class PipelinePanel(Panel):
             sess = getattr(p, "session", None)
             if sess is None or not hasattr(sess, "events"):
                 continue
-            sid = getattr(sess, "id", id(sess))
+            # Coerce to str: session.id is normally str, but the fallback
+            # id(sess) returns int.  A str-keyed dict keeps the dedup
+            # semantically correct and keeps mypy happy.
+            sid = str(getattr(sess, "id", id(sess)))
             if sid in seen:
                 continue
             seen[sid] = sess

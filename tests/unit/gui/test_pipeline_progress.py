@@ -167,7 +167,7 @@ def test_running_label_marker():
         guidance=None,
     )
 
-    started = threading_event_bool = {"running": True}
+    threading_event_bool = {"running": True}
 
     def _run(args):
         while threading_event_bool["running"]:
@@ -201,10 +201,12 @@ def test_second_run_rejected_while_first_running():
     )
 
     flag = {"running": True}
+
     def _run(args):
         while flag["running"]:
             time.sleep(0.005)
         return "ok"
+
     tool.run = _run
 
     panel = PipelinePanel(tool)

@@ -164,10 +164,7 @@ def read_folder_docs(
         try:
             target.relative_to(base)
         except ValueError:
-            return (
-                f"[Error: refused — path {str(target)!r} escapes "
-                f"base_dir {str(base)!r}]"
-            )
+            return f"[Error: refused — path {str(target)!r} escapes base_dir {str(base)!r}]"
 
     if not target.exists():
         return f"[Error: path not found — {path}]"
@@ -190,10 +187,7 @@ def read_folder_docs(
         # folder from silently widening the read surface to other
         # directories.
         files = sorted(
-            f for f in root.glob(glob_pattern)
-            if f.is_file()
-            and not f.is_symlink()
-            and f.suffix.lower() in exts
+            f for f in root.glob(glob_pattern) if f.is_file() and not f.is_symlink() and f.suffix.lower() in exts
         )
         if not files:
             return f"[No documents found in '{path}' matching extensions: {extensions}]"

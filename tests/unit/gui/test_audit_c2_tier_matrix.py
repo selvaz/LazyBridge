@@ -9,7 +9,6 @@ test fails at PR review time.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -34,6 +33,7 @@ def _extract_matrix(md: str) -> str | None:
 
 def _generator_output() -> str:
     from tools.generate_tier_matrix import render  # type: ignore
+
     return render()
 
 
@@ -44,7 +44,7 @@ def test_generator_importable():
 
     sys.path.insert(0, str(_REPO_ROOT))
     try:
-        from tools.generate_tier_matrix import render, _TIER_ORDER, _PROVIDER_COLUMNS  # noqa: F401
+        from tools.generate_tier_matrix import _PROVIDER_COLUMNS, _TIER_ORDER, render  # noqa: F401
     finally:
         if str(_REPO_ROOT) in sys.path:
             sys.path.remove(str(_REPO_ROOT))
@@ -62,10 +62,7 @@ def test_canonical_matrix_matches_provider_tables():
 
     md = _CANONICAL.read_text()
     canonical = _extract_matrix(md)
-    assert canonical is not None, (
-        f"Could not locate the tier matrix in {_CANONICAL}; did the heading "
-        "structure change?"
-    )
+    assert canonical is not None, f"Could not locate the tier matrix in {_CANONICAL}; did the heading structure change?"
     # Compare line by line to make diffs readable.
     gen_lines = [ln.rstrip() for ln in generated.splitlines() if ln.strip()]
     can_lines = [ln.rstrip() for ln in canonical.splitlines() if ln.strip()]

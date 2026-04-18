@@ -142,11 +142,15 @@ class LazyTool:
     # Guards the compute-and-cache block in definition() so concurrent
     # first-calls don't both run the schema builder (audit M3).
     _compile_lock: Any = field(
-        default=None, repr=False, compare=False, init=False,
+        default=None,
+        repr=False,
+        compare=False,
+        init=False,
     )
 
     def __post_init__(self) -> None:
         import threading as _threading
+
         if self._compile_lock is None:
             self._compile_lock = _threading.Lock()
 

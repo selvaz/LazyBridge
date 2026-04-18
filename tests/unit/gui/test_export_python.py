@@ -93,8 +93,8 @@ def test_export_python_roundtrips_via_exec(tmp_path):
     # Patch LazyAgent to a lightweight stub so exec doesn't try to spin up
     # a real provider.
     stub = MagicMock()
-    from lazybridge import LazyAgent as _Real
     import lazybridge as _lb
+
     original = _lb.LazyAgent
     _lb.LazyAgent = stub
     try:

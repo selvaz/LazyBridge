@@ -64,10 +64,10 @@ class DeepSeekProvider(OpenAIProvider):
     # its peers; multiple aliases point at the same concrete model —
     # documented in the matrix (lazy_wiki/human/agents.md).
     _TIER_ALIASES = {
-        "top":         "deepseek-reasoner",
-        "expensive":   "deepseek-reasoner",
-        "medium":      "deepseek-chat",
-        "cheap":       "deepseek-chat",
+        "top": "deepseek-reasoner",
+        "expensive": "deepseek-reasoner",
+        "medium": "deepseek-chat",
+        "cheap": "deepseek-chat",
         "super_cheap": "deepseek-chat",
     }
     _FALLBACKS = {

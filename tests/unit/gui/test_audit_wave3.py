@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import time
@@ -13,11 +12,10 @@ import pytest
 from pydantic import BaseModel
 
 from lazybridge.core.types import CompletionResponse, UsageStats
-from lazybridge.lazy_session import Event
 from lazybridge.lazy_agent import LazyAgent
+from lazybridge.lazy_session import Event
 from lazybridge.lazy_tool import LazyTool
 from lazybridge.memory import Memory
-
 
 # ---------------------------------------------------------------------------
 # M1 — output guard runs BEFORE _record_response
@@ -35,9 +33,7 @@ def _bare_agent():
 
     mock_exec.provider = _AnthropicProvider()
     mock_exec.model = "m"
-    mock_exec.execute = MagicMock(
-        return_value=CompletionResponse(content="blocked payload", usage=UsageStats())
-    )
+    mock_exec.execute = MagicMock(return_value=CompletionResponse(content="blocked payload", usage=UsageStats()))
     agent._executor = mock_exec
     agent.id = str(uuid.uuid4())
     agent.name = "a"
@@ -82,9 +78,7 @@ def test_output_guard_runs_before_record_response():
     # MODEL_RESPONSE must NOT be in the emitted events, because the guard
     # rejected the response before _record_response could run.
     event_types = [et for et, _ in track_calls]
-    assert Event.MODEL_RESPONSE not in event_types, (
-        f"MODEL_RESPONSE leaked before guard check: {event_types}"
-    )
+    assert Event.MODEL_RESPONSE not in event_types, f"MODEL_RESPONSE leaked before guard check: {event_types}"
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +117,7 @@ def test_memory_compress_runs_unlocked():
     t0 = time.monotonic()
     _ = len(mem)
     elapsed = time.monotonic() - t0
-    assert elapsed < 0.05, (
-        f"Lock was held during _compress — len() took {elapsed:.3f}s"
-    )
+    assert elapsed < 0.05, f"Lock was held during _compress — len() took {elapsed:.3f}s"
     t.join(timeout=2.0)
     assert not t.is_alive()
 
@@ -143,7 +135,6 @@ def test_lazy_tool_definition_is_not_computed_twice_under_concurrency():
         return x
 
     tool = LazyTool.from_function(_slow_func)
-    original_build = tool.schema_builder.build if tool.schema_builder else None
 
     # Patch the builder used by definition() so we can count calls and
     # inject a slow path.
@@ -168,12 +159,12 @@ def test_lazy_tool_definition_is_not_computed_twice_under_concurrency():
 
         t1 = threading.Thread(target=_call, args=(0,))
         t2 = threading.Thread(target=_call, args=(1,))
-        t1.start(); t2.start()
-        t1.join(timeout=2.0); t2.join(timeout=2.0)
+        t1.start()
+        t2.start()
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
 
-    assert call_count["n"] == 1, (
-        f"definition() cache race: builder called {call_count['n']}x"
-    )
+    assert call_count["n"] == 1, f"definition() cache race: builder called {call_count['n']}x"
     assert results[0] is results[1]  # both threads returned the same cached object
 
 
@@ -200,7 +191,7 @@ def test_parallel_failure_logged_with_participant_names(caplog):
             return CompletionResponse(content=self._result, usage=UsageStats())
 
     parts = [
-        _FakePart("alpha", exc=asyncio.TimeoutError("slow")),
+        _FakePart("alpha", exc=TimeoutError("slow")),
         _FakePart("beta", result="fine"),
     ]
     runner = build_parallel_func(parts, native_tools=[], combiner="concat")

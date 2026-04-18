@@ -7,7 +7,7 @@ import urllib.request
 
 import pytest
 
-from lazybridge.gui._server import GuiServer, _STATIC_JS_PATH, _load_static_js
+from lazybridge.gui._server import _STATIC_JS_PATH, GuiServer, _load_static_js
 
 
 @pytest.fixture

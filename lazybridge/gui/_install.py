@@ -83,8 +83,14 @@ def uninstall_gui_methods() -> None:
     from lazybridge.supervisor import SupervisorAgent
 
     for cls in (
-        LazyAgent, LazyTool, LazySession, LazyRouter, LazyStore, Memory,
-        HumanAgent, SupervisorAgent,
+        LazyAgent,
+        LazyTool,
+        LazySession,
+        LazyRouter,
+        LazyStore,
+        Memory,
+        HumanAgent,
+        SupervisorAgent,
     ):
         if hasattr(cls, "gui"):
             delattr(cls, "gui")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 import uuid
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,7 +80,7 @@ async def test_astream_and_track_updates_last_output_incrementally():
     c1 = await it.__anext__()
     assert c1.delta == "foo"
     assert agent._last_output == "foo"
-    c2 = await it.__anext__()
+    await it.__anext__()  # consume second chunk
     assert agent._last_output == "foobar"
     await it.aclose()
     assert agent._last_output == "foobar"
@@ -143,9 +142,7 @@ def test_openai_stream_emits_incomplete_final_chunk_when_interrupted():
     # Drive the sync-stream method.
     chunks = list(provider.stream(request))
     final = chunks[-1]
-    assert final.is_final is True, (
-        f"expected a final chunk when finish_reason is missing; got chunks={chunks}"
-    )
+    assert final.is_final is True, f"expected a final chunk when finish_reason is missing; got chunks={chunks}"
     assert final.stop_reason == "incomplete"
 
 
@@ -227,10 +224,12 @@ def test_agent_panel_test_action_sync_path_still_returns_result_inline():
 def test_agent_panel_rejects_second_test_while_first_running():
     agent = _bare_agent()
     event_flag = {"done": False}
+
     def _hold(msg):
         while not event_flag["done"]:
             time.sleep(0.005)
         return CompletionResponse(content="x", usage=UsageStats())
+
     agent.chat = _hold
     panel = AgentPanel(agent)
     panel.handle_action("test", {"mode": "chat", "message": "one"})
@@ -258,8 +257,10 @@ def test_agent_panel_clear_test_drops_last_test():
 
 def test_agent_panel_test_error_captured_as_error_state():
     agent = _bare_agent()
+
     def _boom(msg):
         raise RuntimeError("kaboom")
+
     agent.chat = _boom
     panel = AgentPanel(agent)
     panel.handle_action("test", {"mode": "chat", "message": "go"})

@@ -49,9 +49,7 @@ def test_store_panel_write_plain():
 def test_store_panel_write_as_json():
     store = LazyStore()
     panel = StorePanel(store)
-    panel.handle_action(
-        "write", {"key": "config", "value": '{"n":1,"k":["a"]}', "as_json": True}
-    )
+    panel.handle_action("write", {"key": "config", "value": '{"n":1,"k":["a"]}', "as_json": True})
     assert store.read("config") == {"n": 1, "k": ["a"]}
 
 

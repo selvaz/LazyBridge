@@ -108,7 +108,7 @@ class AgentPanel(Panel):
 
     def _enabled_native_tool_values(self) -> list[str]:
         result: list[str] = []
-        for t in (getattr(self._agent, "native_tools", None) or []):
+        for t in getattr(self._agent, "native_tools", None) or []:
             result.append(str(getattr(t, "value", None) or getattr(t, "name", None) or t))
         return result
 
@@ -144,8 +144,8 @@ class AgentPanel(Panel):
             return {"ok": True, "system": value}
 
         if action == "update_model":
-            value = args.get("value")
-            if not isinstance(value, str) or not value.strip():
+            raw_model = args.get("value")
+            if not isinstance(raw_model, str) or not raw_model.strip():
                 raise ValueError("'value' must be a non-empty string")
             # Update the executor's bound model — `agent._model_name` reads
             # `self._executor.model` on every call, so this takes effect
@@ -153,7 +153,7 @@ class AgentPanel(Panel):
             executor = getattr(self._agent, "_executor", None)
             if executor is None:
                 raise ValueError("agent has no executor to update")
-            executor.model = value.strip()
+            executor.model = raw_model.strip()
             return {"ok": True, "model": executor.model}
 
         if action == "toggle_native_tool":
@@ -168,18 +168,17 @@ class AgentPanel(Panel):
             # Match the member by .value or .name, case-insensitive.
             target = None
             for member in NativeTool:
-                if str(getattr(member, "value", "")).lower() == name.lower() \
-                        or str(getattr(member, "name", "")).lower() == name.lower():
+                if (
+                    str(getattr(member, "value", "")).lower() == name.lower()
+                    or str(getattr(member, "name", "")).lower() == name.lower()
+                ):
                     target = member
                     break
             if target is None:
                 raise ValueError(f"Unknown native tool {name!r}")
             current = list(getattr(self._agent, "native_tools", None) or [])
             # Normalise: drop any existing entry matching target.
-            current = [
-                t for t in current
-                if str(getattr(t, "value", getattr(t, "name", t))).lower() != name.lower()
-            ]
+            current = [t for t in current if str(getattr(t, "value", getattr(t, "name", t))).lower() != name.lower()]
             if enabled:
                 current.append(target)
             self._agent.native_tools = current
@@ -198,8 +197,7 @@ class AgentPanel(Panel):
                     tool = lookup.get(name)
                     if tool is None:
                         raise ValueError(
-                            f"Tool {name!r} is not in the agent's tool scope; "
-                            "add it to a session agent first."
+                            f"Tool {name!r} is not in the agent's tool scope; add it to a session agent first."
                         )
                     current.append(tool)
             else:
@@ -319,7 +317,9 @@ class AgentPanel(Panel):
         name = getattr(agent, "name", None) or "agent"
         system = getattr(agent, "system", None) or ""
         enabled_native = self._enabled_native_tool_values()
-        tool_names = [getattr(t, "name", None) for t in (getattr(agent, "tools", None) or []) if getattr(t, "name", None)]
+        tool_names = [
+            getattr(t, "name", None) for t in (getattr(agent, "tools", None) or []) if getattr(t, "name", None)
+        ]
 
         lines = [
             "from lazybridge import LazyAgent",
@@ -377,8 +377,7 @@ class AgentPanel(Panel):
             "model": getattr(resp, "model", None),
             "usage": usage_payload,
             "tool_calls": [
-                {"name": tc.name, "arguments": tc.arguments}
-                for tc in (getattr(resp, "tool_calls", None) or [])
+                {"name": tc.name, "arguments": tc.arguments} for tc in (getattr(resp, "tool_calls", None) or [])
             ],
         }
 

@@ -15,7 +15,6 @@ from lazybridge.gui.store import GUI_AGENT_ID, StorePanel
 from lazybridge.lazy_store import LazyStore
 from lazybridge.memory import Memory
 
-
 # ---------------------------------------------------------------------------
 # C1 — token must not appear in the INFO log
 # ---------------------------------------------------------------------------
@@ -82,8 +81,10 @@ def test_force_compress_is_safe_under_concurrent_mutation():
 
     tc = threading.Thread(target=_compressor)
     tw = threading.Thread(target=_writer)
-    tc.start(); tw.start()
-    tc.join(timeout=5.0); tw.join(timeout=5.0)
+    tc.start()
+    tw.start()
+    tc.join(timeout=5.0)
+    tw.join(timeout=5.0)
     assert done.is_set()
     # Invariants: message count is strictly non-decreasing and
     # summary is either None or a string.

@@ -43,12 +43,16 @@ def _bare_agent(name: str):
 def _router():
     writer = _bare_agent("writer")
     reviewer = _bare_agent("reviewer")
-    return LazyRouter(
-        condition=lambda v: "writer" if v == "ship" else "reviewer",
-        routes={"writer": writer, "reviewer": reviewer},
-        name="gate",
-        default="reviewer",
-    ), writer, reviewer
+    return (
+        LazyRouter(
+            condition=lambda v: "writer" if v == "ship" else "reviewer",
+            routes={"writer": writer, "reviewer": reviewer},
+            name="gate",
+            default="reviewer",
+        ),
+        writer,
+        reviewer,
+    )
 
 
 def test_router_panel_render_state():
@@ -79,9 +83,7 @@ def test_router_panel_route_and_run_invokes_agent():
         usage=UsageStats(input_tokens=1, output_tokens=2),
     )
     writer.chat = MagicMock(return_value=resp)
-    out = RouterPanel(router).handle_action(
-        "route_and_run", {"value": "ship", "prompt": "write something"}
-    )
+    out = RouterPanel(router).handle_action("route_and_run", {"value": "ship", "prompt": "write something"})
     writer.chat.assert_called_once_with("write something")
     assert out["content"] == "the writer says hi"
     assert out["agent_name"] == "writer"

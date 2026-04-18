@@ -44,6 +44,7 @@ def test_supervisor_achat_does_not_hang_and_preserves_behaviour():
     sup_sync = SupervisorAgent(name="s1", input_fn=lambda p: "continue")
     # Default: ainput_fn is None → falls through to sync REPL in thread.
     import asyncio
+
     resp = asyncio.run(sup_sync.achat("prev output"))
     assert resp.content == "prev output"
 
@@ -51,6 +52,7 @@ def test_supervisor_achat_does_not_hang_and_preserves_behaviour():
 async def test_supervisor_achat_with_ainput_fn_still_works():
     """With an ainput_fn set (even if we don't natively use it yet),
     achat should still succeed — the collapse shouldn't break this path."""
+
     async def _ainput(prompt: str) -> str:
         return "continue"
 
@@ -66,7 +68,6 @@ async def test_supervisor_achat_with_ainput_fn_still_works():
 def test_downloader_parquet_load_failure_logged(monkeypatch, tmp_path, caplog):
     """pd.read_parquet failures must produce a DEBUG log, not silent None."""
     pytest.importorskip("pandas", reason="data_downloader requires pandas")
-    import pandas as pd
 
     from lazybridge.ext.data_downloader.downloader import DataCache, _logger
 

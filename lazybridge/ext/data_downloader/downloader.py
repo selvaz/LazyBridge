@@ -238,7 +238,10 @@ class CacheManager:
             # root cause (corrupt / partial write / schema drift).
             _logger.debug(
                 "load(%r): pd.read_parquet(%s) failed — %s: %s",
-                ticker, p, type(exc).__name__, exc,
+                ticker,
+                p,
+                type(exc).__name__,
+                exc,
             )
             return None
 

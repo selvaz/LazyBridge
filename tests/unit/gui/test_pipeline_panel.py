@@ -22,14 +22,18 @@ def test_is_pipeline_tool_detects_chain_and_parallel():
     assert is_pipeline_tool(plain) is False
 
     chain = LazyTool.chain(
-        plain, LazyTool.from_function(_upper),
-        name="pipe", description="echo then upper",
+        plain,
+        LazyTool.from_function(_upper),
+        name="pipe",
+        description="echo then upper",
     )
     assert is_pipeline_tool(chain) is True
 
     par = LazyTool.parallel(
-        plain, LazyTool.from_function(_upper),
-        name="par", description="parallel demo",
+        plain,
+        LazyTool.from_function(_upper),
+        name="par",
+        description="parallel demo",
     )
     assert is_pipeline_tool(par) is True
 
@@ -38,7 +42,8 @@ def test_pipeline_panel_render_state_chain():
     chain = LazyTool.chain(
         LazyTool.from_function(_echo),
         LazyTool.from_function(_upper),
-        name="pipe", description="echo then upper",
+        name="pipe",
+        description="echo then upper",
         step_timeout=5.0,
     )
     panel = PipelinePanel(chain)
@@ -64,8 +69,10 @@ def test_pipeline_panel_render_state_parallel_with_agents():
     par = LazyTool.parallel(
         LazyTool.from_function(_echo),
         LazyTool.from_function(_upper),
-        name="par", description="x",
-        combiner="concat", concurrency_limit=2,
+        name="par",
+        description="x",
+        combiner="concat",
+        concurrency_limit=2,
     )
     assert par._pipeline is not None
     par._pipeline.participants = (FakeAgent("a1"), FakeAgent("a2"))
@@ -87,7 +94,8 @@ def test_pipeline_panel_run_action(monkeypatch):
     chain = LazyTool.chain(
         LazyTool.from_function(_echo),
         LazyTool.from_function(_upper),
-        name="pipe", description="echo then upper",
+        name="pipe",
+        description="echo then upper",
     )
     # `LazyTool.chain` is built for agent-participants; function-tools have
     # their own `(x: str)` signature.  Mock the underlying run() so we don't
@@ -117,11 +125,14 @@ def test_pipeline_panel_run_action(monkeypatch):
 
 def test_pipeline_panel_run_rejects_empty_task():
     chain = LazyTool.chain(
-        LazyTool.from_function(_echo), LazyTool.from_function(_upper),
-        name="pipe", description="x",
+        LazyTool.from_function(_echo),
+        LazyTool.from_function(_upper),
+        name="pipe",
+        description="x",
     )
     panel = PipelinePanel(chain)
     import pytest
+
     with pytest.raises(ValueError):
         panel.handle_action("run", {"task": "   "})
 
@@ -129,6 +140,7 @@ def test_pipeline_panel_run_rejects_empty_task():
 def test_pipeline_panel_rejects_non_pipeline_tool():
     plain = LazyTool.from_function(_echo)
     import pytest
+
     with pytest.raises(ValueError):
         PipelinePanel(plain)
 
@@ -141,8 +153,10 @@ def test_tool_gui_picks_pipeline_panel_for_pipeline_tools():
     install_gui_methods()
     try:
         chain = LazyTool.chain(
-            LazyTool.from_function(_echo), LazyTool.from_function(_upper),
-            name="pipeX", description="x",
+            LazyTool.from_function(_echo),
+            LazyTool.from_function(_upper),
+            name="pipeX",
+            description="x",
         )
         url = chain.gui(open_browser=False)
         assert "#panel=pipeline-pipeX" in url

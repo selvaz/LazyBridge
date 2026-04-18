@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # M6 — Gemini grounding + structured output raises clearly
 # ---------------------------------------------------------------------------
@@ -45,7 +44,7 @@ def test_gemini_grounding_plus_structured_output_raises():
 
 
 def test_anthropic_warns_when_temperature_dropped_on_opus_47():
-    from lazybridge.core.providers.anthropic import AnthropicProvider, _NO_SAMPLING_MODELS
+    from lazybridge.core.providers.anthropic import _NO_SAMPLING_MODELS, AnthropicProvider
     from lazybridge.core.types import CompletionRequest, Message, Role
 
     # Pick the first no-sampling model alias (robust against table changes).
@@ -68,10 +67,7 @@ def test_anthropic_warns_when_temperature_dropped_on_opus_47():
         warnings.simplefilter("always", UserWarning)
         params = provider._build_params(request)  # type: ignore[attr-defined]
     assert "temperature" not in params, "temperature must NOT be sent to a no-sampling model"
-    assert any(
-        "does not support the temperature parameter" in str(w.message)
-        for w in captured
-    ), captured
+    assert any("does not support the temperature parameter" in str(w.message) for w in captured), captured
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +207,7 @@ def test_openai_streaming_with_pydantic_schema_warns():
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always", UserWarning)
         list(provider.stream(request))
-    assert any(
-        "streaming with a Pydantic output_schema is best-effort" in str(w.message)
-        for w in captured
-    ), captured
+    assert any("streaming with a Pydantic output_schema is best-effort" in str(w.message) for w in captured), captured
 
 
 # ---------------------------------------------------------------------------

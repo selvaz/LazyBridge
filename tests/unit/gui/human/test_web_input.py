@@ -42,9 +42,7 @@ def _get(url: str, timeout: float = 2.0) -> tuple[int, bytes]:
 
 def _post_json(url: str, payload: dict, timeout: float = 2.0) -> tuple[int, dict]:
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
         return resp.status, json.loads(resp.read())

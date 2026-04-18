@@ -107,17 +107,17 @@ class GoogleProvider(BaseProvider):
 
     # Tier aliases (audit F2).
     _TIER_ALIASES = {
-        "top":         "gemini-3.1-pro-preview",
-        "expensive":   "gemini-3.1-pro",
-        "medium":      "gemini-3.1-flash",
-        "cheap":       "gemini-1.5-flash",
+        "top": "gemini-3.1-pro-preview",
+        "expensive": "gemini-3.1-pro",
+        "medium": "gemini-3.1-flash",
+        "cheap": "gemini-1.5-flash",
         "super_cheap": "gemini-1.5-flash-8b",
     }
     _FALLBACKS = {
         "gemini-3.1-pro-preview": ["gemini-3.1-pro", "gemini-3.1-flash"],
-        "gemini-3.1-pro":         ["gemini-3.1-flash"],
-        "gemini-3.1-flash":       ["gemini-1.5-flash"],
-        "gemini-1.5-flash":       ["gemini-1.5-flash-8b"],
+        "gemini-3.1-pro": ["gemini-3.1-flash"],
+        "gemini-3.1-flash": ["gemini-1.5-flash"],
+        "gemini-1.5-flash": ["gemini-1.5-flash-8b"],
     }
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
@@ -487,7 +487,8 @@ class GoogleProvider(BaseProvider):
                 except AttributeError as exc:
                     _logger.debug(
                         "model_json_schema() not available on %r, passing schema object directly: %s",
-                        schema, exc,
+                        schema,
+                        exc,
                     )
                     kwargs["response_schema"] = schema
 
@@ -563,8 +564,8 @@ class GoogleProvider(BaseProvider):
 
         candidate = response.candidates[0]
         _fn_call_idx = 0  # local counter for synthesising unique ids when
-                          # Gemini omits fc.id and the same function is
-                          # called multiple times in one turn.
+        # Gemini omits fc.id and the same function is
+        # called multiple times in one turn.
         for part in candidate.content.parts:
             if hasattr(part, "text") and part.text:
                 content += part.text

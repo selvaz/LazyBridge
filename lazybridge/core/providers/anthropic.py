@@ -92,17 +92,17 @@ class AnthropicProvider(BaseProvider):
     # Update this table when new models ship; the matrix in
     # lazy_wiki/human/agents.md mirrors it (audit F2).
     _TIER_ALIASES = {
-        "top":         "claude-opus-4-7",
-        "expensive":   "claude-opus-4-6",
-        "medium":      "claude-sonnet-4-6",
-        "cheap":       "claude-haiku-4-5",
+        "top": "claude-opus-4-7",
+        "expensive": "claude-opus-4-6",
+        "medium": "claude-sonnet-4-6",
+        "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",
     }
     _FALLBACKS = {
-        "claude-opus-4-7":   ["claude-opus-4-6", "claude-sonnet-4-6"],
-        "claude-opus-4-6":   ["claude-opus-4-5", "claude-sonnet-4-6"],
+        "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
+        "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
         "claude-sonnet-4-6": ["claude-sonnet-4-5", "claude-3-5-sonnet"],
-        "claude-haiku-4-5":  ["claude-3-5-haiku"],
+        "claude-haiku-4-5": ["claude-3-5-haiku"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {
@@ -509,10 +509,12 @@ class AnthropicProvider(BaseProvider):
                         # Log once at DEBUG so users diagnosing "why is validation
                         # different?" can find the signal (audit L7).
                         import logging as _logging
+
                         _logging.getLogger(__name__).debug(
                             "Anthropic SDK lacks messages.parse(); falling back to "
                             "manual JSON parse for schema %r (%s)",
-                            getattr(schema, "__name__", schema), _pe,
+                            getattr(schema, "__name__", schema),
+                            _pe,
                         )
                         response = self._client.messages.create(**params)
                         resp = self._parse_response(response)

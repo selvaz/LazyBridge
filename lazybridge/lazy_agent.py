@@ -1085,6 +1085,7 @@ class LazyAgent:
         times out cleanly with :class:`TimeoutError` rather than hanging
         the loop indefinitely (ChatGPT audit F5).
         """
+
         def _call() -> Any:
             # Registry lookup first (LazyTool with a known callable)
             if call.name in registry:
@@ -1100,6 +1101,7 @@ class LazyAgent:
             return _call()
 
         import concurrent.futures as _futures
+
         # Can't use `with ThreadPoolExecutor(...)` — __exit__ waits for
         # the worker to finish, negating the timeout. Create the pool
         # manually and call shutdown(wait=False) so the runaway thread
@@ -1111,9 +1113,7 @@ class LazyAgent:
             return future.result(timeout=tool_timeout)
         except _futures.TimeoutError as exc:
             future.cancel()
-            raise TimeoutError(
-                f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s"
-            ) from exc
+            raise TimeoutError(f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s") from exc
         finally:
             pool.shutdown(wait=False)
 
@@ -1126,6 +1126,7 @@ class LazyAgent:
         tool_timeout: float | None = None,
     ) -> Any:
         """Async counterpart of :meth:`_execute_tool` with ``tool_timeout`` support."""
+
         async def _acall() -> Any:
             # Registry lookup first — LazyTool.arun() is always a coroutine
             if call.name in registry:
@@ -1145,9 +1146,7 @@ class LazyAgent:
         try:
             return await asyncio.wait_for(_acall(), timeout=tool_timeout)
         except TimeoutError as exc:
-            raise TimeoutError(
-                f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s"
-            ) from exc
+            raise TimeoutError(f"tool {call.name!r} exceeded tool_timeout={tool_timeout}s") from exc
 
     # ------------------------------------------------------------------
     # as_tool() — expose this agent as a LazyTool

@@ -224,9 +224,7 @@ class EventLog:
                 if isinstance(redacted, dict):
                     data = redacted
             except Exception as exc:
-                _logger.warning(
-                    "EventLog redactor raised — keeping original payload: %s", exc
-                )
+                _logger.warning("EventLog redactor raised — keeping original payload: %s", exc)
         row = {
             "timestamp": _now(),
             "session_id": self.session_id,

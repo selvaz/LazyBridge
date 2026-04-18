@@ -107,17 +107,17 @@ class OpenAIProvider(BaseProvider):
 
     # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
     _TIER_ALIASES = {
-        "top":         "gpt-5.4",
-        "expensive":   "gpt-5",
-        "medium":      "gpt-4o",
-        "cheap":       "gpt-4o-mini",
+        "top": "gpt-5.4",
+        "expensive": "gpt-5",
+        "medium": "gpt-4o",
+        "cheap": "gpt-4o-mini",
         "super_cheap": "gpt-3.5-turbo",
     }
     _FALLBACKS = {
-        "gpt-5.4":      ["gpt-5", "gpt-4o"],
-        "gpt-5":        ["gpt-4o", "gpt-4-turbo"],
-        "gpt-4o":       ["gpt-4-turbo", "gpt-3.5-turbo"],
-        "gpt-4o-mini":  ["gpt-3.5-turbo"],
+        "gpt-5.4": ["gpt-5", "gpt-4o"],
+        "gpt-5": ["gpt-4o", "gpt-4-turbo"],
+        "gpt-4o": ["gpt-4-turbo", "gpt-3.5-turbo"],
+        "gpt-4o-mini": ["gpt-3.5-turbo"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {

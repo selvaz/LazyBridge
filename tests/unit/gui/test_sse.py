@@ -26,8 +26,15 @@ class _StatePanel(Panel):
         return self._id
 
     def render_state(self) -> dict:
-        return {"counter": self._counter, "name": self._id, "provider": "fake",
-                "model": "m", "system": "", "tools": [], "available_tools": []}
+        return {
+            "counter": self._counter,
+            "name": self._id,
+            "provider": "fake",
+            "model": "m",
+            "system": "",
+            "tools": [],
+            "available_tools": [],
+        }
 
     def handle_action(self, action, args):
         if action == "bump":
@@ -76,9 +83,9 @@ def _parse_block(block: bytes) -> dict | None:
         if raw.startswith(b":"):
             continue  # comment / keep-alive
         if raw.startswith(b"event:"):
-            event_name = raw[len(b"event:"):].strip().decode()
+            event_name = raw[len(b"event:") :].strip().decode()
         elif raw.startswith(b"data:"):
-            data = raw[len(b"data:"):].strip().decode()
+            data = raw[len(b"data:") :].strip().decode()
     if event_name != "refresh" or data is None:
         return None
     try:
@@ -102,7 +109,8 @@ def test_register_unregister_emits_list_event(server):
     stream = _open_sse(server)
     try:
         # Drain the initial ``: connected`` comment + blank line.
-        _ = stream.readline(); _ = stream.readline()
+        stream.readline()
+        stream.readline()
         server.register(_StatePanel("a"))
         evt = _read_event(stream, timeout=2.0)
         assert evt == {"type": "list"}
@@ -118,7 +126,9 @@ def test_panel_notify_emits_state_event_with_panel_id(server):
     server.register(p)
     stream = _open_sse(server)
     try:
-        _ = stream.readline(); _ = stream.readline()
+        stream.readline()
+
+        stream.readline()
         # Trigger a state change via the panel's own action.
         p.handle_action("bump", {})
         evt = _read_event(stream, timeout=2.0)
@@ -134,7 +144,8 @@ def test_multiple_subscribers_each_receive(server):
     stream_b = _open_sse(server)
     try:
         for s in (stream_a, stream_b):
-            _ = s.readline(); _ = s.readline()
+            s.readline()
+            s.readline()
         p.handle_action("bump", {})
         evt_a = _read_event(stream_a, timeout=2.0)
         evt_b = _read_event(stream_b, timeout=2.0)
@@ -147,7 +158,9 @@ def test_multiple_subscribers_each_receive(server):
 
 def test_close_terminates_subscribers(server):
     stream = _open_sse(server)
-    _ = stream.readline(); _ = stream.readline()
+    stream.readline()
+
+    stream.readline()
 
     received: list[bytes] = []
 
@@ -196,24 +209,36 @@ def test_pipeline_panel_notifies_on_completion():
 
     sess = LazySession()
     agent = SimpleNamespace(
-        id="a", name="alpha", session=sess,
-        _provider_name="anthropic", _model_name="m",
+        id="a",
+        name="alpha",
+        session=sess,
+        _provider_name="anthropic",
+        _model_name="m",
     )
 
     def _run(args):
         sess.events.log("agent_start", agent_id="a", agent_name="alpha")
         sess.events.log(
-            "agent_finish", agent_id="a", agent_name="alpha",
-            method="chat", stop_reason="end_turn", n_steps=1,
+            "agent_finish",
+            agent_id="a",
+            agent_name="alpha",
+            method="chat",
+            stop_reason="end_turn",
+            n_steps=1,
         )
         return "ok"
 
     tool = SimpleNamespace(
-        name="t", description="x",
+        name="t",
+        description="x",
         _is_pipeline_tool=True,
         _pipeline=SimpleNamespace(
-            mode="chain", participants=(agent,), combiner=None,
-            concurrency_limit=None, step_timeout=None, guidance=None,
+            mode="chain",
+            participants=(agent,),
+            combiner=None,
+            concurrency_limit=None,
+            step_timeout=None,
+            guidance=None,
         ),
         run=_run,
     )
@@ -224,7 +249,9 @@ def test_pipeline_panel_notifies_on_completion():
         server.register(panel)
         stream = _open_sse(server)
         try:
-            _ = stream.readline(); _ = stream.readline()
+            stream.readline()
+
+            stream.readline()
             panel.handle_action("run", {"task": "go"})
             # Collect a handful of events.
             events: list[dict] = []

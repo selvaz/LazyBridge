@@ -6,7 +6,6 @@ import logging
 import threading
 from unittest.mock import MagicMock
 
-
 # ---------------------------------------------------------------------------
 # L2 — run_async emits a DEBUG log when it hits the thread-offload path
 # ---------------------------------------------------------------------------
@@ -48,6 +47,7 @@ def test_llm_judge_crash_surfaces_as_error_not_fail():
     check = llm_judge(crashing_judge, criteria="always pass")
 
     import pytest
+
     with pytest.raises(JudgeError):
         check("anything")
 
@@ -81,8 +81,12 @@ def test_pipeline_panel_run_done_event_is_threading_event():
         description="",
         _is_pipeline_tool=True,
         _pipeline=SimpleNamespace(
-            mode="chain", participants=(agent,), combiner=None,
-            concurrency_limit=None, step_timeout=None, guidance=None,
+            mode="chain",
+            participants=(agent,),
+            combiner=None,
+            concurrency_limit=None,
+            step_timeout=None,
+            guidance=None,
         ),
         run=lambda args: "ok",
     )
@@ -110,9 +114,6 @@ def test_coverage_config_includes_providers():
 
     root = Path(__file__).resolve().parents[3]
     pyproject = tomllib.loads((root / "pyproject.toml").read_text())
-    omit = (pyproject.get("tool", {})
-                       .get("coverage", {})
-                       .get("run", {})
-                       .get("omit", []))
+    omit = pyproject.get("tool", {}).get("coverage", {}).get("run", {}).get("omit", [])
     bad = [p for p in omit if "core/providers/" in p or "core\\providers\\" in p]
     assert not bad, f"coverage.run.omit still hides provider adapters: {bad}"

@@ -170,9 +170,7 @@ class WebInputServer:
         quick_commands: list[str] | None = None,
     ) -> str:
         """Awaitable wrapper — delegates to a thread so the loop is free."""
-        return await asyncio.to_thread(
-            self.ask, prompt, timeout=timeout, quick_commands=quick_commands
-        )
+        return await asyncio.to_thread(self.ask, prompt, timeout=timeout, quick_commands=quick_commands)
 
     @property
     def input_fn(self) -> Callable[[str], str]:

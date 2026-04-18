@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from lazybridge.core.providers.anthropic import AnthropicProvider
@@ -11,7 +9,6 @@ from lazybridge.core.providers.deepseek import DeepSeekProvider
 from lazybridge.core.providers.google import GoogleProvider
 from lazybridge.core.providers.openai import OpenAIProvider
 from lazybridge.core.types import CompletionRequest, Message, Role
-
 
 PROVIDERS = [AnthropicProvider, OpenAIProvider, GoogleProvider, DeepSeekProvider]
 
@@ -41,9 +38,7 @@ def _req(model: str | None) -> CompletionRequest:
 @pytest.mark.parametrize("tier", ["top", "expensive", "medium", "cheap", "super_cheap"])
 def test_each_tier_resolves_to_a_concrete_model(provider, tier):
     resolved = provider._resolve_model(_req(tier))
-    assert resolved != tier, (
-        f"{type(provider).__name__}: tier {tier!r} did not resolve"
-    )
+    assert resolved != tier, f"{type(provider).__name__}: tier {tier!r} did not resolve"
     # The resolved value must appear in the class's tier table.
     assert resolved == provider._TIER_ALIASES[tier]
 

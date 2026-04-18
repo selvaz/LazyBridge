@@ -24,8 +24,7 @@ class _EchoPanel(Panel):
         return self._id
 
     def render_state(self) -> dict:
-        return {"name": "demo", "provider": "fake", "model": "m", "system": "",
-                "tools": [], "available_tools": []}
+        return {"name": "demo", "provider": "fake", "model": "m", "system": "", "tools": [], "available_tools": []}
 
     def handle_action(self, action, args):
         self.actions.append((action, args))
@@ -49,8 +48,7 @@ def _get(url):
 
 def _post(url, payload):
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     return urllib.request.urlopen(req, timeout=2).read()
 
 
@@ -90,8 +88,9 @@ def test_panel_unknown_404(server):
 def test_action_success(server):
     p = _EchoPanel("x")
     server.register(p)
-    body = _post(f"http://127.0.0.1:{server.port}/api/panel/x/action?t={server.token}",
-                 {"action": "touch", "args": {"k": 1}})
+    body = _post(
+        f"http://127.0.0.1:{server.port}/api/panel/x/action?t={server.token}", {"action": "touch", "args": {"k": 1}}
+    )
     assert json.loads(body) == {"action": "touch", "args": {"k": 1}}
     assert p.actions == [("touch", {"k": 1})]
 
@@ -99,8 +98,7 @@ def test_action_success(server):
 def test_action_validation_error_is_400(server):
     server.register(_EchoPanel("x"))
     with pytest.raises(urllib.error.HTTPError) as e:
-        _post(f"http://127.0.0.1:{server.port}/api/panel/x/action?t={server.token}",
-              {"action": "boom", "args": {}})
+        _post(f"http://127.0.0.1:{server.port}/api/panel/x/action?t={server.token}", {"action": "boom", "args": {}})
     assert e.value.code == 400
 
 
@@ -110,8 +108,7 @@ def test_token_enforced_on_api_and_action(server):
         _get(f"http://127.0.0.1:{server.port}/api/panels")
     assert e.value.code == 401
     with pytest.raises(urllib.error.HTTPError) as e:
-        _post(f"http://127.0.0.1:{server.port}/api/panel/y/action",
-              {"action": "touch", "args": {}})
+        _post(f"http://127.0.0.1:{server.port}/api/panel/y/action", {"action": "touch", "args": {}})
     assert e.value.code == 401
 
 

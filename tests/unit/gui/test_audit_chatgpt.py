@@ -52,9 +52,7 @@ def test_clear_checkpoint_removes_key_from_store():
     store.write("_ckpt:demo", {"step": 2, "output": "partial"})
     assert "_ckpt:demo" in store
     _clear_checkpoint(store, "_ckpt:demo")
-    assert "_ckpt:demo" not in store, (
-        "checkpoint key should be DELETED, not left as a None-tombstone"
-    )
+    assert "_ckpt:demo" not in store, "checkpoint key should be DELETED, not left as a None-tombstone"
 
 
 def test_clear_checkpoint_is_idempotent_when_key_missing():
@@ -66,6 +64,7 @@ def test_clear_checkpoint_is_idempotent_when_key_missing():
 
 def test_clear_checkpoint_tolerates_store_without_delete():
     """If a user-supplied store lacks .delete(), fall back to write(None)."""
+
     class _WriteOnlyStore:
         def __init__(self) -> None:
             self.writes: list[tuple[str, object]] = []
@@ -201,6 +200,7 @@ def test_eventlog_redactor_rewrites_tool_arguments():
 
 def test_eventlog_redactor_exception_keeps_original_payload():
     """A crashing redactor must NOT drop events — log warning + use original."""
+
     def _broken(event_type, data):
         raise RuntimeError("oops")
 
@@ -210,8 +210,11 @@ def test_eventlog_redactor_exception_keeps_original_payload():
 
     sess.events.add_exporter(CallbackExporter(captured.append))
     sess.events.log(
-        "tool_call", agent_id="a", agent_name="n",
-        name="search", arguments={"q": "x"},
+        "tool_call",
+        agent_id="a",
+        agent_name="n",
+        name="search",
+        arguments={"q": "x"},
     )
     assert len(captured) == 1
     assert captured[0]["data"]["arguments"] == {"q": "x"}
@@ -224,7 +227,10 @@ def test_eventlog_redactor_default_is_noop():
 
     sess.events.add_exporter(CallbackExporter(captured.append))
     sess.events.log(
-        "tool_call", agent_id="a", agent_name="n",
-        name="search", arguments={"q": "x"},
+        "tool_call",
+        agent_id="a",
+        agent_name="n",
+        name="search",
+        arguments={"q": "x"},
     )
     assert captured[0]["data"]["arguments"] == {"q": "x"}

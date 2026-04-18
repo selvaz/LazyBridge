@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import sys
-from pathlib import Path
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # M11 — read_folder_docs refuses paths that escape base_dir
@@ -81,6 +78,4 @@ def test_doc_skills_iter_docs_skips_symlinks(tmp_path):
         pytest.skip("can't create symlinks on this filesystem")
 
     found = sorted(p.name for p in _iter_docs([root], include_exts=[".md"]))
-    assert found == ["real.md"], (
-        f"_iter_docs should skip symlinks; got {found}"
-    )
+    assert found == ["real.md"], f"_iter_docs should skip symlinks; got {found}"
