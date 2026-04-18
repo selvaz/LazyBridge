@@ -131,3 +131,18 @@ export GOOGLE_API_KEY=...
 python examples/write_paper.py
 # Output → artifacts/lazybridge_paper.md
 ```
+
+---
+
+## Supervised Pipeline — human-in-the-loop with SupervisorAgent
+
+`supervised_pipeline.py` wires `researcher → SupervisorAgent → writer` via `LazyTool.chain(...)`. The supervisor is driven by a scripted `input_fn` that replays three REPL commands (`search(...)`, `retry researcher: ...`, `continue`), so the script runs non-interactively under CI. Remove the `input_fn=` argument to get the real terminal REPL.
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/supervised_pipeline.py
+```
+
+Reference: [`docs/course/13-human-in-the-loop.md`](../docs/course/13-human-in-the-loop.md) · [`lazy_wiki/bot/13_supervisor.md`](../lazy_wiki/bot/13_supervisor.md).

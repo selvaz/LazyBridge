@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Documentation
+- `README.md` — new **Human-in-the-loop** section showcasing `SupervisorAgent` in a `researcher → supervisor → writer` chain, plus an entry in the Documentation table.
+- `lazy_wiki/bot/13_supervisor.md` — new LLM-oriented reference for `HumanAgent` / `SupervisorAgent` (constructors, methods, REPL commands, scripted-input patterns for tests).
+- `lazy_wiki/bot/INDEX.md` — `HumanAgent` and `SupervisorAgent` added to the class table, import block, and reading order.
+- `lazy_wiki/human/quickstart.md` — cross-reference rows for human-in-the-loop supervision in both the "Next steps" and "Choosing the right pattern" tables.
+- `mkdocs.yml` — new Guide nav entry "Human-in-the-Loop" pointing at the existing module 13 walkthrough.
+- `examples/supervised_pipeline.py` — runnable, non-interactive demo wiring `researcher → SupervisorAgent → writer` via scripted `input_fn`, exercising `continue`, `retry`, and tool-call commands.
+
+### Added (prior, now surfaced)
+- `HumanAgent` and `SupervisorAgent` (`lazybridge/human.py`, `lazybridge/supervisor.py`) — human-in-the-loop participants that slot into chains, parallel tools, `as_tool()`, and `verify=`. Exported from `lazybridge` top-level.
+
+---
+
+## [0.6.0] — Claude Opus 4.7 support + version bump
+
+See commit `20f7130` for details.
+
+---
+
 ## [0.5.0] — 2026-04-14
 
 ### Breaking Changes

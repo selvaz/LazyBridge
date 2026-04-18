@@ -125,6 +125,7 @@ print(sess.store.read_all())  # shared state
 | Conditional routing | [routing.md](routing.md) |
 | Full pipeline examples | [pipelines.md](pipelines.md) |
 | Session-free pipelines (`parallel`/`chain`) | [pipelines.md](pipelines.md) |
+| Human-in-the-loop supervision | [agents.md#human-agents](agents.md#human-agents) |
 | LazyBridge vs raw SDK | [comparison.md](comparison.md) |
 
 ---
@@ -142,6 +143,7 @@ print(sess.store.read_all())  # shared state
 | Run agents in sequence with handoff | `LazyTool.chain([a, b])` |
 | Shared blackboard between agents | `LazySession` + `LazyStore` |
 | Conditional routing | `LazyRouter` |
+| Human approval / override in a pipeline | `HumanAgent` or `SupervisorAgent` (see [agents.md#human-agents](agents.md#human-agents)) |
 
 ### Common mistakes to avoid
 

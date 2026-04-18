@@ -36,6 +36,7 @@ nav:
     - Pipelines (advanced): pipelines.md
     - Context Injection: context.md
     - Routing: routing.md
+    - Human-in-the-Loop: course/13-human-in-the-loop.md
   - Course:
     - Overview: course/index.md
     - "1. Your First Agent": course/01-first-agent.md

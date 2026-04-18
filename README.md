@@ -131,6 +131,41 @@ for src in resp.grounding_sources:
     print(src.url, src.title)
 ```
 
+## Human-in-the-loop
+
+Humans participate as first-class agents — no callbacks, no hooks. `HumanAgent` is a simple approval/review gate; `SupervisorAgent` is a REPL that lets the human call tools, retry upstream agents with feedback, and inspect the session store before deciding to continue.
+
+```python
+from lazybridge import LazyAgent, LazyTool, LazySession, SupervisorAgent
+
+sess = LazySession()
+
+def search(query: str) -> str:
+    """Search the web."""
+    return f"results for {query}"
+
+search_tool = LazyTool.from_function(search)
+researcher  = LazyAgent("anthropic", name="researcher", tools=[search_tool], session=sess)
+writer      = LazyAgent("openai",    name="writer",     session=sess)
+
+supervisor = SupervisorAgent(
+    name="supervisor",
+    tools=[search_tool],     # human can call tools
+    agents=[researcher],     # human can retry upstream agents with feedback
+    session=sess,            # human can read the shared store
+)
+
+pipeline = LazyTool.chain(
+    researcher, supervisor, writer,
+    name="supervised_pipeline",
+    description="Research, supervise, write",
+)
+pipeline.run({"task": "AI safety report"})
+# REPL commands: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)
+```
+
+Full walkthrough in [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) and [`lazy_wiki/human/agents.md`](lazy_wiki/human/agents.md#human-agents).
+
 ## Supported providers
 
 | Provider | String | Default model |
@@ -222,6 +257,7 @@ LazyBridge/
 | SDK comparison | [`lazy_wiki/human/comparison.md`](lazy_wiki/human/comparison.md) |
 | LLM / AI assistant | [`lazy_wiki/bot/INDEX.md`](lazy_wiki/bot/INDEX.md) |
 | Full API reference | [`lazy_wiki/bot/00_quickref.md`](lazy_wiki/bot/00_quickref.md) |
+| Human-in-the-loop (`HumanAgent` / `SupervisorAgent`) | [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) |
 
 ## License
 
