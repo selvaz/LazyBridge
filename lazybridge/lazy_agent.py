@@ -1448,13 +1448,29 @@ class LazyAgent:
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
 
+        # When the agent has tools, use loop() so tool rounds complete before
+        # structured parsing.  Passing output_schema + response_format to a
+        # provider in the same call as tools causes an empty-content response
+        # (the model returns a tool call instead of JSON).
+        has_tools = bool(
+            self.tools or self.native_tools
+            or kwargs.get("tools") or kwargs.get("native_tools")
+        )
+
         task = messages  # keep original task for judge context
         _verify_log: list[str] = []
         for _attempt in range(max_verify if verify is not None else 1):
-            resp = self.chat(messages, output_schema=effective_schema, **kwargs)
-            if not isinstance(resp, CompletionResponse):
-                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            resp.raise_if_failed()
+            if has_tools:
+                resp = self.loop(messages, **kwargs)
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(resp, resp.content, effective_schema)
+                resp.raise_if_failed()
+            else:
+                resp = self.chat(messages, output_schema=effective_schema, **kwargs)
+                if not isinstance(resp, CompletionResponse):
+                    raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+                resp.raise_if_failed()
 
             if verify is None:
                 return resp.parsed
@@ -1544,12 +1560,24 @@ class LazyAgent:
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
 
+        has_tools = bool(
+            self.tools or self.native_tools
+            or kwargs.get("tools") or kwargs.get("native_tools")
+        )
+
         task = messages
         for _attempt in range(max_verify if verify is not None else 1):
-            resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
-            if not isinstance(resp, CompletionResponse):
-                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            resp.raise_if_failed()
+            if has_tools:
+                resp = await self.aloop(messages, **kwargs)
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(resp, resp.content, effective_schema)
+                resp.raise_if_failed()
+            else:
+                resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
+                if not isinstance(resp, CompletionResponse):
+                    raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+                resp.raise_if_failed()
 
             if verify is None:
                 return resp.parsed
