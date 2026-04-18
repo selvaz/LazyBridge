@@ -45,7 +45,9 @@ _BETA_COMPUTER_USE = "computer-use-2025-01-24"
 _FORCE_STREAM_MAX_TOKENS = 20_000
 
 # Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
+# Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
+    "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-6": (15.0, 75.0),
     "claude-opus-4-5": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
@@ -58,17 +60,29 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-3-haiku": (0.25, 1.25),
 }
 
+# Models where temperature/top_p/top_k are not supported (returns 400)
+_NO_SAMPLING_MODELS = frozenset({"claude-opus-4-7"})
+
+# Models that use adaptive thinking only (no budget_tokens)
+_ADAPTIVE_ONLY_MODELS = frozenset({"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"})
+
 
 class AnthropicProvider(BaseProvider):
     """Anthropic Claude provider.
 
     Supports:
-    - Adaptive thinking (claude-opus-4-6 / claude-sonnet-4-6)
+    - Adaptive thinking (claude-opus-4-7 / claude-opus-4-6 / claude-sonnet-4-6)
+    - Extended thinking with budget_tokens (older models: 3.x, 4.5)
     - Structured output via messages.parse() + Pydantic
     - Tool use via beta tool_runner or manual loop
     - Native tools: web_search, code_execution, computer_use
     - Anthropic Skills (domain-expert server-side packages)
     - Streaming
+
+    Model-specific behavior:
+    - Opus 4.7: adaptive thinking only, no temperature/sampling params
+    - Opus 4.6 / Sonnet 4.6: adaptive thinking, full sampling support
+    - Older models: extended thinking with budget_tokens
     """
 
     default_model = "claude-sonnet-4-6"
@@ -98,7 +112,7 @@ class AnthropicProvider(BaseProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for a given Anthropic model."""
         resolved = (model or self.model or self.default_model or "").lower()
-        if "opus-4-6" in resolved:
+        if "opus-4-7" in resolved or "opus-4-6" in resolved:
             return 128_000
         if any(x in resolved for x in ("sonnet-4-6", "haiku-4-5", "opus-4-5", "sonnet-4-5")):
             return 64_000
@@ -255,36 +269,42 @@ class AnthropicProvider(BaseProvider):
         if not request.thinking or not request.thinking.enabled:
             return None
         model = self._resolve_model(request)
-        # Adaptive thinking on 4.6 models only; budget_tokens deprecated for these.
-        # Use "-4-6" (with leading dash) to avoid matching "4-5" or "3-x" substrings.
-        if "-4-6" in model:
+
+        # Check if this model uses adaptive-only thinking
+        is_adaptive = any(key in model for key in _ADAPTIVE_ONLY_MODELS)
+
+        if is_adaptive:
             if request.thinking.budget_tokens is not None:
                 import warnings
 
                 warnings.warn(
-                    f"ThinkingConfig.budget_tokens is deprecated for model '{model}' "
-                    "and will be ignored. Use 'effort' instead.",
+                    f"ThinkingConfig.budget_tokens is ignored for model '{model}'. "
+                    "Use 'effort' instead (adaptive thinking only).",
                     DeprecationWarning,
                     stacklevel=4,
                 )
-            thinking = {"type": "adaptive"}
+            thinking: dict[str, Any] = {"type": "adaptive"}
             if request.thinking.display:
                 thinking["display"] = request.thinking.display
             return thinking
-        # Older models: explicit budget required
+
+        # Older models (3.x, 4.5): explicit budget required
         budget = request.thinking.budget_tokens or 8000
         return {"type": "enabled", "budget_tokens": budget}
 
     def _build_params(self, request: CompletionRequest) -> dict[str, Any]:
+        model = self._resolve_model(request)
         params: dict[str, Any] = {
-            "model": self._resolve_model(request),
+            "model": model,
             "max_tokens": request.max_tokens,
             "messages": self._messages_to_anthropic(request),
         }
         system = self._get_system(request)
         if system:
             params["system"] = system
-        if request.temperature is not None:
+        # Opus 4.7 does not support temperature/top_p/top_k — skip silently
+        no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
+        if request.temperature is not None and not no_sampling:
             params["temperature"] = request.temperature
         tools = self._build_tools(request)
         if tools:
