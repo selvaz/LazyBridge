@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -213,7 +214,8 @@ class LazyTool:
         agent's loop() or chat() depending on its configuration.
         The agent's return value is passed directly back to the caller.
         """
-        tool_name = str(name or getattr(agent, "name", None) or getattr(agent, "id", "agent_tool"))
+        raw_name = str(name or getattr(agent, "name", None) or getattr(agent, "id", "agent_tool"))
+        tool_name = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_name)
         tool_desc: str = description or getattr(agent, "description", None) or f"Delegate task to {tool_name}"
         delegate = _DelegateConfig(
             agent=agent,
