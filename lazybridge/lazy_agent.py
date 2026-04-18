@@ -726,6 +726,8 @@ class LazyAgent:
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
         guard: Guard | None = None,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
         **kwargs: Any,
     ) -> CompletionResponse | Iterator[StreamChunk]:
         """Send a single-turn chat request.
@@ -744,6 +746,53 @@ class LazyAgent:
         ``guard`` runs input validation before the LLM call and output validation
         after. Raises ``GuardError`` if the guard blocks content.
         """
+        # Verify loop — if verify= is set, run the retry cycle here and call
+        # self.chat(..., verify=None) each time to avoid infinite recursion.
+        if verify is not None:
+            if stream:
+                raise TypeError("stream=True is incompatible with verify= in chat().")
+            task = messages
+            for _attempt in range(max_verify):
+                resp = self.chat(
+                    messages,
+                    memory=memory,
+                    system=system,
+                    tools=tools,
+                    native_tools=native_tools,
+                    output_schema=output_schema,
+                    thinking=thinking,
+                    skills=skills,
+                    stream=False,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    tool_choice=tool_choice,
+                    context=context,
+                    guard=guard,
+                    verify=None,  # terminates recursion
+                    **kwargs,
+                )
+                if not isinstance(resp, CompletionResponse):
+                    return resp  # pragma: no cover
+                verdict = (
+                    verify.text(f"Question: {task}\nAnswer: {resp.content}")
+                    if hasattr(verify, "text")
+                    else verify(str(task), resp.content)
+                )
+                if verdict.strip().lower().startswith("approved"):
+                    return resp
+                messages = (
+                    f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                    "Please address the feedback and try again."
+                )
+            warnings.warn(
+                f"chat() verify exhausted after {max_verify} attempt(s) without approval. "
+                "Returning last result unchanged.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return resp  # type: ignore[return-value]
+
         messages = self._run_input_guard(guard, messages)
 
         # Resolve effective memory:
@@ -835,9 +884,57 @@ class LazyAgent:
         tool_choice: str | None = None,
         context: LazyContext | Callable[[], str] | None = None,
         guard: Guard | None = None,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
-        """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
+        """Async version of chat(). Accepts memory=, tool_choice=, guard=, verify=."""
+        if verify is not None:
+            if stream:
+                raise TypeError("stream=True is incompatible with verify= in achat().")
+            task = messages
+            for _attempt in range(max_verify):
+                resp = await self.achat(
+                    messages,
+                    memory=memory,
+                    system=system,
+                    tools=tools,
+                    native_tools=native_tools,
+                    output_schema=output_schema,
+                    thinking=thinking,
+                    skills=skills,
+                    stream=False,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    tool_choice=tool_choice,
+                    context=context,
+                    guard=guard,
+                    verify=None,
+                    **kwargs,
+                )
+                if not isinstance(resp, CompletionResponse):
+                    return resp  # pragma: no cover
+                if hasattr(verify, "atext"):
+                    verdict = await verify.atext(f"Question: {task}\nAnswer: {resp.content}")
+                elif inspect.iscoroutinefunction(verify):
+                    verdict = await verify(str(task), resp.content)
+                else:
+                    verdict = verify.text(f"Question: {task}\nAnswer: {resp.content}") if hasattr(verify, "text") else verify(str(task), resp.content)
+                if verdict.strip().lower().startswith("approved"):
+                    return resp
+                messages = (
+                    f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                    "Please address the feedback and try again."
+                )
+            warnings.warn(
+                f"achat() verify exhausted after {max_verify} attempt(s) without approval. "
+                "Returning last result unchanged.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return resp  # type: ignore[return-value]
+
         messages = await self._arun_input_guard(guard, messages)
 
         if memory is _MEMORY_UNSET:
@@ -1285,13 +1382,46 @@ class LazyAgent:
     # Convenience text/json shortcuts
     # ------------------------------------------------------------------
 
-    def text(self, messages: str | list, **kwargs) -> str:
+    def text(
+        self,
+        messages: str | list,
+        *,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
+        **kwargs,
+    ) -> str:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in text(). Use chat(stream=True) instead.")
-        resp = self.chat(messages, **kwargs)
-        if not isinstance(resp, CompletionResponse):
-            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-        return resp.content
+
+        task = messages
+        for _attempt in range(max_verify if verify is not None else 1):
+            resp = self.chat(messages, **kwargs)
+            if not isinstance(resp, CompletionResponse):
+                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+
+            if verify is None:
+                return resp.content
+
+            verdict = (
+                verify.text(f"Question: {task}\nAnswer: {resp.content}")
+                if hasattr(verify, "text")
+                else verify(str(task), resp.content)
+            )
+            if verdict.strip().lower().startswith("approved"):
+                return resp.content
+
+            messages = (
+                f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                "Please address the feedback and try again."
+            )
+
+        warnings.warn(
+            f"text() verify exhausted after {max_verify} attempt(s) without approval. "
+            "Returning last result unchanged.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return resp.content  # type: ignore[return-value]
 
     # Appended to the system prompt on every json()/ajson() call so models
     # don't produce markdown or preamble even when native structured output is
@@ -1301,7 +1431,15 @@ class LazyAgent:
         "No preamble, no explanation, no markdown — JSON only."
     )
 
-    def json(self, messages: str | list, schema: type | dict | None = None, **kwargs) -> Any:
+    def json(
+        self,
+        messages: str | list,
+        schema: type | dict | None = None,
+        *,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
+        **kwargs,
+    ) -> Any:
         effective_schema = schema if schema is not None else self.output_schema
         if effective_schema is None:
             raise TypeError("json() requires a schema — pass schema= or set output_schema= on the agent.")
@@ -1309,21 +1447,95 @@ class LazyAgent:
             raise TypeError("stream=True is not supported in json(). Use chat(stream=True) instead.")
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        resp = self.chat(messages, output_schema=effective_schema, **kwargs)
-        if not isinstance(resp, CompletionResponse):
-            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-        resp.raise_if_failed()
-        return resp.parsed
 
-    async def atext(self, messages: str | list, **kwargs) -> str:
+        task = messages  # keep original task for judge context
+        _verify_log: list[str] = []
+        for attempt in range(max_verify if verify is not None else 1):
+            resp = self.chat(messages, output_schema=effective_schema, **kwargs)
+            if not isinstance(resp, CompletionResponse):
+                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+            resp.raise_if_failed()
+
+            if verify is None:
+                return resp.parsed
+
+            # Ask the judge
+            answer = resp.content
+            verdict = (
+                verify.text(f"Question: {task}\nAnswer: {answer}")
+                if hasattr(verify, "text")
+                else verify(str(task), answer)
+            )
+            if verdict.strip().lower().startswith("approved"):
+                return resp.parsed
+
+            _verify_log.append(verdict)
+            # Append feedback and retry
+            messages = (
+                f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                "Please address the feedback and try again."
+            )
+
+        warnings.warn(
+            f"json() verify exhausted after {max_verify} attempt(s) without approval. "
+            "Returning last result unchanged.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return resp.parsed  # type: ignore[return-value]
+
+    async def atext(
+        self,
+        messages: str | list,
+        *,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
+        **kwargs,
+    ) -> str:
         if kwargs.get("stream"):
             raise TypeError("stream=True is not supported in atext(). Use achat(stream=True) instead.")
-        resp = await self.achat(messages, **kwargs)
-        if not isinstance(resp, CompletionResponse):
-            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-        return resp.content
 
-    async def ajson(self, messages: str | list, schema: type | dict | None = None, **kwargs) -> Any:
+        task = messages
+        for _attempt in range(max_verify if verify is not None else 1):
+            resp = await self.achat(messages, **kwargs)
+            if not isinstance(resp, CompletionResponse):
+                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+
+            if verify is None:
+                return resp.content
+
+            if hasattr(verify, "atext"):
+                verdict = await verify.atext(f"Question: {task}\nAnswer: {resp.content}")
+            elif inspect.iscoroutinefunction(verify):
+                verdict = await verify(str(task), resp.content)
+            else:
+                verdict = verify.text(f"Question: {task}\nAnswer: {resp.content}") if hasattr(verify, "text") else verify(str(task), resp.content)
+
+            if verdict.strip().lower().startswith("approved"):
+                return resp.content
+
+            messages = (
+                f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                "Please address the feedback and try again."
+            )
+
+        warnings.warn(
+            f"atext() verify exhausted after {max_verify} attempt(s) without approval. "
+            "Returning last result unchanged.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return resp.content  # type: ignore[return-value]
+
+    async def ajson(
+        self,
+        messages: str | list,
+        schema: type | dict | None = None,
+        *,
+        verify: Verifier | Callable[..., Any] | None = None,
+        max_verify: int = 3,
+        **kwargs,
+    ) -> Any:
         effective_schema = schema if schema is not None else self.output_schema
         if effective_schema is None:
             raise TypeError("ajson() requires a schema — pass schema= or set output_schema= on the agent.")
@@ -1331,11 +1543,40 @@ class LazyAgent:
             raise TypeError("stream=True is not supported in ajson(). Use achat(stream=True) instead.")
         existing = kwargs.pop("system", None)
         kwargs["system"] = f"{existing}\n\n{self._JSON_SYSTEM_SUFFIX}" if existing else self._JSON_SYSTEM_SUFFIX
-        resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
-        if not isinstance(resp, CompletionResponse):
-            raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-        resp.raise_if_failed()
-        return resp.parsed
+
+        task = messages
+        for attempt in range(max_verify if verify is not None else 1):
+            resp = await self.achat(messages, output_schema=effective_schema, **kwargs)
+            if not isinstance(resp, CompletionResponse):
+                raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
+            resp.raise_if_failed()
+
+            if verify is None:
+                return resp.parsed
+
+            answer = resp.content
+            if hasattr(verify, "atext"):
+                verdict = await verify.atext(f"Question: {task}\nAnswer: {answer}")
+            elif inspect.iscoroutinefunction(verify):
+                verdict = await verify(str(task), answer)
+            else:
+                verdict = verify(str(task), answer) if callable(verify) else verify.text(f"Question: {task}\nAnswer: {answer}")
+
+            if verdict.strip().lower().startswith("approved"):
+                return resp.parsed
+
+            messages = (
+                f"{task}\n\nPrevious attempt was rejected with this feedback: {verdict}\n"
+                "Please address the feedback and try again."
+            )
+
+        warnings.warn(
+            f"ajson() verify exhausted after {max_verify} attempt(s) without approval. "
+            "Returning last result unchanged.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return resp.parsed  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Dedicated streaming methods (unambiguous return types)
