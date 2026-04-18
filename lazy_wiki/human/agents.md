@@ -483,3 +483,25 @@ supervisor = SupervisorAgent(
 ```
 
 Both classes work everywhere a LazyAgent works: chains, parallel, as_tool(), verify, LazyContext.from_agent().
+
+### Optional browser UI — `lazybridge.ext.human_gui`
+
+Prefer a browser tab over stdin? Swap the default `input_fn` for the one
+provided by the `human_gui` extension. Stdlib-only, no extra install.
+
+```python
+from lazybridge import SupervisorAgent
+from lazybridge.ext.human_gui import web_input_fn
+
+fn = web_input_fn()  # opens a local tab on 127.0.0.1:<ephemeral>
+supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
+# ... run the pipeline ...
+fn.server.close()
+```
+
+The page renders each prompt with the previous agent's output, optional
+quick-command chips, and a textarea. Ctrl/⌘-Enter submits. Works the same
+way for `HumanAgent`. Full API and security notes:
+[`lazybridge/ext/human_gui/README.md`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/ext/human_gui/README.md).
+Runnable pipeline:
+[`examples/human_gui_demo.py`](https://github.com/selvaz/LazyBridge/blob/main/examples/human_gui_demo.py).

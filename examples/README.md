@@ -146,3 +146,23 @@ python examples/supervised_pipeline.py
 ```
 
 Reference: [`docs/course/13-human-in-the-loop.md`](../docs/course/13-human-in-the-loop.md) · [`lazy_wiki/bot/13_supervisor.md`](../lazy_wiki/bot/13_supervisor.md).
+
+---
+
+## Human-in-the-loop with a browser UI
+
+`human_gui_demo.py` is the same `researcher → supervisor → writer` chain
+as `supervised_pipeline.py`, except the supervisor's REPL runs in a local
+browser tab instead of stdin. Stdlib-only (no extra `pip install`).
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+
+python examples/human_gui_demo.py
+```
+
+The script prints a `http://127.0.0.1:<port>/?t=<token>` URL and opens the
+page automatically. Each REPL prompt renders on the page with the previous
+output and a textarea; Ctrl/⌘-Enter submits. Details:
+[`lazybridge/ext/human_gui/README.md`](../lazybridge/ext/human_gui/README.md).

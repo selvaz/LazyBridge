@@ -166,6 +166,17 @@ pipeline.run({"task": "AI safety report"})
 
 Full walkthrough in [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) and [`lazy_wiki/human/agents.md`](lazy_wiki/human/agents.md#human-agents).
 
+Prefer a browser to stdin? Stdlib-only, opt-in:
+
+```python
+from lazybridge.ext.human_gui import web_input_fn
+
+fn = web_input_fn()  # opens a local tab on 127.0.0.1:<ephemeral>
+supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
+```
+
+See [`lazybridge/ext/human_gui/README.md`](lazybridge/ext/human_gui/README.md).
+
 ## Supported providers
 
 | Provider | String | Default model |
@@ -195,6 +206,7 @@ Drop-in tools for common agent tasks — each in its own folder with a README an
 |---|---|
 | `lazybridge.ext.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
 | `lazybridge.ext.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
+| `lazybridge.ext.human_gui` | Optional browser UI for `HumanAgent` / `SupervisorAgent`. Stdlib-only, no extra install. |
 
 ### doc_skills — example
 
