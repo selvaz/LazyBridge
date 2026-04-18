@@ -20,9 +20,12 @@ panels created outside of a registered server see a no-op.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 class Panel(ABC):
@@ -48,7 +51,10 @@ class Panel(ABC):
             try:
                 self._notifier("state", panel_id if panel_id is not None else self.id)
             except Exception:
-                pass
+                # Don't propagate — notifications are fire-and-forget — but do
+                # log so genuine bugs in the downstream notifier surface in
+                # debug output instead of vanishing.
+                _logger.debug("Panel.notify() raised", exc_info=True)
 
     @property
     @abstractmethod

@@ -98,7 +98,10 @@ class GuiServer:
         if open_browser:
             self._maybe_open_browser()
 
-        _logger.info("LazyBridge GUI server listening at %s", self.url)
+        # SECURITY: never log the full URL — it contains the session token.
+        # Log the bind address only; users that need the tokenised URL can
+        # read `server.url` directly or receive it from `.gui()` return values.
+        _logger.info("LazyBridge GUI server listening at http://%s:%d/", self._host, self.port)
 
     # ------------------------------------------------------------------
     # Public API

@@ -91,7 +91,16 @@ class MemoryPanel(Panel):
             fn = getattr(self._memory, "_maybe_recompress", None)
             if not callable(fn):
                 raise ValueError("This Memory instance does not support manual recompression.")
-            fn()
+            # Memory owns an internal lock that Memory._record / _build_input
+            # acquire while mutating self._messages. Acquire it here too so a
+            # concurrent agent.chat(memory=mem) in another thread can't
+            # mutate _messages mid-recompression.
+            lock = getattr(self._memory, "_lock", None)
+            if lock is not None:
+                with lock:
+                    fn()
+            else:
+                fn()
             return {"ok": True, "summary": self._memory.summary}
 
         if action == "export_history":

@@ -15,6 +15,10 @@ from lazybridge.gui._panel import Panel
 
 _PREVIEW_LIMIT = 160
 
+#: Sentinel agent_id used for writes/deletes performed through the GUI.
+#: Double-underscore brackets prevent collision with a real agent name.
+GUI_AGENT_ID = "__gui_panel__"
+
 
 class StorePanel(Panel):
     """Panel for a :class:`~lazybridge.lazy_store.LazyStore` instance."""
@@ -106,7 +110,7 @@ class StorePanel(Panel):
                     raise ValueError(f"value is not valid JSON: {exc}") from exc
             else:
                 value = raw
-            self._store.write(key, value, agent_id="gui")
+            self._store.write(key, value, agent_id=GUI_AGENT_ID)
             return {"ok": True, "key": key, "preview": self._preview(value)}
 
         if action == "delete":
