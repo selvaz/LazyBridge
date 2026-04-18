@@ -19,7 +19,9 @@
 | HumanAgent | 13_supervisor.md | Human-in-the-loop participant: approval, dialogue, verify, timeouts | A, B, C |
 | SupervisorAgent | 13_supervisor.md | Human REPL with superpowers: continue / retry \<agent\> / store \<key\> / \<tool\>(args) | A, B, C |
 | gui.human | 13_supervisor.md | Optional browser UI for HumanAgent / SupervisorAgent — stdlib-only (deprecated; use `lazybridge.gui.panel_input_fn`) | A, B, C |
-| lazybridge.gui | 00_quickref.md | Shared browser GUI for every LazyBridge object via `.gui()` | A, B, C |
+| lazybridge.gui | 16_gui.md | Shared browser GUI: AgentPanel (live edit + test), PipelinePanel (per-step timeline), StorePanel, RouterPanel, SessionPanel, HumanInputPanel | A, B, C |
+| ContentGuard / GuardChain / LLMGuard | 14_guardrails.md | Input/output safety: block, modify, or flag content before/after every LLM call | all |
+| EvalSuite / EvalCase / EvalReport | 15_evals.md | Lightweight eval framework: built-in checks, llm_judge, regression tracking | all |
 
 ## Communication rules (critical)
 
@@ -41,13 +43,16 @@
 | Quick pipeline | `00_quickref.md` → `01_lazyagent.md` → `03_lazytool.md` |
 | Multi-agent | add `02_lazysession.md` → `04_lazycontext.md` → `05_lazystore.md` |
 | Routing | `06_lazyrouter.md` |
-| GUI integration | `07_graphschema.md` |
+| Graph topology | `07_graphschema.md` |
 | All patterns with full code | `08_patterns.md` |
 | Advanced features | `09_advanced.md` |
 | Schema generation (type mapping, LLM modes, artifacts) | `10_tool_schema.md` |
 | Custom provider integration | `11_custom_provider.md` |
 | Ready-made tools (doc_skills, read_docs) | `12_tools.md` |
 | Human approval & overrides (HumanAgent, SupervisorAgent) | `13_supervisor.md` |
+| Safety, PII filtering, content moderation | `14_guardrails.md` |
+| Testing & eval suites | `15_evals.md` |
+| Browser GUI (live edit, pipeline timeline, store inspector) | `16_gui.md` |
 
 ## Providers supported
 

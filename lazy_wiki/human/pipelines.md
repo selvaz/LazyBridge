@@ -315,3 +315,175 @@ orchestrator
 ```
 
 See [`lazy_wiki/human/tools.md`](tools.md) for the full API reference.
+
+---
+
+## Pipeline 7 — Checkpoint & Resume (crash-safe pipelines)
+
+Long pipelines can crash mid-run. Attach a `LazyStore` to `LazyTool.chain()` and set a `chain_id` — completed steps are saved automatically and skipped on the next run.
+
+```python
+from lazybridge import LazyAgent, LazyTool, LazyStore
+
+store = LazyStore(db="pipeline.db")  # SQLite — survives process restarts
+
+researcher = LazyAgent("anthropic", name="researcher")
+analyst    = LazyAgent("openai",    name="analyst")
+writer     = LazyAgent("anthropic", name="writer")
+
+pipeline = LazyTool.chain(
+    researcher, analyst, writer,
+    name="report",
+    description="Research → analyse → write",
+    store=store,
+    chain_id="report-v1",   # change this to invalidate old checkpoints
+)
+
+# Run 1: crashes after analyst finishes (e.g. API outage, process kill)
+pipeline.run({"task": "Analyse the EV battery market in 2025"})
+# ... process dies at writer step ...
+
+# Run 2: researcher and analyst are skipped automatically
+pipeline.run({"task": "Analyse the EV battery market in 2025"})
+# Only writer runs — picks up from where it left off
+```
+
+**Concurrent runs:** if the same pipeline runs in parallel workers, give each worker its own checkpoint lane via `run_id=`:
+
+```python
+# Worker A — default lane
+pipeline_a = LazyTool.chain(
+    researcher, writer,
+    name="pipe", description="d",
+    store=store, chain_id="pipe-v1",
+)
+
+# Worker B — isolated lane (does not collide with Worker A)
+pipeline_b = LazyTool.chain(
+    researcher, writer,
+    name="pipe", description="d",
+    store=store, chain_id="pipe-v1", run_id="worker-b",
+)
+```
+
+The same `run_id=` parameter is available on `sess.as_tool(mode="chain", run_id=...)`.
+
+---
+
+## Pipeline 8 — Saving & Loading Pipelines
+
+### Save a tool to a file
+
+`LazyTool.from_function()` and `agent.as_tool()` tools can be saved to human-readable Python files and loaded in a different process or on a different machine.
+
+```python
+from lazybridge import LazyAgent, LazyTool
+
+def search_web(query: str) -> str:
+    """Search the web for current information."""
+    import httpx
+    return httpx.get(f"https://api.example.com/search?q={query}").text
+
+# Function-backed tool
+tool = LazyTool.from_function(search_web)
+tool.save("tools/search_web.py")
+
+# Load in another script / worker process
+tool2 = LazyTool.load("tools/search_web.py")
+result = tool2.run({"query": "EV battery technology 2025"})
+```
+
+The saved file includes the function source, necessary imports, and the `LazyTool.from_function()` call. A sentinel comment `# LAZYBRIDGE_GENERATED_TOOL v1` at the top is required for `load()` to accept it.
+
+```python
+# Agent-backed tool — saves the agent constructor + as_tool() call
+# API keys are NOT serialised
+researcher = LazyAgent("anthropic", name="researcher",
+                       system="You are a research analyst.")
+researcher.as_tool("research", "Find factual information").save("tools/researcher.py")
+
+loaded = LazyTool.load("tools/researcher.py")
+```
+
+**Limitations:**
+- `LazyTool.chain()` and `LazyTool.parallel()` cannot be saved directly (`save()` raises `ValueError`). Save the individual participant tools instead.
+- `LazyTool.load` must never be exposed as an agent tool — it executes arbitrary Python files.
+
+### Save session topology (GraphSchema)
+
+A `LazySession`'s graph topology (which agents exist, how they connect) can be serialised independently of the live Python objects:
+
+```python
+from lazybridge import LazyAgent, LazySession
+from lazybridge import GraphSchema
+
+sess = LazySession(db="project.db")
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer     = LazyAgent("openai",    name="writer",     session=sess)
+
+# Save topology
+sess.graph.save("pipeline.json")     # auto-detects .json
+sess.graph.save("pipeline.yaml")     # or .yaml (requires PyYAML)
+
+# Reload as a descriptor (not live agents)
+graph = GraphSchema.from_file("pipeline.json")
+```
+
+### Resume a session from SQLite
+
+If you used `LazySession(db="pipeline.db")`, the session id and event log are persisted. Resume in a new process:
+
+```python
+from lazybridge import LazySession
+
+# Resume the most recent session from the database
+sess = LazySession.from_db("pipeline.db")
+
+# Resume a specific session by id
+sess = LazySession.from_db("pipeline.db", session_id="abc-123")
+
+# Reconstruct graph topology from a JSON snapshot
+sess = LazySession.from_json(json_str, db="pipeline.db")
+```
+
+---
+
+## Pipeline 9 — GUI Tracking & Live Inspection
+
+`lazybridge.gui` opens a browser panel for any LazyBridge object. No extra dependencies — pure stdlib.
+
+```python
+import lazybridge.gui   # activates .gui() on all core classes
+from lazybridge import LazyAgent, LazySession, LazyTool
+
+sess = LazySession(db="tracked.db", tracking="verbose")
+researcher = LazyAgent("anthropic", name="researcher", session=sess)
+writer     = LazyAgent("openai",    name="writer",     session=sess)
+
+pipeline = LazyTool.chain(researcher, writer,
+                          name="article", description="Research then write")
+
+# Open the GUI — one call registers all agents + the pipeline
+sess.gui()       # SessionPanel + auto-registers AgentPanels
+pipeline.gui()   # PipelinePanel with live per-step timeline
+
+# Run — watch the browser tab update in real time
+result = pipeline.run({"task": "Summarise fusion energy breakthroughs in 2025"})
+print(result)
+```
+
+**What each panel shows:**
+
+| Panel | What you can do |
+|---|---|
+| **AgentPanel** | Live-edit system prompt, model, tools. Run test calls with token + cost display. |
+| **PipelinePanel** | See chain/parallel topology. Run with per-step timeline (start/finish events). |
+| **SessionPanel** | Browse registered agents + store keys. Click any agent to open its panel. |
+| **StorePanel** | Read, write, delete store keys. See which agent wrote each key + timestamp. |
+| **RouterPanel** | Test routing logic — enter a value, see which agent is selected. |
+
+**Live editing** applies to the running Python objects — edits to a system prompt take effect on the agent's next call, without restarting the process.
+
+**Edits are not persisted to disk.** Use the "Export as Python" button in the AgentPanel to capture the current state as a code snippet.
+
+For complete GUI reference: [`lazy_wiki/bot/16_gui.md`](../bot/16_gui.md).
