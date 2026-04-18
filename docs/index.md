@@ -42,3 +42,4 @@ LazyAgent("deepseek")
 - [Sessions & Pipelines](sessions.md) --- multi-agent orchestration
 - [API Reference](reference.md) --- complete API surface
 - [Troubleshooting](troubleshooting.md) --- common errors and fixes
+
