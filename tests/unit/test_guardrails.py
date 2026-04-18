@@ -32,6 +32,7 @@ def _make_agent():
     agent._last_output = None
     agent._last_response = None
     agent.session = None
+    agent.memory = None
     agent._log = None
     return agent
 

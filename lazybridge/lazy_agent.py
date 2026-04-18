@@ -211,6 +211,7 @@ class LazyAgent:
         native_tools: list[NativeTool | str] | None = None,
         output_schema: type | dict | None = None,
         session: LazySession | None = None,
+        memory: Memory | None = None,
         max_retries: int = 0,
         api_key: str | None = None,
         verbose: bool = False,
@@ -232,6 +233,7 @@ class LazyAgent:
         self.output_schema: type | dict | None = output_schema
         self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         self.session = session
+        self.memory: Memory | None = memory
 
         # Stores the last text output; read by LazyContext.from_agent() when
         # another agent wants to use this agent's result as context.
@@ -740,11 +742,13 @@ class LazyAgent:
         """
         messages = self._run_input_guard(guard, messages)
 
-        if memory is not None:
-            self._validate_memory(messages, memory, stream)
-            full = memory._build_input(messages)  # type: ignore[arg-type]
+        effective_memory = memory if memory is not None else self.memory
+        if effective_memory is not None:
+            self._validate_memory(messages, effective_memory, stream)
+            full = effective_memory._build_input(messages)  # type: ignore[arg-type]
             resp = self.chat(
                 full,
+                memory=None,  # already applied — don't recurse with memory again
                 system=system,
                 tools=tools,
                 native_tools=native_tools,
@@ -762,7 +766,7 @@ class LazyAgent:
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            memory._record(messages, resp.content)  # type: ignore[arg-type]
+            effective_memory._record(messages, resp.content)  # type: ignore[arg-type]
             return resp
 
         msgs, request = self._prepare_chat_request(
@@ -825,11 +829,13 @@ class LazyAgent:
         """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
         messages = await self._arun_input_guard(guard, messages)
 
-        if memory is not None:
-            self._validate_memory(messages, memory, stream)
-            full = memory._build_input(messages)  # type: ignore[arg-type]
+        effective_memory = memory if memory is not None else self.memory
+        if effective_memory is not None:
+            self._validate_memory(messages, effective_memory, stream)
+            full = effective_memory._build_input(messages)  # type: ignore[arg-type]
             resp = await self.achat(
                 full,
+                memory=None,  # already applied — don't recurse with memory again
                 system=system,
                 tools=tools,
                 native_tools=native_tools,
@@ -847,7 +853,7 @@ class LazyAgent:
             )
             if not isinstance(resp, CompletionResponse):  # pragma: no cover
                 raise TypeError(f"Expected CompletionResponse, got {type(resp).__name__}")
-            memory._record(messages, resp.content)  # type: ignore[arg-type]
+            effective_memory._record(messages, resp.content)  # type: ignore[arg-type]
             return resp
 
         msgs, request = self._prepare_chat_request(
@@ -934,7 +940,18 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in loop(). Use chat() for streaming.")
 
+        # Extract memory so it is applied once at the loop boundary (initial
+        # message prepend + final result record) rather than on every internal
+        # chat() step.  Per-call memory overrides agent-level memory.
+        loop_memory: Memory | None = chat_kwargs.pop("memory", None)
+        if loop_memory is None:
+            loop_memory = self.memory
+
         messages = self._run_input_guard(guard, messages)
+        if loop_memory is not None:
+            self._validate_memory(messages, loop_memory, False)
+            messages = loop_memory._build_input(messages)  # type: ignore[arg-type]
+
         gen = self._loop_logic(
             messages,
             tools=tools,
@@ -979,6 +996,8 @@ class LazyAgent:
         except StopIteration as e:
             result = e.value
         self._run_output_guard(guard, result)
+        if loop_memory is not None:
+            loop_memory._record(messages, result.content)  # type: ignore[arg-type]
         return result
 
     async def aloop(
@@ -1012,7 +1031,16 @@ class LazyAgent:
         if chat_kwargs.get("stream"):
             raise TypeError("stream=True is not supported in aloop(). Use achat() for streaming.")
 
+        # Same boundary-memory pattern as loop() — pop before passing to generator.
+        loop_memory: Memory | None = chat_kwargs.pop("memory", None)
+        if loop_memory is None:
+            loop_memory = self.memory
+
         messages = await self._arun_input_guard(guard, messages)
+        if loop_memory is not None:
+            self._validate_memory(messages, loop_memory, False)
+            messages = loop_memory._build_input(messages)  # type: ignore[arg-type]
+
         gen = self._loop_logic(
             messages,
             tools=tools,
@@ -1065,6 +1093,8 @@ class LazyAgent:
         except StopIteration as e:
             result = e.value
         await self._arun_output_guard(guard, result)
+        if loop_memory is not None:
+            loop_memory._record(messages, result.content)  # type: ignore[arg-type]
         return result
 
     # ------------------------------------------------------------------
