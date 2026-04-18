@@ -7,6 +7,7 @@ LazyBridge integration (stat_runtime catalog registration, Pydantic results).
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -83,7 +84,12 @@ def _http_get(url: str, cfg: DownloaderConfig, params: dict | None = None):
             )
             if attempt == cfg.max_retries - 1:
                 raise
-            time.sleep(cfg.retry_sleep * (2**attempt))
+            # Exponential backoff with ±25% jitter — prevents a
+            # thundering herd when many workers retry after the same
+            # rate-limit window (audit L10).  Matches the jitter
+            # formula used in lazybridge.core.executor.
+            delay = cfg.retry_sleep * (2**attempt) * (0.75 + random.random() * 0.5)
+            time.sleep(delay)
 
 
 # ---------------------------------------------------------------------------

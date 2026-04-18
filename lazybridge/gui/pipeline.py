@@ -152,16 +152,29 @@ class PipelinePanel(Panel):
         with self._run_lock:
             return self._last_run is not None and self._last_run.get("status") == "running"
 
-    def _session_for_capture(self) -> Any | None:
-        """Return the first session we find among pipeline participants."""
+    def _sessions_for_capture(self) -> list[Any]:
+        """Return every distinct ``LazySession`` referenced by the pipeline.
+
+        Previously only the first participant's session was used, so events
+        emitted by agents in other sessions were silently dropped from the
+        live timeline (audit L5).  We now attach a capture exporter to
+        every unique session; the exporter filters by participant name, so
+        events from multiple sessions converge cleanly into the same
+        panel buffer.
+        """
         cfg = self._tool._pipeline
         if cfg is None:
-            return None
+            return []
+        seen: dict[str, Any] = {}
         for p in cfg.participants:
             sess = getattr(p, "session", None)
-            if sess is not None and hasattr(sess, "events"):
-                return sess
-        return None
+            if sess is None or not hasattr(sess, "events"):
+                continue
+            sid = getattr(sess, "id", id(sess))
+            if sid in seen:
+                continue
+            seen[sid] = sess
+        return list(seen.values())
 
     def _interesting_names(self) -> set[str]:
         cfg = self._tool._pipeline
@@ -200,19 +213,23 @@ class PipelinePanel(Panel):
         return {"started": True, "run_id": run_id}
 
     def _run_in_thread(self, run_id: str, task: str) -> None:
-        session = self._session_for_capture()
+        sessions = self._sessions_for_capture()
         interesting = self._interesting_names()
-        exporter = None
-        if session is not None and interesting:
-            exporter = _PipelineEventExporter(self, interesting, run_id)
-            try:
-                session.events.add_exporter(exporter)
-            except Exception:  # pragma: no cover - defensive
-                exporter = None
-
-            with self._run_lock:
-                if self._last_run and self._last_run["run_id"] == run_id:
-                    self._last_run["captured_from_session"] = True
+        # Track (session, exporter) pairs so we can detach from each at
+        # the end of the run regardless of how we exit.  Audit L5.
+        attached: list[tuple[Any, _PipelineEventExporter]] = []
+        if sessions and interesting:
+            for sess in sessions:
+                ex = _PipelineEventExporter(self, interesting, run_id)
+                try:
+                    sess.events.add_exporter(ex)
+                    attached.append((sess, ex))
+                except Exception:  # pragma: no cover - defensive
+                    continue
+            if attached:
+                with self._run_lock:
+                    if self._last_run and self._last_run["run_id"] == run_id:
+                        self._last_run["captured_from_session"] = True
 
         try:
             result = self._tool.run({"task": task})
@@ -227,9 +244,9 @@ class PipelinePanel(Panel):
             self._run_done.set()
             return
         finally:
-            if exporter is not None:
+            for sess, ex in attached:
                 try:
-                    session.events.remove_exporter(exporter)
+                    sess.events.remove_exporter(ex)
                 except Exception:  # pragma: no cover
                     pass
 
