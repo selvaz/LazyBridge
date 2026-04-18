@@ -78,14 +78,8 @@ def test_run_captures_session_events_and_finishes_done():
     out = panel.handle_action("run", {"task": "go"})
     assert out == {"started": True, "run_id": out["run_id"]}
 
-    # Wait for the background thread to finish (up to 1s).
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        state = panel.render_state()
-        lr = state.get("last_run")
-        if lr and lr["status"] != "running":
-            break
-        time.sleep(0.01)
+    # Wait for the background thread to finish — Event-based, not polled.
+    assert panel._run_done.wait(timeout=2.0)
 
     state = panel.render_state()
     lr = state["last_run"]
@@ -116,13 +110,8 @@ def test_run_without_session_skips_capture_but_still_returns_result():
 
     panel = PipelinePanel(tool)
     panel.handle_action("run", {"task": "hi"})
-    # Wait for thread.
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        state = panel.render_state()
-        if state.get("last_run") and state["last_run"]["status"] != "running":
-            break
-        time.sleep(0.01)
+    # Wait for thread — Event-based, not polled.
+    assert panel._run_done.wait(timeout=2.0)
     state = panel.render_state()
     lr = state["last_run"]
     assert lr["status"] == "done"
@@ -155,12 +144,7 @@ def test_run_propagates_exception_as_error_state():
 
     panel = PipelinePanel(tool)
     panel.handle_action("run", {"task": "x"})
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        state = panel.render_state()
-        if state.get("last_run") and state["last_run"]["status"] != "running":
-            break
-        time.sleep(0.01)
+    assert panel._run_done.wait(timeout=2.0)
     lr = panel.render_state()["last_run"]
     assert lr["status"] == "error"
     assert "kaboom" in lr["error"]
@@ -197,12 +181,7 @@ def test_running_label_marker():
     time.sleep(0.02)
     assert panel.label.endswith("· running")
     threading_event_bool["running"] = False
-    # Let the thread finish for cleanup.
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        if panel.render_state()["last_run"]["status"] != "running":
-            break
-        time.sleep(0.01)
+    assert panel._run_done.wait(timeout=2.0)
 
 
 def test_second_run_rejected_while_first_running():
@@ -242,11 +221,7 @@ def test_clear_run_drops_last_run():
     tool = _fake_pipeline_tool([agent], sess)
     panel = PipelinePanel(tool)
     panel.handle_action("run", {"task": "x"})
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        if panel.render_state().get("last_run", {}).get("status") == "done":
-            break
-        time.sleep(0.01)
+    assert panel._run_done.wait(timeout=2.0)
     assert "last_run" in panel.render_state()
     panel.handle_action("clear_run", {})
     assert "last_run" not in panel.render_state()

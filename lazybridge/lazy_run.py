@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import logging
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+
+_logger = logging.getLogger(__name__)
 
 
 def _run_suppressed(coro: Coroutine[Any, Any, T]) -> T:
@@ -106,6 +109,13 @@ def run_async(coro: Coroutine[Any, Any, T]) -> T:
     else:
         # A loop is already running (Jupyter, async test frameworks, Spyder, etc.).
         # Offload to a dedicated thread to avoid blocking/deadlocking the live loop.
+        # If the caller is already inside async code, preferring `await coro`
+        # directly is cheaper than going through the thread pool — log at DEBUG
+        # so power users can spot the overhead (audit L2).
+        _logger.debug(
+            "run_async called from inside a running event loop; offloading to a "
+            "thread pool. In async code, prefer `await coro` directly."
+        )
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_run_suppressed, coro)
             return future.result()

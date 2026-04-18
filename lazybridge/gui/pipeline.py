@@ -53,6 +53,10 @@ class PipelinePanel(Panel):
         self._run_lock = threading.Lock()
         self._last_run: dict[str, Any] | None = None
         self._event_buffer: deque[dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
+        # Set when the background thread finishes (done OR error).  Tests
+        # that await completion should wait on this Event rather than
+        # polling ``render_state`` in a loop (audit L9).
+        self._run_done = threading.Event()
 
     @property
     def id(self) -> str:
@@ -172,6 +176,7 @@ class PipelinePanel(Panel):
 
     def _start_run(self, task: str) -> dict[str, Any]:
         run_id = str(uuid.uuid4())[:8]
+        self._run_done.clear()
         with self._run_lock:
             self._event_buffer.clear()
             self._last_run = {
@@ -219,6 +224,7 @@ class PipelinePanel(Panel):
                     self._last_run["finished_at"] = time.time()
                     self._last_run["events"] = list(self._event_buffer)
             self.notify()
+            self._run_done.set()
             return
         finally:
             if exporter is not None:
@@ -234,6 +240,7 @@ class PipelinePanel(Panel):
                 self._last_run["finished_at"] = time.time()
                 self._last_run["events"] = list(self._event_buffer)
         self.notify()
+        self._run_done.set()
 
     # ------------------------------------------------------------------
     # CallbackExporter — called from the running session's thread(s)

@@ -115,16 +115,22 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["lazybridge"]
+# Extensions stay omitted because they carry optional-dependency code that
+# the default test environment doesn't install. Provider adapters are now
+# INCLUDED (audit M10): the fail_under gate was previously hiding ~2800
+# lines of core surface by omitting them. As the provider unit tests grow
+# this will become a meaningful signal; until then the gate is set to a
+# realistic floor (see fail_under below).
 omit = [
     "lazybridge/ext/*",
-    "lazybridge/core/providers/anthropic.py",
-    "lazybridge/core/providers/openai.py",
-    "lazybridge/core/providers/google.py",
-    "lazybridge/core/providers/deepseek.py",
 ]
 
 [tool.coverage.report]
-fail_under = 60
+# Realistic floor given that the four provider adapters are only exercised
+# via focused unit tests (tests/unit/gui/test_audit_wave*.py) and live
+# tests (opt-in, skipped in CI). Raise this as provider-dedicated unit
+# tests land.
+fail_under = 40
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
