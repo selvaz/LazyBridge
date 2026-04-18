@@ -1,31 +1,58 @@
 """lazybridge.gui — Core, reusable GUI surfaces for LazyBridge objects.
 
-First-class (not an ``ext``) because the primitives here are intended to be
-reused by any future LazyBridge GUI — including the planned whole-pipeline
-inspector / editor.
+First-class (not an ``ext``) because the primitives here are intended to
+be reused by any future LazyBridge GUI — including the planned
+whole-pipeline inspector.
 
-Each sub-module provides a browser-based inspector / editor for one kind of
-LazyBridge object, built on a shared set of stdlib-only primitives:
-``ThreadingHTTPServer`` + token-gated endpoints + an inlined HTML page.
+Importing this package installs a ``.gui()`` method on the core classes::
 
-Sub-modules (current / planned):
+    import lazybridge.gui                          # monkey-patches .gui()
 
-- ``human`` — browser UI that supplies an ``input_fn`` for ``HumanAgent`` /
-  ``SupervisorAgent``. Stable, shipped.
+    from lazybridge import LazyAgent, LazySession
+    sess  = LazySession()
+    agent = LazyAgent("anthropic", session=sess)
+    print(agent.gui())                             # opens a browser tab, returns URL
 
-- ``agent`` — read/edit a ``LazyAgent`` (name, system prompt, model, enabled
-  tools drawn from the enclosing session's scope). *Planned.*
+The first ``.gui()`` call in the process starts a shared, localhost-bound,
+token-gated HTTP server; subsequent calls register extra panels on the
+same server so you end up with one tab listing every agent / tool /
+session you have opened.
 
-- ``tool`` — inspect a ``LazyTool`` (schema, description, guidance). *Planned.*
+Sub-modules:
 
-- ``pipeline`` — view a ``LazyTool.chain`` / ``LazyTool.parallel`` topology
-  and reorder / toggle participants. *Planned.*
+- ``human``  — browser UI that supplies an ``input_fn`` for ``HumanAgent``
+  / ``SupervisorAgent`` (uses its own dedicated server; shipped).
+- ``agent``  — :class:`AgentPanel` (inspect, edit, live test).
+- ``tool``   — :class:`ToolPanel` (inspect, live invoke from a schema-generated form).
+- ``session``— :class:`SessionPanel` (agents + store-key overview; dispatcher).
 
-- ``session`` — session-wide inspector: agents, tools, store entries, event
-  log, graph topology. *Planned.*
+Lower-level primitives for building your own panels:
 
-Design principle: keep the HTTP server / token / page-assembly primitives
-factored so the pipeline-wide GUI can embed the same panels as sub-views.
+- :class:`lazybridge.gui.Panel` — base class.
+- :class:`lazybridge.gui.GuiServer` — shared HTTP server.
+- :func:`lazybridge.gui.get_server` — singleton accessor.
 """
 
-__all__: list[str] = []
+from lazybridge.gui._global import GuiServer, close_server, get_server, is_running
+from lazybridge.gui._install import install_gui_methods, uninstall_gui_methods
+from lazybridge.gui._panel import Panel
+from lazybridge.gui.agent import AgentPanel
+from lazybridge.gui.session import SessionPanel
+from lazybridge.gui.tool import ToolPanel
+
+# Install .gui() methods on LazyAgent / LazyTool / LazySession as a side
+# effect of importing this package. The install is idempotent.
+install_gui_methods()
+
+__all__ = [
+    "GuiServer",
+    "Panel",
+    "AgentPanel",
+    "ToolPanel",
+    "SessionPanel",
+    "get_server",
+    "close_server",
+    "is_running",
+    "install_gui_methods",
+    "uninstall_gui_methods",
+]

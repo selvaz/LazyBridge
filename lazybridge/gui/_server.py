@@ -1,0 +1,260 @@
+"""GuiServer — shared HTTP server for lazybridge.gui panels.
+
+One ``ThreadingHTTPServer`` hosts the whole GUI. Each registered
+:class:`~lazybridge.gui._panel.Panel` appears as a sidebar entry; clicking it
+fetches the panel's JSON state and renders it using the matching JS renderer
+in :mod:`lazybridge.gui._templates`. ``POST /api/panel/<id>/action`` routes
+edits and live test runs back to ``panel.handle_action()``.
+
+Threading model: ``ThreadingHTTPServer`` spawns a new thread per request,
+so a long-running test call (e.g. ``agent.chat(...)`` hitting the Anthropic
+API) does not block other requests such as sidebar polling.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import secrets
+import threading
+import traceback
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+from lazybridge.gui._panel import Panel
+from lazybridge.gui._templates import PAGE_TEMPLATE
+
+_logger = logging.getLogger(__name__)
+
+
+class GuiServer:
+    """Shared HTTP server hosting every registered panel.
+
+    Parameters
+    ----------
+    host:
+        Bind address. Default ``127.0.0.1`` — do not change without
+        understanding the security implications.
+    port:
+        TCP port, ``0`` for an OS-assigned ephemeral port.
+    open_browser:
+        If ``True``, opens :attr:`url` on first start via :mod:`webbrowser`.
+    title:
+        Browser tab title.
+    """
+
+    def __init__(
+        self,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        open_browser: bool = True,
+        title: str = "LazyBridge GUI",
+    ) -> None:
+        self._host = host
+        self._title = title
+        self._token = secrets.token_urlsafe(24)
+        self._panels: dict[str, Panel] = {}
+        self._panels_lock = threading.RLock()
+        self._browser_opened = False
+        self._closed = threading.Event()
+
+        handler_cls = _make_handler(self)
+        self._httpd = ThreadingHTTPServer((host, port), handler_cls)
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever,
+            name="lazybridge-gui-server",
+            daemon=True,
+        )
+        self._thread.start()
+
+        if open_browser:
+            self._maybe_open_browser()
+
+        _logger.info("LazyBridge GUI server listening at %s", self.url)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    @property
+    def port(self) -> int:
+        return self._httpd.server_address[1]
+
+    @property
+    def url(self) -> str:
+        return f"http://{self._host}:{self.port}/?t={self._token}"
+
+    @property
+    def token(self) -> str:
+        return self._token
+
+    @property
+    def closed(self) -> bool:
+        return self._closed.is_set()
+
+    def register(self, panel: Panel) -> str:
+        """Add or replace ``panel`` and return its panel URL."""
+        with self._panels_lock:
+            self._panels[panel.id] = panel
+        return self.url_for(panel.id)
+
+    def unregister(self, panel_id: str) -> None:
+        with self._panels_lock:
+            self._panels.pop(panel_id, None)
+
+    def get(self, panel_id: str) -> Panel | None:
+        with self._panels_lock:
+            return self._panels.get(panel_id)
+
+    def panels(self) -> list[Panel]:
+        with self._panels_lock:
+            return list(self._panels.values())
+
+    def url_for(self, panel_id: str) -> str:
+        return f"{self.url}#panel={panel_id}"
+
+    def close(self) -> None:
+        if self._closed.is_set():
+            return
+        self._closed.set()
+        try:
+            self._httpd.shutdown()
+        except Exception:  # pragma: no cover
+            pass
+        self._httpd.server_close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _maybe_open_browser(self) -> None:
+        if self._browser_opened:
+            return
+        self._browser_opened = True
+        try:
+            webbrowser.open(self.url)
+        except Exception as exc:  # pragma: no cover - headless envs
+            _logger.info("Could not open browser: %s", exc)
+
+
+def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
+    token = server.token
+    title = server._title  # noqa: SLF001 — friend access by design
+
+    class _Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            _logger.debug("gui " + format, *args)
+
+        # ------------------------------------------------------------------
+        def _check_token(self) -> bool:
+            query_token = None
+            if "?" in self.path:
+                _, _, qs = self.path.partition("?")
+                for pair in qs.split("&"):
+                    if pair.startswith("t="):
+                        query_token = pair[2:]
+                        break
+            header_token = self.headers.get("X-Token")
+            return secrets.compare_digest(query_token or header_token or "", token)
+
+        def _send_json(self, payload: Any, status: int = 200) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_text(self, body: str, status: int = 200, content_type: str = "text/html; charset=utf-8") -> None:
+            data = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        # ------------------------------------------------------------------
+        def do_GET(self) -> None:  # noqa: N802
+            path = self.path.split("?", 1)[0].rstrip("/") or "/"
+            if path in ("/", "/index.html"):
+                page = PAGE_TEMPLATE.format(title=title, token_json=json.dumps(token))
+                self._send_text(page)
+                return
+            if path == "/healthz":
+                self._send_json({"ok": True, "panels": len(server.panels()), "closed": server.closed})
+                return
+            if not self._check_token():
+                self._send_json({"error": "unauthorized"}, status=401)
+                return
+            if path == "/api/panels":
+                panels = [
+                    {"id": p.id, "kind": p.kind, "label": p.label, "group": p.group}
+                    for p in server.panels()
+                ]
+                self._send_json({"panels": panels})
+                return
+            if path.startswith("/api/panel/"):
+                panel_id = path[len("/api/panel/"):]
+                panel = server.get(panel_id)
+                if panel is None:
+                    self._send_json({"error": "unknown panel"}, status=404)
+                    return
+                try:
+                    state = panel.render_state()
+                except Exception as exc:
+                    _logger.exception("render_state failed for %s", panel_id)
+                    self._send_json({"error": "render_state failed", "detail": str(exc)}, status=500)
+                    return
+                payload = {"id": panel.id, "kind": panel.kind, "label": panel.label,
+                           "group": panel.group, **state}
+                self._send_json(payload)
+                return
+            self._send_text("Not found", status=404, content_type="text/plain")
+
+        # ------------------------------------------------------------------
+        def do_POST(self) -> None:  # noqa: N802
+            path = self.path.split("?", 1)[0]
+            if not self._check_token():
+                self._send_json({"error": "unauthorized"}, status=401)
+                return
+            if not path.startswith("/api/panel/") or not path.endswith("/action"):
+                self._send_text("Not found", status=404, content_type="text/plain")
+                return
+            panel_id = path[len("/api/panel/"):-len("/action")]
+            panel = server.get(panel_id)
+            if panel is None:
+                self._send_json({"error": "unknown panel"}, status=404)
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 10_000_000:
+                self._send_json({"error": "invalid length"}, status=400)
+                return
+            raw = self.rfile.read(length)
+            try:
+                payload = json.loads(raw)
+                action_name = str(payload["action"])
+                args = payload.get("args") or {}
+                if not isinstance(args, dict):
+                    raise ValueError("'args' must be an object")
+            except (ValueError, KeyError, TypeError) as exc:
+                self._send_json({"error": "bad payload", "detail": str(exc)}, status=400)
+                return
+            try:
+                result = panel.handle_action(action_name, args)
+            except ValueError as exc:
+                self._send_json({"error": "bad action", "detail": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                _logger.exception("handle_action failed for %s/%s", panel_id, action_name)
+                self._send_json(
+                    {"error": "action failed", "detail": str(exc), "trace": traceback.format_exc()},
+                    status=500,
+                )
+                return
+            self._send_json(result if isinstance(result, dict) else {"result": result})
+
+    return _Handler
