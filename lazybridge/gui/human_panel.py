@@ -129,6 +129,9 @@ class HumanInputPanel(Panel):
                     self._response_q.get_nowait()
             except queue.Empty:
                 pass
+        # Tell any SSE subscribers — the sidebar label flips to "waiting"
+        # and the active human panel should refresh immediately.
+        self.notify()
 
         start = time.monotonic()
         try:
@@ -176,6 +179,9 @@ class HumanInputPanel(Panel):
             self._response_q.put_nowait(response)
         except queue.Full:
             return False
+        # The panel's label drops the "waiting" marker on the next
+        # render_state() — push an SSE refresh so clients see it.
+        self.notify()
         return True
 
 

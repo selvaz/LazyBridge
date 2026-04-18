@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import secrets
 import threading
 import traceback
@@ -26,6 +27,29 @@ from lazybridge.gui._panel import Panel
 from lazybridge.gui._templates import PAGE_TEMPLATE
 
 _logger = logging.getLogger(__name__)
+
+
+class _Subscriber:
+    """One SSE client.  Messages flow through a bounded queue; dropped
+    notifications become a ``{"type": "refresh"}`` hint so the client
+    re-syncs the next time it polls or reconnects."""
+
+    __slots__ = ("q", "alive")
+
+    def __init__(self) -> None:
+        self.q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=64)
+        self.alive = threading.Event()
+        self.alive.set()
+
+    def push(self, event: dict[str, Any]) -> None:
+        if not self.alive.is_set():
+            return
+        try:
+            self.q.put_nowait(event)
+        except queue.Full:
+            # Drop the event silently; the client's full-refetch on
+            # reconnection will catch it up.
+            pass
 
 
 class GuiServer:
@@ -57,6 +81,8 @@ class GuiServer:
         self._token = secrets.token_urlsafe(24)
         self._panels: dict[str, Panel] = {}
         self._panels_lock = threading.RLock()
+        self._subscribers: set[_Subscriber] = set()
+        self._subscribers_lock = threading.Lock()
         self._browser_opened = False
         self._closed = threading.Event()
 
@@ -98,11 +124,16 @@ class GuiServer:
         """Add or replace ``panel`` and return its panel URL."""
         with self._panels_lock:
             self._panels[panel.id] = panel
+        panel._notifier = self._panel_notify  # noqa: SLF001 — friend access
+        self._broadcast({"type": "list"})
         return self.url_for(panel.id)
 
     def unregister(self, panel_id: str) -> None:
         with self._panels_lock:
-            self._panels.pop(panel_id, None)
+            removed = self._panels.pop(panel_id, None)
+        if removed is not None:
+            removed._notifier = None  # noqa: SLF001
+            self._broadcast({"type": "list"})
 
     def get(self, panel_id: str) -> Panel | None:
         with self._panels_lock:
@@ -119,11 +150,46 @@ class GuiServer:
         if self._closed.is_set():
             return
         self._closed.set()
+        # Wake every SSE handler so their queues return and the
+        # connections shut down cleanly.
+        with self._subscribers_lock:
+            subs = list(self._subscribers)
+        for sub in subs:
+            sub.alive.clear()
+            try:
+                sub.q.put_nowait({"type": "closed"})
+            except queue.Full:
+                pass
         try:
             self._httpd.shutdown()
         except Exception:  # pragma: no cover
             pass
         self._httpd.server_close()
+
+    # ------------------------------------------------------------------
+    # SSE subscriber plumbing (internal, used by the request handler)
+    # ------------------------------------------------------------------
+
+    def _add_subscriber(self, sub: _Subscriber) -> None:
+        with self._subscribers_lock:
+            self._subscribers.add(sub)
+
+    def _remove_subscriber(self, sub: _Subscriber) -> None:
+        with self._subscribers_lock:
+            self._subscribers.discard(sub)
+
+    def _broadcast(self, event: dict[str, Any]) -> None:
+        with self._subscribers_lock:
+            subs = list(self._subscribers)
+        for sub in subs:
+            sub.push(event)
+
+    def _panel_notify(self, kind: str, panel_id: str | None) -> None:
+        """Called by panels via ``Panel.notify()``."""
+        payload: dict[str, Any] = {"type": "state"}
+        if panel_id is not None:
+            payload["panel_id"] = panel_id
+        self._broadcast(payload)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -197,6 +263,9 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
                 ]
                 self._send_json({"panels": panels})
                 return
+            if path == "/api/events":
+                self._serve_sse(server)
+                return
             if path.startswith("/api/panel/"):
                 panel_id = path[len("/api/panel/"):]
                 panel = server.get(panel_id)
@@ -214,6 +283,44 @@ def _make_handler(server: GuiServer) -> type[BaseHTTPRequestHandler]:
                 self._send_json(payload)
                 return
             self._send_text("Not found", status=404, content_type="text/plain")
+
+        # ------------------------------------------------------------------
+        def _serve_sse(self, srv: GuiServer) -> None:
+            sub = _Subscriber()
+            srv._add_subscriber(sub)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-transform")
+                self.send_header("X-Accel-Buffering", "no")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                try:
+                    self.wfile.write(b": connected\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+                while sub.alive.is_set():
+                    try:
+                        evt = sub.q.get(timeout=15)
+                    except queue.Empty:
+                        try:
+                            self.wfile.write(b": keep-alive\n\n")
+                            self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError, OSError):
+                            return
+                        continue
+                    if evt.get("type") == "closed":
+                        return
+                    body = json.dumps(evt).encode("utf-8")
+                    payload = b"event: refresh\ndata: " + body + b"\n\n"
+                    try:
+                        self.wfile.write(payload)
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        return
+            finally:
+                srv._remove_subscriber(sub)
 
         # ------------------------------------------------------------------
         def do_POST(self) -> None:  # noqa: N802

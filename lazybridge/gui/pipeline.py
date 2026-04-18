@@ -218,6 +218,7 @@ class PipelinePanel(Panel):
                     self._last_run["error"] = f"{type(exc).__name__}: {exc}"
                     self._last_run["finished_at"] = time.time()
                     self._last_run["events"] = list(self._event_buffer)
+            self.notify()
             return
         finally:
             if exporter is not None:
@@ -232,6 +233,7 @@ class PipelinePanel(Panel):
                 self._last_run["result"] = _jsonable_result(result)
                 self._last_run["finished_at"] = time.time()
                 self._last_run["events"] = list(self._event_buffer)
+        self.notify()
 
     # ------------------------------------------------------------------
     # CallbackExporter — called from the running session's thread(s)
@@ -259,6 +261,9 @@ class PipelinePanel(Panel):
             # Live mirror — reflect in last_run immediately so clients
             # polling render_state() see progress without another action.
             self._last_run["events"] = list(self._event_buffer)
+        # Push a refresh notification to SSE subscribers so the client
+        # redraws the timeline without waiting for the next poll tick.
+        self.notify()
 
 
 class _PipelineEventExporter:

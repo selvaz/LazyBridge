@@ -131,6 +131,10 @@ from lazybridge.gui import (
 - **Localhost only.** Bound to `127.0.0.1` on an ephemeral port.
 - **Token-gated.** Every `/api/*` request requires a random 24-byte urlsafe
   token, inlined into the page JavaScript on first GET.
+- **Live updates via Server-Sent Events.** The client subscribes to
+  `/api/events` (text/event-stream) and refreshes only when the server
+  pushes a `refresh` event — register/unregister/state changes. A 2 s
+  polling loop kicks in as a fallback when SSE is unavailable.
 - **No persistence.** Panels' state is read from live Python objects on
   every request; GUI edits mutate those objects but are never serialised
   to disk.
@@ -139,10 +143,8 @@ This is a **developer tool**. Do not expose the server outside localhost.
 
 ## Known limitations
 
-- Polling-based: the client re-fetches `/api/panels` every 2 s. SSE
-  replacement is planned.
 - `mypy` does not see the monkey-patched `.gui()` method directly. Use
-  `open_gui(obj)` for type-checked call sites.
+  `open_gui(obj)` (or `cast(GuiEnabled, obj).gui()`) for typed call sites.
 - No edit-conflict detection between tabs; last-write-wins.
 - `LazyTool` metadata (name, description, guidance) is read-only — the
   compiled schema is cached on first call.

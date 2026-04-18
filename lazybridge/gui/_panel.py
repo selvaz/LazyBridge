@@ -12,11 +12,16 @@ exposes:
 The panel does NOT render HTML itself — the shared page template knows how
 to render each ``kind`` based on the JSON state. This keeps the server-side
 code small and lets us grow the UI without touching Python.
+
+Panels can push change notifications to SSE subscribers by calling
+``self.notify()``.  The server wires up the notifier at registration time;
+panels created outside of a registered server see a no-op.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 
@@ -26,6 +31,24 @@ class Panel(ABC):
     #: Panel kind — one of ``"agent"``, ``"tool"``, ``"session"``,
     #: ``"router"``, ``"store"``, ``"memory"``, ``"pipeline"``, ``"human"``.
     kind: str = "generic"
+
+    #: Set by :class:`GuiServer.register` — call ``self.notify()`` to push
+    #: a ``refresh`` event to every SSE subscriber.  No-op when unset.
+    _notifier: Callable[[str, str | None], None] | None = None
+
+    def notify(self, panel_id: str | None = None) -> None:
+        """Tell SSE subscribers this panel's state changed.
+
+        ``panel_id`` defaults to ``self.id`` but can be overridden to
+        notify the sidebar list as a whole (pass ``None``) — useful when
+        a panel's ``label`` changes, because the list is cached in the
+        client until a refresh.
+        """
+        if self._notifier is not None:
+            try:
+                self._notifier("state", panel_id if panel_id is not None else self.id)
+            except Exception:
+                pass
 
     @property
     @abstractmethod

@@ -1020,10 +1020,57 @@ PAGE_TEMPLATE = """<!doctype html>
   }};
 
   // ------------------------------------------------------------------
-  // Bootstrap
+  // Bootstrap — SSE with polling fallback
   // ------------------------------------------------------------------
   refreshPanelList();
-  setInterval(refreshPanelList, 2000);
+  let sseActive = false;
+  let pollTimer = null;
+  function startPolling() {{
+    if (pollTimer) return;
+    pollTimer = setInterval(refreshPanelList, 2000);
+  }}
+  function stopPolling() {{
+    if (pollTimer) {{ clearInterval(pollTimer); pollTimer = null; }}
+  }}
+  function connectSse() {{
+    try {{
+      const es = new EventSource(qs("/api/events"));
+      es.onopen = () => {{
+        sseActive = true;
+        stopPolling();
+        sbStatus.textContent = "Live · SSE connected"; sbStatus.className = "status ok";
+      }};
+      es.addEventListener("refresh", (e) => {{
+        let payload = null;
+        try {{ payload = JSON.parse(e.data); }} catch (_err) {{}}
+        if (!payload || payload.type === "list" || payload.type === "closed") {{
+          refreshPanelList();
+          return;
+        }}
+        // state change: refetch list so labels stay fresh, plus the
+        // specific panel if it's the one currently shown.
+        refreshPanelList();
+        if (payload.panel_id && payload.panel_id === activePanelId) {{
+          loadPanel(activePanelId);
+        }}
+      }});
+      es.onerror = () => {{
+        if (sseActive) {{
+          sbStatus.textContent = "SSE dropped — falling back to polling"; sbStatus.className = "status warn";
+        }}
+        sseActive = false;
+        es.close();
+        startPolling();
+        // Try to reconnect after a back-off.
+        setTimeout(connectSse, 3000);
+      }};
+    }} catch (_err) {{
+      startPolling();
+    }}
+  }}
+  // Prefer SSE; poll as a fallback until connected (and if SSE breaks).
+  startPolling();
+  connectSse();
 }})();
 </script>
 </body>
