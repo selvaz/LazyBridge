@@ -73,6 +73,10 @@ from lazybridge.memory import Memory
 
 _logger = logging.getLogger(__name__)
 
+# Sentinel used to distinguish "caller did not pass memory=" from "caller
+# explicitly passed memory=None" (which means bypass agent-level memory).
+_MEMORY_UNSET = object()
+
 # ---------------------------------------------------------------------------
 # Message normalisation helpers
 # ---------------------------------------------------------------------------
@@ -708,7 +712,7 @@ class LazyAgent:
         self,
         messages: str | list,
         *,
-        memory: Memory | None = None,
+        memory: Memory | None = _MEMORY_UNSET,  # type: ignore[assignment]
         system: str | None = None,
         tools: list | None = None,
         native_tools: list[NativeTool | str] | None = None,
@@ -742,13 +746,20 @@ class LazyAgent:
         """
         messages = self._run_input_guard(guard, messages)
 
-        effective_memory = memory if memory is not None else self.memory
+        # Resolve effective memory:
+        #   _MEMORY_UNSET (default) → fall back to agent-level self.memory
+        #   None (explicit)         → no memory for this call (bypass agent-level)
+        #   Memory instance         → use it directly
+        if memory is _MEMORY_UNSET:
+            effective_memory = self.memory
+        else:
+            effective_memory = memory  # type: ignore[assignment]
         if effective_memory is not None:
             self._validate_memory(messages, effective_memory, stream)
             full = effective_memory._build_input(messages)  # type: ignore[arg-type]
             resp = self.chat(
                 full,
-                memory=None,  # already applied — don't recurse with memory again
+                memory=None,  # None = explicit bypass; _MEMORY_UNSET would re-apply agent memory
                 system=system,
                 tools=tools,
                 native_tools=native_tools,
@@ -810,7 +821,7 @@ class LazyAgent:
         self,
         messages: str | list,
         *,
-        memory: Memory | None = None,
+        memory: Memory | None = _MEMORY_UNSET,  # type: ignore[assignment]
         system: str | None = None,
         tools: list | None = None,
         native_tools: list[NativeTool | str] | None = None,
@@ -829,13 +840,16 @@ class LazyAgent:
         """Async version of chat(). Accepts memory=, tool_choice=, guard=."""
         messages = await self._arun_input_guard(guard, messages)
 
-        effective_memory = memory if memory is not None else self.memory
+        if memory is _MEMORY_UNSET:
+            effective_memory = self.memory
+        else:
+            effective_memory = memory  # type: ignore[assignment]
         if effective_memory is not None:
             self._validate_memory(messages, effective_memory, stream)
             full = effective_memory._build_input(messages)  # type: ignore[arg-type]
             resp = await self.achat(
                 full,
-                memory=None,  # already applied — don't recurse with memory again
+                memory=None,  # None = explicit bypass
                 system=system,
                 tools=tools,
                 native_tools=native_tools,
