@@ -520,6 +520,11 @@ class AnthropicProvider(BaseProvider):
                         resp = self._parse_response(response)
                         apply_structured_validation(resp, resp.content, schema)
                 else:
+                    # Pydantic schema + thinking/native_tools/betas — can't use
+                    # messages.parse().  Convert to JSON schema and pass via
+                    # output_config so the API enforces the structure server-side.
+                    json_schema = normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+                    params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
                     if betas:
                         response = self._client.beta.messages.create(**params, **self._beta_kwargs(betas))
                     else:
