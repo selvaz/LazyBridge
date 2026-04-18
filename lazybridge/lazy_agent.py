@@ -786,8 +786,10 @@ class LazyAgent:
             return self._stream_and_track(self._executor.stream(request))
 
         resp = self._executor.execute(request)
-        self._record_response(resp)
+        # Run the output guard BEFORE recording so blocked content does
+        # not leak into Event.MODEL_RESPONSE payloads or exporters.
         self._run_output_guard(guard, resp)
+        self._record_response(resp)
         return resp
 
     @overload
@@ -869,8 +871,9 @@ class LazyAgent:
             return self._astream_and_track(self._executor.astream(request))
 
         resp = await self._executor.aexecute(request)
-        self._record_response(resp)
+        # Output guard runs before _record_response — see sync path above.
         await self._arun_output_guard(guard, resp)
+        self._record_response(resp)
         return resp
 
     # ------------------------------------------------------------------

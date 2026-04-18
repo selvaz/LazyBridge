@@ -162,41 +162,70 @@ class Memory:
     # ------------------------------------------------------------------
 
     def _maybe_recompress(self) -> None:
-        total = len(self._messages)
-        if total <= self._window_size:
-            return
-        older = self._messages[: -self._window_size]
-        if len(older) <= self._compressed_up_to:
-            return
-        if self._strategy == "auto":
-            est = self._estimate_tokens(self._messages)
-            if est <= self._max_context_tokens:
+        """Re-evaluate compression.  Must be called *without* ``_lock`` held.
+
+        Takes a snapshot of ``self._messages`` under the lock, runs the
+        potentially-slow ``_compress`` call unlocked, then re-acquires
+        the lock to publish the result (with a version check so a
+        concurrent writer's newer result is not overwritten).
+        """
+        with self._lock:
+            total = len(self._messages)
+            if total <= self._window_size:
                 return
-        self._compressed = self._compress(older)
-        self._compressed_up_to = len(older)
+            older = list(self._messages[: -self._window_size])
+            if len(older) <= self._compressed_up_to:
+                return
+            if self._strategy == "auto":
+                est = self._estimate_tokens(self._messages)
+                if est <= self._max_context_tokens:
+                    return
+            snapshot_upto = len(older)
+
+        # Slow path — potentially an LLM call. Run unlocked.
+        new_summary = self._compress(older)
+
+        with self._lock:
+            if self._compressed_up_to < snapshot_upto:
+                self._compressed = new_summary
+                self._compressed_up_to = snapshot_upto
 
     # ------------------------------------------------------------------
     # Internal helpers — used by LazyAgent
     # ------------------------------------------------------------------
 
     def _build_input(self, message: str) -> list[dict]:
-        """Build input for provider: [compressed] + [window] + [new message]."""
+        """Build input for provider: [compressed] + [window] + [new message].
+
+        Compression (which may call an LLM) runs *outside* the lock so
+        other threads that share this ``Memory`` aren't blocked on slow
+        I/O.  A version check (``_compressed_up_to``) prevents stomping a
+        fresher result published by another thread.
+        """
         with self._lock:
             if self._strategy == "full":
                 return self._messages + [{"role": "user", "content": message}]
 
             total = len(self._messages)
-
             if total <= self._window_size:
                 return self._messages + [{"role": "user", "content": message}]
 
-            window = self._messages[-self._window_size :]
-            older = self._messages[: -self._window_size]
+            window = list(self._messages[-self._window_size :])
+            older = list(self._messages[: -self._window_size])
+            need_compress = len(older) > self._compressed_up_to
+            snapshot_upto = len(older)
 
-            if len(older) > self._compressed_up_to:
-                self._compressed = self._compress(older)
-                self._compressed_up_to = len(older)
+        if need_compress:
+            # Slow path — potentially an LLM call. Run unlocked.
+            new_summary = self._compress(older)
+            with self._lock:
+                # Only publish if no concurrent caller already did it for
+                # an equal-or-larger slice.
+                if self._compressed_up_to < snapshot_upto:
+                    self._compressed = new_summary
+                    self._compressed_up_to = snapshot_upto
 
+        with self._lock:
             result: list[dict] = []
             if self._compressed:
                 result.append({"role": "system", "content": self._compressed})
@@ -209,5 +238,8 @@ class Memory:
         with self._lock:
             self._messages.append({"role": "user", "content": user_message})
             self._messages.append({"role": "assistant", "content": assistant_content})
-            if self._strategy in ("auto", "rolling"):
-                self._maybe_recompress()
+            strategy = self._strategy
+        # _maybe_recompress manages the lock itself now, so we call it
+        # outside to keep slow compression I/O off the critical path.
+        if strategy in ("auto", "rolling"):
+            self._maybe_recompress()

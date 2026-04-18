@@ -352,10 +352,15 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # Pydantic BaseModel subclass — use its JSON Schema directly.
     # $defs produced by nested models are preserved as-is: Anthropic and
     # OpenAI both support JSON Schema draft 7+ $ref resolution natively.
-    # For providers that require a flat schema, pre-flatten with
-    # model.model_json_schema(mode='serialization') before passing to ToolBridge.
+    #
+    # We use ``mode="validation"`` so the advertised schema matches the
+    # rules Pydantic will apply when the tool result is validated on the
+    # way back (audit M5).  ``mode="serialization"`` can report
+    # computed fields / alias-renamed fields that the validator would
+    # reject, leading to "the LLM generated against this schema but
+    # Pydantic rejected it" surprises.
     if inspect.isclass(annotation) and issubclass(annotation, _BaseModel):
-        schema = annotation.model_json_schema(mode="serialization")
+        schema = annotation.model_json_schema(mode="validation")
         schema.pop("title", None)
         return schema
 

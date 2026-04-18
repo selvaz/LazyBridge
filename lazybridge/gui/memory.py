@@ -88,19 +88,13 @@ class MemoryPanel(Panel):
         if action == "force_compress":
             # Memory._maybe_recompress is the private hook; call through
             # only if it exists (it does today, but be defensive).
+            # Since Wave 3's M2 fix, _maybe_recompress manages the lock
+            # internally (snapshot-under-lock, compress-outside,
+            # publish-under-lock), so callers must NOT hold the lock.
             fn = getattr(self._memory, "_maybe_recompress", None)
             if not callable(fn):
                 raise ValueError("This Memory instance does not support manual recompression.")
-            # Memory owns an internal lock that Memory._record / _build_input
-            # acquire while mutating self._messages. Acquire it here too so a
-            # concurrent agent.chat(memory=mem) in another thread can't
-            # mutate _messages mid-recompression.
-            lock = getattr(self._memory, "_lock", None)
-            if lock is not None:
-                with lock:
-                    fn()
-            else:
-                fn()
+            fn()
             return {"ok": True, "summary": self._memory.summary}
 
         if action == "export_history":

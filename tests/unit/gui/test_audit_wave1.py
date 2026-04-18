@@ -40,43 +40,55 @@ def test_startup_log_does_not_contain_token(caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_force_compress_holds_memory_lock():
-    """MemoryPanel.force_compress must hold Memory._lock while running.
-
-    We instrument the memory's `_maybe_recompress` to sleep briefly while
-    holding `self._lock`, then try to acquire the lock from another thread
-    and verify it's contested — i.e. the panel is holding the lock.
+def test_force_compress_does_not_deadlock_with_internal_lock():
+    """Wave 3 M2 made Memory._maybe_recompress manage its own lock
+    (snapshot-under-lock, compress-outside, publish-under-lock).  The
+    panel must NOT acquire the lock externally — doing so would deadlock.
+    This test confirms the panel call completes in bounded time.
     """
     mem = Memory(strategy="rolling", max_context_tokens=1, window_turns=1)
     for _ in range(6):
         mem._messages.append({"role": "user", "content": "hi " * 100})
         mem._messages.append({"role": "assistant", "content": "ok " * 100})
 
-    original = mem._maybe_recompress
-    entered = threading.Event()
-
-    def _slow():
-        entered.set()
-        time.sleep(0.05)
-        original()
-
-    mem._maybe_recompress = _slow  # type: ignore[method-assign]
     panel = MemoryPanel(mem)
-
-    acquired_while_running = {"value": True}  # assume True; flip to False if we fail
     t = threading.Thread(target=panel.handle_action, args=("force_compress", {}))
     t.start()
-    assert entered.wait(timeout=1.0)
-    # Try to acquire the memory lock now — must fail because the panel holds it.
-    acquired = mem._lock.acquire(blocking=False)
-    acquired_while_running["value"] = acquired
-    if acquired:
-        mem._lock.release()
     t.join(timeout=2.0)
-    assert not t.is_alive()
-    assert acquired_while_running["value"] is False, (
-        "MemoryPanel.force_compress did not hold memory._lock during recompression"
-    )
+    assert not t.is_alive(), "force_compress deadlocked (held lock and called back in)"
+
+
+def test_force_compress_is_safe_under_concurrent_mutation():
+    """Two threads — one calling panel.force_compress, one mutating the
+    memory via _record — must not corrupt state."""
+    mem = Memory(strategy="rolling", max_context_tokens=1, window_turns=1)
+    for _ in range(6):
+        mem._messages.append({"role": "user", "content": "u"})
+        mem._messages.append({"role": "assistant", "content": "a"})
+
+    panel = MemoryPanel(mem)
+    done = threading.Event()
+
+    def _compressor():
+        for _ in range(5):
+            panel.handle_action("force_compress", {})
+            time.sleep(0.002)
+        done.set()
+
+    def _writer():
+        for i in range(20):
+            mem._record(f"user {i}", f"assistant {i}")
+            time.sleep(0.001)
+
+    tc = threading.Thread(target=_compressor)
+    tw = threading.Thread(target=_writer)
+    tc.start(); tw.start()
+    tc.join(timeout=5.0); tw.join(timeout=5.0)
+    assert done.is_set()
+    # Invariants: message count is strictly non-decreasing and
+    # summary is either None or a string.
+    assert len(mem._messages) >= 12
+    assert mem.summary is None or isinstance(mem.summary, str)
 
 
 def test_force_compress_still_produces_summary():
