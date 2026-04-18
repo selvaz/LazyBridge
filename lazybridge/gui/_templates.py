@@ -281,6 +281,46 @@ PAGE_TEMPLATE = """<!doctype html>
       }}
     }});
 
+    // Export-as-Python button — puts the current agent state into a snippet
+    // the user can paste into code.  Addresses the "GUI edits die with the
+    // process" persistence gap.
+    const exportSection = makeSection("Export as Python");
+    exportSection.innerHTML += `
+      <div class="row">
+        <button id="agent-export">Generate snippet</button>
+        <button id="agent-copy" class="secondary" disabled>Copy</button>
+        <span class="status" id="agent-export-status"></span>
+      </div>
+      <pre id="agent-snippet">—</pre>
+    `;
+    root.appendChild(exportSection);
+
+    exportSection.querySelector("#agent-export").addEventListener("click", async () => {{
+      const st = exportSection.querySelector("#agent-export-status");
+      const out = exportSection.querySelector("#agent-snippet");
+      const copyBtn = exportSection.querySelector("#agent-copy");
+      st.textContent = "Generating…"; st.className = "status";
+      try {{
+        const res = await action(state.id, "export_python", {{}});
+        out.textContent = res.snippet;
+        copyBtn.disabled = false;
+        st.textContent = "Snippet ready"; st.className = "status ok";
+      }} catch (e) {{
+        out.textContent = e.message;
+        st.textContent = "Failed"; st.className = "status bad";
+      }}
+    }});
+    exportSection.querySelector("#agent-copy").addEventListener("click", async () => {{
+      const st = exportSection.querySelector("#agent-export-status");
+      const text = exportSection.querySelector("#agent-snippet").textContent;
+      try {{
+        await navigator.clipboard.writeText(text);
+        st.textContent = "Copied to clipboard ✓"; st.className = "status ok";
+      }} catch (e) {{
+        st.textContent = "Copy failed: " + e.message; st.className = "status bad";
+      }}
+    }});
+
     inspect.querySelector("#agent-save-model").addEventListener("click", async () => {{
       const val = inspect.querySelector("#agent-model").value.trim();
       const st = inspect.querySelector("#agent-model-status");

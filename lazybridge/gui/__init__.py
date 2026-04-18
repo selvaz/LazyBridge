@@ -33,9 +33,11 @@ Lower-level primitives for building your own panels:
 - :func:`lazybridge.gui.get_server` — singleton accessor.
 """
 
+from lazybridge.gui._dispatch import open_gui
 from lazybridge.gui._global import GuiServer, close_server, get_server, is_running
 from lazybridge.gui._install import install_gui_methods, uninstall_gui_methods
 from lazybridge.gui._panel import Panel
+from lazybridge.gui.types import GuiEnabled
 from lazybridge.gui.agent import AgentPanel
 from lazybridge.gui.human_panel import HumanInputPanel, panel_input_fn
 from lazybridge.gui.pipeline import PipelinePanel
@@ -49,6 +51,8 @@ from lazybridge.gui.tool import ToolPanel
 install_gui_methods()
 
 __all__ = [
+    "open_gui",
+    "GuiEnabled",
     "GuiServer",
     "Panel",
     "AgentPanel",

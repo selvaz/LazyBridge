@@ -1,4 +1,10 @@
-"""Tests for lazybridge.gui.human.WebInputServer and web_input_fn."""
+"""Tests for lazybridge.gui.human.WebInputServer and web_input_fn.
+
+The module is deprecated in favour of :func:`lazybridge.gui.panel_input_fn`.
+These tests exercise the legacy implementation itself, so we suppress the
+deprecation warning at import time (its own test lives in
+``test_deprecation.py``).
+"""
 
 from __future__ import annotations
 
@@ -8,10 +14,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import warnings
 
 import pytest
 
-from lazybridge.gui.human import WebInputServer, web_input_fn
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from lazybridge.gui.human import WebInputServer, web_input_fn
 
 
 @pytest.fixture

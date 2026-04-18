@@ -204,7 +204,55 @@ class AgentPanel(Panel):
                 raise ValueError(f"unsupported mode {mode!r} — choose chat | loop | text")
             return self._run_test(mode, message)
 
+        if action == "export_python":
+            return {"snippet": self._export_python()}
+
         return super().handle_action(action, args)
+
+    # ------------------------------------------------------------------
+
+    def _export_python(self) -> str:
+        """Return a minimal ``LazyAgent(...)`` snippet reconstructing this agent.
+
+        Captures the fields a user is likely to have edited in the GUI:
+        ``name``, ``model``, ``system``, and enabled ``native_tools``.
+        ``tools=`` is rendered as a placeholder list of tool names because
+        serialising the callables themselves is out of scope; the user
+        stitches the real callables back on the way out.
+        """
+        agent = self._agent
+        provider = getattr(agent, "_provider_name", None) or "anthropic"
+        model = getattr(agent, "_model_name", None) or ""
+        name = getattr(agent, "name", None) or "agent"
+        system = getattr(agent, "system", None) or ""
+        enabled_native = self._enabled_native_tool_values()
+        tool_names = [getattr(t, "name", None) for t in (getattr(agent, "tools", None) or []) if getattr(t, "name", None)]
+
+        lines = [
+            "from lazybridge import LazyAgent",
+        ]
+        if enabled_native:
+            lines.append("from lazybridge.core.types import NativeTool")
+        lines.append("")
+        lines.append(f"agent = LazyAgent(")
+        lines.append(f"    {provider!r},")
+        lines.append(f"    name={name!r},")
+        if model:
+            lines.append(f"    model={model!r},")
+        if system:
+            literal = repr(system)
+            lines.append(f"    system={literal},")
+        if enabled_native:
+            members = ", ".join(f"NativeTool({v!r})" for v in enabled_native)
+            lines.append(f"    native_tools=[{members}],")
+        if tool_names:
+            lines.append(
+                "    # tools=[... rebind your LazyTool instances by name: "
+                + ", ".join(repr(n) for n in tool_names)
+                + "],"
+            )
+        lines.append(")")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
 
