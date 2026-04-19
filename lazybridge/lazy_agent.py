@@ -219,6 +219,8 @@ class LazyAgent:
         max_retries: int = 0,
         api_key: str | None = None,
         verbose: bool = False,
+        verify: Any | None = None,      # Option C: judge active on every call
+        max_verify: int = 3,
         **kwargs: Any,
     ) -> None:
         self._executor = Executor(
@@ -238,6 +240,8 @@ class LazyAgent:
         self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         self.session = session
         self.memory: Memory | None = memory
+        self.verify: Any | None = verify          # Option C: agent-level judge
+        self.max_verify: int = max_verify
 
         # Stores the last text output; read by LazyContext.from_agent() when
         # another agent wants to use this agent's result as context.
@@ -1347,6 +1351,8 @@ class LazyAgent:
         native_tools: list[NativeTool | str] | None = None,
         system_prompt: str | None = None,
         tool_choice: str | None = None,
+        verify: Any | None = None,      # Option B: judge attached to this tool exposure
+        max_verify: int = 3,
         strict: bool = False,
     ) -> LazyTool:
         """Wrap this agent as a LazyTool for use in another agent's loop.
@@ -1356,6 +1362,9 @@ class LazyAgent:
 
         ``tool_choice`` controls tool selection in the inner loop:
         ``"required"`` forces tool use, ``"<name>"`` forces a specific tool.
+        ``verify`` / ``max_verify`` (Option B): attach a judge to *this tool exposure*.
+        The judge runs after every invocation, regardless of context.
+        Takes precedence over the agent-level ``verify`` (Option C).
         """
         return LazyTool.from_agent(
             self,
@@ -1366,6 +1375,8 @@ class LazyAgent:
             native_tools=native_tools,
             system_prompt=system_prompt,
             tool_choice=tool_choice,
+            verify=verify,
+            max_verify=max_verify,
             strict=strict,
         )
 

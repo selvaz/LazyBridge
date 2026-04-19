@@ -91,6 +91,8 @@ class _DelegateConfig:
     native_tools: list | None = None
     system_prompt: str | None = None
     tool_choice: str | None = None
+    verify: Any | None = None        # Verifier attached at as_tool() time — option B
+    max_verify: int = 3
 
 
 @dataclass
@@ -206,6 +208,8 @@ class LazyTool:
         native_tools: list | None = None,
         system_prompt: str | None = None,
         tool_choice: str | None = None,
+        verify: Any | None = None,
+        max_verify: int = 3,
         strict: bool = False,
     ) -> LazyTool:
         """Wrap a LazyAgent as a tool with schema ``{"task": str}``.
@@ -223,6 +227,8 @@ class LazyTool:
             native_tools=native_tools,
             system_prompt=system_prompt,
             tool_choice=tool_choice,
+            verify=verify,
+            max_verify=max_verify,
         )
         # Schema is always {"task": str} for delegated agents
         fixed_def = ToolDefinition(
@@ -302,6 +308,9 @@ class LazyTool:
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
         tc = self._delegate.tool_choice
+        # Option B: verify/max_verify attached at as_tool() time
+        _verify = self._delegate.verify or getattr(agent, "verify", None)
+        _max_verify = self._delegate.max_verify if self._delegate.verify else getattr(agent, "max_verify", 3)
         kw: dict[str, Any] = {}
         if sys:
             kw["system"] = sys
@@ -316,10 +325,12 @@ class LazyTool:
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
                     force_final_after_tools=True,
+                    verify=_verify,
+                    max_verify=_max_verify,
                     **kw,
                 )
             else:
-                resp = agent.chat(task, output_schema=self._delegate.output_schema, **kw)
+                resp = agent.chat(task, output_schema=self._delegate.output_schema, verify=_verify, max_verify=_max_verify, **kw)
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -332,9 +343,9 @@ class LazyTool:
             # force_final_after_tools: delegate agents act as tools — they
             # should gather data in one tool round then return a final answer,
             # not keep calling sub-tools indefinitely.
-            resp = agent.loop(task, tools=tools, native_tools=native, force_final_after_tools=True, **kw)
+            resp = agent.loop(task, tools=tools, native_tools=native, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
         else:
-            resp = agent.chat(task, **kw)
+            resp = agent.chat(task, verify=_verify, max_verify=_max_verify, **kw)
         return resp.content
 
     # ------------------------------------------------------------------
@@ -362,6 +373,9 @@ class LazyTool:
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
         tc = self._delegate.tool_choice
+        # Option B: verify/max_verify attached at as_tool() time
+        _verify = self._delegate.verify or getattr(agent, "verify", None)
+        _max_verify = self._delegate.max_verify if self._delegate.verify else getattr(agent, "max_verify", 3)
         kw: dict[str, Any] = {}
         if sys:
             kw["system"] = sys
@@ -376,10 +390,12 @@ class LazyTool:
                     native_tools=native,
                     output_schema=self._delegate.output_schema,
                     force_final_after_tools=True,
+                    verify=_verify,
+                    max_verify=_max_verify,
                     **kw,
                 )
             else:
-                resp = await agent.achat(task, output_schema=self._delegate.output_schema, **kw)
+                resp = await agent.achat(task, output_schema=self._delegate.output_schema, verify=_verify, max_verify=_max_verify, **kw)
             if resp.validated is False:
                 raise ValueError(
                     f"Delegate agent '{agent.name}' failed to produce valid structured "
@@ -389,9 +405,9 @@ class LazyTool:
             return resp.parsed if resp.parsed is not None else resp.content
 
         if tools or native:
-            resp = await agent.aloop(task, tools=tools, native_tools=native, force_final_after_tools=True, **kw)
+            resp = await agent.aloop(task, tools=tools, native_tools=native, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
         else:
-            resp = await agent.achat(task, **kw)
+            resp = await agent.achat(task, verify=_verify, max_verify=_max_verify, **kw)
         return resp.content
 
     # ------------------------------------------------------------------
