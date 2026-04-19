@@ -304,7 +304,10 @@ class LazyTool:
         assert self._delegate is not None
         task = arguments.get("task", "")
         agent = self._delegate.agent
-        tools = getattr(agent, "tools", None) or []
+        # Used only for the loop-vs-chat branch decision — NOT passed to the call.
+        # Passing tools= explicitly would cause _build_tool_set to merge them with
+        # agent.tools again, producing duplicate tool names.
+        _has_tools = bool(getattr(agent, "tools", None))
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
         tc = self._delegate.tool_choice
@@ -318,11 +321,10 @@ class LazyTool:
             kw["tool_choice"] = tc
 
         if self._delegate.output_schema:
-            if tools or native:
+            if _has_tools or native:
                 resp = agent.loop(
                     task,
-                    tools=tools,
-                    native_tools=native,
+                    native_tools=native or None,
                     output_schema=self._delegate.output_schema,
                     force_final_after_tools=True,
                     verify=_verify,
@@ -339,11 +341,11 @@ class LazyTool:
                 )
             return resp.parsed if resp.parsed is not None else resp.content
 
-        if tools or native:
+        if _has_tools or native:
             # force_final_after_tools: delegate agents act as tools — they
             # should gather data in one tool round then return a final answer,
             # not keep calling sub-tools indefinitely.
-            resp = agent.loop(task, tools=tools, native_tools=native, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
+            resp = agent.loop(task, native_tools=native or None, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
         else:
             resp = agent.chat(task, verify=_verify, max_verify=_max_verify, **kw)
         return resp.content
@@ -369,7 +371,10 @@ class LazyTool:
         assert self._delegate is not None
         task = arguments.get("task", "")
         agent = self._delegate.agent
-        tools = getattr(agent, "tools", None) or []
+        # Used only for the loop-vs-chat branch decision — NOT passed to the call.
+        # Passing tools= explicitly would cause _build_tool_set to merge them with
+        # agent.tools again, producing duplicate tool names.
+        _has_tools = bool(getattr(agent, "tools", None))
         native = self._delegate.native_tools or []
         sys = self._delegate.system_prompt
         tc = self._delegate.tool_choice
@@ -383,11 +388,10 @@ class LazyTool:
             kw["tool_choice"] = tc
 
         if self._delegate.output_schema:
-            if tools or native:
+            if _has_tools or native:
                 resp = await agent.aloop(
                     task,
-                    tools=tools,
-                    native_tools=native,
+                    native_tools=native or None,
                     output_schema=self._delegate.output_schema,
                     force_final_after_tools=True,
                     verify=_verify,
@@ -404,8 +408,8 @@ class LazyTool:
                 )
             return resp.parsed if resp.parsed is not None else resp.content
 
-        if tools or native:
-            resp = await agent.aloop(task, tools=tools, native_tools=native, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
+        if _has_tools or native:
+            resp = await agent.aloop(task, native_tools=native or None, force_final_after_tools=True, verify=_verify, max_verify=_max_verify, **kw)
         else:
             resp = await agent.achat(task, verify=_verify, max_verify=_max_verify, **kw)
         return resp.content
