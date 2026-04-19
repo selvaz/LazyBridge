@@ -144,6 +144,86 @@ def _clear_checkpoint(store: Any, ckpt_key: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def build_aparallel_func(
+    parts: list,
+    native_tools: list,
+    combiner: str,
+    concurrency_limit: int | None = None,
+    step_timeout: float | None = None,
+) -> Callable[[str], Any]:
+    """Return an async closure that runs parts concurrently when awaited.
+
+    Mirrors build_parallel_func but exposes the coroutine directly so callers
+    already inside an event loop (e.g. LazyTool.arun, nested pipelines) can
+    await without re-entering run_async() — which would block the event loop
+    via ThreadPoolExecutor and serialize supposedly-parallel participants.
+
+    Dispatch is character-for-character identical to LazySession.as_tool(mode='parallel'):
+      output_schema set       → ajson
+      has_tools/native_tools  → aloop
+      bare agent              → achat
+      LazyTool                → arun({"task": task})
+    """
+
+    async def _arun_parallel(task: str) -> str:
+        coros = []
+        for p in parts:
+            if hasattr(p, "achat"):  # LazyAgent
+                kw = {"native_tools": native_tools} if native_tools else {}
+                schema = getattr(p, "output_schema", None)
+                has_tools = bool(
+                    getattr(p, "tools", None) or getattr(p, "native_tools", None) or kw.get("native_tools")
+                )
+                if schema is not None:
+                    coros.append(p.ajson(task, schema, **kw))
+                elif has_tools:
+                    coros.append(p.aloop(task, **kw))
+                else:
+                    coros.append(p.achat(task, **kw))
+            else:  # LazyTool
+                coros.append(p.arun({"task": task}))
+
+        if step_timeout is not None:
+            coros = [asyncio.wait_for(c, timeout=step_timeout) for c in coros]
+
+        if concurrency_limit is not None:
+            sem = asyncio.Semaphore(concurrency_limit)
+
+            async def _guarded(c: Any) -> Any:
+                async with sem:
+                    return await c
+
+            coros = [_guarded(c) for c in coros]
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        if not results:
+            return ""
+
+        failures = [(getattr(p, "name", "?"), r) for p, r in zip(parts, results) if isinstance(r, BaseException)]
+        if failures:
+            _logger.warning(
+                "LazyTool.parallel: %d/%d participant(s) failed: %s",
+                len(failures),
+                len(results),
+                ", ".join(f"{name}={type(r).__name__}" for name, r in failures),
+            )
+
+        def _to_text(r: Any) -> str:
+            if isinstance(r, BaseException):
+                return f"[ERROR: {type(r).__name__}: {r}]"
+            if hasattr(r, "model_dump_json"):
+                return r.model_dump_json(indent=2)
+            if hasattr(r, "content"):
+                return r.content
+            return str(r)
+
+        if combiner == "last":
+            return _to_text(results[-1])
+        return "\n\n".join(f"[{getattr(p, 'name', '?')}]\n{_to_text(r)}" for p, r in zip(parts, results))
+
+    return _arun_parallel
+
+
 def build_parallel_func(
     parts: list,
     native_tools: list,
@@ -151,90 +231,20 @@ def build_parallel_func(
     concurrency_limit: int | None = None,
     step_timeout: float | None = None,
 ) -> Callable[[str], str]:
-    """Return a closure that runs parts concurrently when called with (task).
+    """Return a sync closure that runs parts concurrently when called with (task).
 
-    Dispatch is character-for-character identical to LazySession.as_tool(mode='parallel'):
-      output_schema set       → ajson
-      has_tools/native_tools  → aloop
-      bare agent              → achat
-      LazyTool                → arun({"task": task})
-
-    Parameters
-    ----------
-    concurrency_limit:
-        Maximum number of participants that run simultaneously.
-        None (default) means no limit — all run at once.
-        Use when API rate limits or resource constraints apply.
-    step_timeout:
-        Per-participant timeout in seconds.  If a participant exceeds this,
-        its result becomes ``asyncio.TimeoutError`` (rendered as
-        ``"[ERROR: TimeoutError: ...]"`` in concat mode).
-        None (default) means no timeout.
+    Thin sync wrapper around ``build_aparallel_func`` preserved for callers that
+    need a synchronous entry point (e.g. ``LazyTool.run()`` on a pipeline tool).
+    Async callers should prefer ``build_aparallel_func`` to avoid the
+    run_async → ThreadPoolExecutor round-trip.
     """
 
     def _run_parallel(task: str) -> str:
         from lazybridge.lazy_run import run_async
 
-        async def _gather() -> str:
-            coros = []
-            for p in parts:
-                if hasattr(p, "achat"):  # LazyAgent
-                    kw = {"native_tools": native_tools} if native_tools else {}
-                    schema = getattr(p, "output_schema", None)
-                    has_tools = bool(
-                        getattr(p, "tools", None) or getattr(p, "native_tools", None) or kw.get("native_tools")
-                    )
-                    if schema is not None:
-                        coros.append(p.ajson(task, schema, **kw))
-                    elif has_tools:
-                        coros.append(p.aloop(task, **kw))
-                    else:
-                        coros.append(p.achat(task, **kw))
-                else:  # LazyTool
-                    coros.append(p.arun({"task": task}))
-
-            if step_timeout is not None:
-                coros = [asyncio.wait_for(c, timeout=step_timeout) for c in coros]
-
-            if concurrency_limit is not None:
-                sem = asyncio.Semaphore(concurrency_limit)
-
-                async def _guarded(c: Any) -> Any:
-                    async with sem:
-                        return await c
-
-                coros = [_guarded(c) for c in coros]
-
-            results = await asyncio.gather(*coros, return_exceptions=True)
-            if not results:
-                return ""
-
-            # Surface timeouts / failures programmatically via the logger so
-            # operators can distinguish "participant raised" from "participant
-            # returned a string containing the word 'error'".  Audit M4.
-            failures = [(getattr(p, "name", "?"), r) for p, r in zip(parts, results) if isinstance(r, BaseException)]
-            if failures:
-                _logger.warning(
-                    "LazyTool.parallel: %d/%d participant(s) failed: %s",
-                    len(failures),
-                    len(results),
-                    ", ".join(f"{name}={type(r).__name__}" for name, r in failures),
-                )
-
-            def _to_text(r: Any) -> str:
-                if isinstance(r, BaseException):
-                    return f"[ERROR: {type(r).__name__}: {r}]"
-                if hasattr(r, "model_dump_json"):
-                    return r.model_dump_json(indent=2)
-                if hasattr(r, "content"):
-                    return r.content
-                return str(r)
-
-            if combiner == "last":
-                return _to_text(results[-1])
-            return "\n\n".join(f"[{getattr(p, 'name', '?')}]\n{_to_text(r)}" for p, r in zip(parts, results))
-
-        return run_async(_gather())
+        return run_async(
+            build_aparallel_func(parts, native_tools, combiner, concurrency_limit, step_timeout)(task)
+        )
 
     return _run_parallel
 

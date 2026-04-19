@@ -142,6 +142,11 @@ class LazyTool:
     _compiled: ToolDefinition | None = field(default=None, repr=False)
     _is_pipeline_tool: bool = field(default=False, repr=False, compare=False)
     _pipeline: _PipelineConfig | None = field(default=None, repr=False, compare=False)
+    # Optional native-async execution path. When set, ``arun()`` awaits this
+    # instead of calling the sync ``func`` (which would block the event loop
+    # via run_async → ThreadPoolExecutor). Set by pipeline factories so that
+    # parallel/chain participants can run truly concurrently under gather().
+    _afunc: Callable[..., Any] | None = field(default=None, repr=False, compare=False)
     # Guards the compute-and-cache block in definition() so concurrent
     # first-calls don't both run the schema builder (audit M3).
     _compile_lock: Any = field(
@@ -357,6 +362,13 @@ class LazyTool:
     async def arun(self, arguments: dict[str, Any], *, parent: Any = None) -> Any:
         if self._delegate is not None:
             return await self._arun_delegate(arguments, parent=parent)
+
+        # Pipeline tools register a native-async implementation here so gather()
+        # over parallel participants actually overlaps; falling back to the sync
+        # ``func`` would re-enter run_async and block the event loop.
+        if self._afunc is not None:
+            validated = _validate_and_coerce_arguments(self._afunc, arguments)
+            return await self._afunc(**validated)
 
         if self.func is None:
             raise RuntimeError(f"LazyTool '{self.name}' has no function to execute.")
@@ -1048,6 +1060,7 @@ class LazyTool:
         from lazybridge.pipeline_builders import (
             _resolve_participant,
             _validate_session_compatibility,
+            build_aparallel_func,
             build_parallel_func,
         )
 
@@ -1062,8 +1075,13 @@ class LazyTool:
             inv = [_resolve_participant(p) for p in participants]
             return build_parallel_func(inv, _native, combiner, concurrency_limit, step_timeout)(task)
 
+        async def _arun(task: str) -> str:
+            inv = [_resolve_participant(p) for p in participants]
+            return await build_aparallel_func(inv, _native, combiner, concurrency_limit, step_timeout)(task)
+
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
+        tool._afunc = _arun
         tool._pipeline = _PipelineConfig(
             mode="parallel",
             participants=participants,
@@ -1169,8 +1187,20 @@ class LazyTool:
                 )(task)
             )
 
+        async def _arun(task: str) -> Any:
+            inv = [_resolve_participant(p) for p in participants]
+            return await build_achain_func(
+                inv,
+                _native,
+                step_timeout,
+                store=store,
+                chain_id=_cid,
+                run_id=run_id,
+            )(task)
+
         tool = cls.from_function(_run, name=name, description=description, guidance=guidance)
         tool._is_pipeline_tool = True
+        tool._afunc = _arun
         tool._pipeline = _PipelineConfig(
             mode="chain",
             participants=participants,
