@@ -59,13 +59,18 @@ def on_event(e: dict) -> None:
         print(f"{c}{D}{out[:400]}{'…' if len(out) > 400 else ''}{R}")
 
 
-# ── session & stores ──────────────────────────────────────────────────────────
+# ── session & store ───────────────────────────────────────────────────────────
 SESS      = LazySession(db="framework_monitor.db", tracking="verbose", console=True,
                         exporters=[CallbackExporter(on_event)])
 artifacts = LazyStore(db="framework_monitor_artifacts.db")
 
 # ── framework root ────────────────────────────────────────────────────────────
 FRAMEWORK_ROOT = Path(__file__).parent / "lazybridge"
+
+# ── lazy contexts — read from artifacts after each phase writes them ──────────
+# Evaluated at execution time, so Phase 2 agents see Phase 1 results, etc.
+research_ctx = LazyContext.from_function(lambda: artifacts.read("research") or "")
+analysis_ctx = LazyContext.from_function(lambda: artifacts.read("analysis") or "")
 
 # ── source reading tools ───────────────────────────────────────────────────────
 def _read_source(path: str, start: int = 0, end: int = 0) -> str:
@@ -158,22 +163,30 @@ KEY INVARIANTS:
   - Memory shared between chain clone and original (shallow copy)
 """)
 
-# ── shared research memory ─────────────────────────────────────────────────────
-research_mem = Memory(strategy="full")
-research_ctx = LazyContext.from_function(
-    lambda: "\n\n---\n\n".join(
-        m["content"] for m in research_mem.history if m["role"] == "assistant"
-    )
-)
+# ── module → files mapping ────────────────────────────────────────────────────
+MODULES = {
+    "providers":   ["core/providers/anthropic.py", "core/providers/openai.py",
+                    "core/providers/google.py",    "core/providers/deepseek.py",
+                    "core/providers/base.py"],
+    "agent_core":  ["lazy_agent.py", "memory.py", "lazy_context.py"],
+    "tools_chain": ["lazy_tool.py", "pipeline_builders.py"],
+    "types_infra": ["core/types.py", "core/tool_schema.py", "lazy_store.py",
+                    "lazy_session.py", "exporters.py"],
+}
+
+# ── search configs: 3 providers × different focus angles ─────────────────────
+SEARCH_CONFIGS = [
+    ("anthropic", "official changelog, release notes, new models, API changes"),
+    ("openai",    "migration guides, deprecated features, new parameters"),
+    ("google",    "community reports, third-party coverage, SDK updates"),
+]
+
 
 # ── Phase 1: SDK searcher factory ─────────────────────────────────────────────
-_search_seen: set[str] = set()
-
-
 def _make_searcher(search_provider: str, sdk: str, focus: str) -> LazyAgent:
     return LazyAgent(
         search_provider, model="cheap", name="Searcher", session=SESS,
-        memory=research_mem,
+        memory=Memory(),
         native_tools=[NativeTool.WEB_SEARCH],
         system=(
             f"You are a changelog monitor for the {sdk.capitalize()} SDK. "
@@ -185,32 +198,9 @@ def _make_searcher(search_provider: str, sdk: str, focus: str) -> LazyAgent:
     )
 
 
-def _make_search_tool(agent: LazyAgent, store_key: str) -> LazyTool:
-    """Sync search tool — agent.loop() records to research_mem automatically."""
-    def search(task: str) -> str:
-        dk = f"{store_key}:{task.strip().lower()[:60]}"
-        if dk in _search_seen:
-            return "[already searched]"
-        _search_seen.add(dk)
-        return agent.loop(task, max_steps=SEARCH_MAX_STEPS).content
-
-    return LazyTool.from_function(
-        search,
-        name=store_key.replace("/", "_"),
-        description=f"Search {store_key}",
-    )
-
-
-# ── Phase 2: code reader factory ──────────────────────────────────────────────
-analysis_mem = Memory(strategy="full")
-analysis_ctx = LazyContext.from_function(
-    lambda: "\n\n---\n\n".join(
-        m["content"] for m in analysis_mem.history if m["role"] == "assistant"
-    )
-)
-
-
+# ── Phase 2: code reader factory ─────────────────────────────────────────────
 def _make_reader(module: str, files: list[str]) -> LazyAgent:
+    # research_ctx is lazy — reads from artifacts when the agent runs (after Phase 1)
     return LazyAgent(
         "anthropic", model="medium", name="Reader", session=SESS,
         memory=Memory(),
@@ -237,38 +227,12 @@ def _make_reader(module: str, files: list[str]) -> LazyAgent:
     )
 
 
-def _make_reader_tool(reader: LazyAgent, module: str, months: int) -> LazyTool:
-    """Sync analysis tool — writes result to analysis_mem explicitly."""
-    def analyze(task: str) -> str:
-        result = reader.loop(
-            f"Analyze how recent SDK changes (last {months} months) impact "
-            f"the {module} module. Read the actual source files first, "
-            f"then identify specific patches needed.",
-            max_steps=READER_MAX_STEPS,
-        ).content
-        analysis_mem._record(f"[{module}]", result)
-        artifacts.write(f"analysis_{module}", result)
-        return result
-
-    return LazyTool.from_function(analyze, name=module, description=f"Analyze {module}")
-
-
-# Module → files mapping
-MODULES = {
-    "providers":   ["core/providers/anthropic.py", "core/providers/openai.py",
-                    "core/providers/google.py",    "core/providers/deepseek.py",
-                    "core/providers/base.py"],
-    "agent_core":  ["lazy_agent.py", "memory.py", "lazy_context.py"],
-    "tools_chain": ["lazy_tool.py", "pipeline_builders.py"],
-    "types_infra": ["core/types.py", "core/tool_schema.py", "lazy_store.py",
-                    "lazy_session.py", "exporters.py"],
-}
-
 # ── Phase 3: finding verifier ─────────────────────────────────────────────────
 verifier = LazyAgent(
     "openai", model="medium", name="Verifier", session=SESS,
     memory=Memory(),
     native_tools=[NativeTool.WEB_SEARCH],
+    # research_ctx is lazy — reads from artifacts at execution time
     context=NAVIGATOR + research_ctx,
     system=(
         "You verify code reader findings against live web sources.\n"
@@ -286,6 +250,7 @@ verifier = LazyAgent(
 judge = LazyAgent(
     "anthropic", model="cheap", name="Judge", session=SESS,
     tools=[read_tool],
+    # research_ctx is lazy — reads from artifacts at execution time
     context=NAVIGATOR + research_ctx,
     system=(
         "Verify the action plan:\n"
@@ -298,6 +263,7 @@ judge = LazyAgent(
 
 synthesizer = LazyAgent(
     "anthropic", model="medium", name="Synthesizer", session=SESS,
+    # both contexts are lazy — read from artifacts at execution time (after phases 1+2)
     context=NAVIGATOR + research_ctx + analysis_ctx,
     system=(
         "Produce a prioritized LazyBridge update report.\n\n"
@@ -317,7 +283,6 @@ synthesizer = LazyAgent(
     ),
 )
 
-# synthesizer.as_tool() already wires judge as verifier — no chain needed
 synthesis_tool = synthesizer.as_tool(
     name="monitor_pipeline",
     description="Synthesis + judge verification",
@@ -354,31 +319,29 @@ def run(providers: list[str] | None = None, months: int = 2) -> str:
     print(f"\n\033[96m{B}🔍 LAZYBRIDGE MONITOR  ·  "
           f"providers: {', '.join(providers)}  ·  last {months} month(s){R}\n")
 
-    # Reset all shared state
-    research_mem.clear()
-    analysis_mem.clear()
     artifacts.clear()
-    _search_seen.clear()
     verifier.memory.clear()
 
-    # ── Phase 1: 3 parallel searchers per provider ────────────────────────────
+    # ── Phase 1: parallel SDK search ─────────────────────────────────────────
+    # Each searcher is exposed via .as_tool() so _arun_delegate calls aloop()
+    # with force_final_after_tools=True.  native_tools= must be passed explicitly
+    # so the delegate's branch logic (not agent.native_tools) triggers aloop.
     print(f"\033[90m{B}── PHASE 1: SDK SEARCH ──────────────────────────────────{R}")
 
-    SEARCH_CONFIGS = [
-        ("anthropic", "official changelog, release notes, new models, API changes"),
-        ("openai",    "migration guides, deprecated features, new parameters"),
-        ("google",    "community reports, third-party coverage, SDK updates"),
-    ]
-
-    search_tools = [
-        _make_search_tool(_make_searcher(search_provider, sdk, focus),
-                          f"{sdk}/{search_provider}")
+    searcher_tools = [
+        _make_searcher(search_provider, sdk, focus).as_tool(
+            name=f"{sdk}_{search_provider}",
+            description=f"Search {sdk} SDK via {search_provider}: {focus}",
+            native_tools=[NativeTool.WEB_SEARCH],
+        )
         for sdk in providers
         for search_provider, focus in SEARCH_CONFIGS
     ]
 
-    LazyTool.parallel(
-        *search_tools,
+    # build_aparallel_func → asyncio.gather → each tool.arun() → _arun_delegate
+    # → agent.aloop(task, native_tools=[WEB_SEARCH], force_final_after_tools=True)
+    research = LazyTool.parallel(
+        *searcher_tools,
         name="sdk_search",
         description="Parallel SDK search",
     ).run({"task": (
@@ -387,23 +350,34 @@ def run(providers: list[str] | None = None, months: int = 2) -> str:
         f"new tool types, parameter changes. Be specific with names and versions."
     )})
 
-    artifacts.write("research", research_ctx.build())
+    artifacts.write("research", research)
+    # research_ctx now returns this string to all subsequent agents
 
-    # ── Phase 2: parallel code readers per module ─────────────────────────────
+    # ── Phase 2: parallel code analysis ──────────────────────────────────────
+    # Readers use as_tool(): _has_tools=True (agent.tools=[read_tool,list_tool])
+    # → _arun_delegate calls aloop(task, force_final_after_tools=True).
+    # research_ctx in each reader's context is lazy — reads from artifacts now.
     print(f"\n\033[93m{B}── PHASE 2: CODE ANALYSIS ───────────────────────────────{R}")
 
     reader_tools = [
-        _make_reader_tool(_make_reader(module, files), module, months)
+        _make_reader(module, files).as_tool(
+            name=module,
+            description=f"Analyze {module} module for SDK-driven changes",
+        )
         for module, files in MODULES.items()
     ]
 
-    LazyTool.parallel(
+    analysis = LazyTool.parallel(
         *reader_tools,
         name="code_analysis",
         description="Parallel module analysis",
-    ).run({"task": "analyze"})
+    ).run({"task": (
+        f"Analyze how recent SDK changes (last {months} months) impact your module. "
+        f"Read the actual source files first, then identify specific patches needed."
+    )})
 
-    artifacts.write("analysis", analysis_ctx.build())
+    artifacts.write("analysis", analysis)
+    # analysis_ctx now returns this string to synthesizer
 
     # ── Phase 3: verify findings ──────────────────────────────────────────────
     print(f"\n\033[92m{B}── PHASE 3: VERIFICATION ────────────────────────────────{R}")
@@ -411,7 +385,7 @@ def run(providers: list[str] | None = None, months: int = 2) -> str:
     verified = verifier.loop(
         f"Verify all findings from the module analysis. "
         f"For each finding that has a 'Verify query', run it as a web search "
-        f"and add verification status. "
+        f"and add verification status.\n\n"
         f"Current analysis:\n\n{analysis_ctx.build()}",
         max_steps=VERIFY_MAX_STEPS,
     ).content
