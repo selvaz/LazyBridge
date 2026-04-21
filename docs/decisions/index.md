@@ -8,3 +8,5 @@ Each tree answers a concrete "when to use which" question.
 * [Composing agents: chain, Agent.parallel, Plan, or tools=?](composition.md)
 * [Parallelism: automatic or declared?](parallelism.md)
 * [Human-in-the-loop: HumanEngine or SupervisorEngine?](human-engine-vs-supervisor.md)
+* [verify= at Agent level, tool level, or Plan step level?](verify-placement.md)
+* [Checkpoint/resume: when is it worth the storage complexity?](checkpoint.md)

@@ -184,3 +184,70 @@ non-interactive.
 `verify=` is **not** HIL at all — the judge is an Agent, automated.
 Listed here because users often conflate "verification" with "human
 review".
+
+## verify= at Agent level, tool level, or Plan step level?
+
+```
+Gating the final output of a single agent?
+    → Agent("model", verify=judge, max_verify=3)
+
+One sub-agent inside a tool list is the risky one;
+rest of the run is fine?
+    → parent.as_tool(verify=judge, max_verify=2)   # Option B
+
+One step of a declared Plan needs a judge; other steps don't?
+    → Step(Agent(..., verify=judge), ...)
+
+Want a judge on every tool call emitted by the model?
+    → This isn't what verify= does — it's LLM-as-judge on output.
+      For call-time filtering use Guards (guards.md).
+```
+
+`verify=` is LLM-as-judge on an agent's output; it retries with
+feedback. Three placements because three scopes:
+
+* **Agent-level** — broadest. Use when you don't trust an agent's
+  final output by default.
+* **Tool-level (Option B)** — surgical. Use when one sub-agent is
+  risky and the rest of the run is fine. Put the judge on the
+  `as_tool(...)` wrapper.
+* **Plan step-level** — same mechanism, scoped to one step in a
+  declared workflow.
+
+If you need to gate *every tool call* (e.g. "block any search with
+PII"), `verify=` is the wrong tool — that's a **Guard**
+(`GuardChain`, `ContentGuard`, `LLMGuard`), which intercepts call
+inputs and outputs directly.
+
+## Checkpoint/resume: when is it worth the storage complexity?
+
+```
+Short-running pipeline, idempotent if rerun from scratch?
+    → Don't bother — no store=, no checkpoint_key=, no resume=.
+
+Long or expensive pipeline; partial-run survival matters?
+    → Plan(..., store=Store(db="..."), checkpoint_key="...", resume=True)
+      → failed step retries on resume; done pipeline short-circuits
+        to cached kv.
+
+Pipeline waits on external events (webhook, human, retry queue)?
+    → Same pattern; you split the run across processes and re-enter
+      on event delivery.
+
+Dev loop iterating on a specific step?
+    → Pin previous steps via checkpoint so you don't re-pay for
+      them on every iteration.
+
+Need a user-visible history of every step's Envelope?
+    → Checkpoint is minimal (writes + next_step + status only).
+      For full history use Session + JsonFileExporter.
+```
+
+Rule of thumb: enable checkpointing when the cost of re-running earlier
+steps exceeds the cost of the storage complication.
+
+Cost of checkpointing is low: one JSON write per step, persistence via
+SQLite WAL, minimal state shape (`writes` bucket + next step + status).
+It is **not** a full run history — the in-memory `StepResult` history
+is rebuilt empty on resume. If you need the full audit trail, combine
+`Plan` with a `Session` + `JsonFileExporter`.
