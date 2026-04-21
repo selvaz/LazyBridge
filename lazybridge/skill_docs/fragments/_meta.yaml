@@ -1,0 +1,91 @@
+# Topic → tier assignment.  Order inside each list is preserved in the
+# rendered skill / site pages, so order topics didactically.
+tiers:
+  basic:
+    - agent
+    - tool
+    - envelope
+  mid:
+    - memory
+    - store
+    - session
+    - guards
+    - chain
+    - as_tool
+    - agent_parallel
+    - human_engine
+    - evals
+  full:
+    - plan
+    - sentinels
+    - parallel_steps
+    - supervisor
+    - checkpoint
+    - exporters
+    - graph_schema
+    - verify
+  advanced:
+    - engine_protocol
+    - base_provider
+    - plan_serialize
+    - register_provider
+    - core_types
+
+# Decision tree fragments.  Each lives in fragments/decision_<name>.md.
+decisions:
+  - pick_tier
+  - return_type
+  - state_layer
+  - composition
+  - parallelism
+  - human_engine_vs_supervisor
+  - verify_placement
+  - checkpoint
+  - need_advanced
+
+# Pretty titles for tier landing pages + decision tree pages.
+titles:
+  agent: Agent
+  tool: Tool
+  envelope: Envelope
+  memory: Memory
+  store: Store
+  session: Session & tracing
+  guards: Guards
+  chain: Agent.chain
+  as_tool: Agent.as_tool
+  agent_parallel: Agent.parallel
+  human_engine: HumanEngine
+  evals: EvalSuite
+  plan: Plan
+  sentinels: Sentinels (from_prev / from_start / from_step / from_parallel)
+  parallel_steps: Parallel plan steps
+  supervisor: SupervisorEngine
+  checkpoint: Checkpoint & resume
+  exporters: Exporters
+  graph_schema: GraphSchema
+  verify: "verify="
+  engine_protocol: Engine protocol
+  base_provider: BaseProvider
+  plan_serialize: Plan serialization
+  register_provider: Provider registry
+  core_types: core.types
+
+tier_intros:
+  basic: |
+    One-shot or tool-calling agents. Text or structured output.
+    No memory, no pipeline, no HIL. If you need state across calls
+    or more than one agent, go to Mid.
+  mid: |
+    Realistic apps. Conversation memory, shared state, console/verbose
+    logging, input/output guardrails, simple chain or parallel fan-out,
+    one agent re-used as a tool, basic human-in-the-loop, evals.
+    No explicit DAG — for that, go to Full.
+  full: |
+    Production pipelines. Declared workflows with typed hand-offs between
+    steps, conditional routing via sentinels, checkpoint/resume after
+    crashes, OTel/JSON export, tool-level verifiers, serialisable plans.
+  advanced: |
+    Framework extension. New providers, new execution engines,
+    cross-process Plan serialisation, direct use of core.types.
+    Skip this tier if you're not writing framework code.

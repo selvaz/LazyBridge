@@ -1,1 +1,0 @@
-../lazy_wiki/human/agents.md
