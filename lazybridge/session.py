@@ -135,3 +135,61 @@ class Session:
                 exp.export(event_dict)
             except Exception:
                 pass
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Aggregate token usage and cost across all agent runs in this session.
+
+        Returns a dict with:
+          - "total": {input_tokens, output_tokens, cost_usd}
+          - "by_agent": {agent_name: {input_tokens, output_tokens, cost_usd}}
+          - "by_run":   {run_id:    {agent_name, input_tokens, output_tokens, cost_usd}}
+        """
+        model_responses = self.events.query(event_type=EventType.MODEL_RESPONSE)
+        agent_starts = {
+            e["id"]: e["payload"]
+            for e in self.events.query(event_type=EventType.AGENT_START)
+        }
+
+        # Build run_id → agent_name map from AGENT_START events
+        run_agent: dict[str, str] = {}
+        for row in self.events.query(event_type=EventType.AGENT_START):
+            rid = row.get("payload", {}).get("run_id") or ""
+            # run_id stored in the record table, not payload — fetch from raw
+            raw = self.events._conn().execute(
+                "SELECT run_id FROM events WHERE id=?", (row["id"],)
+            ).fetchone()
+            if raw and raw["run_id"]:
+                run_agent[raw["run_id"]] = row["payload"].get("agent_name", "unknown")
+
+        total = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        by_agent: dict[str, dict[str, Any]] = {}
+        by_run: dict[str, dict[str, Any]] = {}
+
+        for row in model_responses:
+            p = row["payload"]
+            raw = self.events._conn().execute(
+                "SELECT run_id FROM events WHERE id=?", (row["id"],)
+            ).fetchone()
+            run_id = raw["run_id"] if raw else None
+            agent_name = run_agent.get(run_id or "", "unknown") if run_id else "unknown"
+
+            in_tok = p.get("input_tokens", 0) or 0
+            out_tok = p.get("output_tokens", 0) or 0
+            cost = p.get("cost_usd") or 0.0
+
+            total["input_tokens"] += in_tok
+            total["output_tokens"] += out_tok
+            total["cost_usd"] += cost
+
+            ag = by_agent.setdefault(agent_name, {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+            ag["input_tokens"] += in_tok
+            ag["output_tokens"] += out_tok
+            ag["cost_usd"] += cost
+
+            if run_id:
+                rn = by_run.setdefault(run_id, {"agent_name": agent_name, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+                rn["input_tokens"] += in_tok
+                rn["output_tokens"] += out_tok
+                rn["cost_usd"] += cost
+
+        return {"total": total, "by_agent": by_agent, "by_run": by_run}

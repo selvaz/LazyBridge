@@ -54,7 +54,10 @@ from lazybridge.memory import Memory
 from lazybridge.store import Store, StoreEntry
 from lazybridge.session import Session, EventLog, EventType
 from lazybridge.guardrails import Guard, GuardAction, GuardError, ContentGuard, GuardChain, LLMGuard
-from lazybridge.evals import EvalCase, EvalReport, EvalSuite, exact_match, contains, max_length, min_length, llm_judge
+from lazybridge.evals import (
+    EvalCase, EvalReport, EvalSuite,
+    exact_match, contains, not_contains, max_length, min_length, llm_judge,
+)
 
 # Engines
 from lazybridge.engines.base import Engine

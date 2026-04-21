@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from lazybridge.envelope import Envelope
@@ -20,17 +20,18 @@ class Agent:
     Tier 2 (with tools):
         Agent("claude-opus-4-7", tools=[search])("find news").text()
 
-    Tier 4 (chain):
-        Agent.chain(researcher, writer)("AI trends").text()
+    Tier 3 (structured output):
+        Agent("claude-opus-4-7", output=Summary)("...").payload.title
 
-    Tier 4b (parallel):
-        Agent.parallel(a, b, c)("task")  # → list[Envelope]
+    Tier 4 (chain / parallel):
+        Agent.chain(researcher, writer)("AI trends").text()
+        Agent.parallel(a, b, c)("task")   # → list[Envelope]
 
     Tier 5/6 (Plan / full config):
         Agent(engine=Plan(...), tools=[...], output=Report, session=session)
     """
 
-    _is_lazy_agent = True  # sentinel for wrap_tool() detection
+    _is_lazy_agent = True  # recognised by wrap_tool()
 
     def __init__(
         self,
@@ -38,18 +39,22 @@ class Agent:
         tools: "list[Tool | Callable | Agent]" = (),
         output: type = str,
         memory: "Any | None" = None,
-        sources: list = (),
+        sources: "list[Any]" = (),
         guard: "Any | None" = None,
         verify: "Agent | None" = None,
         max_verify: int = 3,
         name: str | None = None,
         description: str | None = None,
         session: "Any | None" = None,
+        # Convenience: pass provider + model separately
+        # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
+        model: str | None = None,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
         if isinstance(engine_or_model, str):
-            self.engine: Any = LLMEngine(engine_or_model)
+            model_str = model or engine_or_model
+            self.engine: Any = LLMEngine(model_str)
         else:
             self.engine = engine_or_model
 
@@ -65,10 +70,9 @@ class Agent:
         self.description = description
         self.session = session
 
-        # Pass agent name down to engine for event naming
         self.engine._agent_name = self.name
 
-        # Validate Plan at construction time
+        # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
             self.engine._validate(self._tool_map)
 
@@ -78,26 +82,22 @@ class Agent:
 
     async def run(self, task: "str | Envelope") -> Envelope:
         env = self._to_envelope(task)
-
-        # Inject live sources into context
         env = self._inject_sources(env)
 
-        # Guard: check input
         if self.guard:
             action = await self.guard.acheck_input(env.task or "")
             if not action.allowed:
                 return Envelope.error_envelope(ValueError(action.message or "Blocked by guard"))
             if action.modified_text is not None:
-                env = Envelope(task=action.modified_text, context=env.context, payload=action.modified_text)
+                env = Envelope(task=action.modified_text, context=env.context,
+                               payload=action.modified_text)
 
-        # Verify loop
         if self.verify:
             from lazybridge.evals import verify_with_retry
             result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify)
         else:
             result = await self._run_engine(env)
 
-        # Guard: check output
         if self.guard and result.ok:
             action = await self.guard.acheck_output(result.text())
             if not action.allowed:
@@ -105,7 +105,8 @@ class Agent:
                 result = Envelope(
                     task=result.task,
                     payload=result.payload,
-                    error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
+                    error=ErrorInfo(type="GuardBlocked",
+                                   message=action.message or "Output blocked"),
                     metadata=result.metadata,
                 )
 
@@ -120,7 +121,8 @@ class Agent:
             session=self.session,
         )
 
-    async def stream(self, task: "str | Envelope") -> AsyncIterator[str]:
+    async def stream(self, task: "str | Envelope") -> AsyncGenerator[str, None]:
+        """Stream LLM tokens across the full tool-calling loop."""
         env = self._to_envelope(task)
         env = self._inject_sources(env)
         async for chunk in self.engine.stream(
@@ -133,14 +135,13 @@ class Agent:
             yield chunk
 
     # ------------------------------------------------------------------
-    # Sync API — runs the event loop
+    # Sync API
     # ------------------------------------------------------------------
 
     def __call__(self, task: "str | Envelope") -> Envelope:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # In Jupyter / async context — run in thread executor
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     fut = pool.submit(asyncio.run, self.run(task))
@@ -150,17 +151,53 @@ class Agent:
             return asyncio.run(self.run(task))
 
     # ------------------------------------------------------------------
+    # Tool exposure
+    # ------------------------------------------------------------------
+
+    def as_tool(
+        self,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Tool:
+        """Return a Tool that wraps this agent.
+
+        The tool schema is: ``(task: str) -> str``.
+        Use this to plug one agent into another agent's tools list.
+
+            researcher = Agent("claude-opus-4-7", tools=[search])
+            orchestrator = Agent("claude-opus-4-7",
+                                 tools=[researcher.as_tool("researcher",
+                                                           "Search and summarise papers")])
+        """
+        agent = self
+        effective_name = name or self.name
+        effective_desc = description or self.description or f"Run the {effective_name} agent."
+
+        async def _run(task: str) -> str:
+            env = await agent.run(task)
+            return env.text()
+
+        _run.__name__ = effective_name
+        _run.__doc__ = effective_desc
+
+        return Tool(_run, name=effective_name, description=effective_desc, mode="signature")
+
+    def definition(self) -> Any:
+        """ToolDefinition for this agent — used when passed in tools=[] of another agent."""
+        return self.as_tool().definition()
+
+    # ------------------------------------------------------------------
     # Factories
     # ------------------------------------------------------------------
 
     @classmethod
     def chain(cls, *agents: "Agent", **kwargs: Any) -> "Agent":
-        """Return a new Agent whose engine runs ``agents`` sequentially."""
+        """Run agents sequentially: output of each becomes input to the next."""
         from lazybridge.engines.plan import Plan, Step
 
         steps = [Step(target=a, name=a.name) for a in agents]
         plan = Plan(*steps)
-        tools = [wrap_tool(a) for a in agents]
+        tools = [a.as_tool() for a in agents]
         name = kwargs.pop("name", "chain")
         return cls(engine=plan, tools=tools, name=name, **kwargs)
 
@@ -172,21 +209,13 @@ class Agent:
         step_timeout: float | None = None,
         **kwargs: Any,
     ) -> "_ParallelAgent":
-        """Return a _ParallelAgent that runs all agents concurrently → list[Envelope]."""
+        """Run all agents concurrently on the same task → list[Envelope]."""
         return _ParallelAgent(
             agents=list(agents),
             concurrency_limit=concurrency_limit,
             step_timeout=step_timeout,
             **kwargs,
         )
-
-    # ------------------------------------------------------------------
-    # Tool Protocol — makes Agent usable as a tool in another Agent
-    # ------------------------------------------------------------------
-
-    def definition(self) -> Any:
-        from lazybridge.tools import Tool, wrap_tool
-        return wrap_tool(self).definition()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -199,20 +228,33 @@ class Agent:
         return Envelope.from_task(str(task))
 
     def _inject_sources(self, env: Envelope) -> Envelope:
+        """Build context string from sources (live view — read at call time)."""
         if not self.sources:
             return env
         parts: list[str] = []
         if env.context:
             parts.append(env.context)
         for src in self.sources:
-            if hasattr(src, "text"):
-                parts.append(src.text())
-            elif callable(src):
-                parts.append(str(src()))
-            else:
-                parts.append(str(src))
+            text = _read_source(src)
+            if text:
+                parts.append(text)
         merged = "\n\n".join(p for p in parts if p)
         return Envelope(task=env.task, context=merged or env.context, payload=env.payload)
+
+
+def _read_source(src: Any) -> str:
+    """Extract a string from any source object — Memory, Store, callable, str."""
+    # Memory / Store / objects with .text() or .to_text()
+    if hasattr(src, "to_text"):
+        return src.to_text()
+    if hasattr(src, "text"):
+        val = src.text
+        return val() if callable(val) else str(val)
+    # Callable — call it
+    if callable(src):
+        return str(src())
+    # Plain string
+    return str(src)
 
 
 class _ParallelAgent:
@@ -222,7 +264,7 @@ class _ParallelAgent:
 
     def __init__(
         self,
-        agents: list[Agent],
+        agents: "list[Agent]",
         *,
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
@@ -237,29 +279,30 @@ class _ParallelAgent:
         self.description = description
         self.session = session
 
-    async def run(self, task: "str | Envelope") -> list[Envelope]:
+    async def run(self, task: "str | Envelope") -> "list[Envelope]":
         env = Agent._to_envelope(task) if isinstance(task, str) else task
         sem = asyncio.Semaphore(self.concurrency_limit) if self.concurrency_limit else None
 
-        async def _run_one(agent: Agent) -> Envelope:
-            coro = agent.run(env)
+        async def _run_one(agent: "Agent") -> Envelope:
+            async def _coro() -> Envelope:
+                if self.step_timeout:
+                    return await asyncio.wait_for(agent.run(env), timeout=self.step_timeout)
+                return await agent.run(env)
+
             if sem:
                 async with sem:
-                    coro2 = agent.run(env)
-                    if self.step_timeout:
-                        return await asyncio.wait_for(coro2, timeout=self.step_timeout)
-                    return await coro2
-            if self.step_timeout:
-                return await asyncio.wait_for(coro, timeout=self.step_timeout)
-            return await coro
+                    return await _coro()
+            return await _coro()
 
-        results = await asyncio.gather(*[_run_one(a) for a in self.agents], return_exceptions=True)
+        results = await asyncio.gather(*[_run_one(a) for a in self.agents],
+                                       return_exceptions=True)
         return [
-            r if isinstance(r, Envelope) else Envelope.error_envelope(r if isinstance(r, Exception) else RuntimeError(str(r)))
+            r if isinstance(r, Envelope)
+            else Envelope.error_envelope(r if isinstance(r, Exception) else RuntimeError(str(r)))
             for r in results
         ]
 
-    def __call__(self, task: "str | Envelope") -> list[Envelope]:
+    def __call__(self, task: "str | Envelope") -> "list[Envelope]":
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
