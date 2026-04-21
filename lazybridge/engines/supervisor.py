@@ -193,14 +193,29 @@ class SupervisorEngine:
             print("\nCommands: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)")
             print(f"{'─' * 60}")
 
+    # Accept ``name(args)`` with any surrounding whitespace and balanced
+    # outer parentheses.  Anything between the first ``(`` and the last
+    # ``)`` is the raw argument string; internal quoting is preserved so
+    # the human can type ``search("AI news")`` or ``calc(a, b)``.
+    _TOOL_CALL_RE = re.compile(r"^\s*(\w+)\s*\(\s*(.*?)\s*\)\s*$", re.DOTALL)
+
     def _try_tool_call(self, user_input: str, tools: dict) -> str | None:
-        match = re.match(r"(\w+)\((.*)\)$", user_input.strip())
+        match = self._TOOL_CALL_RE.match(user_input)
         if not match:
             return None
         tool_name = match.group(1)
         if tool_name not in tools:
             return None
-        args_str = match.group(2).strip().strip("'\"")
+        args_str = match.group(2)
+        # Best-effort quote-stripping only when the whole arg is a single
+        # quoted token (don't strip from ``"foo", "bar"``).
+        stripped = args_str.strip()
+        if (
+            len(stripped) >= 2
+            and stripped[0] == stripped[-1]
+            and stripped[0] in ("'", '"')
+        ):
+            args_str = stripped[1:-1]
         tool = tools[tool_name]
         try:
             defn = tool.definition() if callable(tool.definition) else tool.definition

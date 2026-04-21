@@ -57,29 +57,78 @@ class _TerminalUI(_UIProtocol):
             return await loop.run_in_executor(None, input, prompt_str)
 
     async def _prompt_model(self, model_type: type) -> str:
+        """Prompt each field of a Pydantic model and coerce via TypeAdapter.
+
+        Uses ``pydantic.TypeAdapter`` so Optional, Union, list[T], nested
+        BaseModel and every other shape Pydantic understands round-trip
+        correctly without an ad-hoc if/elif cascade.  Empty input on an
+        Optional field validates as ``None``; JSON inputs are accepted for
+        lists and nested models.
+        """
         import json
-        from pydantic import BaseModel
+        from pydantic import TypeAdapter, ValidationError
 
         print(f"Please fill in the following fields for {model_type.__name__}:")
         data: dict[str, Any] = {}
         for field_name, field_info in model_type.model_fields.items():
             annotation = field_info.annotation or str
+            type_label = getattr(annotation, "__name__", str(annotation))
             loop = asyncio.get_event_loop()
-            raw = await loop.run_in_executor(None, input, f"  {field_name} ({annotation.__name__ if hasattr(annotation, '__name__') else str(annotation)}): ")
+            raw = await loop.run_in_executor(
+                None, input, f"  {field_name} ({type_label}): ",
+            )
+            data[field_name] = self._coerce_field(annotation, raw)
+        return json.dumps(data, default=str)
+
+    @staticmethod
+    def _coerce_field(annotation: Any, raw: str) -> Any:
+        """Coerce a CLI-entered string to ``annotation`` via TypeAdapter.
+
+        Fallback order:
+        1. Empty string ⇒ ``None`` iff the annotation accepts None.
+        2. ``json.loads`` if the raw string looks like JSON (``{``, ``[``,
+           ``true``/``false``/``null``, or a number).  Lets users paste
+           lists / nested objects verbatim.
+        3. Comma-split if the annotation is a list-ish origin and the
+           input doesn't start with ``[``.
+        4. ``TypeAdapter(annotation).validate_python(raw)`` — Pydantic's
+           native coercion (handles int / float / bool / datetime /
+           Optional / Union / Enum / ...).
+        5. On any failure, fall back to the raw string; the outer
+           ``BaseModel(**data)`` will emit a clear ValidationError.
+        """
+        import json
+        from pydantic import TypeAdapter, ValidationError
+
+        # Optional + empty → None.
+        origin = getattr(annotation, "__origin__", None)
+        args = getattr(annotation, "__args__", ())
+        if raw.strip() == "" and type(None) in args:
+            return None
+
+        # Comma-list sugar for list[T] when the user didn't type JSON.
+        if (origin is list or annotation is list) and not raw.lstrip().startswith("["):
+            parts = [p.strip() for p in raw.split(",") if p.strip()]
+            inner = args[0] if args else str
             try:
-                if annotation is int:
-                    data[field_name] = int(raw)
-                elif annotation is float:
-                    data[field_name] = float(raw)
-                elif annotation is bool:
-                    data[field_name] = raw.lower() in ("yes", "true", "1", "y")
-                elif annotation is list or (hasattr(annotation, "__origin__") and annotation.__origin__ is list):
-                    data[field_name] = [x.strip() for x in raw.split(",")]
-                else:
-                    data[field_name] = raw
-            except (ValueError, TypeError):
-                data[field_name] = raw
-        return json.dumps(data)
+                return TypeAdapter(list[inner]).validate_python(parts)  # type: ignore[valid-type]
+            except ValidationError:
+                return parts
+
+        # Try JSON first for everything that could be complex.
+        trimmed = raw.strip()
+        if trimmed and trimmed[0] in "{[" or trimmed in ("true", "false", "null"):
+            try:
+                parsed = json.loads(trimmed)
+                return TypeAdapter(annotation).validate_python(parsed)
+            except (json.JSONDecodeError, ValidationError, TypeError):
+                pass   # fall through to plain-string validation
+
+        # Final: let Pydantic handle the raw string (int "42", bool "yes", …).
+        try:
+            return TypeAdapter(annotation).validate_python(raw)
+        except (ValidationError, TypeError):
+            return raw
 
 
 class HumanEngine:
