@@ -1,245 +1,90 @@
-"""Memory — stateful conversation history with smart compression.
-
-Default behavior (``strategy="auto"``): under the token threshold, sends
-everything raw. Over it, compresses older turns into a dense structured
-block and keeps recent turns raw. The full history is always preserved
-internally.
-
-Quick start::
-
-    mem = Memory()  # auto compression — just works
-    ai.chat("ciao, mi chiamo Marco", memory=mem)
-    ai.chat("qual è il mio nome?", memory=mem)   # ricorda "Marco"
-
-Strategies::
-
-    Memory()                              # auto — compresses when needed
-    Memory(strategy="full")               # never compress (backward compat)
-    Memory(strategy="rolling")            # sliding window + compression
-
-With LLM compressor (more accurate)::
-
-    compressor = LazyAgent("openai", model="gpt-4o-mini")
-    mem = Memory(compressor=compressor)
-
-The full raw history is always available via ``mem.history``.
-"""
+"""Memory — conversation history management for per-agent and shared use."""
 
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from lazybridge.core.types import Message, Role
+
+
+@dataclass
+class _Turn:
+    user: str
+    assistant: str
+    token_estimate: int = 0
 
 
 class Memory:
-    """Accumulates conversation turns with automatic context compression.
+    """Conversation memory with configurable compression strategy.
 
-    Parameters
-    ----------
-    strategy:
-        ``"auto"`` (default) — compresses when token estimate exceeds threshold.
-        ``"full"`` — never compress (sends all turns, backward compatible).
-        ``"rolling"`` — always use window + compression, regardless of size.
-    max_context_tokens:
-        Token budget estimate. When exceeded, older turns are compressed.
-        Uses ``len(text) // 4`` approximation (no tiktoken dependency).
-    window_turns:
-        Number of recent turn pairs (user+assistant) to keep raw.
-    compressor:
-        Optional LazyAgent for LLM-powered compression. Uses a cheap model
-        to extract entities, facts, decisions into a dense format.
-        Default: rule-based extraction (free, no API call).
+    Per-agent use:  memory=Memory() on the Agent — tracks its message history.
+    Shared use:     sources=[memory] on multiple Agents — live view of shared text.
+
+    The ``text()`` method returns the current memory as a context string,
+    re-read on every invocation (live view — never a stale snapshot).
     """
 
     def __init__(
         self,
         *,
-        strategy: Literal["full", "rolling", "auto"] = "auto",
-        max_context_tokens: int = 4000,
-        window_turns: int = 10,
-        compressor: Any = None,
+        strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
+        max_tokens: int | None = 4000,
+        store: Any | None = None,
     ) -> None:
-        self._messages: list[dict] = []
+        self.strategy = strategy
+        self.max_tokens = max_tokens
+        self.store = store
+        self._turns: list[_Turn] = []
         self._lock = threading.Lock()
-        self._strategy = strategy
-        self._max_context_tokens = max_context_tokens
-        self._window_size = window_turns * 2
-        self._compressor = compressor
-        self._compressed: str | None = None
-        self._compressed_up_to: int = 0
+        self._summary: str = ""
 
-    @classmethod
-    def from_history(cls, messages: list[dict], **kwargs: Any) -> Memory:
-        """Restore a Memory instance from a previously serialised history list."""
-        instance = cls(**kwargs)
-        instance._messages = list(messages)
-        return instance
-
-    @property
-    def history(self) -> list[dict]:
-        """Full raw history — never truncated, always complete."""
+    def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         with self._lock:
-            return list(self._messages)
+            self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))
+            self._maybe_compress()
 
-    @property
-    def summary(self) -> str | None:
-        """Current compressed memory block, if any."""
-        with self._lock:
-            return self._compressed
+    def _maybe_compress(self) -> None:
+        if self.strategy == "none" or not self.max_tokens:
+            return
+        total = sum(t.token_estimate for t in self._turns)
+        if self.strategy == "sliding" or (self.strategy == "auto" and total > self.max_tokens):
+            if len(self._turns) > 10:
+                old = self._turns[:-10]
+                self._summary = self._rule_summary(old)
+                self._turns = self._turns[-10:]
 
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._messages)
-
-    def __repr__(self) -> str:
-        with self._lock:
-            turns = len(self._messages) // 2
-            compressed = "compressed" if self._compressed else "raw"
-        return f"Memory(turns={turns}, {compressed})"
-
-    def clear(self) -> None:
-        """Reset conversation history and compression state."""
-        with self._lock:
-            self._messages.clear()
-            self._compressed = None
-            self._compressed_up_to = 0
-
-    # ------------------------------------------------------------------
-    # Token estimation
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _estimate_tokens(messages: list[dict]) -> int:
-        return sum(len(m.get("content", "")) for m in messages) // 4
-
-    # ------------------------------------------------------------------
-    # Compression
-    # ------------------------------------------------------------------
-
-    def _compress(self, turns: list[dict]) -> str:
-        if self._compressor is not None:
-            return self._llm_compress(turns)
-        return self._simple_compress(turns)
-
-    @staticmethod
-    def _simple_compress(turns: list[dict]) -> str:
-        n_turns = len(turns) // 2
+    def _rule_summary(self, turns: list[_Turn]) -> str:
         topics: set[str] = set()
         for t in turns:
-            content = t.get("content", "")
-            for word in content.split():
-                if len(word) > 2 and word[0].isupper() and word.isalpha():
-                    topics.add(word)
-        topics_str = ", ".join(sorted(topics)[:20]) if topics else "general discussion"
-        last_user = ""
-        last_asst = ""
-        for t in reversed(turns):
-            if t.get("role") == "user" and not last_user:
-                last_user = t.get("content", "")[:150]
-            elif t.get("role") == "assistant" and not last_asst:
-                last_asst = t.get("content", "")[:150]
-            if last_user and last_asst:
-                break
-        lines = [f"[Memory — {n_turns} earlier turns]"]
-        lines.append(f"Topics: {topics_str}")
-        if last_user:
-            lines.append(f"Last discussed: {last_user[:100]}")
-        return "\n".join(lines)
+            words = (t.user + " " + t.assistant).split()
+            topics.update(w.lower() for w in words if len(w) > 5)
+        return f"[Earlier conversation covered: {', '.join(sorted(topics)[:20])}]"
 
-    def _llm_compress(self, turns: list[dict]) -> str:
-        sample = turns[-30:] if len(turns) > 30 else turns
-        text = "\n".join(f"{t['role']}: {t['content'][:200]}" for t in sample)
-        prompt = (
-            "Extract key information from this conversation into a dense structured format.\n"
-            "Include: entities (people, projects, tools), facts, decisions, preferences, open threads.\n"
-            "Be extremely concise — use key:value format, not sentences.\n\n"
-            f"Conversation ({len(turns) // 2} turns):\n{text}"
-        )
-        return self._compressor.text(prompt)
-
-    # ------------------------------------------------------------------
-    # Monitoring — called after each _record
-    # ------------------------------------------------------------------
-
-    def _maybe_recompress(self) -> None:
-        """Re-evaluate compression.  Must be called *without* ``_lock`` held.
-
-        Takes a snapshot of ``self._messages`` under the lock, runs the
-        potentially-slow ``_compress`` call unlocked, then re-acquires
-        the lock to publish the result (with a version check so a
-        concurrent writer's newer result is not overwritten).
-        """
+    def messages(self) -> list[Message]:
+        """Return full message list including summary prefix if compressed."""
         with self._lock:
-            total = len(self._messages)
-            if total <= self._window_size:
-                return
-            older = list(self._messages[: -self._window_size])
-            if len(older) <= self._compressed_up_to:
-                return
-            if self._strategy == "auto":
-                est = self._estimate_tokens(self._messages)
-                if est <= self._max_context_tokens:
-                    return
-            snapshot_upto = len(older)
-
-        # Slow path — potentially an LLM call. Run unlocked.
-        new_summary = self._compress(older)
-
-        with self._lock:
-            if self._compressed_up_to < snapshot_upto:
-                self._compressed = new_summary
-                self._compressed_up_to = snapshot_upto
-
-    # ------------------------------------------------------------------
-    # Internal helpers — used by LazyAgent
-    # ------------------------------------------------------------------
-
-    def _build_input(self, message: str) -> list[dict]:
-        """Build input for provider: [compressed] + [window] + [new message].
-
-        Compression (which may call an LLM) runs *outside* the lock so
-        other threads that share this ``Memory`` aren't blocked on slow
-        I/O.  A version check (``_compressed_up_to``) prevents stomping a
-        fresher result published by another thread.
-        """
-        with self._lock:
-            if self._strategy == "full":
-                return self._messages + [{"role": "user", "content": message}]
-
-            total = len(self._messages)
-            if total <= self._window_size:
-                return self._messages + [{"role": "user", "content": message}]
-
-            window = list(self._messages[-self._window_size :])
-            older = list(self._messages[: -self._window_size])
-            need_compress = len(older) > self._compressed_up_to
-            snapshot_upto = len(older)
-
-        if need_compress:
-            # Slow path — potentially an LLM call. Run unlocked.
-            new_summary = self._compress(older)
-            with self._lock:
-                # Only publish if no concurrent caller already did it for
-                # an equal-or-larger slice.
-                if self._compressed_up_to < snapshot_upto:
-                    self._compressed = new_summary
-                    self._compressed_up_to = snapshot_upto
-
-        with self._lock:
-            result: list[dict] = []
-            if self._compressed:
-                result.append({"role": "system", "content": self._compressed})
-            result.extend(window)
-            result.append({"role": "user", "content": message})
+            result: list[Message] = []
+            if self._summary:
+                result.append(Message(role=Role.USER, content=f"Context from earlier: {self._summary}"))
+                result.append(Message(role=Role.ASSISTANT, content="Understood."))
+            for t in self._turns:
+                result.append(Message(role=Role.USER, content=t.user))
+                result.append(Message(role=Role.ASSISTANT, content=t.assistant))
             return result
 
-    def _record(self, user_message: str, assistant_content: str) -> None:
-        """Append a completed turn and monitor for recompression."""
+    def text(self) -> str:
+        """Return current memory as a plain-text string (live view)."""
         with self._lock:
-            self._messages.append({"role": "user", "content": user_message})
-            self._messages.append({"role": "assistant", "content": assistant_content})
-            strategy = self._strategy
-        # _maybe_recompress manages the lock itself now, so we call it
-        # outside to keep slow compression I/O off the critical path.
-        if strategy in ("auto", "rolling"):
-            self._maybe_recompress()
+            parts: list[str] = []
+            if self._summary:
+                parts.append(self._summary)
+            for t in self._turns[-5:]:
+                parts.append(f"User: {t.user}\nAssistant: {t.assistant}")
+            return "\n\n".join(parts)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._turns.clear()
+            self._summary = ""

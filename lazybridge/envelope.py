@@ -1,0 +1,59 @@
+"""Envelope — the single data type flowing between all agents and engines."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class EnvelopeMetadata(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_ms: float = 0.0
+    model: str | None = None
+    provider: str | None = None
+    run_id: str | None = None
+
+
+class ErrorInfo(BaseModel):
+    type: str
+    message: str
+    retryable: bool = False
+
+
+class Envelope(BaseModel):
+    task: str | None = None
+    context: str | None = None
+    payload: Any = None
+    metadata: EnvelopeMetadata = Field(default_factory=EnvelopeMetadata)
+    error: ErrorInfo | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+    def text(self) -> str:
+        if self.payload is None:
+            return ""
+        if isinstance(self.payload, str):
+            return self.payload
+        if isinstance(self.payload, BaseModel):
+            return self.payload.model_dump_json()
+        return json.dumps(self.payload)
+
+    @classmethod
+    def from_task(cls, task: str, context: str | None = None) -> "Envelope":
+        return cls(task=task, context=context, payload=task)
+
+    @classmethod
+    def error_envelope(cls, exc: Exception, *, retryable: bool = False) -> "Envelope":
+        return cls(
+            error=ErrorInfo(
+                type=type(exc).__name__,
+                message=str(exc),
+                retryable=retryable,
+            )
+        )
