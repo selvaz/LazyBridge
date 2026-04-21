@@ -65,7 +65,33 @@ class Tool:
         return await loop.run_in_executor(None, lambda: self.func(**kwargs))
 
     def run_sync(self, **kwargs: Any) -> Any:
-        return self.func(**kwargs)
+        """Blocking tool invocation.
+
+        Handles three cases so that callers never see a stray coroutine:
+
+        * plain sync function → called directly.
+        * async function → executed inside the current event loop if one
+          is running (a worker thread hops out of it), otherwise on a
+          fresh ``asyncio.run`` loop.  Needed because :meth:`Agent.as_tool`
+          wraps the agent's ``.run()`` coroutine into ``Tool.func`` —
+          ``SupervisorEngine`` / REPL callers were previously getting
+          ``"<coroutine object _run at 0x...>"`` instead of the result.
+        """
+        if not asyncio.iscoroutinefunction(self.func):
+            return self.func(**kwargs)
+
+        coro_factory = lambda: self.func(**kwargs)  # noqa: E731
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return asyncio.run(coro_factory())
+        if loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(asyncio.run, coro_factory())
+                return fut.result()
+        return loop.run_until_complete(coro_factory())
 
     def __repr__(self) -> str:
         return f"Tool({self.name!r})"

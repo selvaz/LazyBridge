@@ -67,7 +67,7 @@ class SupervisorEngine:
     def __init__(
         self,
         *,
-        tools: "list[Tool] | None" = None,
+        tools: "list[Tool | Callable | Any] | None" = None,
         agents: "list[Any] | None" = None,
         store: "Store | None" = None,
         input_fn: Callable[[str], str] | None = None,
@@ -75,7 +75,13 @@ class SupervisorEngine:
         timeout: float | None = None,
         default: str | None = None,
     ) -> None:
-        self._tools = {t.name: t for t in (tools or [])}
+        # Tool-is-Tool: accept plain functions and Agents too, not just Tool
+        # instances.  Matches the contract of ``Agent(tools=[...])`` so the
+        # same tools list can be handed to either surface.
+        from lazybridge.tools import wrap_tool
+
+        wrapped = [wrap_tool(t) for t in (tools or [])]
+        self._tools = {t.name: t for t in wrapped}
         self._agents = {getattr(a, "name", f"agent-{i}"): a for i, a in enumerate(agents or [])}
         self._store = store
         self._input_fn = input_fn or (lambda prompt: input(prompt))
