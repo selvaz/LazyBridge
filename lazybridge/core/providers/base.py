@@ -36,9 +36,9 @@ Minimal implementation::
 
 Usage::
 
-    from lazybridge import LazyAgent
-    agent = LazyAgent(MyProvider(api_key="..."))
-    print(agent.chat("hello").content)
+    from lazybridge import Agent, LLMEngine
+    agent = Agent(engine=LLMEngine("my-model"))
+    print(agent("hello").text())
 """
 
 from __future__ import annotations
@@ -58,10 +58,11 @@ from lazybridge.core.types import (
 class BaseProvider(ABC):
     """Stable abstract base class for all LLM providers.
 
-    Subclass this to integrate any LLM backend with LazyBridge.
-    Pass an instance directly as the first argument of ``LazyAgent``::
+    Subclass this to integrate any LLM backend with LazyBridge. Plug a
+    custom provider in by constructing an ``LLMEngine`` that routes to it
+    (see ``lazybridge/core/executor.py`` for resolution)::
 
-        agent = LazyAgent(MyProvider(api_key="..."))
+        agent = Agent(engine=LLMEngine("my-model"))
 
     **Stability contract**
     The following are guaranteed stable across minor versions:
@@ -219,7 +220,7 @@ class BaseProvider(ABC):
 
     #: Tier aliases (audit F2).  Each provider populates this with the
     #: concrete model it considers "top"/"expensive"/"medium"/"cheap"/
-    #: "super_cheap" so users can write ``LazyAgent("anthropic",
+    #: "super_cheap" so users can write ``Agent("anthropic",
     #: model="cheap")`` without hard-coding preview / date-pinned names.
     #: A string not in this dict is treated as a literal model name
     #: (passthrough).

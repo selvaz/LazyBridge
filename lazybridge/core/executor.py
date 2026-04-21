@@ -5,7 +5,7 @@ Handles:
   - Retry with exponential backoff on transient errors
   - Sync and async execution + streaming
 
-No memory, no tracking, no context injection — those live in LazyAgent/LazySession.
+No memory, no tracking, no context injection — those live in Agent/Session.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ _RETRY_WARN = "Executor: transient error on attempt {attempt}/{total} ({exc_type
 class Executor:
     """Thin, stateless execution layer over a provider.
 
-    LazyAgent builds on top of this — don't use directly unless you need
+    Agent / LLMEngine build on top of this — don't use directly unless you need
     raw provider access.
     """
 

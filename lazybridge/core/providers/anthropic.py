@@ -88,9 +88,8 @@ class AnthropicProvider(BaseProvider):
 
     default_model = "claude-sonnet-4-6"
 
-    # Tier aliases — ``LazyAgent("anthropic", model="top")`` resolves here.
-    # Update this table when new models ship; the matrix in
-    # lazy_wiki/human/agents.md mirrors it (audit F2).
+    # Tier aliases — ``Agent("anthropic", model="top")`` resolves here.
+    # Update this table when new models ship.
     _TIER_ALIASES = {
         "top": "claude-opus-4-7",
         "expensive": "claude-opus-4-6",
@@ -147,7 +146,7 @@ class AnthropicProvider(BaseProvider):
         if not key:
             raise ValueError(
                 "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
-                "variable, or pass api_key= to LazyAgent/AnthropicProvider."
+                "variable, or pass api_key= to AnthropicProvider."
             )
         # Allow callers to override beta header versions and the streaming threshold.
         self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}

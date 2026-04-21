@@ -9,7 +9,7 @@ Owns everything between a raw Python callable and a provider-ready ToolDefinitio
   - Compiled artifact structure (ToolCompileArtifact)
   - Artifact caching (ArtifactStore / InMemoryArtifactStore)
 
-LazyTool (in lazy_tool.py) is the only consumer of this module's public API.
+Tool (in lazybridge/tools.py) is the only consumer of this module's public API.
 """
 
 from __future__ import annotations

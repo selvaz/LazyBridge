@@ -157,7 +157,7 @@ class OpenAIProvider(BaseProvider):
         if not key:
             raise ValueError(
                 "OpenAI API key not found. Set the OPENAI_API_KEY environment "
-                "variable, or pass api_key= to LazyAgent/OpenAIProvider."
+                "variable, or pass api_key= to OpenAIProvider."
             )
         base_url = kwargs.pop("base_url", None)
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)

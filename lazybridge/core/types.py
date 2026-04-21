@@ -290,8 +290,8 @@ class Verifier(Protocol):
     """Protocol for verify judges used in ``loop()`` / ``aloop()``.
 
     Any object with a ``text(messages) -> str`` method satisfies this
-    protocol — including ``LazyAgent`` itself.  Alternatively, pass a
-    plain ``Callable[[str, str], str]`` to loop()'s ``verify`` parameter.
+    protocol — including ``Agent`` itself.  Alternatively, pass a
+    plain ``Callable[[str, str], str]`` to the verify= parameter.
 
     Return a string starting with ``"approved"`` (case-insensitive) to
     accept the answer; anything else triggers a retry with the feedback.
