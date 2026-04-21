@@ -8,4 +8,6 @@ or more than one agent, go to Mid.
 
 * [Agent](../guides/agent.md)
 * [Tool](../guides/tool.md)
+* [Native tools (web search, code execution, …)](../guides/native-tools.md)
+* [Function → Tool (schema modes)](../guides/tool-schema.md)
 * [Envelope](../guides/envelope.md)

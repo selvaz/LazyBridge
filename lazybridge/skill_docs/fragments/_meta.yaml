@@ -4,6 +4,8 @@ tiers:
   basic:
     - agent
     - tool
+    - native_tools
+    - tool_schema
     - envelope
   mid:
     - memory
@@ -47,6 +49,8 @@ decisions:
 titles:
   agent: Agent
   tool: Tool
+  native_tools: Native tools (web search, code execution, …)
+  tool_schema: Function → Tool (schema modes)
   envelope: Envelope
   memory: Memory
   store: Store

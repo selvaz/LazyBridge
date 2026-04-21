@@ -1,3 +1,16 @@
 # Errors — cause → fix
 
-*(pending)*
+| Error | Where it's raised | Likely cause | Fix |
+|---|---|---|---|
+| `PlanCompileError` | `Agent.__init__` when engine is a `Plan` | Step with a duplicate name; `from_step("x")` where `x` doesn't exist earlier in the plan; cyclic `depends`; tool-name target not in `tools=[]`. | Read the message — it names the offending step. Fix the plan before any LLM call runs. |
+| `GuardError` | Inside guard-aware callers | A guard raised instead of returning `GuardAction(allowed=False)`. | Return an explicit `GuardAction` with `allowed=False` + a message. Never raise from a guard. |
+| `ValidationError` (Pydantic) | When the provider returns a payload that doesn't match `output=SomeModel` | The model hallucinated extra fields, wrong types, or missing required fields. | Tighten the schema (use `strict=True` on the model / config), add few-shot examples to the system prompt, or use `llm_judge` as a repair loop. |
+| `ImportError: PyYAML required` | `GraphSchema.to_yaml` / `from_file` on a `.yaml` path | `pyyaml` not installed. | `pip install lazybridge[yaml]` or stick to JSON (`save("g.json")`). |
+| `ImportError: opentelemetry ...` | `OTelExporter()` | `opentelemetry-sdk` not installed. | `pip install lazybridge[otel]`. |
+| `TimeoutError` from supervisor / human engine | ``SupervisorEngine``/``HumanEngine`` with ``timeout`` set and no ``default`` | The human didn't respond in time. | Pass ``default="..."`` to return a fallback instead of raising. |
+| `KeyError` from `Plan.from_dict` | Loading a serialised plan | The registry is missing an entry for a callable/agent target. | Add the offending name to ``registry={}``; or drop that step; or keep only tool-name targets (strings survive without a registry). |
+| `RuntimeError: ... tool_choice` (provider) | Provider complaint about `tool_choice="parallel"` | Legacy code passing the deprecated literal. | Drop the argument — concurrent execution is always on. `"auto"` or `"any"` are the only accepted values post-v1. |
+| `DeprecationWarning` | Anywhere | Using a post-v1 deprecated API (e.g. `tool_choice="parallel"`). | The warning message says what to use instead. |
+| Stray `"<coroutine object ...>"` in output | `Tool.run_sync` on an async `func` (very old bug) | Pre-fix `run_sync` returned the coroutine without awaiting. | Upgrade to lazybridge ≥ 1.0.0 post-Tool-is-Tool fix. |
+| `Envelope.error.type == "GuardBlocked"` | After a guarded agent | A guard returned `allowed=False` on the output. | Read `env.error.message` for the guard's reason; adjust input or the guard's policy. |
+| `asyncio.InvalidStateError` in Jupyter | Calling `agent(task)` inside a running IPython kernel | The sync-to-async bridge in `Agent.__call__` hit an unexpected loop state. | Use `await agent.run(task)` in notebooks (async cell), or call from `asyncio.run(...)`. |

@@ -1,5 +1,4 @@
-# Errors — cause → fix
-
+## table
 | Error | Where it's raised | Likely cause | Fix |
 |---|---|---|---|
 | `PlanCompileError` | `Agent.__init__` when engine is a `Plan` | Step with a duplicate name; `from_step("x")` where `x` doesn't exist earlier in the plan; cyclic `depends`; tool-name target not in `tools=[]`. | Read the message — it names the offending step. Fix the plan before any LLM call runs. |

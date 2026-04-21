@@ -180,6 +180,181 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
 [agent](agent.md), [as_tool](as-tool.md),
 decision tree: [parallelism](../decisions/parallelism.md)
 
+## Native tools (web search, code execution, …)
+
+**signature**
+
+from lazybridge import Agent, NativeTool
+
+Agent("model", native_tools=[NativeTool.WEB_SEARCH, ...]) -> Agent
+
+# Accepted values (NativeTool enum):
+#   WEB_SEARCH       — web search (Anthropic, OpenAI, Google)
+#   CODE_EXECUTION   — sandboxed Python/JS (Anthropic, OpenAI)
+#   FILE_SEARCH      — file search over uploaded content (OpenAI)
+#   COMPUTER_USE     — screen control (Anthropic)
+#   GOOGLE_SEARCH    — Google grounded search (Google)
+#   GOOGLE_MAPS      — Google Maps grounding (Google)
+
+# String aliases also accepted:  native_tools=["web_search", "code_execution"]
+
+**rules**
+
+- Native tools run server-side at the provider. You don't write or host
+  them; you opt in by passing the enum.
+- Not every tool is supported by every provider. Using
+  ``NativeTool.GOOGLE_SEARCH`` on Anthropic raises at ``complete`` time.
+  Match the tool to the model's provider.
+- Native tools **coexist** with regular ``tools=[...]`` — the model may
+  choose to call a native tool, one of your functions, both in the same
+  turn, or neither.
+- ``native_tools=`` is a shortcut on Agent equivalent to
+  ``Agent(engine=LLMEngine(..., native_tools=[...]))``.
+- Grounded responses from search tools expose sources via
+  ``Envelope.metadata`` (``model``, ``provider``) and, where providers
+  return them, via raw ``CompletionResponse.grounding_sources``.
+
+**example**
+
+```python
+from lazybridge import Agent, NativeTool
+
+# Web search is one line.
+search = Agent("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH])
+print(search("what happened in AI news April 2026?").text())
+
+# Native + custom tools coexist.
+def read_report(path: str) -> str:
+    """Read a local markdown file."""
+    return open(path).read()
+
+analyst = Agent(
+    "claude-opus-4-7",
+    native_tools=[NativeTool.WEB_SEARCH, NativeTool.CODE_EXECUTION],
+    tools=[read_report],
+)
+analyst("cross-reference my report.md with current web consensus on the topic").text()
+
+# Strings work too — equivalent to the enum.
+Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
+```
+
+**pitfalls**
+
+- Mixing ``NativeTool.GOOGLE_SEARCH`` with an Anthropic model fails at
+  provider time, not at Agent construction. Match the enum to the
+  provider before you ship.
+- Some native tools (``COMPUTER_USE``) require additional setup or beta
+  flags on the provider's API. Check the provider's current docs.
+- Cost: native tool calls are billed by the provider (search queries,
+  code execution time). They appear in ``Envelope.metadata.cost_usd``
+  when the provider reports them.
+
+**see-also**
+
+[tool](tool.md), [agent](agent.md),
+[core_types](core-types.md)
+
+## Function → Tool (schema modes)
+
+**signature**
+
+# Three ways to turn a Python function into an LLM-callable Tool.
+
+Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
+     schema_llm: Any | None = None, strict: bool = False)
+
+# Mode recap:
+#   "signature" — parse type hints + docstring (default). No LLM cost.
+#   "llm"       — call an LLM to infer schema from the function body
+#                 and docstring.  Needs schema_llm= (an Agent).
+#   "hybrid"    — signature first; LLM fills gaps for missing hints.
+
+# Convenience APIs (no explicit Tool() call needed):
+wrap_tool(func_or_agent) -> Tool          # uniform wrapper
+build_tool_map(list_of_things) -> dict    # batch wrapping
+Agent(..., tools=[func])                  # wrap_tool applied automatically
+
+**rules**
+
+- ``mode="signature"`` is the default and produces a schema from type
+  hints + docstring (parameter types, return type, description, tool
+  name). No LLM is called. Fast, deterministic, free.
+- ``mode="llm"`` calls ``schema_llm`` (a cheap Agent) to synthesise a
+  JSON schema from the function source + docstring. Pays in tokens but
+  works for functions with incomplete or missing hints.
+- ``mode="hybrid"`` starts with ``"signature"`` and falls back to
+  ``"llm"`` only for parameters lacking hints. Best of both when your
+  codebase is mixed.
+- The schema is cached per ``Tool`` instance (first ``.definition()``
+  call computes it; subsequent calls reuse).
+- ``strict=True`` asks the provider to enforce the schema exactly (no
+  extra fields, no coercion). Available on Anthropic + OpenAI strict
+  modes; increases reliability at the cost of some flexibility.
+
+**example**
+
+```python
+from lazybridge import Agent, Tool
+
+# --- Signature mode (default, no LLM) -----------------------------
+def calculate(expression: str) -> float:
+    """Evaluate a basic arithmetic expression and return the result.
+
+    Supports +, -, *, /, parentheses.
+    """
+    return eval(expression)
+
+Agent("claude-opus-4-7", tools=[calculate])   # schema auto-inferred
+
+# --- LLM mode (schema synthesised by a cheap Agent) ---------------
+from lazybridge import Agent
+
+tiny = Agent.from_provider("anthropic", tier="cheap", name="schema_bot")
+
+def legacy_func(data, opts=None):
+    """Transform the incoming payload per options. data is a dict of
+    readings {timestamp: value}; opts controls resampling.
+    """
+    ...
+
+legacy_tool = Tool(legacy_func, mode="llm", schema_llm=tiny)
+Agent("claude-opus-4-7", tools=[legacy_tool])
+
+# --- Hybrid (signature where possible, LLM where missing) ---------
+def partial_hint(query: str, opts=None) -> list:
+    """Search and return matches. opts is a dict of filters."""
+    ...
+
+Agent("claude-opus-4-7",
+      tools=[Tool(partial_hint, mode="hybrid", schema_llm=tiny)])
+
+# --- wrap_tool: uniform conversion -------------------------------
+from lazybridge.tools import wrap_tool, build_tool_map
+
+tool_1 = wrap_tool(calculate)                  # function → Tool
+tool_2 = wrap_tool(legacy_tool)                 # Tool → Tool (idempotent)
+tool_3 = wrap_tool(Agent("claude-opus-4-7"))    # Agent → Tool (via as_tool)
+
+tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
+```
+
+**pitfalls**
+
+- ``mode="llm"`` without ``schema_llm=`` silently falls back to
+  ``"signature"`` (with warnings). Always pass the schema_llm if you
+  pick LLM / hybrid mode.
+- Calling ``Tool(func).definition()`` forces the schema computation.
+  If ``mode="llm"``, this triggers an LLM call at construction time —
+  don't build tools on import if you're latency-sensitive.
+- ``strict=True`` is opinionated about JSON schema shape. Tools that
+  rely on extra kwargs or variadic args may fail strict validation;
+  try without strict first.
+
+**see-also**
+
+[tool](tool.md), [agent](agent.md), [native_tools](native-tools.md)
+
 ## Envelope
 
 **signature**

@@ -78,6 +78,11 @@ class Agent:
         # Keyword alias for engine_or_model when passing a non-string Engine
         # (e.g. ``Agent(engine=SupervisorEngine(...))``).
         engine: "Any | None" = None,
+        # Provider-native server-side tools (WEB_SEARCH, CODE_EXECUTION, …).
+        # Accepted directly on Agent as a shortcut for
+        # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
+        # ``engine=`` is a non-LLM engine.
+        native_tools: "list[Any] | None" = None,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -85,9 +90,23 @@ class Agent:
             self.engine: Any = engine
         elif isinstance(engine_or_model, str):
             model_str = model or engine_or_model
-            self.engine = LLMEngine(model_str)
+            self.engine = LLMEngine(model_str, native_tools=native_tools)
         else:
             self.engine = engine_or_model
+
+        # If the caller passed native_tools but also supplied a pre-built
+        # engine, push the list onto the engine if it has the attribute.
+        # This lets ``Agent(engine=LLMEngine("claude"), native_tools=[...])``
+        # work the same as ``Agent("claude", native_tools=[...])``.
+        if native_tools and hasattr(self.engine, "native_tools"):
+            from lazybridge.core.types import NativeTool
+            resolved = [NativeTool(t) if isinstance(t, str) else t for t in native_tools]
+            # Merge without dup — preserve order of existing + append new.
+            existing = list(getattr(self.engine, "native_tools", []) or [])
+            for t in resolved:
+                if t not in existing:
+                    existing.append(t)
+            self.engine.native_tools = existing
 
         self._tools_raw = list(tools)
         self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)

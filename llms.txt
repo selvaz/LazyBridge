@@ -1,0 +1,29 @@
+# LazyBridge v1.0
+
+Zero-boilerplate Python agent framework. One `Agent`, swappable engines
+(LLM / Human / Supervisor / Plan), uniform tool contract: tools can be
+plain functions, Agents, or Agents-of-Agents. Parallelism is automatic
+when the engine decides; declared when you do.
+
+## Claude Skill (preferred for LLM assistants)
+
+LazyBridge ships its own Claude Skill with tier-organised reference.
+Load it on demand instead of ingesting the whole site:
+
+- [SKILL manifest](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/SKILL.md)
+- [Overview](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/00_overview.md)
+- [Basic tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/01_basic.md) — Agent, Tool, Envelope
+- [Mid tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/02_mid.md) — Memory, Store, Session, Guards, chain, parallel, as_tool, HumanEngine, EvalSuite
+- [Full tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/03_full.md) — Plan, Sentinels, SupervisorEngine, checkpoint, exporters, verify
+- [Advanced tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/04_advanced.md) — Engine protocol, BaseProvider, Plan.to_dict, register_provider_*
+- [Decision trees](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/05_decision_trees.md) — "when to use which"
+- [API reference](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/06_reference.md) — signature-first index
+- [Errors](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/99_errors.md) — cause → fix table
+
+## Human-facing site
+
+- [Quickstart](https://github.com/selvaz/LazyBridge/blob/main/docs/quickstart.md)
+- [Basic / Mid / Full / Advanced tiers](https://github.com/selvaz/LazyBridge/tree/main/docs/tiers)
+- [Per-topic guides](https://github.com/selvaz/LazyBridge/tree/main/docs/guides)
+- [Decision trees (mermaid)](https://github.com/selvaz/LazyBridge/tree/main/docs/decisions)
+- [Examples](https://github.com/selvaz/LazyBridge/tree/main/examples)

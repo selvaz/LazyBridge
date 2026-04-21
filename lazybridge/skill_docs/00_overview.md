@@ -10,7 +10,7 @@ One-shot or tool-calling agents. Text or structured output.
 No memory, no pipeline, no HIL. If you need state across calls
 or more than one agent, go to Mid.
 
-Covers: Agent, Tool, Envelope
+Covers: Agent, Tool, Native tools (web search, code execution, …), Function → Tool (schema modes), Envelope
 
 ### Mid
 Realistic apps. Conversation memory, shared state, console/verbose

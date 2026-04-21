@@ -1,5 +1,5 @@
 site_name: LazyBridge
-site_description: Zero-boilerplate multi-provider LLM agent framework
+site_description: One Agent, swappable engines, tool-is-tool composition, and Plans with compile-time validation.
 site_url: https://selvaz.github.io/LazyBridge/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
@@ -20,47 +20,89 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.sections
-    - navigation.expand
+    - navigation.tabs
+    - navigation.instant
     - navigation.top
     - content.code.copy
+    - content.tabs.link
     - search.suggest
 
 nav:
   - Home: index.md
-  - Getting Started: quickstart.md
-  - Guide:
-    - Agents: agents.md
-    - Tools: tools.md
-    - Sessions & Pipelines: sessions.md
-    - Pipelines (advanced): pipelines.md
-    - Context Injection: context.md
-    - Routing: routing.md
-    - Human-in-the-Loop: course/13-human-in-the-loop.md
-  - Course:
-    - Overview: course/index.md
-    - "1. Your First Agent": course/01-first-agent.md
-    - "2. Tools & Functions": course/02-tools.md
-    - "3. Structured Output": course/03-structured-output.md
-    - "4. Memory & Conversations": course/04-memory.md
-    - "5. Context Injection": course/05-context.md
-    - "6. Multi-Agent Pipelines": course/06-pipelines.md
-    - "7. Streaming": course/07-streaming.md
-    - "8. Guardrails & Safety": course/08-guardrails.md
-    - "9. Observability & Cost": course/09-observability.md
-    - "10. Evals & Testing": course/10-evals.md
-    - "11. Advanced & Production": course/11-advanced.md
-    - "12. Composition Patterns": course/12-composition.md
-    - "13. Human-in-the-Loop": course/13-human-in-the-loop.md
-  - Reference:
-    - API Quick Reference: reference.md
-  - Troubleshooting: troubleshooting.md
-  - Comparison: comparison.md
+  - Quickstart: quickstart.md
+
+  - Tiers:
+    - Basic: tiers/basic.md
+    - Mid: tiers/mid.md
+    - Full: tiers/full.md
+    - Advanced: tiers/advanced.md
+
+  - Guides:
+    - Basic:
+      - Agent: guides/agent.md
+      - Tool: guides/tool.md
+      - Native tools: guides/native-tools.md
+      - Function → Tool: guides/tool-schema.md
+      - Envelope: guides/envelope.md
+    - Mid:
+      - Memory: guides/memory.md
+      - Store: guides/store.md
+      - Session & tracing: guides/session.md
+      - Guards: guides/guards.md
+      - Agent.chain: guides/chain.md
+      - Agent.parallel: guides/agent-parallel.md
+      - Agent.as_tool: guides/as-tool.md
+      - HumanEngine: guides/human-engine.md
+      - EvalSuite: guides/evals.md
+    - Full:
+      - Plan: guides/plan.md
+      - Sentinels: guides/sentinels.md
+      - Parallel plan steps: guides/parallel-steps.md
+      - SupervisorEngine: guides/supervisor.md
+      - Checkpoint & resume: guides/checkpoint.md
+      - Exporters: guides/exporters.md
+      - GraphSchema: guides/graph-schema.md
+      - "verify=": guides/verify.md
+    - Advanced:
+      - Engine protocol: guides/engine-protocol.md
+      - BaseProvider: guides/base-provider.md
+      - Plan serialization: guides/plan-serialize.md
+      - Provider registry: guides/register-provider.md
+      - core.types: guides/core-types.md
+
+  - Decision trees:
+    - Index: decisions/index.md
+    - Pick your tier: decisions/pick-tier.md
+    - Return type: decisions/return-type.md
+    - State layer: decisions/state-layer.md
+    - Composition: decisions/composition.md
+    - Parallelism: decisions/parallelism.md
+    - HumanEngine vs SupervisorEngine: decisions/human-engine-vs-supervisor.md
+    - "verify= placement": decisions/verify-placement.md
+    - Checkpoint & resume: decisions/checkpoint.md
+    - Need Advanced?: decisions/need-advanced.md
+
+  - Reference: reference.md
+  - Errors: errors.md
+  - Claude Skill:
+    - Manifest: skill/SKILL.md
+    - Overview: skill/00_overview.md
+    - Basic: skill/01_basic.md
+    - Mid: skill/02_mid.md
+    - Full: skill/03_full.md
+    - Advanced: skill/04_advanced.md
+    - Decision trees: skill/05_decision_trees.md
+    - Reference: skill/06_reference.md
+    - Errors: skill/99_errors.md
 
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - admonition
