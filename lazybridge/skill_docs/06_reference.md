@@ -131,7 +131,7 @@ Run multiple guards in sequence; first block wins.
 
 ### `LLMGuard(agent: 'Any', policy: 'str' = 'block harmful content') -> 'None'`
 
-Use an Agent as a judge. Returns block if judge says 'block' or 'deny'.
+Use an Agent as a judge. Returns block if the verdict begins with 'block' or 'deny'.
 
 ### `EvalCase(input: 'str', check: 'Callable[[str], bool] | Callable[[str, Any], bool]', expected: 'Any' = None, description: 'str' = '') -> None`
 
