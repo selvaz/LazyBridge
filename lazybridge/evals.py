@@ -125,30 +125,54 @@ async def verify_with_retry(
     *,
     max_verify: int = 3,
 ) -> Any:
-    """Run verify_agent on agent output; retry with feedback up to max_verify times."""
+    """Run ``agent`` and gate its output through ``verify_agent``.
+
+    If the judge rejects, retry the ORIGINAL task with the judge's
+    feedback appended as context.  Up to ``max_verify`` attempts; the
+    last attempt is returned as-is even if still rejected.
+
+    Pre-fix, each retry appended feedback to the previous retry's
+    ``env.task`` — so by attempt 3 the task was the original prompt
+    layered with two feedback paragraphs, and the judge's
+    ``"Original task: {env.task}"`` line was showing the already-
+    modified task rather than the user's real input.  Now we cache
+    the original task / context outside the loop and rebuild a clean
+    envelope every attempt.
+    """
     from lazybridge.envelope import Envelope
 
+    original_task = getattr(env, "task", None) or ""
+    original_context = getattr(env, "context", None)
+    current_env = env
+    result: Any = None
+
     for attempt in range(max_verify):
-        result = await agent.run(env)
+        result = await agent.run(current_env)
+
         if not hasattr(verify_agent, "run"):
-            # Plain callable judge
+            # Plain callable judge.
             verdict = verify_agent(result.text())
-            if str(verdict).lower().startswith("approved"):
-                return result
-            if attempt == max_verify - 1:
-                return result
-            # Inject feedback for next attempt
-            feedback = str(verdict)
-            env = Envelope(task=f"{env.task}\n\nFeedback from judge: {feedback}", context=env.context)
+            approved = str(verdict).lower().startswith("approved")
         else:
             verdict_env = await verify_agent.run(
-                f"Evaluate this output:\n{result.text()}\n\nOriginal task: {env.task}\n\nApproved or rejected (with reason)?"
+                f"Evaluate this output:\n{result.text()}\n\n"
+                f"Original task: {original_task}\n\n"
+                f"Approved or rejected (with reason)?"
             )
             verdict = verdict_env.text()
-            if verdict.strip().lower().startswith("approved"):
-                return result
-            if attempt == max_verify - 1:
-                return result
-            env = Envelope(task=f"{env.task}\n\nFeedback: {verdict}", context=env.context)
+            approved = verdict.strip().lower().startswith("approved")
+
+        if approved or attempt == max_verify - 1:
+            return result
+
+        # Rebuild from the pristine original task.  Feedback goes into
+        # the context slot rather than concatenated onto the task so
+        # the judge always sees the user's real question.
+        feedback = str(verdict)
+        feedback_ctx = f"Feedback from judge: {feedback}"
+        merged_context = (
+            f"{original_context}\n\n{feedback_ctx}" if original_context else feedback_ctx
+        )
+        current_env = Envelope(task=original_task, context=merged_context)
 
     return result

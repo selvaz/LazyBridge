@@ -134,11 +134,7 @@ class Agent:
         self.engine._agent_name = self.name
 
         # Register with session graph so it's visible in session.graph.to_json()
-        if self.session is not None and hasattr(self.session, "register_agent"):
-            try:
-                self.session.register_agent(self)
-            except Exception:
-                pass
+        _safe_register_agent(self.session, self)
 
         # Propagate session to nested Agents passed as tools (they become
         # part of the same observability surface — events from B called
@@ -150,17 +146,8 @@ class Agent:
             for raw in self._tools_raw:
                 if isinstance(raw, Agent) and raw.session is None:
                     raw.session = self.session
-                    if hasattr(self.session, "register_agent"):
-                        try:
-                            self.session.register_agent(raw)
-                        except Exception:
-                            pass
-                    # Also wire the graph edge so the topology is explicit.
-                    if hasattr(self.session, "register_tool_edge"):
-                        try:
-                            self.session.register_tool_edge(self, raw, label="as_tool")
-                        except Exception:
-                            pass
+                    _safe_register_agent(self.session, raw)
+                    _safe_register_tool_edge(self.session, self, raw, label="as_tool")
 
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
@@ -433,6 +420,46 @@ class Agent:
                 parts.append(text)
         merged = "\n\n".join(p for p in parts if p)
         return Envelope(task=env.task, context=merged or env.context, payload=env.payload)
+
+
+def _safe_register_agent(session: Any, agent: "Agent") -> None:
+    """Register ``agent`` on ``session.graph`` if possible, warning on failure.
+
+    Pre-fix this was a silent ``try: ... except Exception: pass`` at
+    three call sites — a buggy ``register_agent`` on a custom Session
+    subclass would silently drop graph entries and nobody would know.
+    """
+    if session is None or not hasattr(session, "register_agent"):
+        return
+    try:
+        session.register_agent(agent)
+    except Exception as exc:
+        import warnings
+
+        warnings.warn(
+            f"session.register_agent({getattr(agent, 'name', '?')!r}) raised "
+            f"{type(exc).__name__}: {exc}",
+            stacklevel=2,
+        )
+
+
+def _safe_register_tool_edge(
+    session: Any, outer: "Agent", inner: "Agent", *, label: str,
+) -> None:
+    """Register a graph edge between two agents, warning on failure."""
+    if session is None or not hasattr(session, "register_tool_edge"):
+        return
+    try:
+        session.register_tool_edge(outer, inner, label=label)
+    except Exception as exc:
+        import warnings
+
+        warnings.warn(
+            f"session.register_tool_edge({getattr(outer, 'name', '?')!r}→"
+            f"{getattr(inner, 'name', '?')!r}) raised "
+            f"{type(exc).__name__}: {exc}",
+            stacklevel=2,
+        )
 
 
 def _read_source(src: Any) -> str:

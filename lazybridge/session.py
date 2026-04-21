@@ -151,15 +151,50 @@ class Session:
         run_id: str | None = None,
     ) -> None:
         if self._redact:
-            payload = self._redact(payload)
+            # Validate the redactor's return: must stay a dict.  A
+            # misbehaving redactor used to either crash downstream on
+            # ``{**None}`` or silently wipe the payload.  Now we warn
+            # once per redactor callable and fall back to the original
+            # payload — observability stays honest.
+            result = self._redact(payload)
+            if isinstance(result, dict):
+                payload = result
+            else:
+                import warnings
+
+                if not getattr(self._redact, "_lazybridge_warned", False):
+                    warnings.warn(
+                        f"Session redact callable returned "
+                        f"{type(result).__name__!s}; expected dict. "
+                        f"Payload left unredacted.",
+                        stacklevel=2,
+                    )
+                    try:
+                        self._redact._lazybridge_warned = True  # type: ignore[attr-defined]
+                    except AttributeError:
+                        pass   # built-in / frozen callable — best-effort
         self.events.record(event_type, payload, run_id=run_id)
         exporters = self._exporters  # snapshot for thread safety
         event_dict = {"event_type": str(event_type), "session_id": self.session_id, "run_id": run_id, **payload}
         for exp in exporters:
             try:
                 exp.export(event_dict)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Warn once per exporter instance so a buggy exporter
+                # is visible in logs instead of silently eating events.
+                if not getattr(exp, "_lazybridge_export_warned", False):
+                    import warnings
+
+                    warnings.warn(
+                        f"Exporter {exp.__class__.__name__} raised "
+                        f"{type(exc).__name__}: {exc}. Further failures "
+                        f"from this exporter will be suppressed.",
+                        stacklevel=2,
+                    )
+                    try:
+                        exp._lazybridge_export_warned = True  # type: ignore[attr-defined]
+                    except AttributeError:
+                        pass
 
     def usage_summary(self) -> dict[str, Any]:
         """Aggregate token usage and cost across all agent runs in this session.

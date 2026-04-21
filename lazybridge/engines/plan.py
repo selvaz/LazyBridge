@@ -198,6 +198,14 @@ class Plan:
         "completed_steps": [...]}``. The in-memory ``history`` restarts
         empty on resume — only ``writes``-bucket values survive across
         process boundaries.
+
+        .. warning:: **checkpoint_key must be unique per concurrent run.**
+           The read-modify-write sequence that persists state after each
+           step is NOT atomic across processes.  Two Plan instances
+           sharing a ``Store`` and the same ``checkpoint_key`` executing
+           concurrently can corrupt each other's ``kv`` / ``next_step``
+           state.  Derive distinct keys per run (e.g. ``f"pipeline-{uid}"``)
+           when you need parallelism.
         """
         self.steps = list(steps)
         self.max_iterations = max_iterations
