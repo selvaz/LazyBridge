@@ -294,38 +294,92 @@ class Plan:
         was_routed = False  # True when the current step was reached via out.next, not linear order
         effective_store = store or self.store
 
+        all_step_names = [s.name for s in self.steps]
+
         while current_name and iterations < self.max_iterations:
             iterations += 1
             step = step_map.get(current_name)
             if not step:
                 break
 
-            # Resolve task
-            step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
-            # Resolve context
-            ctx_parts: list[str] = []
-            if step.context is not None:
-                ctx_env = self._resolve_sentinel(step.context, prev_env, start_env, history, kv)
-                if ctx_env.context:
-                    ctx_parts.append(ctx_env.context)
-                if ctx_env.payload and isinstance(ctx_env.payload, str):
-                    ctx_parts.append(ctx_env.payload)
-            # Inject sources (live view)
-            for src in step.sources:
-                if hasattr(src, "text"):
-                    ctx_parts.append(src.text())
+            # ──────────────────────────────────────────────────────────────
+            # Parallel branch dispatch
+            # ──────────────────────────────────────────────────────────────
+            # When the current step is ``parallel=True``, collect every
+            # consecutive ``parallel=True`` step in the DECLARED order and
+            # run them concurrently via ``asyncio.gather``.  Each branch
+            # sees the SAME ``prev_env`` / ``history`` / ``kv`` snapshot —
+            # a branch cannot observe its siblings' effects.  State updates
+            # apply sequentially after the gather so ``writes`` are
+            # deterministic.  Routing (``out.next``) is ignored on parallel
+            # branches — control flow after the group falls through to the
+            # next declared step in linear order (the conventional "join").
+            if step.parallel:
+                try:
+                    idx = all_step_names.index(step.name)
+                except ValueError:
+                    idx = -1
+                group = [step]
+                while idx + 1 < len(all_step_names):
+                    idx += 1
+                    nxt = step_map.get(all_step_names[idx])
+                    if nxt and nxt.parallel:
+                        group.append(nxt)
+                    else:
+                        idx -= 1  # don't consume the non-parallel step
+                        break
 
-            merged_ctx = "\n\n".join(ctx_parts) if ctx_parts else None
-            step_env = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
+                # Each branch gets an isolated snapshot of history/kv.
+                hist_snap = list(history)
+                kv_snap = dict(kv)
+                raw = await asyncio.gather(
+                    *[self._execute_one(
+                        s, prev_env, start_env, hist_snap, kv_snap,
+                        tool_map=tool_map, session=session, run_id=run_id,
+                    ) for s in group],
+                    return_exceptions=True,
+                )
 
-            # Execute the step's tool or agent
-            result_env = await self._exec_step(step, step_env, tool_map=tool_map, session=session, run_id=run_id)
-            result_env = Envelope(
-                task=step_env.task,
-                context=step_env.context,
-                payload=result_env if not isinstance(result_env, Envelope) else result_env.payload,
-                metadata=result_env.metadata if isinstance(result_env, Envelope) else EnvelopeMetadata(),
-                error=result_env.error if isinstance(result_env, Envelope) else None,
+                # Apply writes / history sequentially; bail on first error.
+                last_ok: Envelope | None = None
+                for s, r in zip(group, raw):
+                    if isinstance(r, Exception):
+                        err_env = Envelope.error_envelope(r)
+                        self._save_checkpoint(
+                            next_step=s.name, kv=kv, completed=completed, status="failed",
+                        )
+                        return err_env
+                    if r.error is not None:
+                        self._save_checkpoint(
+                            next_step=s.name, kv=kv, completed=completed, status="failed",
+                        )
+                        return r
+                    if s.writes and r.payload is not None:
+                        kv[s.writes] = r.payload
+                        if effective_store:
+                            effective_store.write(s.writes, r.payload)
+                    history.append(StepResult(step_name=s.name, envelope=r))
+                    completed.append(s.name)
+                    last_ok = r
+
+                # Advance past the whole parallel group.
+                current_name = (
+                    all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
+                )
+                prev_env = last_ok or prev_env
+                was_routed = False  # routing does not apply to parallel groups
+                self._save_checkpoint(
+                    next_step=current_name, kv=kv, completed=completed,
+                    status="running" if current_name else "done",
+                )
+                continue
+
+            # ──────────────────────────────────────────────────────────────
+            # Sequential path
+            # ──────────────────────────────────────────────────────────────
+            result_env = await self._execute_one(
+                step, prev_env, start_env, history, kv,
+                tool_map=tool_map, session=session, run_id=run_id,
             )
 
             # If the step errored, persist a "failed" checkpoint that
@@ -364,6 +418,49 @@ class Plan:
 
         return prev_env
 
+    async def _execute_one(
+        self,
+        step: "Step",
+        prev_env: Envelope,
+        start_env: Envelope,
+        history: list["StepResult"],
+        kv: dict[str, Any],
+        *,
+        tool_map: dict[str, "Tool"],
+        session: "Session | None",
+        run_id: str,
+    ) -> Envelope:
+        """Resolve sentinels, build the step env, and execute the step.
+
+        Returns a normalised ``Envelope``.  Does NOT mutate ``history`` /
+        ``kv`` — the caller applies those deterministically so parallel
+        branches see a consistent snapshot.
+        """
+        step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
+
+        ctx_parts: list[str] = []
+        if step.context is not None:
+            ctx_env = self._resolve_sentinel(step.context, prev_env, start_env, history, kv)
+            if ctx_env.context:
+                ctx_parts.append(ctx_env.context)
+            if ctx_env.payload and isinstance(ctx_env.payload, str):
+                ctx_parts.append(ctx_env.payload)
+        for src in step.sources:
+            if hasattr(src, "text"):
+                ctx_parts.append(src.text())
+
+        merged_ctx = "\n\n".join(ctx_parts) if ctx_parts else None
+        step_env = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
+
+        result_env = await self._exec_step(step, step_env, tool_map=tool_map, session=session, run_id=run_id)
+        return Envelope(
+            task=step_env.task,
+            context=step_env.context,
+            payload=result_env if not isinstance(result_env, Envelope) else result_env.payload,
+            metadata=result_env.metadata if isinstance(result_env, Envelope) else EnvelopeMetadata(),
+            error=result_env.error if isinstance(result_env, Envelope) else None,
+        )
+
     def _resolve_sentinel(
         self,
         sentinel: Sentinel | str,
@@ -376,8 +473,13 @@ class Plan:
         # step's task" — i.e. real chain semantics.  Without this promotion
         # the default behaviour was for every step to receive the original
         # user task, so ``Plan(Step(a), Step(b))`` was NOT actually a chain.
+        # We carry metadata through so token / cost accounting doesn't get
+        # reset at every sentinel boundary.
         if isinstance(sentinel, _FromPrev):
-            return Envelope(task=prev.text(), context=prev.context, payload=prev.payload)
+            return Envelope(
+                task=prev.text(), context=prev.context, payload=prev.payload,
+                metadata=prev.metadata,
+            )
         if isinstance(sentinel, _FromStart):
             return start
         # from_step / from_parallel also forward the referenced step's
@@ -386,13 +488,19 @@ class Plan:
             for r in reversed(history):
                 if r.step_name == sentinel.name:
                     e = r.envelope
-                    return Envelope(task=e.text(), context=e.context, payload=e.payload)
+                    return Envelope(
+                        task=e.text(), context=e.context, payload=e.payload,
+                        metadata=e.metadata,
+                    )
             return start
         if isinstance(sentinel, _FromParallel):
             for r in reversed(history):
                 if r.step_name == sentinel.name:
                     e = r.envelope
-                    return Envelope(task=e.text(), context=e.context, payload=e.payload)
+                    return Envelope(
+                        task=e.text(), context=e.context, payload=e.payload,
+                        metadata=e.metadata,
+                    )
             return start
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)
