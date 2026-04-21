@@ -62,16 +62,29 @@ def _derive_provider_model(agent: Any) -> tuple[str, str]:
     Preference order:
       1. Explicit ``_provider_name`` / ``_model_name`` attributes (legacy
          duck-type and tests).
-      2. ``agent.engine.provider`` / ``agent.engine.model`` on v1 Agent.
-      3. Empty strings.
+      2. ``agent.engine.provider`` / ``agent.engine.model`` on v1 Agent
+         backed by LLMEngine.
+      3. Engine class name as fallback (``HumanEngine``,
+         ``SupervisorEngine``, ``Plan``, ``_RelayEngine``, …) so nodes
+         for non-LLM agents don't render as empty strings in dumps.
+      4. Empty strings if the agent truly exposes nothing useful.
     """
     provider = getattr(agent, "_provider_name", None)
     model = getattr(agent, "_model_name", None)
+    engine = getattr(agent, "engine", None)
     if provider is None:
-        provider = getattr(getattr(agent, "engine", None), "provider", "") or ""
+        provider = getattr(engine, "provider", None)
     if model is None:
-        model = getattr(getattr(agent, "engine", None), "model", "") or ""
-    return str(provider), str(model)
+        model = getattr(engine, "model", None)
+
+    # Fallback: name the engine class so HumanEngine / SupervisorEngine /
+    # Plan nodes aren't visually indistinguishable from "no engine".
+    if not provider and engine is not None:
+        provider = engine.__class__.__name__
+    if not model and engine is not None:
+        model = engine.__class__.__name__
+
+    return str(provider or ""), str(model or "")
 
 
 # ---------------------------------------------------------------------------

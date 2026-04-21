@@ -128,8 +128,12 @@ class LLMEngine:
         ("contains",  "deepseek", "deepseek"),
     ]
 
-    #: Fallback provider when nothing matches.
-    _PROVIDER_DEFAULT: str = "anthropic"
+    #: Fallback provider when nothing matches.  A warning is emitted on
+    #: fallback so ``Agent("grok-2")`` (an unrecognised model) does NOT
+    #: silently get routed to Anthropic and fail with a cryptic API-side
+    #: error.  Set to ``None`` in a subclass to disable the fallback and
+    #: raise ``ValueError`` instead.
+    _PROVIDER_DEFAULT: "str | None" = "anthropic"
 
     @classmethod
     def register_provider_alias(cls, alias: str, provider: str) -> None:
@@ -171,6 +175,25 @@ class LLMEngine:
                 return provider
             if kind == "startswith" and m.startswith(pattern):
                 return provider
+        # Nothing matched — warn loudly rather than silently route to
+        # the default provider.  Raising would break the "no-config
+        # Agent('some-model')" ergonomic, so we stick with a warning
+        # and let the provider surface its own "unknown model" error.
+        if cls._PROVIDER_DEFAULT is None:
+            raise ValueError(
+                f"No provider rule matches model {model!r} and no default is "
+                f"configured. Register a rule via "
+                f"LLMEngine.register_provider_rule(...) or set "
+                f"_PROVIDER_DEFAULT on a subclass."
+            )
+        import warnings
+
+        warnings.warn(
+            f"No provider rule matches model {model!r}; defaulting to "
+            f"{cls._PROVIDER_DEFAULT!r}. Register a rule via "
+            f"LLMEngine.register_provider_rule({model!r}, <provider>) to silence.",
+            stacklevel=3,
+        )
         return cls._PROVIDER_DEFAULT
 
     def _make_executor(self) -> Executor:
@@ -212,8 +235,16 @@ class LLMEngine:
             return Envelope.error_envelope(exc)
 
         latency_ms = (time.monotonic() - t_start) * 1000
-        result.metadata.latency_ms = latency_ms
-        result.metadata.run_id = run_id
+        # Rebuild metadata via ``model_copy`` so we don't rely on
+        # Pydantic v2's default-mutable semantics.  This stays correct
+        # even if a future version ships with ``frozen=True`` on
+        # EnvelopeMetadata.
+        result = result.model_copy(update={
+            "metadata": result.metadata.model_copy(update={
+                "latency_ms": latency_ms,
+                "run_id": run_id,
+            }),
+        })
 
         if session:
             session.emit(
