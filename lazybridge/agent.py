@@ -229,16 +229,22 @@ class Agent:
     # ------------------------------------------------------------------
 
     def __call__(self, task: "str | Envelope") -> Envelope:
+        # Detect whether we're already inside a running event loop.
+        # ``asyncio.get_running_loop`` is the forward-compatible way — it
+        # raises ``RuntimeError`` when there is no current loop, unlike
+        # the deprecated ``get_event_loop`` which implicitly creates one.
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    fut = pool.submit(asyncio.run, self.run(task))
-                    return fut.result()
-            return loop.run_until_complete(self.run(task))
+            asyncio.get_running_loop()
         except RuntimeError:
+            # No loop running — safe to use asyncio.run directly.
             return asyncio.run(self.run(task))
+
+        # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
+        # We need a fresh loop on a worker thread so we don't try to nest.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, self.run(task)).result()
 
     # ------------------------------------------------------------------
     # Tool exposure
@@ -358,7 +364,11 @@ class Agent:
         """
         from lazybridge.engines.llm import LLMEngine
 
-        return cls(engine=LLMEngine(provider), model=tier, **kwargs)
+        # Pass both the tier (as the provider-facing model string, which
+        # the BaseProvider resolves via its tier map) AND the explicit
+        # provider name (so _infer_provider doesn't fall back to the
+        # default when the tier alone isn't a recognised model).
+        return cls(engine=LLMEngine(tier, provider=provider), **kwargs)
 
     @classmethod
     def chain(cls, *agents: "Agent", **kwargs: Any) -> "Agent":

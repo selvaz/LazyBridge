@@ -89,17 +89,18 @@ class Tool:
             return self.func(**kwargs)
 
         coro_factory = lambda: self.func(**kwargs)  # noqa: E731
+        # ``asyncio.get_running_loop`` is the forward-compatible check
+        # (it raises cleanly when no loop is running, unlike the
+        # deprecated ``get_event_loop``).  When a loop is running we
+        # hop to a worker thread so we never try to nest.
         try:
-            loop = asyncio.get_event_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro_factory())
-        if loop.is_running():
-            import concurrent.futures
+        import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                fut = pool.submit(asyncio.run, coro_factory())
-                return fut.result()
-        return loop.run_until_complete(coro_factory())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro_factory()).result()
 
     def __repr__(self) -> str:
         return f"Tool({self.name!r})"

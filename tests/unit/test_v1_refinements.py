@@ -123,9 +123,18 @@ def test_agent_from_engine_accepts_plan():
 
 
 def test_agent_from_provider_applies_tier():
+    """Tier must reach the engine.model so BaseProvider.resolve_model_alias
+    maps it to the concrete model.  Pre-fix, ``model=tier`` was passed to
+    ``Agent.__init__`` which silently ignored it when ``engine=`` was
+    already supplied — the tier was lost.
+    """
     ag = Agent.from_provider("anthropic", tier="top", name="y")
-    # provider string carried on engine
-    assert ag.engine.model == "anthropic"
+    assert ag.engine.model == "top"          # tier reaches the engine
+    assert ag.engine.provider == "anthropic"  # explicit provider preserved
+
+    ag_cheap = Agent.from_provider("openai", tier="cheap", name="z")
+    assert ag_cheap.engine.model == "cheap"
+    assert ag_cheap.engine.provider == "openai"
 
 
 # ---------------------------------------------------------------------------

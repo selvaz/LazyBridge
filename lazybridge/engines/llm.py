@@ -58,6 +58,7 @@ class LLMEngine:
         self,
         model: str,
         *,
+        provider: str | None = None,
         thinking: bool = False,
         max_turns: int = 10,
         tool_choice: Literal["auto", "any"] = "auto",
@@ -90,9 +91,11 @@ class LLMEngine:
             NativeTool(t) if isinstance(t, str) else t
             for t in (native_tools or [])
         ]
-        # Expose inferred provider name so tooling (e.g. GraphSchema) can
-        # introspect it without recomputing the heuristic.
-        self.provider = self._infer_provider(model)
+        # Provider may be passed explicitly (used by Agent.from_provider
+        # when the model is a tier alias like "top" / "cheap" that
+        # _infer_provider can't route on its own).  Falls back to the
+        # inference heuristic on the model string.
+        self.provider = provider or self._infer_provider(model)
 
     # Provider name aliases accepted as the model argument
     _PROVIDER_NAMES = {"anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek"}
@@ -171,14 +174,12 @@ class LLMEngine:
         return cls._PROVIDER_DEFAULT
 
     def _make_executor(self) -> Executor:
-        provider = self._infer_provider(self.model)
-        # When model is a provider name or tier alias ("top", "cheap", etc.)
-        # pass model=None and let the provider resolve via its tier map + default_model.
-        if self.model.lower() in self._PROVIDER_NAMES or self.model.lower() in (
-            "top", "mid", "cheap", "super_cheap"
-        ):
-            return Executor(provider, model=self.model)
-        return Executor(provider, model=self.model)
+        # Use ``self.provider`` (set at __init__, possibly explicitly by
+        # Agent.from_provider) rather than re-running inference.  The
+        # BaseProvider handles tier / provider-name aliases on the model
+        # string via ``resolve_model_alias``; there is no reason to
+        # special-case them here.
+        return Executor(self.provider, model=self.model)
 
     # ------------------------------------------------------------------
     # run()
