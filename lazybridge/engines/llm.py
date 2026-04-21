@@ -79,28 +79,78 @@ class LLMEngine:
     # Provider name aliases accepted as the model argument
     _PROVIDER_NAMES = {"anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek"}
 
-    @staticmethod
-    def _infer_provider(model: str) -> str:
+    #: Exact-match provider aliases — first lookup.  ``Agent("anthropic")`` and
+    #: ``Agent("claude")`` both resolve to the ``anthropic`` provider.  Users
+    #: can extend this at runtime via :meth:`register_provider_alias`.
+    _PROVIDER_ALIASES: dict[str, str] = {
+        "anthropic": "anthropic",
+        "claude": "anthropic",
+        "openai": "openai",
+        "gpt": "openai",
+        "google": "google",
+        "gemini": "google",
+        "deepseek": "deepseek",
+    }
+
+    #: Ordered substring / prefix rules applied when no exact alias matches.
+    #: Each entry is ``(kind, pattern, provider)`` where ``kind`` is
+    #: ``"contains"`` or ``"startswith"``.  First match wins.  Users can
+    #: prepend new rules via :meth:`register_provider_rule` — newly
+    #: registered rules take priority over built-ins so shipping a new
+    #: "claude-opus-5-*" alias is one call, not a code edit.
+    _PROVIDER_RULES: list[tuple[str, str, str]] = [
+        ("contains",  "claude",   "anthropic"),
+        ("contains",  "gpt",      "openai"),
+        ("startswith", "o1",      "openai"),
+        ("startswith", "o3",      "openai"),
+        ("contains",  "gemini",   "google"),
+        ("contains",  "deepseek", "deepseek"),
+    ]
+
+    #: Fallback provider when nothing matches.
+    _PROVIDER_DEFAULT: str = "anthropic"
+
+    @classmethod
+    def register_provider_alias(cls, alias: str, provider: str) -> None:
+        """Register an exact-match model-string → provider alias.
+
+        Example::
+
+            LLMEngine.register_provider_alias("mistral", "mistral")
+            Agent("mistral")   # resolves to the mistral provider
+        """
+        cls._PROVIDER_ALIASES = {**cls._PROVIDER_ALIASES, alias.lower(): provider}
+
+    @classmethod
+    def register_provider_rule(
+        cls,
+        pattern: str,
+        provider: str,
+        *,
+        kind: Literal["contains", "startswith"] = "contains",
+    ) -> None:
+        """Register a substring / prefix routing rule.
+
+        New rules take priority over built-ins so you can override default
+        routing without editing the framework source::
+
+            LLMEngine.register_provider_rule("claude-opus-5", "anthropic")
+            Agent("claude-opus-5-20260701")   # routed to anthropic
+        """
+        cls._PROVIDER_RULES = [(kind, pattern.lower(), provider), *cls._PROVIDER_RULES]
+
+    @classmethod
+    def _infer_provider(cls, model: str) -> str:
         m = model.lower()
-        # Explicit provider name
-        if m in ("anthropic", "claude"):
-            return "anthropic"
-        if m in ("openai", "gpt"):
-            return "openai"
-        if m in ("google", "gemini"):
-            return "google"
-        if m == "deepseek":
-            return "deepseek"
-        # Model-string heuristics
-        if "claude" in m:
-            return "anthropic"
-        if "gpt" in m or m.startswith("o1") or m.startswith("o3"):
-            return "openai"
-        if "gemini" in m:
-            return "google"
-        if "deepseek" in m:
-            return "deepseek"
-        return "anthropic"
+        alias = cls._PROVIDER_ALIASES.get(m)
+        if alias is not None:
+            return alias
+        for kind, pattern, provider in cls._PROVIDER_RULES:
+            if kind == "contains" and pattern in m:
+                return provider
+            if kind == "startswith" and m.startswith(pattern):
+                return provider
+        return cls._PROVIDER_DEFAULT
 
     def _make_executor(self) -> Executor:
         provider = self._infer_provider(self.model)
