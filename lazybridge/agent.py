@@ -283,24 +283,28 @@ class Agent:
         effective_desc = description or self.description or f"Run the {effective_name} agent."
 
         if verify is None:
-            async def _run(task: str) -> str:
-                env = await agent.run(task)
-                return env.text()
+            async def _run(task: str) -> "Envelope":
+                return await agent.run(task)
         else:
-            async def _run(task: str) -> str:  # type: ignore[misc]
-                from lazybridge.envelope import Envelope
+            async def _run(task: str) -> "Envelope":  # type: ignore[misc]
+                from lazybridge.envelope import Envelope as _Env
                 from lazybridge.evals import verify_with_retry
 
-                env = Envelope.from_task(str(task))
-                result = await verify_with_retry(
+                env = _Env.from_task(str(task))
+                return await verify_with_retry(
                     agent, env, verify, max_verify=max_verify,
                 )
-                return result.text()
 
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc
 
-        return Tool(_run, name=effective_name, description=effective_desc, mode="signature")
+        return Tool(
+            _run,
+            name=effective_name,
+            description=effective_desc,
+            mode="signature",
+            returns_envelope=True,
+        )
 
     def definition(self) -> Any:
         """ToolDefinition for this agent — used when passed in tools=[] of another agent."""

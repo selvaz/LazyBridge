@@ -269,6 +269,12 @@ class LLMEngine:
 
         total_in = total_out = 0
         cost = 0.0
+        # Nested aggregation: when a tool returns an ``Envelope`` (an
+        # Agent wrapped via ``as_tool``), its own metadata is added to
+        # these buckets so the outer Envelope reflects total pipeline
+        # cost without double-counting with ``total_in`` / ``total_out``.
+        nested_in = nested_out = 0
+        nested_cost = 0.0
         model_used: str | None = None
 
         for turn in range(self.max_turns):
@@ -337,6 +343,9 @@ class LLMEngine:
                         input_tokens=total_in,
                         output_tokens=total_out,
                         cost_usd=cost,
+                        nested_input_tokens=nested_in,
+                        nested_output_tokens=nested_out,
+                        nested_cost_usd=nested_cost,
                         model=model_used,
                         provider=executor._provider.__class__.__name__,
                     ),
@@ -363,12 +372,31 @@ class LLMEngine:
 
             result_blocks: list[Any] = []
             for tc, tr in zip(resp.tool_calls, raw_results):
+                # Detect Envelope-returning tools (agent-as-tool,
+                # verified tools): preserve their metadata and error
+                # state, stringify via .text() for the provider.
+                if isinstance(tr, Envelope):
+                    # Aggregate usage. Include the nested Envelope's
+                    # own ``nested_*`` so aggregation is transitive
+                    # across arbitrarily-deep agent trees.
+                    nm = tr.metadata
+                    nested_in += (nm.input_tokens + nm.nested_input_tokens)
+                    nested_out += (nm.output_tokens + nm.nested_output_tokens)
+                    nested_cost += (nm.cost_usd + nm.nested_cost_usd)
+                    content = tr.text()
+                    is_err = not tr.ok
+                elif isinstance(tr, Exception):
+                    content = f"Tool error: {tr}"
+                    is_err = True
+                else:
+                    content = str(tr)
+                    is_err = False
                 result_blocks.append(
                     ToolResultContent(
                         tool_use_id=tc.id,
-                        content=str(tr),
+                        content=content,
                         tool_name=tc.name,
-                        is_error=isinstance(tr, Exception),
+                        is_error=is_err,
                     )
                 )
             messages.append(Message(role=Role.USER, content=result_blocks))
@@ -380,8 +408,11 @@ class LLMEngine:
                 message=f"Reached max_turns={self.max_turns}",
                 retryable=False,
             ),
-            metadata=EnvelopeMetadata(input_tokens=total_in, output_tokens=total_out,
-                                      cost_usd=cost, model=model_used),
+            metadata=EnvelopeMetadata(
+                input_tokens=total_in, output_tokens=total_out, cost_usd=cost,
+                nested_input_tokens=nested_in, nested_output_tokens=nested_out,
+                nested_cost_usd=nested_cost, model=model_used,
+            ),
         )
 
     async def _stream_turn(

@@ -29,6 +29,7 @@ class Tool:
         mode: Literal["signature", "llm", "hybrid"] = "signature",
         schema_llm: Any | None = None,
         strict: bool = False,
+        returns_envelope: bool = False,
     ) -> None:
         self.func = func
         self.name = name or func.__name__
@@ -37,6 +38,13 @@ class Tool:
         self.mode = mode
         self.schema_llm = schema_llm
         self.strict = strict
+        #: When ``True``, ``func`` returns an ``Envelope`` instead of a
+        #: plain Python value.  Engines aware of this hint will preserve
+        #: the inner envelope's metadata (tokens / cost / error) when
+        #: aggregating results from a turn's tool calls.  The flag is
+        #: set automatically by ``wrap_tool`` for Agents wrapped via
+        #: ``agent.as_tool()``.
+        self.returns_envelope = returns_envelope
         self._definition: ToolDefinition | None = None
         self._lock = threading.Lock()
 
@@ -112,12 +120,22 @@ def wrap_tool(obj: Any) -> Tool:
 
 
 def _agent_as_tool(agent: Any) -> Tool:
-    """Expose an Agent as a Tool with signature (task: str) -> str."""
-    import asyncio
+    """Expose an Agent as a Tool with signature (task: str) -> Envelope.
 
-    async def _run(task: str) -> str:
+    The inner agent's full Envelope (payload + metadata + error) is
+    returned verbatim.  Engines that detect ``tool.returns_envelope``
+    unpack the metadata into the outer Envelope's nested-* buckets so
+    cost / tokens / errors propagate through the whole agent tree.
+
+    At the LLM content-block boundary the Envelope is stringified via
+    ``Envelope.__str__`` / ``.text()`` — the model sees the same text
+    it would have seen under the old "flatten to str" contract, but
+    the framework keeps the structured metadata.
+    """
+
+    async def _run(task: str) -> "Envelope":  # type: ignore[name-defined]
         env = await agent.run(task)
-        return env.text()
+        return env
 
     _run.__name__ = agent.name or "agent"
     _run.__doc__ = agent.description or f"Run the {agent.name} agent on the given task."
@@ -127,6 +145,7 @@ def _agent_as_tool(agent: Any) -> Tool:
         name=agent.name or "agent",
         description=agent.description or f"Run the {agent.name} agent.",
         mode="signature",
+        returns_envelope=True,
     )
 
 

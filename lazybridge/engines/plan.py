@@ -418,7 +418,18 @@ class Plan:
                     raise RuntimeError(f"Tool {target!r} not found")
                 task_str = env.task or env.text()
                 raw = await tool.run(**{"task": task_str} if "task" in tool.definition().parameters.get("properties", {}) else _first_arg_kwargs(tool, task_str))
-                result_env = Envelope(task=env.task, payload=raw)
+                # Preserve the inner Envelope (agent-as-tool) so metadata
+                # survives the step boundary; otherwise wrap the raw value.
+                if isinstance(raw, Envelope):
+                    result_env = Envelope(
+                        task=env.task,
+                        context=raw.context or env.context,
+                        payload=raw.payload,
+                        metadata=raw.metadata,
+                        error=raw.error,
+                    )
+                else:
+                    result_env = Envelope(task=env.task, payload=raw)
             elif callable(target) and hasattr(target, "run") and hasattr(target, "_is_lazy_agent"):
                 # Agent as step
                 result_env = await target.run(env)

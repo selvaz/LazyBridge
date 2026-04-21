@@ -65,6 +65,17 @@ class Envelope(BaseModel, Generic[T]):
             return self.payload.model_dump_json()
         return json.dumps(self.payload, default=str)
 
+    def __str__(self) -> str:  # noqa: D401
+        """Stringification falls through to :meth:`text`.
+
+        Needed because tools that return an ``Envelope`` (agent-as-tool)
+        cross back into content blocks expected by the LLM API, which
+        serialise the value via ``str(...)``.  Without this, any such
+        tool would produce ``"task=…  context=…"`` garbage instead of
+        the agent's actual answer.
+        """
+        return self.text()
+
     @classmethod
     def from_task(cls, task: str, context: str | None = None) -> "Envelope":
         return cls(task=task, context=context, payload=task)
