@@ -46,15 +46,21 @@ class Agent:
         name: str | None = None,
         description: str | None = None,
         session: "Any | None" = None,
+        verbose: bool = False,
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
+        # Keyword alias for engine_or_model when passing a non-string Engine
+        # (e.g. ``Agent(engine=SupervisorEngine(...))``).
+        engine: "Any | None" = None,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
-        if isinstance(engine_or_model, str):
+        if engine is not None:
+            self.engine: Any = engine
+        elif isinstance(engine_or_model, str):
             model_str = model or engine_or_model
-            self.engine: Any = LLMEngine(model_str)
+            self.engine = LLMEngine(model_str)
         else:
             self.engine = engine_or_model
 
@@ -68,9 +74,27 @@ class Agent:
         self.max_verify = max_verify
         self.name = name or getattr(self.engine, "model", "agent")
         self.description = description
+
+        # Private per-agent console exporter when verbose= is set without
+        # an explicit Session. Attached when we bind to a session below.
+        self._verbose = verbose
+
+        # Bind to session — create an implicit private Session if verbose=
+        # is requested without one, so events print to stdout out of the box.
+        if session is None and verbose:
+            from lazybridge.session import Session
+
+            session = Session(console=True)
         self.session = session
 
         self.engine._agent_name = self.name
+
+        # Register with session graph so it's visible in session.graph.to_json()
+        if self.session is not None and hasattr(self.session, "register_agent"):
+            try:
+                self.session.register_agent(self)
+            except Exception:
+                pass
 
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
@@ -158,6 +182,9 @@ class Agent:
         self,
         name: str | None = None,
         description: str | None = None,
+        *,
+        verify: "Agent | Callable[[str], Any] | None" = None,
+        max_verify: int = 3,
     ) -> Tool:
         """Return a Tool that wraps this agent.
 
@@ -168,14 +195,41 @@ class Agent:
             orchestrator = Agent("claude-opus-4-7",
                                  tools=[researcher.as_tool("researcher",
                                                            "Search and summarise papers")])
+
+        Verify (Option B) — wrap the tool in a judge/retry loop so every
+        call through this tool is vetted by a judge before returning::
+
+            judge = Agent("claude-opus-4-7",
+                          system="Reply 'approved' or 'rejected: <reason>'.")
+            synth = Agent(...)
+            orchestrator = Agent(
+                ...,
+                tools=[synth.as_tool("synthesize", verify=judge, max_verify=2)],
+            )
+
+        ``verify`` can be either an :class:`Agent` (its ``run`` method is
+        called with the output) or a plain callable taking the output text
+        and returning a verdict string / bool. On rejection, the judge's
+        feedback is injected into the next attempt's task.
         """
         agent = self
         effective_name = name or self.name
         effective_desc = description or self.description or f"Run the {effective_name} agent."
 
-        async def _run(task: str) -> str:
-            env = await agent.run(task)
-            return env.text()
+        if verify is None:
+            async def _run(task: str) -> str:
+                env = await agent.run(task)
+                return env.text()
+        else:
+            async def _run(task: str) -> str:  # type: ignore[misc]
+                from lazybridge.envelope import Envelope
+                from lazybridge.evals import verify_with_retry
+
+                env = Envelope.from_task(str(task))
+                result = await verify_with_retry(
+                    agent, env, verify, max_verify=max_verify,
+                )
+                return result.text()
 
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc

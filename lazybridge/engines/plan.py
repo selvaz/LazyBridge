@@ -163,10 +163,48 @@ class Plan:
     PlanCompiler runs at Agent construction time; errors surface before any LLM call.
     """
 
-    def __init__(self, *steps: Step, max_iterations: int = 100) -> None:
+    def __init__(
+        self,
+        *steps: Step,
+        max_iterations: int = 100,
+        store: "Store | None" = None,
+        checkpoint_key: str | None = None,
+        resume: bool = False,
+    ) -> None:
+        """Construct a Plan.
+
+        Checkpoint / resume
+        -------------------
+        Pass ``store=`` and ``checkpoint_key=`` to persist minimal plan state
+        (next step to run, ``writes``-bucket values, completed step names)
+        after every step. Pass ``resume=True`` together with a populated
+        ``store[checkpoint_key]`` to pick up where the previous run stopped
+        (useful after a crash, interrupt, or external pause).
+
+        Example::
+
+            store = Store(db="run.sqlite")
+            plan = Plan(
+                Step(researcher, writes="research"),
+                Step(writer, writes="draft"),
+                store=store,
+                checkpoint_key="my_pipeline",
+                resume=True,
+            )
+            Agent(engine=plan)("topic")   # continues if a checkpoint exists
+
+        The persisted shape is intentionally small (no Envelopes, no
+        in-memory history): ``{"next_step": str, "kv": {...},
+        "completed_steps": [...]}``. The in-memory ``history`` restarts
+        empty on resume — only ``writes``-bucket values survive across
+        process boundaries.
+        """
         self.steps = list(steps)
         self.max_iterations = max_iterations
         self._compiler = PlanCompiler()
+        self.store = store
+        self.checkpoint_key = checkpoint_key
+        self.resume = resume
         # Validation deferred to Agent.__init__ after tools are resolved
 
     def _validate(self, tool_map: dict[str, "Tool"]) -> None:
@@ -174,6 +212,43 @@ class Plan:
 
     def _step_map(self) -> dict[str, Step]:
         return {s.name: s for s in self.steps}
+
+    # ------------------------------------------------------------------
+    # Checkpoint helpers
+    # ------------------------------------------------------------------
+
+    def _checkpoint_store(self) -> "Store | None":
+        return self.store if self.checkpoint_key else None
+
+    def _save_checkpoint(
+        self,
+        *,
+        next_step: str | None,
+        kv: dict[str, Any],
+        completed: list[str],
+        status: str,
+    ) -> None:
+        store = self._checkpoint_store()
+        if store is None or self.checkpoint_key is None:
+            return
+        store.write(
+            self.checkpoint_key,
+            {
+                "next_step": next_step,
+                "kv": kv,
+                "completed_steps": completed,
+                "status": status,
+            },
+        )
+
+    def _load_checkpoint(self) -> dict[str, Any] | None:
+        store = self._checkpoint_store()
+        if store is None or self.checkpoint_key is None or not self.resume:
+            return None
+        saved = store.read(self.checkpoint_key)
+        if not isinstance(saved, dict):
+            return None
+        return saved
 
     async def run(
         self,
@@ -189,13 +264,25 @@ class Plan:
         run_id = str(uuid.uuid4())
         tool_map = {t.name: t for t in tools}
         step_map = self._step_map()
+
+        # Resume: prefer explicit plan_state over store-backed checkpoint
+        checkpoint = self._load_checkpoint() if plan_state is None else None
         history: list[StepResult] = list(plan_state.history) if plan_state else []
         kv: dict[str, Any] = dict(plan_state.store) if plan_state else {}
+        completed: list[str] = []
+        if checkpoint is not None:
+            kv.update(checkpoint.get("kv") or {})
+            completed = list(checkpoint.get("completed_steps") or [])
 
         # Resume from checkpoint if available
         current_name: str | None
         if plan_state and plan_state.next_step:
             current_name = plan_state.next_step
+        elif checkpoint and checkpoint.get("next_step"):
+            current_name = checkpoint["next_step"]
+        elif checkpoint and checkpoint.get("status") == "done":
+            # Already finished — return a stub envelope with kv.
+            return Envelope(task=env.task, context=env.context, payload=kv)
         elif self.steps:
             current_name = self.steps[0].name
         else:
@@ -205,6 +292,7 @@ class Plan:
         start_env = env
         iterations = 0
         was_routed = False  # True when the current step was reached via out.next, not linear order
+        effective_store = store or self.store
 
         while current_name and iterations < self.max_iterations:
             iterations += 1
@@ -240,13 +328,25 @@ class Plan:
                 error=result_env.error if isinstance(result_env, Envelope) else None,
             )
 
+            # If the step errored, persist a "failed" checkpoint that
+            # points back at the same step so a future resume= retries it.
+            if result_env.error is not None:
+                self._save_checkpoint(
+                    next_step=step.name,
+                    kv=kv,
+                    completed=completed,
+                    status="failed",
+                )
+                return result_env
+
             # Persist writes
             if step.writes and result_env.payload is not None:
                 kv[step.writes] = result_env.payload
-                if store:
-                    store.write(step.writes, result_env.payload)
+                if effective_store:
+                    effective_store.write(step.writes, result_env.payload)
 
             history.append(StepResult(step_name=step.name, envelope=result_env))
+            completed.append(step.name)
             prev_env = result_env
 
             # Determine next step via out.next or linear progression
@@ -254,15 +354,12 @@ class Plan:
             current_name = next_name
             was_routed = next_was_routed
 
-        # Build final state
-        if store:
-            state = PlanState(
-                plan_id=run_id,
-                current_step=history[-1].step_name if history else "",
-                next_step=None,
-                store=kv,
-                history=history,
-                status="done",
+            # Save checkpoint after each step so a crash mid-plan can resume
+            self._save_checkpoint(
+                next_step=current_name,
+                kv=kv,
+                completed=completed,
+                status="running" if current_name else "done",
             )
 
         return prev_env

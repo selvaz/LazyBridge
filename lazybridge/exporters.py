@@ -58,6 +58,43 @@ class StructuredLogExporter:
         self._log.info(json.dumps(event, default=str))
 
 
+class ConsoleExporter:
+    """Pretty-print events to stdout for human inspection.
+
+    Output format (one line per event)::
+
+        [agent_name] event_type  key=value  key=value
+
+    Installed automatically by ``Session(console=True)`` and
+    ``Agent(verbose=True)``; can also be added manually via
+    ``Session(exporters=[ConsoleExporter()])``.
+    """
+
+    _NOISY_KEYS = {"session_id", "event_type", "run_id"}
+
+    def __init__(self, *, stream: Any = None) -> None:
+        import sys
+
+        self._stream = stream or sys.stdout
+
+    def export(self, event: dict[str, Any]) -> None:
+        etype = event.get("event_type", "event")
+        agent = event.get("agent_name") or event.get("name") or ""
+        parts: list[str] = []
+        for k, v in event.items():
+            if k in self._NOISY_KEYS or k == "agent_name":
+                continue
+            if v is None or v == "":
+                continue
+            s = str(v)
+            if len(s) > 120:
+                s = s[:117] + "..."
+            parts.append(f"{k}={s}")
+        prefix = f"[{agent}] " if agent else ""
+        line = f"{prefix}{etype}  " + "  ".join(parts)
+        print(line, file=self._stream)
+
+
 class OTelExporter:
     """Export events as OpenTelemetry spans (requires opentelemetry-sdk).
 
