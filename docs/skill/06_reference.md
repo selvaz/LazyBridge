@@ -51,7 +51,7 @@ Use the initial task/context Envelope passed to the Plan.
 
 Contract every engine must satisfy.
 
-### `LLMEngine(model: 'str', *, thinking: 'bool' = False, max_turns: 'int' = 10, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None) -> 'None'`
+### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 10, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None) -> 'None'`
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
 
