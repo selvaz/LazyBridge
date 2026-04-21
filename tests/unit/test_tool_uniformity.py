@@ -84,15 +84,16 @@ def test_tool_run_sync_on_sync_func_unchanged():
     assert tool.run_sync(q="hi") == "sync-echo:hi"
 
 
-def test_tool_run_sync_on_agent_as_tool_returns_envelope_text():
-    """Agent.as_tool produces an async func that returns ``env.text()``.
-    Through ``run_sync``, a REPL caller must see the string, not a coroutine.
+def test_tool_run_sync_on_agent_as_tool_returns_envelope_with_text():
+    """Agent.as_tool now returns the inner agent's full Envelope.
+
+    The REPL caller must (a) never see a raw coroutine, (b) be able to
+    reach the string via ``str(...)`` / ``.text()`` unchanged.
     """
-    import asyncio as _a
+    from lazybridge.envelope import Envelope
 
     class _FakeEngine:
         async def run(self, env, *, tools, output_type, memory, session):
-            from lazybridge.envelope import Envelope
             return Envelope(task=env.task, payload=f"fake:{env.task}")
 
         async def stream(self, *a, **kw):  # pragma: no cover
@@ -103,7 +104,10 @@ def test_tool_run_sync_on_agent_as_tool_returns_envelope_text():
     inner_tool = inner.as_tool("inner", "inner agent")
 
     out = inner_tool.run_sync(task="hello")
-    assert out == "fake:hello"
+    assert isinstance(out, Envelope)
+    assert out.text() == "fake:hello"
+    assert str(out) == "fake:hello"   # Envelope.__str__ safety net
+    assert inner_tool.returns_envelope is True
 
 
 # ---------------------------------------------------------------------------

@@ -84,10 +84,18 @@ class TestAsToolMethod:
         assert "Does a thing" in t.definition().description
 
     def test_tool_runs_agent(self):
+        # Post-Envelope-through-Tool change: Agent.as_tool returns the
+        # inner agent's full Envelope rather than a flattened string.
+        # The string payload is still reachable via .text() / str(env).
+        from lazybridge import Envelope
+
         a = _make_agent("the answer")
         t = a.as_tool()
         result = asyncio.run(t.run(task="question"))
-        assert result == "the answer"
+        assert isinstance(result, Envelope)
+        assert result.text() == "the answer"
+        assert str(result) == "the answer"    # __str__ falls through to text()
+        assert t.returns_envelope is True
 
     def test_tool_definition_has_task_param(self):
         a = _make_agent()

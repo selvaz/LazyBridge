@@ -9,7 +9,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 Universal agent — delegates execution to a swappable Engine.
 
-### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, guidance: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False) -> 'None'`
+### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, guidance: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False, returns_envelope: 'bool' = False) -> 'None'`
 
 Wraps any Python callable as an LLM-accessible tool.
 

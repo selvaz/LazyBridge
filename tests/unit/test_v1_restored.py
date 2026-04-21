@@ -133,7 +133,12 @@ class _FakeAgent:
 
 
 async def _run_tool(tool: Tool, task: str) -> str:
-    return await tool.run(task=task)
+    result = await tool.run(task=task)
+    # Post-Envelope-preservation change: Agent.as_tool returns an
+    # Envelope.  Tests written against the flat-string contract stay
+    # green because ``str(envelope)`` routes through ``__str__ →
+    # text()`` and yields the same string.
+    return str(result)
 
 
 @pytest.mark.asyncio
