@@ -96,6 +96,28 @@ class Agent:
             except Exception:
                 pass
 
+        # Propagate session to nested Agents passed as tools (they become
+        # part of the same observability surface — events from B called
+        # via A flow into A's EventLog). Agents that already have a
+        # session keep it. This is the fix for the "as_tool" observability
+        # paradox: without it, calling B through A's tool loop recorded
+        # nothing anywhere.
+        if self.session is not None:
+            for raw in self._tools_raw:
+                if isinstance(raw, Agent) and raw.session is None:
+                    raw.session = self.session
+                    if hasattr(self.session, "register_agent"):
+                        try:
+                            self.session.register_agent(raw)
+                        except Exception:
+                            pass
+                    # Also wire the graph edge so the topology is explicit.
+                    if hasattr(self.session, "register_tool_edge"):
+                        try:
+                            self.session.register_tool_edge(self, raw, label="as_tool")
+                        except Exception:
+                            pass
+
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
             self.engine._validate(self._tool_map)
@@ -243,6 +265,52 @@ class Agent:
     # ------------------------------------------------------------------
     # Factories
     # ------------------------------------------------------------------
+
+    @classmethod
+    def from_model(cls, model: str, **kwargs: Any) -> "Agent":
+        """Construct an Agent backed by an LLMEngine for ``model``.
+
+        Explicit counterpart to ``Agent("claude-opus-4-7")``.  Use this
+        when you want the model-path to be unambiguous at the call site
+        (code review, static analysis, teaching material)::
+
+            Agent.from_model("claude-opus-4-7", tools=[search])
+        """
+        from lazybridge.engines.llm import LLMEngine
+
+        return cls(engine=LLMEngine(model), **kwargs)
+
+    @classmethod
+    def from_engine(cls, engine: Any, **kwargs: Any) -> "Agent":
+        """Construct an Agent from an already-built Engine instance.
+
+        Explicit counterpart to ``Agent(engine=some_engine)``::
+
+            Agent.from_engine(Plan(Step(researcher), Step(writer)))
+            Agent.from_engine(SupervisorEngine(tools=[t], agents=[a]))
+        """
+        return cls(engine=engine, **kwargs)
+
+    @classmethod
+    def from_provider(
+        cls,
+        provider: str,
+        *,
+        tier: str = "medium",
+        **kwargs: Any,
+    ) -> "Agent":
+        """Construct an Agent for ``provider`` using its tier alias for model selection.
+
+        Tiers (``super_cheap`` / ``cheap`` / ``medium`` / ``expensive`` /
+        ``top``) resolve to each provider's current lineup, so preview and
+        date-pinned model names stay in one place::
+
+            Agent.from_provider("anthropic", tier="top")
+            Agent.from_provider("openai", tier="cheap", tools=[search])
+        """
+        from lazybridge.engines.llm import LLMEngine
+
+        return cls(engine=LLMEngine(provider), model=tier, **kwargs)
 
     @classmethod
     def chain(cls, *agents: "Agent", **kwargs: Any) -> "Agent":
