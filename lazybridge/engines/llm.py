@@ -39,10 +39,13 @@ class LLMEngine:
     max_turns:
         Maximum tool-call rounds before giving up with MaxTurnsExceeded error.
     tool_choice:
-        "auto"     — provider decides when to call tools (default).
-        "any"      — provider must call at least one tool.
-        "parallel" — same as "auto" for the provider; our asyncio.gather() runs
-                     all tool calls returned in one turn concurrently.
+        "auto" — provider decides when to call tools (default).
+        "any"  — provider must call at least one tool.
+
+        When the model emits multiple tool calls in a single turn,
+        LazyBridge always executes them concurrently via ``asyncio.gather``.
+        That is a capability of the engine, not a configuration knob;
+        there is no "serial" execution path for LLM-emitted tool calls.
     temperature:
         Sampling temperature. None = provider default.
     system:
@@ -57,7 +60,7 @@ class LLMEngine:
         *,
         thinking: bool = False,
         max_turns: int = 10,
-        tool_choice: Literal["auto", "any", "parallel"] = "auto",
+        tool_choice: Literal["auto", "any"] = "auto",
         temperature: float | None = None,
         system: str | None = None,
         native_tools: list[NativeTool | str] | None = None,
@@ -65,6 +68,21 @@ class LLMEngine:
         self.model = model
         self.thinking = thinking
         self.max_turns = max_turns
+        # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
+        # with a deprecation warning. The framework no longer has a
+        # separate "parallel mode" — tool calls are always executed via
+        # asyncio.gather when the model emits more than one in a turn.
+        if tool_choice == "parallel":
+            import warnings
+
+            warnings.warn(
+                "LLMEngine(tool_choice='parallel') is deprecated. "
+                "Concurrent tool execution is now the default and cannot be "
+                "disabled; drop the argument (or use 'auto'/'any').",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            tool_choice = "auto"
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system
@@ -247,7 +265,7 @@ class LLMEngine:
 
         thinking_cfg = ThinkingConfig(enabled=True) if self.thinking else None
         # "parallel" is our asyncio strategy; provider always gets "auto"
-        provider_tc = "auto" if self.tool_choice == "parallel" else self.tool_choice
+        provider_tc = self.tool_choice
 
         total_in = total_out = 0
         cost = 0.0
@@ -332,19 +350,16 @@ class LLMEngine:
                 assistant_blocks.append(ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments))
             messages.append(Message(role=Role.ASSISTANT, content=assistant_blocks))
 
-            # Execute tools (parallel or sequential)
-            if self.tool_choice == "parallel":
-                raw_results = await asyncio.gather(
-                    *[self._exec_tool(tc, tool_map, session=session, run_id=run_id)
-                      for tc in resp.tool_calls],
-                    return_exceptions=True,
-                )
-            else:
-                raw_results = []
-                for tc in resp.tool_calls:
-                    raw_results.append(
-                        await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
-                    )
+            # Execute tool calls — always concurrently.  A single tool call
+            # in a turn is just a one-element gather; N calls run in parallel.
+            # Tool-is-Tool uniformity: each ``tc`` may target a plain
+            # function, an Agent wrapped via ``as_tool()``, or an Agent of
+            # Agents — the engine does not special-case any of them.
+            raw_results = await asyncio.gather(
+                *[self._exec_tool(tc, tool_map, session=session, run_id=run_id)
+                  for tc in resp.tool_calls],
+                return_exceptions=True,
+            )
 
             result_blocks: list[Any] = []
             for tc, tr in zip(resp.tool_calls, raw_results):
