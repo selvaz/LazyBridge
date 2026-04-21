@@ -372,19 +372,27 @@ class Plan:
         history: list[StepResult],
         kv: dict[str, Any],
     ) -> Envelope:
+        # ``from_prev`` means "the previous step's *output* becomes the next
+        # step's task" — i.e. real chain semantics.  Without this promotion
+        # the default behaviour was for every step to receive the original
+        # user task, so ``Plan(Step(a), Step(b))`` was NOT actually a chain.
         if isinstance(sentinel, _FromPrev):
-            return prev
+            return Envelope(task=prev.text(), context=prev.context, payload=prev.payload)
         if isinstance(sentinel, _FromStart):
             return start
+        # from_step / from_parallel also forward the referenced step's
+        # output as the next step's task for consistency with from_prev.
         if isinstance(sentinel, _FromStep):
             for r in reversed(history):
                 if r.step_name == sentinel.name:
-                    return r.envelope
+                    e = r.envelope
+                    return Envelope(task=e.text(), context=e.context, payload=e.payload)
             return start
         if isinstance(sentinel, _FromParallel):
             for r in reversed(history):
                 if r.step_name == sentinel.name:
-                    return r.envelope
+                    e = r.envelope
+                    return Envelope(task=e.text(), context=e.context, payload=e.payload)
             return start
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)
@@ -469,6 +477,58 @@ class Plan:
             pass
         return None, False
 
+    # ------------------------------------------------------------------
+    # Serialisation — to_dict / from_dict  (Plan round-trip)
+    # ------------------------------------------------------------------
+    #
+    # A Plan describes *topology* (steps, routing, writes, parallel flag).
+    # Execution targets (functions, agents) live in Python and cannot be
+    # serialised directly; ``from_dict`` takes a ``registry={name: target}``
+    # so the caller explicitly rebinds names to live objects.  Tool-name
+    # targets (``target=str``) survive a round-trip as-is because they
+    # are already resolved by ``tool_map`` at run time.
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the Plan's topology to a JSON-compatible dict.
+
+        Callables and Agents are serialised by ``name`` only — rebind
+        them at load time via :meth:`from_dict`'s ``registry`` kwarg.
+        Sentinels, writes, parallel flags, iteration limit, and step
+        order are preserved faithfully.
+        """
+        return {
+            "version": 1,
+            "max_iterations": self.max_iterations,
+            "steps": [_step_to_dict(s) for s in self.steps],
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        registry: dict[str, Any] | None = None,
+    ) -> "Plan":
+        """Reconstruct a Plan from a ``to_dict`` payload.
+
+        ``registry`` maps serialised target names back to live callables /
+        Agents.  Missing entries for non-tool targets raise
+        :class:`KeyError` with the offending name — keeping the failure
+        loud rather than producing a silently-broken Plan.
+
+        Example::
+
+            saved = plan.to_dict()                     # store somewhere
+            ...
+            plan = Plan.from_dict(saved, registry={
+                "researcher": researcher_agent,
+                "fetch":      fetch_function,
+            })
+        """
+        registry = registry or {}
+        steps = [_step_from_dict(s, registry) for s in data.get("steps", [])]
+        return cls(*steps, max_iterations=data.get("max_iterations", 100))
+
     # Engine Protocol compatibility
     async def stream(self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any) -> AsyncIterator[str]:
         result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
@@ -482,3 +542,101 @@ def _first_arg_kwargs(tool: "Tool", value: str) -> dict[str, str]:
         first = next(iter(params))
         return {first: value}
     return {"input": value}
+
+
+# ---------------------------------------------------------------------------
+# Serialisation helpers (module-level so users can import them to write
+# their own to_yaml / mermaid renderers on top of the topology shape).
+# ---------------------------------------------------------------------------
+
+
+def _target_to_ref(target: Any) -> dict[str, str]:
+    """Serialise a Step.target to a ``{"kind": ..., "name": ...}`` ref.
+
+    Tools referenced by name round-trip as-is; callables and Agents are
+    recorded by their ``name`` attribute / ``__name__`` so a registry can
+    rebind them on load.
+    """
+    if isinstance(target, str):
+        return {"kind": "tool", "name": target}
+    if hasattr(target, "_is_lazy_agent"):
+        return {"kind": "agent", "name": getattr(target, "name", "agent")}
+    if callable(target):
+        return {"kind": "callable", "name": getattr(target, "__name__", "anon")}
+    return {"kind": "unknown", "name": str(target)}
+
+
+def _target_from_ref(ref: dict[str, str], registry: dict[str, Any]) -> Any:
+    kind = ref.get("kind")
+    name = ref.get("name", "")
+    if kind == "tool":
+        return name  # keep as string — tool_map resolves it at run time
+    if name in registry:
+        return registry[name]
+    raise KeyError(
+        f"Plan.from_dict: no entry in registry for {kind} target {name!r}. "
+        f"Pass registry={{'{name}': <callable>}} to rebind."
+    )
+
+
+def _sentinel_to_ref(sentinel: Any) -> dict[str, Any] | None:
+    if sentinel is None:
+        return None
+    if isinstance(sentinel, _FromPrev):
+        return {"kind": "from_prev"}
+    if isinstance(sentinel, _FromStart):
+        return {"kind": "from_start"}
+    if isinstance(sentinel, _FromStep):
+        return {"kind": "from_step", "name": sentinel.name}
+    if isinstance(sentinel, _FromParallel):
+        return {"kind": "from_parallel", "name": sentinel.name}
+    if isinstance(sentinel, str):
+        return {"kind": "literal", "value": sentinel}
+    return None
+
+
+def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
+    if ref is None:
+        return from_prev
+    from lazybridge.sentinels import from_parallel, from_start, from_step
+
+    kind = ref.get("kind")
+    if kind == "from_prev":
+        return from_prev
+    if kind == "from_start":
+        return from_start
+    if kind == "from_step":
+        return from_step(ref["name"])
+    if kind == "from_parallel":
+        return from_parallel(ref["name"])
+    if kind == "literal":
+        return ref["value"]
+    return from_prev
+
+
+def _step_to_dict(step: Step) -> dict[str, Any]:
+    d: dict[str, Any] = {
+        "name": step.name,
+        "target": _target_to_ref(step.target),
+        "task": _sentinel_to_ref(step.task),
+        "parallel": step.parallel,
+    }
+    if step.context is not None:
+        d["context"] = _sentinel_to_ref(step.context)
+    if step.writes:
+        d["writes"] = step.writes
+    return d
+
+
+def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
+    target = _target_from_ref(data["target"], registry)
+    task = _sentinel_from_ref(data.get("task"))
+    context = _sentinel_from_ref(data["context"]) if "context" in data else None
+    return Step(
+        target=target,
+        task=task,
+        context=context,
+        writes=data.get("writes"),
+        parallel=data.get("parallel", False),
+        name=data.get("name"),
+    )
