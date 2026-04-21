@@ -11,6 +11,8 @@ from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
+from lazybridge.graph import GraphSchema
+
 
 class EventType(StrEnum):
     AGENT_START = "agent_start"
@@ -103,12 +105,35 @@ class Session:
         db: str | None = None,
         exporters: list[Any] | None = None,
         redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        console: bool = False,
     ) -> None:
         self.session_id = str(uuid.uuid4())
         self.events = EventLog(self.session_id, db=db)
         self._exporters: list[Any] = list(exporters or [])
         self._redact = redact
         self._lock = threading.Lock()
+        self.graph = GraphSchema(session_id=self.session_id)
+        if console:
+            # Late import to avoid circular dependency with exporters
+            from lazybridge.exporters import ConsoleExporter
+
+            self._exporters.append(ConsoleExporter())
+
+    # ------------------------------------------------------------------
+    # Graph registration — called by Agent.__init__ when session= is set.
+    # ------------------------------------------------------------------
+
+    def register_agent(self, agent: Any) -> None:
+        """Register an agent with this session's graph."""
+        self.graph.add_agent(agent)
+
+    def register_tool_edge(self, from_agent: Any, to_agent: Any, *, label: str = "") -> None:
+        """Record a tool-call edge between two registered agents."""
+        from_id = str(getattr(from_agent, "name", "agent"))
+        to_id = str(getattr(to_agent, "name", "agent"))
+        from lazybridge.graph import EdgeType
+
+        self.graph.add_edge(from_id, to_id, label=label, kind=EdgeType.TOOL)
 
     def add_exporter(self, exporter: Any) -> None:
         with self._lock:

@@ -72,6 +72,9 @@ class LLMEngine:
             NativeTool(t) if isinstance(t, str) else t
             for t in (native_tools or [])
         ]
+        # Expose inferred provider name so tooling (e.g. GraphSchema) can
+        # introspect it without recomputing the heuristic.
+        self.provider = self._infer_provider(model)
 
     # Provider name aliases accepted as the model argument
     _PROVIDER_NAMES = {"anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek"}

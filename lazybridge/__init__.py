@@ -65,6 +65,9 @@ from lazybridge.engines.llm import LLMEngine
 from lazybridge.engines.human import HumanEngine
 from lazybridge.engines.plan import Plan, Step, PlanState, StepResult, PlanCompileError
 
+# Graph
+from lazybridge.graph import EdgeType, GraphSchema, NodeType
+
 # Exporters
 from lazybridge.exporters import (
     EventExporter,
@@ -135,6 +138,10 @@ __all__ = [
     "PlanState",
     "StepResult",
     "PlanCompileError",
+    # Graph
+    "GraphSchema",
+    "NodeType",
+    "EdgeType",
     # Exporters
     "CallbackExporter",
     "FilteredExporter",

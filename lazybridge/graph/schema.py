@@ -1,17 +1,17 @@
 """GraphSchema — serialisable representation of an agent pipeline.
 
 A GraphSchema is a directed graph where:
-  - Nodes are LazyAgents or LazyRouters
-  - Edges are LazyTools (agent → agent delegation) or LazyContext reads
+  - Nodes are Agents or routers
+  - Edges are Tools (agent → agent delegation) or context reads
 
-The schema is auto-built as agents and tools are created, and can be:
+The schema is auto-built as agents are created inside a Session and can be:
   - Serialised to JSON/YAML for storage or GUI loading
   - Deserialised back into a descriptor via from_json() / from_file()
   - Inspected programmatically (for debugging or visualisation)
 
-Note: deserialisation reconstructs the graph descriptor (nodes, edges, metadata)
-but not live agent instances. Recreating runnable LazyAgent objects from the
-schema is the caller's responsibility.
+Note: deserialisation reconstructs the graph descriptor (nodes, edges,
+metadata) but not live Agent instances. Recreating runnable Agent objects
+from the schema is the caller's responsibility.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ class NodeType(StrEnum):
 
 class EdgeType(StrEnum):
     TOOL = "tool"  # agent A calls agent B as a tool
-    CONTEXT = "context"  # agent A reads agent B's output via LazyContext
-    ROUTER = "router"  # conditional branch from a LazyRouter
+    CONTEXT = "context"  # agent A reads agent B's output via sources/context
+    ROUTER = "router"  # conditional branch from a router
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +56,24 @@ def _require_yaml() -> Any:
         raise ImportError("PyYAML required: pip install pyyaml") from None
 
 
+def _derive_provider_model(agent: Any) -> tuple[str, str]:
+    """Infer provider + model strings from a v1 Agent or duck-typed object.
+
+    Preference order:
+      1. Explicit ``_provider_name`` / ``_model_name`` attributes (legacy
+         duck-type and tests).
+      2. ``agent.engine.provider`` / ``agent.engine.model`` on v1 Agent.
+      3. Empty strings.
+    """
+    provider = getattr(agent, "_provider_name", None)
+    model = getattr(agent, "_model_name", None)
+    if provider is None:
+        provider = getattr(getattr(agent, "engine", None), "provider", "") or ""
+    if model is None:
+        model = getattr(getattr(agent, "engine", None), "model", "") or ""
+    return str(provider), str(model)
+
+
 # ---------------------------------------------------------------------------
 # Node / Edge descriptors
 # ---------------------------------------------------------------------------
@@ -72,7 +90,7 @@ class _BaseNode:
 
 
 class AgentNode(_BaseNode):
-    """Serialisable descriptor for a LazyAgent node."""
+    """Serialisable descriptor for an Agent node."""
 
     __slots__ = ("model", "provider", "system")
 
@@ -112,7 +130,7 @@ class AgentNode(_BaseNode):
 
 
 class RouterNode(_BaseNode):
-    """Serialisable descriptor for a LazyRouter node."""
+    """Serialisable descriptor for a router node (Plan branch)."""
 
     __slots__ = ("default", "routes")
 
@@ -184,8 +202,9 @@ class Edge:
 class GraphSchema:
     """Directed graph of agents, routers, and their connections.
 
-    Auto-populated by LazySession._register_agent() as agents are created.
-    Can also be built manually for GUI-driven pipeline construction.
+    Auto-populated by :class:`lazybridge.Session` as Agents register
+    themselves via ``session=``. Can also be built manually for GUI-driven
+    pipeline construction.
     """
 
     def __init__(self, session_id: str = "") -> None:
@@ -198,18 +217,29 @@ class GraphSchema:
     # ------------------------------------------------------------------
 
     def add_agent(self, agent: Any) -> None:
-        """Register a LazyAgent as a graph node."""
+        """Register an Agent (or duck-typed equivalent) as a graph node.
+
+        Reads ``id`` / ``name`` off the agent, and infers provider + model
+        from either legacy ``_provider_name`` / ``_model_name`` attributes
+        or from ``agent.engine`` on the v1 :class:`~lazybridge.Agent`.
+        """
+        provider, model = _derive_provider_model(agent)
+        node_id = str(getattr(agent, "id", None) or getattr(agent, "name", "agent"))
         node = AgentNode(
-            id=agent.id,
-            name=getattr(agent, "name", agent.id),
-            provider=getattr(agent, "_provider_name", ""),
-            model=getattr(agent, "_model_name", ""),
+            id=node_id,
+            name=getattr(agent, "name", node_id),
+            provider=provider,
+            model=model,
             system=getattr(agent, "system", None),
         )
         self._nodes[node.id] = node
 
     def add_router(self, router: Any) -> None:
-        """Register a LazyRouter as a graph node."""
+        """Register a router (e.g. a Plan) as a graph node.
+
+        The router object is expected to expose ``to_graph_node()`` that
+        returns ``{id, name, routes, default}``.
+        """
         node_dict = router.to_graph_node()
         node = RouterNode(
             id=node_dict.get("id", node_dict.get("name", "")),
