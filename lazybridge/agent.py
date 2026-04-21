@@ -14,21 +14,46 @@ from lazybridge.tools import Tool, build_tool_map, wrap_tool
 class Agent:
     """Universal agent — delegates execution to a swappable Engine.
 
-    Tier 1 (2 lines):
+    ``Agent`` is the only public abstraction the user interacts with.  The
+    engine (LLM, Human, Supervisor, Plan) is swappable; the call surface
+    is identical.
+
+    **Tool-is-Tool contract.** ``tools=[...]`` accepts plain functions,
+    ``Tool`` instances, other ``Agent`` instances, and Agents whose tools
+    are themselves Agents.  The composition is closed and uniform: an
+    Agent of an Agent of a function looks the same at every level.
+    LazyBridge wraps each entry via :func:`wrap_tool` at construction
+    time; nested Agents inherit the outer session so observability flows
+    through the whole tree.
+
+    **Parallelism is a capability, not a configuration.**  When the
+    underlying engine emits multiple tool invocations in a single step
+    (e.g. an LLM tool loop turn with N tool calls), LazyBridge executes
+    them concurrently via ``asyncio.gather``.  There is no "serial vs
+    parallel" mode to pick — if you want N things to happen at once, put
+    N things in ``tools=[]`` and the engine will do it for you.
+
+    Tier 1 (2 lines)::
+
         Agent("claude-opus-4-7")("hello").text()
 
-    Tier 2 (with tools):
-        Agent("claude-opus-4-7", tools=[search])("find news").text()
+    Tier 2 (with tools — functions, agents, or mixed)::
 
-    Tier 3 (structured output):
-        Agent("claude-opus-4-7", output=Summary)("...").payload.title
+        Agent("claude-opus-4-7", tools=[search, summarizer])("…").text()
 
-    Tier 4 (chain / parallel):
+    Tier 3 (structured output)::
+
+        Agent("claude-opus-4-7", output=Summary)("…").payload.title
+
+    Tier 4 (deterministic fan-out / sequential chain — sugar helpers)::
+
         Agent.chain(researcher, writer)("AI trends").text()
-        Agent.parallel(a, b, c)("task")   # → list[Envelope]
+        Agent.parallel(a, b, c)("task")   # → list[Envelope], no LLM orchestrator
 
-    Tier 5/6 (Plan / full config):
+    Tier 5/6 (Plan or SupervisorEngine — same ``tools=`` surface)::
+
         Agent(engine=Plan(...), tools=[...], output=Report, session=session)
+        Agent(engine=SupervisorEngine(...), tools=[...], session=session)
     """
 
     _is_lazy_agent = True  # recognised by wrap_tool()
@@ -331,7 +356,20 @@ class Agent:
         step_timeout: float | None = None,
         **kwargs: Any,
     ) -> "_ParallelAgent":
-        """Run all agents concurrently on the same task → list[Envelope]."""
+        """Deterministic fan-out: run ``agents`` concurrently on the same task.
+
+        Returns ``list[Envelope]`` — one entry per input agent, preserving
+        order.  No LLM orchestrator mediates the call; this is just sugar
+        for ``asyncio.gather(*[a.run(task) for a in agents])`` with an
+        optional semaphore (``concurrency_limit``) and per-agent timeout
+        (``step_timeout``).
+
+        Use this when you **know** you want N things to happen in
+        parallel.  If you want the LLM to decide whether to call agents
+        in parallel (and which, and how), don't use this — pass them as
+        ``tools=[...]`` on a regular ``Agent`` instead; the engine emits
+        parallel tool calls automatically when the model requests them.
+        """
         return _ParallelAgent(
             agents=list(agents),
             concurrency_limit=concurrency_limit,
@@ -380,7 +418,17 @@ def _read_source(src: Any) -> str:
 
 
 class _ParallelAgent:
-    """Runs multiple agents concurrently on the same task. Returns list[Envelope]."""
+    """Deterministic fan-out over N agents — the shape behind :meth:`Agent.parallel`.
+
+    This is a **pre-scripted** parallel runner, not a parallelism
+    paradigm.  Every input agent receives the same task; their per-run
+    Envelopes are returned as a list in input order.  No orchestrator
+    LLM is involved.
+
+    Prefer :class:`Agent` with ``tools=[...]`` when you want the engine
+    (LLM, Supervisor, Plan) to decide dynamically which tools to invoke
+    and when — parallel execution is automatic on that path.
+    """
 
     _is_lazy_agent = True
 
