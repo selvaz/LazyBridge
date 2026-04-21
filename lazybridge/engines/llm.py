@@ -50,15 +50,9 @@ class LLMEngine:
         self.model = model
         self.thinking = thinking
         self.max_turns = max_turns
-        self.tool_choice = tool_choice
+        self.tool_choice = tool_choice  # "parallel" = our asyncio mode; provider gets "auto"
         self.temperature = temperature
         self.system = system
-        self._executor: Executor | None = None
-
-    def _get_executor(self) -> Executor:
-        if self._executor is None:
-            self._executor = Executor(self.model, model=None)
-        return self._executor
 
     @staticmethod
     def _infer_provider(model: str) -> str:
@@ -159,12 +153,14 @@ class LLMEngine:
             if session:
                 session.emit(EventType.LOOP_STEP, {"turn": turn, "messages": len(messages)}, run_id=run_id)
 
+            # "parallel" is our asyncio execution strategy, not a provider directive.
+            provider_tool_choice = "auto" if self.tool_choice == "parallel" else self.tool_choice
             req = CompletionRequest(
                 messages=messages,
                 system=system or None,
                 temperature=self.temperature,
                 tools=tool_defs,
-                tool_choice=self.tool_choice if tool_defs else None,
+                tool_choice=provider_tool_choice if tool_defs else None,
                 structured_output=structured_cfg if not tool_defs else None,
                 thinking=thinking_cfg,
             )

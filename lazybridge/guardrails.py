@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class GuardError(Exception):
+    """Raised when a Guard blocks execution."""
+
+
 @dataclass
 class GuardAction:
     allowed: bool = True

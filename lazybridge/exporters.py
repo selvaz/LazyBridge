@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class EventExporter(Protocol):
+    """Protocol satisfied by all exporter classes."""
+
+    def export(self, event: dict[str, Any]) -> None: ...
 
 
 class CallbackExporter:
