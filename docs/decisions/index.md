@@ -10,3 +10,4 @@ Each tree answers a concrete "when to use which" question.
 * [Human-in-the-loop: HumanEngine or SupervisorEngine?](human-engine-vs-supervisor.md)
 * [verify= at Agent level, tool level, or Plan step level?](verify-placement.md)
 * [Checkpoint/resume: when is it worth the storage complexity?](checkpoint.md)
+* [Do I actually need the Advanced tier?](need-advanced.md)
