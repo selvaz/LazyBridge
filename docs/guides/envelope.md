@@ -62,6 +62,78 @@ error channel, plus cost/latency metadata, plus optional type
 narrowing.  There is no "agent returns a string here, a Pydantic
 object there" inconsistency — every engine emits `Envelope`.
 
+## The five fields — what each one carries
+
+An Envelope has five top-level fields.  Three of them (`task`,
+`context`, `payload`) carry **data**; the other two (`metadata`,
+`error`) carry **bookkeeping**.  Understanding which is which
+clarifies how steps in a Plan thread data forward versus how cost
+aggregates.
+
+| Field | Purpose | When is it set? |
+|---|---|---|
+| `task` | The string the agent was asked to act on.  Echoed on the output envelope so downstream steps can see what the upstream step was originally asked. | Set by caller / upstream step / `Envelope.from_task()`. |
+| `context` | Extra context injected on top of the task — Agent.sources concatenated, memory summaries, or a literal string set by a `Step(context=...)` sentinel. | Set by the framework when `sources=` is non-empty, or explicitly by `Step(context=from_step("x"))`. |
+| `payload` | The actual result.  `str` by default; if `output=SomeModel`, a validated `SomeModel` instance. | Set by the engine on successful return. |
+| `metadata` | Token counts, cost, latency, run_id, model/provider — always populated, even on error. | Populated by the engine at the end of every run. |
+| `error` | `ErrorInfo(type, message, retryable)` when something went wrong.  `None` on success. | Set by engines via `Envelope.error_envelope(exc)`; checked by callers via `env.ok`. |
+
+## Factories — `from_task` and `error_envelope`
+
+You rarely construct an Envelope yourself, but two factories are worth
+knowing because they appear in framework-author code (and inside
+custom Engines / Providers).
+
+```python
+# What this shows: building Envelopes at engine/provider boundaries
+# without reimplementing the plumbing each time.
+# Why: the factories enforce the two invariants the framework relies
+# on — ``payload`` seeded to the task for the first step, and errors
+# always expressed as ErrorInfo rather than raising through engines.
+
+from lazybridge import Envelope
+
+# Entry point to a plan or chain: ``from_task`` sets payload=task too,
+# so the very first step sees the user's input both as env.task AND
+# as env.payload (the sentinel ``from_prev`` default resolves to the
+# previous step's payload; for step 0 that's the original task).
+env0 = Envelope.from_task("summarise AI April 2026", context="tone=formal")
+
+# Converting an exception to an error envelope from inside a custom
+# engine. ``retryable=True`` hints to an outer ``fallback=`` layer or
+# retry wrapper that a naive retry might succeed.
+try:
+    raise TimeoutError("provider did not respond")
+except Exception as exc:
+    err = Envelope.error_envelope(exc, retryable=True)
+
+assert err.ok is False
+assert err.error.type == "TimeoutError"
+```
+
+Both are classmethods on `Envelope`.  Engines MUST use
+`error_envelope` rather than raising through `run()` — the framework
+contract is that `Engine.run` returns an Envelope in both success and
+failure cases.
+
+## `text()` — the universal stringifier
+
+Tools, REPLs, and LLM content blocks all eventually need a string.
+`Envelope.text()` is the canonical way to get one, regardless of what
+the payload actually is.  The rules are simple and worth knowing so
+you never reach for `json.dumps` at a tool boundary:
+
+| `payload` type | `.text()` returns |
+|---|---|
+| `None` (including error envelopes) | `""` |
+| `str` | the string verbatim |
+| `BaseModel` | `payload.model_dump_json()` |
+| `dict` / `list` / scalar | `json.dumps(payload, default=str)` |
+
+`str(env)` delegates to `.text()`, which is why passing an
+`Envelope`-returning tool into an LLM content block produces the
+agent's actual answer instead of `"task=… payload=…"` debris.
+
 ## Pitfalls
 
 - ``payload`` can legitimately be ``None`` (e.g. when ``error`` is set or
@@ -70,8 +142,14 @@ object there" inconsistency — every engine emits `Envelope`.
 - ``Envelope.from_task(task)`` sets ``payload=task`` for convenience so
   the very first agent in a chain sees the input as both ``task`` and
   ``payload``. Downstream steps see the preceding step's ``payload``.
-- ``nested_*`` fields in metadata are plumbed but not always populated
-  yet; for accurate cross-agent cost, query ``session.usage_summary()``.
+- ``nested_*`` fields in metadata are plumbed through agent-as-tool
+  boundaries (the outer Envelope's ``nested_input_tokens`` /
+  ``nested_output_tokens`` / ``nested_cost_usd`` sum up all inner
+  agent calls).  For cross-run aggregation across an entire session,
+  query ``session.usage_summary()`` which reads the event log directly.
+- `context` is NOT a persistent log — it's per-run scratch space set
+  from `sources=` / `Step(context=...)`.  For conversation history
+  use `Memory`; for cross-agent state use `Store`.
 
 !!! note "API reference"
 

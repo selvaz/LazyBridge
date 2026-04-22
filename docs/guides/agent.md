@@ -171,6 +171,100 @@ After the call returns, `env.ok` distinguishes success from error,
 the run.  If both the primary and the fallback fail, the final error
 Envelope surfaces to the caller — no exception is raised through.
 
+## Three call surfaces: sync, async, streaming
+
+One `Agent` exposes three ways to invoke it.  They return different
+shapes but share the same engine pipeline (guard → engine → verify →
+fallback); pick based on your host.
+
+```python
+# What this shows: the three entry points side-by-side. The sync
+# __call__ detects an active event loop and hops to a worker thread
+# so it's safe in Jupyter / FastAPI. run() is the async primitive
+# that every other entry point ultimately dispatches to. stream()
+# yields token chunks as they arrive for low-latency UI streaming.
+# Why distinguish: inside a coroutine always prefer await
+# agent.run(...), never agent(...). The auto-hop is there for
+# convenience at REPL / notebook boundaries, not as the primary path.
+
+import asyncio
+from lazybridge import Agent
+
+agent = Agent("claude-opus-4-7", name="writer")
+
+# Sync — from scripts, Jupyter cells, or non-async test code.
+env = agent("write a haiku about bees")
+print(env.text())
+
+# Async — from a coroutine. The primitive; all others delegate here.
+async def use_it():
+    env = await agent.run("write a haiku about bees")
+    print(env.text())
+asyncio.run(use_it())
+
+# Streaming — async generator of text chunks. Useful when the UI
+# wants to render tokens as they arrive. The final chunk is the
+# complete payload; intermediate chunks are deltas.
+async def stream_it():
+    async for chunk in agent.stream("write a haiku about bees"):
+        print(chunk, end="", flush=True)
+asyncio.run(stream_it())
+```
+
+A per-chunk timeout is enforced when `timeout=` is set on the Agent
+— the first chunk that takes too long raises `TimeoutError` and the
+generator stops.  Non-streaming engines (HumanEngine, Plan) satisfy
+the streaming protocol by yielding a single chunk with the final
+text.
+
+## `sources=` — live-view context injection
+
+`sources=[...]` is LazyBridge's mechanism for injecting context that
+is **computed fresh on every call**.  Each source object is asked for
+its current text at call time (no snapshotting); the concatenated
+text becomes `env.context`, which the engine prepends to the system
+prompt when invoking the LLM.
+
+```python
+# What this shows: an agent whose system prompt is "What's in the
+# blackboard?" and whose answer depends on the current Store state.
+# Why live-view: if we snapshotted ``store`` at Agent() construction,
+# the monitor would always report the Store contents at startup, not
+# at call time. ``sources=[store]`` makes every call re-read it.
+# What objects are valid sources: anything with a ``.text()`` method
+# returning ``str``. Memory (live conversation), Store, or any user
+# class. Plain strings also work — ``sources=["policy: peer-reviewed
+# only"]`` injects them verbatim.
+
+from lazybridge import Agent, LLMEngine, Store, Memory
+
+store = Store(db="status.sqlite")
+chat_memory = Memory(strategy="sliding", max_tokens=2000)
+
+monitor = Agent(
+    engine=LLMEngine(
+        "claude-opus-4-7",
+        system="You monitor the blackboard and answer questions about it.",
+    ),
+    sources=[
+        store,              # store.to_text() each call
+        chat_memory,        # chat_memory.text() each call (live history)
+        "Today is 2026-04-22. Always cite the date when relevant.",
+    ],
+    name="monitor",
+)
+
+store.write("service_a", "healthy")
+monitor("what's the state of service_a?")     # sees fresh store contents
+store.write("service_a", "degraded")
+monitor("what's the state of service_a?")     # sees the new value
+```
+
+Use `sources=` for live state (Store, Memory, a config file that can
+be edited at runtime).  Use `LLMEngine(system=...)` for the static
+system prompt.  Both combine at call time — system first, then
+sources joined by `\n\n`, then the task.
+
 ## Pitfalls
 
 - Passing `output=SomeModel` without tools and then calling `.text()`
