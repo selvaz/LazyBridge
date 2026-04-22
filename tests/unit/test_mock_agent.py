@@ -379,16 +379,19 @@ async def test_agent_parallel_runs_mocks_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_preserves_final_step_metadata() -> None:
-    """Plan currently returns the **final step's** metadata on the outer
-    envelope — intermediate step metadata is not aggregated into
-    ``nested_*`` buckets.  The per-step cost is still emitted as session
-    events (TOOL_RESULT with tokens), so observability isn't lost, but
-    callers that read ``env.metadata`` only see the last leg.
+async def test_plan_aggregates_prior_step_metadata_into_nested() -> None:
+    """Plan's outer envelope carries the **final step's** direct
+    metadata *plus* every prior step's cost/tokens rolled up into
+    ``nested_*`` so a caller can read the full pipeline spend off the
+    returned envelope.
 
-    This pins the current contract so a future change to rolling-up
-    per-step metadata (desirable, tracked as a framework finding) is an
-    intentional, test-breaking improvement rather than a silent drift.
+    Invariant::
+
+        pipeline_total = env.metadata.input_tokens  + env.metadata.output_tokens
+                       + env.metadata.nested_input_tokens
+                       + env.metadata.nested_output_tokens
+
+    must equal the sum of every step's direct + nested tokens.
     """
     a = MockAgent(
         "a-out",
@@ -411,17 +414,23 @@ async def test_plan_preserves_final_step_metadata() -> None:
     )
     env = await Agent(engine=plan, name="p").run("start")
 
-    # Both mocks were actually called — the Plan really did two steps.
     a.assert_call_count(1)
     b.assert_call_count(1)
-    # Final envelope carries the *last* step's metadata verbatim.
+    # Final envelope: direct metadata is the LAST step's cost.
     assert env.metadata.input_tokens == 50
     assert env.metadata.output_tokens == 20
     assert env.metadata.cost_usd == pytest.approx(0.001)
-    # No nested aggregation from Plan (separate gap, documented above).
-    assert env.metadata.nested_input_tokens == 0
-    assert env.metadata.nested_output_tokens == 0
-    assert env.metadata.nested_cost_usd == 0.0
+    # Prior step rolls into nested_*.
+    assert env.metadata.nested_input_tokens == 100
+    assert env.metadata.nested_output_tokens == 40
+    assert env.metadata.nested_cost_usd == pytest.approx(0.002)
+    # Aggregate invariant — pipeline total matches sum of step costs.
+    total_in = env.metadata.input_tokens + env.metadata.nested_input_tokens
+    total_out = env.metadata.output_tokens + env.metadata.nested_output_tokens
+    total_cost = env.metadata.cost_usd + env.metadata.nested_cost_usd
+    assert total_in == 150
+    assert total_out == 60
+    assert total_cost == pytest.approx(0.003)
 
 
 @pytest.mark.asyncio
@@ -452,6 +461,60 @@ async def test_nested_metadata_rolls_up_through_as_tool_boundary() -> None:
     assert env.metadata.output_tokens == 33
     assert env.metadata.cost_usd == pytest.approx(0.005)
     inner.assert_call_count(1)
+
+
+@pytest.mark.asyncio
+async def test_plan_aggregates_metadata_on_error_path_too() -> None:
+    """When a step errors, the returned error envelope still carries
+    prior-step nested aggregation — so callers can see what was spent
+    before the failure."""
+    a = MockAgent(
+        "a-out", name="a",
+        default_input_tokens=200, default_output_tokens=80,
+        default_cost_usd=0.004,
+    )
+    b = MockAgent(
+        ErrorInfo(type="Upstream", message="feed down"),
+        name="b",
+    )
+
+    plan = Plan(
+        Step(target=a, name="a"),
+        Step(target=b, task=from_prev, name="b"),
+    )
+    env = await Agent(engine=plan, name="p").run("start")
+
+    assert not env.ok
+    assert env.error is not None
+    # Prior successful step's cost is visible even on failure.
+    assert env.metadata.nested_input_tokens == 200
+    assert env.metadata.nested_output_tokens == 80
+    assert env.metadata.nested_cost_usd == pytest.approx(0.004)
+
+
+@pytest.mark.asyncio
+async def test_plan_aggregation_transitive_across_three_steps() -> None:
+    """Aggregation is transitive — a three-step chain's outer envelope
+    sees step 1 + step 2 in nested_* (step 3 is the leaf / direct)."""
+    a = MockAgent("a", name="a", default_input_tokens=10, default_output_tokens=5)
+    b = MockAgent(lambda env: f"b({env.text()})", name="b",
+                  default_input_tokens=20, default_output_tokens=10)
+    c = MockAgent(lambda env: f"c({env.text()})", name="c",
+                  default_input_tokens=40, default_output_tokens=15)
+
+    plan = Plan(
+        Step(target=a, name="a"),
+        Step(target=b, task=from_prev, name="b"),
+        Step(target=c, task=from_prev, name="c"),
+    )
+    env = await Agent(engine=plan, name="p").run("t")
+
+    # Direct = c only.
+    assert env.metadata.input_tokens == 40
+    assert env.metadata.output_tokens == 15
+    # Nested = a + b.
+    assert env.metadata.nested_input_tokens == 30   # 10 + 20
+    assert env.metadata.nested_output_tokens == 15  # 5 + 10
 
 
 # ---------------------------------------------------------------------------

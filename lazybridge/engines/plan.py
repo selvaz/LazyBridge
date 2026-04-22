@@ -273,6 +273,52 @@ class Plan:
     def _step_map(self) -> dict[str, Step]:
         return {s.name: s for s in self.steps if s.name}
 
+    @staticmethod
+    def _aggregate_nested_metadata(
+        result_env: Envelope,
+        history: list[StepResult],
+    ) -> Envelope:
+        """Fold every prior step's cost/tokens into ``result_env.metadata.nested_*``.
+
+        The outer envelope's direct metadata (``input_tokens``,
+        ``output_tokens``, ``cost_usd``, …) continues to describe
+        *this* — the final step's — cost; everything upstream is summed
+        into ``nested_input_tokens`` / ``nested_output_tokens`` /
+        ``nested_cost_usd`` so a caller reading
+
+            total = env.metadata.input_tokens + env.metadata.output_tokens \
+                    + env.metadata.nested_input_tokens \
+                    + env.metadata.nested_output_tokens
+
+        sees the full pipeline spend regardless of how many Plan steps
+        produced it.  A step's own ``nested_*`` (tokens absorbed by
+        agents-as-tools it invoked) roll up with it, so multi-level
+        pipelines compose cleanly.
+
+        Identity-skips ``result_env`` if it's already in ``history`` so
+        the final step isn't double-counted.
+        """
+        nested_in = result_env.metadata.nested_input_tokens
+        nested_out = result_env.metadata.nested_output_tokens
+        nested_cost = result_env.metadata.nested_cost_usd
+        added = False
+        for sr in history:
+            if sr.envelope is result_env:
+                continue  # don't double-count the tail
+            m = sr.envelope.metadata
+            nested_in += m.input_tokens + m.nested_input_tokens
+            nested_out += m.output_tokens + m.nested_output_tokens
+            nested_cost += m.cost_usd + m.nested_cost_usd
+            added = True
+        if not added:
+            return result_env
+        new_meta = result_env.metadata.model_copy(update={
+            "nested_input_tokens": nested_in,
+            "nested_output_tokens": nested_out,
+            "nested_cost_usd": nested_cost,
+        })
+        return result_env.model_copy(update={"metadata": new_meta})
+
     # ------------------------------------------------------------------
     # Checkpoint helpers
     # ------------------------------------------------------------------
@@ -509,7 +555,7 @@ class Plan:
                             kv=kv, completed=completed, status="failed",
                             run_uid=run_uid,
                         )
-                        return err_env
+                        return self._aggregate_nested_metadata(err_env, history)
                     if r.error is not None:
                         last_snap = self._save_checkpoint(
                             effective_key=effective_key,
@@ -517,7 +563,7 @@ class Plan:
                             kv=kv, completed=completed, status="failed",
                             run_uid=run_uid,
                         )
-                        return r
+                        return self._aggregate_nested_metadata(r, history)
                     if s.writes and r.payload is not None:
                         kv[s.writes] = r.payload
                         if effective_store:
@@ -561,7 +607,7 @@ class Plan:
                     status="failed",
                     run_uid=run_uid,
                 )
-                return result_env
+                return self._aggregate_nested_metadata(result_env, history)
 
             # Persist writes
             if step.writes and result_env.payload is not None:
@@ -589,7 +635,7 @@ class Plan:
                 run_uid=run_uid,
             )
 
-        return prev_env
+        return self._aggregate_nested_metadata(prev_env, history)
 
     async def _execute_one(
         self,
