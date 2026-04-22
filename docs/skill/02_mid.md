@@ -554,11 +554,24 @@ Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
 - ``HumanEngine`` prompts the human for input and returns it as an
   Envelope. It implements the same ``Engine`` protocol as ``LLMEngine``,
   so ``Agent(engine=HumanEngine())`` is a drop-in replacement.
-- ``output=SomeModel`` switches to per-field prompting (terminal UI).
+- ``output=SomeModel`` switches to per-field prompting (terminal UI) or
+  an HTML form (``ui="web"``). Each field is coerced via Pydantic
+  TypeAdapter with up to 3 retries on ``ValidationError``; the error
+  is shown inline so the human can correct typos interactively.
+- When coercion to ``output_type`` ultimately fails, HumanEngine does
+  NOT return a raw string payload — it emits a ``TOOL_ERROR`` event
+  with ``kind="structured_output_coercion"`` and returns an Envelope
+  whose ``error.type == "StructuredOutputCoercionError"``.
+- Every successful human input emits a ``HIL_DECISION`` event on the
+  active Session with ``kind="input"`` and a truncated ``result``
+  string — the audit trail distinguishes human answers from LLM calls.
 - ``timeout`` triggers ``default`` if set, else raises ``TimeoutError``.
 - Tool invocation is NOT handled by HumanEngine — the human types a
   raw string, they don't call tools interactively. If you want the
   human to call tools, use ``SupervisorEngine``.
+- Three UI modes: ``"terminal"`` (default), ``"web"`` (stdlib HTTP
+  form on 127.0.0.1 with auto-browser), or any object matching
+  ``async def prompt(task, *, tools, output_type) -> str``.
 
 **example**
 

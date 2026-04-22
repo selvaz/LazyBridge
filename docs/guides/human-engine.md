@@ -23,9 +23,39 @@ HTML form with one input per field.
 For a full interactive REPL with tool calls and agent retry, use
 `SupervisorEngine` instead.
 
+## What HumanEngine emits (audit trail)
+
+Every human input produces a **`HIL_DECISION` event** on the active
+`Session`'s event log, plus the usual `AGENT_START` / `AGENT_FINISH`
+pair.  The decision payload records `kind="input"`, the task the human
+saw, and the first 500 characters of the result — so an auditor can
+reconstruct who was asked what, and what they answered, without
+replaying the agent.
+
+If the human's response fails to coerce into a requested Pydantic
+`output_type`, HumanEngine does **not** hand back a raw string
+pretending to be a model.  It emits a `TOOL_ERROR` event with
+`kind="structured_output_coercion"` and returns an Envelope whose
+`error.type == "StructuredOutputCoercionError"`.  Downstream code
+sees `env.ok == False` and can retry, fall back, or surface the
+problem — the usual Envelope error-path handling applies.
+
 ## Terminal UI example
 
 ```python
+# What this shows: a reviewer step that wraps a human sign-off inside
+# an otherwise-automated pipeline. HumanEngine is a drop-in for
+# LLMEngine — the chain surrounding it doesn't care whether the
+# reviewer is a human or a model.
+# Why output=Review: the terminal UI then prompts EACH FIELD one at a
+# time ("approved (bool):", "comment (str):", "rating (int):") and
+# coerces the raw text via Pydantic TypeAdapter. If the human types
+# "yes" for a bool it becomes True; if they type "abc" for an int the
+# field is re-prompted (up to 3 retries) with the validation error
+# shown inline. On final failure the run returns an error Envelope
+# with type="StructuredOutputCoercionError" — the caller can retry,
+# fall back, or surface the issue. No silent corruption.
+
 from lazybridge import Agent, HumanEngine
 from pydantic import BaseModel
 
@@ -35,15 +65,27 @@ class Review(BaseModel):
     rating: int
 
 reviewer = Agent(
+    # timeout: wall-clock deadline on the prompt (asyncio.wait_for).
+    # default: if the timeout fires, use this string instead of raising
+    #          TimeoutError — essential for unattended CI runs.
     engine=HumanEngine(timeout=120, default="no comment"),
     output=Review,
     name="reviewer",
 )
 
 # In a pipeline: draft → review → finalise.
+# The reviewer sees whatever the drafter produced as its task. When
+# the human submits, the review payload becomes the finaliser's task.
 pipeline = Agent.chain(drafter, reviewer, finaliser)
 pipeline("draft the release notes")
 ```
+
+What just happened: the chain paused at the reviewer step, presented
+the drafter's output plus field-by-field prompts, and emitted a
+`HIL_DECISION` event on the session before handing the coerced
+`Review` instance back to the finaliser.  If no `Session` is attached,
+the events are simply skipped — HumanEngine behaves identically to an
+LLM engine without one.
 
 ## Web UI example
 
@@ -75,19 +117,37 @@ never reachable from outside the local machine.
 
 ## Custom UI adapter
 
-For web apps and CI environments where `stdin` / browser are unavailable, pass
-any object with `async def prompt(task, *, tools, output_type) -> str`:
+For web apps, chat platforms, or CI runners where neither stdin nor a
+local browser is available, pass **any** object with a coroutine
+method matching `async def prompt(task, *, tools, output_type) -> str`.
+The engine awaits it exactly like the built-in UIs.
 
 ```python
+# What this shows: routing the prompt through Slack instead of stdin.
+# The adapter returns whatever raw string the human types in reply —
+# HumanEngine then runs the same Pydantic coercion / retry loop as if
+# they had typed it at the terminal.
+# Why the minimal surface: everything coercion-related (structured
+# output, TOOL_ERROR on failure, HIL_DECISION on success) lives in
+# HumanEngine itself. Adapters only worry about transport.
+
 from lazybridge.engines.human import _UIProtocol
 
 class SlackUI(_UIProtocol):
     async def prompt(self, task: str, *, tools, output_type) -> str:
+        # tools is a list[Tool] (usually empty for HumanEngine) and
+        # output_type is the Pydantic class / str you passed on the
+        # Agent — useful if you want to render a typed form yourself
+        # instead of letting HumanEngine prompt field-by-field.
         await post_slack_message(task)
-        return await wait_for_slack_reply()
+        return await wait_for_slack_reply()   # raw string
 
 reviewer = Agent(engine=HumanEngine(ui=SlackUI()), name="reviewer")
 ```
+
+For **testing** a pipeline that includes a HumanEngine, the easiest
+adapter is `scripted_inputs` from `lazybridge.testing` — see the
+[testing guide](testing.md) for deterministic HIL harnesses.
 
 ## Pitfalls
 

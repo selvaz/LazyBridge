@@ -259,15 +259,28 @@ REPL commands:
 - ``tools=`` accepts functions, Tool instances, and Agent instances
   uniformly (wrap_tool is applied at __init__). Same contract as
   ``Agent(tools=...)``.
-- The REPL runs on a worker thread so the caller's event loop is not
-  blocked. ``input_fn`` is called there; use scripted inputs in tests.
+- Sync REPL (``input_fn``) runs on a worker thread via
+  ``asyncio.to_thread``. Pass ``ainput_fn`` instead for an
+  event-loop-native async REPL — required for FastAPI / websocket
+  hosts where asyncio cancellation must propagate into the prompt.
 - ``retry <agent>: <feedback>`` re-runs the named agent with the
   feedback appended to the task. The output replaces the current
   supervisor buffer.
 - Unknown commands print help and re-prompt. ``continue`` is the only
   terminator.
+- Every REPL command emits a ``HIL_DECISION`` event with one of
+  these kinds: ``continue`` | ``retry`` | ``store`` | ``tool`` |
+  ``unknown`` | ``empty``. Filter the event log on
+  ``EventType.HIL_DECISION`` for the human-decision audit trail.
 - Session propagation: an Agent wrapping a SupervisorEngine receives
-  session events for AGENT_START / AGENT_FINISH like any other engine.
+  session events for AGENT_START / AGENT_FINISH like any other engine;
+  nested agents retried from the REPL emit their own AGENT_START /
+  AGENT_FINISH under the same session.
+- Tool call parsing: ``name(args)`` with any whitespace and balanced
+  outer parens. Everything between the first ``(`` and last ``)`` is
+  passed as the raw string to the tool's first REQUIRED parameter.
+  Single fully-quoted args (``"foo"`` / ``'foo'``) have quotes stripped.
+- ``store <key>`` is READ-ONLY — the REPL cannot mutate the Store.
 
 **example**
 
