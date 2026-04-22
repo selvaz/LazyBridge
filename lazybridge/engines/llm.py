@@ -292,8 +292,15 @@ class LLMEngine:
         tool_map = {t.name: t for t in tools}
 
         structured_cfg: StructuredOutputConfig | None = None
-        if output_type is not str and isinstance(output_type, type):
-            structured_cfg = StructuredOutputConfig(schema=output_type)
+        # Activate structured output when the caller declared a non-str
+        # output type — including generic forms like ``list[MyModel]``
+        # or ``dict[str, MyModel]``.  Pre-fix the ``isinstance(type)``
+        # filter rejected generics because ``list[X]`` isn't a ``type``,
+        # so Agent(output=list[Summary]) silently got plain text back.
+        if output_type is not str and output_type is not Any:
+            from typing import get_origin
+            if isinstance(output_type, type) or get_origin(output_type) is not None:
+                structured_cfg = StructuredOutputConfig(schema=output_type)
 
         thinking_cfg = ThinkingConfig(enabled=True) if self.thinking else None
         # "parallel" is our asyncio strategy; provider always gets "auto"

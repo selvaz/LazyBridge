@@ -83,6 +83,11 @@ class Agent:
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
         # ``engine=`` is a non-LLM engine.
         native_tools: "list[Any] | None" = None,
+        # Optional post-parse validator.  Runs on the structured ``payload``
+        # after schema validation; may raise ValueError to force a
+        # retry-with-feedback loop (up to ``max_output_retries``).
+        output_validator: "Callable[[Any], Any] | None" = None,
+        max_output_retries: int = 2,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -111,6 +116,8 @@ class Agent:
         self._tools_raw = list(tools)
         self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)
         self.output = output
+        self.output_validator = output_validator
+        self.max_output_retries = max_output_retries
         self.memory = memory
         self.sources = list(sources)
         self.guard = guard
@@ -190,13 +197,60 @@ class Agent:
         return result
 
     async def _run_engine(self, env: Envelope) -> Envelope:
-        return await self.engine.run(
+        result = await self.engine.run(
             env,
             tools=list(self._tool_map.values()),
             output_type=self.output,
             memory=self.memory,
             session=self.session,
         )
+        # Structured output retry loop.  When ``output=`` declares a
+        # concrete type (``SomeModel``, ``list[SomeModel]``, …) and the
+        # engine returned a plain string instead of the expected
+        # payload — or ``output_validator`` raised — re-attempt the
+        # call with the validation error fed back as context. Up to
+        # ``max_output_retries`` times; the final attempt is returned
+        # as-is.  Function-style output (``output=str``) skips this
+        # entirely.
+        if self.output is not str and result.ok:
+            result = await self._validate_and_retry(env, result)
+        return result
+
+    async def _validate_and_retry(self, original_env: Envelope, first: Envelope) -> Envelope:
+        from lazybridge.core.structured import validate_payload_against_output_type
+
+        for attempt in range(self.max_output_retries + 1):
+            current = first if attempt == 0 else None
+            if current is None:
+                current = await self.engine.run(
+                    _feedback_env(original_env, feedback),
+                    tools=list(self._tool_map.values()),
+                    output_type=self.output,
+                    memory=self.memory,
+                    session=self.session,
+                )
+                if not current.ok:
+                    return current
+
+            try:
+                validated = validate_payload_against_output_type(current.payload, self.output)
+                if self.output_validator is not None:
+                    maybe = self.output_validator(validated)
+                    validated = maybe if maybe is not None else validated
+                # Swap the validated payload back in; keep metadata/error.
+                return current.model_copy(update={"payload": validated})
+            except Exception as exc:
+                if attempt == self.max_output_retries:
+                    # Out of retries — return the last attempt unchanged
+                    # so the caller can inspect ``payload`` / ``error``.
+                    return current
+                feedback = (
+                    f"The previous response did not satisfy the required "
+                    f"output schema ({_describe_output_type(self.output)}). "
+                    f"Validation error: {exc}. Please respond again with a "
+                    f"valid instance."
+                )
+        return current  # type: ignore[return-value]
 
     async def stream(self, task: "str | Envelope") -> AsyncGenerator[str, None]:
         """Stream LLM tokens across the full tool-calling loop."""
@@ -460,6 +514,23 @@ def _safe_register_tool_edge(
             f"{type(exc).__name__}: {exc}",
             stacklevel=2,
         )
+
+
+def _feedback_env(original: Envelope, feedback: str) -> Envelope:
+    """Build a retry envelope that keeps the pristine user task but
+    appends the validation failure reason as context so the model
+    understands what went wrong.
+    """
+    merged = f"{original.context}\n\n{feedback}" if original.context else feedback
+    return Envelope(task=original.task, context=merged, payload=original.payload)
+
+
+def _describe_output_type(output: Any) -> str:
+    """Human-readable rendering of an ``output=`` annotation for feedback."""
+    name = getattr(output, "__name__", None)
+    if name:
+        return name
+    return str(output).replace("typing.", "")
 
 
 def _read_source(src: Any) -> str:
