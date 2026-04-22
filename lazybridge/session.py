@@ -14,6 +14,18 @@ from typing import Any
 from lazybridge.graph import GraphSchema
 
 
+_SCHEMA_DDL = """
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    run_id TEXT,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    ts REAL NOT NULL
+)
+"""
+
+
 class EventType(StrEnum):
     AGENT_START = "agent_start"
     AGENT_FINISH = "agent_finish"
@@ -23,6 +35,11 @@ class EventType(StrEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     TOOL_ERROR = "tool_error"
+    # Human-in-the-loop audit trail: one event per decision a human
+    # takes inside ``HumanEngine`` / ``SupervisorEngine``.  Payload:
+    # ``{"agent_name": ..., "kind": "continue"|"retry"|"store"|"tool"|"input",
+    #    "command": "<raw repl input>", "result": "<brief>"}``.
+    HIL_DECISION = "hil_decision"
 
 
 class EventLog:
@@ -31,34 +48,58 @@ class EventLog:
     def __init__(self, session_id: str, db: str | None = None) -> None:
         self.session_id = session_id
         self._db = db
+        # In-memory SQLite needs a SHARED cache otherwise every thread
+        # gets its own isolated DB and events emitted from worker
+        # threads (e.g. ``SupervisorEngine`` via ``asyncio.to_thread``)
+        # land in a DB the main thread can never see.  Using the
+        # ``file::memory:?cache=shared`` URI uniquely named per
+        # ``session_id`` gives us one shared in-memory DB per Session.
+        if db is None:
+            self._uri = f"file:memdb_{session_id}?mode=memory&cache=shared"
+        else:
+            self._uri = None
         self._local = threading.local()
         self._lock = threading.Lock()
+        # Keep one anchor connection alive for in-memory DBs — SQLite
+        # drops a ``file::memory:?cache=shared`` DB as soon as the last
+        # connection closes, so without the anchor the first cleanup
+        # of a thread-local conn would wipe the table.
+        if self._uri is not None:
+            self._anchor: sqlite3.Connection | None = sqlite3.connect(
+                self._uri, uri=True, check_same_thread=False,
+            )
+        else:
+            self._anchor = None
         self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:
+        """Return a thread-local connection, initialising schema on first use.
+
+        Schema init is idempotent (``CREATE TABLE IF NOT EXISTS``) so
+        calling it once per new thread is safe and necessary — worker
+        threads spawned by ``asyncio.to_thread`` otherwise end up with
+        a connection that has no ``events`` table.
+        """
         if not hasattr(self._local, "conn"):
             if self._db:
                 self._local.conn = sqlite3.connect(self._db, check_same_thread=False)
                 self._local.conn.execute("PRAGMA journal_mode=WAL")
                 self._local.conn.execute("PRAGMA busy_timeout=5000")
             else:
-                self._local.conn = sqlite3.connect(":memory:", check_same_thread=False)
+                # Shared in-memory DB — see __init__ for the URI rationale.
+                self._local.conn = sqlite3.connect(
+                    self._uri, uri=True, check_same_thread=False,
+                )
             self._local.conn.row_factory = sqlite3.Row
+            # Ensure the schema exists on every thread-local connection.
+            # ``CREATE TABLE IF NOT EXISTS`` makes this cheap + idempotent;
+            # persistent DBs skip creation after the first hit.
+            self._local.conn.execute(_SCHEMA_DDL)
+            self._local.conn.commit()
         return self._local.conn
 
     def _init_schema(self) -> None:
-        self._conn().execute(
-            """
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                run_id TEXT,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                ts REAL NOT NULL
-            )
-            """
-        )
+        self._conn().execute(_SCHEMA_DDL)
         self._conn().commit()
 
     def record(

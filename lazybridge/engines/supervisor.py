@@ -118,11 +118,20 @@ class SupervisorEngine:
             if env.context:
                 task_text = f"{task_text}\n\nContext:\n{env.context}"
 
-            # REPL is sync — offload to a worker thread so the caller's
-            # event loop is never blocked.
-            final = await asyncio.to_thread(
-                self._run_repl, task_text, effective_tools, agent_name,
-            )
+            # If the caller supplied an ``ainput_fn`` we use a native
+            # async REPL — prompts go through the event loop instead of
+            # a worker thread, so asyncio cancel scope works correctly.
+            # Otherwise fall back to the sync REPL on a worker thread.
+            if self._ainput_fn is not None:
+                final = await self._run_repl_async(
+                    task_text, effective_tools, agent_name,
+                    session=session, run_id=run_id,
+                )
+            else:
+                final = await asyncio.to_thread(
+                    self._run_repl, task_text, effective_tools, agent_name,
+                    session, run_id,
+                )
         except Exception as exc:
             if session:
                 session.emit(EventType.AGENT_FINISH, {"agent_name": agent_name, "error": str(exc)}, run_id=run_id)
@@ -254,50 +263,141 @@ class SupervisorEngine:
             return str(env_out.content)
         return str(env_out)
 
-    def _run_repl(self, task: str, tools: dict, agent_name: str) -> str:
+    def _emit_decision(
+        self,
+        session: "Session | None",
+        run_id: str,
+        agent_name: str,
+        kind: str,
+        command: str,
+        result: str | None = None,
+    ) -> None:
+        """Record a HIL decision on the session's event log.
+
+        Kinds: ``continue`` | ``retry`` | ``store`` | ``tool`` |
+        ``unknown`` | ``empty``.  Pre-fix the supervisor emitted nothing
+        per-decision — only the outer AGENT_START / AGENT_FINISH were
+        visible, so auditing a multi-step REPL session required diffing
+        states rather than reading an event list.
+        """
+        if session is None:
+            return
+        payload = {"agent_name": agent_name, "kind": kind, "command": command}
+        if result is not None:
+            payload["result"] = result[:500]
+        session.emit(EventType.HIL_DECISION, payload, run_id=run_id)
+
+    def _handle_command(
+        self,
+        user_input: str,
+        task: str,
+        tools: dict,
+        agent_name: str,
+        last_output: str,
+        session: "Session | None",
+        run_id: str,
+    ) -> tuple[str | None, str]:
+        """Process one REPL command.
+
+        Returns ``(final, updated_last_output)`` where ``final`` is
+        non-None iff the REPL should exit (the ``continue`` command).
+        Everything else (retry / store / tool / unknown) returns
+        ``(None, new_last_output)`` and the caller re-prompts.
+        """
+        if not user_input.strip():
+            self._emit_decision(session, run_id, agent_name, "empty", user_input)
+            return None, last_output
+
+        lower = user_input.lower()
+
+        if lower.startswith("continue"):
+            custom = user_input[8:].strip().lstrip(":").strip()
+            final = custom if custom else last_output
+            self._emit_decision(session, run_id, agent_name, "continue", user_input, final)
+            return final, last_output
+
+        if lower.startswith("retry "):
+            try:
+                name, feedback = self._parse_retry(user_input)
+                agent = self._find_agent(name)
+                new_output = self._run_retry(agent, task, feedback)
+                with _IO_LOCK:
+                    print(f"\n[{name} re-run] {new_output[:300]}")
+                self._emit_decision(session, run_id, agent_name, "retry", user_input, new_output)
+                return None, new_output
+            except Exception as exc:
+                with _IO_LOCK:
+                    print(f"Retry failed: {exc}")
+                self._emit_decision(session, run_id, agent_name, "retry", user_input, f"error: {exc}")
+                return None, last_output
+
+        if lower.startswith("store "):
+            key = user_input[6:].strip()
+            if self._store is None:
+                with _IO_LOCK:
+                    print("No store configured — pass store= to SupervisorEngine.")
+                self._emit_decision(session, run_id, agent_name, "store", user_input, "no store")
+            else:
+                value = self._store.read(key)
+                with _IO_LOCK:
+                    print(f"Store[{key}]: {value}")
+                self._emit_decision(session, run_id, agent_name, "store", user_input, str(value))
+            return None, last_output
+
+        tool_result = self._try_tool_call(user_input, tools)
+        if tool_result is not None:
+            with _IO_LOCK:
+                print(f"Result: {tool_result[:500]}")
+            self._emit_decision(session, run_id, agent_name, "tool", user_input, tool_result)
+            return None, tool_result
+
+        with _IO_LOCK:
+            print(f"Unknown command: {user_input}")
+            print("Available: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)")
+        self._emit_decision(session, run_id, agent_name, "unknown", user_input)
+        return None, last_output
+
+    def _run_repl(
+        self,
+        task: str,
+        tools: dict,
+        agent_name: str,
+        session: "Session | None" = None,
+        run_id: str = "",
+    ) -> str:
         self._show_header(task, agent_name, tools)
         last_output = task
 
         while True:
             user_input = self._get_input(f"[{agent_name}] > ").strip()
-            if not user_input:
-                continue
+            final, last_output = self._handle_command(
+                user_input, task, tools, agent_name, last_output, session, run_id,
+            )
+            if final is not None:
+                return final
 
-            lower = user_input.lower()
+    async def _run_repl_async(
+        self,
+        task: str,
+        tools: dict,
+        agent_name: str,
+        *,
+        session: "Session | None",
+        run_id: str,
+    ) -> str:
+        """Event-loop-native REPL — used when ``ainput_fn`` was supplied.
 
-            if lower.startswith("continue"):
-                custom = user_input[8:].strip().lstrip(":").strip()
-                return custom if custom else last_output
+        Blocks cooperatively on ``ainput_fn`` instead of occupying a
+        worker thread, so asyncio cancellation propagates naturally.
+        """
+        self._show_header(task, agent_name, tools)
+        last_output = task
+        assert self._ainput_fn is not None
 
-            if lower.startswith("retry "):
-                try:
-                    name, feedback = self._parse_retry(user_input)
-                    agent = self._find_agent(name)
-                    last_output = self._run_retry(agent, task, feedback)
-                    with _IO_LOCK:
-                        print(f"\n[{name} re-run] {last_output[:300]}")
-                except Exception as exc:
-                    with _IO_LOCK:
-                        print(f"Retry failed: {exc}")
-                continue
-
-            if lower.startswith("store "):
-                key = user_input[6:].strip()
-                if self._store is None:
-                    with _IO_LOCK:
-                        print("No store configured — pass store= to SupervisorEngine.")
-                else:
-                    with _IO_LOCK:
-                        print(f"Store[{key}]: {self._store.read(key)}")
-                continue
-
-            tool_result = self._try_tool_call(user_input, tools)
-            if tool_result is not None:
-                with _IO_LOCK:
-                    print(f"Result: {tool_result[:500]}")
-                last_output = tool_result
-                continue
-
-            with _IO_LOCK:
-                print(f"Unknown command: {user_input}")
-                print("Available: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)")
+        while True:
+            user_input = (await self._ainput_fn(f"[{agent_name}] > ")).strip()
+            final, last_output = self._handle_command(
+                user_input, task, tools, agent_name, last_output, session, run_id,
+            )
+            if final is not None:
+                return final
