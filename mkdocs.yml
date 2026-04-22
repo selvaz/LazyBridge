@@ -67,6 +67,7 @@ nav:
     - Advanced:
       - Engine protocol: guides/engine-protocol.md
       - BaseProvider: guides/base-provider.md
+      - LiteLLM bridge: guides/litellm.md
       - Plan serialization: guides/plan-serialize.md
       - Provider registry: guides/register-provider.md
       - core.types: guides/core-types.md

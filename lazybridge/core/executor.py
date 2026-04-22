@@ -53,6 +53,14 @@ def _resolve_provider(
         "deepseek": DeepSeekProvider,
     }
     key = provider.lower().strip()
+
+    # LiteLLM is optional; import lazily so the provider module isn't a
+    # hard dependency for every Agent() construction. Only paid with
+    # ``pip install lazybridge[litellm]``.
+    if key == "litellm":
+        from lazybridge.core.providers.litellm import LiteLLMProvider
+        return LiteLLMProvider(api_key=api_key, model=model, **kwargs)
+
     if key not in registry:
         raise ValueError(f"Unknown provider '{provider}'. Supported: {', '.join(sorted(set(registry.keys())))}.")
     return registry[key](api_key=api_key, model=model, **kwargs)

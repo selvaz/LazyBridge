@@ -149,6 +149,7 @@ class LLMEngine:
     #: registered rules take priority over built-ins so shipping a new
     #: "claude-opus-5-*" alias is one call, not a code edit.
     _PROVIDER_RULES: list[tuple[str, str, str]] = [
+        ("startswith", "litellm/", "litellm"),  # opt-in catch-all bridge
         ("contains",  "claude",   "anthropic"),
         ("contains",  "gpt",      "openai"),
         ("startswith", "o1",      "openai"),
