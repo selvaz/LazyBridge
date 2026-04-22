@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import inspect
 import threading
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -34,10 +37,19 @@ class Memory:
         memory = Memory(strategy="summary", summarizer=summarizer)
         agent  = Agent("claude-opus-4-7", memory=memory)
 
-    When compression triggers the summarizer is called synchronously with a
-    formatted transcript of the turns being dropped.  ``Agent.__call__``
-    handles the async bridge automatically so no special wrapping is needed.
-    If the summarizer raises, compression falls back to keyword extraction.
+    When compression triggers the summarizer is called with a formatted
+    transcript of the turns being dropped.  Three callable shapes are
+    handled transparently:
+
+    * Sync callable returning a string / Envelope / anything with
+      ``.text()`` — called directly.
+    * ``Agent`` — its ``__call__`` already bridges async internally.
+    * Plain ``async def summarize(prompt): ...`` — the returned
+      coroutine is driven to completion (in a worker thread when
+      called from inside an event loop, to avoid nested-loop errors).
+
+    If the summarizer raises, compression falls back to keyword
+    extraction — never silent garbage.
     """
 
     #: Hard cap on ``_turns`` when compression is disabled.  Without a
@@ -121,7 +133,14 @@ class Memory:
             self._turns = self._turns[-10:]
 
     def _llm_summary(self, turns: list[_Turn]) -> str:
-        """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error."""
+        """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.
+
+        If ``summarizer`` is an async callable (returns a coroutine),
+        the coroutine is driven to completion here rather than left
+        dangling — without this the result is silently stringified as
+        ``"<coroutine object at 0x…>"`` and the Python runtime emits a
+        "coroutine was never awaited" RuntimeWarning.
+        """
         assert self._summarizer is not None
         lines: list[str] = []
         for t in turns:
@@ -134,6 +153,8 @@ class Memory:
         )
         try:
             result = self._summarizer(prompt)
+            if inspect.iscoroutine(result) or inspect.isawaitable(result):
+                result = _drive_to_completion(result)
             return result.text() if hasattr(result, "text") else str(result)
         except Exception:
             return self._rule_summary(turns)
@@ -171,3 +192,26 @@ class Memory:
         with self._lock:
             self._turns.clear()
             self._summary = ""
+
+
+def _drive_to_completion(awaitable: Any) -> Any:
+    """Drive an awaitable from sync context regardless of loop state.
+
+    * No loop running → ``asyncio.run(...)``.
+    * Loop running (Jupyter, FastAPI, inside an Agent's async path) →
+      dispatch to a fresh loop on a worker thread so we don't nest.
+
+    Mirrors the bridge used by :meth:`Agent.__call__` so Memory's
+    compression path has identical async semantics.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_ensure_coroutine(awaitable))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _ensure_coroutine(awaitable)).result()
+
+
+async def _ensure_coroutine(awaitable: Any) -> Any:
+    """Wrap any awaitable in a coroutine so ``asyncio.run`` accepts it."""
+    return await awaitable

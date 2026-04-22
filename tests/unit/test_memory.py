@@ -157,3 +157,82 @@ def test_text_reflects_latest_state():
     t2 = m.text()
     assert "new question" in t2
     assert len(t2) >= len(t1)
+
+
+# ── summarizer: sync / async / Agent-like — all bridge correctly ─────────────
+#
+# Audit finding #3 — Memory.add() is sync; an ``async def`` summarizer
+# passed via ``summarizer=`` used to return an un-awaited coroutine,
+# stringified to ``"<coroutine object at 0x…>"`` with a runtime warning.
+# The fix drives awaitables to completion (running-loop-safe via a
+# worker thread when needed) and falls back to keyword extraction on
+# raise — never silent garbage.
+
+
+def _force_compression_turns() -> list[tuple[str, str]]:
+    """Build a turns list long enough that strategy='summary' compresses
+    on the next add()."""
+    return [(f"user-{i}", f"assistant-{i}") for i in range(11)]
+
+
+def test_summarizer_sync_callable_is_used_verbatim():
+    calls: list[str] = []
+
+    def sync_sum(prompt: str) -> str:
+        calls.append(prompt)
+        return "SYNC-SUMMARY"
+
+    m = Memory(strategy="summary", summarizer=sync_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    assert len(calls) >= 1
+    assert m._summary == "SYNC-SUMMARY"
+
+
+def test_summarizer_async_callable_is_driven_to_completion():
+    """An ``async def`` summarizer's coroutine must be awaited, not
+    silently stringified."""
+    calls: list[str] = []
+
+    async def async_sum(prompt: str) -> str:
+        calls.append(prompt)
+        return "ASYNC-SUMMARY"
+
+    m = Memory(strategy="summary", summarizer=async_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+
+    assert len(calls) >= 1
+    assert m._summary == "ASYNC-SUMMARY"
+    # Explicitly guard against regression — the broken path produces
+    # something with "coroutine" in it.
+    assert "coroutine" not in m._summary.lower()
+
+
+def test_summarizer_async_callable_raising_falls_back_to_keywords():
+    async def async_boom(prompt: str) -> str:
+        raise RuntimeError("upstream down")
+
+    m = Memory(strategy="summary", summarizer=async_boom)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    # Rule fallback prefix — compression didn't just die.
+    assert m._summary.startswith("[Earlier conversation covered:")
+
+
+def test_summarizer_object_with_text_method_is_stringified():
+    """A sync callable returning an object exposing ``.text()`` (e.g.
+    an Envelope-like) has ``.text()`` consulted — preserves the shape
+    that Agents return via ``__call__``."""
+
+    class _ResultLike:
+        def text(self) -> str:
+            return "FROM-TEXT"
+
+    def sync_sum(prompt: str) -> _ResultLike:
+        return _ResultLike()
+
+    m = Memory(strategy="summary", summarizer=sync_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    assert m._summary == "FROM-TEXT"
