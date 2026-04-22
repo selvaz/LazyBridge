@@ -26,24 +26,64 @@ class Memory:
     re-read on every invocation (live view — never a stale snapshot).
     """
 
+    #: Hard cap on ``_turns`` when compression is disabled.  Without a
+    #: cap ``strategy="none"`` (or ``max_tokens=None``) leaks memory
+    #: linearly with conversation length.  The ceiling is large enough
+    #: that typical interactive sessions never hit it, but prevents
+    #: long-running agents from OOMing silently.  Callers who genuinely
+    #: want unbounded history can pass ``max_turns=None`` explicitly.
+    _DEFAULT_MAX_TURNS = 1000
+
     def __init__(
         self,
         *,
         strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
         max_tokens: int | None = 4000,
+        max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
     ) -> None:
         self.strategy = strategy
         self.max_tokens = max_tokens
+        self.max_turns = max_turns
         self.store = store
         self._turns: list[_Turn] = []
         self._lock = threading.Lock()
         self._summary: str = ""
+        self._overflow_warned = False
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         with self._lock:
             self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))
             self._maybe_compress()
+            self._enforce_turn_cap()
+
+    def _enforce_turn_cap(self) -> None:
+        """Hard cap on total retained turns — unconditional backstop.
+
+        Runs after ``_maybe_compress`` so strategy-specific compression
+        wins when it applies.  Only fires when the caller has opted out
+        of token-based compression (``strategy="none"`` or
+        ``max_tokens`` is falsy) AND ``max_turns`` is set.  Drops oldest
+        turns FIFO and emits a one-shot warning.
+        """
+        if self.max_turns is None:
+            return
+        if len(self._turns) <= self.max_turns:
+            return
+        drop = len(self._turns) - self.max_turns
+        self._turns = self._turns[drop:]
+        if not self._overflow_warned:
+            import warnings
+
+            warnings.warn(
+                f"Memory turn count exceeded max_turns={self.max_turns}; "
+                f"dropped {drop} oldest turn(s).  Pass max_turns=None to "
+                f"disable this cap, or set strategy='auto'/'sliding' for "
+                f"token-aware compression.",
+                UserWarning,
+                stacklevel=3,
+            )
+            self._overflow_warned = True
 
     def _maybe_compress(self) -> None:
         if self.strategy == "none" or not self.max_tokens:
