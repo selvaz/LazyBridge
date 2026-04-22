@@ -22,7 +22,6 @@ from lazybridge import (
     ConsoleExporter,
     EdgeType,
     Envelope,
-    EventType,
     GraphSchema,
     Plan,
     Session,
@@ -31,7 +30,6 @@ from lazybridge import (
     SupervisorEngine,
     Tool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Session.graph — auto-registration

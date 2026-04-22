@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Literal
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
+from lazybridge.engines.plan import Plan, PlanCompileError, PlanCompiler, Step
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.evals import EvalCase, EvalSuite, contains, exact_match
+from lazybridge.guardrails import ContentGuard, GuardAction, GuardChain
+from lazybridge.memory import Memory
 from lazybridge.sentinels import (
     _FromParallel,
     _FromPrev,
@@ -21,14 +23,9 @@ from lazybridge.sentinels import (
     from_start,
     from_step,
 )
-from lazybridge.tools import Tool, build_tool_map, wrap_tool
-from lazybridge.memory import Memory
+from lazybridge.session import EventType, Session
 from lazybridge.store import Store
-from lazybridge.session import EventType, Session, EventLog
-from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain
-from lazybridge.evals import EvalCase, EvalReport, EvalSuite, contains, exact_match
-from lazybridge.engines.plan import Plan, PlanCompileError, PlanCompiler, Step
-
+from lazybridge.tools import Tool, build_tool_map, wrap_tool
 
 # ============================================================
 # Step 1: Envelope

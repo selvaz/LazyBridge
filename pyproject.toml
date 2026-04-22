@@ -48,7 +48,7 @@ all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<2.0.0", "google-genai>
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
 Repository    = "https://github.com/selvaz/LazyBridge"
-Documentation = "https://github.com/selvaz/LazyBridge/tree/main/lazy_wiki"
+Documentation = "https://github.com/selvaz/LazyBridge/tree/main/docs"
 Changelog     = "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/selvaz/LazyBridge/issues"
 

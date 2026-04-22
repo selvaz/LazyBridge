@@ -16,7 +16,6 @@ from lazybridge.exporters import (
     StructuredLogExporter,
 )
 
-
 _SAMPLE_EVENT = {"event_type": "tool_call", "tool": "search", "run_id": "r1"}
 
 

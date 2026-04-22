@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import threading
 
-from lazybridge.memory import Memory
 from lazybridge.core.types import Role
-
+from lazybridge.memory import Memory
 
 # ── basic add / text ──────────────────────────────────────────────────────────
 
@@ -81,7 +80,7 @@ def test_strategy_sliding_caps_at_10():
 
 def test_strategy_sliding_creates_summary():
     m = Memory(strategy="sliding", max_tokens=1)
-    for i in range(15):
+    for _ in range(15):
         m.add("question", "answer", tokens=200)
     assert m._summary != ""
 
@@ -109,13 +108,13 @@ def test_auto_default_strategy():
 
 def test_summary_non_empty_after_compression():
     m = Memory(strategy="sliding", max_tokens=1)
-    for i in range(15):
+    for _ in range(15):
         m.add("unique_keyword_xyz", "response_abc", tokens=100)
     assert m._summary != ""
 
 def test_messages_includes_summary_prefix():
     m = Memory(strategy="sliding", max_tokens=1)
-    for i in range(15):
+    for _ in range(15):
         m.add("q", "a", tokens=100)
     msgs = m.messages()
     full_text = " ".join(

@@ -28,10 +28,8 @@ from pydantic import BaseModel
 from lazybridge import (
     Agent,
     ContentGuard,
-    GraphSchema,
     GuardAction,
     GuardChain,
-    HumanEngine,
     LLMEngine,
     Plan,
     Session,
@@ -40,7 +38,6 @@ from lazybridge import (
 )
 from lazybridge.engines.human import _TerminalUI
 from lazybridge.guardrails import LLMGuard
-
 
 # ---------------------------------------------------------------------------
 # GuardChain preserves modifications across the chain
@@ -203,7 +200,7 @@ def test_graph_schema_names_supervisor_engine_in_fallback():
     name so dumps are legible.
     """
     sess = Session()
-    sup = Agent(
+    Agent(
         engine=SupervisorEngine(input_fn=lambda p: "continue"),
         name="sup",
         session=sess,
@@ -296,9 +293,8 @@ def test_supervisor_tool_call_preserves_commas_in_args():
 
 
 def test_human_engine_coerce_field_optional_empty_is_none():
-    from typing import Optional
 
-    assert _TerminalUI._coerce_field(Optional[int], "") is None
+    assert _TerminalUI._coerce_field(int | None, "") is None
     # Empty string on a required int falls back to raw string (Pydantic
     # will emit a proper ValidationError downstream).
     assert _TerminalUI._coerce_field(int, "") == ""
@@ -342,6 +338,7 @@ def test_llm_engine_metadata_update_uses_model_copy():
     regression-check by source grep.
     """
     import inspect
+
     from lazybridge.engines import llm
 
     src = inspect.getsource(llm.LLMEngine.run)

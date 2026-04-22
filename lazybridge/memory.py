@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from lazybridge.core.types import Message, Role
@@ -122,6 +122,7 @@ class Memory:
 
     def _llm_summary(self, turns: list[_Turn]) -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error."""
+        assert self._summarizer is not None
         lines: list[str] = []
         for t in turns:
             lines.append(f"User: {t.user}")

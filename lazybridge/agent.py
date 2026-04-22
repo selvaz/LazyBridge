@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from lazybridge.envelope import Envelope
-from lazybridge.tools import Tool, build_tool_map, wrap_tool
+from lazybridge.tools import Tool, build_tool_map
 
 
 class Agent:
@@ -60,33 +59,33 @@ class Agent:
 
     def __init__(
         self,
-        engine_or_model: "str | Any" = "claude-opus-4-7",
-        tools: "list[Tool | Callable | Agent]" = (),
+        engine_or_model: str | Any = "claude-opus-4-7",
+        tools: list[Tool | Callable | Agent] | None = None,
         output: type = str,
-        memory: "Any | None" = None,
-        sources: "list[Any]" = (),
-        guard: "Any | None" = None,
-        verify: "Agent | None" = None,
+        memory: Any | None = None,
+        sources: list[Any] | None = None,
+        guard: Any | None = None,
+        verify: Agent | None = None,
         max_verify: int = 3,
         name: str | None = None,
         description: str | None = None,
-        session: "Any | None" = None,
+        session: Any | None = None,
         verbose: bool = False,
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
         # Keyword alias for engine_or_model when passing a non-string Engine
         # (e.g. ``Agent(engine=SupervisorEngine(...))``).
-        engine: "Any | None" = None,
+        engine: Any | None = None,
         # Provider-native server-side tools (WEB_SEARCH, CODE_EXECUTION, …).
         # Accepted directly on Agent as a shortcut for
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
         # ``engine=`` is a non-LLM engine.
-        native_tools: "list[Any] | None" = None,
+        native_tools: list[Any] | None = None,
         # Optional post-parse validator.  Runs on the structured ``payload``
         # after schema validation; may raise ValueError to force a
         # retry-with-feedback loop (up to ``max_output_retries``).
-        output_validator: "Callable[[Any], Any] | None" = None,
+        output_validator: Callable[[Any], Any] | None = None,
         max_output_retries: int = 2,
         # Total deadline (seconds) for ``run()``.  Applied at the
         # top-level Agent boundary so a hung tool, runaway tool loop,
@@ -129,18 +128,18 @@ class Agent:
                     existing.append(t)
             self.engine.native_tools = existing
 
-        self._tools_raw = list(tools)
+        self._tools_raw = list(tools or [])
         self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)
         self.output = output
         self.output_validator = output_validator
         self.max_output_retries = max_output_retries
         self.timeout = timeout
         self.memory = memory
-        self.sources = list(sources)
+        self.sources = list(sources or [])
         self.guard = guard
         self.verify = verify
         self.max_verify = max_verify
-        self.name = name or getattr(self.engine, "model", "agent")
+        self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
 
         # Private per-agent console exporter when verbose= is set without
@@ -181,7 +180,7 @@ class Agent:
     # Core async API
     # ------------------------------------------------------------------
 
-    async def run(self, task: "str | Envelope") -> Envelope:
+    async def run(self, task: str | Envelope) -> Envelope:
         # ``getattr`` with a default keeps this backwards-compatible for
         # Agents constructed via ``Agent.__new__`` (test helpers, custom
         # subclasses) that haven't set ``self.timeout``.
@@ -190,12 +189,12 @@ class Agent:
             return await self._run_body(task)
         try:
             return await asyncio.wait_for(self._run_body(task), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return Envelope.error_envelope(
                 TimeoutError(f"Agent.run() exceeded timeout={timeout}s")
             )
 
-    async def _run_body(self, task: "str | Envelope") -> Envelope:
+    async def _run_body(self, task: str | Envelope) -> Envelope:
         env = self._to_envelope(task)
         env = self._inject_sources(env)
 
@@ -306,7 +305,7 @@ class Agent:
 
         return current  # type: ignore[return-value]
 
-    async def stream(self, task: "str | Envelope") -> AsyncGenerator[str, None]:
+    async def stream(self, task: str | Envelope) -> AsyncGenerator[str, None]:
         """Stream LLM tokens across the full tool-calling loop.
 
         Honours ``self.timeout`` between chunks so a stalled provider
@@ -347,7 +346,7 @@ class Agent:
     # Sync API
     # ------------------------------------------------------------------
 
-    def __call__(self, task: "str | Envelope") -> Envelope:
+    def __call__(self, task: str | Envelope) -> Envelope:
         # Detect whether we're already inside a running event loop.
         # ``asyncio.get_running_loop`` is the forward-compatible way — it
         # raises ``RuntimeError`` when there is no current loop, unlike
@@ -374,7 +373,7 @@ class Agent:
         name: str | None = None,
         description: str | None = None,
         *,
-        verify: "Agent | Callable[[str], Any] | None" = None,
+        verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
     ) -> Tool:
         """Return a Tool that wraps this agent.
@@ -408,10 +407,10 @@ class Agent:
         effective_desc = description or self.description or f"Run the {effective_name} agent."
 
         if verify is None:
-            async def _run(task: str) -> "Envelope":
+            async def _run(task: str) -> Envelope:
                 return await agent.run(task)
         else:
-            async def _run(task: str) -> "Envelope":  # type: ignore[misc]
+            async def _run(task: str) -> Envelope:  # type: ignore[misc]
                 from lazybridge.envelope import Envelope as _Env
                 from lazybridge.evals import verify_with_retry
 
@@ -440,7 +439,7 @@ class Agent:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_model(cls, model: str, **kwargs: Any) -> "Agent":
+    def from_model(cls, model: str, **kwargs: Any) -> Agent:
         """Construct an Agent backed by an LLMEngine for ``model``.
 
         Explicit counterpart to ``Agent("claude-opus-4-7")``.  Use this
@@ -454,7 +453,7 @@ class Agent:
         return cls(engine=LLMEngine(model), **kwargs)
 
     @classmethod
-    def from_engine(cls, engine: Any, **kwargs: Any) -> "Agent":
+    def from_engine(cls, engine: Any, **kwargs: Any) -> Agent:
         """Construct an Agent from an already-built Engine instance.
 
         Explicit counterpart to ``Agent(engine=some_engine)``::
@@ -471,7 +470,7 @@ class Agent:
         *,
         tier: str = "medium",
         **kwargs: Any,
-    ) -> "Agent":
+    ) -> Agent:
         """Construct an Agent for ``provider`` using its tier alias for model selection.
 
         Tiers (``super_cheap`` / ``cheap`` / ``medium`` / ``expensive`` /
@@ -490,7 +489,7 @@ class Agent:
         return cls(engine=LLMEngine(tier, provider=provider), **kwargs)
 
     @classmethod
-    def chain(cls, *agents: "Agent", **kwargs: Any) -> "Agent":
+    def chain(cls, *agents: Agent, **kwargs: Any) -> Agent:
         """Run agents sequentially: output of each becomes input to the next."""
         from lazybridge.engines.plan import Plan, Step
 
@@ -506,11 +505,11 @@ class Agent:
     @classmethod
     def parallel(
         cls,
-        *agents: "Agent",
+        *agents: Agent,
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
         **kwargs: Any,
-    ) -> "_ParallelAgent":
+    ) -> _ParallelAgent:
         """Deterministic fan-out: run ``agents`` concurrently on the same task.
 
         Returns ``list[Envelope]`` — one entry per input agent, preserving
@@ -537,7 +536,7 @@ class Agent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_envelope(task: "str | Envelope") -> Envelope:
+    def _to_envelope(task: str | Envelope) -> Envelope:
         if isinstance(task, Envelope):
             return task
         return Envelope.from_task(str(task))
@@ -557,7 +556,7 @@ class Agent:
         return Envelope(task=env.task, context=merged or env.context, payload=env.payload)
 
 
-def _safe_register_agent(session: Any, agent: "Agent") -> None:
+def _safe_register_agent(session: Any, agent: Agent) -> None:
     """Register ``agent`` on ``session.graph`` if possible, warning on failure.
 
     Pre-fix this was a silent ``try: ... except Exception: pass`` at
@@ -579,7 +578,7 @@ def _safe_register_agent(session: Any, agent: "Agent") -> None:
 
 
 def _safe_register_tool_edge(
-    session: Any, outer: "Agent", inner: "Agent", *, label: str,
+    session: Any, outer: Agent, inner: Agent, *, label: str,
 ) -> None:
     """Register a graph edge between two agents, warning on failure."""
     if session is None or not hasattr(session, "register_tool_edge"):
@@ -646,7 +645,7 @@ class _ParallelAgent:
 
     def __init__(
         self,
-        agents: "list[Agent]",
+        agents: list[Agent],
         *,
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
@@ -661,11 +660,11 @@ class _ParallelAgent:
         self.description = description
         self.session = session
 
-    async def run(self, task: "str | Envelope") -> "list[Envelope]":
+    async def run(self, task: str | Envelope) -> list[Envelope]:
         env = Agent._to_envelope(task) if isinstance(task, str) else task
         sem = asyncio.Semaphore(self.concurrency_limit) if self.concurrency_limit else None
 
-        async def _run_one(agent: "Agent") -> Envelope:
+        async def _run_one(agent: Agent) -> Envelope:
             async def _coro() -> Envelope:
                 if self.step_timeout:
                     return await asyncio.wait_for(agent.run(env), timeout=self.step_timeout)
@@ -684,7 +683,7 @@ class _ParallelAgent:
             for r in results
         ]
 
-    def __call__(self, task: "str | Envelope") -> "list[Envelope]":
+    def __call__(self, task: str | Envelope) -> list[Envelope]:
         # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only
         # forward-compatible detection (``get_event_loop`` is deprecated
         # under 3.12 and errors under 3.14+ when no loop is running).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from lazybridge.guardrails import (
@@ -11,9 +12,7 @@ from lazybridge.guardrails import (
     GuardAction,
     GuardChain,
     GuardError,
-    LLMGuard,
 )
-
 
 # ── GuardAction factories ─────────────────────────────────────────────────────
 

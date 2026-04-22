@@ -38,7 +38,7 @@ def validate_payload_against_output_type(payload: Any, output_type: Any) -> Any:
         return payload
 
     # Lazy import — keeps this module light when Pydantic is not present.
-    from pydantic import BaseModel, TypeAdapter, ValidationError
+    from pydantic import BaseModel, TypeAdapter
 
     # Bare Pydantic model class.
     if isinstance(output_type, type) and issubclass(output_type, BaseModel):
@@ -115,12 +115,7 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
             }
         elif key in ("items", "additionalProperties") and isinstance(value, dict):
             normalized[key] = normalize_json_schema(value)
-        elif key == "prefixItems" and isinstance(value, list):
-            normalized[key] = [
-                normalize_json_schema(sub) if isinstance(sub, dict) else sub
-                for sub in value
-            ]
-        elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
+        elif (key == "prefixItems" and isinstance(value, list)) or (key in ("anyOf", "allOf", "oneOf") and isinstance(value, list)):
             normalized[key] = [
                 normalize_json_schema(sub) if isinstance(sub, dict) else sub
                 for sub in value

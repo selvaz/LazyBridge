@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin, get_type_hints
 
-from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.sentinels import (
     Sentinel,
     _FromParallel,
@@ -104,7 +104,7 @@ class PlanCompileError(Exception):
 class PlanCompiler:
     """Validates a list of Steps at Plan construction time."""
 
-    def validate(self, steps: list[Step], tool_map: dict[str, "Tool"]) -> None:
+    def validate(self, steps: list[Step], tool_map: dict[str, Tool]) -> None:
         names = {s.name for s in steps}
         for i, step in enumerate(steps):
             # Tool exists
@@ -167,7 +167,7 @@ class Plan:
         self,
         *steps: Step,
         max_iterations: int = 100,
-        store: "Store | None" = None,
+        store: Store | None = None,
         checkpoint_key: str | None = None,
         resume: bool = False,
     ) -> None:
@@ -215,17 +215,17 @@ class Plan:
         self.resume = resume
         # Validation deferred to Agent.__init__ after tools are resolved
 
-    def _validate(self, tool_map: dict[str, "Tool"]) -> None:
+    def _validate(self, tool_map: dict[str, Tool]) -> None:
         self._compiler.validate(self.steps, tool_map)
 
     def _step_map(self) -> dict[str, Step]:
-        return {s.name: s for s in self.steps}
+        return {s.name: s for s in self.steps if s.name}
 
     # ------------------------------------------------------------------
     # Checkpoint helpers
     # ------------------------------------------------------------------
 
-    def _checkpoint_store(self) -> "Store | None":
+    def _checkpoint_store(self) -> Store | None:
         return self.store if self.checkpoint_key else None
 
     def _save_checkpoint(
@@ -262,11 +262,11 @@ class Plan:
         self,
         env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-        store: "Store | None" = None,
+        memory: Memory | None,
+        session: Session | None,
+        store: Store | None = None,
         plan_state: PlanState | None = None,
     ) -> Envelope:
         run_id = str(uuid.uuid4())
@@ -330,7 +330,7 @@ class Plan:
                 group = [step]
                 while idx + 1 < len(all_step_names):
                     idx += 1
-                    nxt = step_map.get(all_step_names[idx])
+                    nxt = step_map.get(all_step_names[idx] or "")
                     if nxt and nxt.parallel:
                         group.append(nxt)
                     else:
@@ -352,23 +352,24 @@ class Plan:
                 # Apply writes / history sequentially; bail on first error.
                 last_ok: Envelope | None = None
                 for s, r in zip(group, raw):
-                    if isinstance(r, Exception):
+                    step_name = s.name or ""
+                    if isinstance(r, BaseException):
                         err_env = Envelope.error_envelope(r)
                         self._save_checkpoint(
-                            next_step=s.name, kv=kv, completed=completed, status="failed",
+                            next_step=step_name, kv=kv, completed=completed, status="failed",
                         )
                         return err_env
                     if r.error is not None:
                         self._save_checkpoint(
-                            next_step=s.name, kv=kv, completed=completed, status="failed",
+                            next_step=step_name, kv=kv, completed=completed, status="failed",
                         )
                         return r
                     if s.writes and r.payload is not None:
                         kv[s.writes] = r.payload
                         if effective_store:
                             effective_store.write(s.writes, r.payload)
-                    history.append(StepResult(step_name=s.name, envelope=r))
-                    completed.append(s.name)
+                    history.append(StepResult(step_name=step_name, envelope=r))
+                    completed.append(step_name)
                     last_ok = r
 
                 # Advance past the whole parallel group.
@@ -408,8 +409,8 @@ class Plan:
                 if effective_store:
                     effective_store.write(step.writes, result_env.payload)
 
-            history.append(StepResult(step_name=step.name, envelope=result_env))
-            completed.append(step.name)
+            history.append(StepResult(step_name=step.name or "", envelope=result_env))
+            completed.append(step.name or "")
             prev_env = result_env
 
             # Determine next step via out.next or linear progression
@@ -429,14 +430,14 @@ class Plan:
 
     async def _execute_one(
         self,
-        step: "Step",
+        step: Step,
         prev_env: Envelope,
         start_env: Envelope,
-        history: list["StepResult"],
+        history: list[StepResult],
         kv: dict[str, Any],
         *,
-        tool_map: dict[str, "Tool"],
-        session: "Session | None",
+        tool_map: dict[str, Tool],
+        session: Session | None,
         run_id: str,
         branch_id: str | None = None,
     ) -> Envelope:
@@ -540,8 +541,8 @@ class Plan:
         step: Step,
         env: Envelope,
         *,
-        tool_map: dict[str, "Tool"],
-        session: "Session | None",
+        tool_map: dict[str, Tool],
+        session: Session | None,
         run_id: str,
         branch_id: str | None = None,
     ) -> Envelope:
@@ -628,7 +629,7 @@ class Plan:
         # Linear progression
         steps_list = list(step_map.keys())
         try:
-            idx = steps_list.index(step.name)
+            idx = steps_list.index(step.name or "")
             if idx + 1 < len(steps_list):
                 return steps_list[idx + 1], False
         except ValueError:
@@ -666,7 +667,7 @@ class Plan:
         data: dict[str, Any],
         *,
         registry: dict[str, Any] | None = None,
-    ) -> "Plan":
+    ) -> Plan:
         """Reconstruct a Plan from a ``to_dict`` payload.
 
         ``registry`` maps serialised target names back to live callables /
@@ -693,7 +694,7 @@ class Plan:
         yield result.text()
 
 
-def _first_arg_kwargs(tool: "Tool", value: str) -> dict[str, str]:
+def _first_arg_kwargs(tool: Tool, value: str) -> dict[str, str]:
     """Build kwargs dict using the first parameter name of the tool."""
     params = tool.definition().parameters.get("properties", {})
     if params:

@@ -67,9 +67,9 @@ class SupervisorEngine:
     def __init__(
         self,
         *,
-        tools: "list[Tool | Callable | Any] | None" = None,
-        agents: "list[Any] | None" = None,
-        store: "Store | None" = None,
+        tools: list[Tool | Callable | Any] | None = None,
+        agents: list[Any] | None = None,
+        store: Store | None = None,
         input_fn: Callable[[str], str] | None = None,
         ainput_fn: Callable[[str], Awaitable[str]] | None = None,
         timeout: float | None = None,
@@ -95,13 +95,13 @@ class SupervisorEngine:
 
     async def run(
         self,
-        env: "Envelope",
+        env: Envelope,
         *,
-        tools: "list[Tool]",
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-    ) -> "Envelope":
+        memory: Memory | None,
+        session: Session | None,
+    ) -> Envelope:
         # Agents can pass additional tools via tools=; merge with engine-level.
         effective_tools = dict(self._tools)
         for t in tools or []:
@@ -152,13 +152,13 @@ class SupervisorEngine:
 
     async def stream(
         self,
-        env: "Envelope",
+        env: Envelope,
         *,
-        tools: "list[Tool]",
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-    ) -> "AsyncIterator[str]":
+        memory: Memory | None,
+        session: Session | None,
+    ) -> AsyncIterator[str]:
         out = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield out.text()
 
@@ -180,9 +180,8 @@ class SupervisorEngine:
         t = threading.Thread(target=_ask, daemon=True)
         t.start()
         t.join(timeout=self.timeout)
-        if t.is_alive():
-            if self.default is None:
-                raise TimeoutError(f"Supervisor input timed out after {self.timeout}s")
+        if t.is_alive() and self.default is None:
+            raise TimeoutError(f"Supervisor input timed out after {self.timeout}s")
         return holder[0] or ""
 
     def _show_header(self, task: str, agent_name: str, tools: dict) -> None:
@@ -265,7 +264,7 @@ class SupervisorEngine:
 
     def _emit_decision(
         self,
-        session: "Session | None",
+        session: Session | None,
         run_id: str,
         agent_name: str,
         kind: str,
@@ -294,7 +293,7 @@ class SupervisorEngine:
         tools: dict,
         agent_name: str,
         last_output: str,
-        session: "Session | None",
+        session: Session | None,
         run_id: str,
     ) -> tuple[str | None, str]:
         """Process one REPL command.
@@ -362,7 +361,7 @@ class SupervisorEngine:
         task: str,
         tools: dict,
         agent_name: str,
-        session: "Session | None" = None,
+        session: Session | None = None,
         run_id: str = "",
     ) -> str:
         self._show_header(task, agent_name, tools)
@@ -382,7 +381,7 @@ class SupervisorEngine:
         tools: dict,
         agent_name: str,
         *,
-        session: "Session | None",
+        session: Session | None,
         run_id: str,
     ) -> str:
         """Event-loop-native REPL — used when ``ainput_fn`` was supplied.

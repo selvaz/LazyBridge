@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator
 
 from lazybridge.core.types import (
     CompletionRequest,
@@ -200,7 +200,7 @@ class BaseProvider(ABC):
         ...
 
     @abstractmethod
-    def astream(self, request: CompletionRequest) -> AsyncGenerator[StreamChunk, None]:
+    def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         """Async streaming generator — async version of :meth:`stream`.
 
         Implement as an ``async def`` generator::

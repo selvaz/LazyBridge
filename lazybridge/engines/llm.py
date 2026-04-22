@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Literal
 
 from lazybridge.core.executor import Executor
@@ -148,7 +148,7 @@ class LLMEngine:
     #: silently get routed to Anthropic and fail with a cryptic API-side
     #: error.  Set to ``None`` in a subclass to disable the fallback and
     #: raise ``ValueError`` instead.
-    _PROVIDER_DEFAULT: "str | None" = "anthropic"
+    _PROVIDER_DEFAULT: str | None = "anthropic"
 
     @classmethod
     def register_provider_alias(cls, alias: str, provider: str) -> None:
@@ -232,10 +232,10 @@ class LLMEngine:
         self,
         env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
+        memory: Memory | None,
+        session: Session | None,
     ) -> Envelope:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
@@ -283,16 +283,16 @@ class LLMEngine:
         self,
         env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
+        memory: Memory | None,
+        session: Session | None,
         run_id: str,
         # When truthy, yield str tokens instead of building Envelope
-        _stream_sink: "asyncio.Queue[str | None] | None" = None,
+        _stream_sink: asyncio.Queue[str | None] | None = None,
     ) -> Envelope:
+
         from lazybridge.core.types import TextContent, ThinkingConfig, ToolResultContent, ToolUseContent
-        from pydantic import BaseModel
 
         executor = self._make_executor()
 
@@ -502,7 +502,7 @@ class LLMEngine:
         self,
         executor: Executor,
         req: CompletionRequest,
-        sink: "asyncio.Queue[str | None]",
+        sink: asyncio.Queue[str | None],
     ) -> CompletionResponse:
         """Stream one LLM turn, push tokens to sink, return reconstructed CompletionResponse."""
         from lazybridge.core.types import CompletionResponse, UsageStats
@@ -537,9 +537,9 @@ class LLMEngine:
     async def _exec_tool(
         self,
         tc: ToolCall,
-        tool_map: dict[str, "Tool"],
+        tool_map: dict[str, Tool],
         *,
-        session: "Session | None",
+        session: Session | None,
         run_id: str,
     ) -> Any:
         if session:
@@ -574,10 +574,10 @@ class LLMEngine:
         self,
         env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
+        memory: Memory | None,
+        session: Session | None,
     ) -> AsyncGenerator[str, None]:
         """Stream tokens from the full tool-calling loop.
 

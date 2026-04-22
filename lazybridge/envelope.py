@@ -9,7 +9,7 @@ seen by mypy / pyright without changing runtime behaviour.  Writing
 from __future__ import annotations
 
 import json
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -65,7 +65,7 @@ class Envelope(BaseModel, Generic[T]):
             return self.payload.model_dump_json()
         return json.dumps(self.payload, default=str)
 
-    def __str__(self) -> str:  # noqa: D401
+    def __str__(self) -> str:
         """Stringification falls through to :meth:`text`.
 
         Needed because tools that return an ``Envelope`` (agent-as-tool)
@@ -77,11 +77,11 @@ class Envelope(BaseModel, Generic[T]):
         return self.text()
 
     @classmethod
-    def from_task(cls, task: str, context: str | None = None) -> "Envelope":
-        return cls(task=task, context=context, payload=task)
+    def from_task(cls, task: str, context: str | None = None) -> Envelope:
+        return cls(task=task, context=context, payload=task)  # type: ignore[arg-type]
 
     @classmethod
-    def error_envelope(cls, exc: Exception, *, retryable: bool = False) -> "Envelope":
+    def error_envelope(cls, exc: BaseException, *, retryable: bool = False) -> Envelope:
         return cls(
             error=ErrorInfo(
                 type=type(exc).__name__,

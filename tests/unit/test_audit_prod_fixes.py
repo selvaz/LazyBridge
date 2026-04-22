@@ -20,11 +20,10 @@ import pytest
 from lazybridge.agent import Agent
 from lazybridge.engines.human import HumanEngine
 from lazybridge.engines.llm import LLMEngine
-from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.envelope import Envelope
 from lazybridge.memory import Memory
 from lazybridge.session import EventType, Session
 from lazybridge.store import Store
-
 
 # ── B1: LLMEngine retry defaults ──────────────────────────────────────────────
 
@@ -68,17 +67,17 @@ def test_llm_engine_executor_receives_retry_config():
 def test_tools_module_uses_get_running_loop():
     import lazybridge.tools as tools_mod
 
-    src = (
-        (tools_mod.__file__ or "")
-        and open(tools_mod.__file__).read()  # type: ignore[arg-type]
-    )
+    path = tools_mod.__file__ or ""
+    with open(path) as fh:  # type: ignore[arg-type]
+        src = path and fh.read()
     assert "get_event_loop()" not in src, "get_event_loop is deprecated on 3.10+"
 
 
 def test_human_module_uses_get_running_loop():
     import lazybridge.engines.human as human_mod
 
-    src = open(human_mod.__file__).read()  # type: ignore[arg-type]
+    with open(human_mod.__file__) as fh:  # type: ignore[arg-type]
+        src = fh.read()
     assert "get_event_loop()" not in src
 
 

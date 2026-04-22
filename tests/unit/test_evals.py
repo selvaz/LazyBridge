@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 
 from lazybridge.envelope import Envelope
 from lazybridge.evals import (
@@ -17,7 +14,6 @@ from lazybridge.evals import (
     max_length,
     min_length,
     not_contains,
-    llm_judge,
 )
 
 

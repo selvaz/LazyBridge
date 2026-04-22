@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from lazybridge.envelope import Envelope
@@ -22,20 +22,20 @@ class Engine(Protocol):
 
     async def run(
         self,
-        env: "Envelope",
+        env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-    ) -> "Envelope": ...
+        memory: Memory | None,
+        session: Session | None,
+    ) -> Envelope: ...
 
     async def stream(
         self,
-        env: "Envelope",
+        env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-    ) -> "AsyncIterator[str]": ...
+        memory: Memory | None,
+        session: Session | None,
+    ) -> AsyncIterator[str]: ...

@@ -40,7 +40,6 @@ from lazybridge.graph.schema import EdgeType
 from lazybridge.guardrails import LLMGuard
 from lazybridge.session import EventLog, EventType
 
-
 # ── L1 ────────────────────────────────────────────────────────────────────────
 
 def test_l1_all_exposes_previously_hidden_names() -> None:
@@ -82,7 +81,7 @@ def test_h2_llm_guard_async_uses_agent_run() -> None:
     class _StubAgent:
         calls: list[str] = []
 
-        async def run(self, prompt: str) -> Any:  # noqa: D401
+        async def run(self, prompt: str) -> Any:
             _StubAgent.calls.append(prompt)
 
             class _Env:

@@ -6,9 +6,9 @@ import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class _TerminalUI(_UIProtocol):
             try:
                 fut = loop.run_in_executor(None, input, prompt_str)
                 return await asyncio.wait_for(fut, timeout=self._timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._default is not None:
                     print(f"[Timeout — using default: {self._default!r}]")
                     return self._default
@@ -72,7 +72,7 @@ class _TerminalUI(_UIProtocol):
 
         print(f"Please fill in the following fields for {model_type.__name__}:")
         data: dict[str, Any] = {}
-        for field_name, field_info in model_type.model_fields.items():
+        for field_name, field_info in getattr(model_type, "model_fields", {}).items():
             annotation = field_info.annotation or str
             type_label = getattr(annotation, "__name__", str(annotation))
             data[field_name] = await self._prompt_field(field_name, annotation, type_label)
@@ -85,7 +85,7 @@ class _TerminalUI(_UIProtocol):
 
         loop = asyncio.get_running_loop()
         last_exc: str | None = None
-        for attempt in range(self._MAX_FIELD_RETRIES):
+        for _attempt in range(self._MAX_FIELD_RETRIES):
             prefix = f"  {field_name} ({type_label}): "
             if last_exc is not None:
                 prefix = f"  [invalid — {last_exc}]\n{prefix}"
@@ -94,7 +94,8 @@ class _TerminalUI(_UIProtocol):
                 return self._coerce_field_strict(annotation, raw)
             except ValidationError as exc:
                 # Compact single-line summary of the first error.
-                err = exc.errors()[0] if exc.errors() else {}
+                errors = exc.errors()
+                err: dict = errors[0] if errors else {}  # type: ignore[assignment]
                 last_exc = f"{err.get('msg', 'invalid')} ({err.get('type', '?')})"
         # Out of retries — return whatever _coerce_field would have
         # produced in lenient mode (matches the previous behaviour).
@@ -109,6 +110,7 @@ class _TerminalUI(_UIProtocol):
         payload that fails Pydantic at the end of the form.
         """
         import json
+
         from pydantic import TypeAdapter
 
         origin = getattr(annotation, "__origin__", None)
@@ -120,7 +122,7 @@ class _TerminalUI(_UIProtocol):
             inner = args[0] if args else str
             return TypeAdapter(list[inner]).validate_python(parts)  # type: ignore[valid-type]
         trimmed = raw.strip()
-        if trimmed and trimmed[0] in "{[" or trimmed in ("true", "false", "null"):
+        if (trimmed and trimmed[0] in "{[") or trimmed in ("true", "false", "null"):
             parsed = json.loads(trimmed)
             return TypeAdapter(annotation).validate_python(parsed)
         return TypeAdapter(annotation).validate_python(raw)
@@ -143,6 +145,7 @@ class _TerminalUI(_UIProtocol):
            ``BaseModel(**data)`` will emit a clear ValidationError.
         """
         import json
+
         from pydantic import TypeAdapter, ValidationError
 
         # Optional + empty → None.
@@ -162,7 +165,7 @@ class _TerminalUI(_UIProtocol):
 
         # Try JSON first for everything that could be complex.
         trimmed = raw.strip()
-        if trimmed and trimmed[0] in "{[" or trimmed in ("true", "false", "null"):
+        if (trimmed and trimmed[0] in "{[") or trimmed in ("true", "false", "null"):
             try:
                 parsed = json.loads(trimmed)
                 return TypeAdapter(annotation).validate_python(parsed)
@@ -206,10 +209,10 @@ class HumanEngine:
         self,
         env: Envelope,
         *,
-        tools: list["Tool"],
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
+        memory: Memory | None,
+        session: Session | None,
     ) -> Envelope:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
@@ -226,8 +229,9 @@ class HumanEngine:
             raw = await self._ui.prompt(task_text, tools=tools, output_type=output_type)
 
             payload: Any = raw
-            from pydantic import BaseModel, ValidationError
             import json
+
+            from pydantic import BaseModel, ValidationError
 
             if isinstance(output_type, type) and issubclass(output_type, BaseModel):
                 try:

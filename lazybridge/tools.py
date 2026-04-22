@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import threading
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from lazybridge.core.tool_schema import ToolSchemaMode, ToolSchemaBuilder
+if TYPE_CHECKING:
+    from lazybridge.envelope import Envelope
+
+from lazybridge.core.tool_schema import ToolSchemaBuilder, ToolSchemaMode
 from lazybridge.core.types import ToolDefinition
 
 
@@ -138,7 +140,7 @@ def _agent_as_tool(agent: Any) -> Tool:
     the framework keeps the structured metadata.
     """
 
-    async def _run(task: str) -> "Envelope":  # type: ignore[name-defined]
+    async def _run(task: str) -> Envelope:  # type: ignore[name-defined]
         env = await agent.run(task)
         return env
 

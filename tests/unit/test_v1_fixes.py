@@ -3,19 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from lazybridge.agent import Agent, _ParallelAgent
 from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.memory import Memory
 from lazybridge.session import EventType, Session
 from lazybridge.store import Store
-from lazybridge.memory import Memory
 from lazybridge.tools import Tool, build_tool_map
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -175,14 +169,14 @@ class TestUsageSummary:
 
 class TestNativeTools:
     def test_native_tools_stored(self):
-        from lazybridge.engines.llm import LLMEngine
         from lazybridge.core.types import NativeTool
+        from lazybridge.engines.llm import LLMEngine
         engine = LLMEngine("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH])
         assert NativeTool.WEB_SEARCH in engine.native_tools
 
     def test_native_tools_from_str(self):
-        from lazybridge.engines.llm import LLMEngine
         from lazybridge.core.types import NativeTool
+        from lazybridge.engines.llm import LLMEngine
         engine = LLMEngine("claude-opus-4-7", native_tools=["web_search"])
         assert engine.native_tools[0] == NativeTool.WEB_SEARCH
 
@@ -192,8 +186,8 @@ class TestNativeTools:
         assert engine.native_tools == []
 
     def test_native_tools_attribute_set(self):
-        from lazybridge.engines.llm import LLMEngine
         from lazybridge.core.types import NativeTool
+        from lazybridge.engines.llm import LLMEngine
         engine = LLMEngine("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH, "code_execution"])
         assert len(engine.native_tools) == 2
         assert NativeTool.WEB_SEARCH in engine.native_tools
@@ -226,8 +220,9 @@ class TestStreamLoop:
         assert "".join(tokens) == "abc"
 
     def test_llmengine_stream_method_signature(self):
-        from lazybridge.engines.llm import LLMEngine
         import inspect
+
+        from lazybridge.engines.llm import LLMEngine
         sig = inspect.signature(LLMEngine.stream)
         params = list(sig.parameters.keys())
         assert "env" in params

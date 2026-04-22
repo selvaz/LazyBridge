@@ -11,7 +11,7 @@ from typing import Any
 @dataclass
 class EvalCase:
     input: str
-    check: Callable[[str], bool] | Callable[[str, Any], bool]
+    check: Callable[..., bool]
     expected: Any = None
     description: str = ""
 

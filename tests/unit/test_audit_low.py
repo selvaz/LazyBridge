@@ -17,7 +17,6 @@ from pydantic import BaseModel
 
 from lazybridge import Agent, EventType, GraphSchema, Session, Store
 
-
 # ---------------------------------------------------------------------------
 # Store preserves Pydantic through SQLite round-trip
 # ---------------------------------------------------------------------------

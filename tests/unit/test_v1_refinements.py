@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -18,17 +17,13 @@ from pydantic import BaseModel
 from lazybridge import (
     Agent,
     Envelope,
-    EventType,
     LLMEngine,
     Plan,
     Session,
     Step,
-    Tool,
-    from_prev,
     from_start,
     from_step,
 )
-
 
 # ---------------------------------------------------------------------------
 # #2  as_tool observability

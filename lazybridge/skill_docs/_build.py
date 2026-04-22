@@ -34,11 +34,9 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import sys
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -163,7 +161,7 @@ def _promote_lists(node: object) -> None:
     of _meta.yaml.
     """
     if isinstance(node, dict):
-        for key, child in list(node.items()):
+        for _key, child in list(node.items()):
             if isinstance(child, list):
                 continue
             if isinstance(child, dict):

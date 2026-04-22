@@ -6,9 +6,8 @@ import json
 import sqlite3
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 
 @dataclass
@@ -82,7 +81,7 @@ class Store:
             except sqlite3.Error:
                 pass  # already closed / invalid — nothing to recover
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Store:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -194,7 +193,7 @@ def _to_jsonable(value: Any) -> Any:
     try:
         from pydantic import BaseModel
     except ImportError:  # pragma: no cover
-        BaseModel = None  # type: ignore[assignment]
+        BaseModel = None  # type: ignore[misc, assignment]
 
     if BaseModel is not None and isinstance(value, BaseModel):
         return value.model_dump(mode="json")

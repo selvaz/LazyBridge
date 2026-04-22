@@ -13,7 +13,6 @@ from typing import Any
 
 from lazybridge.graph import GraphSchema
 
-
 _SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +53,7 @@ class EventLog:
         # land in a DB the main thread can never see.  Using the
         # ``file::memory:?cache=shared`` URI uniquely named per
         # ``session_id`` gives us one shared in-memory DB per Session.
+        self._uri: str | None
         if db is None:
             self._uri = f"file:memdb_{session_id}?mode=memory&cache=shared"
         else:
@@ -94,7 +94,7 @@ class EventLog:
                 conn.execute("PRAGMA busy_timeout=5000")
             else:
                 # Shared in-memory DB — see __init__ for the URI rationale.
-                conn = sqlite3.connect(self._uri, uri=True, check_same_thread=False)
+                conn = sqlite3.connect(self._uri or "", uri=True, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             # Ensure the schema exists on every thread-local connection.
             # ``CREATE TABLE IF NOT EXISTS`` makes this cheap + idempotent;
@@ -324,7 +324,7 @@ class Session:
                     # Session.close() is being called.
                     pass
 
-    def __enter__(self) -> "Session":
+    def __enter__(self) -> Session:
         return self
 
     def __exit__(self, *exc: Any) -> None:

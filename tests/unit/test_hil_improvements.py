@@ -5,10 +5,8 @@ validation error, public scripted_inputs helper.
 from __future__ import annotations
 
 import asyncio
-import warnings
 
 import pytest
-from pydantic import BaseModel
 
 from lazybridge import (
     Agent,
@@ -16,11 +14,9 @@ from lazybridge import (
     HumanEngine,
     Session,
     SupervisorEngine,
-    Tool,
 )
 from lazybridge.engines.human import _TerminalUI
 from lazybridge.testing import scripted_ainputs, scripted_inputs
-
 
 # ---------------------------------------------------------------------------
 # Public scripted_inputs / scripted_ainputs

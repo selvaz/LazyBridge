@@ -20,15 +20,15 @@ class GuardAction:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def allow(cls, message: str | None = None, **metadata: Any) -> "GuardAction":
+    def allow(cls, message: str | None = None, **metadata: Any) -> GuardAction:
         return cls(allowed=True, message=message, metadata=metadata)
 
     @classmethod
-    def block(cls, message: str, **metadata: Any) -> "GuardAction":
+    def block(cls, message: str, **metadata: Any) -> GuardAction:
         return cls(allowed=False, message=message, metadata=metadata)
 
     @classmethod
-    def modify(cls, new_text: str, message: str | None = None, **metadata: Any) -> "GuardAction":
+    def modify(cls, new_text: str, message: str | None = None, **metadata: Any) -> GuardAction:
         return cls(allowed=True, modified_text=new_text, message=message, metadata=metadata)
 
 

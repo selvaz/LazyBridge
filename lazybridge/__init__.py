@@ -46,40 +46,8 @@ Tier 6 — full config::
 __version__ = "1.0.0"
 
 # Core public API
-from lazybridge.agent import Agent, _ParallelAgent
-from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
-from lazybridge.sentinels import from_prev, from_start, from_step, from_parallel
-from lazybridge.tools import Tool
-from lazybridge.memory import Memory
-from lazybridge.store import Store, StoreEntry
-from lazybridge.session import Session, EventLog, EventType
-from lazybridge.guardrails import Guard, GuardAction, GuardError, ContentGuard, GuardChain, LLMGuard
-# testing utilities (scripted_inputs/ainputs) live in lazybridge.testing; not re-exported here.
-from lazybridge.evals import (
-    EvalCase, EvalReport, EvalSuite,
-    exact_match, contains, not_contains, max_length, min_length, llm_judge,
-)
-
-# Engines
-from lazybridge.engines.base import Engine
-from lazybridge.engines.llm import LLMEngine
-from lazybridge.engines.human import HumanEngine
-from lazybridge.engines.supervisor import SupervisorEngine
-from lazybridge.engines.plan import Plan, Step, PlanState, StepResult, PlanCompileError
-
-# Graph
-from lazybridge.graph import EdgeType, GraphSchema, NodeType
-
-# Exporters
-from lazybridge.exporters import (
-    EventExporter,
-    CallbackExporter,
-    ConsoleExporter,
-    FilteredExporter,
-    JsonFileExporter,
-    OTelExporter,
-    StructuredLogExporter,
-)
+from lazybridge.agent import Agent
+from lazybridge.agent import _ParallelAgent as _ParallelAgent
 
 # Core types (re-exported for convenience)
 from lazybridge.core.providers import BaseProvider
@@ -96,6 +64,47 @@ from lazybridge.core.types import (
     ToolDefinition,
     UsageStats,
 )
+
+# Engines
+from lazybridge.engines.base import Engine
+from lazybridge.engines.human import HumanEngine
+from lazybridge.engines.llm import LLMEngine
+from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
+from lazybridge.engines.supervisor import SupervisorEngine
+from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+
+# testing utilities (scripted_inputs/ainputs) live in lazybridge.testing; not re-exported here.
+from lazybridge.evals import (
+    EvalCase,
+    EvalReport,
+    EvalSuite,
+    contains,
+    exact_match,
+    llm_judge,
+    max_length,
+    min_length,
+    not_contains,
+)
+
+# Exporters
+from lazybridge.exporters import (
+    CallbackExporter,
+    ConsoleExporter,
+    EventExporter,
+    FilteredExporter,
+    JsonFileExporter,
+    OTelExporter,
+    StructuredLogExporter,
+)
+
+# Graph
+from lazybridge.graph import EdgeType, GraphSchema, NodeType
+from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
+from lazybridge.memory import Memory
+from lazybridge.sentinels import from_parallel, from_prev, from_start, from_step
+from lazybridge.session import EventLog, EventType, Session
+from lazybridge.store import Store, StoreEntry
+from lazybridge.tools import Tool
 
 __all__ = [
     # Primary API

@@ -34,7 +34,6 @@ from lazybridge import (
 )
 from lazybridge.envelope import EnvelopeMetadata
 
-
 # ---------------------------------------------------------------------------
 # Envelope.__str__ safety net
 # ---------------------------------------------------------------------------

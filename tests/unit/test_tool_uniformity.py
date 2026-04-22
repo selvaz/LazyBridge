@@ -23,8 +23,6 @@ from __future__ import annotations
 import asyncio
 import warnings
 
-import pytest
-
 from lazybridge import (
     Agent,
     LLMEngine,
@@ -32,7 +30,6 @@ from lazybridge import (
     SupervisorEngine,
     Tool,
 )
-
 
 # ---------------------------------------------------------------------------
 # LLMEngine — parallel tool execution is now a capability, not a config
@@ -166,8 +163,8 @@ def test_nested_agents_share_outer_session_by_default():
         return query
 
     middle = Agent(engine=_EchoEngine("m"), tools=[leaf], name="middle")
-    outer = Agent(engine=_EchoEngine("o"), tools=[middle], name="outer",
-                  session=sess)
+    Agent(engine=_EchoEngine("o"), tools=[middle], name="outer",
+          session=sess)
 
     # Middle inherited outer's session; leaf is a plain callable so it
     # doesn't have one.
