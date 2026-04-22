@@ -88,6 +88,11 @@ class Agent:
         # retry-with-feedback loop (up to ``max_output_retries``).
         output_validator: "Callable[[Any], Any] | None" = None,
         max_output_retries: int = 2,
+        # Total deadline (seconds) for ``run()``.  Applied at the
+        # top-level Agent boundary so a hung tool, runaway tool loop,
+        # or slow provider can't block a caller forever.  ``None``
+        # disables the deadline (backwards-compatible default).
+        timeout: float | None = None,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -118,6 +123,7 @@ class Agent:
         self.output = output
         self.output_validator = output_validator
         self.max_output_retries = max_output_retries
+        self.timeout = timeout
         self.memory = memory
         self.sources = list(sources)
         self.guard = guard
@@ -165,6 +171,20 @@ class Agent:
     # ------------------------------------------------------------------
 
     async def run(self, task: "str | Envelope") -> Envelope:
+        # ``getattr`` with a default keeps this backwards-compatible for
+        # Agents constructed via ``Agent.__new__`` (test helpers, custom
+        # subclasses) that haven't set ``self.timeout``.
+        timeout = getattr(self, "timeout", None)
+        if timeout is None:
+            return await self._run_body(task)
+        try:
+            return await asyncio.wait_for(self._run_body(task), timeout=timeout)
+        except asyncio.TimeoutError:
+            return Envelope.error_envelope(
+                TimeoutError(f"Agent.run() exceeded timeout={timeout}s")
+            )
+
+    async def _run_body(self, task: "str | Envelope") -> Envelope:
         env = self._to_envelope(task)
         env = self._inject_sources(env)
 

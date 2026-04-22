@@ -52,6 +52,15 @@ class LLMEngine:
         Static system prompt. Agent.sources= / Envelope.context are added on top.
     native_tools:
         Provider-native server-side tools, e.g. NativeTool.WEB_SEARCH.
+    max_retries:
+        Retries on transient provider errors (429, 5xx, network/timeout).
+        Default 3 — production-safe.  Pass 0 to disable.
+    retry_delay:
+        Base delay (seconds) for exponential backoff with ±10% jitter.
+    request_timeout:
+        Per-completion deadline in seconds.  Caps the time a hung
+        provider can block an agent run.  ``None`` disables the
+        framework-level timeout and defers to the provider SDK.
     """
 
     def __init__(
@@ -65,10 +74,16 @@ class LLMEngine:
         temperature: float | None = None,
         system: str | None = None,
         native_tools: list[NativeTool | str] | None = None,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        request_timeout: float | None = 120.0,
     ) -> None:
         self.model = model
         self.thinking = thinking
         self.max_turns = max_turns
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.request_timeout = request_timeout
         # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
         # with a deprecation warning. The framework no longer has a
         # separate "parallel mode" — tool calls are always executed via
@@ -202,7 +217,12 @@ class LLMEngine:
         # BaseProvider handles tier / provider-name aliases on the model
         # string via ``resolve_model_alias``; there is no reason to
         # special-case them here.
-        return Executor(self.provider, model=self.model)
+        return Executor(
+            self.provider,
+            model=self.model,
+            max_retries=self.max_retries,
+            retry_delay=self.retry_delay,
+        )
 
     # ------------------------------------------------------------------
     # run()
@@ -340,8 +360,16 @@ class LLMEngine:
                 )
 
             if _stream_sink is not None:
-                # Streaming path — accumulate full response while yielding tokens
+                # Streaming path — accumulate full response while yielding tokens.
+                # request_timeout intentionally does NOT wrap streaming:
+                # a slow stream is still making progress, and wrapping the
+                # whole iterator in ``wait_for`` would cancel on total
+                # duration rather than stall duration.
                 resp = await self._stream_turn(executor, req, _stream_sink)
+            elif self.request_timeout is not None:
+                resp = await asyncio.wait_for(
+                    executor.aexecute(req), timeout=self.request_timeout
+                )
             else:
                 resp = await executor.aexecute(req)
 
