@@ -90,8 +90,12 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
     Recursively sets ``additionalProperties: false`` on every object node,
     including those inside ``$defs`` / ``definitions`` (Pydantic nested models),
-    ``properties`` values, ``items``, and ``anyOf`` / ``allOf`` / ``oneOf``
-    sub-schemas.
+    ``properties`` values, ``items``, ``additionalProperties`` (when a schema
+    dict, not a bool), ``prefixItems`` (JSON Schema 2020-12 tuple arrays), and
+    ``anyOf`` / ``allOf`` / ``oneOf`` sub-schemas.
+
+    ``$ref`` nodes are not resolved inline — the definitions they point to in
+    ``$defs`` are already recursively normalized when that key is encountered.
     """
     if not isinstance(schema, dict):
         return schema
@@ -109,8 +113,13 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 def_name: normalize_json_schema(def_schema) if isinstance(def_schema, dict) else def_schema
                 for def_name, def_schema in value.items()
             }
-        elif key == "items" and isinstance(value, dict):
+        elif key in ("items", "additionalProperties") and isinstance(value, dict):
             normalized[key] = normalize_json_schema(value)
+        elif key == "prefixItems" and isinstance(value, list):
+            normalized[key] = [
+                normalize_json_schema(sub) if isinstance(sub, dict) else sub
+                for sub in value
+            ]
         elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
             normalized[key] = [
                 normalize_json_schema(sub) if isinstance(sub, dict) else sub
@@ -303,11 +312,11 @@ def apply_structured_validation(
 
 
 def build_repair_messages(
-    original_messages: list[Message],
+    original_messages: list[Message | dict],
     invalid_content: str,
     schema: type | dict[str, Any],
     error: str,
-) -> list[Message]:
+) -> list[Message | dict]:
     """Build a message list that asks the model to fix its invalid output.
 
     Appends a user message containing:

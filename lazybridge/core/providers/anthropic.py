@@ -148,6 +148,10 @@ class AnthropicProvider(BaseProvider):
                 "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
                 "variable, or pass api_key= to AnthropicProvider."
             )
+        # Instance-level flag: warn once per provider instance, not once globally.
+        # A class-level bool would suppress the warning for ALL instances once any
+        # single instance fires it, masking temperature issues in multi-agent setups.
+        self._temperature_warned: bool = False
         # Allow callers to override beta header versions and the streaming threshold.
         self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
         self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
@@ -325,14 +329,16 @@ class AnthropicProvider(BaseProvider):
         no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
         if request.temperature is not None:
             if no_sampling:
-                warnings.warn(
-                    f"Anthropic model {model!r} does not support the temperature "
-                    "parameter; your temperature= value is being ignored. "
-                    "Drop it from the call or pick a different model to suppress "
-                    "this warning.",
-                    UserWarning,
-                    stacklevel=4,
-                )
+                if not self._temperature_warned:
+                    self._temperature_warned = True
+                    warnings.warn(
+                        f"Anthropic model {model!r} does not support the temperature "
+                        "parameter; your temperature= value is being ignored. "
+                        "Drop it from the call or pick a different model to suppress "
+                        "this warning.",
+                        UserWarning,
+                        stacklevel=4,
+                    )
             else:
                 params["temperature"] = request.temperature
         tools = self._build_tools(request)
@@ -650,7 +656,15 @@ class AnthropicProvider(BaseProvider):
                         resp = self._parse_response(response)
                         apply_structured_validation(resp, resp.content, schema)
                 else:
-                    response = await self._async_client.messages.create(**params)
+                    # Pydantic schema + thinking/native_tools/betas — must go through
+                    # output_config (same as sync path). Plain messages.create() without
+                    # output_config silently ignores the schema and returns free-form text.
+                    json_schema = normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+                    params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+                    if betas:
+                        response = await self._async_client.beta.messages.create(**params, **self._beta_kwargs(betas))
+                    else:
+                        response = await self._async_client.messages.create(**params)
                     resp = self._parse_response(response)
                     apply_structured_validation(resp, resp.content, schema)
             return resp
