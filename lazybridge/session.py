@@ -9,7 +9,7 @@ import time
 import uuid
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from lazybridge.graph import GraphSchema
 
@@ -213,12 +213,38 @@ class Session:
         db: str | None = None,
         exporters: list[Any] | None = None,
         redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        redact_on_error: Literal["fallback", "strict"] = "fallback",
         console: bool = False,
     ) -> None:
+        """Construct a Session.
+
+        Redactor failure modes
+        ----------------------
+        ``redact_on_error`` governs what happens when a ``redact``
+        callable either raises or returns a non-dict:
+
+        * ``"fallback"`` (default) — warn once, then record and export
+          the **original, unredacted** payload.  Observability is
+          preserved at the cost of potentially leaking unredacted data
+          through the event bus.  Safe for development; avoid in
+          compliance-sensitive deployments.
+        * ``"strict"`` — warn once, then **drop the event entirely**.
+          No record in the EventLog, no export to exporters.
+          Fail-closed: unredacted data can never leak via this session.
+          Pick this for compliance workloads where a broken redactor
+          is a bug to be fixed, not a reason to keep leaking.
+        """
+        if redact_on_error not in ("fallback", "strict"):
+            raise ValueError(
+                f"Session(redact_on_error={redact_on_error!r}): must be "
+                f"'fallback' (warn + pass through) or 'strict' (warn + "
+                f"drop event)."
+            )
         self.session_id = str(uuid.uuid4())
         self.events = EventLog(self.session_id, db=db)
         self._exporters: list[Any] = list(exporters or [])
         self._redact = redact
+        self._redact_on_error = redact_on_error
         self._lock = threading.Lock()
         self.graph = GraphSchema(session_id=self.session_id)
         if console:
@@ -251,6 +277,30 @@ class Session:
         with self._lock:
             self._exporters = [e for e in self._exporters if e is not exporter]
 
+    def _warn_once_redact(self, attr: str, msg: str) -> None:
+        """Emit a UserWarning at most once per (redactor, reason) pair.
+
+        Reason is distinguished by ``attr`` so a redactor that both raises
+        on some events and returns a non-dict on others emits one warning
+        per failure mode rather than staying silent after the first.
+        """
+        if self._redact is None:
+            return
+        if getattr(self._redact, attr, False):
+            return
+        import warnings
+
+        warnings.warn(
+            f"Session redact callable: {msg}.  "
+            f"redact_on_error={self._redact_on_error!r}.",
+            stacklevel=3,
+        )
+        try:
+            setattr(self._redact, attr, True)
+        except AttributeError:
+            # Built-in / frozen callable — can't stamp, warn each time.
+            pass
+
     def emit(
         self,
         event_type: EventType,
@@ -259,28 +309,36 @@ class Session:
         run_id: str | None = None,
     ) -> None:
         if self._redact:
-            # Validate the redactor's return: must stay a dict.  A
-            # misbehaving redactor used to either crash downstream on
-            # ``{**None}`` or silently wipe the payload.  Now we warn
-            # once per redactor callable and fall back to the original
-            # payload — observability stays honest.
-            result = self._redact(payload)
-            if isinstance(result, dict):
-                payload = result
+            # Validate the redactor — two failure modes:
+            #   (a) it raises
+            #   (b) it returns something that isn't a dict
+            # Both used to fall back silently to the original payload
+            # (audit finding #5).  The default (``redact_on_error=
+            # "fallback"``) preserves that behaviour but warns once;
+            # ``"strict"`` drops the event entirely so no unredacted
+            # data can ever leak via this session.
+            try:
+                result: Any = self._redact(payload)
+            except Exception as exc:
+                self._warn_once_redact(
+                    "_lazybridge_raise_warned",
+                    f"redact callable raised {type(exc).__name__}: {exc}",
+                )
+                if self._redact_on_error == "strict":
+                    return  # drop event — unredacted data stays off the bus
+                # fallback: ``payload`` unchanged, continue to record.
             else:
-                import warnings
-
-                if not getattr(self._redact, "_lazybridge_warned", False):
-                    warnings.warn(
-                        f"Session redact callable returned "
-                        f"{type(result).__name__!s}; expected dict. "
-                        f"Payload left unredacted.",
-                        stacklevel=2,
+                if isinstance(result, dict):
+                    payload = result
+                else:
+                    self._warn_once_redact(
+                        "_lazybridge_type_warned",
+                        f"redact returned {type(result).__name__!s}; "
+                        f"expected dict",
                     )
-                    try:
-                        self._redact._lazybridge_warned = True  # type: ignore[attr-defined]
-                    except AttributeError:
-                        pass   # built-in / frozen callable — best-effort
+                    if self._redact_on_error == "strict":
+                        return
+                    # fallback: ``payload`` unchanged.
         self.events.record(event_type, payload, run_id=run_id)
         exporters = self._exporters  # snapshot for thread safety
         event_dict = {"event_type": str(event_type), "session_id": self.session_id, "run_id": run_id, **payload}
