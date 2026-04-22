@@ -38,14 +38,34 @@ class FilteredExporter:
 
 
 class JsonFileExporter:
-    """Append each event as a JSON line to ``path``."""
+    """Append each event as a JSON line to ``path``.
+
+    F7: keeps the file handle open across calls instead of opening and closing
+    it on every event.  Under a typical agent run with 50-200 events the
+    original per-call open/fwrite/close caused O(n) filesystem syscalls.
+    ``close()`` is called automatically by ``Session.close()`` when it
+    iterates its exporter list.
+    """
 
     def __init__(self, path: str) -> None:
         self._path = path
+        self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115
 
     def export(self, event: dict[str, Any]) -> None:
-        with open(self._path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(event, default=str) + "\n")
+        self._fh.write(json.dumps(event, default=str) + "\n")
+        self._fh.flush()
+
+    def close(self) -> None:
+        """Flush and close the underlying file handle. Idempotent."""
+        try:
+            if not self._fh.closed:
+                self._fh.flush()
+                self._fh.close()
+        except Exception:
+            pass
+
+    def __del__(self) -> None:  # pragma: no cover
+        self.close()
 
 
 class StructuredLogExporter:

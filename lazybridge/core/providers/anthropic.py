@@ -496,7 +496,17 @@ class AnthropicProvider(BaseProvider):
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
             else:
-                use_native_parse = not request.thinking and not request.native_tools and not betas
+                # F2 companion: exclude function-call tools from the parse()
+                # path.  messages.parse() is designed for pure structured
+                # output and may not reliably handle requests that also carry
+                # function-call tool definitions; fall through to output_config
+                # (the else branch) when tools are present.
+                use_native_parse = (
+                    not request.thinking
+                    and not request.native_tools
+                    and not request.tools
+                    and not betas
+                )
                 if use_native_parse:
                     try:
                         response = self._client.messages.parse(
@@ -637,7 +647,17 @@ class AnthropicProvider(BaseProvider):
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
             else:
-                use_native_parse = not request.thinking and not request.native_tools and not betas
+                # F2 companion: exclude function-call tools from the parse()
+                # path.  messages.parse() is designed for pure structured
+                # output and may not reliably handle requests that also carry
+                # function-call tool definitions; fall through to output_config
+                # (the else branch) when tools are present.
+                use_native_parse = (
+                    not request.thinking
+                    and not request.native_tools
+                    and not request.tools
+                    and not betas
+                )
                 if use_native_parse:
                     try:
                         response = await self._async_client.messages.parse(

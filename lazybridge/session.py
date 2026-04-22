@@ -176,7 +176,8 @@ class EventLog:
             (row["session_id"], row["run_id"], row["event_type"], json.dumps(row["payload"]), row["ts"]),
         )
         conn.commit()
-        return row
+        # F4: removed stray `return row` — the declared return type is None
+        # and no caller uses the value; the return was a dead-code bug.
 
     def query(self, *, run_id: str | None = None, event_type: EventType | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM events WHERE session_id=?"

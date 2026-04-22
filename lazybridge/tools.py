@@ -156,8 +156,18 @@ def _agent_as_tool(agent: Any) -> Tool:
 
 def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
     """Wrap and index tools by name."""
+    import warnings
+
     result: dict[str, Tool] = {}
     for t in tools:
         wrapped = wrap_tool(t)
+        if wrapped.name in result:
+            warnings.warn(
+                f"Tool name collision: '{wrapped.name}' appears more than once "
+                f"in the tools list. The first registration will be replaced by "
+                f"the second. Rename one of the tools to avoid silent shadowing.",
+                UserWarning,
+                stacklevel=2,
+            )
         result[wrapped.name] = wrapped
     return result

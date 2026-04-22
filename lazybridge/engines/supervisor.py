@@ -392,7 +392,14 @@ class SupervisorEngine:
         """
         self._show_header(task, agent_name, tools)
         last_output = task
-        assert self._ainput_fn is not None
+        # F6: assert is disabled by -O / PYTHONOPTIMIZE=1; use an explicit
+        # RuntimeError so the guard survives optimised production deployments.
+        if self._ainput_fn is None:
+            raise RuntimeError(
+                "_run_repl_async called without ainput_fn — this is a "
+                "programming error; only call this path when ainput_fn was "
+                "supplied to SupervisorEngine.__init__."
+            )
 
         while True:
             user_input = (await self._ainput_fn(f"[{agent_name}] > ")).strip()

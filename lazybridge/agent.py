@@ -239,9 +239,13 @@ class Agent:
     async def _validate_and_retry(self, original_env: Envelope, first: Envelope) -> Envelope:
         from lazybridge.core.structured import validate_payload_against_output_type
 
+        # F1-a: initialize feedback before the loop so any future code path that
+        # reaches attempt≥1 always has a defined value, even after refactoring.
+        feedback: str = ""
+        current = first
+
         for attempt in range(self.max_output_retries + 1):
-            current = first if attempt == 0 else None
-            if current is None:
+            if attempt > 0:
                 current = await self.engine.run(
                     _feedback_env(original_env, feedback),
                     tools=list(self._tool_map.values()),
@@ -252,24 +256,43 @@ class Agent:
                 if not current.ok:
                     return current
 
+            # F1-b: schema validation and custom validator are separated so each
+            # failure produces a precise, actionable feedback message rather than
+            # attributing a custom-validator rejection to a schema mismatch.
+
+            # Step 1 — schema validation
             try:
                 validated = validate_payload_against_output_type(current.payload, self.output)
-                if self.output_validator is not None:
-                    maybe = self.output_validator(validated)
-                    validated = maybe if maybe is not None else validated
-                # Swap the validated payload back in; keep metadata/error.
-                return current.model_copy(update={"payload": validated})
             except Exception as exc:
                 if attempt == self.max_output_retries:
-                    # Out of retries — return the last attempt unchanged
-                    # so the caller can inspect ``payload`` / ``error``.
                     return current
                 feedback = (
                     f"The previous response did not satisfy the required "
                     f"output schema ({_describe_output_type(self.output)}). "
-                    f"Validation error: {exc}. Please respond again with a "
-                    f"valid instance."
+                    f"Schema validation error: {exc}. Please respond again "
+                    f"with a valid instance."
                 )
+                continue
+
+            # Step 2 — optional custom post-parse validator
+            if self.output_validator is not None:
+                try:
+                    maybe = self.output_validator(validated)
+                    validated = maybe if maybe is not None else validated
+                except Exception as exc:
+                    if attempt == self.max_output_retries:
+                        return current
+                    feedback = (
+                        f"The previous response passed schema validation but "
+                        f"failed domain validation for "
+                        f"{_describe_output_type(self.output)}. "
+                        f"Validator rejected with: {exc}. Please respond again."
+                    )
+                    continue
+
+            # Swap the validated payload back in; keep metadata/error unchanged.
+            return current.model_copy(update={"payload": validated})
+
         return current  # type: ignore[return-value]
 
     async def stream(self, task: "str | Envelope") -> AsyncGenerator[str, None]:
@@ -462,9 +485,12 @@ class Agent:
 
         steps = [Step(target=a, name=a.name) for a in agents]
         plan = Plan(*steps)
-        tools = [a.as_tool() for a in agents]
         name = kwargs.pop("name", "chain")
-        return cls(engine=plan, tools=tools, name=name, **kwargs)
+        # F5: do NOT auto-wrap agents as tools — Plan._exec_step dispatches
+        # Agent targets via target.run() directly; the tool wrappers were
+        # built but never used, wasting schema-compilation on every chain call.
+        # Caller-supplied tools= in kwargs still pass through unchanged.
+        return cls(engine=plan, name=name, **kwargs)
 
     @classmethod
     def parallel(

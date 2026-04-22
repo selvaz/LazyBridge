@@ -70,8 +70,9 @@ class EvalSuite:
         return report
 
     async def arun(self, agent: Any) -> EvalReport:
-        report = EvalReport()
-        for case in self.cases:
+        # F8: run all cases concurrently — sequential awaiting made arun()
+        # as slow as the synchronous run() for large eval suites.
+        async def _run_one(case: EvalCase) -> EvalResult:
             try:
                 env = await agent.run(case.input)
                 output = env.text()
@@ -79,9 +80,13 @@ class EvalSuite:
                     passed = case.check(output, case.expected)
                 else:
                     passed = case.check(output)
-                report.results.append(EvalResult(case=case, output=output, passed=bool(passed)))
+                return EvalResult(case=case, output=output, passed=bool(passed))
             except Exception as exc:
-                report.results.append(EvalResult(case=case, output="", passed=False, error=str(exc)))
+                return EvalResult(case=case, output="", passed=False, error=str(exc))
+
+        results = await asyncio.gather(*[_run_one(c) for c in self.cases])
+        report = EvalReport()
+        report.results = list(results)
         return report
 
 

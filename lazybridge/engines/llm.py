@@ -347,7 +347,16 @@ class LLMEngine:
                 tools=tool_defs,
                 native_tools=self.native_tools,
                 tool_choice=provider_tc if tool_defs else None,
-                structured_output=structured_cfg if not tool_defs else None,
+                # F2: always pass structured_cfg regardless of whether tools are
+                # present.  On turns where the model emits tool calls the
+                # constraint is honoured but unused (the response carries
+                # tool_use blocks, not text).  On the final turn — when the
+                # model produces its answer — the provider enforces the schema
+                # server-side so resp.parsed is populated and the post-hoc
+                # _validate_and_retry path immediately succeeds.  Providers that
+                # don't support the combination fall back gracefully to the
+                # existing post-hoc validation in Agent._validate_and_retry.
+                structured_output=structured_cfg,
                 thinking=thinking_cfg,
                 stream=_stream_sink is not None,
             )
@@ -400,7 +409,14 @@ class LLMEngine:
                     payload = resp.content
 
                 if memory:
-                    memory.add(task_text, resp.content, tokens=total_in + total_out)
+                    # F3: pass this turn's marginal token count, not the
+                    # running cumulative total.  total_in+total_out is the
+                    # pipeline total across all turns; Memory's compression
+                    # threshold should be measured against per-turn cost.
+                    memory.add(
+                        task_text, resp.content,
+                        tokens=resp.usage.input_tokens + resp.usage.output_tokens,
+                    )
 
                 return Envelope(
                     task=env.task,
