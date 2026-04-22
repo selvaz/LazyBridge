@@ -5,20 +5,19 @@ lazybridge.ext.read_docs  —  Multi-format document reader
 Reads .txt, .md, .pdf, .docx, .html files from a folder or a single file
 and returns their text content in a format ready for LLM consumption.
 
-Works as a plain Python function or as a LazyTool passed to any agent.
+Works as a plain Python function or as a Tool passed to any agent.
 
 Usage — plain function:
     from lazybridge.ext.read_docs import read_folder_docs
     text = read_folder_docs("/path/to/reports", extensions="pdf,docx")
 
-Usage — as a LazyTool:
-    from lazybridge import LazyAgent, LazyTool
+Usage — as a Tool:
+    from lazybridge import Agent, Tool
     from lazybridge.ext.read_docs import read_folder_docs
 
-    docs_tool = LazyTool.from_function(read_folder_docs)
-    resp = LazyAgent("anthropic").loop(
+    docs_tool = Tool(read_folder_docs)
+    resp = Agent("anthropic", tools=[docs_tool])(
         "Summarise all PDFs in /reports",
-        tools=[docs_tool],
     )
 
 Optional dependencies (graceful degradation if missing):

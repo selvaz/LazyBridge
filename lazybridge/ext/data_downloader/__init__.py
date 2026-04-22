@@ -73,7 +73,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
 
 
 def downloader_skill_tools(skill_dir_map: dict):
-    """Create LazyTool wrappers for downloader skill bundles."""
+    """Create Tool wrappers for downloader skill bundles."""
     from lazybridge.ext.doc_skills import skill_tool
 
     tools = []

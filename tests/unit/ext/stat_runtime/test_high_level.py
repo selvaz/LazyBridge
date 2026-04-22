@@ -25,7 +25,7 @@ from lazybridge.ext.stat_runtime.schemas import (
     RunSummary,
 )
 from lazybridge.ext.stat_runtime.tools import stat_tools
-from lazybridge.lazy_tool import LazyTool
+from lazybridge import Tool
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -138,7 +138,7 @@ class TestToolLevelParam:
     def test_level_all_returns_15_tools(self):
         tools = stat_tools(MockRuntime(), level="all")
         assert len(tools) == 15
-        assert all(isinstance(t, LazyTool) for t in tools)
+        assert all(isinstance(t, Tool) for t in tools)
 
     def test_level_high_returns_4_tools(self):
         tools = stat_tools(MockRuntime(), level="high")

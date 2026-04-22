@@ -1,4 +1,4 @@
-"""LazyTool wrappers for the statistical runtime.
+"""Tool wrappers for the statistical runtime.
 
 Each tool function catches all exceptions and returns a structured error dict
 (never raises to the LLM).  Return values are plain dicts (JSON-serializable).
@@ -21,13 +21,13 @@ Two-tier architecture::
 
 Usage::
 
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
     from lazybridge.ext.stat_runtime.runner import StatRuntime
     from lazybridge.ext.stat_runtime.tools import stat_tools
 
     rt = StatRuntime()
-    agent = LazyAgent("anthropic", tools=stat_tools(rt, level="high"))
-    resp = agent.loop("Register data.parquet and analyze the volatility of SPY returns")
+    agent = Agent("anthropic", tools=stat_tools(rt, level="high"))
+    resp = agent("Register data.parquet and analyze the volatility of SPY returns")
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from lazybridge.ext.stat_runtime.schemas import ModelFamily
-from lazybridge.lazy_tool import LazyTool
+from lazybridge import Tool
 
 _logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def _error(exc: Exception) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
+def stat_tools(runtime, level: str = "all") -> list[Tool]:
     """Return stat_runtime tools bound to the given StatRuntime instance.
 
     Args:
@@ -773,21 +773,21 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
     # -- Assemble tools by tier ------------------------------------------
 
     high_level_tools = [
-        LazyTool.from_function(
+        Tool(
             discover_data,
             name="discover_data",
             description="Discover all registered datasets with column roles, types, and suggestions",
             guidance="Call this first to understand what data is available. "
             "Returns enriched metadata with inferred column roles and actionable suggestions.",
         ),
-        LazyTool.from_function(
+        Tool(
             discover_analyses,
             name="discover_analyses",
             description="Discover completed analysis runs with metrics, diagnostics, and artifact catalogs",
             guidance="Call to see what analyses and artifacts already exist. "
             "Shows metrics, diagnostics health, and all plots/data per run.",
         ),
-        LazyTool.from_function(
+        Tool(
             analyze,
             name="analyze",
             description="Run a goal-oriented analysis with automatic model selection",
@@ -796,7 +796,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             "volatility, regime. Returns interpretation, assumptions, diagnostics, "
             "artifact catalog, and suggested next steps.",
         ),
-        LazyTool.from_function(
+        Tool(
             register_dataset,
             name="register_dataset",
             description="Register a Parquet or CSV file as a named dataset for analysis",
@@ -806,20 +806,20 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
     ]
 
     low_level_tools = [
-        LazyTool.from_function(
+        Tool(
             list_datasets,
             name="list_datasets",
             description="List all registered datasets with schema and row count",
             guidance="Expert tool. Prefer discover_data() for a richer view with column roles. "
             "Use this for a quick name/schema check.",
         ),
-        LazyTool.from_function(
+        Tool(
             profile_dataset,
             name="profile_dataset",
             description="Compute column-level statistics for a registered dataset",
             guidance="Call to understand data quality: nulls, ranges, distributions.",
         ),
-        LazyTool.from_function(
+        Tool(
             query_data,
             name="query_data",
             description="Run a SQL query on registered datasets using dataset('name') macro",
@@ -827,7 +827,7 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             "Direct file access (read_parquet etc.) is blocked. "
             "Example: SELECT date, ret FROM dataset('equities') WHERE symbol='SPY' ORDER BY date",
         ),
-        LazyTool.from_function(
+        Tool(
             fit_model,
             name="fit_model",
             description="Fit a statistical model (OLS, ARIMA, GARCH, Markov) to data",
@@ -835,44 +835,44 @@ def stat_tools(runtime, level: str = "all") -> list[LazyTool]:
             "Use fit_model for programmatic fits or when you need the raw RunRecord. "
             "Key params by family: GARCH: p, q; ARIMA: order; Markov: k_regimes.",
         ),
-        LazyTool.from_function(
+        Tool(
             forecast_model,
             name="forecast_model",
             description="Generate a forecast from a previously fitted model",
             guidance="Provide run_id from fit_model/analyze and number of steps to forecast.",
         ),
-        LazyTool.from_function(
+        Tool(
             run_diagnostics,
             name="run_diagnostics",
             description="Run stationarity tests (ADF + KPSS) on a data column",
             guidance="Call before fitting to check if data needs differencing.",
         ),
-        LazyTool.from_function(
+        Tool(
             get_run,
             name="get_run",
             description="Retrieve a past model run with full metrics and artifact paths",
         ),
-        LazyTool.from_function(
+        Tool(
             list_runs,
             name="list_runs",
             description="List past model runs, optionally filtered by dataset",
             guidance="Expert tool. Prefer discover_analyses() for enriched view "
             "with inline metrics and artifact catalogs.",
         ),
-        LazyTool.from_function(
+        Tool(
             compare_models,
             name="compare_models",
             description="Compare multiple model runs by AIC, BIC, and other metrics",
             guidance="Provide a list of run_ids. Returns a comparison with the best model.",
         ),
-        LazyTool.from_function(
+        Tool(
             list_artifacts,
             name="list_artifacts",
             description="List all artifacts (plots, data, summaries) for a model run",
             guidance="Expert tool. discover_analyses() includes artifacts inline. "
             "Use this for type-filtered artifact lookups.",
         ),
-        LazyTool.from_function(
+        Tool(
             get_plot,
             name="get_plot",
             description="Get the file path for a specific plot from a model run",
@@ -925,8 +925,8 @@ def build_stat_skills(output_root: str = "./generated_skills") -> dict[str, Any]
     return result
 
 
-def stat_skill_tools(skill_dir_map: dict[str, Any]) -> list[LazyTool]:
-    """Create LazyTool wrappers for the stat skill bundles."""
+def stat_skill_tools(skill_dir_map: dict[str, Any]) -> list[Tool]:
+    """Create Tool wrappers for the stat skill bundles."""
     from lazybridge.ext.doc_skills import skill_tool
 
     tools = []
@@ -969,7 +969,7 @@ def stat_agent(
     system: str | None = None,
     **agent_kwargs: Any,
 ) -> tuple[Any, Any]:
-    """Create a pre-configured LazyAgent with stat_runtime tools.
+    """Create a pre-configured Agent with stat_runtime tools.
 
     Two operating modes:
 
@@ -991,13 +991,15 @@ def stat_agent(
     Usage::
 
         agent, rt = stat_agent("anthropic")
-        agent.loop("Download SPY data and analyze its volatility")
+        agent("Download SPY data and analyze its volatility")
         rt.close()
     """
+    from lazybridge import Agent
+    from lazybridge.engines.llm import LLMEngine
     from lazybridge.ext.stat_runtime.runner import StatRuntime
-    from lazybridge.lazy_agent import LazyAgent
 
     rt = StatRuntime(db=db, artifacts_dir=artifacts_dir)
+    model_str = model or (provider if isinstance(provider, str) else "anthropic")
 
     default_system = (
         "You are a quantitative analyst. Follow this workflow:\n"
@@ -1010,7 +1012,7 @@ def stat_agent(
         "Report artifact paths so the user can view plots."
     )
 
-    all_tools: list[LazyTool] = []
+    all_tools: list[Tool] = []
 
     # Add downloader tools if available
     if include_downloader:
@@ -1041,15 +1043,17 @@ def stat_agent(
             except Exception:
                 _logger.warning("Failed to build stat skills for expert agent", exc_info=True)
 
-        expert = LazyAgent(
-            provider,
-            model=model,
+        _expert_kwargs = {k: v for k, v in agent_kwargs.items() if k not in ("system",)}
+        expert = Agent(
+            engine=LLMEngine(
+                model_str,
+                system="You are an expert statistical analyst. Use the available tools "
+                "to fulfill the task precisely. Return results as structured data.",
+            ),
             name="stat_expert",
             description="Expert statistical analyst with low-level tool access",
-            system="You are an expert statistical analyst. Use the available tools "
-            "to fulfill the task precisely. Return results as structured data.",
             tools=expert_tools,  # type: ignore[arg-type]
-            **agent_kwargs,
+            **_expert_kwargs,
         )
 
         # Wrap expert as a tool for the main agent
@@ -1088,14 +1092,13 @@ def stat_agent(
             "custom SQL queries, or fine-grained control over the analysis pipeline."
         )
 
-    agent = LazyAgent(
-        provider,
-        model=model,
+    _agent_kwargs = {k: v for k, v in agent_kwargs.items() if k not in ("system",)}
+    agent = Agent(
+        engine=LLMEngine(model_str, system=system or default_system),
         name=name,
         description="Statistical analyst with quantitative analysis capabilities",
-        system=system or default_system,
         tools=all_tools,  # type: ignore[arg-type]
-        **agent_kwargs,
+        **_agent_kwargs,
     )
 
     return agent, rt

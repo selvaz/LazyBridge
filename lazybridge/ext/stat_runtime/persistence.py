@@ -4,7 +4,7 @@ Two backends, same API:
   - InMemory (default): fast, process-local, lost on process exit
   - DuckDB: persistent across runs (activated via ``MetaStore(db="path.duckdb")``)
 
-Follows the same dual-backend pattern as ``LazyStore`` in ``lazy_store.py``.
+Follows the same dual-backend pattern as ``Store`` (``lazybridge.store``).
 
 Usage::
 

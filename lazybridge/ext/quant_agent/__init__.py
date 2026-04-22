@@ -2,15 +2,15 @@
 
 Hybrid architecture: complex tools get dedicated sub-agent pipelines
 (agent_tool) for intelligent parameter construction; simple tools use
-direct tool calling (plain LazyTool) for efficiency.
+direct tool calling (plain Tool) for efficiency.
 
 Quick start::
 
     from lazybridge.ext.quant_agent import quant_agent
 
     agent, rt = quant_agent("anthropic")
-    resp = agent.loop("Download SPY and analyze its volatility")
-    print(resp.content)
+    resp = agent("Download SPY and analyze its volatility")
+    print(resp.text())
     rt.close()
 """
 

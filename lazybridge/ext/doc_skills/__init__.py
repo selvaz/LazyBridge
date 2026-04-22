@@ -6,11 +6,11 @@ the bundle as a LazyBridge tool or pipeline that any agent can call.
 Quick start::
 
     from lazybridge.ext.doc_skills import build_skill, skill_tool
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
 
     meta = build_skill(["./docs", "./reference"], "my-project")
     tool = skill_tool(meta["skill_dir"])
-    resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
+    resp = Agent("anthropic", tools=[tool])("How does X work?")
 
 No extra dependencies required beyond the standard library.
 """

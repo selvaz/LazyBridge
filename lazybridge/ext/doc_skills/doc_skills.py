@@ -19,19 +19,19 @@ Public API
 ----------
     build_skill(source_dirs, skill_name, ...)  → dict        index docs → skill bundle on disk
     query_skill(skill_dir, task, ...)          → str         retrieve + grounded context brief
-    skill_tool(skill_dir, ...)                 → LazyTool    one-step tool for an agent
-    skill_builder_tool(...)                    → LazyTool    tool that builds skill bundles
-    skill_pipeline(skill_dir, ...)             → LazyTool    router + executor chain pipeline
+    skill_tool(skill_dir, ...)                 → Tool    one-step tool for an agent
+    skill_builder_tool(...)                    → Tool    tool that builds skill bundles
+    skill_pipeline(skill_dir, ...)             → Tool    router + executor chain pipeline
 
 Quick start
 -----------
     from lazybridge.ext.doc_skills import build_skill, skill_tool
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
 
     meta = build_skill(["./docs", "./reference"], "my-project")
     tool = skill_tool(meta["skill_dir"])
-    resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
-    print(resp.content)
+    resp = Agent("anthropic", tools=[tool])("How does X work?")
+    print(resp.text())
 
 Add  generated_skills/  to your .gitignore — build_skill() writes there by default.
 No extra dependencies required beyond the standard library.

@@ -8,21 +8,18 @@ downloading the result, and saving it to disk.
 
 Public API
 ----------
-    veo_tool(...)                           → LazyTool    wrap Veo as a LazyBridge tool
-    VeoError                                              base exception for Veo failures
+    veo_tool(...)                           → Tool    wrap Veo as a LazyBridge tool
+    VeoError                                          base exception for Veo failures
 
 Quick start
 -----------
     from lazybridge.ext.veo import veo_tool
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
 
     tool  = veo_tool()
-    agent = LazyAgent("google", model="gemini-2.5-pro")
-    resp  = agent.loop(
-        "Generate an 8-second cinematic video of a sunset over the ocean.",
-        tools=[tool],
-    )
-    print(resp)
+    agent = Agent("google/gemini-2.5-pro", tools=[tool])
+    resp  = agent("Generate an 8-second cinematic video of a sunset over the ocean.")
+    print(resp.text())
 
     # Or invoke the tool directly (no agent):
     tool.invoke(

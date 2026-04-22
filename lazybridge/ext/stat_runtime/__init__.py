@@ -1,7 +1,7 @@
 """stat_runtime — econometrics and time-series execution layer for LazyBridge.
 
 Provides shared data access, query compilation, model fitting, diagnostics,
-visualization, forecasting, run persistence, and LazyTool integrations for
+visualization, forecasting, run persistence, and Tool integrations for
 statistical workflows.
 
 Quick start::
