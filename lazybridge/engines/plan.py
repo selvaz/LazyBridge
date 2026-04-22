@@ -97,6 +97,17 @@ class PlanState:
 # ---------------------------------------------------------------------------
 
 
+class ConcurrentPlanRunError(RuntimeError):
+    """Raised when two Plan runs race for the same ``checkpoint_key``.
+
+    Checkpoints are serialised through :meth:`lazybridge.store.Store.compare_and_swap`
+    so the first writer wins and any second writer fails fast instead of
+    silently overwriting the first run's state.  Derive a unique
+    ``checkpoint_key`` per run (e.g. ``f"pipeline-{uuid.uuid4().hex}"``)
+    when you need concurrent execution on the same :class:`Store`.
+    """
+
+
 class PlanCompileError(Exception):
     pass
 
@@ -231,23 +242,42 @@ class Plan:
     def _save_checkpoint(
         self,
         *,
+        last_snapshot: dict[str, Any] | None,
         next_step: str | None,
         kv: dict[str, Any],
         completed: list[str],
         status: str,
-    ) -> None:
+        run_uid: str,
+    ) -> dict[str, Any] | None:
+        """CAS-aware checkpoint write.  Returns the snapshot written, or
+        ``None`` when no checkpoint store is configured.
+
+        Each call executes ``compare_and_swap(checkpoint_key, last_snapshot,
+        new_snapshot)`` so two concurrent Plan runs sharing a key
+        deterministically converge: the first writer wins, the second
+        raises :class:`ConcurrentPlanRunError` instead of silently
+        overwriting.  ``last_snapshot`` is the value we previously wrote
+        (or read via :meth:`_claim_checkpoint`) — threading it through
+        avoids a read-modify-write window.
+        """
         store = self._checkpoint_store()
         if store is None or self.checkpoint_key is None:
-            return
-        store.write(
-            self.checkpoint_key,
-            {
-                "next_step": next_step,
-                "kv": kv,
-                "completed_steps": completed,
-                "status": status,
-            },
-        )
+            return None
+        new_snap: dict[str, Any] = {
+            "next_step": next_step,
+            "kv": kv,
+            "completed_steps": completed,
+            "status": status,
+            "run_uid": run_uid,
+        }
+        if not store.compare_and_swap(self.checkpoint_key, last_snapshot, new_snap):
+            raise ConcurrentPlanRunError(
+                f"Checkpoint {self.checkpoint_key!r} was modified by another "
+                f"writer mid-run (our run_uid={run_uid!r}).  Two Plan runs "
+                f"appear to share this key — use a unique checkpoint_key "
+                f"per concurrent run."
+            )
+        return new_snap
 
     def _load_checkpoint(self) -> dict[str, Any] | None:
         store = self._checkpoint_store()
@@ -257,6 +287,46 @@ class Plan:
         if not isinstance(saved, dict):
             return None
         return saved
+
+    def _claim_checkpoint(self, run_uid: str) -> dict[str, Any] | None:
+        """Acquire ownership of ``checkpoint_key`` for this run.
+
+        * Fresh run, key absent or a prior ``status=="done"`` checkpoint
+          → returns ``None``; the first subsequent ``_save_checkpoint``
+          writes the initial state.
+        * ``resume=True`` and an in-flight checkpoint exists → adopt it,
+          stamping our ``run_uid`` via CAS so subsequent saves compare
+          against us rather than the crashed run.
+        * In-flight checkpoint and ``resume=False`` → raise
+          :class:`ConcurrentPlanRunError`.
+        """
+        store = self._checkpoint_store()
+        if store is None or self.checkpoint_key is None:
+            return None
+        existing = store.read(self.checkpoint_key)
+        if not isinstance(existing, dict):
+            return None
+        status = existing.get("status")
+        if status in (None, "done"):
+            # Prior run finished cleanly (or key holds a non-plan value) —
+            # safe to overwrite starting from the first save.
+            return existing if status == "done" else None
+        if not self.resume:
+            raise ConcurrentPlanRunError(
+                f"Checkpoint {self.checkpoint_key!r} is already held by "
+                f"run_uid={existing.get('run_uid')!r} (status={status!r}).  "
+                f"Pass resume=True to adopt, or use a unique "
+                f"checkpoint_key per concurrent run."
+            )
+        # Adopt: CAS from the existing state to the same shape with our
+        # run_uid stamped in, so concurrent saves compare against us.
+        adopted = {**existing, "run_uid": run_uid}
+        if not store.compare_and_swap(self.checkpoint_key, existing, adopted):
+            raise ConcurrentPlanRunError(
+                f"Lost race claiming {self.checkpoint_key!r} for resume — "
+                f"another run stamped it between our read and claim.  Retry."
+            )
+        return adopted
 
     async def run(
         self,
@@ -270,8 +340,16 @@ class Plan:
         plan_state: PlanState | None = None,
     ) -> Envelope:
         run_id = str(uuid.uuid4())
+        run_uid = uuid.uuid4().hex  # checkpoint ownership stamp (CAS guard)
         tool_map = {t.name: t for t in tools}
         step_map = self._step_map()
+
+        # Claim the checkpoint_key up-front via CAS so two concurrent
+        # Plan runs on the same key fail fast instead of corrupting each
+        # other.  ``last_snap`` is then threaded through every save so
+        # subsequent CAS operations compare against what WE last wrote
+        # (or adopted on resume).
+        last_snap = self._claim_checkpoint(run_uid)
 
         # Resume: prefer explicit plan_state over store-backed checkpoint
         checkpoint = self._load_checkpoint() if plan_state is None else None
@@ -355,13 +433,17 @@ class Plan:
                     step_name = s.name or ""
                     if isinstance(r, BaseException):
                         err_env = Envelope.error_envelope(r)
-                        self._save_checkpoint(
-                            next_step=step_name, kv=kv, completed=completed, status="failed",
+                        last_snap = self._save_checkpoint(
+                            last_snapshot=last_snap, next_step=step_name,
+                            kv=kv, completed=completed, status="failed",
+                            run_uid=run_uid,
                         )
                         return err_env
                     if r.error is not None:
-                        self._save_checkpoint(
-                            next_step=step_name, kv=kv, completed=completed, status="failed",
+                        last_snap = self._save_checkpoint(
+                            last_snapshot=last_snap, next_step=step_name,
+                            kv=kv, completed=completed, status="failed",
+                            run_uid=run_uid,
                         )
                         return r
                     if s.writes and r.payload is not None:
@@ -378,9 +460,11 @@ class Plan:
                 )
                 prev_env = last_ok or prev_env
                 was_routed = False  # routing does not apply to parallel groups
-                self._save_checkpoint(
-                    next_step=current_name, kv=kv, completed=completed,
+                last_snap = self._save_checkpoint(
+                    last_snapshot=last_snap, next_step=current_name,
+                    kv=kv, completed=completed,
                     status="running" if current_name else "done",
+                    run_uid=run_uid,
                 )
                 continue
 
@@ -395,11 +479,13 @@ class Plan:
             # If the step errored, persist a "failed" checkpoint that
             # points back at the same step so a future resume= retries it.
             if result_env.error is not None:
-                self._save_checkpoint(
+                last_snap = self._save_checkpoint(
+                    last_snapshot=last_snap,
                     next_step=step.name,
                     kv=kv,
                     completed=completed,
                     status="failed",
+                    run_uid=run_uid,
                 )
                 return result_env
 
@@ -419,11 +505,13 @@ class Plan:
             was_routed = next_was_routed
 
             # Save checkpoint after each step so a crash mid-plan can resume
-            self._save_checkpoint(
+            last_snap = self._save_checkpoint(
+                last_snapshot=last_snap,
                 next_step=current_name,
                 kv=kv,
                 completed=completed,
                 status="running" if current_name else "done",
+                run_uid=run_uid,
             )
 
         return prev_env

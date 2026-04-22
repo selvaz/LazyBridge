@@ -176,11 +176,91 @@ class Store:
         with self._lock:
             return list(self._mem.keys())
 
+    def compare_and_swap(
+        self,
+        key: str,
+        expected: Any,
+        new: Any,
+        *,
+        agent_id: str | None = None,
+    ) -> bool:
+        """Atomically set ``key`` to ``new`` only if its current value
+        deep-equals ``expected``.
+
+        ``expected=None`` means "the key must not currently exist" (a
+        missing key compares equal to ``None``).
+
+        Returns ``True`` on success, ``False`` when another writer has
+        moved the value since the caller's last read — the caller is
+        expected to treat this as a lost race (raise, back off, re-read,
+        etc.).  Comparison uses the JSON-normalised shape (via
+        :func:`_to_jsonable`), so Pydantic models / nested dicts compare
+        the same as they do on disk and survive SQLite round-trips.
+
+        SQLite path: wraps the read-check-write in ``BEGIN IMMEDIATE``
+        so concurrent writers serialise on the SQLite reserved lock
+        instead of interleaving.
+        """
+        if self._closed:
+            raise RuntimeError("Store is closed")
+        if not self._db:
+            with self._lock:
+                entry = self._mem.get(key)
+                cur = entry.value if entry else None
+                if not _json_eq(cur, expected):
+                    return False
+                self._mem[key] = StoreEntry(key=key, value=new, agent_id=agent_id)
+                return True
+
+        # SQLite path — serialise concurrent writers via reserved lock.
+        conn = self._conn()
+        serialised_new = json.dumps(_to_jsonable(new), default=str)
+        with self._lock:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT value FROM store WHERE key=?", (key,)
+                ).fetchone()
+                cur = json.loads(row["value"]) if row else None
+                if not _json_eq(cur, expected):
+                    conn.execute("ROLLBACK")
+                    return False
+                conn.execute(
+                    "INSERT OR REPLACE INTO store (key, value, written_at, "
+                    "agent_id) VALUES (?,?,?,?)",
+                    (key, serialised_new, time.time(), agent_id),
+                )
+                conn.commit()
+                return True
+            except sqlite3.Error:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+
     def to_text(self, keys: list[str] | None = None) -> str:
         data = self.read_all()
         if keys:
             data = {k: v for k, v in data.items() if k in keys}
         return "\n".join(f"{k}: {json.dumps(v, default=str)}" for k, v in data.items())
+
+
+def _json_eq(a: Any, b: Any) -> bool:
+    """Deep-equality under the same JSON shape the Store persists.
+
+    Compare values after ``_to_jsonable`` so a Pydantic model passed in
+    at runtime matches the dict it round-trips to on disk.  Falls back
+    to ``False`` if either side isn't JSON-serialisable (rather than
+    raising — a non-serialisable expected value can't have been written
+    by this Store, so CAS should simply miss).
+    """
+    try:
+        sa = json.dumps(_to_jsonable(a), sort_keys=True, default=str)
+        sb = json.dumps(_to_jsonable(b), sort_keys=True, default=str)
+    except TypeError:
+        return False
+    return sa == sb
 
 
 def _to_jsonable(value: Any) -> Any:
