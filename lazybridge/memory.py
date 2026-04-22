@@ -24,6 +24,20 @@ class Memory:
 
     The ``text()`` method returns the current memory as a context string,
     re-read on every invocation (live view — never a stale snapshot).
+
+    LLM summarization
+    -----------------
+    Pass any callable (typically an ``Agent``) as ``summarizer=`` to enable
+    LLM-based compression instead of the keyword-extraction fallback::
+
+        summarizer = Agent("claude-haiku-4-5-20251001", system="Summarize conversations concisely.")
+        memory = Memory(strategy="summary", summarizer=summarizer)
+        agent  = Agent("claude-opus-4-7", memory=memory)
+
+    When compression triggers the summarizer is called synchronously with a
+    formatted transcript of the turns being dropped.  ``Agent.__call__``
+    handles the async bridge automatically so no special wrapping is needed.
+    If the summarizer raises, compression falls back to keyword extraction.
     """
 
     #: Hard cap on ``_turns`` when compression is disabled.  Without a
@@ -41,6 +55,7 @@ class Memory:
         max_tokens: int | None = 4000,
         max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
+        summarizer: Any | None = None,
     ) -> None:
         self.strategy = strategy
         self.max_tokens = max_tokens
@@ -50,6 +65,7 @@ class Memory:
         self._lock = threading.Lock()
         self._summary: str = ""
         self._overflow_warned = False
+        self._summarizer = summarizer
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         with self._lock:
@@ -89,11 +105,37 @@ class Memory:
         if self.strategy == "none" or not self.max_tokens:
             return
         total = sum(t.token_estimate for t in self._turns)
-        if self.strategy == "sliding" or (self.strategy == "auto" and total > self.max_tokens):
-            if len(self._turns) > 10:
-                old = self._turns[:-10]
+        # "summary" compresses like "sliding" but uses LLM summarization.
+        # "sliding" always compresses when turns > window.
+        # "auto"    compresses only once token budget is exceeded.
+        should_compress = (
+            self.strategy in ("sliding", "summary")
+            or (self.strategy == "auto" and total > self.max_tokens)
+        )
+        if should_compress and len(self._turns) > 10:
+            old = self._turns[:-10]
+            if self._summarizer is not None:
+                self._summary = self._llm_summary(old)
+            else:
                 self._summary = self._rule_summary(old)
-                self._turns = self._turns[-10:]
+            self._turns = self._turns[-10:]
+
+    def _llm_summary(self, turns: list[_Turn]) -> str:
+        """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error."""
+        lines: list[str] = []
+        for t in turns:
+            lines.append(f"User: {t.user}")
+            lines.append(f"Assistant: {t.assistant}")
+        prompt = (
+            "Write a concise summary of the following conversation. "
+            "Preserve key facts, decisions, and outcomes in 2-4 sentences:\n\n"
+            + "\n".join(lines)
+        )
+        try:
+            result = self._summarizer(prompt)
+            return result.text() if hasattr(result, "text") else str(result)
+        except Exception:
+            return self._rule_summary(turns)
 
     def _rule_summary(self, turns: list[_Turn]) -> str:
         topics: set[str] = set()

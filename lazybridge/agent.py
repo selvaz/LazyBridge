@@ -93,6 +93,12 @@ class Agent:
         # or slow provider can't block a caller forever.  ``None``
         # disables the deadline (backwards-compatible default).
         timeout: float | None = None,
+        # Convenience shortcuts for provider retry/backoff — forwarded to
+        # LLMEngine when the engine is auto-created from a model string.
+        # Ignored when ``engine=`` is supplied explicitly (use LLMEngine
+        # directly to configure retries on a pre-built engine).
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -100,7 +106,12 @@ class Agent:
             self.engine: Any = engine
         elif isinstance(engine_or_model, str):
             model_str = model or engine_or_model
-            self.engine = LLMEngine(model_str, native_tools=native_tools)
+            self.engine = LLMEngine(
+                model_str,
+                native_tools=native_tools,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+            )
         else:
             self.engine = engine_or_model
 

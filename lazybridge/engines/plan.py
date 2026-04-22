@@ -344,6 +344,7 @@ class Plan:
                     *[self._execute_one(
                         s, prev_env, start_env, hist_snap, kv_snap,
                         tool_map=tool_map, session=session, run_id=run_id,
+                        branch_id=s.name,
                     ) for s in group],
                     return_exceptions=True,
                 )
@@ -437,12 +438,15 @@ class Plan:
         tool_map: dict[str, "Tool"],
         session: "Session | None",
         run_id: str,
+        branch_id: str | None = None,
     ) -> Envelope:
         """Resolve sentinels, build the step env, and execute the step.
 
         Returns a normalised ``Envelope``.  Does NOT mutate ``history`` /
         ``kv`` — the caller applies those deterministically so parallel
         branches see a consistent snapshot.
+        ``branch_id`` is set for parallel-branch steps so their Session
+        events can be distinguished from sequential-step events.
         """
         step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
 
@@ -474,7 +478,9 @@ class Plan:
         merged_ctx = "\n\n".join(ctx_parts) if ctx_parts else None
         step_env = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
 
-        result_env = await self._exec_step(step, step_env, tool_map=tool_map, session=session, run_id=run_id)
+        result_env = await self._exec_step(
+            step, step_env, tool_map=tool_map, session=session, run_id=run_id, branch_id=branch_id,
+        )
         return Envelope(
             task=step_env.task,
             context=step_env.context,
@@ -537,9 +543,13 @@ class Plan:
         tool_map: dict[str, "Tool"],
         session: "Session | None",
         run_id: str,
+        branch_id: str | None = None,
     ) -> Envelope:
         if session:
-            session.emit(EventType.TOOL_CALL, {"step": step.name, "task": env.task}, run_id=run_id)
+            payload: dict[str, Any] = {"step": step.name, "task": env.task}
+            if branch_id is not None:
+                payload["branch_id"] = branch_id
+            session.emit(EventType.TOOL_CALL, payload, run_id=run_id)
 
         try:
             target = step.target
@@ -576,12 +586,18 @@ class Plan:
                 raise RuntimeError(f"Cannot execute step target: {target!r}")
 
             if session:
-                session.emit(EventType.TOOL_RESULT, {"step": step.name, "result": result_env.text()[:200]}, run_id=run_id)
+                result_payload: dict[str, Any] = {"step": step.name, "result": result_env.text()[:200]}
+                if branch_id is not None:
+                    result_payload["branch_id"] = branch_id
+                session.emit(EventType.TOOL_RESULT, result_payload, run_id=run_id)
             return result_env
 
         except Exception as exc:
             if session:
-                session.emit(EventType.TOOL_ERROR, {"step": step.name, "error": str(exc)}, run_id=run_id)
+                err_payload: dict[str, Any] = {"step": step.name, "error": str(exc)}
+                if branch_id is not None:
+                    err_payload["branch_id"] = branch_id
+                session.emit(EventType.TOOL_ERROR, err_payload, run_id=run_id)
             return Envelope.error_envelope(exc)
 
     def _routing(
