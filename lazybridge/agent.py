@@ -98,6 +98,11 @@ class Agent:
         # directly to configure retries on a pre-built engine).
         max_retries: int = 3,
         retry_delay: float = 1.0,
+        # Fallback agent tried when the primary engine returns an error.
+        # Useful for provider redundancy: Agent("claude-opus-4-7", fallback=Agent("gpt-4o")).
+        # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
+        # same envelope, so it should be configured with compatible output= / tools=.
+        fallback: "Agent | None" = None,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -139,6 +144,7 @@ class Agent:
         self.guard = guard
         self.verify = verify
         self.max_verify = max_verify
+        self.fallback = fallback
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
 
@@ -211,6 +217,11 @@ class Agent:
             result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify)
         else:
             result = await self._run_engine(env)
+
+        # Provider fallback: if primary failed and a fallback agent is configured,
+        # run the fallback's full pipeline on the same (already-processed) envelope.
+        if result.error is not None and self.fallback is not None:
+            result = await self.fallback.run(env)
 
         if self.guard and result.ok:
             action = await self.guard.acheck_output(result.text())

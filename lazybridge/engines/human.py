@@ -179,6 +179,142 @@ class _TerminalUI(_UIProtocol):
             return raw
 
 
+def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[str, Any]) -> str:
+    """Return a self-contained HTML form for the human-input web UI."""
+    import html as _html
+
+    tool_section = ""
+    if tools:
+        names = ", ".join(t.name for t in tools if hasattr(t, "name"))
+        tool_section = f"<p><strong>Available actions:</strong> {_html.escape(names)}</p>"
+
+    if is_model:
+        rows = []
+        for fname, finfo in fields.items():
+            ann = finfo.annotation or str
+            label = getattr(ann, "__name__", str(ann))
+            rows.append(
+                f'<tr><td><label for="{fname}">'
+                f'{_html.escape(fname)} <small>({_html.escape(label)})</small>'
+                f"</label></td>"
+                f'<td><input type="text" id="{fname}" name="{fname}" '
+                f'style="width:400px" autocomplete="off"></td></tr>'
+            )
+        form_body = f"<table>{''.join(rows)}</table>"
+    else:
+        form_body = '<textarea name="response" rows="8" style="width:100%;max-width:700px"></textarea>'
+
+    task_escaped = _html.escape(task).replace("\n", "<br>")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LazyBridge — Human Input</title>
+<style>
+  body {{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;}}
+  h2 {{color:#333;}} pre {{background:#f5f5f5;padding:12px;border-radius:4px;white-space:pre-wrap;}}
+  table {{border-collapse:collapse;width:100%;}} td {{padding:6px 8px;}}
+  input,textarea {{border:1px solid #ccc;padding:6px;border-radius:3px;font-size:1em;}}
+  button {{margin-top:14px;padding:10px 24px;background:#0066cc;color:#fff;
+           border:none;border-radius:4px;font-size:1em;cursor:pointer;}}
+  button:hover {{background:#0052a3;}}
+</style>
+</head>
+<body>
+<h2>Human Input Required</h2>
+<pre>{task_escaped}</pre>
+{tool_section}
+<form method="POST" action="/">
+{form_body}
+<br><button type="submit">Submit</button>
+</form>
+</body>
+</html>"""
+
+
+class _WebUI(_UIProtocol):
+    """Minimal web UI for HumanEngine: serves a form on localhost, waits for submission.
+
+    Uses only the standard library (http.server, threading, webbrowser).
+    The OS picks a free port (port=0) unless an explicit port is supplied.
+    """
+
+    def __init__(self, timeout: float | None = None, port: int = 0) -> None:
+        self._timeout = timeout
+        self._port = port
+
+    async def prompt(self, task: str, *, tools: list[Any], output_type: type) -> str:
+        import asyncio
+        import json
+        import queue
+        import threading
+        import urllib.parse
+        import webbrowser
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        from pydantic import BaseModel
+
+        is_model = isinstance(output_type, type) and issubclass(output_type, BaseModel)
+        fields: dict[str, Any] = getattr(output_type, "model_fields", {}) if is_model else {}
+
+        html = _build_web_form(task, tools, is_model, fields)
+        response_q: queue.Queue[str] = queue.Queue()
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html.encode())
+
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
+                if is_model:
+                    result = json.dumps({k: data.get(k, "") for k in fields})
+                else:
+                    result = data.get("response", "")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(
+                    b"<html><body><h2>Response submitted. "
+                    b"You may close this tab.</h2></body></html>"
+                )
+                response_q.put(result)
+
+            def log_message(self, *_args: Any) -> None:  # suppress server logs
+                pass
+
+        server = HTTPServer(("127.0.0.1", self._port), _Handler)
+        port = server.server_address[1]
+        url = f"http://127.0.0.1:{port}/"
+
+        print(f"\n[Human Input Required — Web UI]\nOpen: {url}\n")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass  # browser launch is best-effort
+
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+
+        timeout = self._timeout or 3600.0
+        loop = asyncio.get_running_loop()
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: response_q.get(timeout=timeout + 1)),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            raise TimeoutError(f"Web UI timed out after {timeout}s without a response")
+        finally:
+            server.shutdown()
+
+        return result
+
+
 class HumanEngine:
     """Presents the task to a human and returns their response as an Envelope.
 
@@ -199,7 +335,7 @@ class HumanEngine:
             if ui == "terminal":
                 self._ui: _UIProtocol = _TerminalUI(timeout=timeout, default=default)
             elif ui == "web":
-                raise NotImplementedError("Web UI is not yet implemented — use ui='terminal'")
+                self._ui = _WebUI(timeout=timeout)
             else:
                 raise ValueError(f"Unknown UI type: {ui!r}")
         else:

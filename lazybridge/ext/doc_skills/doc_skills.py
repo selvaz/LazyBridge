@@ -49,7 +49,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from lazybridge import LazyAgent, LazySession, LazyTool
+from lazybridge import Agent, Session, Tool
 from lazybridge.core.tool_schema import ToolSchemaMode  # noqa: F401 — re-exported for callers
 
 __all__ = [
@@ -647,8 +647,8 @@ def skill_tool(
     description: Annotated[str | None, "Tool description."] = None,
     guidance: Annotated[str | None, "Guidance injected into the calling agent's system prompt."] = None,
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
-) -> LazyTool:
-    """Wrap query_skill() as a LazyTool ready to be passed to any agent or pipeline."""
+) -> Tool:
+    """Wrap query_skill() as a Tool ready to be passed to any agent or pipeline."""
     sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
 
@@ -661,7 +661,7 @@ def skill_tool(
         """Query a local documentation skill and return a grounded context brief."""
         return query_skill(str(sdir), task, mode=mode, top_k=top_k, include_quotes=include_quotes)
 
-    return LazyTool.from_function(
+    return Tool(
         _run,
         name=name or _slugify(manifest.name),
         description=description or manifest.description,
@@ -683,9 +683,9 @@ def skill_builder_tool(
         "Use this tool to transform one or more documentation folders into a queryable local skill."
     ),
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
-) -> LazyTool:
-    """Create a LazyTool that builds skill bundles from documentation folders."""
-    return LazyTool.from_function(build_skill, name=name, description=description, guidance=guidance, strict=strict)
+) -> Tool:
+    """Create a Tool that builds skill bundles from documentation folders."""
+    return Tool(build_skill, name=name, description=description, guidance=guidance, strict=strict)
 
 
 def skill_pipeline(
@@ -694,58 +694,65 @@ def skill_pipeline(
     provider: Annotated[str | Any, "LazyBridge provider alias or instance."] = "anthropic",
     router_model: Annotated[str | None, "Model for the task-sharpening router."] = None,
     executor_model: Annotated[str | None, "Model for the grounded-answer executor."] = None,
-    session: Annotated[Any, "Optional LazySession. Created if omitted."] = None,
+    session: Annotated[Any, "Optional Session. Created if omitted."] = None,
     native_tools: Annotated[list | None, "Provider-native tools for the executor."] = None,
-) -> LazyTool:
+) -> Tool:
     """
-    Two-step pipeline exposed as a single LazyTool.
+    Two-step pipeline exposed as a single Tool.
 
       1. Router   — rewrites the user task into a retrieval-optimised query.
-      2. Executor — calls skill_tool() via loop() and synthesises a grounded answer.
+      2. Executor — calls skill_tool() and synthesises a grounded answer.
 
-    Wired via sess.as_tool(mode="chain"). The executor has tools= at construction
-    so the chain automatically calls loop() on it.
+    Returns an Agent.chain(router, executor).as_tool().
     """
+    from lazybridge.engines.llm import LLMEngine
+
     sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
-    sess = session or LazySession()
+    sess = session or Session()
     s_tool = skill_tool(skill_dir=str(sdir))
 
-    router = LazyAgent(
-        provider,
+    # Resolve model strings: use the explicit model override if given, else the provider alias.
+    router_model_str = router_model or (provider if isinstance(provider, str) else "anthropic")
+    executor_model_str = executor_model or (provider if isinstance(provider, str) else "anthropic")
+
+    router = Agent(
+        engine=LLMEngine(
+            router_model_str,
+            system=(
+                "You sharpen user queries for a local documentation retrieval system. "
+                "Return a single concise retrieval query. "
+                "Preserve every technical identifier: class names, method names, "
+                "parameter names, error codes, configuration keys. "
+                "Do not answer the question. Do not add facts."
+            ),
+        ),
         name="skill_router",
-        model=router_model,
         session=sess,
-        system=(
-            "You sharpen user queries for a local documentation retrieval system. "
-            "Return a single concise retrieval query. "
-            "Preserve every technical identifier: class names, method names, "
-            "parameter names, error codes, configuration keys. "
-            "Do not answer the question. Do not add facts."
-        ),
     )
-    executor = LazyAgent(
-        provider,
-        name="skill_executor",
-        model=executor_model,
-        session=sess,
-        native_tools=native_tools,
-        tools=[s_tool],
-        system=(
-            "You answer from the local skill tool only. Always call the skill tool first. "
-            "Build your answer exclusively from the tool result. "
-            "Name every source file you use. "
-            "If the skill returns weak or absent evidence, say so explicitly."
+    executor = Agent(
+        engine=LLMEngine(
+            executor_model_str,
+            system=(
+                "You answer from the local skill tool only. Always call the skill tool first. "
+                "Build your answer exclusively from the tool result. "
+                "Name every source file you use. "
+                "If the skill returns weak or absent evidence, say so explicitly."
+            ),
+            native_tools=native_tools,
         ),
+        name="skill_executor",
+        session=sess,
+        tools=[s_tool],
     )
 
-    return sess.as_tool(
-        name="doc_skill_pipeline",
+    pipeline = Agent.chain(router, executor, name="doc_skill_pipeline", session=sess)
+    t = pipeline.as_tool(
+        "doc_skill_pipeline",
         description=f"Grounded local-docs pipeline: {manifest.description}",
-        mode="chain",
-        participants=[router, executor],
-        guidance=(
-            "Use for questions grounded in the indexed documentation. "
-            "The pipeline sharpens the query then retrieves and synthesises the answer."
-        ),
     )
+    t.guidance = (
+        "Use for questions grounded in the indexed documentation. "
+        "The pipeline sharpens the query then retrieves and synthesises the answer."
+    )
+    return t
