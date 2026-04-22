@@ -21,7 +21,7 @@ Pick ``db=None`` for tests and single-process ephemeral runs.
 ## Example
 
 ```python
-from lazybridge import Agent, Store, Plan, Step
+from lazybridge import Agent, LLMEngine, Store, Plan, Step
 
 store = Store(db="research.sqlite")
 
@@ -34,8 +34,13 @@ Agent.from_engine(plan)("AI trends")
 print(store.read("hits"))
 
 # Agent with sources= sees the live store on every call.
-monitor = Agent("claude-opus-4-7", name="monitor", sources=[store],
-                system="Report what's currently in the blackboard.")
+# ``system=`` lives on the engine, not Agent — build an LLMEngine.
+monitor = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system="Report what's currently in the blackboard."),
+    name="monitor",
+    sources=[store],
+)
 print(monitor("status?").text())
 ```
 

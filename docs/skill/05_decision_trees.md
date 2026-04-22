@@ -57,7 +57,7 @@ payloads as JSON and handles ``None`` as empty string.
 
 ```
 Conversation history for one agent?
-    → Memory         # agent.memory = Memory("auto")
+    → Memory         # agent.memory = Memory(strategy="auto")
 
 Shared key-value blackboard across multiple agents / runs?
     → Store          # store.write / store.read

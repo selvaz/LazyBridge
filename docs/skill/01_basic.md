@@ -34,6 +34,10 @@ Factories:
   Agent.from_engine(engine: Engine, **kw) -> Agent  # explicit Plan / Supervisor / custom
   Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
 
+System prompts:
+  # ``system=`` is NOT an Agent kwarg. Attach it to the engine:
+  Agent(engine=LLMEngine("claude-opus-4-7", system="Be concise."))
+
 Composition sugar (NOT new paradigms):
   Agent.chain(*agents, **kw)  -> Agent          # sequential
   Agent.parallel(*agents, **kw) -> _ParallelAgent  # deterministic fan-out → list[Envelope]

@@ -54,7 +54,7 @@ rewrite needed when you move up.
 * [Quickstart — 5 minutes to first working agent](quickstart.md)
 * [Decision trees — "when to use which"](decisions/index.md)
 * [API reference — signature-first index](reference.md)
-* [Errors — cause → fix table](errors.md)
+* [Errors — cause → fix table](skill/99_errors.md)
 * [Claude Skill — for Claude Code / LLM assistants](skill/SKILL.md)
 
 ## What LazyBridge is for

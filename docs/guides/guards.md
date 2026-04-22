@@ -27,9 +27,13 @@ def no_emails(text: str) -> GuardAction:
         return GuardAction(allowed=False, message="Remove email addresses first.")
     return GuardAction(allowed=True)
 
-# LLM-backed policy guard.
-judge = Agent("claude-opus-4-7", name="judge",
-              system='Respond "approved" or "rejected: <reason>".')
+# LLM-backed policy guard. ``system=`` lives on the engine, not Agent.
+from lazybridge import LLMEngine
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 guard = GuardChain(
     ContentGuard(input_fn=no_emails),

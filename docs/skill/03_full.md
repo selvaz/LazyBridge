@@ -595,12 +595,16 @@ Plan(Step(Agent(..., verify=judge_agent), ...))
 **example**
 
 ```python
-from lazybridge import Agent, Plan, Step
+from lazybridge import Agent, LLMEngine, Plan, Step
 
+# Judge needs a system prompt; ``system=`` belongs on the engine.
+# Use a cheaper model in real code.
 judge = Agent(
-    "claude-opus-4-7",   # would typically be a cheaper model
+    engine=LLMEngine(
+        "claude-opus-4-7",
+        system='Respond "approved" or "rejected: <short reason>".',
+    ),
     name="judge",
-    system='Respond "approved" or "rejected: <short reason>".',
 )
 
 # Agent-level: final output gated.

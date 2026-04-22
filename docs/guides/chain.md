@@ -20,7 +20,7 @@ editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
 pipeline = Agent.chain(researcher, editor, writer,
-                        memory=Memory("auto"))
+                        memory=Memory(strategy="auto"))
 print(pipeline("AI trends April 2026").text())
 ```
 

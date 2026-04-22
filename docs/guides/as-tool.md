@@ -18,11 +18,15 @@ final output.
 ## Example
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
-judge      = Agent("claude-opus-4-7", name="judge",
-                   system='Respond "approved" or "rejected: <reason>".')
+# ``system=`` lives on the engine, not on Agent.
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 # Implicit: pass the agent, LazyBridge wraps it.
 orchestrator = Agent("claude-opus-4-7",

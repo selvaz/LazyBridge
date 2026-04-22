@@ -9,49 +9,59 @@ No explicit DAG — for that, go to Full.
 **signature**
 
 Memory(
+    *,
     strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
-    max_tokens: int = 4000,
-    window: int = 10,            # sliding: last N turns kept raw
-    summarizer: Agent | None = None,  # cheap agent used when strategy="summary"
+    max_tokens: int | None = 4000,
+    max_turns: int | None = 1000,     # hard backstop; None disables
+    store: Any | None = None,         # optional Store for persistence
+    summarizer: Any | None = None,    # Agent or async callable used when strategy="summary"
 ) -> Memory
 
-memory.add(user: str, assistant: str, tokens: int = 0) -> None
+memory.add(user: str, assistant: str, *, tokens: int = 0) -> None
 memory.messages() -> list[Message]
 memory.text() -> str              # current view as plain text (live read)
 memory.clear() -> None
 
-Usage: Agent("model", memory=Memory("auto"))
+Usage: Agent("model", memory=Memory(strategy="auto"))
 
 **rules**
 
 - ``auto`` — sliding window plus summary of older turns once ``max_tokens``
   is exceeded; default. Good for general chat.
-- ``sliding`` — keep last ``window`` turns verbatim, drop the rest.
-  Lossy but cheap.
-- ``summary`` — compress everything with ``summarizer`` on each overflow.
-  Requires passing a cheap Agent.
-- ``none`` — do not compress; raises memory over time.
+- ``sliding`` — always compresses once >10 turns accumulate, keeping only
+  the last 10 verbatim. Lossy but cheap.
+- ``summary`` — same 10-turn cut-off as ``sliding``, but the compressed
+  prefix is an LLM summary from ``summarizer=``; without a summarizer
+  the fallback is keyword extraction.
+- ``none`` — no token-based compression; only the ``max_turns`` hard cap
+  applies.
 - ``Memory`` is per-agent by default. To share memory across agents, pass
   the same instance to each agent's ``memory=`` or via ``sources=[mem]``.
 - ``text()`` is live — every call re-materialises the current view. Do
   not snapshot and cache it.
+- All constructor arguments are keyword-only — ``Memory("auto")`` fails
+  with ``TypeError``; write ``Memory(strategy="auto")``.
 
 **example**
 
 ```python
-from lazybridge import Agent, Memory
+from lazybridge import Agent, LLMEngine, Memory
 
-mem = Memory("auto", max_tokens=3000)
+mem = Memory(strategy="auto", max_tokens=3000)
 chat = Agent("claude-opus-4-7", memory=mem, name="chat")
 
 chat("hi, I'm Marco")
 chat("what's my name?")         # "Marco"
 print(mem.text())               # current compressed view
 
-# Share memory across two agents — the judge reads the live history.
-judge = Agent("claude-opus-4-7", name="judge",
-              sources=[mem],
-              system="Grade the assistant's last reply on helpfulness 1-5.")
+# Share memory across two agents — the judge reads the live history
+# via ``sources=[mem]``. ``system=`` belongs on the engine, not the Agent.
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system="Grade the assistant's last reply on helpfulness 1-5."),
+    name="judge",
+    sources=[mem],
+)
 judge("grade the last turn")
 ```
 
@@ -60,7 +70,8 @@ judge("grade the last turn")
 - Pass the same ``Memory`` instance to both agents if you want shared
   state. Copying or pickling resets the internal compression state.
 - ``Memory(strategy="summary")`` without a ``summarizer=`` agent falls
-  back to a no-op and grows unboundedly.
+  back to keyword-extraction summaries; memory still respects the
+  ``max_turns`` hard cap (default 1000) so it cannot grow unboundedly.
 - ``memory.clear()`` wipes everything including the in-process summary;
   it does not persist across restarts. For durable memory use ``Store``.
 
@@ -102,7 +113,7 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
 **example**
 
 ```python
-from lazybridge import Agent, Store, Plan, Step
+from lazybridge import Agent, LLMEngine, Store, Plan, Step
 
 store = Store(db="research.sqlite")
 
@@ -115,8 +126,13 @@ Agent.from_engine(plan)("AI trends")
 print(store.read("hits"))
 
 # Agent with sources= sees the live store on every call.
-monitor = Agent("claude-opus-4-7", name="monitor", sources=[store],
-                system="Report what's currently in the blackboard.")
+# ``system=`` lives on the engine, not Agent — build an LLMEngine.
+monitor = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system="Report what's currently in the blackboard."),
+    name="monitor",
+    sources=[store],
+)
 print(monitor("status?").text())
 ```
 
@@ -269,9 +285,13 @@ def no_emails(text: str) -> GuardAction:
         return GuardAction(allowed=False, message="Remove email addresses first.")
     return GuardAction(allowed=True)
 
-# LLM-backed policy guard.
-judge = Agent("claude-opus-4-7", name="judge",
-              system='Respond "approved" or "rejected: <reason>".')
+# LLM-backed policy guard. ``system=`` lives on the engine, not Agent.
+from lazybridge import LLMEngine
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 guard = GuardChain(
     ContentGuard(input_fn=no_emails),
@@ -332,7 +352,7 @@ editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
 pipeline = Agent.chain(researcher, editor, writer,
-                        memory=Memory("auto"))
+                        memory=Memory(strategy="auto"))
 print(pipeline("AI trends April 2026").text())
 ```
 
@@ -384,11 +404,15 @@ Usage: Agent("model", tools=[researcher.as_tool()])
 **example**
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
-judge      = Agent("claude-opus-4-7", name="judge",
-                   system='Respond "approved" or "rejected: <reason>".')
+# ``system=`` lives on the engine, not on Agent.
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 # Implicit: pass the agent, LazyBridge wraps it.
 orchestrator = Agent("claude-opus-4-7",
@@ -583,11 +607,16 @@ llm_judge(agent: Agent, criteria: str) -> Callable   # cheap Agent as judge
 **example**
 
 ```python
-from lazybridge import Agent, EvalCase, EvalSuite, contains, llm_judge
+from lazybridge import Agent, LLMEngine, EvalCase, EvalSuite, contains, llm_judge
 
-bot   = Agent("claude-opus-4-7", system="You are a helpful assistant.")
-judge = Agent("claude-opus-4-7", name="judge",
-              system='Respond "approved" or "rejected: <reason>".')
+# System prompts live on the engine, not the Agent constructor.
+bot = Agent(engine=LLMEngine("claude-opus-4-7",
+                             system="You are a helpful assistant."))
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 suite = EvalSuite(
     EvalCase("What's the capital of France?",

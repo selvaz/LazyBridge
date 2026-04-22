@@ -17,11 +17,16 @@ prompt changes.
 ## Example
 
 ```python
-from lazybridge import Agent, EvalCase, EvalSuite, contains, llm_judge
+from lazybridge import Agent, LLMEngine, EvalCase, EvalSuite, contains, llm_judge
 
-bot   = Agent("claude-opus-4-7", system="You are a helpful assistant.")
-judge = Agent("claude-opus-4-7", name="judge",
-              system='Respond "approved" or "rejected: <reason>".')
+# System prompts live on the engine, not the Agent constructor.
+bot = Agent(engine=LLMEngine("claude-opus-4-7",
+                             system="You are a helpful assistant."))
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7",
+                     system='Respond "approved" or "rejected: <reason>".'),
+    name="judge",
+)
 
 suite = EvalSuite(
     EvalCase("What's the capital of France?",
