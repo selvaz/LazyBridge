@@ -106,8 +106,13 @@ primary   = Agent(engine=LLMEngine("google"),    fallback=secondary, name="prima
         fallback: Agent | None = None,
         session: Session | None = None,
         verbose: bool = False,
-        name: str | None = None,
-        description: str | None = None,
+        name: str | None = None,         # label used by Session.graph,
+                                         # event logs, usage_summary()["by_agent"],
+                                         # and SupervisorEngine's ``retry <name>:``
+                                         # command. Defaults to the engine's model.
+        description: str | None = None,  # shown to LLMs when this Agent is
+                                         # wrapped as a tool (via as_tool() or
+                                         # tools=[agent] in another Agent).
         model: str | None = None,     # tier alias when first arg is a provider name
         engine: Engine | None = None, # kwarg alias for the first positional
     ) -> Agent

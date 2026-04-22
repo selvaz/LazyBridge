@@ -25,9 +25,16 @@ bot = Agent(engine=LLMEngine("claude-opus-4-7",
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
+    name="judge",                      # label used in session.usage_summary()
 )
 
+# EvalCase(input_prompt, check=<predicate>, description=<label for the report>)
+#   - The first positional arg is the prompt fed to the agent under test.
+#   - check=  is a Callable[[str], bool] applied to Envelope.text().
+#             contains("Paris") builds one from the library; you can also
+#             pass a lambda or llm_judge(...) for LLM-graded checks.
+#   - description=  is a free-text label that appears in the report output;
+#                   no impact on grading, just makes failures easier to read.
 suite = EvalSuite(
     EvalCase("What's the capital of France?",
              check=contains("Paris")),

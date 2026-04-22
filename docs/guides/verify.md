@@ -32,21 +32,35 @@ judge = Agent(
         "claude-opus-4-7",
         system='Respond "approved" or "rejected: <short reason>".',
     ),
-    name="judge",
+    name="judge",                    # label used in session.usage_summary()
 )
 
-# Agent-level: final output gated.
+# Agent-level:
+#   verify=judge   → after the engine produces its final output, hand it
+#                    to ``judge``. If judge's verdict starts with
+#                    "approved", pass through. Otherwise rerun with the
+#                    verdict appended to the task as feedback.
+#   max_verify=2   → give the writer at most 2 attempts before returning
+#                    the last (possibly rejected) output as-is.
 writer = Agent("claude-opus-4-7", verify=judge, max_verify=2)
 writer("write a haiku about bees")
 
 # Tool-level (Option B): every call of synthesizer is gated.
+#   name="synthesizer" is the tool name seen by the orchestrator LLM
+#   (and the default Tool.name when this Agent is wrapped via as_tool()).
 synthesizer = Agent("claude-opus-4-7", name="synthesizer")
 orchestrator = Agent(
     "claude-opus-4-7",
+    # as_tool("synth", ...) overrides the tool name to "synth".
+    # verify=/max_verify= here gate every call through this tool, not
+    # the orchestrator's own final output.
     tools=[synthesizer.as_tool("synth", verify=judge, max_verify=2)],
 )
 
 # Plan-level: one step gated, rest unchecked.
+# Step(target, name="…") — ``name`` is the step id used by sentinels
+# (from_step("fetch")), checkpoints, and the graph view. ``target`` is
+# the callable / Agent that actually runs the step.
 plan = Plan(
     Step(fetcher, name="fetch"),
     Step(Agent("claude-opus-4-7", verify=judge, name="summarise"),

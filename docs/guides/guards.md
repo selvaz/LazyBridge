@@ -21,7 +21,9 @@ nuanced policies the regex can't capture.
 from lazybridge import Agent, ContentGuard, GuardChain, LLMGuard, GuardAction
 import re
 
-# Cheap regex guard.
+# Cheap regex guard that inspects the USER task before it hits the model.
+#   GuardAction(allowed=False, message=...) → block + explain
+#   GuardAction(allowed=True)                → pass through
 def no_emails(text: str) -> GuardAction:
     if re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text):
         return GuardAction(allowed=False, message="Remove email addresses first.")
@@ -32,14 +34,22 @@ from lazybridge import LLMEngine
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
+    name="judge",                       # label surfaced in observability
 )
 
 guard = GuardChain(
+    # ContentGuard wraps plain functions into the Guard interface.
+    #   input_fn=  runs on the USER task before the engine is invoked
+    #   output_fn= runs on Envelope.text() after the engine returns
     ContentGuard(input_fn=no_emails),
+    # LLMGuard delegates to a judge Agent. ``policy=`` is a natural-language
+    # rule; the guard blocks when the judge's verdict starts with
+    # "block" or "deny".
     LLMGuard(judge, policy="Reject outputs that contain medical advice."),
 )
 
+# guard=  attaches the chain to both input and output paths of this Agent.
+# name="bot"  labels the agent in Session.graph / event logs.
 bot = Agent("claude-opus-4-7", guard=guard, name="bot")
 env = bot("my email is foo@bar.com, what's the weather?")
 assert not env.ok                        # blocked by the regex guard

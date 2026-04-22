@@ -15,10 +15,18 @@ transition is additive, not a rewrite.
 ```python
 from lazybridge import Agent, Memory
 
+# name= labels each Agent in Session.graph / event logs. It also becomes
+# the auto-derived step name inside the Plan that Agent.chain compiles to
+# (i.e. you'd reference them as from_step("researcher") / from_step("editor")
+# / from_step("writer") if you ever switched from chain → Plan).
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
+# memory= on the chain wrapper is per-pipeline memory — it records the
+# (user-task, final-output) pair at the OUTER boundary. Individual agents
+# keep their own memory if they have one (they don't here).
+# strategy="auto" compresses only once Memory's token budget is exceeded.
 pipeline = Agent.chain(researcher, editor, writer,
                         memory=Memory(strategy="auto"))
 print(pipeline("AI trends April 2026").text())

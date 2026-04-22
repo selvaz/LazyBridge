@@ -24,12 +24,21 @@ useful for "shadow" observers that summarise or judge.
 ```python
 from lazybridge import Agent, LLMEngine, Memory
 
+# strategy="auto"  → compress only once we blow past max_tokens.
+# max_tokens=3000  → token budget; when the total estimated tokens in
+#                    stored turns exceeds this, the oldest ones are
+#                    compressed into a summary prefix.
 mem = Memory(strategy="auto", max_tokens=3000)
+
+# name="chat"      → label this agent carries into Session.graph,
+#                    event logs, and usage_summary()["by_agent"].
+#                    No functional effect on a single call; matters
+#                    as soon as you add a Session or Plan.
 chat = Agent("claude-opus-4-7", memory=mem, name="chat")
 
 chat("hi, I'm Marco")
 chat("what's my name?")         # "Marco"
-print(mem.text())               # current compressed view
+print(mem.text())               # current compressed view (live, re-read each call)
 
 # Share memory across two agents — the judge reads the live history
 # via ``sources=[mem]`` (live view on every call). ``system=`` belongs
@@ -37,8 +46,8 @@ print(mem.text())               # current compressed view
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system="Grade the assistant's last reply on helpfulness 1-5."),
-    name="judge",
-    sources=[mem],
+    name="judge",             # distinct label in observability output
+    sources=[mem],            # inject mem.text() into the system prompt each call
 )
 judge("grade the last turn")
 ```

@@ -23,10 +23,15 @@ Pick ``db=None`` for tests and single-process ephemeral runs.
 ```python
 from lazybridge import Agent, LLMEngine, Store, Plan, Step
 
+# db="research.sqlite"  → persistent SQLite file (WAL mode, thread-safe).
+#                         Pass db=None for an in-memory dict instead.
 store = Store(db="research.sqlite")
 
-# Plan step writes a result into the store automatically.
+# Plan step writes its result into the store automatically.
 plan = Plan(
+    # name="search"   → step identifier (referenced by sentinels like
+    #                   from_step("search"), checkpoints, and the graph).
+    # writes="hits"   → after the step runs, Plan calls store.write("hits", payload).
     Step(researcher, name="search", writes="hits"),
     Step(writer,     name="write"),
 )
@@ -38,8 +43,8 @@ print(store.read("hits"))
 monitor = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system="Report what's currently in the blackboard."),
-    name="monitor",
-    sources=[store],
+    name="monitor",           # label in Session.graph / event logs
+    sources=[store],          # store.to_text() is injected into context each call
 )
 print(monitor("status?").text())
 ```

@@ -47,20 +47,25 @@ Usage: Agent("model", memory=Memory(strategy="auto"))
 ```python
 from lazybridge import Agent, LLMEngine, Memory
 
+# strategy="auto"  → compress only once we blow past max_tokens.
+# max_tokens=3000  → token budget; compression triggers on overflow.
 mem = Memory(strategy="auto", max_tokens=3000)
+
+# name="chat"      → label in Session.graph / event logs /
+#                    usage_summary()["by_agent"]. No effect on a lone call.
 chat = Agent("claude-opus-4-7", memory=mem, name="chat")
 
 chat("hi, I'm Marco")
 chat("what's my name?")         # "Marco"
-print(mem.text())               # current compressed view
+print(mem.text())               # current compressed view (live, re-read each call)
 
 # Share memory across two agents — the judge reads the live history
 # via ``sources=[mem]``. ``system=`` belongs on the engine, not the Agent.
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system="Grade the assistant's last reply on helpfulness 1-5."),
-    name="judge",
-    sources=[mem],
+    name="judge",             # distinct label for observability
+    sources=[mem],            # inject mem.text() into the system prompt each call
 )
 judge("grade the last turn")
 ```
@@ -115,10 +120,12 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
 ```python
 from lazybridge import Agent, LLMEngine, Store, Plan, Step
 
+# db="research.sqlite" → persistent SQLite. Pass db=None for in-memory dict.
 store = Store(db="research.sqlite")
 
-# Plan step writes a result into the store automatically.
 plan = Plan(
+    # name="search" is the step id (used by from_step(...), checkpoints, graph).
+    # writes="hits"  triggers store.write("hits", payload) after the step runs.
     Step(researcher, name="search", writes="hits"),
     Step(writer,     name="write"),
 )
@@ -130,8 +137,8 @@ print(store.read("hits"))
 monitor = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system="Report what's currently in the blackboard."),
-    name="monitor",
-    sources=[store],
+    name="monitor",          # label in Session.graph / event logs
+    sources=[store],         # store.to_text() injected into context each call
 )
 print(monitor("status?").text())
 ```
@@ -280,6 +287,8 @@ from lazybridge import Agent, ContentGuard, GuardChain, LLMGuard, GuardAction
 import re
 
 # Cheap regex guard.
+#   GuardAction(allowed=False, message=...) → block + explain
+#   GuardAction(allowed=True)                → pass through
 def no_emails(text: str) -> GuardAction:
     if re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text):
         return GuardAction(allowed=False, message="Remove email addresses first.")
@@ -290,14 +299,20 @@ from lazybridge import LLMEngine
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
+    name="judge",                       # label shown in observability
 )
 
 guard = GuardChain(
+    # ContentGuard: input_fn runs on the USER task, output_fn runs on
+    # Envelope.text() after the engine returns.
     ContentGuard(input_fn=no_emails),
+    # LLMGuard: policy= is a natural-language rule the judge enforces.
+    # The guard blocks when the judge's verdict starts with "block"/"deny".
     LLMGuard(judge, policy="Reject outputs that contain medical advice."),
 )
 
+# guard=  attaches the chain to both input and output paths.
+# name="bot" labels the agent in Session.graph / event logs.
 bot = Agent("claude-opus-4-7", guard=guard, name="bot")
 env = bot("my email is foo@bar.com, what's the weather?")
 assert not env.ok                        # blocked by the regex guard
@@ -347,10 +362,15 @@ Alternatives:
 ```python
 from lazybridge import Agent, Memory
 
+# name=  labels each Agent in Session.graph / event logs AND becomes the
+# auto-derived step name inside the Plan that Agent.chain compiles to.
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
+# memory= on Agent.chain is per-pipeline memory — records the
+# (user-task, final-output) pair at the OUTER boundary.
+# strategy="auto" compresses only once Memory's token budget is exceeded.
 pipeline = Agent.chain(researcher, editor, writer,
                         memory=Memory(strategy="auto"))
 print(pipeline("AI trends April 2026").text())
@@ -406,6 +426,8 @@ Usage: Agent("model", tools=[researcher.as_tool()])
 ```python
 from lazybridge import Agent, LLMEngine
 
+# name="researcher" is the default Tool.name when this Agent is wrapped
+# via as_tool(), plus the label in Session.graph / usage_summary().
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 # ``system=`` lives on the engine, not on Agent.
 judge = Agent(
@@ -415,10 +437,15 @@ judge = Agent(
 )
 
 # Implicit: pass the agent, LazyBridge wraps it.
+# Tool schema is (task: str) -> str; tool name defaults to researcher.name.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher])   # equivalent to researcher.as_tool()
 
-# Explicit + verified: the judge gates every research call.
+# Explicit + verified:
+#   name=         overrides the tool name the orchestrator's LLM sees.
+#   description=  natural-language text the LLM reads to decide when to call it.
+#   verify=       every call through this tool is judged by ``judge``.
+#   max_verify=2  up to 2 retries per call; last attempt returned as-is.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher.as_tool(
                          name="research",
@@ -615,8 +642,13 @@ bot = Agent(engine=LLMEngine("claude-opus-4-7",
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7",
                      system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
+    name="judge",                       # label shown in session.usage_summary()
 )
+
+# EvalCase(prompt, check=<predicate>, description=<report label>)
+#   check=  Callable[[str], bool] run against Envelope.text().
+#           contains("Paris") / llm_judge(...) / lambda work identically.
+#   description=  free text only — surfaces in the printed report.
 
 suite = EvalSuite(
     EvalCase("What's the capital of France?",

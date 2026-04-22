@@ -604,21 +604,29 @@ judge = Agent(
         "claude-opus-4-7",
         system='Respond "approved" or "rejected: <short reason>".',
     ),
-    name="judge",
+    name="judge",                    # label in session.usage_summary()
 )
 
-# Agent-level: final output gated.
+# Agent-level:
+#   verify=judge   gate the writer's final output through the judge.
+#   max_verify=2   at most 2 attempts; the last one is returned as-is.
 writer = Agent("claude-opus-4-7", verify=judge, max_verify=2)
 writer("write a haiku about bees")
 
-# Tool-level (Option B): every call of synthesizer is gated.
+# Tool-level (Option B):
+#   name="synthesizer" is the tool name the orchestrator LLM sees (and
+#   the default Tool.name when wrapped via as_tool()).
+#   as_tool("synth", verify=..., max_verify=...) overrides the tool name
+#   and gates every call through this tool (not the orchestrator's own
+#   final output).
 synthesizer = Agent("claude-opus-4-7", name="synthesizer")
 orchestrator = Agent(
     "claude-opus-4-7",
     tools=[synthesizer.as_tool("synth", verify=judge, max_verify=2)],
 )
 
-# Plan-level: one step gated, rest unchecked.
+# Plan-level — Step(target, name="…") — ``name`` is the step id used by
+# sentinels (from_step("fetch")), checkpoints, and the graph view.
 plan = Plan(
     Step(fetcher, name="fetch"),
     Step(Agent("claude-opus-4-7", verify=judge, name="summarise"),

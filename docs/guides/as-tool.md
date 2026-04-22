@@ -20,6 +20,9 @@ final output.
 ```python
 from lazybridge import Agent, LLMEngine
 
+# name="researcher" becomes:
+#   - the default Tool.name when this Agent is wrapped via as_tool()
+#   - the label in Session.graph / event logs / usage_summary()
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 # ``system=`` lives on the engine, not on Agent.
 judge = Agent(
@@ -29,10 +32,16 @@ judge = Agent(
 )
 
 # Implicit: pass the agent, LazyBridge wraps it.
+# Tool schema is (task: str) -> str; tool name defaults to researcher.name.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher])   # equivalent to researcher.as_tool()
 
 # Explicit + verified: the judge gates every research call.
+#   name=         overrides the tool name the orchestrator's LLM sees.
+#   description=  is the natural-language tool description handed to the
+#                 LLM so it knows when to call this tool.
+#   verify=       every call through this tool is judged by ``judge``.
+#   max_verify=2  up to 2 retries per call; final attempt returned as-is.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher.as_tool(
                          name="research",
