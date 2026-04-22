@@ -5,7 +5,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: "'str | Any'" = 'claude-opus-4-7', tools: "'list[Tool | Callable | Agent]'" = (), output: 'type' = <class 'str'>, memory: "'Any | None'" = None, sources: "'list[Any]'" = (), guard: "'Any | None'" = None, verify: "'Agent | None'" = None, max_verify: 'int' = 3, name: 'str | None' = None, description: 'str | None' = None, session: "'Any | None'" = None, verbose: 'bool' = False, model: 'str | None' = None, engine: "'Any | None'" = None, native_tools: "'list[Any] | None'" = None) -> 'None'`
+### `Agent(engine_or_model: "'str | Any'" = 'claude-opus-4-7', tools: "'list[Tool | Callable | Agent]'" = (), output: 'type' = <class 'str'>, memory: "'Any | None'" = None, sources: "'list[Any]'" = (), guard: "'Any | None'" = None, verify: "'Agent | None'" = None, max_verify: 'int' = 3, name: 'str | None' = None, description: 'str | None' = None, session: "'Any | None'" = None, verbose: 'bool' = False, model: 'str | None' = None, engine: "'Any | None'" = None, native_tools: "'list[Any] | None'" = None, output_validator: "'Callable[[Any], Any] | None'" = None, max_output_retries: 'int' = 2) -> 'None'`
 
 Universal agent — delegates execution to a swappable Engine.
 
