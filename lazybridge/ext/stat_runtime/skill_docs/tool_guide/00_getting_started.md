@@ -2,7 +2,7 @@
 
 ## Overview
 
-The statistical runtime (`stat_runtime`) provides tools for registering datasets, querying data with SQL, fitting statistical models (OLS, ARIMA, GARCH, Markov Switching), running diagnostics, generating plots, and persisting results. All tools are exposed as `LazyTool` instances that return plain dicts (JSON-serializable). Errors are never raised to the caller; they are returned as `{"error": true, "type": "...", "message": "..."}`.
+The statistical runtime (`stat_runtime`) provides tools for registering datasets, querying data with SQL, fitting statistical models (OLS, ARIMA, GARCH, Markov Switching), running diagnostics, generating plots, and persisting results. All tools are exposed as `Tool` instances that return plain dicts (JSON-serializable). Errors are never raised to the caller; they are returned as `{"error": true, "type": "...", "message": "..."}`.
 
 ## Installation
 
@@ -53,21 +53,21 @@ with StatRuntime(db="my.duckdb", artifacts_dir="out") as rt:
 # rt.close() called automatically
 ```
 
-### Binding to a LazyAgent
+### Binding to an Agent
 
 ```python
-from lazybridge import LazyAgent
+from lazybridge import Agent
 from lazybridge.ext.stat_runtime.runner import StatRuntime
 from lazybridge.ext.stat_runtime.tools import stat_tools
 
 rt = StatRuntime()
 # High-level tools only (recommended for LLM agents)
-agent = LazyAgent("anthropic", tools=stat_tools(rt, level="high"))
+agent = Agent("anthropic", tools=stat_tools(rt, level="high"))
 
 # Or use stat_agent() for a pre-configured agent with expert delegation
 from lazybridge.ext.stat_runtime.tools import stat_agent
 agent, rt = stat_agent("anthropic")  # includes downloader + stat tools
-resp = agent.loop("Download SPY and AAPL data, then analyze their volatility")
+resp = agent("Download SPY and AAPL data, then analyze their volatility")
 ```
 
 ## Two-Tier Tool Architecture

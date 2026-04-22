@@ -34,8 +34,8 @@ Usage::
     from lazybridge.ext.quant_agent import quant_agent
 
     agent, rt = quant_agent("anthropic")
-    resp = agent.loop("Download SPY, AAPL, and MSFT. Analyze their volatility.")
-    print(resp.content)
+    resp = agent("Download SPY, AAPL, and MSFT. Analyze their volatility.")
+    print(resp.text())
     rt.close()
 """
 
@@ -138,8 +138,8 @@ def quant_agent(
     Usage::
 
         agent, rt = quant_agent("anthropic")
-        resp = agent.loop("Download SPY and analyze its volatility")
-        print(resp.content)
+        resp = agent("Download SPY and analyze its volatility")
+        print(resp.text())
         rt.close()
     """
     from lazybridge.ext.data_downloader import (

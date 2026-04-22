@@ -1059,8 +1059,8 @@ def stat_agent(
         # Wrap expert as a tool for the main agent
         expert_tool = expert.as_tool(
             name="delegate_to_expert",
-            description="Delegate a task to the expert statistical agent for fine-grained control",
-            guidance="Use when the user needs specific model parameters, custom SQL queries, "
+            description="Delegate a task to the expert statistical agent for fine-grained control. "
+            "Use when the user needs specific model parameters, custom SQL queries, "
             "individual diagnostic tests, manual plot retrieval, or model comparison. "
             "The expert has access to: fit_model, forecast_model, query_data, "
             "profile_dataset, run_diagnostics, compare_models, get_run, list_runs, "

@@ -20,6 +20,9 @@ collapses to a single `Agent` with swappable engines and a uniform
   (`LLMEngine`, `HumanEngine`, `SupervisorEngine`, `Plan`). One call
   surface regardless of engine: `agent(task) -> Envelope`,
   `await agent.run(task)`, `async for ... in agent.stream(task)`.
+  Supports provider fallback via `fallback=Agent(...)`: if the primary
+  engine returns an error (rate limit, quota, outage), the request is
+  transparently retried on the fallback agent.
 - **`Envelope[T]`** — single data type flowing between engines.
   Generic over its payload. `payload` / `metadata` / `error`; `.ok`,
   `.text()`. Replaces the scattered `_last_output` / `_last_response`
@@ -54,8 +57,10 @@ collapses to a single `Agent` with swappable engines and a uniform
   retry, and store access. Commands: `continue`, `retry <agent>:
   <feedback>`, `store <key>`, `<tool>(<args>)`. Accepts plain
   callables / Agents in `tools=` (same contract as `Agent`).
-- **`HumanEngine`** — minimal HIL (prompt/answer, Pydantic field
-  forms).
+- **`HumanEngine`** — HIL engine with terminal (`ui="terminal"`, default)
+  and browser (`ui="web"`) modes. Terminal prompts inline; web mode
+  launches a local HTTP server, opens a browser tab, and awaits
+  form submission. Supports Pydantic field forms and `output=` schema.
 - **`Memory`** — four strategies (`auto` / `sliding` / `summary` /
   `none`), live-view semantics (`.text()` re-reads on every call),
   shareable across agents via `sources=`.

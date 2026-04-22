@@ -32,21 +32,20 @@ for r in records:
     print(r["filename"], r["char_count"])
 ```
 
-### As a LazyTool in an agent
+### As a Tool in an agent
 
 ```python
-from lazybridge import LazyAgent, LazyTool
+from lazybridge import Agent, Tool
 from lazybridge.ext.read_docs import read_folder_docs
 
-docs_tool = LazyTool.from_function(
+docs_tool = Tool(
     read_folder_docs,
     guidance="Call this tool to read files before summarising or analysing them.",
 )
-resp = LazyAgent("anthropic").loop(
+resp = Agent("anthropic", tools=[docs_tool])(
     "Read all PDFs in /reports/q4 and give me a one-page executive summary.",
-    tools=[docs_tool],
 )
-print(resp.content)
+print(resp.text())
 ```
 
 ## Parameters
