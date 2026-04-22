@@ -43,7 +43,14 @@ class Store:
 
     def _conn(self) -> sqlite3.Connection:
         if not self._db:
-            return None  # type: ignore[return-value]
+            # Every public method branches on ``self._db`` before it
+            # ever reaches here; this arm is only hit if a future
+            # refactor wires a SQLite call into the in-memory path.
+            # Fail fast with a real error instead of handing back
+            # ``None`` behind a ``type: ignore``.
+            raise RuntimeError(
+                "Store._conn called in in-memory mode — use the _mem path."
+            )
         if self._closed:
             raise RuntimeError("Store is closed")
         if not hasattr(self._local, "conn"):

@@ -190,7 +190,15 @@ class OpenAIProvider(BaseProvider):
                     messages.append({"role": "system", "content": msg.to_text()})
                 continue
             if isinstance(msg.content, str):
-                messages.append({"role": msg.role.value, "content": msg.content})
+                # ``Role.TOOL`` with string content has no ``tool_call_id``
+                # to wire to — OpenAI would reject the message as missing
+                # required fields.  Mirror Anthropic / Google and demote
+                # the message to ``user`` so the model at least sees the
+                # text rather than failing the whole request.
+                if msg.role == Role.TOOL:
+                    messages.append({"role": "user", "content": msg.content})
+                else:
+                    messages.append({"role": msg.role.value, "content": msg.content})
             else:
                 from lazybridge.core.types import (
                     ImageContent,
@@ -780,6 +788,29 @@ class OpenAIProvider(BaseProvider):
         tool_call_accum: dict[int, dict] = {}
         final_chunk: StreamChunk | None = None
         final_usage: UsageStats | None = None
+
+        def _finalise_tool_calls() -> list[ToolCall]:
+            # Dedupe on tool-call id.  Most streams index each tool call
+            # by a stable ``tc.index`` and the id arrives in the first
+            # delta, but reconnect / multi-choice responses can emit the
+            # same id under different indices — merge the ``args`` in
+            # that case so we don't invent phantom duplicate calls.
+            by_id: dict[str, dict] = {}
+            ordered: list[dict] = []
+            for v in tool_call_accum.values():
+                key = v["id"] or f"__idx_{id(v)}"
+                if key in by_id:
+                    by_id[key]["args"] += v["args"]
+                    if v["name"] and not by_id[key]["name"]:
+                        by_id[key]["name"] = v["name"]
+                else:
+                    by_id[key] = dict(v)
+                    ordered.append(by_id[key])
+            return [
+                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+                for v in ordered
+            ]
+
         for chunk in self._client.chat.completions.create(**params):
             if chunk.usage:
                 final_usage = UsageStats(
@@ -806,13 +837,9 @@ class OpenAIProvider(BaseProvider):
                     if tc.function.arguments:
                         tool_call_accum[idx]["args"] += tc.function.arguments
             if choice and choice.finish_reason:
-                tool_calls = [
-                    ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                    for v in tool_call_accum.values()
-                ]
                 final_chunk = StreamChunk(
                     stop_reason=choice.finish_reason,
-                    tool_calls=tool_calls,
+                    tool_calls=_finalise_tool_calls(),
                     usage=final_usage,
                     is_final=True,
                 )
@@ -825,13 +852,9 @@ class OpenAIProvider(BaseProvider):
             # Emit a best-effort final chunk so consumers that depend on the
             # is_final marker (usage, tool_calls, structured-output validation)
             # don't hang forever waiting for it.
-            tool_calls = [
-                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                for v in tool_call_accum.values()
-            ]
             final_chunk = StreamChunk(
                 stop_reason="incomplete",
-                tool_calls=tool_calls,
+                tool_calls=_finalise_tool_calls(),
                 usage=final_usage,
                 is_final=True,
             )

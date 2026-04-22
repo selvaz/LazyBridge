@@ -364,8 +364,13 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
         schema.pop("title", None)
         return schema
 
-    # inspect.Parameter.empty, typing.Any, unknown -> {}
-    return {}
+    # inspect.Parameter.empty, typing.Any, unknown → permissive string
+    # fallback.  An empty ``{}`` is rejected by strict-mode schemas on
+    # OpenAI and Gemini: the parameter silently disappears from the
+    # tool signature and the LLM never fills it, which shows up as a
+    # confusing ``ToolArgumentValidationError`` at call time.  Defaulting
+    # to string keeps unannotated parameters visible and round-trippable.
+    return {"type": "string"}
 
 
 def _parse_docstring_params(doc: str) -> dict[str, str]:

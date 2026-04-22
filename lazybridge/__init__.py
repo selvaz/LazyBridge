@@ -122,6 +122,7 @@ __all__ = [
     # Guardrails
     "Guard",
     "GuardAction",
+    "GuardError",
     "ContentGuard",
     "GuardChain",
     "LLMGuard",
@@ -131,6 +132,9 @@ __all__ = [
     "EvalSuite",
     "exact_match",
     "contains",
+    "not_contains",
+    "max_length",
+    "min_length",
     "llm_judge",
     # Engines
     "Engine",
@@ -147,6 +151,7 @@ __all__ = [
     "NodeType",
     "EdgeType",
     # Exporters
+    "EventExporter",
     "CallbackExporter",
     "ConsoleExporter",
     "FilteredExporter",

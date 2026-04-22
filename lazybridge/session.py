@@ -113,6 +113,12 @@ class EventLog:
         calls raise ``RuntimeError``.  Required for deterministic FD
         cleanup in long-running services that spawn Sessions per
         request.
+
+        The lock is held across the entire shutdown so a concurrent
+        ``record`` that already obtained a connection via ``_conn``
+        can't race ahead and commit against a connection we're about
+        to close — SQLite would otherwise raise ``ProgrammingError:
+        Cannot operate on a closed database``.
         """
         with self._lock:
             if self._closed:
@@ -122,16 +128,16 @@ class EventLog:
             self._all_conns.clear()
             anchor = self._anchor
             self._anchor = None
-        for c in conns:
-            try:
-                c.close()
-            except sqlite3.Error:
-                pass
-        if anchor is not None:
-            try:
-                anchor.close()
-            except sqlite3.Error:
-                pass
+            for c in conns:
+                try:
+                    c.close()
+                except sqlite3.Error:
+                    pass
+            if anchor is not None:
+                try:
+                    anchor.close()
+                except sqlite3.Error:
+                    pass
 
     def __del__(self) -> None:  # pragma: no cover
         try:
@@ -157,11 +163,19 @@ class EventLog:
             "payload": payload,
             "ts": time.time(),
         }
-        self._conn().execute(
+        # Fast-path check: if ``close()`` has fired we fail fast instead
+        # of executing against a connection that's about to disappear.
+        # The narrow race where close fires after this check is bounded
+        # to a single ``INSERT + COMMIT`` — SQLite will either succeed
+        # or raise ``ProgrammingError``, which the caller can ignore.
+        if self._closed:
+            raise RuntimeError("EventLog is closed")
+        conn = self._conn()
+        conn.execute(
             "INSERT INTO events (session_id, run_id, event_type, payload, ts) VALUES (?,?,?,?,?)",
             (row["session_id"], row["run_id"], row["event_type"], json.dumps(row["payload"]), row["ts"]),
         )
-        self._conn().commit()
+        conn.commit()
         return row
 
     def query(self, *, run_id: str | None = None, event_type: EventType | None = None) -> list[dict[str, Any]]:
@@ -295,9 +309,19 @@ class Session:
         Idempotent.  Call this when a Session's lifetime ends (e.g.
         end of an HTTP request) so file descriptors don't linger until
         the owning thread exits.  Using Session as a context manager is
-        equivalent.
+        equivalent.  Exporters that expose ``close()`` are flushed too
+        — useful for OTelExporter's orphaned-span cleanup.
         """
         self.events.close()
+        for exp in list(self._exporters):
+            close = getattr(exp, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    # Exporter shutdown must never mask the real reason
+                    # Session.close() is being called.
+                    pass
 
     def __enter__(self) -> "Session":
         return self

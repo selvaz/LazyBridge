@@ -273,17 +273,41 @@ class Agent:
         return current  # type: ignore[return-value]
 
     async def stream(self, task: "str | Envelope") -> AsyncGenerator[str, None]:
-        """Stream LLM tokens across the full tool-calling loop."""
+        """Stream LLM tokens across the full tool-calling loop.
+
+        Honours ``self.timeout`` between chunks so a stalled provider
+        can't hang the caller.  Each ``__anext__`` is wrapped in
+        ``asyncio.wait_for`` (per-chunk, not whole-stream) so short
+        chunks don't consume the deadline budget.
+        """
         env = self._to_envelope(task)
         env = self._inject_sources(env)
-        async for chunk in self.engine.stream(
+        timeout = getattr(self, "timeout", None)
+
+        gen = self.engine.stream(
             env,
             tools=list(self._tool_map.values()),
             output_type=self.output,
             memory=self.memory,
             session=self.session,
-        ):
-            yield chunk
+        ).__aiter__()
+        try:
+            while True:
+                try:
+                    if timeout is None:
+                        chunk = await gen.__anext__()
+                    else:
+                        chunk = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            aclose = getattr(gen, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Sync API
@@ -624,13 +648,15 @@ class _ParallelAgent:
         ]
 
     def __call__(self, task: "str | Envelope") -> "list[Envelope]":
+        # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only
+        # forward-compatible detection (``get_event_loop`` is deprecated
+        # under 3.12 and errors under 3.14+ when no loop is running).
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    fut = pool.submit(asyncio.run, self.run(task))
-                    return fut.result()
-            return loop.run_until_complete(self.run(task))
+            asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.run(task))
+
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, self.run(task)).result()

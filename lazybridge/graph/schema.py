@@ -270,14 +270,25 @@ class GraphSchema:
         label: str = "",
         kind: EdgeType | str = EdgeType.TOOL,
     ) -> None:
-        self._edges.append(
-            Edge(
-                from_id=from_id,
-                to_id=to_id,
-                label=label,
-                kind=EdgeType(kind) if isinstance(kind, str) else kind,
-            )
+        edge = Edge(
+            from_id=from_id,
+            to_id=to_id,
+            label=label,
+            kind=EdgeType(kind) if isinstance(kind, str) else kind,
         )
+        # Idempotent insert — repeated registration of the same
+        # ``(from, to, kind, label)`` is a no-op.  Without this the
+        # edge list grows unbounded when a tool-call fires N times
+        # in a single run, distorting every downstream query.
+        for existing in self._edges:
+            if (
+                existing.from_id == edge.from_id
+                and existing.to_id == edge.to_id
+                and existing.kind == edge.kind
+                and existing.label == edge.label
+            ):
+                return
+        self._edges.append(edge)
 
     # ------------------------------------------------------------------
     # Queries

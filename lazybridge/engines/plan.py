@@ -446,6 +446,20 @@ class Plan:
         """
         step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
 
+        # Short-circuit when the referenced upstream envelope carries an
+        # error.  Previously the resolver stripped ``.error`` and this
+        # step ran on the error's ``text()`` as its task — masking the
+        # real failure and producing a downstream cascade that was hard
+        # to diagnose.  Now we propagate the error envelope verbatim.
+        if step_task_env.error is not None:
+            return Envelope(
+                task=step_task_env.task,
+                context=step_task_env.context,
+                payload=step_task_env.payload,
+                metadata=step_task_env.metadata,
+                error=step_task_env.error,
+            )
+
         ctx_parts: list[str] = []
         if step.context is not None:
             ctx_env = self._resolve_sentinel(step.context, prev_env, start_env, history, kv)
@@ -481,12 +495,13 @@ class Plan:
         # step's task" — i.e. real chain semantics.  Without this promotion
         # the default behaviour was for every step to receive the original
         # user task, so ``Plan(Step(a), Step(b))`` was NOT actually a chain.
-        # We carry metadata through so token / cost accounting doesn't get
-        # reset at every sentinel boundary.
+        # We carry metadata AND ``.error`` through so downstream code can
+        # short-circuit rather than silently feed an errored payload into
+        # the next step.
         if isinstance(sentinel, _FromPrev):
             return Envelope(
                 task=prev.text(), context=prev.context, payload=prev.payload,
-                metadata=prev.metadata,
+                metadata=prev.metadata, error=prev.error,
             )
         if isinstance(sentinel, _FromStart):
             return start
@@ -498,7 +513,7 @@ class Plan:
                     e = r.envelope
                     return Envelope(
                         task=e.text(), context=e.context, payload=e.payload,
-                        metadata=e.metadata,
+                        metadata=e.metadata, error=e.error,
                     )
             return start
         if isinstance(sentinel, _FromParallel):
@@ -507,7 +522,7 @@ class Plan:
                     e = r.envelope
                     return Envelope(
                         task=e.text(), context=e.context, payload=e.payload,
-                        metadata=e.metadata,
+                        metadata=e.metadata, error=e.error,
                     )
             return start
         if isinstance(sentinel, str):
