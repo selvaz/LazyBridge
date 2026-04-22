@@ -298,6 +298,16 @@ class GraphSchema:
     def edges_to(self, node_id: str) -> list[Edge]:
         return [e for e in self._edges if e.to_id == node_id]
 
+    def clear(self) -> None:
+        """Drop all nodes and edges.
+
+        Useful when re-using one ``Session`` across multiple pipeline
+        runs and you want each run's graph to start empty.  Session's
+        ``session_id`` is preserved so event correlation still works.
+        """
+        self._nodes.clear()
+        self._edges.clear()
+
     # ------------------------------------------------------------------
     # Serialisation
     # ------------------------------------------------------------------

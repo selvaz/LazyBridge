@@ -26,6 +26,9 @@ StepResult        # single step record: step_name, envelope, ts
 Usage: Agent(engine=Plan(Step(a), Step(b)))
 
 ## rules
+- ``max_iterations`` caps the total number of step executions in one
+  ``run`` to guard against runaway routing loops (default 100). Raise
+  it for legitimate long plans; lower it to fail fast during dev.
 - Step names are unique. ``PlanCompileError`` fires at Agent construction
   if duplicates or dangling references exist.
 - Sentinels: ``from_prev`` (previous step's output, default),

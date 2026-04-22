@@ -93,7 +93,18 @@ class EventLog:
             params.append(str(event_type))
         sql += " ORDER BY id ASC"
         rows = self._conn().execute(sql, params).fetchall()
-        return [{"id": r["id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]), "ts": r["ts"]} for r in rows]
+        # Include ``run_id`` so callers (e.g. usage_summary) don't have
+        # to re-query the DB row-by-row just to resolve it.
+        return [
+            {
+                "id": r["id"],
+                "event_type": r["event_type"],
+                "run_id": r["run_id"],
+                "payload": json.loads(r["payload"]),
+                "ts": r["ts"],
+            }
+            for r in rows
+        ]
 
 
 class Session:
@@ -203,23 +214,23 @@ class Session:
           - "total": {input_tokens, output_tokens, cost_usd}
           - "by_agent": {agent_name: {input_tokens, output_tokens, cost_usd}}
           - "by_run":   {run_id:    {agent_name, input_tokens, output_tokens, cost_usd}}
-        """
-        model_responses = self.events.query(event_type=EventType.MODEL_RESPONSE)
-        agent_starts = {
-            e["id"]: e["payload"]
-            for e in self.events.query(event_type=EventType.AGENT_START)
-        }
 
-        # Build run_id → agent_name map from AGENT_START events
-        run_agent: dict[str, str] = {}
-        for row in self.events.query(event_type=EventType.AGENT_START):
-            rid = row.get("payload", {}).get("run_id") or ""
-            # run_id stored in the record table, not payload — fetch from raw
-            raw = self.events._conn().execute(
-                "SELECT run_id FROM events WHERE id=?", (row["id"],)
-            ).fetchone()
-            if raw and raw["run_id"]:
-                run_agent[raw["run_id"]] = row["payload"].get("agent_name", "unknown")
+        Post-fix this is O(events) with TWO queries total
+        (AGENT_START + MODEL_RESPONSE) instead of the pre-fix
+        ``2 × N + 2`` pattern where every row triggered a single-row
+        SELECT to resolve its ``run_id``.  ``EventLog.query`` now
+        surfaces ``run_id`` directly in the result dict.
+        """
+        # Two bulk queries.  No per-row DB trip.
+        agent_starts = self.events.query(event_type=EventType.AGENT_START)
+        model_responses = self.events.query(event_type=EventType.MODEL_RESPONSE)
+
+        # Build run_id → agent_name map.
+        run_agent: dict[str, str] = {
+            row["run_id"]: row["payload"].get("agent_name", "unknown")
+            for row in agent_starts
+            if row.get("run_id")
+        }
 
         total = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
         by_agent: dict[str, dict[str, Any]] = {}
@@ -227,10 +238,7 @@ class Session:
 
         for row in model_responses:
             p = row["payload"]
-            raw = self.events._conn().execute(
-                "SELECT run_id FROM events WHERE id=?", (row["id"],)
-            ).fetchone()
-            run_id = raw["run_id"] if raw else None
+            run_id = row.get("run_id")
             agent_name = run_agent.get(run_id or "", "unknown") if run_id else "unknown"
 
             in_tok = p.get("input_tokens", 0) or 0
