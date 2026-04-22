@@ -60,6 +60,11 @@ class EventLog:
             self._uri = None
         self._local = threading.local()
         self._lock = threading.Lock()
+        # Registry of every thread-local connection we've handed out.
+        # ``close()`` walks it to release file descriptors deterministically;
+        # without this, worker-thread connections leak until GC runs.
+        self._all_conns: list[sqlite3.Connection] = []
+        self._closed = False
         # Keep one anchor connection alive for in-memory DBs — SQLite
         # drops a ``file::memory:?cache=shared`` DB as soon as the last
         # connection closes, so without the anchor the first cleanup
@@ -80,23 +85,59 @@ class EventLog:
         threads spawned by ``asyncio.to_thread`` otherwise end up with
         a connection that has no ``events`` table.
         """
+        if self._closed:
+            raise RuntimeError("EventLog is closed")
         if not hasattr(self._local, "conn"):
             if self._db:
-                self._local.conn = sqlite3.connect(self._db, check_same_thread=False)
-                self._local.conn.execute("PRAGMA journal_mode=WAL")
-                self._local.conn.execute("PRAGMA busy_timeout=5000")
+                conn = sqlite3.connect(self._db, check_same_thread=False)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
             else:
                 # Shared in-memory DB — see __init__ for the URI rationale.
-                self._local.conn = sqlite3.connect(
-                    self._uri, uri=True, check_same_thread=False,
-                )
-            self._local.conn.row_factory = sqlite3.Row
+                conn = sqlite3.connect(self._uri, uri=True, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
             # Ensure the schema exists on every thread-local connection.
             # ``CREATE TABLE IF NOT EXISTS`` makes this cheap + idempotent;
             # persistent DBs skip creation after the first hit.
-            self._local.conn.execute(_SCHEMA_DDL)
-            self._local.conn.commit()
+            conn.execute(_SCHEMA_DDL)
+            conn.commit()
+            self._local.conn = conn
+            with self._lock:
+                self._all_conns.append(conn)
         return self._local.conn
+
+    def close(self) -> None:
+        """Close every thread-local connection and the anchor (if any).
+
+        Idempotent.  After ``close()`` further ``record`` / ``query``
+        calls raise ``RuntimeError``.  Required for deterministic FD
+        cleanup in long-running services that spawn Sessions per
+        request.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            conns = list(self._all_conns)
+            self._all_conns.clear()
+            anchor = self._anchor
+            self._anchor = None
+        for c in conns:
+            try:
+                c.close()
+            except sqlite3.Error:
+                pass
+        if anchor is not None:
+            try:
+                anchor.close()
+            except sqlite3.Error:
+                pass
+
+    def __del__(self) -> None:  # pragma: no cover
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _init_schema(self) -> None:
         self._conn().execute(_SCHEMA_DDL)
@@ -247,6 +288,22 @@ class Session:
                         exp._lazybridge_export_warned = True  # type: ignore[attr-defined]
                     except AttributeError:
                         pass
+
+    def close(self) -> None:
+        """Release the underlying EventLog's SQLite connections.
+
+        Idempotent.  Call this when a Session's lifetime ends (e.g.
+        end of an HTTP request) so file descriptors don't linger until
+        the owning thread exits.  Using Session as a context manager is
+        equivalent.
+        """
+        self.events.close()
+
+    def __enter__(self) -> "Session":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     def usage_summary(self) -> dict[str, Any]:
         """Aggregate token usage and cost across all agent runs in this session.

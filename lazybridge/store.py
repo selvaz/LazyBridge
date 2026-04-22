@@ -30,6 +30,13 @@ class Store:
         self._db = db
         self._local = threading.local()
         self._lock = threading.Lock()
+        # Track every opened thread-local connection so we can close
+        # them deterministically from ``close()``.  ``threading.local``
+        # only scopes attributes per thread; without a registry the
+        # connections linger until the owning thread exits + GC runs,
+        # which leaks file descriptors under worker pools.
+        self._all_conns: list[sqlite3.Connection] = []
+        self._closed = False
         if not db:
             self._mem: dict[str, StoreEntry] = {}
         self._init_schema()
@@ -37,12 +44,51 @@ class Store:
     def _conn(self) -> sqlite3.Connection:
         if not self._db:
             return None  # type: ignore[return-value]
+        if self._closed:
+            raise RuntimeError("Store is closed")
         if not hasattr(self._local, "conn"):
-            self._local.conn = sqlite3.connect(self._db, check_same_thread=False)
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn.execute("PRAGMA busy_timeout=5000")
-            self._local.conn.row_factory = sqlite3.Row
+            conn = sqlite3.connect(self._db, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+            with self._lock:
+                self._all_conns.append(conn)
         return self._local.conn
+
+    def close(self) -> None:
+        """Close every thread-local SQLite connection opened by this Store.
+
+        Idempotent.  After ``close()`` the Store raises ``RuntimeError``
+        on further reads / writes so callers fail fast instead of
+        silently re-opening connections.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            conns = list(self._all_conns)
+            self._all_conns.clear()
+        for c in conns:
+            try:
+                c.close()
+            except sqlite3.Error:
+                pass  # already closed / invalid — nothing to recover
+
+    def __enter__(self) -> "Store":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:  # pragma: no cover
+        # Best-effort finalizer.  Python doesn't guarantee __del__ runs,
+        # so users relying on deterministic cleanup should call close()
+        # or use the context manager.
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _init_schema(self) -> None:
         if not self._db:
