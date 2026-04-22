@@ -18,9 +18,18 @@ name, inject guidance, or switch schema-generation modes.
 
 ## Example
 
+Three ways to attach a tool — implicit (plain function), explicit
+(`Tool(...)`), and nested (an Agent as a tool).  The LLM-facing schema
+is identical for all three; what differs is how much you wanted to
+customise before handing it over.
+
 ```python
 from lazybridge import Tool, Agent
 
+# A plain function with hints + a docstring is a complete tool spec.
+# LazyBridge reads `expression: str` for the JSON schema, the return
+# annotation to describe the result, and the docstring as the LLM-
+# facing description. No JSON to author.
 def calculate(expression: str) -> float:
     """Evaluate a basic arithmetic expression and return the result.
 
@@ -28,18 +37,31 @@ def calculate(expression: str) -> float:
     """
     return eval(expression)  # noqa: S307  (trusted inputs only)
 
-# Implicit: pass the function, LazyBridge wraps it.
+# Implicit: drop the function in tools=. wrap_tool() turns it into
+# Tool(calculate) with name=func.__name__ and description=docstring.
 Agent("claude-opus-4-7", tools=[calculate])("what is 17 * 23?")
 
-# Explicit: override the name or strictness.
+# Explicit: reach for Tool(...) when you need to override the LLM-
+# facing tool name, provide a better description, or flip strict=True
+# so the provider enforces the schema exactly (Anthropic / OpenAI
+# strict mode). Everything else (async/sync dispatch, concurrency,
+# error handling) is identical.
 calc_tool = Tool(calculate, name="calc", strict=True,
                  description="Evaluate an arithmetic expression.")
 Agent("claude-opus-4-7", tools=[calc_tool])("...")
 
-# An Agent is also a Tool — no ceremony.
+# An Agent is also a Tool — passing researcher to tools= is the same
+# as passing researcher.as_tool(). The outer orchestrator sees a tool
+# with schema (task: str) -> str; observability of the inner agent's
+# run flows into the outer Session automatically.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 orchestrator = Agent("claude-opus-4-7", tools=[researcher])
 ```
+
+After this, `Tool` rarely shows up in application code directly — most
+of the time you pass raw functions or other Agents.  Reach for explicit
+`Tool(...)` only when the name, description, strict flag, or schema
+mode needs to differ from the function's defaults.
 
 ## Pitfalls
 

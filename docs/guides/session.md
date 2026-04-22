@@ -49,6 +49,49 @@ print(summary["by_agent"]["researcher"]["input_tokens"])
 print(sess.graph.to_json())
 ```
 
+## Redaction policy: `redact_on_error`
+
+PII scrubbers fail: a regex throws on unexpected input, a downstream
+callable returns `None`, a schema drift surfaces a type the redactor
+wasn't written for.  `redact_on_error=` decides what happens when the
+redactor itself raises.
+
+```python
+# What this shows: two redaction policies for the same pipeline — one
+# safe for dev (keep observing even if the redactor breaks), one safe
+# for prod (fail closed; never surface unredacted data).
+# Why the distinction: silently dropping events hides bugs, but
+# silently passing through PII violates privacy policy. Choose
+# explicitly.
+
+from lazybridge import Session, JsonFileExporter
+
+def scrub(payload: dict) -> dict:
+    # Hypothetical PII scrubber — assume it can raise on bad input.
+    return {**payload, "task": mask_pii(payload.get("task", ""))}
+
+# Dev default — warn once, then pass the original payload through so
+# you still see events in your logs while debugging the redactor.
+dev = Session(
+    redact=scrub,
+    redact_on_error="fallback",    # the default
+    console=True,
+)
+
+# Prod — warn once, then DROP the event. No unredacted payload ever
+# reaches the EventLog or any exporter.  Fail-closed for compliance.
+prod = Session(
+    db="events.sqlite",
+    exporters=[JsonFileExporter("events.jsonl")],
+    redact=scrub,
+    redact_on_error="strict",
+)
+```
+
+Neither mode surfaces the redactor's exception as a run failure — the
+agent keeps executing.  The difference is only in what reaches the
+observability sink.
+
 ## Pitfalls
 
 - ``Session(db=":memory:")`` behaves like ``Session()`` (in-memory).
@@ -67,6 +110,11 @@ print(sess.graph.to_json())
         db: str | None = None,            # None = in-memory SQLite
         exporters: list[EventExporter] = None,
         redact: Callable[[dict], dict] | None = None,
+        redact_on_error: Literal["fallback", "strict"] = "fallback",
+                                          # "fallback" — redactor failure → warn +
+                                          #              pass original payload through
+                                          # "strict"   — redactor failure → warn +
+                                          #              drop the event entirely
         console: bool = False,             # install a ConsoleExporter for stdout tracing
     ) -> Session
     

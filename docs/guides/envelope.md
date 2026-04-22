@@ -17,6 +17,12 @@ you autocomplete on `env.payload.title` without any runtime cost.
 
 ## Example
 
+The snippet below shows the three things you always do with an
+Envelope — check `ok`, read `payload`, read `metadata` — plus the
+one optional static-typing benefit of `Envelope[T]`.  Every agent
+call returns exactly this shape, whether the underlying engine is an
+LLM, a Plan, a Supervisor, or a pure-Python `MockAgent`.
+
 ```python
 from lazybridge import Agent
 from pydantic import BaseModel
@@ -25,23 +31,36 @@ class Article(BaseModel):
     title: str
     body: str
 
+# output=Article makes payload a validated Article instance on success.
 env = Agent("claude-opus-4-7", output=Article)("write a one-paragraph article on bees")
 
-# Branch on success / failure.
+# Step 1 — always branch on env.ok before dereferencing env.payload.
+# Errors (rate limit, schema failure, guard block, timeout) surface
+# here as env.error rather than raising from .run().
 if env.ok:
     print(env.payload.title)
     print(env.payload.body)
 else:
+    # env.error.type is the exception class name; retryable hints at
+    # whether a naive retry would help. message is the human string.
     print(f"failed ({env.error.type}): {env.error.message}")
 
-# Observability without a Session — metadata is always populated.
+# Step 2 — metadata is ALWAYS populated, even on error. This is how
+# you get cost/latency/model without setting up a Session.
 m = env.metadata
 print(f"cost=${m.cost_usd:.4f}  in={m.input_tokens}  out={m.output_tokens}")
 
-# Typed: the static checker knows env.payload is an Article.
+# Step 3 — Envelope[T] narrows payload for static checkers. Runtime
+# shape is unchanged; mypy/pyright now know `env.payload` is an Article
+# so you get autocomplete on .title without an assert.
 def process(env: "Envelope[Article]") -> str:
     return env.payload.title
 ```
+
+What you've seen: one data type carries either a success payload OR an
+error channel, plus cost/latency metadata, plus optional type
+narrowing.  There is no "agent returns a string here, a Pydantic
+object there" inconsistency — every engine emits `Envelope`.
 
 ## Pitfalls
 

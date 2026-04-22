@@ -54,6 +54,7 @@ nav:
       - Agent.as_tool: guides/as-tool.md
       - HumanEngine: guides/human-engine.md
       - EvalSuite: guides/evals.md
+      - Testing (MockAgent): guides/testing.md
     - Full:
       - Plan: guides/plan.md
       - Sentinels: guides/sentinels.md
@@ -83,7 +84,7 @@ nav:
     - Need Advanced?: decisions/need-advanced.md
 
   - Reference: reference.md
-  - Errors: errors.md
+  - Errors: skill/99_errors.md
   - Claude Skill:
     - Manifest: skill/SKILL.md
     - Overview: skill/00_overview.md

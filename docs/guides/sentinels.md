@@ -24,17 +24,45 @@ context into a step without overriding its task.
 
 ## Example
 
+Below is a four-step plan that uses three of the four sentinels.  Read
+it top-to-bottom: every step's data flow is declared in one line, and
+the plan compiler checks at `Agent(...)` construction time that every
+referenced step actually exists (a typo in `from_step("wirter")` is
+caught before a single token is spent).
+
 ```python
 from lazybridge import Plan, Step, from_prev, from_start, from_step
 
 plan = Plan(
+    # 1. researcher sees the user's original task (there's nothing
+    #    before it). output=Hits switches the step into structured
+    #    output so downstream steps can read fields, not re-parse text.
     Step(researcher,    name="research",  output=Hits),
-    Step(fact_checker,  name="check",     task=from_prev),    # check researcher's output
-    Step(writer,        name="write",     task=from_start),   # writer sees ORIGINAL user task
+
+    # 2. from_prev is the default; spelled out here for clarity.
+    #    The fact_checker receives the researcher's Envelope.payload
+    #    (the Hits instance, rendered to text at the tool boundary).
+    Step(fact_checker,  name="check",     task=from_prev),
+
+    # 3. from_start skips over the intermediate steps and hands the
+    #    writer the ORIGINAL user task. Useful when a later step
+    #    should answer the user's question directly rather than
+    #    transform an upstream intermediate.
+    Step(writer,        name="write",     task=from_start),
+
+    # 4. Reach back to named steps: the editor's TASK is the writer's
+    #    output, and its CONTEXT is the fact_checker's output. Two
+    #    independent sentinels can compose on a single step.
     Step(editor,        name="edit",      task=from_step("write"),
                                           context=from_step("check")),
 )
 ```
+
+What you just declared: "research → check, write from the original
+task, then edit the write output using the check output as context".
+The plan compiler validates that `"write"` and `"check"` both exist
+and precede `"edit"` — any dangling reference fails loud at
+`Agent(engine=plan)` time with a `PlanCompileError`.
 
 ## Pitfalls
 

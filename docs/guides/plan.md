@@ -47,6 +47,52 @@ plan = Plan(
 Agent.from_engine(plan)("AI trends April 2026")
 ```
 
+## Running the same Plan concurrently: `on_concurrent`
+
+A `Plan` with a `checkpoint_key` locks that key: two runs that both
+think they own "research" would race on the checkpoint and clobber
+each other.  The default policy is **fail fast**; the alternative is
+**fork** — each `.run()` writes under `f"{checkpoint_key}:{run_uid}"`
+instead of the shared key, so many runs can execute at once without
+collision.
+
+```python
+# What this shows: a pipeline intended to run N times in parallel
+# across different inputs (a batch job, a fan-out from a queue).
+# Why on_concurrent="fork": with the default "fail" policy, the second
+# concurrent run would raise ConcurrentPlanRunError as soon as it saw
+# the shared checkpoint. "fork" suffixes each run's checkpoint with a
+# unique run_uid so their state is isolated.
+
+from lazybridge import Agent, Plan, Step, Store
+
+store = Store(db="batch.sqlite")
+
+def build_plan():
+    return Plan(
+        Step(researcher, name="search",  writes="hits"),
+        Step(writer,     name="write"),
+        store=store,
+        checkpoint_key="batch_job",
+        on_concurrent="fork",   # each .run() claims "batch_job:<run_uid>"
+        # resume=True is NOT supported with on_concurrent="fork" — fork
+        # mode is deliberately stateless across invocations.
+    )
+
+# Fan out 10 concurrent runs.  Each gets its own isolated checkpoint
+# and never collides with siblings.
+import asyncio
+plan_agent = Agent.from_engine(build_plan())
+results = asyncio.run(asyncio.gather(*[
+    plan_agent.run(f"topic {i}") for i in range(10)
+]))
+```
+
+Use `on_concurrent="fail"` (the default) when the `checkpoint_key` is
+a long-lived pipeline identity you want to resume across process
+restarts.  Use `"fork"` when the key is a pipeline *shape* and each
+run is an independent execution of it.
+
 ## Pitfalls
 
 - Forgetting ``output=Model`` on a step and then expecting the next step
@@ -57,6 +103,8 @@ Agent.from_engine(plan)("AI trends April 2026")
   to read or write to). Pass both.
 - A step that fails persists a ``status="failed"`` checkpoint pointing
   back at itself. Subsequent ``resume=True`` runs retry that step.
+- ``on_concurrent="fork"`` + ``resume=True`` is rejected at construction —
+  fork mode is stateless by design, there's nothing to resume from.
 
 !!! note "API reference"
 

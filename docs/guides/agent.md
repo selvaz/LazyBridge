@@ -18,6 +18,12 @@ not by the model — you use `Plan` or the `Agent.parallel` sugar.
 
 ## Example
 
+The next block runs four increasingly capable Agents against the same
+call surface.  Each builds on the previous one: Tier 1 is the minimum
+call, Tier 2 adds tools, Tier 3 adds structured output, Tier 4 nests
+agents.  Nothing changes about how you *invoke* the agent; the
+difference is entirely in how you *construct* it.
+
 ```python
 from lazybridge import Agent
 from pydantic import BaseModel
@@ -26,25 +32,41 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
-# Tier 1: two lines.
+# Tier 1: two lines — smallest viable call. Useful as a smoke test
+# that credentials and provider routing work end-to-end.
 print(Agent("claude-opus-4-7")("hello").text())
 
-# Tier 2: with tools (plain functions; schema auto-generated from hints).
+# Tier 2: with tools. Plain functions with type hints + docstring are
+# auto-wrapped into Tool definitions; the model sees the docstring as
+# the tool description and calls the function when helpful. Multiple
+# tool calls in one turn execute concurrently via asyncio.gather.
 def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
 print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
-# Tier 3: structured output.
+# Tier 3: structured output. output=Summary switches the model into
+# JSON mode with the Pydantic schema, validates the response, and
+# exposes the parsed instance as Envelope.payload. Use .payload, not
+# .text(), when you care about fields rather than prose.
 resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
 print(resp.payload.title, resp.payload.bullets)
 
-# Nested agent-of-agent — uniform surface, no special ceremony.
+# Tier 4: nested agent-of-agent. ``tools=[researcher]`` is sugar for
+# ``tools=[researcher.as_tool()]``. The outer engine treats researcher
+# identically to a function — same schema, same concurrency, same
+# observability — and researcher's Session propagates down from
+# editor's automatically.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())
 ```
+
+What you've seen: one call surface (`agent(task)`), one return type
+(`Envelope`), and capabilities added purely via constructor kwargs.
+The sections below extend this with reliability knobs (timeouts,
+retries, caching), fallback routing, and the full kwarg table.
 
 ## Provider fallback routing
 
@@ -76,6 +98,79 @@ secondary = Agent(engine=LLMEngine("anthropic"), fallback=tertiary, name="second
 primary   = Agent(engine=LLMEngine("google"),    fallback=secondary, name="primary")
 ```
 
+## Reliability & performance kwargs
+
+Production code usually needs more than the defaults: deadlines on hung
+providers, automatic retries on transient 429/5xx, prompt caching to
+cut repeat cost, and post-parse validation on structured output.  These
+are plain kwargs on `Agent`; they're not opt-in capabilities behind a
+flag.
+
+```python
+# What this shows: a single Agent configured for production.  The
+# order matters — retry is the innermost loop (per-LLM-call), timeout
+# is the outermost (wall-clock deadline on the whole run including
+# tools).
+# Why each kwarg: hung provider → timeout cancels; transient 429 →
+# max_retries recovers without surfacing an error; identical system +
+# tools on repeat calls → cache shaves ~90% off input-token cost on
+# Anthropic; unsafe output → output_validator raises ValueError and
+# triggers up to max_output_retries with the validation error injected
+# as feedback.
+
+from lazybridge import Agent, LLMEngine
+from lazybridge.core.types import CacheConfig
+from pydantic import BaseModel, field_validator
+
+class Hits(BaseModel):
+    items: list[str]
+
+    @field_validator("items")
+    @classmethod
+    def _at_least_three(cls, v: list[str]) -> list[str]:
+        if len(v) < 3:
+            raise ValueError("must have at least 3 items")
+        return v
+
+def my_validator(hits: Hits) -> Hits:
+    # Extra post-parse check; raising ValueError retriggers the LLM
+    # with the error text appended to the task as feedback.
+    if any(len(item) < 10 for item in hits.items):
+        raise ValueError("each item must be at least 10 characters")
+    return hits
+
+research = Agent(
+    # thinking= is NOT an Agent kwarg — pass via engine= when needed.
+    engine=LLMEngine(
+        "claude-opus-4-7",
+        thinking=True,          # extended thinking on Anthropic / o-series.
+        max_turns=15,            # tool-call rounds; default 10.
+        request_timeout=60.0,    # per-LLM-call deadline.
+    ),
+    output=Hits,
+    output_validator=my_validator,   # raises ValueError to retry
+    max_output_retries=2,            # retries specifically for structured-output
+                                     # validation failures (default 2)
+    timeout=120.0,                   # deadline on the WHOLE agent run (tool loop
+                                     # included); returns an error Envelope if hit
+    cache=CacheConfig(ttl="1h"),     # 1-hour Anthropic cache (default is "5m"
+                                     # when cache=True; cache=False disables)
+    max_retries=3,                   # transient-error retries inside LLMEngine
+                                     # (429 / 5xx / network). 0 disables.
+    retry_delay=1.0,                 # base delay in seconds; exponential with
+                                     # ±10% jitter.
+    fallback=Agent("gpt-5"),         # on error envelope, run this agent from
+                                     # scratch on the same task. Chainable.
+)
+env = research("find 3 papers about prompt caching")
+```
+
+After the call returns, `env.ok` distinguishes success from error,
+`env.metadata` always carries token counts and latency, and
+`env.metadata.nested_*` aggregates cost across any tool-calls inside
+the run.  If both the primary and the fallback fail, the final error
+Envelope surfaces to the caller — no exception is raised through.
+
 ## Pitfalls
 
 - Passing `output=SomeModel` without tools and then calling `.text()`
@@ -90,6 +185,15 @@ primary   = Agent(engine=LLMEngine("google"),    fallback=secondary, name="prima
 - `fallback=` is tried on *any* error envelope, including errors caused
   by guard blocks or output validation failures — not just network errors.
   Make sure the fallback enforces the same invariants as the primary.
+- `timeout=` is wall-clock; it includes tool execution time. A slow
+  tool can exhaust the budget even when the LLM responds quickly.
+- `cache=True` caches the **static prefix** (system prompt + tool
+  definitions).  Adding one more tool or changing the system prompt
+  evicts the cache.  OpenAI / DeepSeek auto-cache; Google needs a
+  different API so `cache=` is a no-op there.
+- `max_turns` on `LLMEngine` defaults to **10**.  A complex task with
+  many tool-call rounds can hit it and return a `MaxTurnsExceeded`
+  error.  Raise it when you expect long loops.
 
 !!! note "API reference"
 
@@ -115,6 +219,14 @@ primary   = Agent(engine=LLMEngine("google"),    fallback=secondary, name="prima
                                          # tools=[agent] in another Agent).
         model: str | None = None,     # tier alias when first arg is a provider name
         engine: Engine | None = None, # kwarg alias for the first positional
+        # --- Reliability / performance kwargs (see section above) -------------
+        native_tools: list[NativeTool | str] | None = None,
+        output_validator: Callable[[Any], Any] | None = None,  # raise ValueError to retry
+        max_output_retries: int = 2,        # retries for output validation failures
+        timeout: float | None = None,       # wall-clock deadline on the whole run
+        max_retries: int = 3,               # LLMEngine transient-error retries
+        retry_delay: float = 1.0,           # base seconds for exponential backoff
+        cache: bool | CacheConfig = False,  # True → 5m Anthropic; CacheConfig(ttl="1h") for 1h
     ) -> Agent
 
     Sync:   agent(task) -> Envelope

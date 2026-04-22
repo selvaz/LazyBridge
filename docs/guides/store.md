@@ -49,6 +49,47 @@ monitor = Agent(
 print(monitor("status?").text())
 ```
 
+## Atomic updates with `compare_and_swap`
+
+`write()` is fire-and-forget — two writers that read, modify, and
+write the same key will clobber each other.  `compare_and_swap` gives
+you optimistic concurrency: only commit if the stored value still
+matches what you read.
+
+```python
+# What this shows: incrementing a counter shared across concurrent
+# agents (or processes, for db="file.sqlite") without losing updates.
+# Why CAS: the classic read-modify-write is not atomic. Two agents
+# read "3", both compute "4", both write "4" — one increment is lost.
+# compare_and_swap detects the race and returns False so the caller
+# can retry.
+
+from lazybridge import Store
+
+store = Store(db="counters.sqlite")   # SQLite path: CAS uses BEGIN IMMEDIATE
+                                      #  so concurrent writers serialise.
+
+def increment(key: str) -> int:
+    while True:
+        current = store.read(key, default=0)
+        new = current + 1
+        # Returns True iff the on-disk value is still ``current``.
+        # Works for Pydantic models / dicts too — comparison is
+        # JSON-normalised so runtime shape equals on-disk shape.
+        if store.compare_and_swap(key, current, new):
+            return new
+        # Another writer beat us; loop and re-read.
+
+# CAS semantics for "must not exist":
+#   store.compare_and_swap("lock", expected=None, new="held")
+# Returns True only if "lock" has never been written (or was deleted).
+```
+
+Use `compare_and_swap` when multiple agents share a Store key in a
+pipeline and the value depends on its current state — counters, lock
+handles, checkpoint pointers.  For append-only blackboards where each
+agent owns a distinct key, plain `write()` is enough.
+
 ## Pitfalls
 
 - ``Store(db=":memory:")`` is NOT the same as ``Store()`` — the former

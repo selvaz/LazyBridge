@@ -52,6 +52,69 @@ judge = Agent(
 judge("grade the last turn")
 ```
 
+## Persistence via `store=`
+
+`Memory` is in-process by default.  If you want conversation state to
+survive restarts, hand it a `Store` — each `add()` is mirrored to the
+store and the Memory rehydrates from it at construction time.
+
+```python
+# What this shows: a chat agent whose memory survives process restarts.
+# Why: a multi-turn assistant in a stateless web handler has to
+# reconstruct the conversation every request. Persisting to SQLite is
+# one line; everything else (compression, summarizer, live view)
+# behaves exactly the same.
+
+from lazybridge import Agent, Memory, Store
+
+store = Store(db="chats.sqlite")
+mem   = Memory(strategy="auto", max_tokens=4000, store=store)
+chat  = Agent("claude-opus-4-7", memory=mem, name="chat")
+
+chat("hi, my name is Marco")
+# ... process restarts ...
+# Next request reconstructs `mem` from `store` — the name is still there.
+```
+
+## LLM summarizer (async-safe)
+
+For long conversations, keyword-extraction summaries are lossy.  A
+cheap agent as `summarizer=` gives you an LLM-quality recap for a
+fraction of the main agent's cost.  LazyBridge drives sync, `Agent`,
+and plain `async def` summarizers transparently — you don't have to
+match the surrounding event loop.
+
+```python
+# What this shows: using Haiku as a cheap summarizer for an Opus chat
+# agent.  When compression triggers, the transcript of dropped turns
+# is handed to Haiku and the returned summary becomes the "Context from
+# earlier" prefix on subsequent calls.
+# Why: Opus context windows are expensive; a three-cents-per-run
+# summary tier keeps quality intact without paying Opus rates to
+# re-read stale turns.
+
+from lazybridge import Agent, LLMEngine, Memory
+
+# A cheap, scoped summarizer — system prompt keeps it focused on
+# preserving facts, not prose.
+summarizer = Agent(
+    engine=LLMEngine(
+        "claude-haiku-4-5",
+        system="Summarise conversations tightly. Preserve names, "
+               "decisions, and open questions. 2-4 sentences.",
+    ),
+    name="summarizer",
+)
+
+mem  = Memory(strategy="summary", summarizer=summarizer, max_tokens=6000)
+chat = Agent("claude-opus-4-7", memory=mem, name="chat")
+```
+
+An `async def my_summariser(prompt: str) -> str: ...` coroutine works
+identically — the Memory bridges the loop for you (via a worker
+thread when called from inside a running loop) so the result is never
+silently stringified as `<coroutine object …>`.
+
 ## Pitfalls
 
 - Pass the same ``Memory`` instance to both agents if you want shared
