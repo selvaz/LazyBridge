@@ -143,6 +143,12 @@ def test_memory_unbounded_when_max_turns_none():
 
 @pytest.mark.asyncio
 async def test_human_engine_records_coercion_failure(monkeypatch):
+    """HumanEngine: when the human's input can't be coerced to the
+    requested ``output_type``, the engine must return an **error
+    envelope** — not a silently-downgraded string payload the caller
+    can't tell apart from a successful answer (audit finding #6).
+    The raw string is still exposed via ``.payload`` for debug.
+    """
     from pydantic import BaseModel
 
     class Answer(BaseModel):
@@ -157,12 +163,39 @@ async def test_human_engine_records_coercion_failure(monkeypatch):
     with Session() as sess:
         env = Envelope(task="give me n")
         out = await eng.run(env, tools=[], output_type=Answer, memory=None, session=sess)
-        # Payload falls back to raw string — backwards-compatible behaviour.
+        # Raw string remains on payload for diagnostic inspection.
         assert out.payload == "not-an-int"
-        # But the failure is now visible in the audit trail.
+        # Error envelope surfaces the coercion failure clearly.
+        assert not out.ok
+        assert out.error is not None
+        assert out.error.type == "StructuredOutputCoercionError"
+        assert "Answer" in out.error.message
+        # Audit trail still emits the structured-output event.
         tool_errors = sess.events.query(event_type=EventType.TOOL_ERROR)
         kinds = [e["payload"].get("kind") for e in tool_errors]
         assert "structured_output_coercion" in kinds
+
+
+@pytest.mark.asyncio
+async def test_human_engine_success_path_unchanged() -> None:
+    """Sanity: valid input still produces an ok envelope with the
+    parsed model as payload — the error-envelope path is only taken
+    on coercion failure."""
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        n: int
+
+    class StubUI:
+        async def prompt(self, task, *, tools, output_type):
+            return '{"n": 42}'
+
+    eng = HumanEngine(ui=StubUI())  # type: ignore[arg-type]
+    env = Envelope(task="give me n")
+    out = await eng.run(env, tools=[], output_type=Answer, memory=None, session=None)
+    assert out.ok
+    assert isinstance(out.payload, Answer)
+    assert out.payload.n == 42
 
 
 # ── M4: Agent.run(timeout=) ───────────────────────────────────────────────────

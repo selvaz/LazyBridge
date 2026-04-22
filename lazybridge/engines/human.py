@@ -374,11 +374,23 @@ class HumanEngine:
                     data = json.loads(raw) if raw.strip().startswith("{") else {"response": raw}
                     payload = output_type(**data)
                 except (json.JSONDecodeError, ValidationError, TypeError) as coerce_exc:
-                    # Coercion failed — the raw string is still a usable
-                    # payload for non-strict downstream code, but swallow
-                    # the error silently would make structured-output
-                    # failures indistinguishable from free-text answers.
-                    # Record a warning event so the audit trail is honest.
+                    # Coercion failed — the caller asked for a typed
+                    # ``output_type``, the human's input didn't match,
+                    # and we must NOT silently hand back a string payload
+                    # that breaks ``.payload.field`` access downstream
+                    # (audit finding #6).  Emit the audit-trail event
+                    # AND return an explicit error envelope so ``.ok``
+                    # is False and the caller can react.
+                    latency_ms = (time.monotonic() - t_start) * 1000
+                    err_env = Envelope(
+                        task=env.task,
+                        context=env.context,
+                        payload=raw,  # still available via env.payload for debug
+                        metadata=EnvelopeMetadata(
+                            latency_ms=latency_ms, run_id=run_id,
+                        ),
+                        error=_coerce_error(output_type, coerce_exc),
+                    )
                     if session:
                         session.emit(
                             EventType.TOOL_ERROR,
@@ -391,7 +403,13 @@ class HumanEngine:
                             },
                             run_id=run_id,
                         )
-                    payload = raw
+                        session.emit(
+                            EventType.AGENT_FINISH,
+                            {"agent_name": agent_name,
+                             "error": str(coerce_exc)},
+                            run_id=run_id,
+                        )
+                    return err_env
 
         except Exception as exc:
             error_env = Envelope.error_envelope(exc)
@@ -431,3 +449,23 @@ class HumanEngine:
     async def stream(self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any) -> AsyncIterator[str]:
         env_out = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield env_out.text()
+
+
+def _coerce_error(output_type: Any, exc: BaseException) -> Any:
+    """Build an :class:`ErrorInfo` for a structured-output coercion failure.
+
+    Using a dedicated factory keeps the ``ErrorInfo`` import local (no
+    module-level cost when HumanEngine is imported but never used) and
+    standardises the error type name across terminal and web flows.
+    """
+    from lazybridge.envelope import ErrorInfo
+
+    type_name = getattr(output_type, "__name__", str(output_type))
+    return ErrorInfo(
+        type="StructuredOutputCoercionError",
+        message=(
+            f"Human input could not be coerced to {type_name}: "
+            f"{type(exc).__name__}: {exc}"
+        ),
+        retryable=False,
+    )
