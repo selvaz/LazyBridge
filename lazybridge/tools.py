@@ -113,14 +113,19 @@ class Tool:
 
 
 def wrap_tool(obj: Any) -> Tool:
-    """Convert a raw callable or Agent into a Tool. Returns Tool unchanged."""
+    """Convert a raw callable or Agent into a Tool. Returns Tool unchanged.
+
+    Agent-likes are recognised by the duck-typed ``_is_lazy_agent`` marker so
+    test doubles (``lazybridge.testing.MockAgent``) and custom Agent-compatible
+    classes share the same composition path as the real ``Agent`` — nested
+    envelope metadata propagates through ``returns_envelope=True``.
+    """
     if isinstance(obj, Tool):
         return obj
-    # Circular import guard: Agent exposes .name, .description, .definition(), .__call__
-    if hasattr(obj, "_is_lazy_agent"):
-        from lazybridge.agent import Agent
-        if isinstance(obj, Agent):
-            return _agent_as_tool(obj)
+    # Duck-typed: any object flagged ``_is_lazy_agent`` with ``.run`` /
+    # ``.name`` / ``.description`` is treated as an Agent for composition.
+    if getattr(obj, "_is_lazy_agent", False):
+        return _agent_as_tool(obj)
     if callable(obj):
         return Tool(obj)
     raise TypeError(f"Cannot convert {type(obj).__name__!r} to Tool")

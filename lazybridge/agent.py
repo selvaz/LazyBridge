@@ -173,7 +173,14 @@ class Agent:
         # nothing anywhere.
         if self.session is not None:
             for raw in self._tools_raw:
-                if isinstance(raw, Agent) and raw.session is None:
+                # Duck-typed: any Agent-compatible object (real Agent,
+                # MockAgent from lazybridge.testing, user subclasses) with
+                # the ``_is_lazy_agent`` marker gets the outer session
+                # propagated when it has none of its own.
+                if (
+                    getattr(raw, "_is_lazy_agent", False)
+                    and getattr(raw, "session", None) is None
+                ):
                     raw.session = self.session
                     _safe_register_agent(self.session, raw)
                     _safe_register_tool_edge(self.session, self, raw, label="as_tool")
