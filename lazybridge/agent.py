@@ -103,6 +103,15 @@ class Agent:
         # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
         # same envelope, so it should be configured with compatible output= / tools=.
         fallback: "Agent | None" = None,
+        # Prompt caching — when True, marks the static prefix (system
+        # prompt + tools) as cacheable so providers that support it
+        # (Anthropic today; OpenAI/DeepSeek auto-cache; Google uses a
+        # different API) serve cache hits at ~10% of input token cost.
+        # Forwarded to LLMEngine when the engine is auto-created from a
+        # model string.  Ignored when ``engine=`` is supplied explicitly
+        # (configure ``LLMEngine(cache=...)`` directly in that case).
+        # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
+        cache: bool | Any = False,
     ) -> None:
         from lazybridge.engines.llm import LLMEngine
 
@@ -115,6 +124,7 @@ class Agent:
                 native_tools=native_tools,
                 max_retries=max_retries,
                 retry_delay=retry_delay,
+                cache=cache,
             )
         else:
             self.engine = engine_or_model

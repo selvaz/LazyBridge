@@ -169,6 +169,38 @@ class SkillsConfig:
     skills: list[str]  # e.g. ["pdf", "excel", "powerpoint", "word"]
 
 
+@dataclass
+class CacheConfig:
+    """Mark the static prefix of a request (system prompt + tool
+    definitions) as cacheable.
+
+    Closes audit finding #7 — providers with explicit prompt caching
+    (Anthropic) need a ``cache_control`` marker on the last block of
+    each cached segment; we make that a one-flag opt-in instead of
+    asking callers to hand-craft provider-specific content lists.
+
+    Provider-specific behaviour:
+
+    * **Anthropic** — the system prompt is upgraded from a string to a
+      ``[{type: "text", text, cache_control}]`` block; a cache
+      breakpoint is also placed on the last tool definition if tools
+      are present.  Cache hits cost ~10% of input tokens; writes cost
+      ~25% more.  TTL options: ``"5m"`` (default) or ``"1h"``.
+    * **OpenAI** — automatic for system prompts >1024 tokens; no
+      user-visible opt-in is required.  This config is a no-op but
+      accepted for forward-compat.
+    * **Google Gemini** — explicit Context Caching uses a different
+      lifecycle (create a cache resource, reference by name).  Not
+      auto-wired from this config; pass via ``extra`` if needed.
+    * **DeepSeek** — automatic; no-op.
+    """
+
+    enabled: bool = True
+    #: Anthropic-only: ``"5m"`` (default) or ``"1h"``.  Other providers
+    #: ignore this field.
+    ttl: str = "5m"
+
+
 #: Provider-agnostic meta-keywords accepted as ``tool_choice``.  Anything
 #: outside this set is interpreted as a tool NAME and validated against
 #: the ``tools`` list on the request, so typos fail fast at request
@@ -194,6 +226,10 @@ class CompletionRequest:
     structured_output: StructuredOutputConfig | None = None
     thinking: ThinkingConfig | None = None
     skills: SkillsConfig | None = None  # Anthropic only
+    #: Opt-in prompt caching for the static prefix (system + tools).
+    #: ``None`` = caching disabled; ``CacheConfig()`` = default enabled.
+    #: See :class:`CacheConfig` for per-provider semantics.
+    cache: CacheConfig | None = None
     stream: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 

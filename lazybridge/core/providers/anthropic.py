@@ -320,9 +320,29 @@ class AnthropicProvider(BaseProvider):
             "max_tokens": request.max_tokens,
             "messages": self._messages_to_anthropic(request),
         }
+        # Prompt caching (audit finding #7).  When the caller opts in
+        # via ``request.cache``, wrap the system prompt in a content
+        # block with ``cache_control: {type: "ephemeral", ttl: ...}``
+        # so Anthropic caches the static prefix.  Cache hits cost ~10%
+        # of input; writes cost ~25% more.
+        cache_enabled = (
+            request.cache is not None and request.cache.enabled
+        )
         system = self._get_system(request)
         if system:
-            params["system"] = system
+            if cache_enabled:
+                cache_block: dict[str, Any] = {"type": "ephemeral"}
+                if request.cache and request.cache.ttl and request.cache.ttl != "5m":
+                    cache_block["ttl"] = request.cache.ttl
+                params["system"] = [
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": cache_block,
+                    }
+                ]
+            else:
+                params["system"] = system
         # Opus 4.7 does not support temperature/top_p/top_k — but we now
         # warn rather than drop silently so users aren't surprised when
         # their temperature setting has no effect (audit M7).
@@ -343,6 +363,14 @@ class AnthropicProvider(BaseProvider):
                 params["temperature"] = request.temperature
         tools = self._build_tools(request)
         if tools:
+            if cache_enabled:
+                # Anthropic caches every tool up to and including the
+                # block marked with cache_control.  Marking the LAST
+                # tool therefore caches the entire tool list.
+                cache_block = {"type": "ephemeral"}
+                if request.cache and request.cache.ttl and request.cache.ttl != "5m":
+                    cache_block["ttl"] = request.cache.ttl
+                tools[-1] = {**tools[-1], "cache_control": cache_block}
             params["tools"] = tools
         if request.tool_choice:
             if request.tool_choice in ("auto", "none", "required"):

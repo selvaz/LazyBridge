@@ -77,6 +77,7 @@ class LLMEngine:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         request_timeout: float | None = 120.0,
+        cache: bool | Any = False,
     ) -> None:
         self.model = model
         self.thinking = thinking
@@ -106,6 +107,19 @@ class LLMEngine:
             NativeTool(t) if isinstance(t, str) else t
             for t in (native_tools or [])
         ]
+        # Prompt caching — ``cache=True`` enables the default
+        # (5-minute TTL on Anthropic; no-op on OpenAI / Google /
+        # DeepSeek because they either cache automatically or need a
+        # different API).  Callers wanting the 1-hour TTL pass a
+        # ``CacheConfig(ttl="1h")`` object directly.
+        from lazybridge.core.types import CacheConfig
+
+        if cache is True:
+            self.cache: CacheConfig | None = CacheConfig(enabled=True)
+        elif cache is False or cache is None:
+            self.cache = None
+        else:
+            self.cache = cache  # assumed CacheConfig
         # Provider may be passed explicitly (used by Agent.from_provider
         # when the model is a tier alias like "top" / "cheap" that
         # _infer_provider can't route on its own).  Falls back to the
@@ -358,6 +372,10 @@ class LLMEngine:
                 # existing post-hoc validation in Agent._validate_and_retry.
                 structured_output=structured_cfg,
                 thinking=thinking_cfg,
+                # ``getattr`` keeps this safe when an engine has been
+                # built via ``LLMEngine.__new__`` (test factories, custom
+                # subclasses) without going through ``__init__``.
+                cache=getattr(self, "cache", None),
                 stream=_stream_sink is not None,
             )
 
