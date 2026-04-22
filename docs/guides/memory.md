@@ -115,6 +115,54 @@ identically — the Memory bridges the loop for you (via a worker
 thread when called from inside a running loop) so the result is never
 silently stringified as `<coroutine object …>`.
 
+## Manual use: `add()`, `messages()`, `text()`, `clear()`
+
+`Memory` is designed around the Agent-attaches-it-and-forgets flow,
+but you can drive it directly when you need to — injecting history
+from an external system, running a one-shot analyser without a full
+Agent, or inspecting what a Memory looks like on disk.
+
+```python
+# What this shows: pre-seeding a Memory with history from another
+# source (a CRM, a previous session's export, a test fixture) and
+# then handing it to an Agent for the live conversation to continue.
+# Why: Memory has no "import from dict" — ``add(user, assistant)``
+# IS the import interface. Each add triggers compression + the
+# max_turns backstop, so imports remain bounded.
+# messages() / text() give you two read views: message list (what
+# the engine sends to the provider) vs plain text (what sources=
+# injects into another agent's context).
+
+from lazybridge import Agent, Memory
+
+mem = Memory(strategy="auto", max_tokens=3000)
+
+# Seed with prior turns — each call is thread-safe and hits the same
+# compression/backstop code the engine uses.
+mem.add(user="Hi, I'm Marco",          assistant="Nice to meet you, Marco.")
+mem.add(user="I work on energy grids", assistant="Interesting — what angle?")
+
+# Two read views:
+messages = mem.messages()   # list[Message] — Role.USER / Role.ASSISTANT
+                            # turns, with a summary prefix if compression
+                            # has fired. This is what engines send to
+                            # providers.
+plain    = mem.text()       # str — "summary\n\nUser: ... Assistant: ..."
+                            # sliced to the last 5 turns for
+                            # sources=[mem] live-view injection.
+
+chat = Agent("claude-opus-4-7", memory=mem, name="chat")
+chat("summarise what we've discussed")   # sees both seeded turns
+
+# At cleanup: wipe turns + summary. Does NOT delete from the backing
+# Store if store= was configured — clear() is in-process only.
+mem.clear()
+```
+
+The asymmetry to remember: `messages()` returns structured message
+objects for engine use; `text()` returns a compact string for
+`sources=`.  Pick whichever matches the consumer.
+
 ## Pitfalls
 
 - Pass the same ``Memory`` instance to both agents if you want shared

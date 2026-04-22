@@ -90,6 +90,88 @@ pipeline and the value depends on its current state — counters, lock
 handles, checkpoint pointers.  For append-only blackboards where each
 agent owns a distinct key, plain `write()` is enough.
 
+## Inspection: `read_entry`, `read_all`, `to_text`
+
+`read(key)` returns the raw value.  When you need the **provenance**
+— who wrote it and when — reach for `read_entry`.  Provenance is what
+turns a Store from a dumb dict into an audit-friendly blackboard.
+
+```python
+# What this shows: all three read shapes side-by-side, and how
+# agent_id threads through them.
+# Why: read_entry/read_all are the right tools for debugging "who
+# wrote this value and when?" questions in a multi-agent pipeline.
+# agent_id is an optional string tag the caller passes on write()
+# and gets back on read_entry().
+
+from lazybridge import Store
+
+store = Store()  # in-memory for the demo
+
+# Write with provenance. agent_id is a free-form string; the
+# convention is the producing Agent's name so read_entry later tells
+# you which step wrote the value.
+store.write("hits", ["p1", "p2"],       agent_id="researcher")
+store.write("ranked", ["p2", "p1"],     agent_id="ranker")
+store.write("draft", "short article",   agent_id="writer")
+
+# Plain value:
+store.read("hits")                         # ["p1", "p2"]
+
+# StoreEntry with provenance:
+entry = store.read_entry("hits")
+assert entry.key == "hits"
+assert entry.agent_id == "researcher"
+assert entry.written_at > 0                # monotonic time on write
+
+# Snapshot of every key — useful for dashboards, debug panels,
+# test assertions. Returns a plain dict keyed by store key.
+snapshot = store.read_all()
+assert set(snapshot) == {"hits", "ranked", "draft"}
+
+# Slice of keys rendered as "key: JSON" lines for sources=[store].
+# Pass keys=[...] to restrict to a subset — critical for stores with
+# thousands of keys, where injecting them all would blow the prompt
+# context budget.
+context = store.to_text(keys=["hits", "ranked"])
+# → "hits: [\"p1\", \"p2\"]\nranked: [\"p2\", \"p1\"]"
+```
+
+`agent_id` has no framework-enforced meaning — it's whatever string
+you tag values with.  The convention is the producing Agent's
+`.name`, so `read_entry(key).agent_id` answers "which step wrote
+this".  `Plan(Step(..., writes="k"))` auto-sets `agent_id` to the
+step's agent name when it writes.
+
+## Thread safety & durability
+
+Two execution paths with different guarantees:
+
+| Mode | Set up | Thread safe | Cross-process | Durable |
+|---|---|---|---|---|
+| In-memory dict | `Store()` (default) | Yes — internal lock | No | No (lost on exit) |
+| SQLite file | `Store(db="path.sqlite")` | Yes — WAL + busy timeout | Yes (multiple processes can read/write) | Yes |
+
+- The SQLite path uses **WAL mode** so concurrent readers never block
+  writers; the file is safe to share between a Plan that checkpoints
+  to it and an unrelated process that reads from it.
+- `compare_and_swap` on SQLite wraps read-check-write in `BEGIN
+  IMMEDIATE`, so two concurrent writers serialise on the reserved
+  lock instead of interleaving.
+- Thread-local connections: each worker thread gets its own SQLite
+  connection from the pool; closing the Store (or using it as a
+  context manager) releases all of them.
+
+```python
+from lazybridge import Store
+
+# Context-manager usage — guarantees connection cleanup on exit.
+with Store(db="run.sqlite") as store:
+    store.write("seed", 42)
+    # ... rest of the pipeline
+# Connections closed automatically here.
+```
+
 ## Pitfalls
 
 - ``Store(db=":memory:")`` is NOT the same as ``Store()`` — the former
