@@ -169,6 +169,16 @@ class SkillsConfig:
     skills: list[str]  # e.g. ["pdf", "excel", "powerpoint", "word"]
 
 
+#: Provider-agnostic meta-keywords accepted as ``tool_choice``.  Anything
+#: outside this set is interpreted as a tool NAME and validated against
+#: the ``tools`` list on the request, so typos fail fast at request
+#: construction instead of being silently ignored by the provider API
+#: (or worse, triggering a cryptic server-side error several RTTs in).
+_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset(
+    {"auto", "required", "none", "any"}
+)
+
+
 @dataclass
 class CompletionRequest:
     """Unified request object passed to any provider."""
@@ -179,13 +189,41 @@ class CompletionRequest:
     max_tokens: int = 4096
     temperature: float | None = None
     tools: list[ToolDefinition] = field(default_factory=list)
-    tool_choice: str | None = None  # "auto" | "required" | "none" | tool_name
+    tool_choice: str | None = None  # "auto" | "required" | "none" | "any" | tool_name
     native_tools: list[NativeTool] = field(default_factory=list)
     structured_output: StructuredOutputConfig | None = None
     thinking: ThinkingConfig | None = None
     skills: SkillsConfig | None = None  # Anthropic only
     stream: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Validate ``tool_choice`` up-front: non-keyword values must name
+        # an actual tool in ``self.tools``.  The previous contract
+        # (audit finding #4) let a typo pass silently to the provider
+        # API, where it either errored cryptically or was ignored.
+        if self.tool_choice is None:
+            return
+        if self.tool_choice in _TOOL_CHOICE_KEYWORDS:
+            return
+        tool_names = {t.name for t in self.tools}
+        if self.tool_choice in tool_names:
+            return
+        # Either no tools at all, or the named tool isn't in the list.
+        if not tool_names:
+            raise ValueError(
+                f"CompletionRequest: tool_choice={self.tool_choice!r} names a "
+                f"specific tool, but this request has no tools.  Either pass "
+                f"tools=[...] or use one of "
+                f"{sorted(_TOOL_CHOICE_KEYWORDS)}."
+            )
+        raise ValueError(
+            f"CompletionRequest: tool_choice={self.tool_choice!r} does not "
+            f"match any tool in tools=.  Known tools: "
+            f"{sorted(tool_names)}.  Pick one of those names, or use one of "
+            f"{sorted(_TOOL_CHOICE_KEYWORDS)} for the provider's default "
+            f"behaviour."
+        )
 
 
 @dataclass
