@@ -216,11 +216,13 @@ async def test_human_engine_reprompts_until_valid(monkeypatch):
                 fut.set_exception(RuntimeError("no more scripted inputs"))
             return fut
 
-    def fake_get_event_loop():
+    def fake_get_running_loop():
         return _FakeLoop()
 
     ui = _TerminalUI()
-    monkeypatch.setattr(asyncio, "get_event_loop", fake_get_event_loop)
+    # HumanEngine now uses ``asyncio.get_running_loop`` (Python 3.13+
+    # safe); ``get_event_loop`` is deprecated and no longer called.
+    monkeypatch.setattr(asyncio, "get_running_loop", fake_get_running_loop)
 
     result = await ui._prompt_field("n", int, "int")
     assert result == 7

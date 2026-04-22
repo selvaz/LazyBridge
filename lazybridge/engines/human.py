@@ -42,9 +42,13 @@ class _TerminalUI(_UIProtocol):
             return await self._prompt_model(output_type)
 
         prompt_str = "Your response: "
+        # ``get_running_loop`` is the 3.10+ forward-compatible primitive;
+        # ``get_event_loop`` is deprecated and errors on 3.13+ when no
+        # loop is already running.  ``prompt`` is always awaited from an
+        # active loop, so this is safe.
+        loop = asyncio.get_running_loop()
         if self._timeout:
             try:
-                loop = asyncio.get_event_loop()
                 fut = loop.run_in_executor(None, input, prompt_str)
                 return await asyncio.wait_for(fut, timeout=self._timeout)
             except asyncio.TimeoutError:
@@ -53,7 +57,6 @@ class _TerminalUI(_UIProtocol):
                     return self._default
                 raise
         else:
-            loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, input, prompt_str)
 
     async def _prompt_model(self, model_type: type) -> str:
@@ -80,7 +83,7 @@ class _TerminalUI(_UIProtocol):
     async def _prompt_field(self, field_name: str, annotation: Any, type_label: str) -> Any:
         from pydantic import ValidationError
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         last_exc: str | None = None
         for attempt in range(self._MAX_FIELD_RETRIES):
             prefix = f"  {field_name} ({type_label}): "
@@ -223,14 +226,31 @@ class HumanEngine:
             raw = await self._ui.prompt(task_text, tools=tools, output_type=output_type)
 
             payload: Any = raw
-            from pydantic import BaseModel
+            from pydantic import BaseModel, ValidationError
             import json
 
             if isinstance(output_type, type) and issubclass(output_type, BaseModel):
                 try:
                     data = json.loads(raw) if raw.strip().startswith("{") else {"response": raw}
                     payload = output_type(**data)
-                except Exception:
+                except (json.JSONDecodeError, ValidationError, TypeError) as coerce_exc:
+                    # Coercion failed — the raw string is still a usable
+                    # payload for non-strict downstream code, but swallow
+                    # the error silently would make structured-output
+                    # failures indistinguishable from free-text answers.
+                    # Record a warning event so the audit trail is honest.
+                    if session:
+                        session.emit(
+                            EventType.TOOL_ERROR,
+                            {
+                                "agent_name": agent_name,
+                                "kind": "structured_output_coercion",
+                                "output_type": getattr(output_type, "__name__", str(output_type)),
+                                "error_type": type(coerce_exc).__name__,
+                                "error": str(coerce_exc),
+                            },
+                            run_id=run_id,
+                        )
                     payload = raw
 
         except Exception as exc:

@@ -69,7 +69,11 @@ class Tool:
     async def run(self, **kwargs: Any) -> Any:
         if asyncio.iscoroutinefunction(self.func):
             return await self.func(**kwargs)
-        loop = asyncio.get_event_loop()
+        # ``asyncio.get_event_loop`` is deprecated in 3.10+ and errors on
+        # 3.13+ when no loop is running.  ``run`` is always called from an
+        # already-running coroutine, so ``get_running_loop`` is the right
+        # primitive — it also avoids accidentally creating a second loop.
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.func(**kwargs))
 
     def run_sync(self, **kwargs: Any) -> Any:
