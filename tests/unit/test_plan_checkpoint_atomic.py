@@ -194,3 +194,120 @@ async def test_single_run_still_works_without_store_unchanged() -> None:
     env = await Agent(engine=plan, name="p").run("t")
     assert env.ok
     assert env.text() == "b-out"
+
+
+# ---------------------------------------------------------------------------
+# on_concurrent="fork" — every run gets its own suffixed key
+# ---------------------------------------------------------------------------
+
+
+def _fork_plan(store: Store, *, resume: bool = False) -> Agent:
+    a = MockAgent(lambda env: f"a({env.task})", name="a", delay_ms=30)
+    b = MockAgent(lambda env: f"b({env.text()})", name="b")
+    return Agent(
+        engine=Plan(
+            Step(target=a, name="a"),
+            Step(target=b, name="b"),
+            store=store,
+            checkpoint_key="quant_backtest",
+            resume=resume,
+            on_concurrent="fork",
+        ),
+        name="p",
+    )
+
+
+def test_fork_mode_rejects_resume_at_construction() -> None:
+    """``on_concurrent='fork'`` and ``resume=True`` are mutually exclusive
+    — fork gives each run its own key, so there's no shared state to
+    resume.  This must fail at construction, not at run()."""
+    with pytest.raises(ValueError, match="not supported"):
+        Plan(
+            Step(target=MockAgent("x", name="x"), name="x"),
+            store=Store(),
+            checkpoint_key="k",
+            resume=True,
+            on_concurrent="fork",
+        )
+
+
+def test_invalid_on_concurrent_value_rejected() -> None:
+    with pytest.raises(ValueError, match="on_concurrent"):
+        Plan(
+            Step(target=MockAgent("x", name="x"), name="x"),
+            on_concurrent="queue",  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.asyncio
+async def test_fork_mode_two_concurrent_runs_both_succeed() -> None:
+    """The whole point of fork: many runs of the same pipeline execute
+    concurrently with no collision.  Each run lives under its own
+    suffixed key, so CAS never contends."""
+    store = Store()
+    first = _fork_plan(store)
+    second = _fork_plan(store)
+
+    envs = await asyncio.gather(first.run("one"), second.run("two"))
+    assert all(e.ok for e in envs), [e.error for e in envs]
+    texts = {e.text() for e in envs}
+    assert texts == {"b(a(one))", "b(a(two))"}
+
+
+@pytest.mark.asyncio
+async def test_fork_mode_each_run_has_distinct_suffixed_key() -> None:
+    """Inspect the store after two completed fork runs — two checkpoint
+    entries exist under distinct ``quant_backtest:<run_uid>`` keys, not
+    a single shared ``quant_backtest`` key."""
+    store = Store()
+    first = _fork_plan(store)
+    second = _fork_plan(store)
+
+    await asyncio.gather(first.run("one"), second.run("two"))
+
+    checkpoint_keys = [
+        k for k in store.keys() if k.startswith("quant_backtest:")
+    ]
+    assert len(checkpoint_keys) == 2, checkpoint_keys
+    # The un-suffixed "quant_backtest" key is NOT used in fork mode.
+    assert "quant_backtest" not in store.keys()
+    # Each checkpoint has distinct run_uid and status="done".
+    run_uids = {store.read(k)["run_uid"] for k in checkpoint_keys}
+    assert len(run_uids) == 2
+    for k in checkpoint_keys:
+        assert store.read(k)["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_fork_mode_error_isolates_to_one_run() -> None:
+    """One run in fork mode failing must not pollute a sibling's
+    checkpoint — they're literally different keys."""
+    from lazybridge.envelope import ErrorInfo
+
+    store = Store()
+    good_a = MockAgent(lambda env: f"a({env.task})", name="a", delay_ms=10)
+    good_b = MockAgent(lambda env: f"b({env.text()})", name="b")
+    good = Agent(engine=Plan(
+        Step(target=good_a, name="a"),
+        Step(target=good_b, name="b"),
+        store=store, checkpoint_key="pipe", on_concurrent="fork",
+    ), name="good")
+
+    bad_a = MockAgent(
+        ErrorInfo(type="Upstream", message="boom"), name="a",
+    )
+    bad_b = MockAgent("unused", name="b")
+    bad = Agent(engine=Plan(
+        Step(target=bad_a, name="a"),
+        Step(target=bad_b, name="b"),
+        store=store, checkpoint_key="pipe", on_concurrent="fork",
+    ), name="bad")
+
+    good_env, bad_env = await asyncio.gather(good.run("g"), bad.run("b"))
+    assert good_env.ok, good_env.error
+    assert not bad_env.ok
+
+    # Good's checkpoint is status=done, bad's is status=failed.
+    pipe_keys = [k for k in store.keys() if k.startswith("pipe:")]
+    statuses = [store.read(k)["status"] for k in pipe_keys]
+    assert sorted(statuses) == ["done", "failed"]
