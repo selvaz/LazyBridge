@@ -93,6 +93,117 @@ a long-lived pipeline identity you want to resume across process
 restarts.  Use `"fork"` when the key is a pipeline *shape* and each
 run is an independent execution of it.
 
+## Typed hand-offs: `input=` and `output=`
+
+The killer feature of Plan over `Agent.chain` is **typed hand-offs
+validated at construction time**.  Declare each step's input and
+output with a Pydantic class and the `PlanCompiler` ensures, before a
+single token is spent, that step N's output matches step N+1's
+expected input.
+
+```python
+# What this shows: two steps with a typed hand-off. The ranker
+# declares input=Hits so the compiler checks that the preceding
+# step's output= is also Hits (or Any). A typo or refactor that
+# breaks the contract surfaces at Agent(engine=plan) construction,
+# not two minutes into a production run.
+# Why: string-threaded pipelines silently carry type drift; a
+# Pydantic-threaded pipeline cannot.
+
+from lazybridge import Agent, Plan, Step
+from pydantic import BaseModel
+
+class Hits(BaseModel):
+    items: list[str]
+
+class Ranked(BaseModel):
+    top: list[str]
+
+plan = Plan(
+    Step(searcher, name="search", output=Hits),    # produces Hits
+    Step(ranker,   name="rank",
+         input=Hits,                               # compile-time check:
+                                                   #   prev step's output must be Hits
+         output=Ranked),
+    Step(writer,   name="write", input=Ranked),
+)
+
+# If ``searcher`` returned ``output=SomethingElse``, this line would
+# raise PlanCompileError at construction:
+Agent.from_engine(plan)("AI trends")
+```
+
+`input=Any` (the default) disables the check for that step.  Use it
+when the step accepts multiple shapes (a summariser that works on any
+string) or when you're deliberately coercing at the boundary.
+
+## Conditional routing: `output.next: Literal[...]`
+
+When a step's output model carries a `next` field typed as
+`Literal[...]`, the Plan engine uses its runtime value as the name of
+the **next step to run** — skipping over intermediate steps.  This is
+how you declare branches without writing control flow.
+
+```python
+# What this shows: a branch that skips the writer and routes to an
+# "empty" apology step when the search returned nothing.
+# Why declarative: the branch is part of the DATA, not a Python
+# conditional — the compiler validates that every value in
+# Literal["rank", "empty"] is a real step name, and the graph can be
+# serialised to JSON/YAML without losing the branch shape.
+
+from typing import Literal
+from lazybridge import Plan, Step
+from pydantic import BaseModel
+
+class Hits(BaseModel):
+    items: list[str]
+    # Runtime value of ``next`` determines which step runs after this one.
+    # PlanCompiler checks that "rank" and "empty" are both known step
+    # names; a typo ("writ" vs "write") fails at construction.
+    next: Literal["rank", "empty"] = "rank"
+
+plan = Plan(
+    Step(searcher, name="search", output=Hits),      # next field drives routing
+    Step(ranker,   name="rank",   output=Ranked),    # default path
+    Step(writer,   name="write",  task=from_step("rank")),
+    Step(apology,  name="empty"),                    # branch target: Hits.next == "empty"
+)
+```
+
+`max_iterations` (default 100) is the loop-budget safety valve: if
+routing bounces between branches without ever hitting the end, the
+plan fails with a clear error rather than running forever.
+
+## Step-level `sources=` and `context=`
+
+Alongside `task=` (sentinel or literal), each Step accepts
+`context=` (additional context — sentinel or string) and `sources=`
+(live-view objects with `.text()`).  These compose with whatever
+Agent-level sources the step's target already carries.
+
+```python
+# What this shows: feeding a step both a dynamic context from a
+# previous step AND live state from a shared Store, without touching
+# the step agent's own configuration.
+# Why step-level: keeps the target Agent reusable across plans;
+# one Agent can be a step in many pipelines with different
+# context/sources on each.
+
+from lazybridge import Plan, Step, Store, from_step
+
+store = Store(db="shared.sqlite")
+
+plan = Plan(
+    Step(fetcher,   name="fetch", writes="hits"),
+    Step(summariser, name="sum",
+         task=from_step("fetch"),          # input data
+         context=from_step("fetch"),       # same envelope as context too —
+                                           #   "text says X; in the context of X"
+         sources=[store]),                 # live store content injected each run
+)
+```
+
 ## Pitfalls
 
 - Forgetting ``output=Model`` on a step and then expecting the next step

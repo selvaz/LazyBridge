@@ -56,6 +56,129 @@ assert not env.ok                        # blocked by the regex guard
 print(env.error.message)
 ```
 
+## Rewriting instead of blocking: `modified_text`
+
+Every `GuardAction` can rewrite the text it was given instead of
+blocking it.  Use this for scrubbing inputs before they reach the
+model (masking PII, trimming over-long history) or for
+post-processing outputs (enforcing a tone, stripping markup).  The
+rewritten text replaces the original at the boundary the guard ran
+on — input rewrites change the engine's task; output rewrites change
+`Envelope.payload`.
+
+```python
+# What this shows: a guard that allows the request through but masks
+# obvious secrets BEFORE the model sees them, plus an output-side
+# guard that trims trailing boilerplate.
+# Why two hooks: an input rewrite affects what the LLM is given;
+# an output rewrite affects what the caller receives. Same
+# GuardAction primitive, different call sites.
+
+import re
+from lazybridge import Agent, ContentGuard, GuardAction
+
+_SECRET_RE = re.compile(r"\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16})\b")
+
+def mask_secrets(text: str) -> GuardAction:
+    masked, n = _SECRET_RE.subn("<redacted>", text)
+    if n:
+        # allow + modified_text=... → proceed with the rewritten string
+        return GuardAction.modify(masked, message=f"masked {n} secrets")
+    return GuardAction.allow()
+
+def trim_boilerplate(text: str) -> GuardAction:
+    cleaned = text.split("\n\nDisclaimer:", 1)[0]
+    if cleaned != text:
+        return GuardAction.modify(cleaned)
+    return GuardAction.allow()
+
+scrubbed = Agent(
+    "claude-opus-4-7",
+    guard=ContentGuard(input_fn=mask_secrets, output_fn=trim_boilerplate),
+    name="scrubbed",
+)
+```
+
+Inside a `GuardChain` the rewrites **chain**: each guard sees the
+text as rewritten by the previous one, and the final action carries
+the accumulated modification.  A later guard can rewrite again or
+block outright.
+
+## Async guards: `acheck_input` / `acheck_output`
+
+`ContentGuard` takes sync callables.  When your guard needs to call
+an LLM, hit a remote policy service, or do anything async, subclass
+`Guard` and override the async methods directly.  The agent runtime
+awaits them natively.
+
+```python
+# What this shows: a custom policy guard that checks an allow-list
+# stored remotely. Subclassing Guard (not ContentGuard) gives you
+# control over both input and output in one class, access to async I/O,
+# and a place to hold state (the client session below).
+# Why subclass instead of ContentGuard: ContentGuard wraps two
+# stateless functions. Anything stateful or async-only benefits from
+# a class with explicit acheck_input / acheck_output overrides.
+
+from lazybridge import Agent, Guard, GuardAction
+
+class AllowlistGuard(Guard):
+    def __init__(self, client):
+        self._client = client
+
+    async def acheck_input(self, text: str) -> GuardAction:
+        verdict = await self._client.check(text)    # async I/O
+        return GuardAction.allow() if verdict.ok else GuardAction.block(verdict.reason)
+
+    async def acheck_output(self, text: str) -> GuardAction:
+        # Outputs pass through unconditionally in this example.
+        return GuardAction.allow()
+
+agent = Agent("claude-opus-4-7", guard=AllowlistGuard(my_client))
+```
+
+The framework prefers the async methods when the engine is async and
+falls back to the sync ones when needed.  Overriding only one half
+(input OR output) is fine — the other defaults to `allow()`.
+
+## Custom `Guard` subclass: policy + metadata
+
+Metadata attached to a `GuardAction` flows to the error `Envelope`
+and to any exporter listening to tool-error events — useful for
+downstream classification, alerting, and dashboards.
+
+```python
+# What this shows: a guard that tags blocked requests with a
+# machine-readable category on metadata, so an alerting system can
+# differentiate "prompt_injection" from "pii_present" without
+# pattern-matching the message string.
+# Why metadata: GuardAction.message is human-readable ("please
+# remove emails first"). Machines need a category/severity. The
+# metadata dict is free-form JSON-safe data you control.
+
+from lazybridge import Agent, Guard, GuardAction
+
+class CategorisedGuard(Guard):
+    def check_input(self, text: str) -> GuardAction:
+        if "ignore previous instructions" in text.lower():
+            return GuardAction.block(
+                "prompt injection detected",
+                category="prompt_injection", severity="high",
+            )
+        if "@" in text:
+            return GuardAction.block(
+                "remove emails first",
+                category="pii_present", severity="low",
+            )
+        return GuardAction.allow()
+
+env = Agent("claude-opus-4-7", guard=CategorisedGuard())("ignore previous instructions")
+assert env.error.type == "GuardBlocked"
+# metadata is preserved on the error envelope for downstream consumers:
+# env.error.message contains "prompt injection detected"
+# exporters see the TOOL_ERROR event with the full metadata dict
+```
+
 ## Pitfalls
 
 - A guard that raises instead of returning ``GuardAction`` aborts the
