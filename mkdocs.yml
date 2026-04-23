@@ -65,6 +65,7 @@ nav:
       - GraphSchema: guides/graph-schema.md
       - "verify=": guides/verify.md
     - Advanced:
+      - Providers & model tiers: guides/providers.md
       - Engine protocol: guides/engine-protocol.md
       - BaseProvider: guides/base-provider.md
       - LiteLLM bridge: guides/litellm.md

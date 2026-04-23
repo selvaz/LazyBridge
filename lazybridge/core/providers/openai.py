@@ -117,14 +117,15 @@ class OpenAIProvider(BaseProvider):
     _TIER_ALIASES = {
         "top": "gpt-5.4-pro",      # extended reasoning flagship
         "expensive": "gpt-5.4",    # general flagship
-        "medium": "gpt-5.4-mini",  # fast mid-range; cheaper and newer than gpt-4o
-        "cheap": "gpt-4.1-mini",
-        "super_cheap": "gpt-4.1-nano",
+        "medium": "gpt-5.4-mini",  # fast mid-range; newer and cheaper than gpt-4o
+        "cheap": "gpt-5.4-nano",   # best value: outperforms gpt-4.1-mini at $0.20/$1.25
+        "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
         "gpt-5.4-pro": ["gpt-5.4", "gpt-5"],
         "gpt-5.4": ["gpt-5", "gpt-4o"],
         "gpt-5.4-mini": ["gpt-5", "gpt-4o-mini"],
+        "gpt-5.4-nano": ["gpt-4.1-mini", "gpt-4.1-nano"],
         "gpt-5": ["gpt-4.1", "gpt-4o"],
         "gpt-4o": ["gpt-4.1", "gpt-4-turbo"],
         "gpt-4.1": ["gpt-4o"],

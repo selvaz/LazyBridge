@@ -1,0 +1,83 @@
+## signature
+Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
+
+Tier names: "top" | "expensive" | "medium" | "cheap" | "super_cheap"
+Providers:  "anthropic" | "openai" | "google" | "deepseek"
+
+## rules
+Tier aliases resolve at construction time via _TIER_ALIASES on each provider.
+Prices per 1M tokens (input/output). Context = max input window.
+
+## Anthropic model tiers
+| tier        | model              | ctx  | max_out | $/M in | $/M out |
+|-------------|--------------------|------|---------|--------|---------|
+| top         | claude-opus-4-7    | 1 M  | 128 K   | $5.00  | $25.00  |
+| expensive   | claude-opus-4-6    | 1 M  | 128 K   | $5.00  | $25.00  |
+| medium      | claude-sonnet-4-6  | 1 M  | 128 K   | $3.00  | $15.00  |
+| cheap       | claude-haiku-4-5   | 200K | 64 K    | $1.00  | $5.00   |
+| super_cheap | claude-3-haiku     | 200K | 4 K     | $0.25  | $1.25   |
+
+Thinking: opus-4-7/4-6/sonnet-4-6 → adaptive (no budget_tokens).
+          haiku-4-5 and 3.x → ThinkingConfig(budget_tokens=N) required.
+          opus-4-7 does NOT accept temperature.
+Native tools: WEB_SEARCH, CODE_EXECUTION, COMPUTER_USE
+
+## OpenAI model tiers
+| tier        | model          | ctx  | max_out | $/M in | $/M out |
+|-------------|----------------|------|---------|--------|---------|
+| top         | gpt-5.4-pro    | 1 M  | 128 K   | $30.00 | $180.00 |
+| expensive   | gpt-5.4        | 1 M  | 128 K   | $2.50  | $15.00  |
+| medium      | gpt-5.4-mini   | 400K | 128 K   | $0.75  | $4.50   |
+| cheap       | gpt-5.4-nano   | 400K | 128 K   | $0.20  | $1.25   |
+| super_cheap | gpt-4o-mini    | 128K | 16 K    | $0.15  | $0.60   |
+
+Other models: gpt-5 ($1.25/$10), gpt-4o ($2.50/$10), gpt-4.1 ($2/$8),
+              gpt-4.1-mini ($0.40/$1.60), o3 ($2/$8), o4-mini ($1.10/$4.40)
+Thinking: o-series + gpt-5.4-pro → reasoning_effort param (ThinkingConfig(effort=...)).
+          Standard GPT models → no thinking support.
+Native tools: WEB_SEARCH, CODE_EXECUTION, FILE_SEARCH, COMPUTER_USE
+
+## Google model tiers
+| tier        | model                         | ctx | max_out | $/M in | $/M out |
+|-------------|-------------------------------|-----|---------|--------|---------|
+| top         | gemini-3.1-pro-preview        | 1 M | 64 K    | $2.00  | $12.00  |
+| expensive   | gemini-2.5-pro                | 1 M | 64 K    | $1.25  | $10.00  |
+| medium      | gemini-3-flash-preview        | 1 M | 64 K    | $0.50  | $3.00   |
+| cheap       | gemini-3.1-flash-lite-preview | 1 M | 64 K    | $0.25  | $1.50   |
+| super_cheap | gemini-2.5-flash-lite         | 1 M | 64 K    | $0.10  | $0.40   |
+
+Thinking: gemini-3.x → ThinkingConfig(thinking_level="low"|"medium"|"high").
+          gemini-2.x → ThinkingConfig(thinking_budget=N); -1=auto.
+Native tools: GOOGLE_SEARCH, WEB_SEARCH, GOOGLE_MAPS
+WARNING: Google Search + structured output = 400 error; mutually exclusive.
+WARNING: gemini-2.0-flash deprecated June 1 2026 — do not use in new code.
+
+## DeepSeek model tiers
+| tier                          | model               | ctx  | max_out | $/M in | $/M out |
+|-------------------------------|---------------------|------|---------|--------|---------|
+| top / expensive               | deepseek-reasoner   | 128K | 64 K    | $0.28  | $0.42   |
+| medium / cheap / super_cheap  | deepseek-chat       | 128K | 8 K     | $0.28  | $0.42   |
+
+Thinking: deepseek-reasoner exposes reasoning_content (chain-of-thought).
+          ThinkingConfig on deepseek-chat raises ValueError.
+Native tools: none (function calling supported).
+
+## example
+```python
+from lazybridge import Agent
+
+# Tier-based selection — model name never appears in app code.
+smart  = Agent.from_provider("anthropic", tier="top")
+fast   = Agent.from_provider("openai",    tier="medium")
+budget = Agent.from_provider("google",    tier="super_cheap")
+
+# Direct model name (bypasses tier aliases).
+a = Agent("gpt-5.4-mini")
+b = Agent("claude-haiku-4-5")
+```
+
+## pitfalls
+- DeepSeek has only 2 models; multiple tier aliases collapse onto the same model.
+- gpt-5-mini does NOT exist. The current OpenAI mini variant is gpt-5.4-mini.
+- gemini-2.0-flash is deprecated June 1 2026; use gemini-2.5-flash-lite instead.
+- Adaptive thinking (Anthropic claude-opus/sonnet 4.6+) ignores budget_tokens.
