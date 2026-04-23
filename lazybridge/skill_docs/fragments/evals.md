@@ -30,21 +30,6 @@ llm_judge(agent: Agent, criteria: str) -> Callable   # cheap Agent as judge
 - ``llm_judge`` accepts an Agent and a string policy; the judge
   evaluates output and must respond with ``"approved"`` to pass.
 
-## narrative
-`EvalSuite` is LazyBridge's minimum-viable test framework for agents.
-It's unit testing, not benchmarking — small, fast, runnable in CI.
-
-You write `EvalCase`s with an input prompt and a check function. The
-built-in checks cover the common cases (exact match, substring, length
-bounds). For anything richer — "is this factually correct?", "is the
-tone appropriate?" — `llm_judge` wraps a cheap agent as a pass/fail
-oracle.
-
-Pattern: keep a suite alongside each agent you ship, run it on every
-refactor, track `report.passed / report.total` over time. Combined
-with `llm_judge`, it's also a rudimentary regression guard against
-prompt changes.
-
 ## example
 ```python
 from lazybridge import Agent, EvalCase, EvalSuite, contains, llm_judge
@@ -76,5 +61,3 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
   check sees the JSON serialisation.
 - ``EvalSuite.run`` is synchronous; use ``arun`` in async test harnesses.
 
-## see-also
-[guards](guards.md), [verify](verify.md), [agent](agent.md)

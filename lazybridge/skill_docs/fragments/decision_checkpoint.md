@@ -32,11 +32,7 @@ flowchart TD
     B -->|need full run trace| G[Session + exporter, not checkpoint]
 
 ## notes
-Rule of thumb: enable checkpointing when the cost of re-running earlier
-steps exceeds the cost of the storage complication.
-
-Cost of checkpointing is low: one JSON write per step, persistence via
-SQLite WAL, minimal state shape (`writes` bucket + next step + status).
-It is **not** a full run history — the in-memory `StepResult` history
-is rebuilt empty on resume. If you need the full audit trail, combine
-`Plan` with a `Session` + `JsonFileExporter`.
+Enable when re-running earlier steps costs more than the storage
+overhead. Checkpoint is minimal (one JSON write per step; `writes`
+bucket + next step + status). It is not a full run history — for that,
+combine `Plan` with `Session` + `JsonFileExporter`.

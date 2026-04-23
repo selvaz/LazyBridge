@@ -34,10 +34,6 @@ Factories:
   Agent.from_engine(engine: Engine, **kw) -> Agent  # explicit Plan / Supervisor / custom
   Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
 
-System prompts:
-  # ``system=`` is NOT an Agent kwarg. Attach it to the engine:
-  Agent(engine=LLMEngine("claude-opus-4-7", system="Be concise."))
-
 Composition sugar (NOT new paradigms):
   Agent.chain(*agents, **kw)  -> Agent          # sequential
   Agent.parallel(*agents, **kw) -> _ParallelAgent  # deterministic fan-out → list[Envelope]
@@ -70,21 +66,17 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
-# Tier 1: two lines.
 print(Agent("claude-opus-4-7")("hello").text())
 
-# Tier 2: with tools (plain functions; schema auto-generated from hints).
 def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
 print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
-# Tier 3: structured output.
 resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
 print(resp.payload.title, resp.payload.bullets)
 
-# Nested agent-of-agent — uniform surface, no special ceremony.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())
@@ -101,13 +93,6 @@ print(editor("find papers and write a one-paragraph summary").text())
 - ``verify=`` expects a judge that returns a verdict string starting
   with ``"approved"`` (case-insensitive) to accept. Anything else is
   treated as rejection + feedback.
-
-**see-also**
-
-[tool](tool.md), [envelope](envelope.md),
-[chain](chain.md), [agent_parallel](agent-parallel.md),
-[as_tool](as-tool.md), [session](session.md),
-decision tree: [pick_tier](../decisions/pick-tier.md)
 
 ## Tool
 
@@ -179,11 +164,6 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
 - ``strict=True`` rejects optional / defaulted args under some providers;
   if a call fails with "unknown parameter", try ``strict=False``.
 
-**see-also**
-
-[agent](agent.md), [as_tool](as-tool.md),
-decision tree: [parallelism](../decisions/parallelism.md)
-
 ## Native tools (web search, code execution, …)
 
 **signature**
@@ -253,11 +233,6 @@ Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
 - Cost: native tool calls are billed by the provider (search queries,
   code execution time). They appear in ``Envelope.metadata.cost_usd``
   when the provider reports them.
-
-**see-also**
-
-[tool](tool.md), [agent](agent.md),
-[core_types](core-types.md)
 
 ## Function → Tool (schema modes)
 
@@ -355,10 +330,6 @@ tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
   rely on extra kwargs or variadic args may fail strict validation;
   try without strict first.
 
-**see-also**
-
-[tool](tool.md), [agent](agent.md), [native_tools](native-tools.md)
-
 ## Envelope
 
 **signature**
@@ -440,15 +411,8 @@ def process(env: "Envelope[Article]") -> str:
 
 **pitfalls**
 
-- ``payload`` can legitimately be ``None`` (e.g. when ``error`` is set or
-  when the engine produced no content). Use ``env.ok`` or ``env.text()``
-  if you want a safe string.
 - ``Envelope.from_task(task)`` sets ``payload=task`` for convenience so
   the very first agent in a chain sees the input as both ``task`` and
   ``payload``. Downstream steps see the preceding step's ``payload``.
-- ``nested_*`` fields in metadata are plumbed but not always populated
-  yet; for accurate cross-agent cost, query ``session.usage_summary()``.
-
-**see-also**
-
-[agent](agent.md), [session](session.md), [sentinels](sentinels.md)
+- ``nested_*`` fields in metadata are plumbed but not always populated;
+  for accurate cross-agent cost, query ``session.usage_summary()``.

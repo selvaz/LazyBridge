@@ -86,11 +86,6 @@ print(Agent(engine=EchoEngine())("hello").text())
 - The engine receives ``tools``, not ``agent._tool_map``. Treat it as
   a flat list; don't assume the Agent's internal structure.
 
-**see-also**
-
-[agent](agent.md), [base_provider](base-provider.md),
-[supervisor](supervisor.md)
-
 ## BaseProvider
 
 **signature**
@@ -178,12 +173,6 @@ Agent.from_provider("mistral", tier="top")("hello").text()
 - Don't hard-code API keys; honour ``os.environ`` the same way the
   built-ins do for consistency.
 
-**see-also**
-
-[register_provider](register-provider.md),
-[engine_protocol](engine-protocol.md),
-[core_types](core-types.md)
-
 ## Plan serialization
 
 **signature**
@@ -262,11 +251,6 @@ Agent.from_engine(plan_reloaded)("AI trends")
   bump the number and ``from_dict`` will refuse older shapes; migrate
   explicitly rather than silently.
 
-**see-also**
-
-[plan](plan.md), [graph_schema](graph-schema.md),
-[engine_protocol](engine-protocol.md)
-
 ## Provider registry
 
 **signature**
@@ -337,10 +321,6 @@ def restore_provider_rules():
   fail at Executor resolution time.
 - Tests that register rules leak state into subsequent tests unless
   you use the restore fixture pattern.
-
-**see-also**
-
-[base_provider](base-provider.md), [engine_protocol](engine-protocol.md)
 
 ## core.types
 
@@ -454,8 +434,3 @@ async def astream(self, request):
 - ``NativeTool`` entries are enums, not capabilities — the provider
   decides whether to honour each one; unsupported combinations raise
   at ``complete`` time.
-
-**see-also**
-
-[base_provider](base-provider.md), [engine_protocol](engine-protocol.md),
-[envelope](envelope.md)

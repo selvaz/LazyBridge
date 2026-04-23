@@ -9,81 +9,58 @@ No explicit DAG — for that, go to Full.
 **signature**
 
 Memory(
-    *,
     strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
-    max_tokens: int | None = 4000,
-    max_turns: int | None = 1000,     # hard backstop; None disables
-    store: Any | None = None,         # optional Store for persistence
-    summarizer: Any | None = None,    # Agent or async callable used when strategy="summary"
+    max_tokens: int = 4000,
+    window: int = 10,            # sliding: last N turns kept raw
+    summarizer: Agent | None = None,  # cheap agent used when strategy="summary"
 ) -> Memory
 
-memory.add(user: str, assistant: str, *, tokens: int = 0) -> None
+memory.add(user: str, assistant: str, tokens: int = 0) -> None
 memory.messages() -> list[Message]
 memory.text() -> str              # current view as plain text (live read)
 memory.clear() -> None
 
-Usage: Agent("model", memory=Memory(strategy="auto"))
+Usage: Agent("model", memory=Memory("auto"))
 
 **rules**
 
 - ``auto`` — sliding window plus summary of older turns once ``max_tokens``
   is exceeded; default. Good for general chat.
-- ``sliding`` — always compresses once >10 turns accumulate, keeping only
-  the last 10 verbatim. Lossy but cheap.
-- ``summary`` — same 10-turn cut-off as ``sliding``, but the compressed
-  prefix is an LLM summary from ``summarizer=``; without a summarizer
-  the fallback is keyword extraction.
-- ``none`` — no token-based compression; only the ``max_turns`` hard cap
-  applies.
+- ``sliding`` — keep last ``window`` turns verbatim, drop the rest.
+  Lossy but cheap.
+- ``summary`` — compress everything with ``summarizer`` on each overflow.
+  Requires passing a cheap Agent.
+- ``none`` — do not compress; raises memory over time.
 - ``Memory`` is per-agent by default. To share memory across agents, pass
   the same instance to each agent's ``memory=`` or via ``sources=[mem]``.
 - ``text()`` is live — every call re-materialises the current view. Do
   not snapshot and cache it.
-- All constructor arguments are keyword-only — ``Memory("auto")`` fails
-  with ``TypeError``; write ``Memory(strategy="auto")``.
 
 **example**
 
 ```python
-from lazybridge import Agent, LLMEngine, Memory
+from lazybridge import Agent, Memory
 
-# strategy="auto"  → compress only once we blow past max_tokens.
-# max_tokens=3000  → token budget; compression triggers on overflow.
-mem = Memory(strategy="auto", max_tokens=3000)
-
-# name="chat"      → label in Session.graph / event logs /
-#                    usage_summary()["by_agent"]. No effect on a lone call.
+mem = Memory("auto", max_tokens=3000)
 chat = Agent("claude-opus-4-7", memory=mem, name="chat")
 
 chat("hi, I'm Marco")
 chat("what's my name?")         # "Marco"
-print(mem.text())               # current compressed view (live, re-read each call)
+print(mem.text())               # current compressed view
 
-# Share memory across two agents — the judge reads the live history
-# via ``sources=[mem]``. ``system=`` belongs on the engine, not the Agent.
-judge = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system="Grade the assistant's last reply on helpfulness 1-5."),
-    name="judge",             # distinct label for observability
-    sources=[mem],            # inject mem.text() into the system prompt each call
-)
+# Share memory across two agents — the judge reads the live history.
+judge = Agent("claude-opus-4-7", name="judge",
+              sources=[mem],
+              system="Grade the assistant's last reply on helpfulness 1-5.")
 judge("grade the last turn")
 ```
 
 **pitfalls**
 
-- Pass the same ``Memory`` instance to both agents if you want shared
-  state. Copying or pickling resets the internal compression state.
 - ``Memory(strategy="summary")`` without a ``summarizer=`` agent falls
-  back to keyword-extraction summaries; memory still respects the
-  ``max_turns`` hard cap (default 1000) so it cannot grow unboundedly.
+  back to a no-op and grows unboundedly.
 - ``memory.clear()`` wipes everything including the in-process summary;
   it does not persist across restarts. For durable memory use ``Store``.
-
-**see-also**
-
-[store](store.md), [agent](agent.md),
-decision tree: [state_layer](../decisions/state-layer.md)
 
 ## Store
 
@@ -118,14 +95,12 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
 **example**
 
 ```python
-from lazybridge import Agent, LLMEngine, Store, Plan, Step
+from lazybridge import Agent, Store, Plan, Step
 
-# db="research.sqlite" → persistent SQLite. Pass db=None for in-memory dict.
 store = Store(db="research.sqlite")
 
+# Plan step writes a result into the store automatically.
 plan = Plan(
-    # name="search" is the step id (used by from_step(...), checkpoints, graph).
-    # writes="hits"  triggers store.write("hits", payload) after the step runs.
     Step(researcher, name="search", writes="hits"),
     Step(writer,     name="write"),
 )
@@ -133,13 +108,8 @@ Agent.from_engine(plan)("AI trends")
 print(store.read("hits"))
 
 # Agent with sources= sees the live store on every call.
-# ``system=`` lives on the engine, not Agent — build an LLMEngine.
-monitor = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system="Report what's currently in the blackboard."),
-    name="monitor",          # label in Session.graph / event logs
-    sources=[store],         # store.to_text() injected into context each call
-)
+monitor = Agent("claude-opus-4-7", name="monitor", sources=[store],
+                system="Report what's currently in the blackboard.")
 print(monitor("status?").text())
 ```
 
@@ -153,12 +123,6 @@ print(monitor("status?").text())
   filesystem path as the value and read the file when you need it.
 - ``store.to_text()`` can be expensive for stores with thousands of keys;
   pass ``keys=[...]`` to limit the slice.
-
-**see-also**
-
-[memory](memory.md), [session](session.md),
-[plan](plan.md), [checkpoint](checkpoint.md),
-decision tree: [state_layer](../decisions/state-layer.md)
 
 ## Session & tracing
 
@@ -244,11 +208,6 @@ print(sess.graph.to_json())
   you also pass ``session=another``, ``verbose`` is ignored (the
   explicit session wins).
 
-**see-also**
-
-[exporters](exporters.md), [graph_schema](graph-schema.md),
-[agent](agent.md)
-
 ## Guards
 
 **signature**
@@ -287,32 +246,20 @@ from lazybridge import Agent, ContentGuard, GuardChain, LLMGuard, GuardAction
 import re
 
 # Cheap regex guard.
-#   GuardAction(allowed=False, message=...) → block + explain
-#   GuardAction(allowed=True)                → pass through
 def no_emails(text: str) -> GuardAction:
     if re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text):
         return GuardAction(allowed=False, message="Remove email addresses first.")
     return GuardAction(allowed=True)
 
-# LLM-backed policy guard. ``system=`` lives on the engine, not Agent.
-from lazybridge import LLMEngine
-judge = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",                       # label shown in observability
-)
+# LLM-backed policy guard.
+judge = Agent("claude-opus-4-7", name="judge",
+              system='Respond "approved" or "rejected: <reason>".')
 
 guard = GuardChain(
-    # ContentGuard: input_fn runs on the USER task, output_fn runs on
-    # Envelope.text() after the engine returns.
     ContentGuard(input_fn=no_emails),
-    # LLMGuard: policy= is a natural-language rule the judge enforces.
-    # The guard blocks when the judge's verdict starts with "block"/"deny".
     LLMGuard(judge, policy="Reject outputs that contain medical advice."),
 )
 
-# guard=  attaches the chain to both input and output paths.
-# name="bot" labels the agent in Session.graph / event logs.
 bot = Agent("claude-opus-4-7", guard=guard, name="bot")
 env = bot("my email is foo@bar.com, what's the weather?")
 assert not env.ok                        # blocked by the regex guard
@@ -324,14 +271,10 @@ print(env.error.message)
 - A guard that raises instead of returning ``GuardAction`` aborts the
   run. Return ``GuardAction(allowed=False, message=str(e))`` on error
   to keep pipelines resilient.
-- ``LLMGuard``'s judge is itself an Agent — pass a cheap model
-  (``Agent.from_provider("anthropic", tier="cheap")``) or costs add up.
+- Compose guards: put a cheap regex ``ContentGuard`` first; fall back to
+  ``LLMGuard`` only for what regex can't handle. Saves tokens.
 - Guards see ``Envelope.text()``, not the typed payload. If you're using
   structured output, the guard operates on the JSON serialisation.
-
-**see-also**
-
-[agent](agent.md), [evals](evals.md), [verify](verify.md)
 
 ## Agent.chain
 
@@ -362,17 +305,12 @@ Alternatives:
 ```python
 from lazybridge import Agent, Memory
 
-# name=  labels each Agent in Session.graph / event logs AND becomes the
-# auto-derived step name inside the Plan that Agent.chain compiles to.
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
-# memory= on Agent.chain is per-pipeline memory — records the
-# (user-task, final-output) pair at the OUTER boundary.
-# strategy="auto" compresses only once Memory's token budget is exceeded.
 pipeline = Agent.chain(researcher, editor, writer,
-                        memory=Memory(strategy="auto"))
+                        memory=Memory("auto"))
 print(pipeline("AI trends April 2026").text())
 ```
 
@@ -384,12 +322,6 @@ print(pipeline("AI trends April 2026").text())
   ``Plan`` instead so you can declare ``output=``.
 - The outer chain Agent has its own name ("chain" by default); set
   ``name="…"`` if you want it to appear distinctly in ``Session.graph``.
-
-**see-also**
-
-[agent](agent.md), [plan](plan.md),
-[agent_parallel](agent-parallel.md), [sentinels](sentinels.md),
-decision tree: [composition](../decisions/composition.md)
 
 ## Agent.as_tool
 
@@ -424,28 +356,17 @@ Usage: Agent("model", tools=[researcher.as_tool()])
 **example**
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent
 
-# name="researcher" is the default Tool.name when this Agent is wrapped
-# via as_tool(), plus the label in Session.graph / usage_summary().
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
-# ``system=`` lives on the engine, not on Agent.
-judge = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
-)
+judge      = Agent("claude-opus-4-7", name="judge",
+                   system='Respond "approved" or "rejected: <reason>".')
 
 # Implicit: pass the agent, LazyBridge wraps it.
-# Tool schema is (task: str) -> str; tool name defaults to researcher.name.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher])   # equivalent to researcher.as_tool()
 
-# Explicit + verified:
-#   name=         overrides the tool name the orchestrator's LLM sees.
-#   description=  natural-language text the LLM reads to decide when to call it.
-#   verify=       every call through this tool is judged by ``judge``.
-#   max_verify=2  up to 2 retries per call; last attempt returned as-is.
+# Explicit + verified: the judge gates every research call.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher.as_tool(
                          name="research",
@@ -465,11 +386,6 @@ orchestrator = Agent("claude-opus-4-7",
 - ``as_tool()``'s default schema is ``(task: str) -> str`` regardless of
   the wrapped agent's ``output=``. If you need a typed payload in the
   caller, orchestrate via ``Plan`` with ``Step(output=Model)`` instead.
-
-**see-also**
-
-[agent](agent.md), [tool](tool.md), [verify](verify.md),
-[session](session.md)
 
 ## Agent.parallel
 
@@ -528,12 +444,6 @@ for env in results:
   Timeouts return an error Envelope in the slot, preserving the
   positional contract.
 
-**see-also**
-
-[agent](agent.md), [chain](chain.md),
-[plan](plan.md), [parallel_steps](parallel-steps.md),
-decision tree: [parallelism](../decisions/parallelism.md)
-
 ## HumanEngine
 
 **signature**
@@ -554,24 +464,11 @@ Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
 - ``HumanEngine`` prompts the human for input and returns it as an
   Envelope. It implements the same ``Engine`` protocol as ``LLMEngine``,
   so ``Agent(engine=HumanEngine())`` is a drop-in replacement.
-- ``output=SomeModel`` switches to per-field prompting (terminal UI) or
-  an HTML form (``ui="web"``). Each field is coerced via Pydantic
-  TypeAdapter with up to 3 retries on ``ValidationError``; the error
-  is shown inline so the human can correct typos interactively.
-- When coercion to ``output_type`` ultimately fails, HumanEngine does
-  NOT return a raw string payload — it emits a ``TOOL_ERROR`` event
-  with ``kind="structured_output_coercion"`` and returns an Envelope
-  whose ``error.type == "StructuredOutputCoercionError"``.
-- Every successful human input emits a ``HIL_DECISION`` event on the
-  active Session with ``kind="input"`` and a truncated ``result``
-  string — the audit trail distinguishes human answers from LLM calls.
+- ``output=SomeModel`` switches to per-field prompting (terminal UI).
 - ``timeout`` triggers ``default`` if set, else raises ``TimeoutError``.
 - Tool invocation is NOT handled by HumanEngine — the human types a
   raw string, they don't call tools interactively. If you want the
   human to call tools, use ``SupervisorEngine``.
-- Three UI modes: ``"terminal"`` (default), ``"web"`` (stdlib HTTP
-  form on 127.0.0.1 with auto-browser), or any object matching
-  ``async def prompt(task, *, tools, output_type) -> str``.
 
 **example**
 
@@ -602,11 +499,6 @@ pipeline("draft the release notes")
   output_type) -> str``.
 - ``timeout=`` uses the event loop, not signals; it works in async
   contexts but may hang in tightly-blocking sync nests.
-
-**see-also**
-
-[supervisor](supervisor.md), [agent](agent.md),
-decision tree: [human_engine_vs_supervisor](../decisions/human-engine-vs-supervisor.md)
 
 ## EvalSuite
 
@@ -647,21 +539,11 @@ llm_judge(agent: Agent, criteria: str) -> Callable   # cheap Agent as judge
 **example**
 
 ```python
-from lazybridge import Agent, LLMEngine, EvalCase, EvalSuite, contains, llm_judge
+from lazybridge import Agent, EvalCase, EvalSuite, contains, llm_judge
 
-# System prompts live on the engine, not the Agent constructor.
-bot = Agent(engine=LLMEngine("claude-opus-4-7",
-                             system="You are a helpful assistant."))
-judge = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",                       # label shown in session.usage_summary()
-)
-
-# EvalCase(prompt, check=<predicate>, description=<report label>)
-#   check=  Callable[[str], bool] run against Envelope.text().
-#           contains("Paris") / llm_judge(...) / lambda work identically.
-#   description=  free text only — surfaces in the printed report.
+bot   = Agent("claude-opus-4-7", system="You are a helpful assistant.")
+judge = Agent("claude-opus-4-7", name="judge",
+              system='Respond "approved" or "rejected: <reason>".')
 
 suite = EvalSuite(
     EvalCase("What's the capital of France?",
@@ -686,7 +568,3 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
   typed payload. If you're evaluating a structured-output agent, the
   check sees the JSON serialisation.
 - ``EvalSuite.run`` is synchronous; use ``arun`` in async test harnesses.
-
-**see-also**
-
-[guards](guards.md), [verify](verify.md), [agent](agent.md)

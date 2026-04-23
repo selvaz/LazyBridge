@@ -1,28 +1,8 @@
 # Engine protocol
 
-`Engine` is the abstraction that makes LazyBridge's uniform API
-possible. An `Agent` is an engine-agnostic envelope; every engine
-(LLM, Human, Supervisor, Plan) implements the same two-method
-contract, so the Agent doesn't change its call surface when you swap
-the engine.
-
-To ship a new engine you implement `run` (and optionally `stream`).
-The engine gets the request as an `Envelope`, the pre-wrapped tool
-list, the output type, memory, and the session. It produces an
-`Envelope`.
-
-Typical custom engines people write:
-
-* `ReactEngine` — tool-calling loop with explicit thought/action/
-  observation steps for research agents.
-* `RouterEngine` — pattern-matches the task string and dispatches to
-  sub-agents without calling an LLM at all.
-* `CachingEngine` — wraps another engine with result caching keyed on
-  the input envelope hash.
-
-`SupervisorEngine` is a good reference implementation to read — it's
-~280 LOC and covers the common patterns (event emission, memory
-integration, async-to-sync bridging).
+`SupervisorEngine` (~280 LOC) is a good reference implementation —
+it covers event emission, memory integration, and async-to-sync
+bridging.
 
 ## Example
 
@@ -105,7 +85,3 @@ print(Agent(engine=EchoEngine())("hello").text())
     - Agents set ``engine._agent_name`` before invocation. Use it when
       emitting events for observability.
 
-## See also
-
-[agent](agent.md), [base_provider](base-provider.md),
-[supervisor](supervisor.md)

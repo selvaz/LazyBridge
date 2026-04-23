@@ -32,24 +32,10 @@ Plan.from_dict(data: dict, *, registry: dict[str, Any] | None = None) -> Plan
   Agent's tool map.
 
 ## narrative
-Plan serialisation is what lets LazyBridge's crown jewel (compile-time
-DAG validation) cross process boundaries. You can:
-
-* Save a plan to disk, ship it with the code, reload on startup.
-* Hand a plan shape to a worker service over HTTP, have the worker
-  reconstruct the plan with its own agent bindings and run it.
-* Version-control plan definitions separately from the agents they
-  drive.
-
-What you CAN'T do: ship live functions / agents across processes.
-The registry pattern is explicit about this — both sides need to know
-the same names, and the loader rebinds them on arrival. This is a
-feature, not a limitation: it keeps execution targets in the host
-process where they belong.
-
-For a human-readable topology that includes runtime metadata (agent
-providers, models), use `GraphSchema.to_yaml` instead — `Plan.to_dict`
-is deliberately implementation-focused.
+Callables and Agents are serialised by **name only** — they don't
+cross process boundaries. Both sides must know the same names; the
+loader rebinds them via `registry=`. For a human-readable topology with
+runtime metadata (providers, models) use `GraphSchema.to_yaml` instead.
 
 ## example
 ```python
@@ -90,6 +76,3 @@ Agent.from_engine(plan_reloaded)("AI trends")
   bump the number and ``from_dict`` will refuse older shapes; migrate
   explicitly rather than silently.
 
-## see-also
-[plan](plan.md), [graph_schema](graph-schema.md),
-[engine_protocol](engine-protocol.md)

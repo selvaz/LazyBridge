@@ -23,20 +23,6 @@ flowchart TD
     B -->|me, part of a typed workflow| E[Plan + Step parallel equals True]
 
 ## notes
-Parallelism is not a configuration knob in LazyBridge. It happens in
-one of two ways:
-
-1. **Automatic (LLM-driven).** When an engine's underlying model emits
-   multiple tool calls in a single turn, they execute concurrently via
-   `asyncio.gather`. You do not opt in — you just pass the candidates
-   in `tools=[...]`. This covers "call `search` and `calc` in the same
-   step" scenarios.
-
-2. **Declared.** You wrote the shape. Either as `Agent.parallel(a, b, c)`
-   (pre-scripted fan-out returning `list[Envelope]`) or as a `Plan` with
-   `Step(parallel=True)` (declared concurrent branches in a typed DAG,
-   joined by `from_parallel`).
-
-There is **no "serial vs parallel mode"** on `LLMEngine`. The old
-`tool_choice="parallel"` option is deprecated — LazyBridge always
-dispatches concurrently.
+No serial/parallel mode switch. Automatic parallelism is always on when
+the model emits multiple tool calls. Declared parallelism is when you
+fix the shape yourself via `Agent.parallel` or `Step(parallel=True)`.

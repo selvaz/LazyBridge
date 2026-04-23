@@ -47,23 +47,6 @@ Composition sugar (NOT new paradigms):
 - ``guard=`` filters both input and output. Blocked runs return an
   error Envelope without invoking the engine.
 
-## narrative
-`Agent` is the only public abstraction in LazyBridge. Every pipeline —
-one-shot LLM calls, REPL supervisors, multi-step Plans — is an `Agent`
-with a different engine plugged into it. The call surface does not change.
-
-The key contract to internalise is **tool is tool**. When you pass things
-to `tools=[...]`, it doesn't matter whether each entry is a plain function,
-another Agent, or an Agent that itself has Agents as tools. The composition
-is closed under `Tool`, so you can build deeply-nested agent trees and the
-outer engine treats them identically to a one-line function.
-
-The second contract is **parallelism is free, not configured**. If the
-engine decides to call five tools in one step, LazyBridge fans them out
-with `asyncio.gather`. You do not flip a switch. When you want the
-orchestration to be deterministic — the fan-out shape is fixed by you,
-not by the model — you use `Plan` or the `Agent.parallel` sugar.
-
 ## example
 ```python
 from lazybridge import Agent
@@ -73,21 +56,17 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
-# Tier 1: two lines.
 print(Agent("claude-opus-4-7")("hello").text())
 
-# Tier 2: with tools (plain functions; schema auto-generated from hints).
 def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
 print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
-# Tier 3: structured output.
 resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
 print(resp.payload.title, resp.payload.bullets)
 
-# Nested agent-of-agent — uniform surface, no special ceremony.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())
@@ -104,8 +83,3 @@ print(editor("find papers and write a one-paragraph summary").text())
   with ``"approved"`` (case-insensitive) to accept. Anything else is
   treated as rejection + feedback.
 
-## see-also
-[tool](tool.md), [envelope](envelope.md),
-[chain](chain.md), [agent_parallel](agent-parallel.md),
-[as_tool](as-tool.md), [session](session.md),
-decision tree: [pick_tier](../decisions/pick-tier.md)

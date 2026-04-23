@@ -1,17 +1,8 @@
 # core.types
 
-`core.types` is the vocabulary engines and providers share. When you
-write a new `BaseProvider` you translate `CompletionRequest` →
-provider SDK and provider SDK → `CompletionResponse`. When you write a
-new `Engine` you build `CompletionRequest`s and read
-`CompletionResponse`s.
-
-Never import these in application code. An app uses `Agent`,
-`Envelope`, `Tool`, `Memory`, `Session`. The only exception is
-`NativeTool` — users pass it to `LLMEngine(native_tools=[...])` to
-enable provider-native server-side tools (web search, code exec),
-which is why it lives under `core.types` but is re-exported from
-`lazybridge`.
+Do not import from `lazybridge.core.*` in application code. Use
+`Agent`, `Envelope`, `Tool`, `Memory`, `Session`. The one exception is
+`NativeTool`, which is re-exported from `lazybridge` for end users.
 
 ## Example
 
@@ -111,32 +102,6 @@ async def astream(self, request):
                            GOOGLE_SEARCH, GOOGLE_MAPS
     StreamChunk(delta, thinking_delta, tool_calls, usage, is_final, ...)
 
-    # --- Agent-facing config objects (re-exported from lazybridge) ---
-    # Pass these to Agent() to share policy across a fleet; flat kwargs on
-    # Agent still win per-field.  See guides/agent.md "Shared config objects".
-
-    ResilienceConfig(
-        timeout: float | None = None,
-        max_retries: int = 3,
-        retry_delay: float = 1.0,
-        cache: bool | CacheConfig = False,
-        max_output_retries: int = 2,
-        output_validator: Callable[[Any], Any] | None = None,
-        fallback: Agent | None = None,
-    )
-
-    ObservabilityConfig(
-        verbose: bool = False,
-        session: Session | None = None,
-        name: str | None = None,
-        description: str | None = None,
-    )
-
-    AgentRuntimeConfig(
-        resilience: ResilienceConfig | None = None,
-        observability: ObservabilityConfig | None = None,
-    )
-
 !!! warning "Rules & invariants"
 
     - These types are the bridge between Engines and Providers. End users
@@ -150,7 +115,3 @@ async def astream(self, request):
     - ``StreamChunk`` carries incremental updates; providers yield them
       during ``stream`` / ``astream``.
 
-## See also
-
-[base_provider](base-provider.md), [engine_protocol](engine-protocol.md),
-[envelope](envelope.md)

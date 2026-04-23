@@ -45,26 +45,6 @@ Usage: Agent(engine=Plan(Step(a), Step(b)))
   step; ``resume=True`` reads the checkpoint and picks up at the next
   unrun step (failed runs restart from the failing step, not the next).
 
-## narrative
-`Plan` is where LazyBridge grows up. A plan declares a graph of steps
-with typed hand-offs, named outputs, conditional routing, and optional
-resume — all validated at construction time via `PlanCompileError`, so
-a misspelled step name fails before the first LLM call.
-
-The mental model: each `Step` is "run this target with this input,
-optionally named, optionally producing a typed output, optionally
-writing to a shared store". The `target` can be a tool name, a plain
-callable, or an Agent (which may itself have tools or sub-agents). The
-uniform Tool-is-Tool contract applies here too.
-
-The killer features over `Agent.chain` are four: (a) typed hand-offs
-via `output=Model`, so the next step can read fields rather than
-re-parsing strings; (b) conditional routing via `output.next: Literal`,
-so branches are data-driven; (c) parallel branches via
-`Step(parallel=True)` + `from_parallel`; (d) checkpoint/resume via
-`store + checkpoint_key`, so a crash mid-plan restarts the failed
-step rather than the whole pipeline.
-
 ## example
 ```python
 from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
@@ -102,8 +82,3 @@ Agent.from_engine(plan)("AI trends April 2026")
 - A step that fails persists a ``status="failed"`` checkpoint pointing
   back at itself. Subsequent ``resume=True`` runs retry that step.
 
-## see-also
-[sentinels](sentinels.md), [parallel_steps](parallel-steps.md),
-[checkpoint](checkpoint.md), [verify](verify.md),
-[plan_serialize](plan-serialize.md),
-decision tree: [composition](../decisions/composition.md)

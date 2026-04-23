@@ -30,27 +30,6 @@ Plan(Step(Agent(..., verify=judge_agent), ...))
 - Plan-level is just a special case of agent-level: wrap the step's
   agent with its own ``verify=``.
 
-## narrative
-`verify=` is LazyBridge's LLM-as-judge primitive. A cheap judge agent
-(or a plain callable) sits on the output path; if it says "approved",
-pass through; if not, inject the judge's feedback as retry fuel and try
-again up to `max_verify` times.
-
-Three placements address three different failure modes:
-
-* **Agent-level** is the broad-strokes gate: "I don't trust this
-  agent's final output without a second opinion."
-* **Tool-level (Option B)** is precision: "This one sub-agent is the
-  risky one; gate it specifically, and let the rest run freely."
-  Put it on the `as_tool` wrapper so every call is vetted.
-* **Plan-level** is when a specific step needs its own gate and the
-  rest of the pipeline doesn't — identical to agent-level, just
-  applied to the Step's agent.
-
-Judge design: keep the judge cheap (a smaller/faster model) and
-specific (one criterion per judge). Multi-criteria judges conflate
-failure modes and produce vague feedback.
-
 ## example
 ```python
 from lazybridge import Agent, Plan, Step
@@ -91,8 +70,6 @@ plan = Plan(
 - Nested verify (Agent-level + tool-level + Plan-level all on the
   same path) is allowed but expensive. Pick one per agent unless
   you're intentionally stacking.
-
-## see-also
-[agent](agent.md), [as_tool](as-tool.md), [plan](plan.md),
-[guards](guards.md), [evals](evals.md),
-decision tree: [verify_placement](../decisions/verify-placement.md)
+- Keep judges cheap (a smaller/faster model) and specific (one
+  criterion per judge). Multi-criteria judges conflate failure modes
+  and produce vague feedback.

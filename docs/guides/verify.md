@@ -1,66 +1,28 @@
 # verify=
 
-`verify=` is LazyBridge's LLM-as-judge primitive. A cheap judge agent
-(or a plain callable) sits on the output path; if it says "approved",
-pass through; if not, inject the judge's feedback as retry fuel and try
-again up to `max_verify` times.
-
-Three placements address three different failure modes:
-
-* **Agent-level** is the broad-strokes gate: "I don't trust this
-  agent's final output without a second opinion."
-* **Tool-level (Option B)** is precision: "This one sub-agent is the
-  risky one; gate it specifically, and let the rest run freely."
-  Put it on the `as_tool` wrapper so every call is vetted.
-* **Plan-level** is when a specific step needs its own gate and the
-  rest of the pipeline doesn't — identical to agent-level, just
-  applied to the Step's agent.
-
-Judge design: keep the judge cheap (a smaller/faster model) and
-specific (one criterion per judge). Multi-criteria judges conflate
-failure modes and produce vague feedback.
-
 ## Example
 
 ```python
-from lazybridge import Agent, LLMEngine, Plan, Step
+from lazybridge import Agent, Plan, Step
 
-# Judge needs a system prompt; ``system=`` belongs on the engine.
-# Use a cheaper model in real code.
 judge = Agent(
-    engine=LLMEngine(
-        "claude-opus-4-7",
-        system='Respond "approved" or "rejected: <short reason>".',
-    ),
-    name="judge",                    # label used in session.usage_summary()
+    "claude-opus-4-7",   # would typically be a cheaper model
+    name="judge",
+    system='Respond "approved" or "rejected: <short reason>".',
 )
 
-# Agent-level:
-#   verify=judge   → after the engine produces its final output, hand it
-#                    to ``judge``. If judge's verdict starts with
-#                    "approved", pass through. Otherwise rerun with the
-#                    verdict appended to the task as feedback.
-#   max_verify=2   → give the writer at most 2 attempts before returning
-#                    the last (possibly rejected) output as-is.
+# Agent-level: final output gated.
 writer = Agent("claude-opus-4-7", verify=judge, max_verify=2)
 writer("write a haiku about bees")
 
 # Tool-level (Option B): every call of synthesizer is gated.
-#   name="synthesizer" is the tool name seen by the orchestrator LLM
-#   (and the default Tool.name when this Agent is wrapped via as_tool()).
 synthesizer = Agent("claude-opus-4-7", name="synthesizer")
 orchestrator = Agent(
     "claude-opus-4-7",
-    # as_tool("synth", ...) overrides the tool name to "synth".
-    # verify=/max_verify= here gate every call through this tool, not
-    # the orchestrator's own final output.
     tools=[synthesizer.as_tool("synth", verify=judge, max_verify=2)],
 )
 
 # Plan-level: one step gated, rest unchecked.
-# Step(target, name="…") — ``name`` is the step id used by sentinels
-# (from_step("fetch")), checkpoints, and the graph view. ``target`` is
-# the callable / Agent that actually runs the step.
 plan = Plan(
     Step(fetcher, name="fetch"),
     Step(Agent("claude-opus-4-7", verify=judge, name="summarise"),
@@ -80,6 +42,9 @@ plan = Plan(
 - Nested verify (Agent-level + tool-level + Plan-level all on the
   same path) is allowed but expensive. Pick one per agent unless
   you're intentionally stacking.
+- Keep judges cheap (a smaller/faster model) and specific (one
+  criterion per judge). Multi-criteria judges conflate failure modes
+  and produce vague feedback.
 
 !!! note "API reference"
 
@@ -115,8 +80,3 @@ plan = Plan(
     - Plan-level is just a special case of agent-level: wrap the step's
       agent with its own ``verify=``.
 
-## See also
-
-[agent](agent.md), [as_tool](as-tool.md), [plan](plan.md),
-[guards](guards.md), [evals](evals.md),
-decision tree: [verify_placement](../decisions/verify-placement.md)

@@ -1,47 +1,19 @@
 # Agent.as_tool
 
-`as_tool` is the hinge that makes the "everything is a Tool" contract
-real. An `Agent` becomes a `Tool` the moment another `Agent` uses it:
-same schema, same calling convention, same observability. The outer
-engine does not know or care whether the thing it's calling is a pure
-function, an Agent, or an Agent of Agents.
-
-The second job of `as_tool` is to hold a verifier. When you want
-*every call* of a sub-agent to be vetted by a judge before returning,
-pass `verify=judge_agent`. The judge sees the output and must respond
-with `"approved"` to accept; anything else is treated as a rejection
-with feedback, and the wrapped agent retries with that feedback injected
-into the task. This is the tool-level placement of the verify pattern
-— different from `Agent(verify=...)` which gates the agent's own
-final output.
-
 ## Example
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent
 
-# name="researcher" becomes:
-#   - the default Tool.name when this Agent is wrapped via as_tool()
-#   - the label in Session.graph / event logs / usage_summary()
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
-# ``system=`` lives on the engine, not on Agent.
-judge = Agent(
-    engine=LLMEngine("claude-opus-4-7",
-                     system='Respond "approved" or "rejected: <reason>".'),
-    name="judge",
-)
+judge      = Agent("claude-opus-4-7", name="judge",
+                   system='Respond "approved" or "rejected: <reason>".')
 
 # Implicit: pass the agent, LazyBridge wraps it.
-# Tool schema is (task: str) -> str; tool name defaults to researcher.name.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher])   # equivalent to researcher.as_tool()
 
 # Explicit + verified: the judge gates every research call.
-#   name=         overrides the tool name the orchestrator's LLM sees.
-#   description=  is the natural-language tool description handed to the
-#                 LLM so it knows when to call this tool.
-#   verify=       every call through this tool is judged by ``judge``.
-#   max_verify=2  up to 2 retries per call; final attempt returned as-is.
 orchestrator = Agent("claude-opus-4-7",
                      tools=[researcher.as_tool(
                          name="research",
@@ -90,7 +62,3 @@ orchestrator = Agent("claude-opus-4-7",
     - Nested agents inherit the outer session and register an ``as_tool``
       edge in the graph automatically (see Agent docs).
 
-## See also
-
-[agent](agent.md), [tool](tool.md), [verify](verify.md),
-[session](session.md)

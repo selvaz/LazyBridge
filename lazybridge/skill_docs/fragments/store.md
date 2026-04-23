@@ -24,25 +24,6 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
   timeout (persistent). Safe to share across concurrent agents.
 - Store is not transactional; each write commits immediately.
 
-## narrative
-`Store` is the blackboard. When two or more agents need to share state
-— intermediate results, configuration, flags — they write to a common
-`Store`. Unlike `Memory`, which is conversation history attached to a
-single agent, `Store` is explicitly shared and addressable by key.
-
-Two common patterns:
-
-1. **Hand-off via store**: Agent A writes `store["research"] = results`;
-   Agent B reads `store.read("research")` in a later step. Useful with
-   `Plan(Step(..., writes="research"))` where Plan does the write for you.
-2. **Live context**: `Agent(sources=[store])` injects the current store
-   content (as text) into every call's context. The agent sees the
-   blackboard as part of its prompt, automatically updated each turn.
-
-Pick ``db="file.sqlite"`` when you need durability — a Plan's
-checkpoint/resume, cross-process sharing, or survival of crashes.
-Pick ``db=None`` for tests and single-process ephemeral runs.
-
 ## example
 ```python
 from lazybridge import Agent, Store, Plan, Step
@@ -73,7 +54,3 @@ print(monitor("status?").text())
 - ``store.to_text()`` can be expensive for stores with thousands of keys;
   pass ``keys=[...]`` to limit the slice.
 
-## see-also
-[memory](memory.md), [session](session.md),
-[plan](plan.md), [checkpoint](checkpoint.md),
-decision tree: [state_layer](../decisions/state-layer.md)

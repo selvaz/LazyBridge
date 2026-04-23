@@ -29,23 +29,6 @@ build_tool_map(tools: list) -> dict[str, Tool]
   drives them to completion so REPL callers (e.g. SupervisorEngine) never
   see a raw coroutine.
 
-## narrative
-You usually never construct a `Tool` yourself. Pass raw callables
-straight into `Agent(tools=[my_function])` — LazyBridge wraps each entry
-through `wrap_tool` and extracts the JSON schema from type hints +
-docstring. The `Tool` class is what comes out of that wrapping, and it is
-the uniform representation the engines operate on.
-
-Three things make this one abstraction enough. First, an `Agent`
-registered with `tools=[other_agent]` is wrapped via `other_agent.as_tool()`,
-which produces a `Tool`. Second, an `Agent` inside an `Agent` inside a
-`Tool` is still just a `Tool` to the outer engine. Third, `SupervisorEngine`
-and `Plan` accept the same `tools=[...]` surface; you write one tools list
-and hand it to any engine.
-
-Reach for an explicit `Tool(...)` call only when you need to override the
-name, inject guidance, or switch schema-generation modes.
-
 ## example
 ```python
 from lazybridge import Tool, Agent
@@ -79,6 +62,3 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
 - ``strict=True`` rejects optional / defaulted args under some providers;
   if a call fails with "unknown parameter", try ``strict=False``.
 
-## see-also
-[agent](agent.md), [as_tool](as-tool.md),
-decision tree: [parallelism](../decisions/parallelism.md)

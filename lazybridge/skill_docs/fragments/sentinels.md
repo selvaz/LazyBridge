@@ -66,6 +66,3 @@ plan = Plan(
 - When passing a ``str`` as ``task=``, it's treated as a LITERAL, not a
   sentinel. Don't write ``task="from_prev"`` expecting the sentinel.
 
-## see-also
-[plan](plan.md), [parallel_steps](parallel-steps.md),
-decision tree: [composition](../decisions/composition.md)

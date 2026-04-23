@@ -30,24 +30,14 @@ class BaseProvider(ABC):
   ``register_provider_rule`` so ``Agent("mymodel-foo")`` routes to it.
 
 ## narrative
-`BaseProvider` is the extension point for new LLM backends. Subclass
-it, implement four methods, and register the routing rule — you're
-wired.
+The contract is deliberately narrow: translate between
+`CompletionRequest` / `CompletionResponse` and the provider's native
+SDK. Tool loops, memory, structured output, and session events live in
+`LLMEngine`, not in the provider adapter.
 
-The contract is deliberately narrow: translate between LazyBridge's
-`CompletionRequest` / `CompletionResponse` types and the provider's
-native SDK. Everything above (tool loops, memory, structured output,
-session events) lives in `LLMEngine`, not in the provider adapter.
-
-Tier aliases (`_TIER_ALIASES`) decouple model names from the rest of
-the stack. A user who writes `Agent.from_provider("myllm", tier="top")`
-will get whatever you currently rank "top" in that provider — preview
-models, date-pinned snapshots — without their code changing when you
-refresh the lineup.
-
-Implement `resolve_model_alias` via the `BaseProvider` shared helper
-if you only need standard tier lookup; override it for custom routing
-logic.
+`_TIER_ALIASES` decouples model names from application code — users
+who write `Agent.from_provider("myllm", tier="top")` get whatever you
+rank "top" without changing their code when you update the lineup.
 
 ## example
 ```python
@@ -99,7 +89,3 @@ Agent.from_provider("mistral", tier="top")("hello").text()
 - Don't hard-code API keys; honour ``os.environ`` the same way the
   built-ins do for consistency.
 
-## see-also
-[register_provider](register-provider.md),
-[engine_protocol](engine-protocol.md),
-[core_types](core-types.md)

@@ -57,17 +57,10 @@ judge("grade the last turn")
 
 **pitfalls**
 
-- Pass the same ``Memory`` instance to both agents if you want shared
-  state. Copying or pickling resets the internal compression state.
 - ``Memory(strategy="summary")`` without a ``summarizer=`` agent falls
   back to a no-op and grows unboundedly.
 - ``memory.clear()`` wipes everything including the in-process summary;
   it does not persist across restarts. For durable memory use ``Store``.
-
-**see-also**
-
-[store](store.md), [agent](agent.md),
-decision tree: [state_layer](../decisions/state-layer.md)
 
 ## Store
 
@@ -130,12 +123,6 @@ print(monitor("status?").text())
   filesystem path as the value and read the file when you need it.
 - ``store.to_text()`` can be expensive for stores with thousands of keys;
   pass ``keys=[...]`` to limit the slice.
-
-**see-also**
-
-[memory](memory.md), [session](session.md),
-[plan](plan.md), [checkpoint](checkpoint.md),
-decision tree: [state_layer](../decisions/state-layer.md)
 
 ## Session & tracing
 
@@ -221,11 +208,6 @@ print(sess.graph.to_json())
   you also pass ``session=another``, ``verbose`` is ignored (the
   explicit session wins).
 
-**see-also**
-
-[exporters](exporters.md), [graph_schema](graph-schema.md),
-[agent](agent.md)
-
 ## Guards
 
 **signature**
@@ -289,14 +271,10 @@ print(env.error.message)
 - A guard that raises instead of returning ``GuardAction`` aborts the
   run. Return ``GuardAction(allowed=False, message=str(e))`` on error
   to keep pipelines resilient.
-- ``LLMGuard``'s judge is itself an Agent — pass a cheap model
-  (``Agent.from_provider("anthropic", tier="cheap")``) or costs add up.
+- Compose guards: put a cheap regex ``ContentGuard`` first; fall back to
+  ``LLMGuard`` only for what regex can't handle. Saves tokens.
 - Guards see ``Envelope.text()``, not the typed payload. If you're using
   structured output, the guard operates on the JSON serialisation.
-
-**see-also**
-
-[agent](agent.md), [evals](evals.md), [verify](verify.md)
 
 ## Agent.chain
 
@@ -344,12 +322,6 @@ print(pipeline("AI trends April 2026").text())
   ``Plan`` instead so you can declare ``output=``.
 - The outer chain Agent has its own name ("chain" by default); set
   ``name="…"`` if you want it to appear distinctly in ``Session.graph``.
-
-**see-also**
-
-[agent](agent.md), [plan](plan.md),
-[agent_parallel](agent-parallel.md), [sentinels](sentinels.md),
-decision tree: [composition](../decisions/composition.md)
 
 ## Agent.as_tool
 
@@ -415,11 +387,6 @@ orchestrator = Agent("claude-opus-4-7",
   the wrapped agent's ``output=``. If you need a typed payload in the
   caller, orchestrate via ``Plan`` with ``Step(output=Model)`` instead.
 
-**see-also**
-
-[agent](agent.md), [tool](tool.md), [verify](verify.md),
-[session](session.md)
-
 ## Agent.parallel
 
 **signature**
@@ -477,12 +444,6 @@ for env in results:
   Timeouts return an error Envelope in the slot, preserving the
   positional contract.
 
-**see-also**
-
-[agent](agent.md), [chain](chain.md),
-[plan](plan.md), [parallel_steps](parallel-steps.md),
-decision tree: [parallelism](../decisions/parallelism.md)
-
 ## HumanEngine
 
 **signature**
@@ -538,11 +499,6 @@ pipeline("draft the release notes")
   output_type) -> str``.
 - ``timeout=`` uses the event loop, not signals; it works in async
   contexts but may hang in tightly-blocking sync nests.
-
-**see-also**
-
-[supervisor](supervisor.md), [agent](agent.md),
-decision tree: [human_engine_vs_supervisor](../decisions/human-engine-vs-supervisor.md)
 
 ## EvalSuite
 
@@ -612,7 +568,3 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
   typed payload. If you're evaluating a structured-output agent, the
   check sees the JSON serialisation.
 - ``EvalSuite.run`` is synchronous; use ``arun`` in async test harnesses.
-
-**see-also**
-
-[guards](guards.md), [verify](verify.md), [agent](agent.md)

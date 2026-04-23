@@ -1,25 +1,5 @@
 # Checkpoint & resume
 
-Checkpoint/resume converte Plan da "workflow che può crashare" a
-"workflow idempotente attraverso crash". Il meccanismo è intenzionalmente
-minimale: nessuna history di Envelope, nessuna ricostruzione di stato
-in-memory. Quello che sopravvive a un restart è solo
-``writes``-bucket + puntatore allo step successivo + status.
-
-Tre scenari d'uso tipici:
-
-* **Run lungo e costoso** — una pipeline a 6 step con ciascun step che
-  costa $0.50 in token. Un crash alla 5/6 deve riprendere dalla 5, non
-  dalla 1.
-* **Eventi esterni** — un Plan che attende un webhook. Il processo si
-  spegne; un altro processo con lo stesso ``store`` + ``checkpoint_key``
-  + ``resume=True`` riprende dove l'altro aveva lasciato.
-* **Dev loop** — stai iterando su uno step specifico; i precedenti
-  sono già computati e persistiti, non ha senso rifarli ogni volta.
-
-La regola di pollice: usa checkpoint quando il costo di rieseguire gli
-step precedenti supera il costo della complicazione di storage.
-
 ## Example
 
 ```python
@@ -37,30 +17,31 @@ def build_plan():
         resume=True,
     )
 
-# Run 1 — crash dopo rank: status="failed", next_step="write".
+# Run 1 — crashes after rank: status="failed", next_step="write".
 try:
     Agent.from_engine(build_plan())("AI trends")
 except KeyboardInterrupt:
     pass
 
-# Run 2 — resume dallo step fallito, non rifà search+rank.
+# Run 2 — resumes from the failing step; search+rank are not re-run.
 Agent.from_engine(build_plan())("AI trends")
 
-# Run 3 — il plan è già "done": short-circuit, ritorna kv cached.
+# Run 3 — plan is already "done": short-circuits, returns cached kv.
 result = Agent.from_engine(build_plan())("AI trends")
 print(result.payload)  # {"hits": ..., "ranked": ..., "draft": ...}
 ```
 
 ## Pitfalls
 
-- Cambiare la definizione del ``Plan`` (aggiungere / rimuovere step,
-  rinominare) e riprendere da un checkpoint vecchio è un errore: il
-  ``next_step`` salvato può non esistere più. Invalida il checkpoint
-  (``store.delete(checkpoint_key)``) dopo refactor dei step.
-- Non-JSON-serialisable ``writes`` (es. un file handle) si rompono in
-  silenzio (vengono convertiti a stringa via ``default=str``).
-- Il resume non ri-inietta session / exporter del run originario; passa
-  gli stessi ``session=`` + ``store=`` su ogni run per continuità.
+- Changing the Plan definition (adding/removing/renaming steps) and
+  resuming from an old checkpoint will fail: the saved ``next_step``
+  may no longer exist. Delete the checkpoint
+  (``store.delete(checkpoint_key)``) after refactoring steps.
+- Non-JSON-serialisable ``writes`` values (e.g. a file handle) are
+  stringified silently via ``default=str``. Prefer primitives and
+  Pydantic models.
+- Resume does not re-inject the original session or exporters; pass the
+  same ``session=`` + ``store=`` on every run for continuity.
 
 !!! note "API reference"
 
@@ -81,19 +62,16 @@ print(result.payload)  # {"hits": ..., "ranked": ..., "draft": ...}
 
 !!! warning "Rules & invariants"
 
-    - Checkpoint scatta dopo ogni step riuscito e dopo ogni step fallito.
-    - Success path: ``status="running"`` (step successivo pendente) →
-      ``status="done"`` quando ``next_step is None``.
-    - Fail path: lo step fallito NON viene aggiunto a ``completed_steps``;
-      il checkpoint salva ``next_step=<nome step fallito>`` + ``status="failed"``.
-      Un successivo run con ``resume=True`` ri-parte da quello step.
-    - Success + ``resume=True`` + ``status="done"`` → short-circuit: il Plan
-      ritorna un Envelope con payload = ``kv`` cached, senza rieseguire.
-    - Il checkpoint è JSON-encoded via ``Store.write``; gli step ``writes=``
-      devono essere JSON-serialisable (string, dict, Pydantic model via
+    - Checkpoint fires after each successful step and after each failed step.
+    - Success path: ``status="running"`` (next step pending) →
+      ``status="done"`` when ``next_step is None``.
+    - Fail path: the failing step is NOT added to ``completed_steps``;
+      the checkpoint saves ``next_step=<failing step name>`` +
+      ``status="failed"``. A subsequent run with ``resume=True`` restarts
+      from that step.
+    - Success + ``resume=True`` + ``status="done"`` → short-circuit: Plan
+      returns an Envelope with payload = cached ``kv``, without re-running.
+    - Checkpoint is JSON-encoded via ``Store.write``; ``writes=`` payloads
+      must be JSON-serialisable (string, dict, Pydantic model via
       ``.model_dump()``).
 
-## See also
-
-[plan](plan.md), [store](store.md),
-decision tree: [checkpoint](../decisions/checkpoint.md)

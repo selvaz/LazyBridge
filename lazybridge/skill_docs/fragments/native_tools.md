@@ -28,27 +28,6 @@ Agent("model", native_tools=[NativeTool.WEB_SEARCH, ...]) -> Agent
   ``Envelope.metadata`` (``model``, ``provider``) and, where providers
   return them, via raw ``CompletionResponse.grounding_sources``.
 
-## narrative
-Native tools are the simplest kind of tool in LazyBridge — and often
-the first ones you need. You don't write anything: just pass an enum
-value and the provider does the work server-side.
-
-Think of them as capabilities you unlock on a model, not as code you
-ship. Want the model to search the web? `native_tools=[WEB_SEARCH]`.
-Want it to execute Python in a sandbox? `native_tools=[CODE_EXECUTION]`.
-No schema, no function, no loop.
-
-Native tools compose with your own functions. A researcher agent can
-have `native_tools=[WEB_SEARCH]` **and** `tools=[read_local_file]` at
-the same time — the model picks which to call per step, and parallel
-execution across them is automatic.
-
-The tradeoff is portability: each native tool is provider-specific.
-Web search works on Anthropic, OpenAI, and Google, but only
-`GOOGLE_SEARCH` gives you Google's grounded results. If you need
-provider-agnostic behaviour, write your own function and put it in
-`tools=[...]`.
-
 ## example
 ```python
 from lazybridge import Agent, NativeTool
@@ -83,6 +62,3 @@ Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
   code execution time). They appear in ``Envelope.metadata.cost_usd``
   when the provider reports them.
 
-## see-also
-[tool](tool.md), [agent](agent.md),
-[core_types](core-types.md)

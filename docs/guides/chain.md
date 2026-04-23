@@ -1,34 +1,16 @@
 # Agent.chain
 
-`Agent.chain` is the shortest path from "I want two agents in a row" to
-running code. Pass the agents, get back an Agent you can call. Each
-step's payload becomes the next step's task.
-
-Under the hood it's a `Plan` with plain `Step`s and the default
-`from_prev` sentinel. If you ever need to reach back to an earlier
-step's output, change a step's input to a typed model, or add a
-conditional branch — drop `chain` and write the `Plan` directly. The
-transition is additive, not a rewrite.
-
 ## Example
 
 ```python
 from lazybridge import Agent, Memory
 
-# name= labels each Agent in Session.graph / event logs. It also becomes
-# the auto-derived step name inside the Plan that Agent.chain compiles to
-# (i.e. you'd reference them as from_step("researcher") / from_step("editor")
-# / from_step("writer") if you ever switched from chain → Plan).
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
-# memory= on the chain wrapper is per-pipeline memory — it records the
-# (user-task, final-output) pair at the OUTER boundary. Individual agents
-# keep their own memory if they have one (they don't here).
-# strategy="auto" compresses only once Memory's token budget is exceeded.
 pipeline = Agent.chain(researcher, editor, writer,
-                        memory=Memory(strategy="auto"))
+                        memory=Memory("auto"))
 print(pipeline("AI trends April 2026").text())
 ```
 
@@ -63,8 +45,3 @@ print(pipeline("AI trends April 2026").text())
     - For fan-out on the same task see ``Agent.parallel``. For typed /
       conditional flows see ``Plan``.
 
-## See also
-
-[agent](agent.md), [plan](plan.md),
-[agent_parallel](agent-parallel.md), [sentinels](sentinels.md),
-decision tree: [composition](../decisions/composition.md)

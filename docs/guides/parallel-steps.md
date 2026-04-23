@@ -1,21 +1,5 @@
 # Parallel plan steps
 
-`Plan` is the only place in LazyBridge where parallelism is something
-you *declare*. In a plain `Agent(tools=[...])` the LLM decides and the
-engine dispatches with `asyncio.gather`; you don't configure anything.
-But a `Plan` is a pre-scripted workflow — the LLM isn't driving the
-shape — so if you want concurrent branches, you say so.
-
-The pattern is: N consecutive `Step(parallel=True)` entries, followed
-by a join step that reads one or more of them via `from_parallel`.
-Everything else works as usual — per-step `output=` types, `writes=` to
-a Store, sentinels for input/context.
-
-Use this when the workflow has independent sub-tasks that should happen
-at the same time (multi-source research, multi-provider comparison,
-independent verification probes) and you want them declared
-deterministically rather than relying on an LLM orchestrator.
-
 ## Example
 
 ```python
@@ -83,8 +67,3 @@ Agent.from_engine(plan)("framework update — April 2026")
     - Errors in a parallel branch surface as an error ``Envelope`` for
       that branch only; sibling branches continue.
 
-## See also
-
-[plan](plan.md), [sentinels](sentinels.md),
-[agent_parallel](agent-parallel.md),
-decision tree: [parallelism](../decisions/parallelism.md)

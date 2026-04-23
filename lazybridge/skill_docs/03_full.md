@@ -93,13 +93,6 @@ Agent.from_engine(plan)("AI trends April 2026")
 - A step that fails persists a ``status="failed"`` checkpoint pointing
   back at itself. Subsequent ``resume=True`` runs retry that step.
 
-**see-also**
-
-[sentinels](sentinels.md), [parallel_steps](parallel-steps.md),
-[checkpoint](checkpoint.md), [verify](verify.md),
-[plan_serialize](plan-serialize.md),
-decision tree: [composition](../decisions/composition.md)
-
 ## Sentinels (from_prev / from_start / from_step / from_parallel)
 
 **signature**
@@ -150,11 +143,6 @@ plan = Plan(
   variables of the same name.
 - When passing a ``str`` as ``task=``, it's treated as a LITERAL, not a
   sentinel. Don't write ``task="from_prev"`` expecting the sentinel.
-
-**see-also**
-
-[plan](plan.md), [parallel_steps](parallel-steps.md),
-decision tree: [composition](../decisions/composition.md)
 
 ## Parallel plan steps
 
@@ -224,12 +212,6 @@ Agent.from_engine(plan)("framework update — April 2026")
   saves after the block completes, not per-branch. If branch A
   succeeds but B crashes, resume retries the whole block, not just B.
   (Tracked for future work.)
-
-**see-also**
-
-[plan](plan.md), [sentinels](sentinels.md),
-[agent_parallel](agent-parallel.md),
-decision tree: [parallelism](../decisions/parallelism.md)
 
 ## SupervisorEngine
 
@@ -310,12 +292,6 @@ pipeline("AI policy brief")
 - Tool calls in the REPL go via ``run_sync``. If a tool's ``func`` is
   async, it's driven to completion automatically (post-v1 fix).
 
-**see-also**
-
-[human_engine](human-engine.md), [agent](agent.md),
-[plan](plan.md),
-decision tree: [human_engine_vs_supervisor](../decisions/human-engine-vs-supervisor.md)
-
 ## Checkpoint & resume
 
 **signature**
@@ -337,16 +313,17 @@ Plan(
 
 **rules**
 
-- Checkpoint scatta dopo ogni step riuscito e dopo ogni step fallito.
-- Success path: ``status="running"`` (step successivo pendente) →
-  ``status="done"`` quando ``next_step is None``.
-- Fail path: lo step fallito NON viene aggiunto a ``completed_steps``;
-  il checkpoint salva ``next_step=<nome step fallito>`` + ``status="failed"``.
-  Un successivo run con ``resume=True`` ri-parte da quello step.
-- Success + ``resume=True`` + ``status="done"`` → short-circuit: il Plan
-  ritorna un Envelope con payload = ``kv`` cached, senza rieseguire.
-- Il checkpoint è JSON-encoded via ``Store.write``; gli step ``writes=``
-  devono essere JSON-serialisable (string, dict, Pydantic model via
+- Checkpoint fires after each successful step and after each failed step.
+- Success path: ``status="running"`` (next step pending) →
+  ``status="done"`` when ``next_step is None``.
+- Fail path: the failing step is NOT added to ``completed_steps``;
+  the checkpoint saves ``next_step=<failing step name>`` +
+  ``status="failed"``. A subsequent run with ``resume=True`` restarts
+  from that step.
+- Success + ``resume=True`` + ``status="done"`` → short-circuit: Plan
+  returns an Envelope with payload = cached ``kv``, without re-running.
+- Checkpoint is JSON-encoded via ``Store.write``; ``writes=`` payloads
+  must be JSON-serialisable (string, dict, Pydantic model via
   ``.model_dump()``).
 
 **example**
@@ -366,35 +343,31 @@ def build_plan():
         resume=True,
     )
 
-# Run 1 — crash dopo rank: status="failed", next_step="write".
+# Run 1 — crashes after rank: status="failed", next_step="write".
 try:
     Agent.from_engine(build_plan())("AI trends")
 except KeyboardInterrupt:
     pass
 
-# Run 2 — resume dallo step fallito, non rifà search+rank.
+# Run 2 — resumes from the failing step; search+rank are not re-run.
 Agent.from_engine(build_plan())("AI trends")
 
-# Run 3 — il plan è già "done": short-circuit, ritorna kv cached.
+# Run 3 — plan is already "done": short-circuits, returns cached kv.
 result = Agent.from_engine(build_plan())("AI trends")
 print(result.payload)  # {"hits": ..., "ranked": ..., "draft": ...}
 ```
 
 **pitfalls**
 
-- Cambiare la definizione del ``Plan`` (aggiungere / rimuovere step,
-  rinominare) e riprendere da un checkpoint vecchio è un errore: il
-  ``next_step`` salvato può non esistere più. Invalida il checkpoint
-  (``store.delete(checkpoint_key)``) dopo refactor dei step.
-- Non-JSON-serialisable ``writes`` (es. un file handle) si rompono in
-  silenzio (vengono convertiti a stringa via ``default=str``).
-- Il resume non ri-inietta session / exporter del run originario; passa
-  gli stessi ``session=`` + ``store=`` su ogni run per continuità.
-
-**see-also**
-
-[plan](plan.md), [store](store.md),
-decision tree: [checkpoint](../decisions/checkpoint.md)
+- Changing the Plan definition (adding/removing/renaming steps) and
+  resuming from an old checkpoint will fail: the saved ``next_step``
+  may no longer exist. Delete the checkpoint
+  (``store.delete(checkpoint_key)``) after refactoring steps.
+- Non-JSON-serialisable ``writes`` values (e.g. a file handle) are
+  stringified silently via ``default=str``. Prefer primitives and
+  Pydantic models.
+- Resume does not re-inject the original session or exporters; pass the
+  same ``session=`` + ``store=`` on every run for continuity.
 
 ## Exporters
 
@@ -466,13 +439,6 @@ Agent.chain(researcher, writer, session=sess)("…")
   to a log aggregator via ``JsonFileExporter``).
 - Exporter exceptions are caught silently; if events don't arrive,
   temporarily wrap with ``CallbackExporter(print)`` to confirm.
-- ``StructuredLogExporter`` is a thin wrapper over Python ``logging``
-  — it inherits your logger's handlers / format.
-
-**see-also**
-
-[session](session.md),
-decision tree: [parallelism](../decisions/parallelism.md)
 
 ## GraphSchema
 
@@ -550,11 +516,6 @@ assert len(replay.nodes()) == 3
   ``to_json`` is stdlib-only.
 - ``from_dict`` reconstructs descriptors only — the ``provider`` /
   ``model`` strings on ``AgentNode`` are not live ``LLMEngine``s.
-
-**see-also**
-
-[session](session.md), [agent](agent.md),
-[plan_serialize](plan-serialize.md)
 
 ## verify=
 
@@ -634,9 +595,6 @@ plan = Plan(
 - Nested verify (Agent-level + tool-level + Plan-level all on the
   same path) is allowed but expensive. Pick one per agent unless
   you're intentionally stacking.
-
-**see-also**
-
-[agent](agent.md), [as_tool](as-tool.md), [plan](plan.md),
-[guards](guards.md), [evals](evals.md),
-decision tree: [verify_placement](../decisions/verify-placement.md)
+- Keep judges cheap (a smaller/faster model) and specific (one
+  criterion per judge). Multi-criteria judges conflate failure modes
+  and produce vague feedback.

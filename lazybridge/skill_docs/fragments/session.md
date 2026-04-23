@@ -37,26 +37,6 @@ Shortcut: Agent("model", verbose=True) creates a private Session(console=True).
 - Exporters fire in registration order on every emit. Exceptions raised
   by one exporter do not block others.
 
-## narrative
-`Session` is LazyBridge's observability container. It owns an `EventLog`
-(SQLite, in-memory by default) and a fan-out of `EventExporter`s that
-receive each event — console printers, OpenTelemetry, JSON files,
-custom callbacks.
-
-Two ergonomics to remember. `Session(console=True)` installs a
-pretty-printing exporter that prints each event to stdout with one line
-per event — ideal during development. `Agent("model", verbose=True)`
-creates a private `Session(console=True)` for you when you just want to
-watch one agent run, no ceremony.
-
-Every Agent constructed with `session=s` auto-registers in
-`s.graph` (a `GraphSchema`), and when agents wrap each other as tools
-an `as_tool` edge is recorded. You can dump the topology with
-`s.graph.to_json()` or `.to_yaml()`.
-
-Call `s.usage_summary()` at the end of a run to get a structured
-breakdown: total tokens and cost, per-agent, and per-run.
-
 ## example
 ```python
 from lazybridge import Agent, Session, ConsoleExporter, JsonFileExporter
@@ -96,6 +76,3 @@ print(sess.graph.to_json())
   you also pass ``session=another``, ``verbose`` is ignored (the
   explicit session wins).
 
-## see-also
-[exporters](exporters.md), [graph_schema](graph-schema.md),
-[agent](agent.md)

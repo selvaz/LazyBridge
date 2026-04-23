@@ -66,18 +66,9 @@ StreamChunk(delta, thinking_delta, tool_calls, usage, is_final, ...)
   during ``stream`` / ``astream``.
 
 ## narrative
-`core.types` is the vocabulary engines and providers share. When you
-write a new `BaseProvider` you translate `CompletionRequest` →
-provider SDK and provider SDK → `CompletionResponse`. When you write a
-new `Engine` you build `CompletionRequest`s and read
-`CompletionResponse`s.
-
-Never import these in application code. An app uses `Agent`,
-`Envelope`, `Tool`, `Memory`, `Session`. The only exception is
-`NativeTool` — users pass it to `LLMEngine(native_tools=[...])` to
-enable provider-native server-side tools (web search, code exec),
-which is why it lives under `core.types` but is re-exported from
-`lazybridge`.
+Do not import from `lazybridge.core.*` in application code. Use
+`Agent`, `Envelope`, `Tool`, `Memory`, `Session`. The one exception is
+`NativeTool`, which is re-exported from `lazybridge` for end users.
 
 ## example
 ```python
@@ -119,6 +110,3 @@ async def astream(self, request):
   decides whether to honour each one; unsupported combinations raise
   at ``complete`` time.
 
-## see-also
-[base_provider](base-provider.md), [engine_protocol](engine-protocol.md),
-[envelope](envelope.md)

@@ -12,8 +12,5 @@ flowchart TD
     E --> E1[Engine protocol / BaseProvider /<br/>Plan serialisation / core.types]
 ```
 
-Start as low as possible. Moving up a tier is additive — no code you
-wrote in Basic needs to change when you later add Memory (Mid) or wrap
-the agent in a Plan (Full). Most users live in Basic and Mid; Full is
-for production-grade declared pipelines; Advanced only applies if you're
-writing framework code.
+Start as low as possible. Tiers are additive — no code changes when
+you move up. Advanced is for framework authors only.

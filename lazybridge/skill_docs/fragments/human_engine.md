@@ -20,24 +20,6 @@ Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
   raw string, they don't call tools interactively. If you want the
   human to call tools, use ``SupervisorEngine``.
 
-## narrative
-`HumanEngine` is the simplest form of human-in-the-loop: the engine
-pauses execution and waits for the human to type something. That's it.
-No REPL, no tool calling, no agent retry — just a text prompt and a
-response.
-
-Use it when the human is a participant in a pipeline (an approver, a
-reviewer, an annotator) rather than an operator. The Agent wrapping
-`HumanEngine` slots identically into `chain` / `parallel` / `Plan`.
-
-When `output=` is a Pydantic model, the terminal variant prompts
-field-by-field with coercion — integers become `int`, `bool` accepts
-`yes/no`, lists are comma-separated. That's enough for light-touch
-forms without shipping a GUI.
-
-For a full interactive REPL with tool calls and agent retry, use
-`SupervisorEngine` instead.
-
 ## example
 ```python
 from lazybridge import Agent, HumanEngine
@@ -66,6 +48,3 @@ pipeline("draft the release notes")
 - ``timeout=`` uses the event loop, not signals; it works in async
   contexts but may hang in tightly-blocking sync nests.
 
-## see-also
-[supervisor](supervisor.md), [agent](agent.md),
-decision tree: [human_engine_vs_supervisor](../decisions/human-engine-vs-supervisor.md)

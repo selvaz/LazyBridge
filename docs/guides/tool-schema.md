@@ -1,34 +1,5 @@
 # Function → Tool (schema modes)
 
-LazyBridge's zero-boilerplate promise rests on `ToolSchemaBuilder`:
-any Python callable becomes an LLM-usable tool, no JSON schema written
-by hand, no decorator dance. Pass a function to `tools=[...]` and
-you're done.
-
-Three modes, because three common situations:
-
-* **Signature mode** — your function has complete type hints and a
-  good docstring. The builder extracts everything it needs from
-  `inspect.signature` + `typing.get_type_hints` + the docstring. This
-  is the default and should be your default choice. No LLM is involved;
-  conversion is microseconds.
-
-* **LLM mode** — the function has no hints, or uses exotic types the
-  JSON schema world doesn't speak (e.g. NumPy arrays, custom classes).
-  The builder sends the function's source and docstring to a cheap LLM
-  and asks it to produce a schema. You pay tokens once at construction
-  time; subsequent calls use the cached schema.
-
-* **Hybrid mode** — you have a mix. The builder tries signature mode
-  first and falls back to LLM for parameters it can't resolve.
-  Pragmatic for gradual-typed codebases.
-
-In 95% of cases you don't touch this knob at all — the default
-signature mode just works. Reach for `"llm"` when you're wrapping a
-legacy function you don't want to annotate, or a function whose
-argument types genuinely need explanation beyond a type name (e.g.
-natural-language parameters like "SQL query dialect").
-
 ## Example
 
 ```python
@@ -123,6 +94,3 @@ tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
       extra fields, no coercion). Available on Anthropic + OpenAI strict
       modes; increases reliability at the cost of some flexibility.
 
-## See also
-
-[tool](tool.md), [agent](agent.md), [native_tools](native-tools.md)

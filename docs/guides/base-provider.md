@@ -1,23 +1,13 @@
 # BaseProvider
 
-`BaseProvider` is the extension point for new LLM backends. Subclass
-it, implement four methods, and register the routing rule — you're
-wired.
+The contract is deliberately narrow: translate between
+`CompletionRequest` / `CompletionResponse` and the provider's native
+SDK. Tool loops, memory, structured output, and session events live in
+`LLMEngine`, not in the provider adapter.
 
-The contract is deliberately narrow: translate between LazyBridge's
-`CompletionRequest` / `CompletionResponse` types and the provider's
-native SDK. Everything above (tool loops, memory, structured output,
-session events) lives in `LLMEngine`, not in the provider adapter.
-
-Tier aliases (`_TIER_ALIASES`) decouple model names from the rest of
-the stack. A user who writes `Agent.from_provider("myllm", tier="top")`
-will get whatever you currently rank "top" in that provider — preview
-models, date-pinned snapshots — without their code changing when you
-refresh the lineup.
-
-Implement `resolve_model_alias` via the `BaseProvider` shared helper
-if you only need standard tier lookup; override it for custom routing
-logic.
+`_TIER_ALIASES` decouples model names from application code — users
+who write `Agent.from_provider("myllm", tier="top")` get whatever you
+rank "top" without changing their code when you update the lineup.
 
 ## Example
 
@@ -90,21 +80,6 @@ Agent.from_provider("mistral", tier="top")("hello").text()
         # Shared helper:
         def resolve_model_alias(self, model: str) -> str | None: ...
 
-        # Optional — provider-specific retry classifier.  Executor
-        # consults this before falling back to the generic string /
-        # status-code heuristic.
-        #
-        #   True  → retry with backoff
-        #   False → do not retry; surface the exception
-        #   None  → defer to the generic classifier (default)
-        #
-        # Override when the provider SDK raises structured exception
-        # types that carry retry semantics more precisely than HTTP
-        # codes alone — e.g. Bedrock ThrottlingException vs
-        # ModelNotReadyException, both 400-class but the first is
-        # retryable and the second is not.
-        def is_retryable(self, exc: BaseException) -> bool | None: ...
-
 !!! warning "Rules & invariants"
 
     - Subclass ``BaseProvider`` to integrate a new LLM backend with
@@ -119,8 +94,3 @@ Agent.from_provider("mistral", tier="top")("hello").text()
     - Register the provider with ``LLMEngine.register_provider_alias`` or
       ``register_provider_rule`` so ``Agent("mymodel-foo")`` routes to it.
 
-## See also
-
-[register_provider](register-provider.md),
-[engine_protocol](engine-protocol.md),
-[core_types](core-types.md)

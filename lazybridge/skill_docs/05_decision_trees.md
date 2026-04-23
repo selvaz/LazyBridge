@@ -23,11 +23,8 @@ cross-process Plan serialisation, direct core.types use?
     → Advanced.
 ```
 
-Start as low as possible. Moving up a tier is additive — no code you
-wrote in Basic needs to change when you later add Memory (Mid) or wrap
-the agent in a Plan (Full). Most users live in Basic and Mid; Full is
-for production-grade declared pipelines; Advanced only applies if you're
-writing framework code.
+Start as low as possible. Tiers are additive — no code changes when
+you move up. Advanced is for framework authors only.
 
 ## What does my agent return — text, typed object, or metadata?
 
@@ -45,13 +42,8 @@ Need to check for errors before reading payload?
     → if env.ok: ... else: env.error.message
 ```
 
-An ``Envelope`` carries everything the engine knows about a run: the
-payload (string by default; typed when ``output=`` is set), metadata
-(tokens, cost, latency, run id), and an optional error channel. You
-pick what you read; nothing is hidden.
-
-Calling ``.text()`` is safe on every Envelope — it serialises Pydantic
-payloads as JSON and handles ``None`` as empty string.
+`.text()` is always safe — serialises Pydantic payloads as JSON,
+returns empty string for `None`.
 
 ## State: Memory, Store, or sources=?
 
@@ -70,20 +62,10 @@ Multiple patterns at once?
       Example: Agent(memory=Memory(), sources=[shared_store, policy_text])
 ```
 
-`Memory` is conversational and per-agent. It records turns and
-compresses older ones when your token budget is exceeded.
-
-`Store` is a blackboard: explicit, addressable by key, shareable.
-Use it when agents need to hand off intermediate state or cache results
-across runs. Pass ``db="file.sqlite"`` for persistence.
-
-`sources=[...]` is context injection. Each source object is asked for
-its current text at call time (live view — no snapshotting), and the
-concatenated text is appended to the system prompt. Sources can be
-`Memory`, `Store`, callables, or plain strings.
-
-All three compose: an agent can have its own `memory`, read from a
-shared `Store` via `sources=`, and also inject a policy string.
+`Memory` is per-agent conversation history with compression. `Store` is
+a shared, addressable blackboard (use `db=` for persistence). `sources=`
+injects any live text into the system prompt at call time. All three
+compose freely on the same agent.
 
 ## Composing agents: chain, Agent.parallel, Plan, or tools=?
 
@@ -101,19 +83,9 @@ Declared workflow with typed hand-offs, routing, resume?
     → Plan(Step(..., output=...), ...)
 ```
 
-Four composition patterns, picked by **who decides what runs when**:
-
-* `Agent.chain` and `Agent.parallel` are **sugar** — deterministic,
-  pre-scripted, no LLM orchestrator. Use when you know the shape.
-* `Agent(tools=[a, b, c])` is **LLM-driven** — the model picks which
-  tools to call and in what order; parallel execution of multiple tool
-  calls in a single turn happens automatically.
-* `Plan` is **declared and typed** — steps have named outputs, optional
-  routing via `out.next: Literal[...]`, compile-time validation,
-  checkpoint/resume via a backing Store.
-
-The three are composable: a Plan step's target can be an Agent which
-itself has `tools=[...]`, and so on down.
+Pick by **who decides what runs when**: `chain`/`parallel` are
+pre-scripted; `tools=[...]` is LLM-driven; `Plan` is typed and
+declared with compile-time validation. All three compose freely.
 
 ## Parallelism: automatic or declared?
 
@@ -132,23 +104,9 @@ Do you want declared concurrent branches inside a typed workflow?
            Step(join, task=from_parallel("a")))   # plus aggregation step
 ```
 
-Parallelism is not a configuration knob in LazyBridge. It happens in
-one of two ways:
-
-1. **Automatic (LLM-driven).** When an engine's underlying model emits
-   multiple tool calls in a single turn, they execute concurrently via
-   `asyncio.gather`. You do not opt in — you just pass the candidates
-   in `tools=[...]`. This covers "call `search` and `calc` in the same
-   step" scenarios.
-
-2. **Declared.** You wrote the shape. Either as `Agent.parallel(a, b, c)`
-   (pre-scripted fan-out returning `list[Envelope]`) or as a `Plan` with
-   `Step(parallel=True)` (declared concurrent branches in a typed DAG,
-   joined by `from_parallel`).
-
-There is **no "serial vs parallel mode"** on `LLMEngine`. The old
-`tool_choice="parallel"` option is deprecated — LazyBridge always
-dispatches concurrently.
+No serial/parallel mode switch. Automatic parallelism is always on when
+the model emits multiple tool calls. Declared parallelism is when you
+fix the shape yourself via `Agent.parallel` or `Step(parallel=True)`.
 
 ## Human-in-the-loop: HumanEngine or SupervisorEngine?
 
@@ -165,25 +123,9 @@ Automated (no human) verification at runtime?
     → verify=judge_agent          # NOT a HIL paradigm — it's an LLM judge
 ```
 
-`HumanEngine` is the minimum: one prompt, one answer. Good for
-approvals, reviewers, light annotation, Pydantic forms. Blocks on
-`input()` or a custom UI adapter.
-
-`SupervisorEngine` is a full REPL. The human sees the previous output
-and can:
-
-* `continue` — accept and return to the pipeline,
-* `retry <agent>: <feedback>` — re-run a registered agent with feedback,
-* `store <key>` — inspect the shared Store,
-* `<tool>(<args>)` — invoke a registered tool directly.
-
-Use it when the human is an operator in the pipeline, not just a
-gate. Pass `input_fn=_scripted(...)` in tests to keep the loop
-non-interactive.
-
-`verify=` is **not** HIL at all — the judge is an Agent, automated.
-Listed here because users often conflate "verification" with "human
-review".
+`HumanEngine` = one prompt, one answer. `SupervisorEngine` = full REPL
+(continue / retry / store / tool commands). Use `input_fn=` in tests.
+`verify=` is an automated LLM judge, not human-in-the-loop.
 
 ## verify= at Agent level, tool level, or Plan step level?
 
@@ -203,21 +145,11 @@ Want a judge on every tool call emitted by the model?
       For call-time filtering use Guards (guards.md).
 ```
 
-`verify=` is LLM-as-judge on an agent's output; it retries with
-feedback. Three placements because three scopes:
-
-* **Agent-level** — broadest. Use when you don't trust an agent's
-  final output by default.
-* **Tool-level (Option B)** — surgical. Use when one sub-agent is
-  risky and the rest of the run is fine. Put the judge on the
-  `as_tool(...)` wrapper.
-* **Plan step-level** — same mechanism, scoped to one step in a
-  declared workflow.
-
-If you need to gate *every tool call* (e.g. "block any search with
-PII"), `verify=` is the wrong tool — that's a **Guard**
-(`GuardChain`, `ContentGuard`, `LLMGuard`), which intercepts call
-inputs and outputs directly.
+`verify=` retries with judge feedback. Use agent-level for broad
+output gates, tool-level (`as_tool(verify=...)`) when one sub-agent
+is risky, Plan step-level when one step needs a gate. For filtering
+every tool invocation, use a Guard instead — `verify=` gates output,
+not individual calls.
 
 ## Checkpoint/resume: when is it worth the storage complexity?
 
@@ -243,14 +175,10 @@ Need a user-visible history of every step's Envelope?
       For full history use Session + JsonFileExporter.
 ```
 
-Rule of thumb: enable checkpointing when the cost of re-running earlier
-steps exceeds the cost of the storage complication.
-
-Cost of checkpointing is low: one JSON write per step, persistence via
-SQLite WAL, minimal state shape (`writes` bucket + next step + status).
-It is **not** a full run history — the in-memory `StepResult` history
-is rebuilt empty on resume. If you need the full audit trail, combine
-`Plan` with a `Session` + `JsonFileExporter`.
+Enable when re-running earlier steps costs more than the storage
+overhead. Checkpoint is minimal (one JSON write per step; `writes`
+bucket + next step + status). It is not a full run history — for that,
+combine `Plan` with `Session` + `JsonFileExporter`.
 
 ## Do I actually need the Advanced tier?
 
@@ -272,12 +200,6 @@ Tweaking prompts, swapping models, building pipelines?
     → Basic / Mid / Full cover this.           (STOP. You're fine.)
 ```
 
-Advanced tier is **framework authorship**, not application authorship.
-If you are building a product on top of LazyBridge — pipelines,
-agents, prompts, evals — the Full tier covers you. Reach for Advanced
-only when you're changing what LazyBridge itself can do, not what you
-can do with it.
-
-A smell test: if you find yourself importing from
-`lazybridge.core.*` in application code, step back. The imports at
-`from lazybridge import ...` cover 99% of use cases.
+Advanced is framework authorship, not application development. Smell
+test: if you're importing from `lazybridge.core.*` in app code, step
+back — `from lazybridge import ...` covers 99% of use cases.

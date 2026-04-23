@@ -18,17 +18,6 @@ Alternatives:
 - For fan-out on the same task see ``Agent.parallel``. For typed /
   conditional flows see ``Plan``.
 
-## narrative
-`Agent.chain` is the shortest path from "I want two agents in a row" to
-running code. Pass the agents, get back an Agent you can call. Each
-step's payload becomes the next step's task.
-
-Under the hood it's a `Plan` with plain `Step`s and the default
-`from_prev` sentinel. If you ever need to reach back to an earlier
-step's output, change a step's input to a typed model, or add a
-conditional branch — drop `chain` and write the `Plan` directly. The
-transition is additive, not a rewrite.
-
 ## example
 ```python
 from lazybridge import Agent, Memory
@@ -50,7 +39,3 @@ print(pipeline("AI trends April 2026").text())
 - The outer chain Agent has its own name ("chain" by default); set
   ``name="…"`` if you want it to appear distinctly in ``Session.graph``.
 
-## see-also
-[agent](agent.md), [plan](plan.md),
-[agent_parallel](agent-parallel.md), [sentinels](sentinels.md),
-decision tree: [composition](../decisions/composition.md)

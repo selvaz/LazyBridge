@@ -28,12 +28,6 @@ flowchart TD
     B -->|pipelines / prompts / models| G[No - use Basic/Mid/Full]
 
 ## notes
-Advanced tier is **framework authorship**, not application authorship.
-If you are building a product on top of LazyBridge — pipelines,
-agents, prompts, evals — the Full tier covers you. Reach for Advanced
-only when you're changing what LazyBridge itself can do, not what you
-can do with it.
-
-A smell test: if you find yourself importing from
-`lazybridge.core.*` in application code, step back. The imports at
-`from lazybridge import ...` cover 99% of use cases.
+Advanced is framework authorship, not application development. Smell
+test: if you're importing from `lazybridge.core.*` in app code, step
+back — `from lazybridge import ...` covers 99% of use cases.

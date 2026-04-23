@@ -23,10 +23,5 @@ flowchart TD
     B -->|error check| F[env.ok then env.error]
 
 ## notes
-An ``Envelope`` carries everything the engine knows about a run: the
-payload (string by default; typed when ``output=`` is set), metadata
-(tokens, cost, latency, run id), and an optional error channel. You
-pick what you read; nothing is hidden.
-
-Calling ``.text()`` is safe on every Envelope — it serialises Pydantic
-payloads as JSON and handles ``None`` as empty string.
+`.text()` is always safe — serialises Pydantic payloads as JSON,
+returns empty string for `None`.

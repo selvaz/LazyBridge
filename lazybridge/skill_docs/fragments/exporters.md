@@ -30,24 +30,14 @@ Usage:
 - ``OTelExporter`` requires ``pip install lazybridge[otel]``.
 
 ## narrative
-Exporters are event sinks: every `Session.emit(...)` call fans out to
-them. LazyBridge ships six, covering the common cases (stdout,
-logging, JSONL, OpenTelemetry, generic callback, filter combinator),
-and `EventExporter` is a trivial Protocol so shipping your own is a
-one-method class.
-
 Three practical stacks:
 
-* **Dev**: `Session(console=True)` (or `Agent(verbose=True)`) — one
-  `ConsoleExporter` is installed, you read events as they happen.
-* **Prod**: `exporters=[JsonFileExporter("run.jsonl"),
-  OTelExporter(endpoint=...)]` — durable log + distributed trace.
-* **Custom**: `CallbackExporter(push_to_kafka)` — pipe events wherever
-  you need.
+* **Dev**: `Session(console=True)` (or `Agent(verbose=True)`)
+* **Prod**: `exporters=[JsonFileExporter("run.jsonl"), OTelExporter(endpoint=...)]`
+* **Custom**: `CallbackExporter(fn)` — pipe events anywhere
 
-Filtering: wrap any exporter in a `FilteredExporter` if you only care
-about certain event types. Common filter: `{"tool_call", "tool_error"}`
-for cost/error dashboards.
+Wrap any exporter in `FilteredExporter` to forward only specific event
+types, e.g. `{"tool_call", "tool_error"}` for a cost/error dashboard.
 
 ## example
 ```python
@@ -82,9 +72,3 @@ Agent.chain(researcher, writer, session=sess)("…")
   to a log aggregator via ``JsonFileExporter``).
 - Exporter exceptions are caught silently; if events don't arrive,
   temporarily wrap with ``CallbackExporter(print)`` to confirm.
-- ``StructuredLogExporter`` is a thin wrapper over Python ``logging``
-  — it inherits your logger's handlers / format.
-
-## see-also
-[session](session.md),
-decision tree: [parallelism](../decisions/parallelism.md)

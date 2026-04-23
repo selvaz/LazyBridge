@@ -29,21 +29,12 @@ Every as_tool wrapping records an edge with label="as_tool".
   from a saved graph is the caller's job.
 
 ## narrative
-`GraphSchema` is the topology view of a `Session`. Every agent
-constructed with `session=s` registers a node; every `Agent.as_tool()`
-call from within that session records an `as_tool` edge. The result is
-a live-updating graph you can serialise, inspect, or hand to a GUI.
-
 Two typical uses:
 
-* **Debug / docs** — `print(session.graph.to_json())` after a run to
-  confirm the pipeline you think you built is the one that ran.
-* **External rendering** — dump to JSON/YAML for a UI (`save("g.yaml")`
-  → load in a diagramming tool, or feed to your own renderer).
-
-`GraphSchema` round-trips through `to_dict` / `from_dict`, so you can
-persist a topology, edit it, and reload — handy for saved workflow
-templates.
+* **Debug** — `print(session.graph.to_json())` after a run to confirm
+  the pipeline you built matches what ran.
+* **External rendering** — `save("g.yaml")` → load in a diagramming
+  tool or your own UI renderer.
 
 ## example
 ```python
@@ -86,6 +77,3 @@ assert len(replay.nodes()) == 3
 - ``from_dict`` reconstructs descriptors only — the ``provider`` /
   ``model`` strings on ``AgentNode`` are not live ``LLMEngine``s.
 
-## see-also
-[session](session.md), [agent](agent.md),
-[plan_serialize](plan-serialize.md)

@@ -24,27 +24,6 @@ LLMEngine.register_provider_rule(
   Tests should snapshot/restore these tables if they register rules
   (see ``tests/unit/test_v1_refinements.py:restore_provider_rules``).
 
-## narrative
-Provider discovery is a runtime registry, not a code edit. When a new
-Claude or OpenAI model ships, you extend the registry in one line
-rather than patching `_infer_provider` in the framework:
-
-```python
-LLMEngine.register_provider_rule("claude-opus-5", "anthropic")
-Agent("claude-opus-5-20260701-preview")("hello")   # routed correctly
-```
-
-Two surfaces cover the two common needs:
-
-* **Alias** for exact matches — `Agent("mistral")` → the mistral
-  provider, no questions asked.
-* **Rule** for model-name patterns — `claude-*` → anthropic, `gpt-*`
-  / `o1-*` / `o3-*` → openai.
-
-User-registered rules beat built-ins by list order. Restoration is
-trivial in tests: snapshot the two dicts and restore them in a
-fixture.
-
 ## example
 ```python
 import pytest
@@ -84,5 +63,3 @@ def restore_provider_rules():
 - Tests that register rules leak state into subsequent tests unless
   you use the restore fixture pattern.
 
-## see-also
-[base_provider](base-provider.md), [engine_protocol](engine-protocol.md)

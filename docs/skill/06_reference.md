@@ -5,7 +5,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: "'str | Any'" = 'claude-opus-4-7', tools: "'list[Tool | Callable | Agent]'" = (), output: 'type' = <class 'str'>, memory: "'Any | None'" = None, sources: "'list[Any]'" = (), guard: "'Any | None'" = None, verify: "'Agent | None'" = None, max_verify: 'int' = 3, name: 'str | None' = None, description: 'str | None' = None, session: "'Any | None'" = None, verbose: 'bool' = False, model: 'str | None' = None, engine: "'Any | None'" = None, native_tools: "'list[Any] | None'" = None, output_validator: "'Callable[[Any], Any] | None'" = None, max_output_retries: 'int' = 2) -> 'None'`
+### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = <object object at 0x7f4d7a0bcf30>, description: 'str | None' = <object object at 0x7f4d7a0bcf30>, session: 'Any | None' = <object object at 0x7f4d7a0bcf30>, verbose: 'bool' = <object object at 0x7f4d7a0bcf30>, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = <object object at 0x7f4d7a0bcf30>, max_output_retries: 'int' = <object object at 0x7f4d7a0bcf30>, timeout: 'float | None' = <object object at 0x7f4d7a0bcf30>, max_retries: 'int' = <object object at 0x7f4d7a0bcf30>, retry_delay: 'float' = <object object at 0x7f4d7a0bcf30>, fallback: "'Agent | None'" = <object object at 0x7f4d7a0bcf30>, cache: 'bool | Any' = <object object at 0x7f4d7a0bcf30>) -> 'None'`
 
 Universal agent — delegates execution to a swappable Engine.
 
@@ -51,7 +51,7 @@ Use the initial task/context Envelope passed to the Plan.
 
 Contract every engine must satisfy.
 
-### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 10, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None) -> 'None'`
+### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, cache: 'bool | Any' = False) -> 'None'`
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
 
@@ -59,11 +59,11 @@ Drives the LLM ↔ tool-call loop for a single agent invocation.
 
 Presents the task to a human and returns their response as an Envelope.
 
-### `SupervisorEngine(*, tools: "'list[Tool | Callable | Any] | None'" = None, agents: "'list[Any] | None'" = None, store: "'Store | None'" = None, input_fn: 'Callable[[str], str] | None' = None, ainput_fn: 'Callable[[str], Awaitable[str]] | None' = None, timeout: 'float | None' = None, default: 'str | None' = None) -> 'None'`
+### `SupervisorEngine(*, tools: 'list[Tool | Callable | Any] | None' = None, agents: 'list[Any] | None' = None, store: 'Store | None' = None, input_fn: 'Callable[[str], str] | None' = None, ainput_fn: 'Callable[[str], Awaitable[str]] | None' = None, timeout: 'float | None' = None, default: 'str | None' = None) -> 'None'`
 
 Human-in-the-loop engine with tool-calling and agent retry.
 
-### `Plan(*steps: 'Step', max_iterations: 'int' = 100, store: "'Store | None'" = None, checkpoint_key: 'str | None' = None, resume: 'bool' = False) -> 'None'`
+### `Plan(*steps: 'Step', max_iterations: 'int' = 100, store: 'Store | None' = None, checkpoint_key: 'str | None' = None, resume: 'bool' = False, on_concurrent: "Literal['fail', 'fork']" = 'fail') -> 'None'`
 
 Structured multi-step execution engine.
 
@@ -86,7 +86,7 @@ Common base class for all non-exit exceptions.
 
 ## Memory / Store / Session
 
-### `Memory(*, strategy: "Literal['auto', 'sliding', 'summary', 'none']" = 'auto', max_tokens: 'int | None' = 4000, store: 'Any | None' = None) -> 'None'`
+### `Memory(*, strategy: "Literal['auto', 'sliding', 'summary', 'none']" = 'auto', max_tokens: 'int | None' = 4000, max_turns: 'int | None' = 1000, store: 'Any | None' = None, summarizer: 'Any | None' = None) -> 'None'`
 
 Conversation memory with configurable compression strategy.
 
@@ -98,7 +98,7 @@ Key-value store for PlanState and shared data.
 
 StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None)
 
-### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, console: 'bool' = False) -> 'None'`
+### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'fallback', console: 'bool' = False) -> 'None'`
 
 Container for observability config: exporters, redaction, EventLog.
 
@@ -133,9 +133,9 @@ Run multiple guards in sequence; first block wins.
 
 Use an Agent as a judge. Returns block if the verdict begins with 'block' or 'deny'.
 
-### `EvalCase(input: 'str', check: 'Callable[[str], bool] | Callable[[str, Any], bool]', expected: 'Any' = None, description: 'str' = '') -> None`
+### `EvalCase(input: 'str', check: 'Callable[..., bool]', expected: 'Any' = None, description: 'str' = '') -> None`
 
-EvalCase(input: 'str', check: 'Callable[[str], bool] | Callable[[str, Any], bool]', expected: 'Any' = None, description: 'str' = '')
+EvalCase(input: 'str', check: 'Callable[..., bool]', expected: 'Any' = None, description: 'str' = '')
 
 ### `EvalReport(results: 'list[EvalResult]' = <factory>) -> None`
 
@@ -202,11 +202,31 @@ Enum where members are also (and must be) strings
 
 ## Core types
 
+### `GuardError`
+
+Raised when a Guard blocks execution.
+
+### `not_contains(substring: 'str') -> 'Callable[[str], bool]'`
+
+*(no docstring)*
+
+### `max_length(n: 'int') -> 'Callable[[str], bool]'`
+
+*(no docstring)*
+
+### `min_length(n: 'int') -> 'Callable[[str], bool]'`
+
+*(no docstring)*
+
+### `EventExporter(*args, **kwargs)`
+
+Protocol satisfied by all exporter classes.
+
 ### `BaseProvider(api_key: 'str | None' = None, model: 'str | None' = None, **kwargs)`
 
 Stable abstract base class for all LLM providers.
 
-### `CompletionRequest(messages: 'list[Message]', model: 'str | None' = None, system: 'str | None' = None, max_tokens: 'int' = 4096, temperature: 'float | None' = None, tools: 'list[ToolDefinition]' = <factory>, tool_choice: 'str | None' = None, native_tools: 'list[NativeTool]' = <factory>, structured_output: 'StructuredOutputConfig | None' = None, thinking: 'ThinkingConfig | None' = None, skills: 'SkillsConfig | None' = None, stream: 'bool' = False, extra: 'dict[str, Any]' = <factory>) -> None`
+### `CompletionRequest(messages: 'list[Message]', model: 'str | None' = None, system: 'str | None' = None, max_tokens: 'int' = 4096, temperature: 'float | None' = None, tools: 'list[ToolDefinition]' = <factory>, tool_choice: 'str | None' = None, native_tools: 'list[NativeTool]' = <factory>, structured_output: 'StructuredOutputConfig | None' = None, thinking: 'ThinkingConfig | None' = None, skills: 'SkillsConfig | None' = None, cache: 'CacheConfig | None' = None, stream: 'bool' = False, extra: 'dict[str, Any]' = <factory>) -> None`
 
 Unified request object passed to any provider.
 
@@ -249,3 +269,19 @@ Unified tool/function definition (JSON Schema based).
 ### `UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cost_usd: 'float | None' = None) -> None`
 
 UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cost_usd: 'float | None' = None)
+
+### `AgentRuntimeConfig(resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None) -> None`
+
+Composite — carries both resilience and observability.
+
+### `CacheConfig(enabled: 'bool' = True, ttl: 'str' = '5m') -> None`
+
+Mark the static prefix of a request (system prompt + tool
+
+### `ObservabilityConfig(verbose: 'bool' = False, session: 'Any' = None, name: 'str | None' = None, description: 'str | None' = None) -> None`
+
+Bundle of identity / tracing knobs shareable across Agents.
+
+### `ResilienceConfig(timeout: 'float | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, cache: 'bool | CacheConfig' = False, max_output_retries: 'int' = 2, output_validator: 'Any' = None, fallback: 'Any' = None) -> None`
+
+Bundle of reliability / performance knobs shareable across Agents.

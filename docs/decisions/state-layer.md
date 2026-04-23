@@ -9,17 +9,7 @@ flowchart TD
     C & D & E -->|compose freely| F[Pass all three if needed]
 ```
 
-`Memory` is conversational and per-agent. It records turns and
-compresses older ones when your token budget is exceeded.
-
-`Store` is a blackboard: explicit, addressable by key, shareable.
-Use it when agents need to hand off intermediate state or cache results
-across runs. Pass ``db="file.sqlite"`` for persistence.
-
-`sources=[...]` is context injection. Each source object is asked for
-its current text at call time (live view — no snapshotting), and the
-concatenated text is appended to the system prompt. Sources can be
-`Memory`, `Store`, callables, or plain strings.
-
-All three compose: an agent can have its own `memory`, read from a
-shared `Store` via `sources=`, and also inject a policy string.
+`Memory` is per-agent conversation history with compression. `Store` is
+a shared, addressable blackboard (use `db=` for persistence). `sources=`
+injects any live text into the system prompt at call time. All three
+compose freely on the same agent.

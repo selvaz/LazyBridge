@@ -45,22 +45,6 @@ class ErrorInfo(BaseModel):
 - ``Envelope.error_envelope(exc)`` is the canonical way for engines to
   convert an exception into an envelope without raising up the stack.
 
-## narrative
-Every agent call returns an `Envelope`. You almost never build one
-yourself; engines do that. Your job is to read the three fields you care
-about — `payload` for the result, `metadata` for cost/tokens/latency,
-`error` when something went wrong.
-
-Think of it as an HTTP response object for agent runs: one type that
-carries either a successful payload or structured error info, with
-metadata attached. That uniformity is why chaining, wrapping, and
-verifying agents stays simple — there is no "agent returns a string here
-but a model there" inconsistency.
-
-`Envelope` is generic over its payload. If you know you set
-`output=Summary`, writing `env: Envelope[Summary] = agent(task)` gives
-you autocomplete on `env.payload.title` without any runtime cost.
-
 ## example
 ```python
 from lazybridge import Agent
@@ -89,14 +73,8 @@ def process(env: "Envelope[Article]") -> str:
 ```
 
 ## pitfalls
-- ``payload`` can legitimately be ``None`` (e.g. when ``error`` is set or
-  when the engine produced no content). Use ``env.ok`` or ``env.text()``
-  if you want a safe string.
 - ``Envelope.from_task(task)`` sets ``payload=task`` for convenience so
   the very first agent in a chain sees the input as both ``task`` and
   ``payload``. Downstream steps see the preceding step's ``payload``.
-- ``nested_*`` fields in metadata are plumbed but not always populated
-  yet; for accurate cross-agent cost, query ``session.usage_summary()``.
-
-## see-also
-[agent](agent.md), [session](session.md), [sentinels](sentinels.md)
+- ``nested_*`` fields in metadata are plumbed but not always populated;
+  for accurate cross-agent cost, query ``session.usage_summary()``.

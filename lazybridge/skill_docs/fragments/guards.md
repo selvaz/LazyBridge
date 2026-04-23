@@ -25,22 +25,6 @@ Usage: Agent("model", guard=GuardChain(my_filter, LLMGuard(judge, "no PII")))
   become the engine's task; output rewrites replace the payload string.
 - ``GuardChain`` short-circuits on the first ``allowed=False``.
 
-## narrative
-Guards sit on the boundary between user / model and your code. They
-answer two questions: "should this input reach the model?" and "is this
-output safe to surface?". Each guard returns a `GuardAction` describing
-the verdict, optionally with a rewritten text.
-
-Three built-ins cover most cases. `ContentGuard` wraps two plain
-callables, one for input, one for output — useful for regex / allow-list
-filtering. `GuardChain` sequences multiple guards and stops at the
-first rejection. `LLMGuard` delegates to a cheap judge agent which
-evaluates against a natural-language policy.
-
-The power-user pattern is composition: a cheap regex guard up-front
-(most rejections resolved here, zero LLM cost), then an `LLMGuard` for
-nuanced policies the regex can't capture.
-
 ## example
 ```python
 from lazybridge import Agent, ContentGuard, GuardChain, LLMGuard, GuardAction
@@ -71,10 +55,7 @@ print(env.error.message)
 - A guard that raises instead of returning ``GuardAction`` aborts the
   run. Return ``GuardAction(allowed=False, message=str(e))`` on error
   to keep pipelines resilient.
-- ``LLMGuard``'s judge is itself an Agent — pass a cheap model
-  (``Agent.from_provider("anthropic", tier="cheap")``) or costs add up.
+- Compose guards: put a cheap regex ``ContentGuard`` first; fall back to
+  ``LLMGuard`` only for what regex can't handle. Saves tokens.
 - Guards see ``Envelope.text()``, not the typed payload. If you're using
   structured output, the guard operates on the JSON serialisation.
-
-## see-also
-[agent](agent.md), [evals](evals.md), [verify](verify.md)

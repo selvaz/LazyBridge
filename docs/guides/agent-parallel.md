@@ -1,21 +1,5 @@
 # Agent.parallel
 
-`Agent.parallel` is deterministic fan-out sugar. Every input agent
-receives the same task and runs concurrently; you get back a list of
-`Envelope`s in input order. No LLM sits on top of them deciding which
-to call — you asked for N concurrent runs, you get N concurrent runs.
-
-This is **not a third kind of parallelism** in the framework. Parallel
-tool execution inside an engine is automatic and emergent (the LLM
-decides, `asyncio.gather` implements). `Plan` with
-`Step(parallel=True)` declares concurrent branches in a workflow.
-`Agent.parallel` is just the case where you know exactly what you want
-to run at once and want a one-liner for it.
-
-Typical uses: comparing responses across providers; fanning out a
-symmetric question (e.g. "search for this topic" across three
-angle-specific researchers); running N idempotent probes.
-
 ## Example
 
 ```python
@@ -71,8 +55,3 @@ for env in results:
       instead — the engine fans out tool calls automatically when the
       model emits more than one in a turn.
 
-## See also
-
-[agent](agent.md), [chain](chain.md),
-[plan](plan.md), [parallel_steps](parallel-steps.md),
-decision tree: [parallelism](../decisions/parallelism.md)
