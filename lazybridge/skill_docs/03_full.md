@@ -61,25 +61,30 @@ from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 from pydantic import BaseModel
 from typing import Literal
 
+# next: Literal[...] field turns step completion into a routing decision.
+# Plan routes to the step whose name matches the value of .next after each run.
 class Hits(BaseModel):
     items: list[str]
-    next: Literal["rank", "empty"] = "rank"
+    next: Literal["rank", "empty"] = "rank"  # "empty" → skip to apology step
 
 class Ranked(BaseModel):
     top: list[str]
 
 store = Store(db="research.sqlite")
 
+# Plan(...) constructs the engine and validates the DAG — no LLM call yet.
 plan = Plan(
     Step(searcher, name="search",  writes="hits",   output=Hits),
-    Step(ranker,   name="rank",    task=from_prev,  output=Ranked),
-    Step(writer,   name="write",   task=from_step("rank")),
-    Step(apology,  name="empty"),  # reached only if Hits.next == "empty"
+    Step(ranker,   name="rank",    task=from_prev,  output=Ranked),   # receives search's Envelope
+    Step(writer,   name="write",   task=from_step("rank")),           # receives rank's Envelope by name
+    Step(apology,  name="empty"),                                     # reached only if Hits.next == "empty"
     store=store, checkpoint_key="research", resume=True,
     max_iterations=20,
 )
 
-Agent.from_engine(plan)("AI trends April 2026")
+# Agent.from_engine wraps the plan; ("task") starts execution; .text() reads result.
+result = Agent.from_engine(plan)("AI trends April 2026")
+print(result.text())
 ```
 
 **pitfalls**

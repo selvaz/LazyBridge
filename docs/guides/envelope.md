@@ -10,6 +10,7 @@ class Article(BaseModel):
     title: str
     body: str
 
+# Agent(...) constructs; ("task") invokes → always returns an Envelope.
 env = Agent("claude-opus-4-7", output=Article)("write a one-paragraph article on bees")
 
 # Branch on success / failure.

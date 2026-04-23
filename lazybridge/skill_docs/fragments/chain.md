@@ -26,9 +26,11 @@ researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
+# Each agent's output becomes the next agent's task (from_prev default).
+# Memory("auto") keeps the running transcript in the chain's context window.
 agents = [researcher, editor, writer]
-pipeline = Agent.chain(*agents, memory=Memory("auto"))
-print(pipeline("AI trends April 2026").text())
+pipeline = Agent.chain(*agents, memory=Memory("auto"))   # construction
+print(pipeline("AI trends April 2026").text())            # invocation → Envelope → text
 ```
 
 ## pitfalls

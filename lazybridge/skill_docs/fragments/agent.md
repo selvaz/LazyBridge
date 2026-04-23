@@ -56,17 +56,21 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
+# Agent(...) constructs (no LLM call); ("task") invokes; .text() reads the Envelope.
 print(Agent("claude-opus-4-7")("hello").text())
 
 def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
+# tools= accepts functions — schema auto-inferred from type hints and docstring.
 print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
+# output= activates structured output; .payload is the typed model instance.
 resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
-print(resp.payload.title, resp.payload.bullets)
+print(resp.payload.title, resp.payload.bullets)    # .text() would give the JSON dump
 
+# Agents compose — editor treats researcher as a tool via tools=[researcher].
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())

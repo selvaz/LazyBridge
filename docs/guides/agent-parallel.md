@@ -5,16 +5,18 @@
 ```python
 from lazybridge import Agent
 
-us   = Agent("claude-opus-4-7", name="us", tools=[search_us])
-eu   = Agent("claude-opus-4-7", name="eu", tools=[search_eu])
+us   = Agent("claude-opus-4-7", name="us",   tools=[search_us])
+eu   = Agent("claude-opus-4-7", name="eu",   tools=[search_eu])
 asia = Agent("claude-opus-4-7", name="asia", tools=[search_asia])
 
+# All three receive the same task; run concurrently; results arrive in input order.
+# Use this for deterministic fan-out — not LLM-directed dispatch (use tools=[] for that).
 agents = [us, eu, asia]
 results = Agent.parallel(*agents,
-                          concurrency_limit=3,
+                          concurrency_limit=3,   # cap simultaneous in-flight calls
                           step_timeout=30.0)("AI policy news")
 
-for env in results:
+for env in results:   # list[Envelope], one per agent
     print(env.metadata.model, env.text()[:100])
 ```
 

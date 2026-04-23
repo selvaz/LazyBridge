@@ -54,7 +54,8 @@ sess = Session(
     ],
     redact=lambda p: {**p, "task": _mask_pii(p.get("task", ""))},
 )
-pipeline = Agent.chain(researcher, writer, session=sess)
+agents = [researcher, writer]
+pipeline = Agent.chain(*agents, session=sess)
 pipeline("summarise AI trends")
 
 # Observability summary.

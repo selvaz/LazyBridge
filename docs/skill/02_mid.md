@@ -185,7 +185,8 @@ sess = Session(
     ],
     redact=lambda p: {**p, "task": _mask_pii(p.get("task", ""))},
 )
-pipeline = Agent.chain(researcher, writer, session=sess)
+agents = [researcher, writer]
+pipeline = Agent.chain(*agents, session=sess)
 pipeline("summarise AI trends")
 
 # Observability summary.
@@ -309,9 +310,11 @@ researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
+# Each agent's output becomes the next agent's task (from_prev default).
+# Memory("auto") keeps the running transcript in the chain's context window.
 agents = [researcher, editor, writer]
-pipeline = Agent.chain(*agents, memory=Memory("auto"))
-print(pipeline("AI trends April 2026").text())
+pipeline = Agent.chain(*agents, memory=Memory("auto"))   # construction
+print(pipeline("AI trends April 2026").text())            # invocation → Envelope → text
 ```
 
 **pitfalls**
@@ -420,16 +423,18 @@ parallel_agent(task) -> list[Envelope]   # one entry per input agent, order pres
 ```python
 from lazybridge import Agent
 
-us   = Agent("claude-opus-4-7", name="us", tools=[search_us])
-eu   = Agent("claude-opus-4-7", name="eu", tools=[search_eu])
+us   = Agent("claude-opus-4-7", name="us",   tools=[search_us])
+eu   = Agent("claude-opus-4-7", name="eu",   tools=[search_eu])
 asia = Agent("claude-opus-4-7", name="asia", tools=[search_asia])
 
+# All three receive the same task; run concurrently; results arrive in input order.
+# Use this for deterministic fan-out — not LLM-directed dispatch (use tools=[] for that).
 agents = [us, eu, asia]
 results = Agent.parallel(*agents,
-                          concurrency_limit=3,
+                          concurrency_limit=3,   # cap simultaneous in-flight calls
                           step_timeout=30.0)("AI policy news")
 
-for env in results:
+for env in results:   # list[Envelope], one per agent
     print(env.metadata.model, env.text()[:100])
 ```
 
