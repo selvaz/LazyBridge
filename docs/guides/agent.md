@@ -285,9 +285,15 @@ sources joined by `\n\n`, then the task.
   definitions).  Adding one more tool or changing the system prompt
   evicts the cache.  OpenAI / DeepSeek auto-cache; Google needs a
   different API so `cache=` is a no-op there.
-- `max_turns` on `LLMEngine` defaults to **10**.  A complex task with
-  many tool-call rounds can hit it and return a `MaxTurnsExceeded`
-  error.  Raise it when you expect long loops.
+- `max_turns` on `LLMEngine` defaults to **20** (raised from 10 in the
+  2026-04-23 amendments).  A task with many tool-call rounds can still
+  hit it and return a `MaxTurnsExceeded` error.  Raise it when you
+  expect long loops; lower it during dev to fail fast.
+- `Agent("grok-2")` — an unknown model — falls back to Anthropic with
+  a `UserWarning` by default.  In production, call
+  `LLMEngine.set_default_provider(None)` once at startup to turn that
+  into a loud `ValueError` at construction, so unknown-model bugs
+  surface before any network round-trip.
 
 !!! note "API reference"
 

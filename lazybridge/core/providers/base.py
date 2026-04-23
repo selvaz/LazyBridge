@@ -133,6 +133,28 @@ class BaseProvider(ABC):
         """
         pass
 
+    def is_retryable(self, exc: BaseException) -> bool | None:
+        """Classify a provider exception as retryable, non-retryable, or defer.
+
+        The :class:`~lazybridge.core.executor.Executor` consults this hook
+        before falling back to its generic status/string heuristic.  Override
+        when the provider SDK raises structured exception types that encode
+        retry semantics more precisely than HTTP status codes alone — for
+        example a rate-limit exception that carries a ``retry_after`` attribute
+        distinguishing "back off" (retryable) from "quota exhausted" (not).
+
+        Return values:
+          * ``True`` — retry with backoff.
+          * ``False`` — do not retry; surface the exception.
+          * ``None`` — no opinion; Executor falls back to its generic
+            classifier (``core.executor._is_retryable``) that matches
+            ``status_code in {429, 5xx}`` and common transient-error strings.
+
+        Default implementation returns ``None`` so built-in providers fall
+        through to the generic path with no behaviour change.
+        """
+        return None
+
     @abstractmethod
     def complete(self, request: CompletionRequest) -> CompletionResponse:
         """Execute a synchronous completion and return a unified response.

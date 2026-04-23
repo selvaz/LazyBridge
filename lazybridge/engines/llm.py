@@ -38,6 +38,10 @@ class LLMEngine:
         Enable extended thinking (Anthropic) or reasoning (OpenAI o-series).
     max_turns:
         Maximum tool-call rounds before giving up with MaxTurnsExceeded error.
+        Default 20 — a plain tool-using task typically completes in 2-5 rounds;
+        the 20-round budget leaves headroom for deeper reasoning loops without
+        capping legitimate pipelines.  Bump higher for deliberately long
+        agentic tasks; lower it during dev to fail fast.
     tool_choice:
         "auto" — provider decides when to call tools (default).
         "any"  — provider must call at least one tool.
@@ -69,7 +73,7 @@ class LLMEngine:
         *,
         provider: str | None = None,
         thinking: bool = False,
-        max_turns: int = 10,
+        max_turns: int = 20,
         tool_choice: Literal["auto", "any"] = "auto",
         temperature: float | None = None,
         system: str | None = None,
@@ -164,6 +168,28 @@ class LLMEngine:
     #: error.  Set to ``None`` in a subclass to disable the fallback and
     #: raise ``ValueError`` instead.
     _PROVIDER_DEFAULT: str | None = "anthropic"
+
+    @classmethod
+    def set_default_provider(cls, provider: str | None) -> None:
+        """Set (or disable) the fallback provider used when no rule matches.
+
+        Two common uses::
+
+            # Production hardening: raise on unknown models rather than
+            # silently falling back to the default. Recommended when you
+            # only ever want the providers you've explicitly registered.
+            LLMEngine.set_default_provider(None)
+
+            # Redirect the safety-net to a different built-in:
+            LLMEngine.set_default_provider("openai")
+
+        The audit finding that motivated this helper: ``Agent("grok-2")``
+        would default-route to Anthropic and fail several RTTs later
+        with a cryptic provider-side "unknown model" error.  Disabling
+        the fallback turns that into a loud ``ValueError`` at
+        construction time.
+        """
+        cls._PROVIDER_DEFAULT = provider
 
     @classmethod
     def register_provider_alias(cls, alias: str, provider: str) -> None:

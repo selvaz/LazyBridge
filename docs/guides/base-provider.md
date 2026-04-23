@@ -90,6 +90,21 @@ Agent.from_provider("mistral", tier="top")("hello").text()
         # Shared helper:
         def resolve_model_alias(self, model: str) -> str | None: ...
 
+        # Optional — provider-specific retry classifier.  Executor
+        # consults this before falling back to the generic string /
+        # status-code heuristic.
+        #
+        #   True  → retry with backoff
+        #   False → do not retry; surface the exception
+        #   None  → defer to the generic classifier (default)
+        #
+        # Override when the provider SDK raises structured exception
+        # types that carry retry semantics more precisely than HTTP
+        # codes alone — e.g. Bedrock ThrottlingException vs
+        # ModelNotReadyException, both 400-class but the first is
+        # retryable and the second is not.
+        def is_retryable(self, exc: BaseException) -> bool | None: ...
+
 !!! warning "Rules & invariants"
 
     - Subclass ``BaseProvider`` to integrate a new LLM backend with

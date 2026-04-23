@@ -70,6 +70,15 @@ def restore_provider_rules():
         *,
         kind: Literal["contains", "startswith"] = "contains",
     ) -> None
+
+    # Strict routing: raise on unknown models rather than silently
+    # falling back to the default provider (Anthropic out of the box).
+    # Recommended for production — unknown-model bugs surface at
+    # construction time instead of several RTTs into a doomed API call.
+    LLMEngine.set_default_provider(None)
+
+    # Or redirect the safety-net to a different built-in provider:
+    LLMEngine.set_default_provider("openai")
     
     # Internal tables (user-extendable at runtime):
     #   LLMEngine._PROVIDER_ALIASES  — exact-match model string → provider

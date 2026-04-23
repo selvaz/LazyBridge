@@ -131,6 +131,22 @@ class Executor:
     def model(self) -> str:
         return self._provider.model
 
+    def _should_retry(self, exc: BaseException) -> bool:
+        """Consult the provider's ``is_retryable`` hook, then fall back.
+
+        The provider's classifier wins when it returns a bool; ``None`` means
+        "no opinion" and hands control to the generic heuristic.  This lets
+        provider adapters (e.g. a Bedrock subclass that inspects structured
+        throttling codes) express retry policy without having to patch the
+        Executor.
+        """
+        verdict = self._provider.is_retryable(exc)
+        if verdict is True:
+            return True
+        if verdict is False:
+            return False
+        return _is_retryable(exc)
+
     # ------------------------------------------------------------------
     # Sync
     # ------------------------------------------------------------------
@@ -141,7 +157,7 @@ class Executor:
             try:
                 return self._provider.complete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not _is_retryable(exc):
+                if attempt >= self._max_retries or not self._should_retry(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
                 delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
@@ -173,7 +189,7 @@ class Executor:
             try:
                 return await self._provider.acomplete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not _is_retryable(exc):
+                if attempt >= self._max_retries or not self._should_retry(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
                 delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
