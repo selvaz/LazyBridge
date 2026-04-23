@@ -13,7 +13,7 @@ Prices per 1M tokens (input/output). Context = max input window.
 |-------------|--------------------|------|---------|--------|---------|
 | top         | claude-opus-4-7    | 1 M  | 128 K   | $5.00  | $25.00  |
 | expensive   | claude-opus-4-6    | 1 M  | 128 K   | $5.00  | $25.00  |
-| medium      | claude-sonnet-4-6  | 1 M  | 128 K   | $3.00  | $15.00  |
+| medium      | claude-sonnet-4-6  | 1 M  | 64 K    | $3.00  | $15.00  |
 | cheap       | claude-haiku-4-5   | 200K | 64 K    | $1.00  | $5.00   |
 | super_cheap | claude-3-haiku     | 200K | 4 K     | $0.25  | $1.25   |
 
