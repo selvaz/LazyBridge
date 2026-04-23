@@ -6,8 +6,16 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
+from lazybridge.core.types import AgentRuntimeConfig, ObservabilityConfig, ResilienceConfig
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
+
+#: Private sentinel — used to distinguish "caller omitted the flat kwarg"
+#: from "caller explicitly passed its default value".  Phase 1 of the
+#: config-object refactor: when a flat kwarg is the sentinel, values from
+#: ``resilience=`` / ``observability=`` / ``runtime=`` fill in; an explicit
+#: value (including the previous documented default) wins.
+_UNSET: Any = object()
 
 
 class Agent:
@@ -67,10 +75,10 @@ class Agent:
         guard: Any | None = None,
         verify: Agent | None = None,
         max_verify: int = 3,
-        name: str | None = None,
-        description: str | None = None,
-        session: Any | None = None,
-        verbose: bool = False,
+        name: str | None = _UNSET,
+        description: str | None = _UNSET,
+        session: Any | None = _UNSET,
+        verbose: bool = _UNSET,  # type: ignore[assignment]
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
@@ -82,27 +90,38 @@ class Agent:
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
         # ``engine=`` is a non-LLM engine.
         native_tools: list[Any] | None = None,
+        # --- Phase 1 config-object refactor ---
+        # Optional structured alternatives to the flat resilience /
+        # observability kwargs below.  Precedence is flat > config > default:
+        # an explicit flat kwarg always wins, the config fills in anything
+        # omitted, the documented default applies when both are absent.
+        # Mix freely — ``Agent(resilience=cfg, timeout=30.0)`` uses the
+        # config's retries/cache but overrides its timeout.
+        runtime: AgentRuntimeConfig | None = None,
+        resilience: ResilienceConfig | None = None,
+        observability: ObservabilityConfig | None = None,
+        # --- Resilience kwargs (also reachable via resilience=...) ---
         # Optional post-parse validator.  Runs on the structured ``payload``
         # after schema validation; may raise ValueError to force a
         # retry-with-feedback loop (up to ``max_output_retries``).
-        output_validator: Callable[[Any], Any] | None = None,
-        max_output_retries: int = 2,
+        output_validator: Callable[[Any], Any] | None = _UNSET,
+        max_output_retries: int = _UNSET,  # type: ignore[assignment]
         # Total deadline (seconds) for ``run()``.  Applied at the
         # top-level Agent boundary so a hung tool, runaway tool loop,
         # or slow provider can't block a caller forever.  ``None``
         # disables the deadline (backwards-compatible default).
-        timeout: float | None = None,
+        timeout: float | None = _UNSET,
         # Convenience shortcuts for provider retry/backoff — forwarded to
         # LLMEngine when the engine is auto-created from a model string.
         # Ignored when ``engine=`` is supplied explicitly (use LLMEngine
         # directly to configure retries on a pre-built engine).
-        max_retries: int = 3,
-        retry_delay: float = 1.0,
+        max_retries: int = _UNSET,  # type: ignore[assignment]
+        retry_delay: float = _UNSET,  # type: ignore[assignment]
         # Fallback agent tried when the primary engine returns an error.
         # Useful for provider redundancy: Agent("claude-opus-4-7", fallback=Agent("gpt-4o")).
         # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
         # same envelope, so it should be configured with compatible output= / tools=.
-        fallback: "Agent | None" = None,
+        fallback: "Agent | None" = _UNSET,
         # Prompt caching — when True, marks the static prefix (system
         # prompt + tools) as cacheable so providers that support it
         # (Anthropic today; OpenAI/DeepSeek auto-cache; Google uses a
@@ -111,8 +130,36 @@ class Agent:
         # model string.  Ignored when ``engine=`` is supplied explicitly
         # (configure ``LLMEngine(cache=...)`` directly in that case).
         # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
-        cache: bool | Any = False,
+        cache: bool | Any = _UNSET,
     ) -> None:
+        # Merge config objects into flat kwargs.  Precedence: an explicit
+        # flat value (anything that isn't the private ``_UNSET`` sentinel)
+        # wins; otherwise the config object fills in; otherwise the
+        # documented default applies.
+        _res = resilience if resilience is not None else (runtime.resilience if runtime else None)
+        _obs = observability if observability is not None else (runtime.observability if runtime else None)
+        if timeout is _UNSET:
+            timeout = _res.timeout if _res else None
+        if max_retries is _UNSET:
+            max_retries = _res.max_retries if _res else 3
+        if retry_delay is _UNSET:
+            retry_delay = _res.retry_delay if _res else 1.0
+        if cache is _UNSET:
+            cache = _res.cache if _res else False
+        if max_output_retries is _UNSET:
+            max_output_retries = _res.max_output_retries if _res else 2
+        if output_validator is _UNSET:
+            output_validator = _res.output_validator if _res else None
+        if fallback is _UNSET:
+            fallback = _res.fallback if _res else None
+        if verbose is _UNSET:
+            verbose = _obs.verbose if _obs else False
+        if session is _UNSET:
+            session = _obs.session if _obs else None
+        if name is _UNSET:
+            name = _obs.name if _obs else None
+        if description is _UNSET:
+            description = _obs.description if _obs else None
         from lazybridge.engines.llm import LLMEngine
 
         if engine is not None:

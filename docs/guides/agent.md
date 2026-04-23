@@ -171,6 +171,81 @@ After the call returns, `env.ok` distinguishes success from error,
 the run.  If both the primary and the fallback fail, the final error
 Envelope surfaces to the caller — no exception is raised through.
 
+## Shared config objects (`ResilienceConfig`, `ObservabilityConfig`)
+
+Once you have more than one or two agents in a pipeline, repeating
+the same seven resilience kwargs at every call site gets noisy and
+drift-prone. The three config dataclasses — `ResilienceConfig`,
+`ObservabilityConfig`, and the composite `AgentRuntimeConfig` — let
+you define a policy once and inject it everywhere.
+
+```python
+# What this shows: a single production-grade resilience policy and a
+# single Session shared across three agents. Without the config
+# objects, each Agent() call would have to repeat timeout=,
+# max_retries=, cache=, and session= by hand — six places to edit
+# when the policy changes, six places to get it wrong.
+# Why precedence matters: the ``fact_checker`` needs a tighter
+# timeout than the rest of the fleet. Passing ``timeout=15.0``
+# alongside ``resilience=policy`` overrides just that one field —
+# retries, cache, and fallback still come from the shared policy.
+
+from lazybridge import (
+    Agent, Session, ResilienceConfig, ObservabilityConfig, CacheConfig,
+)
+
+# Fleet-wide policy: 60s wall-clock, 5 retries, 1h Anthropic cache.
+policy = ResilienceConfig(
+    timeout=60.0,
+    max_retries=5,
+    cache=CacheConfig(ttl="1h"),
+)
+
+# Fleet-wide observability: every agent reports to the same session.
+trace = Session(console=True)
+obs = ObservabilityConfig(session=trace)
+
+researcher   = Agent("claude-opus-4-7", resilience=policy, observability=obs, name="researcher")
+writer       = Agent("claude-opus-4-7", resilience=policy, observability=obs, name="writer")
+# One-off override: tighter timeout for a fast-path agent — everything
+# else (retries, cache, session) still inherits from the shared configs.
+fact_checker = Agent("claude-opus-4-7", resilience=policy, observability=obs,
+                     name="fact_checker", timeout=15.0)
+```
+
+**Precedence.** Flat kwargs always win over the config:
+
+| Value passed via…           | Wins when…                                      |
+| :-------------------------- | :---------------------------------------------- |
+| `Agent(..., timeout=30.0)`  | always (explicit flat kwarg beats everything)   |
+| `ResilienceConfig(timeout=120.0)` | no flat `timeout=` is passed              |
+| documented default (`None`) | neither the flat kwarg nor the config supplied |
+
+The precedence rule is implemented with a private sentinel, so even
+passing the *documented default* explicitly counts as user intent:
+`Agent(resilience=policy_with_retries_7, max_retries=3)` uses 3, not 7.
+
+**`AgentRuntimeConfig` — one object for the whole fleet.** When you
+pass both configs to every agent, wrap them in `AgentRuntimeConfig`
+and pass a single object instead:
+
+```python
+from lazybridge import AgentRuntimeConfig
+
+runtime = AgentRuntimeConfig(resilience=policy, observability=obs)
+
+researcher = Agent("claude-opus-4-7", runtime=runtime, name="researcher")
+writer     = Agent("claude-opus-4-7", runtime=runtime, name="writer")
+```
+
+**What's in / what's out.** The config objects cover the *runtime*
+kwargs — resilience and observability. The *structural* kwargs
+(`tools`, `output`, `memory`, `sources`, `guard`, `verify`, `engine`)
+stay flat because they describe what the agent *is*, not how it
+behaves under pressure. A shared resilience policy with a custom
+tool list is idiomatic; sharing a full `AgentConfig` including tools
+would collapse the distinction between agents.
+
 ## Three call surfaces: sync, async, streaming
 
 One `Agent` exposes three ways to invoke it.  They return different
@@ -319,6 +394,13 @@ sources joined by `\n\n`, then the task.
                                          # tools=[agent] in another Agent).
         model: str | None = None,     # tier alias when first arg is a provider name
         engine: Engine | None = None, # kwarg alias for the first positional
+        # --- Config-object alternatives (see "Shared config objects") ---------
+        # Each bundles a subset of the flat kwargs below.  Flat kwargs always
+        # win; the config fills in anything omitted.  Use to share a policy
+        # across a fleet of agents without copy-pasting seven kwargs.
+        runtime: AgentRuntimeConfig | None = None,
+        resilience: ResilienceConfig | None = None,
+        observability: ObservabilityConfig | None = None,
         # --- Reliability / performance kwargs (see section above) -------------
         native_tools: list[NativeTool | str] | None = None,
         output_validator: Callable[[Any], Any] | None = None,  # raise ValueError to retry

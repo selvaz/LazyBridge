@@ -201,6 +201,62 @@ class CacheConfig:
     ttl: str = "5m"
 
 
+#: Sentinel used by config-object unpacking to detect "user passed a
+#: flat kwarg explicitly" vs "left it at the default".  Internal only —
+#: never exposed in public signatures.
+_UNSET: Any = object()
+
+
+@dataclass
+class ResilienceConfig:
+    """Bundle of reliability / performance knobs shareable across Agents.
+
+    Wraps the resilience kwargs on ``Agent`` so a fleet of agents in a
+    production pipeline can share a single retry / timeout / cache
+    policy instead of copy-pasting seven kwargs at every call site.
+
+    Flat ``Agent`` kwargs still win when both are passed — the config
+    is the default, an explicit kwarg is the override.
+    """
+
+    timeout: float | None = None
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    cache: bool | CacheConfig = False
+    max_output_retries: int = 2
+    output_validator: Any = None  # Callable[[Any], Any] | None
+    #: Forward-ref to ``Agent`` — typed ``Any`` to avoid a circular import.
+    #: Actual validation happens inside ``Agent.__init__``.
+    fallback: Any = None
+
+
+@dataclass
+class ObservabilityConfig:
+    """Bundle of identity / tracing knobs shareable across Agents.
+
+    ``session`` is the single biggest win: binding a fleet of agents to
+    the same ``Session`` in one object beats threading it through every
+    constructor call.
+    """
+
+    verbose: bool = False
+    session: Any = None  # Session | None
+    name: str | None = None
+    description: str | None = None
+
+
+@dataclass
+class AgentRuntimeConfig:
+    """Composite — carries both resilience and observability.
+
+    Convenience for configuration injection: one object passed to every
+    ``Agent`` in a factory instead of two.
+    """
+
+    resilience: ResilienceConfig | None = None
+    observability: ObservabilityConfig | None = None
+
+
 #: Provider-agnostic meta-keywords accepted as ``tool_choice``.  Anything
 #: outside this set is interpreted as a tool NAME and validated against
 #: the ``tools`` list on the request, so typos fail fast at request

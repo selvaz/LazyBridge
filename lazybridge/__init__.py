@@ -52,10 +52,14 @@ from lazybridge.agent import _ParallelAgent as _ParallelAgent
 # Core types (re-exported for convenience)
 from lazybridge.core.providers import BaseProvider
 from lazybridge.core.types import (
+    AgentRuntimeConfig,
+    CacheConfig,
     CompletionRequest,
     CompletionResponse,
     Message,
     NativeTool,
+    ObservabilityConfig,
+    ResilienceConfig,
     Role,
     StreamChunk,
     StructuredOutputConfig,
@@ -180,4 +184,9 @@ __all__ = [
     "ToolCall",
     "ToolDefinition",
     "UsageStats",
+    # Config objects (Phase 1 of config-object refactor)
+    "AgentRuntimeConfig",
+    "CacheConfig",
+    "ObservabilityConfig",
+    "ResilienceConfig",
 ]
