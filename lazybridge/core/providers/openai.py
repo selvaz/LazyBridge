@@ -64,8 +64,16 @@ _EFFORT_MAP = {
 }
 
 # Price per 1M tokens (input, output). Approximate; verify at platform.openai.com/docs/pricing.
+# Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gpt-5": (2.50, 10.0),
+    "gpt-5.4-pro": (30.0, 180.0),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4": (2.50, 15.0),
+    "gpt-5": (1.25, 10.0),
+    "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1": (2.00, 8.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.0),
     "gpt-4-turbo": (10.0, 30.0),
@@ -73,7 +81,7 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "gpt-3.5": (0.50, 1.50),
     "o4-mini": (1.10, 4.40),
     "o3-mini": (1.10, 4.40),
-    "o3": (10.0, 40.0),
+    "o3": (2.00, 8.00),
     "o1-mini": (3.0, 12.0),
     "o1-pro": (150.0, 600.0),
     "o1": (15.0, 60.0),
@@ -110,14 +118,16 @@ class OpenAIProvider(BaseProvider):
         "top": "gpt-5.4",
         "expensive": "gpt-5",
         "medium": "gpt-4o",
-        "cheap": "gpt-4o-mini",
-        "super_cheap": "gpt-3.5-turbo",
+        "cheap": "gpt-4.1-mini",
+        "super_cheap": "gpt-4.1-nano",
     }
     _FALLBACKS = {
         "gpt-5.4": ["gpt-5", "gpt-4o"],
-        "gpt-5": ["gpt-4o", "gpt-4-turbo"],
-        "gpt-4o": ["gpt-4-turbo", "gpt-3.5-turbo"],
-        "gpt-4o-mini": ["gpt-3.5-turbo"],
+        "gpt-5": ["gpt-4.1", "gpt-4o"],
+        "gpt-4o": ["gpt-4.1", "gpt-4-turbo"],
+        "gpt-4.1": ["gpt-4o"],
+        "gpt-4.1-mini": ["gpt-4o-mini"],
+        "gpt-4o-mini": ["gpt-4.1-nano"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {

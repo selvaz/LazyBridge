@@ -49,11 +49,12 @@ _FORCE_STREAM_MAX_TOKENS = 20_000
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-4-7": (5.0, 25.0),
-    "claude-opus-4-6": (15.0, 75.0),
-    "claude-opus-4-5": (15.0, 75.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-opus-4-5": (5.0, 25.0),
+    "claude-opus-4-1": (15.0, 75.0),   # legacy Opus 4.1 — higher price tier
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
-    "claude-haiku-4-5": (0.80, 4.0),
+    "claude-haiku-4-5": (1.0, 5.0),
     "claude-3-5-sonnet": (3.0, 15.0),
     "claude-3-5-haiku": (0.80, 4.0),
     "claude-3-opus": (15.0, 75.0),
@@ -92,7 +93,7 @@ class AnthropicProvider(BaseProvider):
     # Update this table when new models ship.
     _TIER_ALIASES = {
         "top": "claude-opus-4-7",
-        "expensive": "claude-opus-4-6",
+        "expensive": "claude-opus-4-1",  # legacy high-cost Opus
         "medium": "claude-sonnet-4-6",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",
@@ -100,6 +101,7 @@ class AnthropicProvider(BaseProvider):
     _FALLBACKS = {
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
+        "claude-opus-4-1": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-sonnet-4-6": ["claude-sonnet-4-5", "claude-3-5-sonnet"],
         "claude-haiku-4-5": ["claude-3-5-haiku"],
     }

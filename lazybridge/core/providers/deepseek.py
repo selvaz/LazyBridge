@@ -42,8 +42,8 @@ _REASONING_MODELS = frozenset({"deepseek-reasoner"})
 
 # Price per 1M tokens (input, output). Approximate; verify at platform.deepseek.com/api-docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "deepseek-reasoner": (0.55, 2.19),
-    "deepseek-chat": (0.14, 0.28),
+    "deepseek-reasoner": (0.28, 0.42),
+    "deepseek-chat": (0.28, 0.42),
 }
 
 
