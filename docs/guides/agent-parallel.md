@@ -1,5 +1,11 @@
 # Agent.parallel
 
+**Use `Agent.parallel` for** deterministic fan-out: the same task goes to multiple agents
+concurrently and results come back in input order as `list[Envelope]`.
+
+**Use `Agent(tools=[a, b, c])` instead** when you want the LLM to decide which agents to
+call and whether to call them in parallel. `Agent.parallel` is not LLM-directed.
+
 ## Example
 
 ```python

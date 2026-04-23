@@ -22,6 +22,13 @@ parallel_agent(task) -> list[Envelope]   # one entry per input agent, order pres
   instead — the engine fans out tool calls automatically when the
   model emits more than one in a turn.
 
+## narrative
+**Use `Agent.parallel` for** deterministic fan-out: the same task goes to multiple agents
+concurrently and results come back in input order as `list[Envelope]`.
+
+**Use `Agent(tools=[a, b, c])` instead** when you want the LLM to decide which agents to
+call and whether to call them in parallel. `Agent.parallel` is not LLM-directed.
+
 ## example
 ```python
 from lazybridge import Agent

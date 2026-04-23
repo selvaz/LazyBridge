@@ -72,6 +72,13 @@ nav:
       - Provider registry: guides/register-provider.md
       - core.types: guides/core-types.md
 
+  - Recipes:
+    - Overview: recipes/index.md
+    - Tool calling: recipes/tool-calling.md
+    - Structured output: recipes/structured-output.md
+    - Plan with resume: recipes/plan-with-resume.md
+    - Human-in-the-loop: recipes/human-in-the-loop.md
+
   - Decision trees:
     - Index: decisions/index.md
     - Pick your tier: decisions/pick-tier.md

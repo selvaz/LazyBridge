@@ -1,7 +1,7 @@
 # LazyBridge — Basic tier
-One-shot or tool-calling agents. Text or structured output.
-No memory, no pipeline, no HIL. If you need state across calls
-or more than one agent, go to Mid.
+**Use this when** you need a single LLM call — with or without tools, with or without structured output. No setup beyond an API key.
+
+**Move to Mid when** you need memory across calls, shared state, tracing, guardrails, or more than one agent in sequence.
 
 ## Agent
 

@@ -37,6 +37,14 @@ Shortcut: Agent("model", verbose=True) creates a private Session(console=True).
 - Exporters fire in registration order on every emit. Exceptions raised
   by one exporter do not block others.
 
+## narrative
+**Use `Session` for** full observability: per-run event logs, usage aggregation across
+nested agents, and exporter hooks for OTel, JSON file, or console output.
+
+**Use `Agent(verbose=True)` instead** for quick development tracing — it creates a private
+`Session(console=True)` automatically. Switch to an explicit `Session` when you need
+persistence, redaction, or multiple exporters.
+
 ## example
 ```python
 from lazybridge import Agent, Session, ConsoleExporter, JsonFileExporter

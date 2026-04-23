@@ -1,7 +1,7 @@
 # LazyBridge — Full tier
-Production pipelines. Declared workflows with typed hand-offs between
-steps, conditional routing via sentinels, checkpoint/resume after
-crashes, OTel/JSON export, tool-level verifiers, serialisable plans.
+**Use this when** you need a declared, multi-step pipeline: typed hand-offs, conditional routing, crash recovery via checkpoint/resume, or OTel/JSON observability.
+
+**Stay at Mid** if your pipeline is a straight line with no typed models between steps and you don't need resume semantics.
 
 ## Plan
 

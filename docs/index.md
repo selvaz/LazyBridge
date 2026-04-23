@@ -49,22 +49,28 @@ rewrite needed when you move up.
 
 </div>
 
-## Or skip straight to the tool you need
+## Choose your path
 
-* [Quickstart — 5 minutes to first working agent](quickstart.md)
+**New here?**
+→ [Quickstart (5 min)](quickstart.md) → [Basic tier](tiers/basic.md) → [Decision trees](decisions/index.md)
+
+**Building a real app?**
+→ [Mid tier](tiers/mid.md) — [Memory](guides/memory.md) · [Session & tracing](guides/session.md) · [Guards](guides/guards.md) · [chain / parallel](guides/chain.md)
+
+**Production pipeline?**
+→ [Full tier](tiers/full.md) — [Plan](guides/plan.md) · [Checkpoint & resume](guides/checkpoint.md) · [Exporters](guides/exporters.md)
+
+**Extending the framework?**
+→ [Advanced tier](tiers/advanced.md) — [Engine protocol](guides/engine-protocol.md) · [BaseProvider](guides/base-provider.md)
+
+## Top tasks
+
+* [Tool calling end-to-end](recipes/tool-calling.md)
+* [Structured output with Pydantic](recipes/structured-output.md)
+* [Pipeline with typed steps and crash resume](recipes/plan-with-resume.md)
+* [Human-in-the-loop: approval gates and REPL](recipes/human-in-the-loop.md)
 * [Decision trees — "when to use which"](decisions/index.md)
-* [API reference — signature-first index](reference.md)
-* [Errors — cause → fix table](skill/99_errors.md)
-* [Claude Skill — for Claude Code / LLM assistants](skill/SKILL.md)
 
-## What LazyBridge is for
+## Reference
 
-If you want to build multi-agent systems in Python without picking a
-side in the LangGraph / Pydantic-AI / CrewAI religious wars, and you
-want your pipelines validated at construction time (not at the first
-production failure), start with the **Full** tier's [Plan
-guide](guides/plan.md).
-
-If you just want to call an LLM with some tools and a Pydantic output
-schema, stay at **Basic**. `Agent("claude-opus-4-7", output=MyModel)`
-and you're done.
+* [API reference](reference.md) · [Errors table](skill/99_errors.md) · [Claude Skill](skill/SKILL.md)

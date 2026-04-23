@@ -1,5 +1,11 @@
 # Agent
 
+**Use `Agent` for** any single LLM interaction — one-shot calls, tool use, or structured output.
+It's the only class you need at the Basic tier; all other features are opt-in via keyword args.
+
+**Move to `Plan`** when steps need typed hand-offs, conditional routing, or crash-resume semantics.
+**Use `Agent.chain`** for a simple linear sequence where text hand-offs between agents are enough.
+
 ## Example
 
 ```python

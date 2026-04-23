@@ -1,5 +1,11 @@
 # Agent.chain
 
+**Use `Agent.chain` for** linear pipelines where each agent's text output feeds the next.
+It's the right default for sequential multi-agent flows with no branching.
+
+**Upgrade to `Plan`** when steps need Pydantic typed models to flow between them, you need
+conditional routing (`next: Literal[...]`), or you want crash-resume with `resume=True`.
+
 ## Example
 
 ```python

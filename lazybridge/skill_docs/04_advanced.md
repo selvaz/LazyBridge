@@ -1,7 +1,7 @@
 # LazyBridge — Advanced tier
-Framework extension. New providers, new execution engines,
-cross-process Plan serialisation, direct use of core.types.
-Skip this tier if you're not writing framework code.
+**Use this when** you are extending the framework itself: adding a new LLM provider, writing a custom execution engine, or serialising Plans across processes.
+
+**Skip this tier** if you're building apps — Basic/Mid/Full cover everything user-facing.
 
 ## Engine protocol
 

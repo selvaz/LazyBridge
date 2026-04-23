@@ -14,6 +14,13 @@ from lazybridge import Agent
 print(Agent("claude-opus-4-7")("hello").text())
 ```
 
+## Who it's for
+
+- **Simple LLM calls with tools or structured output** — stay at Basic. `Agent` is all you need.
+- **Real apps** that need conversation memory, tracing, guardrails, or multi-agent chains — Mid tier.
+- **Production pipelines** with typed hand-offs, conditional routing, crash-resume — Full tier.
+- **Framework extension** (new providers, custom engines) — Advanced tier.
+
 ## Pick your tier
 
 LazyBridge grows with you — every tier is additive.
@@ -115,6 +122,14 @@ Agent.chain(*agents)("publish a policy brief")
 Commands in the REPL: `continue`, `retry <agent>: <feedback>`,
 `store <key>`, `<tool>(<args>)`. For approval-only flows use the
 lighter [`HumanEngine`](docs/guides/human-engine.md) instead.
+
+## Top tasks
+
+* [Tool calling end-to-end](https://selvaz.github.io/LazyBridge/recipes/tool-calling/)
+* [Structured output with Pydantic](https://selvaz.github.io/LazyBridge/recipes/structured-output/)
+* [Pipeline with typed steps and crash resume](https://selvaz.github.io/LazyBridge/recipes/plan-with-resume/)
+* [Human-in-the-loop: approval gates and REPL](https://selvaz.github.io/LazyBridge/recipes/human-in-the-loop/)
+* [Decision trees — "when to use which"](https://selvaz.github.io/LazyBridge/decisions/)
 
 ## Documentation
 

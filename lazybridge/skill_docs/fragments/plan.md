@@ -45,6 +45,13 @@ Usage: Agent(engine=Plan(Step(a), Step(b)))
   step; ``resume=True`` reads the checkpoint and picks up at the next
   unrun step (failed runs restart from the failing step, not the next).
 
+## narrative
+**Use `Plan` for** multi-step pipelines where each step has a declared input/output type,
+conditional routing (via `next: Literal[...]`), or crash-resume via `checkpoint_key` + `resume=True`.
+
+**Stay at `Agent.chain`** if your pipeline is a straight line and steps don't need to pass
+typed Pydantic models to each other — chain is simpler and covers that case.
+
 ## example
 ```python
 from lazybridge import Agent, Plan, Step, Store, from_prev, from_step

@@ -305,12 +305,15 @@ def render_site_guide(topic: str, titles: dict) -> str:
     return "".join(out)
 
 
-def render_site_tier(tier: str, topics: list[str], titles: dict, intro: str) -> str:
+def render_site_tier(tier: str, topics: list[str], titles: dict, intro: str,
+                     next_steps: str = "") -> str:
     out = [f"# {tier.capitalize()} tier\n\n", intro.strip() + "\n\n", "## Topics\n\n"]
     for topic in topics:
         slug = topic.replace("_", "-")
         label = titles.get(topic, topic)
         out.append(f"* [{label}](../guides/{slug}.md)\n")
+    if next_steps:
+        out.append("\n## Next steps\n\n" + next_steps.strip() + "\n")
     return "".join(out).rstrip() + "\n"
 
 
@@ -435,6 +438,7 @@ def build(check: bool = False) -> int:
     decisions = meta.get("decisions", []) or []
     titles = meta.get("titles", {}) or {}
     intros = meta.get("tier_intros", {}) or {}
+    nexts = meta.get("tier_next", {}) or {}
 
     changed: list[Path] = []
 
@@ -469,7 +473,8 @@ def build(check: bool = False) -> int:
             if body:
                 _write(DOCS_DIR / "guides" / f"{slug}.md", body, changed)
         _write(DOCS_DIR / "tiers" / f"{tier}.md",
-               render_site_tier(tier, topics, titles, intros.get(tier, "")),
+               render_site_tier(tier, topics, titles, intros.get(tier, ""),
+                                nexts.get(tier, "")),
                changed)
 
     for name in decisions:

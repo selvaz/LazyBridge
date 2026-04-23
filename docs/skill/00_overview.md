@@ -6,31 +6,30 @@ Tier-organised reference. Load on demand. The whole framework is one `Agent` wit
 
 
 ### Basic
-One-shot or tool-calling agents. Text or structured output.
-No memory, no pipeline, no HIL. If you need state across calls
-or more than one agent, go to Mid.
+**Use this when** you need a single LLM call — with or without tools, with or without structured output. No setup beyond an API key.
+
+**Move to Mid when** you need memory across calls, shared state, tracing, guardrails, or more than one agent in sequence.
 
 Covers: Agent, Tool, Native tools (web search, code execution, …), Function → Tool (schema modes), Envelope
 
 ### Mid
-Realistic apps. Conversation memory, shared state, console/verbose
-logging, input/output guardrails, simple chain or parallel fan-out,
-one agent re-used as a tool, basic human-in-the-loop, evals.
-No explicit DAG — for that, go to Full.
+**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, or a simple human approval gate.
+
+**Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
 
 Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Agent.parallel, HumanEngine, EvalSuite
 
 ### Full
-Production pipelines. Declared workflows with typed hand-offs between
-steps, conditional routing via sentinels, checkpoint/resume after
-crashes, OTel/JSON export, tool-level verifiers, serialisable plans.
+**Use this when** you need a declared, multi-step pipeline: typed hand-offs, conditional routing, crash recovery via checkpoint/resume, or OTel/JSON observability.
+
+**Stay at Mid** if your pipeline is a straight line with no typed models between steps and you don't need resume semantics.
 
 Covers: Plan, Sentinels (from_prev / from_start / from_step / from_parallel), Parallel plan steps, SupervisorEngine, Checkpoint & resume, Exporters, GraphSchema, verify=
 
 ### Advanced
-Framework extension. New providers, new execution engines,
-cross-process Plan serialisation, direct use of core.types.
-Skip this tier if you're not writing framework code.
+**Use this when** you are extending the framework itself: adding a new LLM provider, writing a custom execution engine, or serialising Plans across processes.
+
+**Skip this tier** if you're building apps — Basic/Mid/Full cover everything user-facing.
 
 Covers: Engine protocol, BaseProvider, Plan serialization, Provider registry, core.types
 

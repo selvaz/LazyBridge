@@ -1,8 +1,7 @@
 # LazyBridge — Mid tier
-Realistic apps. Conversation memory, shared state, console/verbose
-logging, input/output guardrails, simple chain or parallel fan-out,
-one agent re-used as a tool, basic human-in-the-loop, evals.
-No explicit DAG — for that, go to Full.
+**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, or a simple human approval gate.
+
+**Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
 
 ## Memory
 

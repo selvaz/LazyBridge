@@ -1,5 +1,11 @@
 # Plan
 
+**Use `Plan` for** multi-step pipelines where each step has a declared input/output type,
+conditional routing (via `next: Literal[...]`), or crash-resume via `checkpoint_key` + `resume=True`.
+
+**Stay at `Agent.chain`** if your pipeline is a straight line and steps don't need to pass
+typed Pydantic models to each other — chain is simpler and covers that case.
+
 ## Example
 
 ```python

@@ -1,5 +1,12 @@
 # Session & tracing
 
+**Use `Session` for** full observability: per-run event logs, usage aggregation across
+nested agents, and exporter hooks for OTel, JSON file, or console output.
+
+**Use `Agent(verbose=True)` instead** for quick development tracing — it creates a private
+`Session(console=True)` automatically. Switch to an explicit `Session` when you need
+persistence, redaction, or multiple exporters.
+
 ## Example
 
 ```python
