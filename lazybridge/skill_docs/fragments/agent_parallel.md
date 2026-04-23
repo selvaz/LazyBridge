@@ -30,7 +30,8 @@ us   = Agent("claude-opus-4-7", name="us", tools=[search_us])
 eu   = Agent("claude-opus-4-7", name="eu", tools=[search_eu])
 asia = Agent("claude-opus-4-7", name="asia", tools=[search_asia])
 
-results = Agent.parallel(us, eu, asia,
+agents = [us, eu, asia]
+results = Agent.parallel(*agents,
                           concurrency_limit=3,
                           step_timeout=30.0)("AI policy news")
 

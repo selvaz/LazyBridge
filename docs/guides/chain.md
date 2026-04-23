@@ -9,8 +9,8 @@ researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 editor     = Agent("claude-opus-4-7", name="editor")
 writer     = Agent("claude-opus-4-7", name="writer")
 
-pipeline = Agent.chain(researcher, editor, writer,
-                        memory=Memory("auto"))
+agents = [researcher, editor, writer]
+pipeline = Agent.chain(*agents, memory=Memory("auto"))
 print(pipeline("AI trends April 2026").text())
 ```
 

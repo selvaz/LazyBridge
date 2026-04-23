@@ -108,7 +108,8 @@ sup = Agent(engine=SupervisorEngine(
     tools=[search],
     agents=[researcher],   # human can `retry researcher: <feedback>`
 ))
-Agent.chain(researcher, sup, writer)("publish a policy brief")
+agents = [researcher, sup, writer]
+Agent.chain(*agents)("publish a policy brief")
 ```
 
 Commands in the REPL: `continue`, `retry <agent>: <feedback>`,

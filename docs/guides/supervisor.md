@@ -25,7 +25,8 @@ supervisor = Agent(
 writer = Agent("claude-opus-4-7", name="writer")
 
 # Pipeline: researcher drafts → supervisor inspects / revises → writer finalises.
-pipeline = Agent.chain(researcher, supervisor, writer)
+agents = [researcher, supervisor, writer]
+pipeline = Agent.chain(*agents)
 pipeline("AI policy brief")
 ```
 
