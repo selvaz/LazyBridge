@@ -114,16 +114,16 @@ class GoogleProvider(BaseProvider):
     # Tier aliases (audit F2). Gemini 3 preview series used where available.
     _TIER_ALIASES = {
         "top": "gemini-3.1-pro-preview",
-        "expensive": "gemini-3.1-pro-preview",
+        "expensive": "gemini-2.5-pro",         # stable GA, distinct from preview top
         "medium": "gemini-3-flash-preview",
         "cheap": "gemini-3.1-flash-lite-preview",
         "super_cheap": "gemini-2.5-flash-lite",  # gemini-2.0-flash deprecated June 1 2026
     }
     _FALLBACKS = {
-        "gemini-3.1-pro-preview": ["gemini-3-flash-preview", "gemini-2.5-pro"],
+        "gemini-3.1-pro-preview": ["gemini-2.5-pro", "gemini-3-flash-preview"],
+        "gemini-2.5-pro": ["gemini-2.5-flash"],
         "gemini-3-flash-preview": ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"],
         "gemini-3.1-flash-lite-preview": ["gemini-2.5-flash-lite"],
-        "gemini-2.5-pro": ["gemini-2.5-flash"],
         "gemini-2.5-flash": ["gemini-2.5-flash-lite"],
         "gemini-2.0-flash": ["gemini-1.5-flash"],  # deprecated fallback chain
     }

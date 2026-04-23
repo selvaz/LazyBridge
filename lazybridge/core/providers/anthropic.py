@@ -93,7 +93,7 @@ class AnthropicProvider(BaseProvider):
     # Update this table when new models ship.
     _TIER_ALIASES = {
         "top": "claude-opus-4-7",
-        "expensive": "claude-opus-4-1",  # legacy high-cost Opus
+        "expensive": "claude-opus-4-6",  # second tier, same quality family as top
         "medium": "claude-sonnet-4-6",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",

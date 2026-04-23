@@ -115,14 +115,16 @@ class OpenAIProvider(BaseProvider):
 
     # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
     _TIER_ALIASES = {
-        "top": "gpt-5.4",
-        "expensive": "gpt-5",
-        "medium": "gpt-4o",
+        "top": "gpt-5.4-pro",      # extended reasoning flagship
+        "expensive": "gpt-5.4",    # general flagship
+        "medium": "gpt-5.4-mini",  # fast mid-range; cheaper and newer than gpt-4o
         "cheap": "gpt-4.1-mini",
         "super_cheap": "gpt-4.1-nano",
     }
     _FALLBACKS = {
+        "gpt-5.4-pro": ["gpt-5.4", "gpt-5"],
         "gpt-5.4": ["gpt-5", "gpt-4o"],
+        "gpt-5.4-mini": ["gpt-5", "gpt-4o-mini"],
         "gpt-5": ["gpt-4.1", "gpt-4o"],
         "gpt-4o": ["gpt-4.1", "gpt-4-turbo"],
         "gpt-4.1": ["gpt-4o"],
