@@ -106,20 +106,27 @@ verify at each provider's pricing page before billing decisions.
 
 | Tier | Model | Context | Max out | $/M in | $/M out |
 |------|-------|--------:|-------:|-------:|--------:|
-| `top` / `expensive` | deepseek-reasoner | 128 K | 64 K | $0.28 | $0.42 |
-| `medium` / `cheap` / `super_cheap` | deepseek-chat | 128 K | 8 K | $0.28 | $0.42 |
+| `top` / `expensive` | deepseek-v4-pro | 1 M | 384 K | $1.74 | $3.48 |
+| `medium` / `cheap` / `super_cheap` | deepseek-v4-flash | 1 M | 384 K | $0.14 | $0.28 |
 
-DeepSeek has only two models; multiple tier aliases collapse onto the same model.
+Both V4 models share the same tier family; three tiers collapse onto `deepseek-v4-flash`.
 
 **Thinking / reasoning**
 
-`deepseek-reasoner` exposes `reasoning_content` — the full chain-of-thought
-before the final answer. Available in both streaming and non-streaming mode.
-`deepseek-chat` does not support thinking.
+Both `deepseek-v4-pro` and `deepseek-v4-flash` support optional thinking mode,
+activated by passing `ThinkingConfig` to the request. Chain-of-thought surfaces
+in the `reasoning_content` field in both streaming and non-streaming responses.
+
+In thinking mode the API silently ignores `temperature`, `top_p`,
+`presence_penalty`, and `frequency_penalty`; `tool_choice` is also not supported.
 
 !!! note
-    Passing `ThinkingConfig` to a non-reasoner DeepSeek model raises `ValueError`.
-    Switch to `model="deepseek-reasoner"` explicitly.
+    Passing `ThinkingConfig` to a non-V4 DeepSeek model raises `ValueError`.
+
+!!! warning "Deprecation"
+    `deepseek-reasoner` and `deepseek-chat` are deprecated and will be retired
+    **2026-07-24**. They currently map to `deepseek-v4-flash` on the API side.
+    Migrate to `deepseek-v4-pro` / `deepseek-v4-flash` before that date.
 
 **Native tools:** None (standard function calling supported).
 

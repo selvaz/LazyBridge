@@ -53,13 +53,15 @@ WARNING: Google Search + structured output = 400 error; mutually exclusive.
 WARNING: gemini-2.0-flash deprecated June 1 2026 — do not use in new code.
 
 ## DeepSeek model tiers
-| tier                          | model               | ctx  | max_out | $/M in | $/M out |
-|-------------------------------|---------------------|------|---------|--------|---------|
-| top / expensive               | deepseek-reasoner   | 128K | 64 K    | $0.28  | $0.42   |
-| medium / cheap / super_cheap  | deepseek-chat       | 128K | 8 K     | $0.28  | $0.42   |
+| tier                          | model               | ctx | max_out | $/M in | $/M out |
+|-------------------------------|---------------------|-----|---------|--------|---------|
+| top / expensive               | deepseek-v4-pro     | 1 M | 384 K   | $1.74  | $3.48   |
+| medium / cheap / super_cheap  | deepseek-v4-flash   | 1 M | 384 K   | $0.14  | $0.28   |
 
-Thinking: deepseek-reasoner exposes reasoning_content (chain-of-thought).
-          ThinkingConfig on deepseek-chat raises ValueError.
+Thinking: both V4 models support ThinkingConfig → reasoning_content field.
+          temperature/top_p/presence_penalty/frequency_penalty stripped in thinking mode.
+          ThinkingConfig on non-V4 models raises ValueError.
+DEPRECATED (retire 2026-07-24): deepseek-reasoner, deepseek-chat → both map to deepseek-v4-flash.
 Native tools: none (function calling supported).
 
 ## example
@@ -77,7 +79,7 @@ b = Agent("claude-haiku-4-5")
 ```
 
 ## pitfalls
-- DeepSeek has only 2 models; multiple tier aliases collapse onto the same model.
+- DeepSeek V4 has 2 models (v4-pro, v4-flash); three tier aliases collapse onto v4-flash.
 - gpt-5-mini does NOT exist. The current OpenAI mini variant is gpt-5.4-mini.
 - gemini-2.0-flash is deprecated June 1 2026; use gemini-2.5-flash-lite instead.
 - Adaptive thinking (Anthropic claude-opus/sonnet 4.6+) ignores budget_tokens.

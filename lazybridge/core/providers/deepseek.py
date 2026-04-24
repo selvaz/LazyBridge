@@ -3,14 +3,23 @@
 DeepSeek's API is fully compatible with the OpenAI SDK — it uses the same
 client with a custom base_url and different model names.
 
-Models (March 2026):
-  Flagship / Reasoning: deepseek-reasoner  (DeepSeek-R1 / thinking mode)
-  General / Mid:        deepseek-chat      (DeepSeek-V3.2)
+Models (April 2026):
+  Flagship:    deepseek-v4-pro    (1.6T/49B active, 1M ctx, 384K out, optional thinking)
+  Fast/Cheap:  deepseek-v4-flash  (284B/13B active, 1M ctx, 384K out, optional thinking)
 
-Reasoning:
-  - `deepseek-reasoner` returns a `reasoning_content` field in streaming chunks
-    containing the chain-of-thought before the final answer.
-  - In non-streaming mode, the reasoning is in `message.reasoning_content`.
+Deprecated (retire 2026-07-24 — currently routed to deepseek-v4-flash by the API):
+  deepseek-reasoner  → deepseek-v4-flash (thinking mode)
+  deepseek-chat      → deepseek-v4-flash (non-thinking mode)
+
+Thinking mode (V4 models):
+  - Activated by passing ThinkingConfig to the request.
+  - The API receives extra_body={"thinking": {"type": "enabled"}}.
+  - Chain-of-thought surfaces in the ``reasoning_content`` field (streaming and non-streaming).
+  - temperature, top_p, presence_penalty, frequency_penalty are ignored in thinking mode.
+  - tool_choice is not supported in thinking mode.
+
+Thinking mode (legacy deepseek-reasoner):
+  - Always in thinking mode; reasoning_content is always present.
 
 Native tools:
   - No provider-native server-side tools (web search etc.) via API.
@@ -37,13 +46,22 @@ _logger = logging.getLogger(__name__)
 _DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 _DEEPSEEK_ENV_KEY = "DEEPSEEK_API_KEY"
 
-# DeepSeek reasoning models (support reasoning_content field)
+# Legacy model permanently in thinking/reasoning mode.
 _REASONING_MODELS = frozenset({"deepseek-reasoner"})
+
+# V4 models that support optional thinking via ThinkingConfig.
+_THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
+
+# Parameters silently ignored by the API when thinking mode is active.
+_THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penalty", "frequency_penalty"})
 
 # Price per 1M tokens (input, output). Approximate; verify at platform.deepseek.com/api-docs/pricing.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "deepseek-reasoner": (0.28, 0.42),
-    "deepseek-chat": (0.28, 0.42),
+    "deepseek-v4-pro": (1.74, 3.48),
+    "deepseek-v4-flash": (0.14, 0.28),
+    # Deprecated 2026-07-24; currently API-routed to deepseek-v4-flash.
+    "deepseek-reasoner": (0.14, 0.28),
+    "deepseek-chat": (0.14, 0.28),
 }
 
 
@@ -51,27 +69,25 @@ class DeepSeekProvider(OpenAIProvider):
     """DeepSeek provider — extends OpenAI provider with DeepSeek-specific handling.
 
     Supports:
-    - deepseek-chat (V3.2): standard chat + function calling
-    - deepseek-reasoner (R1): reasoning via reasoning_content field
+    - deepseek-v4-flash: fast/cheap general chat + optional thinking + function calling
+    - deepseek-v4-pro: flagship, higher quality + optional thinking + function calling
+    - deepseek-reasoner (deprecated): always-on reasoning via reasoning_content field
     - Streaming with reasoning extraction
-    - OpenAI-compatible function calling
     - JSON mode structured output (response_format: json_object)
     """
 
-    default_model = "deepseek-chat"
+    default_model = "deepseek-v4-flash"
 
-    # Tier aliases (audit F2).  DeepSeek has fewer distinct tiers than
-    # its peers; multiple aliases point at the same concrete model —
-    # documented in the matrix (lazy_wiki/human/agents.md).
     _TIER_ALIASES = {
-        "top": "deepseek-reasoner",
-        "expensive": "deepseek-reasoner",
-        "medium": "deepseek-chat",
-        "cheap": "deepseek-chat",
-        "super_cheap": "deepseek-chat",
+        "top": "deepseek-v4-pro",
+        "expensive": "deepseek-v4-pro",
+        "medium": "deepseek-v4-flash",
+        "cheap": "deepseek-v4-flash",
+        "super_cheap": "deepseek-v4-flash",
     }
     _FALLBACKS = {
-        "deepseek-reasoner": ["deepseek-chat"],
+        "deepseek-v4-pro": ["deepseek-v4-flash"],
+        "deepseek-reasoner": ["deepseek-v4-flash"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset()  # No native server tools
 
@@ -85,6 +101,8 @@ class DeepSeekProvider(OpenAIProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for the given model."""
         resolved = (model or self.model or self.default_model or "").lower()
+        if "v4" in resolved:
+            return 64_000  # Conservative default; V4 models support up to 384K
         if "reasoner" in resolved:
             return 64_000
         return 8_000
@@ -115,8 +133,17 @@ class DeepSeekProvider(OpenAIProvider):
     def _is_reasoning_model(self, model: str) -> bool:
         return model in _REASONING_MODELS
 
+    def _is_thinking_active(self, request: CompletionRequest, model: str) -> bool:
+        """True when the request will run in thinking/reasoning mode."""
+        if model in _REASONING_MODELS:
+            return True
+        return (
+            model in _THINKING_CAPABLE_MODELS
+            and bool(request.thinking and request.thinking.enabled)
+        )
+
     def _resolve_thinking(self, request: CompletionRequest) -> CompletionRequest:
-        """If thinking is enabled and model is not reasoner, error out.
+        """Validate that thinking is only requested on models that support it.
 
         Previously the provider auto-switched to ``deepseek-reasoner``
         with only a warning — changing the model underneath the caller
@@ -125,13 +152,24 @@ class DeepSeekProvider(OpenAIProvider):
         """
         if request.thinking and request.thinking.enabled:
             model = self._resolve_model(request)
-            if model not in _REASONING_MODELS:
+            if model not in (_REASONING_MODELS | _THINKING_CAPABLE_MODELS):
                 raise ValueError(
                     f"DeepSeek: thinking was requested but model {model!r} does "
-                    "not support reasoning. Pass model='deepseek-reasoner' "
-                    "explicitly, or drop thinking= for this call."
+                    "not support reasoning. Use 'deepseek-v4-pro' or 'deepseek-v4-flash' "
+                    "for thinking, or drop thinking= for this call."
                 )
         return request
+
+    def _apply_thinking_params(self, params: dict, model: str, request: CompletionRequest) -> None:
+        """Mutate params in-place to activate thinking mode on V4 models."""
+        if model not in _THINKING_CAPABLE_MODELS:
+            return
+        if not (request.thinking and request.thinking.enabled):
+            return
+        params.setdefault("extra_body", {})["thinking"] = {"type": "enabled"}
+        # Strip params the API silently ignores in thinking mode to avoid confusion.
+        for p in _THINKING_SUPPRESSED_PARAMS:
+            params.pop(p, None)
 
     # ------------------------------------------------------------------
     # Override: extract reasoning_content from DeepSeek responses
@@ -189,9 +227,10 @@ class DeepSeekProvider(OpenAIProvider):
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
 
-        # deepseek-reasoner does not support tool_choice — strip it silently.
-        if self._is_reasoning_model(model):
+        if self._is_thinking_active(request, model):
             params.pop("tool_choice", None)
+
+        self._apply_thinking_params(params, model, request)
 
         # DeepSeek structured output: JSON mode only (not full schema enforcement).
         # Skip when tools are present — tool calls return empty content, which
@@ -213,9 +252,15 @@ class DeepSeekProvider(OpenAIProvider):
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
         """Stream a completion, yielding StreamChunk objects."""
         request = self._resolve_thinking(request)
+        model = self._resolve_model(request)
         params = self._build_chat_params(request)
         params["stream"] = True
         params["stream_options"] = {"include_usage": True}
+
+        if self._is_thinking_active(request, model):
+            params.pop("tool_choice", None)
+
+        self._apply_thinking_params(params, model, request)
 
         text_accum = ""
         tool_call_accum: dict[int, dict] = {}
@@ -277,8 +322,10 @@ class DeepSeekProvider(OpenAIProvider):
         model = self._resolve_model(request)
         params = self._build_chat_params(request)
 
-        if self._is_reasoning_model(model):
+        if self._is_thinking_active(request, model):
             params.pop("tool_choice", None)
+
+        self._apply_thinking_params(params, model, request)
 
         has_tools = bool(params.get("tools"))
         if request.structured_output and not has_tools:
@@ -297,9 +344,15 @@ class DeepSeekProvider(OpenAIProvider):
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         """Async streaming completion."""
         request = self._resolve_thinking(request)
+        model = self._resolve_model(request)
         params = self._build_chat_params(request)
         params["stream"] = True
         params["stream_options"] = {"include_usage": True}
+
+        if self._is_thinking_active(request, model):
+            params.pop("tool_choice", None)
+
+        self._apply_thinking_params(params, model, request)
 
         text_accum = ""
         tool_call_accum: dict[int, dict] = {}
