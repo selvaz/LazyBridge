@@ -53,14 +53,15 @@ WARNING: Google Search + structured output = 400 error; mutually exclusive.
 WARNING: gemini-2.0-flash deprecated June 1 2026 — do not use in new code.
 
 ## DeepSeek model tiers
-| tier                          | model               | ctx | max_out | $/M in | $/M out |
-|-------------------------------|---------------------|-----|---------|--------|---------|
-| top / expensive               | deepseek-v4-pro     | 1 M | 384 K   | $1.74  | $3.48   |
-| medium / cheap / super_cheap  | deepseek-v4-flash   | 1 M | 384 K   | $0.14  | $0.28   |
+| tier                          | model               | ctx | max_out | $/M in | $/M in cached | $/M out |
+|-------------------------------|---------------------|-----|---------|--------|---------------|---------|
+| top / expensive               | deepseek-v4-pro     | 1 M | 384 K   | $1.74  | $0.145        | $3.48   |
+| medium / cheap / super_cheap  | deepseek-v4-flash   | 1 M | 384 K   | $0.14  | $0.028        | $0.28   |
 
 Thinking: both V4 models support ThinkingConfig → reasoning_content field.
           temperature/top_p/presence_penalty/frequency_penalty stripped in thinking mode.
           ThinkingConfig on non-V4 models raises ValueError.
+Cache: automatic on repeated prefixes ≥1024 tokens; no opt-in needed.
 DEPRECATED (retire 2026-07-24): deepseek-reasoner, deepseek-chat → both map to deepseek-v4-flash.
 Native tools: none (function calling supported).
 

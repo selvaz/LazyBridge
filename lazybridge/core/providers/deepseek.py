@@ -55,7 +55,9 @@ _THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
 # Parameters silently ignored by the API when thinking mode is active.
 _THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penalty", "frequency_penalty"})
 
-# Price per 1M tokens (input, output). Approximate; verify at platform.deepseek.com/api-docs/pricing.
+# Price per 1M tokens (input, output). Verify at platform.deepseek.com/api-docs/pricing.
+# Cache-hit input rates (automatic for repeated prefixes ≥1024 tokens, same account):
+#   deepseek-v4-pro:   $0.145/M   deepseek-v4-flash: $0.028/M
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "deepseek-v4-pro": (1.74, 3.48),
     "deepseek-v4-flash": (0.14, 0.28),

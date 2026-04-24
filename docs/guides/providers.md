@@ -104,12 +104,13 @@ verify at each provider's pricing page before billing decisions.
 
 ## DeepSeek
 
-| Tier | Model | Context | Max out | $/M in | $/M out |
-|------|-------|--------:|-------:|-------:|--------:|
-| `top` / `expensive` | deepseek-v4-pro | 1 M | 384 K | $1.74 | $3.48 |
-| `medium` / `cheap` / `super_cheap` | deepseek-v4-flash | 1 M | 384 K | $0.14 | $0.28 |
+| Tier | Model | Context | Max out | $/M in | $/M in (cached) | $/M out |
+|------|-------|--------:|-------:|-------:|----------------:|--------:|
+| `top` / `expensive` | deepseek-v4-pro | 1 M | 384 K | $1.74 | $0.145 | $3.48 |
+| `medium` / `cheap` / `super_cheap` | deepseek-v4-flash | 1 M | 384 K | $0.14 | $0.028 | $0.28 |
 
 Both V4 models share the same tier family; three tiers collapse onto `deepseek-v4-flash`.
+Cache hits apply automatically to any repeated prefix ≥ 1,024 tokens; no opt-in required.
 
 **Thinking / reasoning**
 
