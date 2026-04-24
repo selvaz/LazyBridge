@@ -69,12 +69,12 @@ _logger = logging.getLogger(__name__)
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     # Gemini 3 series (all preview as of 2026-04)
     "gemini-3.1-flash-lite": (0.25, 1.50),   # gemini-3.1-flash-lite-preview
-    "gemini-3.1-pro": (2.00, 12.0),           # gemini-3.1-pro-preview ($2/$12 >200k tiered; use upper bound)
+    "gemini-3.1-pro": (2.00, 12.0),           # gemini-3.1-pro-preview; ≤200K tier — >200K billed at $4/$18
     "gemini-3-flash": (0.50, 3.00),           # gemini-3-flash-preview
     # Gemini 2.5 series (GA)
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-2.5-pro": (1.25, 10.0),
+    "gemini-2.5-pro": (1.25, 10.0),           # ≤200K tier — >200K billed at $2.50/$15
     # Gemini 2.0 series (deprecated June 1 2026 — kept for compatibility)
     "gemini-2.0-flash": (0.075, 0.30),
     # Gemini 1.5 series (legacy)
