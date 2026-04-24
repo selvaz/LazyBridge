@@ -223,6 +223,38 @@ class DeepSeekProvider(OpenAIProvider):
             raw=response,
         )
 
+    @staticmethod
+    def _ensure_json_word_in_prompt(params: dict, schema: Any = None) -> None:
+        """DeepSeek requires the literal word 'json' somewhere in the prompt
+        when response_format=json_object is used, or the API returns 400.
+        Also injects the expected JSON schema so the model produces the right shape.
+        """
+        import json as _json
+
+        if schema is not None:
+            try:
+                if hasattr(schema, "model_json_schema"):
+                    schema_str = _json.dumps(schema.model_json_schema(), indent=2)
+                elif isinstance(schema, dict):
+                    schema_str = _json.dumps(schema, indent=2)
+                else:
+                    schema_str = str(schema)
+            except Exception:
+                schema_str = str(schema)
+            instruction = f"Respond with a valid JSON object matching this schema exactly:\n```json\n{schema_str}\n```"
+        else:
+            messages: list[dict] = params.get("messages", [])
+            has_json = any("json" in str(m.get("content", "")).lower() for m in messages)
+            if has_json:
+                return
+            instruction = "Respond with a valid JSON object."
+
+        messages = params.get("messages", [])
+        if messages and messages[0].get("role") == "system":
+            messages[0] = {**messages[0], "content": messages[0]["content"] + "\n" + instruction}
+        else:
+            params["messages"] = [{"role": "system", "content": instruction}] + messages
+
     def complete(self, request: CompletionRequest) -> CompletionResponse:
         """Execute a synchronous completion."""
         request = self._resolve_thinking(request)
@@ -240,6 +272,7 @@ class DeepSeekProvider(OpenAIProvider):
         has_tools = bool(params.get("tools"))
         if request.structured_output and not has_tools:
             params["response_format"] = {"type": "json_object"}
+            self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
 
         response = self._client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
@@ -332,6 +365,7 @@ class DeepSeekProvider(OpenAIProvider):
         has_tools = bool(params.get("tools"))
         if request.structured_output and not has_tools:
             params["response_format"] = {"type": "json_object"}
+            self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
 
         response = await self._async_client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)

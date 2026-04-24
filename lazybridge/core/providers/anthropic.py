@@ -319,7 +319,7 @@ class AnthropicProvider(BaseProvider):
         model = self._resolve_model(request)
         params: dict[str, Any] = {
             "model": model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": request.max_tokens or self.get_default_max_tokens(model),
             "messages": self._messages_to_anthropic(request),
         }
         # Prompt caching (audit finding #7).  When the caller opts in
@@ -440,7 +440,9 @@ class AnthropicProvider(BaseProvider):
 
     def _should_force_streaming(self, request: CompletionRequest) -> bool:
         threshold = getattr(self, "_force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
-        if request.max_tokens and request.max_tokens > threshold:
+        resolved_model = self._resolve_model(request)
+        effective_max = request.max_tokens or self.get_default_max_tokens(resolved_model)
+        if effective_max > threshold:
             import logging as _logging
 
             _logging.getLogger(__name__).debug(
@@ -590,8 +592,21 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        # Mirror complete(): add output_config for structured output so the API
+        # enforces the schema server-side and the model emits valid JSON, not prose.
+        if request.structured_output and request.structured_output.schema:
+            from lazybridge.core.structured import normalize_json_schema
+
+            schema = request.structured_output.schema
+            json_schema = (
+                normalize_json_schema(schema)
+                if isinstance(schema, dict)
+                else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+            )
+            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+
         ctx: Any
-        if betas:
+        if betas or "output_config" in params:
             ctx = self._client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
             ctx = self._client.messages.stream(**params)
@@ -731,8 +746,21 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        # Mirror acomplete(): add output_config so the API enforces the schema
+        # server-side when streaming (force-streamed requests need this too).
+        if request.structured_output and request.structured_output.schema:
+            from lazybridge.core.structured import normalize_json_schema
+
+            schema = request.structured_output.schema
+            json_schema = (
+                normalize_json_schema(schema)
+                if isinstance(schema, dict)
+                else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+            )
+            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+
         ctx: Any
-        if betas:
+        if betas or "output_config" in params:
             ctx = self._async_client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
             ctx = self._async_client.messages.stream(**params)

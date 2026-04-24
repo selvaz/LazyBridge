@@ -274,7 +274,7 @@ class CompletionRequest:
     messages: list[Message]
     model: str | None = None
     system: str | None = None
-    max_tokens: int = 4096
+    max_tokens: int | None = None
     temperature: float | None = None
     tools: list[ToolDefinition] = field(default_factory=list)
     tool_choice: str | None = None  # "auto" | "required" | "none" | "any" | tool_name

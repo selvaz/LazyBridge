@@ -309,11 +309,13 @@ class OpenAIProvider(BaseProvider):
             "model": model,
             "messages": self._messages_to_openai(request),
         }
-        # max_tokens vs max_completion_tokens
+        # max_tokens vs max_completion_tokens — omit when None so the API uses its own default
         if self._is_reasoning_model(model):
-            params["max_completion_tokens"] = request.max_tokens
+            if request.max_tokens is not None:
+                params["max_completion_tokens"] = request.max_tokens
         else:
-            params["max_tokens"] = request.max_tokens
+            if request.max_tokens is not None:
+                params["max_tokens"] = request.max_tokens
             if request.temperature is not None:
                 params["temperature"] = request.temperature
 
