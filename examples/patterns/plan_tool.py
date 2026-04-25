@@ -307,13 +307,17 @@ def make_execute_parallel_tool(
     name: str = "execute_parallel",
     description: Optional[str] = None,
 ) -> Tool:
-    """Tool: ``execute_parallel(jobs: list[ParallelJob]) -> str``.
+    """Tool: ``execute_parallel(jobs, synthesize_with=None) -> str``.
 
     Runs each (agent, task) pair concurrently via :func:`asyncio.gather`.
     Returns the joined results, one section per job, labelled by agent.
-    Use when the legs are independent and you don't need the framework
-    to enforce an ordering — for fan-out+join with a synthesise step on
-    top, prefer ``execute_plan`` so the join sees ``list[Envelope]``.
+
+    If ``synthesize_with`` names an agent in the registry, the joined sections
+    are passed to that agent as a final synthesis step and its output is
+    returned instead. This is the recommended idiom for "fan out N then
+    synthesise" — Plan's ``from_parallel`` reads only one branch, so building
+    that pattern via ``execute_plan`` doesn't actually deliver all N to the
+    join step.
     """
     import asyncio
 
@@ -327,13 +331,19 @@ def make_execute_parallel_tool(
         ]
         description = (
             "Run multiple (agent, task) jobs concurrently. Each leg is "
-            "independent. Returns the joined text, one labelled section per "
-            "job. Use when the work fans out into independent lookups or "
-            "computations and a separate synthesis step is unnecessary.\n\n"
+            "independent. Returns the joined text (one labelled section "
+            "per job), or — if synthesize_with is set — the named agent's "
+            "synthesis of those joined sections. Use synthesize_with when "
+            "you need a single coherent answer drawing on all branches; "
+            "this is the correct idiom for fan-out + synthesise (Plan's "
+            "from_parallel reads only one branch).\n\n"
             "Available sub-agents:\n" + "\n".join(agent_lines)
         )
 
-    async def execute_parallel(jobs: list[ParallelJob]) -> str:
+    async def execute_parallel(
+        jobs: list[ParallelJob],
+        synthesize_with: Optional[str] = None,
+    ) -> str:
         if not jobs:
             return "PARALLEL_REJECTED: jobs list is empty."
         unknown = sorted({j.agent for j in jobs if j.agent not in registry})
@@ -341,6 +351,11 @@ def make_execute_parallel_tool(
             return (
                 f"PARALLEL_REJECTED: unknown agent(s) {unknown!r}. "
                 f"Available: {sorted(registry)!r}."
+            )
+        if synthesize_with is not None and synthesize_with not in registry:
+            return (
+                f"PARALLEL_REJECTED: synthesize_with={synthesize_with!r} "
+                f"not in registry. Available: {sorted(registry)!r}."
             )
 
         try:
@@ -355,7 +370,22 @@ def make_execute_parallel_tool(
             label = f"[{j.agent}] {j.task}"
             body = env.text() if not env.error else f"(error) {env.error.message}"
             sections.append(f"{label}\n→ {body}")
-        return "\n\n".join(sections)
+        joined = "\n\n".join(sections)
+
+        if synthesize_with is None:
+            return joined
+
+        synth_task = (
+            "Synthesise the following independent results into a single "
+            "coherent answer:\n\n" + joined
+        )
+        try:
+            env = await registry[synthesize_with].run(synth_task)
+        except Exception as e:  # noqa: BLE001
+            return f"PARALLEL_RUNTIME_ERROR (synth): {type(e).__name__}: {e}"
+        if env.error:
+            return f"PARALLEL_RUNTIME_ERROR (synth): {env.error.message}"
+        return env.text()
 
     return Tool(execute_parallel, name=name, description=description, mode="signature")
 
@@ -387,12 +417,13 @@ ORCHESTRATOR_GUIDANCE = """\
 You have three orchestration tools, ordered from simple to expressive.
 **Always pick the simplest tool that fits the task.**
 
-| Tool              | Shape                              | When to use                                                |
-|-------------------|------------------------------------|------------------------------------------------------------|
-| (none — answer)   | direct response                    | Greetings, common knowledge, pure opinion.                 |
-| execute_chain     | a → b → c (sequential)             | Strict pipeline, each step builds on previous output.      |
-| execute_parallel  | [a, b, c] (independent)            | Independent legs; you don't need a separate synthesise step. |
-| execute_plan      | DAG (parallel + sequential mix)    | Fan-out + join, conditional ordering, multi-stage work.    |
+| Tool                              | Shape                              | When to use                                                |
+|-----------------------------------|------------------------------------|------------------------------------------------------------|
+| (none — answer)                   | direct response                    | Greetings, common knowledge, pure opinion.                 |
+| execute_chain                     | a → b → c (sequential)             | Strict pipeline, each step builds on previous output.      |
+| execute_parallel                  | [a, b, c] (independent)            | Independent legs, raw labelled outputs are enough.         |
+| execute_parallel(synthesize_with) | [a, b, c] → synth                  | Fan-out + a single synthesised answer drawing on all legs. |
+| execute_plan                      | DAG (parallel + sequential mix)    | Linear pipelines that pass *one* branch's output forward.  |
 
 ## Decision rules
 
@@ -400,10 +431,13 @@ You have three orchestration tools, ordered from simple to expressive.
 2. **One sub-agent suffices** → call ``execute_chain`` with a single-element list,
    or — if the sub-agent is exposed directly — just call it.
 3. **All steps depend on the previous output** → ``execute_chain``.
-4. **Steps are independent and you can paste their text together** → ``execute_parallel``.
-5. **Fan-out then synthesise** (need a join step that sees all parallel outputs) →
-   ``execute_plan`` with ``parallel=true`` siblings + a ``from_parallel`` join step.
-6. **Mixed DAG** (some parallel, some sequential, some references back) → ``execute_plan``.
+4. **Independent legs, raw outputs OK** → ``execute_parallel``.
+5. **Fan-out then synthesise** (need ONE coherent answer drawing on all legs) →
+   ``execute_parallel(synthesize_with=<agent>)``. **Do NOT use ``execute_plan``
+   with ``from_parallel`` for this — ``from_parallel`` reads exactly one
+   branch, not a list.**
+6. **Mixed DAG** with linear hand-offs and at most one branch read forward
+   from a parallel band → ``execute_plan``.
 
 ## Tool reference
 
@@ -411,10 +445,11 @@ You have three orchestration tools, ordered from simple to expressive.
 Sequential pipeline. ``agents[0]`` receives ``task``. Each subsequent agent
 receives the previous agent's text output. Returns the last agent's text.
 
-### ``execute_parallel(jobs: list[{agent, task}]) -> str``
-Runs every ``(agent, task)`` pair concurrently. Returns labelled sections
-joined together. There is no separate synthesise step; if you need one,
-use ``execute_plan`` instead.
+### ``execute_parallel(jobs: list[{agent, task}], synthesize_with: str | None = None) -> str``
+Runs every ``(agent, task)`` pair concurrently. By default returns labelled
+sections joined together. When ``synthesize_with`` names a registry agent,
+that agent receives the joined sections as task and its output is returned —
+the canonical idiom for "fan out N + synthesise".
 
 ### ``execute_plan(steps: list[StepSpec], task: str) -> str``
 Builds and runs a DAG. Each ``StepSpec`` has:
@@ -425,12 +460,16 @@ Builds and runs a DAG. Each ``StepSpec`` has:
     * ``"literal"``       — provide ``task_text``. Use for the first step or
                             for steps that need a hand-crafted prompt.
     * ``"from_prev"``     — receive the previous step's text output (default).
-    * ``"from_step"``     — receive the named step's output (provide ``task_step``).
-                            The named step **must come earlier** in the DAG.
-    * ``"from_parallel"`` — receive a ``list[Envelope]`` from a group of
-                            parallel siblings whose first member is named
-                            in ``task_step``. Use this for the join step
-                            after a fan-out.
+                            After a parallel band, ``from_prev`` resolves to
+                            the LAST branch in the band (not all of them).
+    * ``"from_step"``     — receive the named step's output (provide
+                            ``task_step``). One envelope only. The named
+                            step **must come earlier** in the DAG.
+    * ``"from_parallel"`` — alias of ``from_step`` named for readability when
+                            the referenced step ran with ``parallel=true``.
+                            **Reads ONE specific branch's output, NOT a list.**
+                            For "fan out N + synthesise all of them" use
+                            ``execute_parallel(synthesize_with=...)`` instead.
 - ``task_text`` : required when ``task_kind="literal"``.
 - ``task_step`` : required when ``task_kind="from_step"`` or ``"from_parallel"``.
 - ``parallel``  : ``true`` to run concurrently with adjacent parallel siblings.
@@ -463,25 +502,24 @@ Tool:
     {"agent": "research", "task": "headcount of Meta in 2024"},
 ])``
 
-### Example 5 — fan-out + join + write: execute_plan
-User: "Get the 2024 headcounts of Apple, Google, and Meta in parallel, sum them, and write a short comment."
-Tool:
-``execute_plan(
-    task="...",
-    steps=[
-        {"name": "hc_apple",  "agent": "research", "task_kind": "literal",
-         "task_text": "headcount of Apple in 2024",  "parallel": true},
-        {"name": "hc_google", "agent": "research", "task_kind": "literal",
-         "task_text": "headcount of Google in 2024", "parallel": true},
-        {"name": "hc_meta",   "agent": "research", "task_kind": "literal",
-         "task_text": "headcount of Meta in 2024",  "parallel": true},
-        {"name": "sum",       "agent": "math",
-         "task_kind": "from_parallel", "task_step": "hc_apple"},
-        {"name": "comment",   "agent": "writer",   "task_kind": "from_prev"},
+### Example 5 — fan-out + synthesise: execute_parallel(synthesize_with=...)
+User: "Get the 2024 headcounts of Apple, Google, and Meta in parallel and write a short paragraph commenting on the totals."
+
+Wrong: ``execute_plan`` with parallel siblings and a ``from_parallel`` join —
+``from_parallel`` reads one branch, so the join would only see Apple's number.
+
+Right:
+``execute_parallel(
+    jobs=[
+        {"agent": "research", "task": "headcount of Apple in 2024"},
+        {"agent": "research", "task": "headcount of Google in 2024"},
+        {"agent": "research", "task": "headcount of Meta in 2024"},
     ],
+    synthesize_with="writer",
 )``
-Note: the join step uses ``task_kind="from_parallel"`` with
-``task_step="hc_apple"`` — the *first* parallel sibling names the group.
+The writer receives the three labelled sections joined together and produces
+a single paragraph. If the synthesis needs arithmetic, set
+``synthesize_with="math"`` (or chain a math then writer call afterwards).
 
 ### Example 6 — branching with from_step
 User: "Look up X, then in parallel write a marketing blurb and a technical brief from those facts."
@@ -551,60 +589,67 @@ automatically (LazyBridge folds them into ``Envelope.metadata.nested_*``).
 Pick the simplest layer that fits — don't replicate inside ``execute_plan``
 what a registry entry already does internally.
 
-### Layer 2 — *you* compose at runtime via ``execute_plan``
-You can build nested structures yourself: ``execute_plan`` is the universal
-DAG expression, so any chain, any parallel, and any combination of the two
-fits inside a single ``execute_plan`` call. Use ``parallel=true`` on adjacent
-steps to fan out, and ``task_kind="from_parallel"`` on the next step to join.
+### Layer 2 — *you* compose at runtime
+You can compose work yourself by issuing **multiple** orchestration tool
+calls in sequence:
 
-### Example 10 — chain with a parallel block in the middle (you build it)
-Pattern: ``a → [b ∥ c] → d``. ``a`` is sequential; ``b`` and ``c`` run
-concurrently from a's output; ``d`` joins them.
+- Need fan-out + synthesise? ``execute_parallel(synthesize_with=...)`` in
+  one call.
+- Need a sequential pipeline with a parallel-with-synthesis stage in the
+  middle? Issue ``execute_chain`` for the lead-in, then
+  ``execute_parallel(synthesize_with=...)`` for the parallel stage, then a
+  final ``execute_chain`` for the tail. Three calls, each shape correct.
+- Linear pipelines with at most one branch read forward from a parallel
+  band fit a single ``execute_plan`` call.
 
+There is no "nested DAG that joins multiple parallel branches into one
+follow-up step" — Plan's ``from_parallel`` reads exactly one branch.
+Don't try to fake it with ``execute_plan``; use multiple tool calls.
+
+### Example 10 — sequential setup, then parallel-with-synthesis
+Pattern: ``a → execute_parallel([b, c], synthesize_with=writer)``.
+This is two tool calls. First do the setup step:
+
+``execute_chain(agents=["research"], task="Find background on X.")``
+
+Then fan out two follow-ups and synthesise:
+
+``execute_parallel(
+    jobs=[
+        {"agent": "research", "task": "Specifically: <follow-up 1 derived from background>"},
+        {"agent": "research", "task": "Specifically: <follow-up 2 derived from background>"},
+    ],
+    synthesize_with="writer",
+)``
+Two tool calls is the right shape here — ``execute_plan`` cannot deliver
+both follow-ups to a single join step (``from_parallel`` reads one branch).
+
+### Example 11 — strict pipeline that *does* fit execute_plan
+Pattern: ``research → fact_checker → writer`` (linear, no branching).
 Tool:
+``execute_chain(agents=["research", "fact_checker", "writer"], task="topic")``
+
+Or — if you want compile-time DAG validation — use ``execute_plan``:
 ``execute_plan(
-    task="...",
+    task="topic",
     steps=[
-        {"name": "a", "agent": "research", "task_kind": "literal",
-         "task_text": "Find background on X"},
-        {"name": "b", "agent": "research", "task_kind": "from_step",
-         "task_step": "a", "parallel": true},
-        {"name": "c", "agent": "research", "task_kind": "from_step",
-         "task_step": "a", "parallel": true},
-        {"name": "d", "agent": "writer", "task_kind": "from_parallel",
-         "task_step": "b"},
+        {"name": "step_a", "agent": "research"},
+        {"name": "step_b", "agent": "fact_checker"},
+        {"name": "step_c", "agent": "writer"},
     ],
 )``
-
-### Example 11 — parallel of mini-pipelines (you build it)
-Pattern: ``[(a → b) ∥ (c → d)] → e``. Two short pipelines run concurrently,
-then merge.
-
-Tool:
-``execute_plan(
-    task="...",
-    steps=[
-        {"name": "a", "agent": "research", "task_kind": "literal",
-         "task_text": "...", "parallel": true},
-        {"name": "b", "agent": "writer", "task_kind": "from_step",
-         "task_step": "a", "parallel": true},
-        {"name": "c", "agent": "research", "task_kind": "literal",
-         "task_text": "...", "parallel": true},
-        {"name": "d", "agent": "writer", "task_kind": "from_step",
-         "task_step": "c", "parallel": true},
-        {"name": "e", "agent": "writer", "task_kind": "from_parallel",
-         "task_step": "a"},
-    ],
-)``
-The trick: every step that should run in the parallel band gets ``parallel=true``.
-``from_step`` references inside the band wire the mini-pipelines; the join
-step ``e`` uses ``from_parallel`` pointing at the *first* step of the band.
+Both shapes are equivalent here; ``execute_chain`` is shorter.
 
 ### Bottom line
-- Want a flat sequential pipeline? ``execute_chain``.
-- Want a flat fan-out with no synthesis? ``execute_parallel``.
-- Want anything else, including nested composition? ``execute_plan`` —
-  build the DAG yourself, no recursion needed.
+- Flat sequential pipeline → ``execute_chain``.
+- Independent fan-out, raw outputs OK → ``execute_parallel``.
+- Independent fan-out, **single synthesised answer** → ``execute_parallel(synthesize_with=...)``.
+- Linear pipeline with one branch read forward from a parallel band →
+  ``execute_plan`` (use ``from_step`` / ``from_parallel`` for the chosen branch).
+- More than one branch needs to flow into the next stage → split into TWO
+  tool calls (``execute_parallel(synthesize_with=...)`` then
+  ``execute_chain``). Don't try to express it as one Plan — the DAG
+  primitive doesn't deliver list-of-branches to a join step.
 
 ## Pitfalls
 
@@ -730,11 +775,13 @@ def main() -> None:
         "What does FAANG stand for?",
         # Pipeline — execute_chain.
         "Research recent agent frameworks and write a one-paragraph summary.",
-        # Independent fan-out — execute_parallel.
+        # Independent fan-out — execute_parallel (raw labelled outputs).
         "Headcounts of Apple, Google, and Meta in 2024.",
-        # Fan-out + join + write — execute_plan.
+        # Fan-out + synthesis — execute_parallel(synthesize_with="writer").
         "Get the 2024 headcounts of Apple, Google, and Meta in parallel, "
-        "sum them, and write a short paragraph commenting on it.",
+        "and write a short paragraph commenting on the trends across them.",
+        # Linear pipeline — execute_plan or execute_chain.
+        "Research quantum networking, fact-check the claims, and write a brief.",
     ]
     for q in queries:
         print(f"\n>>> {q}")

@@ -55,11 +55,18 @@ orchestrator(
 
 ## What the three tools do
 
-| Tool                 | Shape                              | When to use                                                |
-|----------------------|------------------------------------|------------------------------------------------------------|
-| `execute_chain`      | `a → b → c` (sequential)           | Strict pipeline; each step builds on the previous output.  |
-| `execute_parallel`   | `[a, b, c]` (independent)          | Independent legs; no separate synthesise step needed.      |
-| `execute_plan`       | DAG (parallel + sequential)        | Fan-out + join, branching, mixed multi-stage work.         |
+| Tool                                        | Shape                              | When to use                                                  |
+|---------------------------------------------|------------------------------------|--------------------------------------------------------------|
+| `execute_chain`                             | `a → b → c` (sequential)           | Strict pipeline; each step builds on the previous output.    |
+| `execute_parallel`                          | `[a, b, c]` (raw)                  | Independent legs; raw labelled outputs are enough.           |
+| `execute_parallel(synthesize_with="agent")` | `[a, b, c] → synth`                | Fan-out + a single coherent answer drawing on all legs.      |
+| `execute_plan`                              | Linear DAG with optional branches  | Linear pipelines that pass *one* branch's output forward.    |
+
+> **Important — `from_parallel` reads ONE branch.** Plan's `from_parallel("name")`
+> is an alias for `from_step("name")`: it forwards a single envelope, not a
+> list. For "fan out N + synthesise all of them", use
+> `execute_parallel(synthesize_with=...)`. Don't try to express that pattern
+> through `execute_plan`; the join step would only see one branch.
 
 All three return `str`. On a bad spec they return a structured error
 prefix the LLM can parse and self-correct from on its next attempt:
@@ -113,21 +120,20 @@ the rest.
 put `Agent.chain(...)` or an Agent-from-Plan in there. The outer LLM
 calls them by name like any leaf.
 
-**Layer 2 — runtime composition.** The outer LLM can build any DAG it
-wants by calling `execute_plan` with `parallel=true` on adjacent steps
-and `task_kind="from_parallel"` on the join. Two patterns from the
-examples in `ORCHESTRATOR_GUIDANCE`:
+**Layer 2 — runtime composition.** The outer LLM composes work itself by
+issuing one or more orchestration tool calls. Useful patterns:
 
-- *Chain with a parallel block in the middle* (`a → [b ∥ c] → d`):
-  one Plan, four steps, with `b` and `c` flagged `parallel=true` and
-  `d` using `task_kind="from_parallel"`.
-- *Parallel of mini-pipelines* (`[(a → b) ∥ (c → d)] → e`):
-  one Plan, five steps, with `a, b, c, d` all `parallel=true` (the
-  `from_step` references inside the band wire the mini-pipelines) and
-  `e` joining them.
+- *Fan out + synthesise* — one call: `execute_parallel(jobs=[…], synthesize_with="writer")`.
+- *Linear pipeline* — one call: `execute_chain(agents=[…], task=…)`.
+- *Lead-in + parallel-with-synth + tail* — three calls in sequence
+  (chain, parallel-with-synth, chain). Each shape is correct on its own;
+  `execute_plan` cannot express the middle stage as a single step because
+  `from_parallel` only reads one branch.
+- *Linear pipelines that read one specific branch from a parallel band* —
+  one `execute_plan` call.
 
-You don't need a separate "compose" tool — `execute_plan` already
-expresses every shape.
+There is no "DAG join that delivers a list of parallel branches to one
+follow-up step". Compose via multiple tool calls instead.
 
 ## Error-recovery loop
 
@@ -156,9 +162,10 @@ Common rejection messages and their fixes:
 - **Don't fan out single-agent work.** If three "parallel" jobs would
   all hit the research agent with similar tasks the agent could batch,
   emit one batched task instead.
-- **Match `from_parallel` to the *first* sibling.** A parallel band's
-  group is named after its first member; the join step's `task_step`
-  must point at that first name, not a later one.
+- **`from_parallel` is single-branch.** It's just `from_step` under a
+  parallel-flavoured name. It forwards exactly one branch's output. For
+  fan-out + multi-branch synthesis, use
+  `execute_parallel(synthesize_with=...)`.
 - **`task_kind="from_prev"` on the first step** receives the original
   user task verbatim. That's usually what you want; if not, use
   `task_kind="literal"` with a hand-crafted `task_text`.
