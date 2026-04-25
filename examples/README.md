@@ -20,12 +20,26 @@ examples/
 │   └── 02_research_and_report.py        # 2-agent sequential  → Agent.chain(a, b)
 └── patterns/
     ├── dynamic_planner.py                # planner → typed rounds → asyncio.gather → re-plan
-    └── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
+    ├── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
+    └── plan_tool.py                      # chain / parallel / plan exposed as Tools + LLM guidance
 ```
 
 ## Patterns (LazyBridge-native)
 
-Two ways to build an adaptive planner that picks sub-agents per query:
+Three approaches to "agent reasons, then dispatches work to sub-agents":
+
+**`patterns/plan_tool.py`** *(recommended starting point)* — exposes three
+reusable `Tool` factories over a registry of sub-agents:
+
+- `make_execute_chain_tool`    — sequential pipeline (a → b → c)
+- `make_execute_parallel_tool` — fan-out N independent jobs concurrently
+- `make_execute_plan_tool`     — full DAG (parallel + sequential mix), with
+  `PlanCompiler` validation before any LLM call
+
+Plus `make_orchestration_tools(registry)` returning all three, and
+`ORCHESTRATOR_GUIDANCE` — a ~7k-char system-prompt addendum with decision
+rules, a tool reference, eight worked examples, and a pitfalls section so
+the outer LLM picks the simplest shape that fits the query.
 
 **`patterns/dynamic_planner.py`** — planner uses `Agent(output=PlanRound)` to
 emit a typed task list per round, the orchestrator dispatches with
@@ -33,12 +47,10 @@ emit a typed task list per round, the orchestrator dispatches with
 until it sets `done=True`. Use when you want fine-grained control over the
 loop (e.g. early-stop after partial results, custom retry per task).
 
-**`patterns/agent_builds_plan.py`** — planner emits a `PlanSpec`; a small
-`materialize()` builds a real `Plan(Step(...), ...)` and `Agent.from_engine`
-runs it. Parallel rounds are native (`Step(parallel=True)`), and the
-`PlanCompiler` rejects forward `from_step` references, unknown step names,
-and duplicates *before* any LLM call. Use when one round is enough or when
-you want compile-time DAG validation; pass `replan=True` for multi-round.
+**`patterns/agent_builds_plan.py`** — minimal "planner emits a `PlanSpec`,
+`materialize()` turns it into a real `Plan`" example. The `plan_tool.py`
+above is the productionised version; this file is the educational walkthrough
+of the underlying mechanism.
 
 ## Concept map
 
