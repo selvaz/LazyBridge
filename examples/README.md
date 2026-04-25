@@ -21,38 +21,52 @@ examples/
 └── patterns/
     ├── dynamic_planner.py                # planner → typed rounds → asyncio.gather → re-plan
     ├── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
-    └── plan_tool.py                      # make_planner(agents) → Agent with execute_plan tool
+    ├── plan_tool.py                      # make_planner: builder tools (create_plan/add_step/run_plan)
+    └── blackboard_planner.py             # make_blackboard_planner: shared todo-list (no DAG)
 ```
 
 ## Patterns (LazyBridge-native)
 
-**`patterns/plan_tool.py`** *(recommended starting point)* — single factory:
+Two planner factories, same input shape (`agents: list[Agent]`), different
+trade-offs. Full guide: [docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
+
+**`patterns/plan_tool.py`** — `make_planner` (DAG builder):
 
 ```python
 planner = make_planner([research, math, writer])
 planner("Research X and write a brief.")
 ```
 
-The returned `Agent` has each sub-agent as a direct tool *and* an
-`execute_plan` tool. The LLM picks the simplest fit — direct call for one
-sub-agent, `execute_plan` for multi-step work. The planner's system prompt
-is `PLANNER_GUIDANCE` (decision rules + worked examples). `execute_plan`
-materialises a typed `PlanSpec` into a real `Plan(Step(...), ...)` and
-returns `PLAN_REJECTED: <reason>` for bad specs so the LLM can self-correct.
+The planner gets each sub-agent as a direct tool *plus* five **builder
+tools** that compose a `Plan` one step at a time:
+`create_plan` → `add_step` (×N) → `inspect_plan` (optional) → `run_plan`.
+Each `add_step` validates locally — unknown agent, duplicate name, forward
+`from_step` ref — so the LLM corrects one step at a time instead of
+re-emitting a whole DAG. Native parallel via `parallel=true`. Optional
+`verify=` for high-stakes outputs.
 
-Full doc: [docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
+**`patterns/blackboard_planner.py`** — `make_blackboard_planner` (todo list):
 
-**`patterns/dynamic_planner.py`** — alternative shape: planner uses
-`Agent(output=PlanRound)` to emit a typed task list per round, an external
-loop dispatches with `asyncio.gather`, and the planner re-runs each round
-with accumulated results until it sets `done=True`. Use when you want
-fine-grained control over the loop (e.g. early-stop after partial results,
-custom retry per task).
+```python
+planner = make_blackboard_planner([research, math, writer])
+planner("Research X and write a brief.")
+```
 
-**`patterns/agent_builds_plan.py`** — minimal "planner emits a `PlanSpec`,
-`materialize()` turns it into a real `Plan`" example, without the tool
-wrapper. Educational walkthrough of the underlying mechanism that
-`plan_tool.py` productionises.
+Less precise but simpler. The planner gets each sub-agent as a direct
+tool *plus* four **blackboard tools** for managing a flat todo list:
+`set_plan` → loop(`get_next` → call sub-agent → `mark_done`) → reply.
+No DAG, no structural validation; the LLM revises the plan freely by
+calling `set_plan` again. Use for exploratory work where the shape
+emerges as you go.
+
+**`patterns/dynamic_planner.py`** *(legacy)* — earlier exploration: planner
+uses `Agent(output=PlanRound)` to emit a typed task list per round, an
+external loop dispatches with `asyncio.gather`. Superseded by the two
+factories above.
+
+**`patterns/agent_builds_plan.py`** *(legacy)* — minimal walkthrough of the
+"planner emits PlanSpec → materialize into Plan" mechanism that
+`plan_tool.py` productionises with the builder API.
 
 ## Concept map
 
