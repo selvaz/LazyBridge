@@ -3,7 +3,7 @@
 Routes all requests through the Responses API (OpenAI's recommended path since 2025).
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
 
-Default model: gpt-5.4. Pass model= to override.
+Default model: gpt-5.5. Pass model= to override.
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ _RESPONSES_NATIVE_MAP: dict[NativeTool, dict] = {
     NativeTool.COMPUTER_USE: {"type": "computer_use_preview"},
 }
 
-# Effort level mapping: unified → OpenAI reasoning_effort
+# Effort level mapping: unified → OpenAI reasoning_effort.
+# "none" was added in GPT-5.5; passing it skips reasoning entirely.
 _EFFORT_MAP = {
+    "none": "none",
     "low": "low",
     "medium": "medium",
     "high": "high",
@@ -63,28 +65,35 @@ _EFFORT_MAP = {
     "max": "xhigh",
 }
 
-# Price per 1M tokens (input, output). Approximate; verify at platform.openai.com/docs/pricing.
+# Price per 1M tokens: (input, cached_input, output). cached_input is None when
+# the model has no published cache-hit rate (or doesn't support input caching),
+# in which case cached tokens are billed at the full input rate.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
-_PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gpt-5.4-pro": (30.0, 180.0),
-    "gpt-5.4-nano": (0.20, 1.25),
-    "gpt-5.4-mini": (0.75, 4.50),
-    "gpt-5.4": (2.50, 15.0),
-    "gpt-5": (1.25, 10.0),
-    "gpt-4.1-nano": (0.10, 0.40),
-    "gpt-4.1-mini": (0.40, 1.60),
-    "gpt-4.1": (2.00, 8.00),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
-    "gpt-4-turbo": (10.0, 30.0),
-    "gpt-4": (30.0, 60.0),
-    "gpt-3.5": (0.50, 1.50),
-    "o4-mini": (1.10, 4.40),
-    "o3-mini": (1.10, 4.40),
-    "o3": (2.00, 8.00),
-    "o1-mini": (3.0, 12.0),
-    "o1-pro": (150.0, 600.0),
-    "o1": (15.0, 60.0),
+# Long-context tier (>272K input on gpt-5.x) is NOT modeled here — those prompts
+# are billed at 2x input / 1.5x output for the session; cost values returned by
+# this table will under-count in that regime.
+_PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
+    "gpt-5.5-pro": (30.0, None, 180.0),
+    "gpt-5.5": (5.0, 0.50, 30.0),
+    "gpt-5.4-pro": (30.0, None, 180.0),
+    "gpt-5.4-nano": (0.20, 0.02, 1.25),
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-5.4": (2.50, 0.25, 15.0),
+    "gpt-5": (1.25, None, 10.0),
+    "gpt-4.1-nano": (0.10, None, 0.40),
+    "gpt-4.1-mini": (0.40, None, 1.60),
+    "gpt-4.1": (2.00, None, 8.00),
+    "gpt-4o-mini": (0.15, None, 0.60),
+    "gpt-4o": (2.50, None, 10.0),
+    "gpt-4-turbo": (10.0, None, 30.0),
+    "gpt-4": (30.0, None, 60.0),
+    "gpt-3.5": (0.50, None, 1.50),
+    "o4-mini": (1.10, None, 4.40),
+    "o3-mini": (1.10, None, 4.40),
+    "o3": (2.00, None, 8.00),
+    "o1-mini": (3.0, None, 12.0),
+    "o1-pro": (150.0, None, 600.0),
+    "o1": (15.0, None, 60.0),
 }
 
 
@@ -111,18 +120,22 @@ class OpenAIProvider(BaseProvider):
     - Streaming
     """
 
-    default_model = "gpt-5.4"
+    default_model = "gpt-5.5"
 
     # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
+    # GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
+    # so medium/cheap continue to point at the GPT-5.4 family.
     _TIER_ALIASES = {
-        "top": "gpt-5.4-pro",      # extended reasoning flagship
-        "expensive": "gpt-5.4",    # general flagship
-        "medium": "gpt-5.4-mini",  # fast mid-range; newer and cheaper than gpt-4o
-        "cheap": "gpt-5.4-nano",   # best value: outperforms gpt-4.1-mini at $0.20/$1.25
+        "top": "gpt-5.5-pro",      # extended reasoning flagship
+        "expensive": "gpt-5.5",    # general flagship (released 2026-04-23)
+        "medium": "gpt-5.4-mini",  # fast mid-range; no 5.5-mini yet
+        "cheap": "gpt-5.4-nano",   # best value; no 5.5-nano yet
         "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
-        "gpt-5.4-pro": ["gpt-5.4", "gpt-5"],
+        "gpt-5.5-pro": ["gpt-5.5", "gpt-5.4-pro", "gpt-5.4"],
+        "gpt-5.5": ["gpt-5.4", "gpt-5"],
+        "gpt-5.4-pro": ["gpt-5.5", "gpt-5.4", "gpt-5"],
         "gpt-5.4": ["gpt-5", "gpt-4o"],
         "gpt-5.4-mini": ["gpt-5", "gpt-4o-mini"],
         "gpt-5.4-nano": ["gpt-4.1-mini", "gpt-4.1-nano"],
@@ -141,11 +154,24 @@ class OpenAIProvider(BaseProvider):
         }
     )
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float | None:
         model_l = model.lower()
-        for key, (in_price, out_price) in _PRICE_TABLE.items():
+        for key, (in_price, cached_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
-                return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+                cached = max(0, min(cached_input_tokens, input_tokens))
+                uncached = input_tokens - cached
+                cached_rate = cached_price if cached_price is not None else in_price
+                return (
+                    uncached * in_price
+                    + cached * cached_rate
+                    + output_tokens * out_price
+                ) / 1_000_000
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
@@ -189,6 +215,25 @@ class OpenAIProvider(BaseProvider):
             details = raw_usage.completion_tokens_details
             if details and hasattr(details, "reasoning_tokens"):
                 usage.thinking_tokens = details.reasoning_tokens or 0
+        return usage
+
+    @staticmethod
+    def _populate_cached_input_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
+        """Extract cached prompt tokens.
+
+        Chat Completions exposes them on `prompt_tokens_details.cached_tokens`;
+        the Responses API uses `input_tokens_details.cached_tokens`.
+        """
+        if not raw_usage:
+            return usage
+        for attr in ("prompt_tokens_details", "input_tokens_details"):
+            details = getattr(raw_usage, attr, None)
+            if details is None:
+                continue
+            cached = getattr(details, "cached_tokens", None)
+            if cached:
+                usage.cached_input_tokens = int(cached)
+                return usage
         return usage
 
     def _messages_to_openai(self, request: CompletionRequest) -> list[dict]:
@@ -484,7 +529,10 @@ class OpenAIProvider(BaseProvider):
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
             )
-            usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+            usage = self._populate_cached_input_tokens(usage, response.usage)
+            usage.cost_usd = self._compute_cost(
+                model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+            )
             return CompletionResponse(
                 content="",
                 tool_calls=[],
@@ -511,7 +559,10 @@ class OpenAIProvider(BaseProvider):
             output_tokens=response.usage.completion_tokens if response.usage else 0,
         )
         usage = self._populate_reasoning_tokens(usage, response.usage)
-        usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+        usage = self._populate_cached_input_tokens(usage, response.usage)
+        usage.cost_usd = self._compute_cost(
+            model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+        )
         return CompletionResponse(
             content=content,
             tool_calls=tool_calls,
@@ -543,8 +594,11 @@ class OpenAIProvider(BaseProvider):
             output_tokens=getattr(response.usage, "output_tokens", 0),
         )
         usage = self._populate_reasoning_tokens(usage, response.usage)
+        usage = self._populate_cached_input_tokens(usage, response.usage)
         model_name = getattr(response, "model", "") or ""
-        usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+        usage.cost_usd = self._compute_cost(
+            model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+        )
         return CompletionResponse(
             content=content,
             tool_calls=tool_calls,
@@ -636,10 +690,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=getattr(u, "output_tokens", 0) or 0,
                 )
                 usage = self._populate_reasoning_tokens(usage, u)
+                usage = self._populate_cached_input_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens,
                     usage.output_tokens,
+                    usage.cached_input_tokens,
                 )
             grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
@@ -699,10 +755,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=getattr(u, "output_tokens", 0) or 0,
                 )
                 usage = self._populate_reasoning_tokens(usage, u)
+                usage = self._populate_cached_input_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens,
                     usage.output_tokens,
+                    usage.cached_input_tokens,
                 )
             grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
@@ -833,8 +891,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=chunk.usage.completion_tokens,
                 )
                 final_usage = self._populate_reasoning_tokens(final_usage, chunk.usage)
+                final_usage = self._populate_cached_input_tokens(final_usage, chunk.usage)
                 final_usage.cost_usd = self._compute_cost(
-                    getattr(chunk, "model", "") or "", final_usage.input_tokens, final_usage.output_tokens
+                    getattr(chunk, "model", "") or "",
+                    final_usage.input_tokens,
+                    final_usage.output_tokens,
+                    final_usage.cached_input_tokens,
                 )
             choice = chunk.choices[0] if chunk.choices else None
             if choice and choice.delta.content:
@@ -953,8 +1015,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=chunk.usage.completion_tokens,
                 )
                 final_usage = self._populate_reasoning_tokens(final_usage, chunk.usage)
+                final_usage = self._populate_cached_input_tokens(final_usage, chunk.usage)
                 final_usage.cost_usd = self._compute_cost(
-                    getattr(chunk, "model", "") or "", final_usage.input_tokens, final_usage.output_tokens
+                    getattr(chunk, "model", "") or "",
+                    final_usage.input_tokens,
+                    final_usage.output_tokens,
+                    final_usage.cached_input_tokens,
                 )
             choice = chunk.choices[0] if chunk.choices else None
             if choice and choice.delta.content:

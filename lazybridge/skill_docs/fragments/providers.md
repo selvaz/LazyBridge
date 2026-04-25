@@ -23,19 +23,24 @@ Thinking: opus-4-7/4-6/sonnet-4-6 → adaptive (no budget_tokens).
 Native tools: WEB_SEARCH, CODE_EXECUTION, COMPUTER_USE
 
 ## OpenAI model tiers
-| tier        | model          | ctx  | max_out | $/M in | $/M out |
-|-------------|----------------|------|---------|--------|---------|
-| top         | gpt-5.4-pro    | 1 M  | 128 K   | $30.00 | $180.00 |
-| expensive   | gpt-5.4        | 1 M  | 128 K   | $2.50  | $15.00  |
-| medium      | gpt-5.4-mini   | 400K | 128 K   | $0.75  | $4.50   |
-| cheap       | gpt-5.4-nano   | 400K | 128 K   | $0.20  | $1.25   |
-| super_cheap | gpt-4o-mini    | 128K | 16 K    | $0.15  | $0.60   |
+| tier        | model          | ctx  | max_out | $/M in | $/M cached | $/M out |
+|-------------|----------------|------|---------|--------|-----------|---------|
+| top         | gpt-5.5-pro    | 1 M  | 128 K   | $30.00 | -         | $180.00 |
+| expensive   | gpt-5.5        | 1 M  | 128 K   | $5.00  | $0.50     | $30.00  |
+| medium      | gpt-5.4-mini   | 400K | 128 K   | $0.75  | $0.075    | $4.50   |
+| cheap       | gpt-5.4-nano   | 400K | 128 K   | $0.20  | $0.02     | $1.25   |
+| super_cheap | gpt-4o-mini    | 128K | 16 K    | $0.15  | -         | $0.60   |
 
-Other models: gpt-5 ($1.25/$10), gpt-4o ($2.50/$10), gpt-4.1 ($2/$8),
+Other models: gpt-5.4-pro ($30/$180), gpt-5.4 ($2.50 / $0.25 cache / $15),
+              gpt-5 ($1.25/$10), gpt-4o ($2.50/$10), gpt-4.1 ($2/$8),
               gpt-4.1-mini ($0.40/$1.60), o3 ($2/$8), o4-mini ($1.10/$4.40)
-Thinking: o-series + gpt-5.4-pro → reasoning_effort param (ThinkingConfig(effort=...)).
+Thinking: gpt-5.5/gpt-5.5-pro → reasoning_effort none|low|medium|high|xhigh (default medium).
+          o-series + gpt-5.4-pro → reasoning_effort low|medium|high.
           Standard GPT models → no thinking support.
 Native tools: WEB_SEARCH, CODE_EXECUTION, FILE_SEARCH, COMPUTER_USE
+Cache: automatic via prompt_tokens_details.cached_tokens; cached_input rate
+       applied when published (gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano).
+Long-context surcharge (>272K input on gpt-5.x) NOT modeled — cost under-counts.
 
 ## Google model tiers
 | tier        | model                         | ctx | max_out | $/M in | $/M out |
@@ -81,6 +86,7 @@ b = Agent("claude-haiku-4-5")
 
 ## pitfalls
 - DeepSeek V4 has 2 models (v4-pro, v4-flash); three tier aliases collapse onto v4-flash.
+- gpt-5.5-mini / gpt-5.5-nano do NOT exist yet; medium/cheap tiers still use gpt-5.4-mini / gpt-5.4-nano.
 - gpt-5-mini does NOT exist. The current OpenAI mini variant is gpt-5.4-mini.
 - gemini-2.0-flash is deprecated June 1 2026; use gemini-2.5-flash-lite instead.
 - Adaptive thinking (Anthropic claude-opus/sonnet 4.6+) ignores budget_tokens.

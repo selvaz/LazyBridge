@@ -5,7 +5,7 @@ also address providers by **tier name** so your code never hard-codes a model:
 
 ```python
 agent = Agent.from_provider("anthropic", tier="medium")   # claude-sonnet-4-6
-agent = Agent.from_provider("openai",    tier="cheap")    # gpt-5.4-nano
+agent = Agent.from_provider("openai",    tier="expensive") # gpt-5.5
 agent = Agent.from_provider("google",    tier="top")      # gemini-3.1-pro-preview
 ```
 
@@ -42,34 +42,52 @@ verify at each provider's pricing page before billing decisions.
 
 ## OpenAI
 
-| Tier | Model | Context | Max out | $/M in | $/M out |
-|------|-------|--------:|-------:|-------:|--------:|
-| `top` | gpt-5.4-pro | 1 M | 128 K | $30.00 | $180.00 |
-| `expensive` | gpt-5.4 | 1 M | 128 K | $2.50 | $15.00 |
-| `medium` | gpt-5.4-mini | 400 K | 128 K | $0.75 | $4.50 |
-| `cheap` | gpt-5.4-nano | 400 K | 128 K | $0.20 | $1.25 |
-| `super_cheap` | gpt-4o-mini | 128 K | 16 K | $0.15 | $0.60 |
+| Tier | Model | Context | Max out | $/M in | $/M in (cached) | $/M out |
+|------|-------|--------:|-------:|-------:|----------------:|--------:|
+| `top` | gpt-5.5-pro | 1 M | 128 K | $30.00 | — | $180.00 |
+| `expensive` | gpt-5.5 | 1 M | 128 K | $5.00 | $0.50 | $30.00 |
+| `medium` | gpt-5.4-mini | 400 K | 128 K | $0.75 | $0.075 | $4.50 |
+| `cheap` | gpt-5.4-nano | 400 K | 128 K | $0.20 | $0.02 | $1.25 |
+| `super_cheap` | gpt-4o-mini | 128 K | 16 K | $0.15 | — | $0.60 |
+
+GPT-5.5 (released 2026-04-23) is the new flagship. There is no `gpt-5.5-mini` /
+`gpt-5.5-nano` yet, so `medium` / `cheap` continue to point at the GPT-5.4 family.
 
 **Other available models** (not in tier aliases, still in price table):
 
-| Model | Context | $/M in | $/M out | Notes |
-|-------|--------:|-------:|--------:|-------|
-| gpt-5 | 400 K | $1.25 | $10.00 | strong general model |
-| gpt-4o | 128 K | $2.50 | $10.00 | stable legacy workhorse |
-| gpt-4.1 | 1 M | $2.00 | $8.00 | |
-| gpt-4.1-mini | 1 M | $0.40 | $1.60 | |
-| o3 | 200 K | $2.00 | $8.00 | reasoning model |
-| o4-mini | 200 K | $1.10 | $4.40 | reasoning model |
+| Model | Context | $/M in | $/M in (cached) | $/M out | Notes |
+|-------|--------:|-------:|----------------:|--------:|-------|
+| gpt-5.4-pro | 1 M | 128 K | $30.00 | — | $180.00 — extended reasoning flagship |
+| gpt-5.4 | 1 M | 128 K | $2.50 | $0.25 | $15.00 — prior flagship |
+| gpt-5 | 400 K | $1.25 | — | $10.00 | strong general model |
+| gpt-4o | 128 K | $2.50 | — | $10.00 | stable legacy workhorse |
+| gpt-4.1 | 1 M | $2.00 | — | $8.00 | |
+| gpt-4.1-mini | 1 M | $0.40 | — | $1.60 | |
+| o3 | 200 K | $2.00 | — | $8.00 | reasoning model |
+| o4-mini | 200 K | $1.10 | — | $4.40 | reasoning model |
 
 **Thinking / reasoning**
 
 | Models | Config |
 |--------|--------|
-| o3, o4-mini, o1, o1-pro | `ThinkingConfig(effort="low"|"medium"|"high")` → `reasoning_effort` parameter; no `temperature` |
-| gpt-5.4-pro | extended reasoning via `reasoning_effort`; very high cost |
+| gpt-5.5, gpt-5.5-pro | `ThinkingConfig(effort="none"\|"low"\|"medium"\|"high"\|"xhigh")`. `none` skips reasoning; default is `medium`. |
+| o3, o4-mini, o1, o1-pro | `ThinkingConfig(effort="low"\|"medium"\|"high")` → `reasoning_effort` parameter; no `temperature` |
+| gpt-5.4 family | `reasoning_effort` parameter; gpt-5.4-pro is reasoning-by-default |
 | All others | `ThinkingConfig` has no effect; use `temperature` for creativity |
 
 **Native tools:** `WEB_SEARCH` · `CODE_EXECUTION` · `FILE_SEARCH` · `COMPUTER_USE`
+
+!!! note "Long-context surcharge"
+    Prompts above **272K input tokens** on GPT-5.5 / GPT-5.4 are billed at 2× input
+    and 1.5× output for the session. The framework's reported `cost_usd` does
+    **not** apply this surcharge — it under-counts in that regime.
+
+!!! note "Cache hits"
+    OpenAI applies prompt caching automatically; the API returns
+    `prompt_tokens_details.cached_tokens` (Chat Completions) /
+    `input_tokens_details.cached_tokens` (Responses), which the framework
+    consumes to bill cached tokens at the cached-input rate when one is
+    published for the model.
 
 ---
 
