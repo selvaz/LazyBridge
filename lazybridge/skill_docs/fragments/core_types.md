@@ -44,7 +44,7 @@ CompletionResponse(
     # …plus provider-specific fields
 )
 
-UsageStats(input_tokens, output_tokens, thinking_tokens, cost_usd)
+UsageStats(input_tokens, output_tokens, thinking_tokens, cached_input_tokens, cost_usd)
 
 StructuredOutputConfig(schema, strict=True)
 ThinkingConfig(enabled=True, effort="high", budget_tokens=None, display=None)

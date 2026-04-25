@@ -5,7 +5,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = <object object at 0x7f0497af0f30>, description: 'str | None' = <object object at 0x7f0497af0f30>, session: 'Any | None' = <object object at 0x7f0497af0f30>, verbose: 'bool' = <object object at 0x7f0497af0f30>, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = <object object at 0x7f0497af0f30>, max_output_retries: 'int' = <object object at 0x7f0497af0f30>, timeout: 'float | None' = <object object at 0x7f0497af0f30>, max_retries: 'int' = <object object at 0x7f0497af0f30>, retry_delay: 'float' = <object object at 0x7f0497af0f30>, fallback: "'Agent | None'" = <object object at 0x7f0497af0f30>, cache: 'bool | Any' = <object object at 0x7f0497af0f30>) -> 'None'`
+### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: "'Agent | None'" = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
 
 Universal agent — delegates execution to a swappable Engine.
 
@@ -51,7 +51,7 @@ Use the initial task/context Envelope passed to the Plan.
 
 Contract every engine must satisfy.
 
-### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, cache: 'bool | Any' = False) -> 'None'`
+### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, max_parallel_tools: 'int | None' = None, tool_timeout: 'float | None' = None, stream_idle_timeout: 'float | None' = None, cache: 'bool | Any' = False) -> 'None'`
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
 
@@ -82,6 +82,14 @@ StepResult(step_name: 'str', envelope: 'Envelope', ts: 'float' = <factory>)
 ### `PlanCompileError`
 
 Common base class for all non-exit exceptions.
+
+### `ToolTimeoutError`
+
+Raised when a tool exceeds ``LLMEngine.tool_timeout``.
+
+### `StreamStallError`
+
+Raised when a streaming response goes idle past ``stream_idle_timeout``.
 
 
 ## Memory / Store / Session
@@ -226,7 +234,7 @@ Protocol satisfied by all exporter classes.
 
 Stable abstract base class for all LLM providers.
 
-### `CompletionRequest(messages: 'list[Message]', model: 'str | None' = None, system: 'str | None' = None, max_tokens: 'int' = 4096, temperature: 'float | None' = None, tools: 'list[ToolDefinition]' = <factory>, tool_choice: 'str | None' = None, native_tools: 'list[NativeTool]' = <factory>, structured_output: 'StructuredOutputConfig | None' = None, thinking: 'ThinkingConfig | None' = None, skills: 'SkillsConfig | None' = None, cache: 'CacheConfig | None' = None, stream: 'bool' = False, extra: 'dict[str, Any]' = <factory>) -> None`
+### `CompletionRequest(messages: 'list[Message]', model: 'str | None' = None, system: 'str | None' = None, max_tokens: 'int | None' = None, temperature: 'float | None' = None, tools: 'list[ToolDefinition]' = <factory>, tool_choice: 'str | None' = None, native_tools: 'list[NativeTool]' = <factory>, structured_output: 'StructuredOutputConfig | None' = None, thinking: 'ThinkingConfig | None' = None, skills: 'SkillsConfig | None' = None, cache: 'CacheConfig | None' = None, stream: 'bool' = False, extra: 'dict[str, Any]' = <factory>) -> None`
 
 Unified request object passed to any provider.
 
@@ -266,9 +274,9 @@ ToolCall(id: 'str', name: 'str', arguments: 'dict[str, Any]', thought_signature:
 
 Unified tool/function definition (JSON Schema based).
 
-### `UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cost_usd: 'float | None' = None) -> None`
+### `UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cached_input_tokens: 'int' = 0, cost_usd: 'float | None' = None) -> None`
 
-UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cost_usd: 'float | None' = None)
+UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cached_input_tokens: 'int' = 0, cost_usd: 'float | None' = None)
 
 ### `AgentRuntimeConfig(resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None) -> None`
 

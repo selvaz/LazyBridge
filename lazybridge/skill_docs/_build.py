@@ -380,6 +380,7 @@ def render_reference() -> str:
         "HumanEngine": "Engines", "SupervisorEngine": "Engines",
         "Plan": "Engines", "Step": "Engines", "PlanState": "Engines",
         "StepResult": "Engines", "PlanCompileError": "Engines",
+        "ToolTimeoutError": "Engines", "StreamStallError": "Engines",
         "Memory": "Memory / Store / Session",
         "Store": "Memory / Store / Session", "StoreEntry": "Memory / Store / Session",
         "Session": "Memory / Store / Session", "EventLog": "Memory / Store / Session",
@@ -406,6 +407,12 @@ def render_reference() -> str:
             sig = str(inspect.signature(sym)) if callable(sym) else ""
         except (TypeError, ValueError):
             sig = ""
+        # ``_UNSET = object()`` sentinels in Agent/types render as
+        # ``<object object at 0x...>`` whose address differs each run,
+        # making the rendered reference non-deterministic.  Normalise
+        # those to a stable token so ``--check`` actually catches real
+        # drift.
+        sig = re.sub(r"<object object at 0x[0-9a-f]+>", "_UNSET", sig)
         doc = (inspect.getdoc(sym) or "").strip().split("\n")[0]
         groups[group].append((name, sig, doc))
 

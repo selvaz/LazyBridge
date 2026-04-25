@@ -47,12 +47,6 @@ class StreamStallError(Exception):
 
 
 class LLMEngine:
-    # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
-    # (and any subclass that forgets to call super) still see safe values.
-    max_parallel_tools: int | None = None
-    tool_timeout: float | None = None
-    stream_idle_timeout: float | None = None
-
     """Drives the LLM ↔ tool-call loop for a single agent invocation.
 
     Parameters
@@ -110,6 +104,13 @@ class LLMEngine:
         killing legitimately long fast streams.  ``None`` (default)
         leaves streams unbounded — preserving the prior behavior.
     """
+
+    # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
+    # (and any subclass that forgets to call super) still see safe values.
+    max_parallel_tools: int | None = None
+    tool_timeout: float | None = None
+    stream_idle_timeout: float | None = None
+
 
     def __init__(
         self,
