@@ -149,14 +149,13 @@ extra LLM call per attempt — turn it on when wrong answers are expensive.
 ## Alternative — `make_blackboard_planner` (todo list)
 
 Less precise but simpler to prompt. Instead of a typed DAG, the LLM
-manages a flat to-do list via four blackboard tools:
+manages a flat to-do list via three blackboard tools:
 
 | Tool | What it does |
 |---|---|
-| `set_plan(reasoning, tasks)` | Replace the current plan with a new list. |
+| `set_plan(reasoning, tasks)` | Initialise / reset the plan with a new list. |
 | `get_plan()` | Read current state with checkmarks + recorded results. |
 | `mark_done(task_index, result_summary)` | Tick a task; record a 1-3 sentence summary. |
-| `get_next()` | Convenience: get the next TODO item. |
 
 ```python
 from examples.patterns.blackboard_planner import make_blackboard_planner
@@ -165,17 +164,93 @@ planner = make_blackboard_planner([research, math, writer])
 planner("Research recent agent frameworks and write a one-paragraph summary.")
 ```
 
-Typical workflow inside the planner:
+### Workflow (what the LLM does turn-by-turn)
 
-1. `set_plan(reasoning="…", tasks=["research X", "summarise findings"])`
-2. Loop: call the right sub-agent for the next task, then
-   `mark_done(idx, "<short summary>")`.
-3. Once everything is ticked, synthesise the final answer for the user.
+1. `set_plan(reasoning="…", tasks=[…])` — flat list, 3-6 coarse items.
+2. Loop: pick the next `[ ]` task → call the right sub-agent → `mark_done`.
+3. Once everything is `[x]`, synthesise the final answer for the user.
 
-The LLM can `set_plan` again at any time to revise the list; the
-revision counter is bumped and earlier done state is dropped. There's no
-structural validation — the LLM is responsible for picking the right
-sub-agent for each task and for marking work done.
+`set_plan` and `mark_done` both return the formatted state with a
+`next: N` footer, so the LLM rarely needs to call `get_plan` explicitly.
+
+### Worked examples
+
+**Simple two-step task.** User: *"Research recent agent frameworks and
+write a one-paragraph summary."*
+
+```text
+[turn 1] set_plan(
+    reasoning="Two-step pipeline: research finds frameworks, writer turns
+               them into prose.",
+    tasks=[
+        "Research the most discussed AI agent frameworks of 2026.",
+        "Write a one-paragraph summary based on the research findings.",
+    ],
+)
+→ reasoning: Two-step pipeline...
+    0. [ ] Research the most discussed AI agent frameworks of 2026.
+    1. [ ] Write a one-paragraph summary based on the research findings.
+  next: 0
+
+[turn 2] research("Research the most discussed AI agent frameworks of 2026.")
+→ "Top 5 in 2026: LazyBridge, LangGraph, CrewAI, AutoGen, Smol-Agents..."
+
+[turn 3] mark_done(
+    task_index=0,
+    result_summary="Top 5 in 2026: LazyBridge, LangGraph, CrewAI, AutoGen, Smol-Agents.",
+)
+→ ...
+    0. [x] Research the most discussed AI agent frameworks of 2026.
+       → Top 5 in 2026: LazyBridge, LangGraph, ...
+    1. [ ] Write a one-paragraph summary based on the research findings.
+  next: 1
+
+[turn 4] writer("Write a one-paragraph summary based on the research findings.")
+→ "Five frameworks dominated agent tooling in 2026..."
+
+[turn 5] mark_done(task_index=1, result_summary="Wrote 4-sentence summary.")
+→ ... all tasks done — reply to user
+
+[turn 6] reply to user with the writer's paragraph.
+```
+
+**Mid-flow revision.** The user asks a follow-up while the planner is
+mid-task; the planner abandons the rest of the current list and resets:
+
+```text
+[turn 1] set_plan(reasoning="...", tasks=["A", "B", "C", "D"])
+[turn 2] research("A") → ...
+[turn 3] mark_done(0, "...")
+# new info changes the plan
+[turn 4] set_plan(
+    reasoning="A's result made B/C/D irrelevant; replacing with E and F.",
+    tasks=["E", "F"],
+)
+→ reasoning: A's result made B/C/D irrelevant...
+    0. [ ] E
+    1. [ ] F
+  next: 0
+```
+Calling `set_plan` again drops all prior `[x]` state — by design.
+
+**Sub-agent fails / returns error.** The planner inspects the result, then
+either retries or revises the plan:
+
+```text
+[turn N] research("look up X") → "stub returned no results"
+[turn N+1] mark_done(2, "research returned no results — retry with broader query")
+[turn N+2] research("look up X with broader scope") → "..."
+[turn N+3] (note: same task index is already [x]; planner adds a new task)
+           set_plan(
+               reasoning="Adding a retry slot since research needed a broader query.",
+               tasks=[...prior 3 tasks..., "Re-do research with broader scope"],
+           )
+```
+
+The blackboard has no structural validation — the LLM is responsible for
+picking the right sub-agent per task and for keeping `mark_done` summaries
+faithful. The trade-off is fewer guardrails in exchange for more freedom
+to reshape the plan as understanding evolves.
 
 ## Pitfalls (both planners)
 
@@ -216,7 +291,6 @@ sub-agent for each task and for marking work done.
     # blackboard_planner.py
     from examples.patterns.blackboard_planner import (
         make_blackboard_planner,     # Agent factory (todo list).
-        make_blackboard_tools,       # Lower-level: returns the 4 blackboard Tools.
         BLACKBOARD_PLANNER_GUIDANCE, # System-prompt addendum.
     )
 
