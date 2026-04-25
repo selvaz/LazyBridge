@@ -46,11 +46,30 @@ planner = make_planner([research, math, writer])
 planner("Research quantum networking and write a one-paragraph brief.")
 ```
 
+## Five principles baked into the planner
+
+These are in `PLANNER_GUIDANCE` and exist because they're what reliably
+makes plan-driven agents work:
+
+1. **Think first, then structure.** `execute_plan` requires a `reasoning`
+   argument. The LLM must justify the plan shape in prose before
+   committing to JSON; empty / boilerplate reasoning is rejected.
+2. **Coarse steps, not micro-steps.** Prefer 2-4 step plans. Six+ steps
+   usually means the work belongs inside one sub-agent.
+3. **Re-plan, don't perfect-plan.** Two simple `execute_plan` calls in
+   sequence beat one complex one. Big tasks → short scouting plan, then
+   re-plan with what you learned.
+4. **Verify the answer addresses the question.** Optional `verify=` on
+   `make_planner` wraps the planner with a judge agent (extra LLM call;
+   off by default).
+5. **Prefer the simpler shape.** Direct sub-agent call > linear plan >
+   plan with parallel band > plan with combined branches.
+
 ## What `execute_plan` does
 
-The LLM emits a typed `PlanSpec` (an ordered list of `StepSpec`).
-`_materialize` builds a real [`Plan`](../guides/plan.md);
-`Agent.from_engine(plan)` triggers
+The LLM emits a typed `PlanSpec`: a `reasoning` string, the user `task`, and
+an ordered list of `StepSpec`. `_materialize` builds a real
+[`Plan`](../guides/plan.md); `Agent.from_engine(plan)` triggers
 [`PlanCompiler`](../guides/plan.md#compile-time-validation) so forward
 `from_step` references, unknown step names, and duplicates are rejected
 **before any inner LLM call runs**. On rejection the tool returns
@@ -90,10 +109,12 @@ the lookups internally.
 ### Sequential pipeline
 ```python
 execute_plan(
+    reasoning="Two-step pipeline: research gathers facts, writer turns "
+              "them into prose. Linear, no branching. Smallest shape.",
     task="Quantum networking",
     steps=[
-        {"name": "r", "agent": "research"},
-        {"name": "w", "agent": "writer"},
+        {"name": "gather", "agent": "research"},
+        {"name": "draft",  "agent": "writer"},
     ],
 )
 ```
@@ -101,6 +122,8 @@ execute_plan(
 ### Parallel band + one branch read
 ```python
 execute_plan(
+    reasoning="Two parallel lookups; report uses Apple only per user "
+              "instruction. Google is collected but not consumed.",
     task="...",
     steps=[
         {"name": "hc_apple",  "agent": "research", "task_kind": "literal",
@@ -116,6 +139,9 @@ execute_plan(
 ### Parallel band + combine two branches in the join
 ```python
 execute_plan(
+    reasoning="Two parallel lookups feed a comparison writer. Apple as "
+              "task, Google as context — Plan only forwards two branches "
+              "per step, which is enough for a comparison.",
     task="...",
     steps=[
         {"name": "hc_apple",  "agent": "research", "task_kind": "literal",
@@ -128,6 +154,30 @@ execute_plan(
     ],
 )
 ```
+
+### Big task — short scout, then re-plan
+For uncertain or open-ended work, don't try to fully plan ahead. Issue a
+short scouting `execute_plan`, read the result, and call again with what
+you've learned. Two simple plans beat one speculative big one.
+
+## Optional: verify= for high-stakes outputs
+
+```python
+from lazybridge import Agent, LLMEngine
+from examples.patterns.plan_tool import make_planner, PLANNER_VERIFY_PROMPT
+
+judge = Agent(
+    engine=LLMEngine("claude-opus-4-7", system=PLANNER_VERIFY_PROMPT),
+    name="judge",
+)
+planner = make_planner([research, math, writer], verify=judge, max_verify=3)
+```
+
+When `verify=` is set, the planner's final output runs through the judge
+(LazyBridge's built-in verify-with-retry loop). The judge replies
+`approved` or `rejected: <reason>`; on rejection the planner retries up
+to `max_verify` times with the judge's feedback in context. Costs one
+extra LLM call per attempt — turn it on when wrong answers are expensive.
 
 ## Pitfalls
 
@@ -145,9 +195,10 @@ execute_plan(
     from examples.patterns.plan_tool import (
         make_planner,            # Agent factory — the single entry point.
         make_execute_plan_tool,  # Lower-level Tool factory if you need it.
-        PLANNER_GUIDANCE,        # System-prompt addendum (decision rules + examples).
+        PLANNER_GUIDANCE,        # System-prompt addendum (5 principles + examples).
+        PLANNER_VERIFY_PROMPT,   # Suggested system prompt for the verify= judge.
         StepSpec,                # Pydantic model for plan steps.
-        PlanSpec,                # Pydantic model: task + steps.
+        PlanSpec,                # Pydantic model: reasoning + task + steps.
     )
 
     make_planner(
@@ -157,6 +208,8 @@ execute_plan(
         system: str | None = None,    # defaults to PLANNER_GUIDANCE
         name: str = "planner",
         verbose: bool = False,
+        verify: Agent | None = None,  # optional judge; off by default
+        max_verify: int = 3,
     ) -> Agent
     ```
 

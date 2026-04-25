@@ -98,6 +98,14 @@ class StepSpec(BaseModel):
 class PlanSpec(BaseModel):
     """The argument shape of execute_plan."""
 
+    reasoning: str = Field(
+        ...,
+        description=(
+            "Think first, in prose. Why these steps? Which sub-agents and "
+            "why? What's the simplest shape that fits? This field is "
+            "REQUIRED — empty or boilerplate values defeat its purpose."
+        ),
+    )
     task: str = Field(..., description="The user task that drives the plan.")
     steps: list[StepSpec] = Field(..., description="Ordered DAG steps.")
 
@@ -193,7 +201,11 @@ def make_execute_plan_tool(
 ) -> Tool:
     """Return a :class:`lazybridge.Tool` that builds and runs a Plan.
 
-    Tool signature: ``execute_plan(steps: list[StepSpec], task: str) -> str``.
+    Tool signature: ``execute_plan(reasoning: str, steps: list[StepSpec], task: str) -> str``.
+
+    The ``reasoning`` field is required and forces the planner LLM to externalise
+    its plan-shape thinking before committing to JSON — empirically this raises
+    plan quality more than any single example in the system prompt.
 
     Args:
         registry: Mapping ``{agent_name: Agent}`` the plan may dispatch to.
@@ -220,9 +232,24 @@ def make_execute_plan_tool(
             "Available sub-agents:\n" + "\n".join(agent_lines)
         )
 
-    async def execute_plan(steps: list[StepSpec], task: str) -> str:
-        """Build and run a plan over the registered sub-agents."""
-        spec = PlanSpec(task=task, steps=steps)
+    async def execute_plan(reasoning: str, steps: list[StepSpec], task: str) -> str:
+        """Build and run a plan over the registered sub-agents.
+
+        Args:
+            reasoning: Why these steps? Which sub-agents and why? What's the
+                simplest shape that fits? Required — empty / boilerplate
+                values defeat the field's purpose (it exists to make you
+                think before structuring).
+            steps: Ordered DAG steps; see ``StepSpec`` for fields.
+            task: The user task that drives the first step (when the first
+                step uses ``task_kind="from_prev"``).
+        """
+        if not reasoning or not reasoning.strip():
+            return (
+                "PLAN_REJECTED: reasoning is required and must be non-empty. "
+                "Briefly state why this plan shape fits the task before re-emitting."
+            )
+        spec = PlanSpec(reasoning=reasoning, task=task, steps=steps)
         try:
             plan = _materialize(spec, registry)
         except _PlanToolError as e:
@@ -255,12 +282,36 @@ PLANNER_GUIDANCE = """\
 You have a set of specialist sub-agents available as direct tools, plus an
 ``execute_plan`` tool to compose them when one agent isn't enough.
 
+## Five principles (these matter more than any worked example)
+
+1. **Think first, then structure.** Before calling ``execute_plan``, decide
+   in prose: which agents and why, simplest shape that fits, what could go
+   wrong. The tool's required ``reasoning`` argument is where this goes —
+   empty or boilerplate reasoning ("decompose into steps") defeats the point.
+2. **Coarse steps, not micro-steps.** Each step is one sub-agent doing one
+   meaningful unit of work. Prefer 2-4 step plans. If you find yourself
+   emitting 6+ steps, you're probably doing the work the sub-agents should
+   do internally.
+3. **Re-plan, don't perfect-plan.** Two simple ``execute_plan`` calls in
+   sequence beat one complex one. After a plan returns, you can call
+   another with what you've learned. Don't try to nail an 8-step DAG
+   from the first turn.
+4. **Verify the answer addresses the question.** Before returning the
+   final response to the user, check that what you have actually answers
+   what was asked. If not, re-plan or call a sub-agent for the gap.
+5. **Prefer the simpler shape.** Direct sub-agent call > linear plan >
+   plan with parallel band > plan with combined branches. Step down only
+   when the simpler shape genuinely doesn't fit.
+
 ## Decision rules
 
 1. **Trivial query** — answer directly. No tool call.
 2. **One sub-agent suffices** — call that agent directly as a tool.
 3. **Multiple steps that depend on each other, OR a parallel band followed
    by a single step that reads one branch** — call ``execute_plan``.
+4. **Big or uncertain task** — call ``execute_plan`` with a SHORT plan
+   (2-3 steps), then call again with what you learned. Don't try to
+   express the whole flow at once.
 
 That's it. Don't reach for ``execute_plan`` when calling one sub-agent
 twice in a row would be just as clear.
@@ -302,10 +353,11 @@ You: call ``math("Compute 17 * 23 + 5.")``
 User: "Research quantum networking and write a one-paragraph brief."
 You:
 ``execute_plan(
+    reasoning="Two-step pipeline: research gathers facts, writer turns them into prose. Linear, no branching. Smallest shape that fits.",
     task="Quantum networking",
     steps=[
-        {"name": "r", "agent": "research"},
-        {"name": "w", "agent": "writer"},
+        {"name": "gather", "agent": "research"},
+        {"name": "draft",  "agent": "writer"},
     ],
 )``
 
@@ -313,6 +365,7 @@ You:
 User: "Look up Apple and Google headcounts in parallel; report Apple's."
 You:
 ``execute_plan(
+    reasoning="Two parallel lookups (independent), then a writer step that reads only Apple's branch. The Google branch is requested but not used in the report — that's per the user's instruction.",
     task="...",
     steps=[
         {"name": "hc_apple",  "agent": "research", "task_kind": "literal",
@@ -328,6 +381,7 @@ You:
 User: "Look up Apple and Google headcounts in parallel; write a comparison."
 You:
 ``execute_plan(
+    reasoning="Two parallel lookups feed a comparison writer. Apple goes in as task, Google as context (Plan only forwards two branches per step, which is fine for a comparison).",
     task="...",
     steps=[
         {"name": "hc_apple",  "agent": "research", "task_kind": "literal",
@@ -339,6 +393,20 @@ You:
          "context_kind": "from_parallel", "context_step": "hc_google"},
     ],
 )``
+
+### Big task — short plan, then re-plan
+User: "Build a competitive analysis of the top 5 AI agent frameworks."
+You: First call (gather, don't try to fully plan ahead):
+``execute_plan(
+    reasoning="I don't yet know which 5 frameworks to compare. Step one: research surfaces a candidate list. Then I'll re-plan with that list in hand rather than guessing now.",
+    task="Top AI agent frameworks 2026",
+    steps=[
+        {"name": "scout", "agent": "research", "task_kind": "literal",
+         "task_text": "List the top 5 AI agent frameworks in 2026 with one-line descriptions."},
+    ],
+)``
+Then, with the result, call ``execute_plan`` again to fan out the per-framework
+deep-dives. Two simple plans beat one speculative big one.
 
 ## Pitfalls
 
@@ -366,6 +434,8 @@ def make_planner(
     system: Optional[str] = None,
     name: str = "planner",
     verbose: bool = False,
+    verify: Optional[Agent] = None,
+    max_verify: int = 3,
 ) -> Agent:
     """Build a planner :class:`Agent` over the given sub-agents.
 
@@ -387,6 +457,14 @@ def make_planner(
             ``execute_plan``.
         name: Display name for the planner agent.
         verbose: If True, print event traces to stdout.
+        verify: Optional judge :class:`Agent` that vets the planner's final
+            output. When set, the planner's response runs through
+            ``verify`` (LazyBridge's built-in verify-with-retry loop). The
+            judge should reply "approved" or "rejected: <reason>"; on
+            rejection the planner retries up to ``max_verify`` times with
+            the judge's feedback in context. Costs one extra LLM call per
+            attempt — use it for tasks where wrong answers are expensive.
+        max_verify: Max judge attempts when ``verify`` is set. Default 3.
 
     Returns:
         A configured planner :class:`Agent`. Call it with the user task.
@@ -411,7 +489,24 @@ def make_planner(
         tools=[*agents, plan_tool],
         name=name,
         verbose=verbose,
+        verify=verify,
+        max_verify=max_verify,
     )
+
+
+# Suggested judge prompt for the verify= argument.
+PLANNER_VERIFY_PROMPT = """\
+You are a verification judge for a planner agent's output.
+
+Read the user's original question and the planner's final answer. Reply with
+EXACTLY one of:
+
+- "approved" — the answer addresses the question fully and accurately.
+- "rejected: <one-line reason>" — the answer misses part of the question,
+  contradicts itself, contains unsupported claims, or is not actionable.
+
+Do NOT rewrite the answer. Only judge it.
+"""
 
 
 # ---------------------------------------------------------------------------
