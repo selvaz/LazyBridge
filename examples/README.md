@@ -21,36 +21,38 @@ examples/
 └── patterns/
     ├── dynamic_planner.py                # planner → typed rounds → asyncio.gather → re-plan
     ├── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
-    └── plan_tool.py                      # chain / parallel / plan exposed as Tools + LLM guidance
+    └── plan_tool.py                      # make_planner(agents) → Agent with execute_plan tool
 ```
 
 ## Patterns (LazyBridge-native)
 
-Three approaches to "agent reasons, then dispatches work to sub-agents":
+**`patterns/plan_tool.py`** *(recommended starting point)* — single factory:
 
-**`patterns/plan_tool.py`** *(recommended starting point)* — exposes three
-reusable `Tool` factories over a registry of sub-agents:
+```python
+planner = make_planner([research, math, writer])
+planner("Research X and write a brief.")
+```
 
-- `make_execute_chain_tool`    — sequential pipeline (a → b → c)
-- `make_execute_parallel_tool` — fan-out N independent jobs concurrently
-- `make_execute_plan_tool`     — full DAG (parallel + sequential mix), with
-  `PlanCompiler` validation before any LLM call
+The returned `Agent` has each sub-agent as a direct tool *and* an
+`execute_plan` tool. The LLM picks the simplest fit — direct call for one
+sub-agent, `execute_plan` for multi-step work. The planner's system prompt
+is `PLANNER_GUIDANCE` (decision rules + worked examples). `execute_plan`
+materialises a typed `PlanSpec` into a real `Plan(Step(...), ...)` and
+returns `PLAN_REJECTED: <reason>` for bad specs so the LLM can self-correct.
 
-Plus `make_orchestration_tools(registry)` returning all three, and
-`ORCHESTRATOR_GUIDANCE` — a ~7k-char system-prompt addendum with decision
-rules, a tool reference, eight worked examples, and a pitfalls section so
-the outer LLM picks the simplest shape that fits the query.
+Full doc: [docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
 
-**`patterns/dynamic_planner.py`** — planner uses `Agent(output=PlanRound)` to
-emit a typed task list per round, the orchestrator dispatches with
-`asyncio.gather`, and the planner re-runs each round with accumulated results
-until it sets `done=True`. Use when you want fine-grained control over the
-loop (e.g. early-stop after partial results, custom retry per task).
+**`patterns/dynamic_planner.py`** — alternative shape: planner uses
+`Agent(output=PlanRound)` to emit a typed task list per round, an external
+loop dispatches with `asyncio.gather`, and the planner re-runs each round
+with accumulated results until it sets `done=True`. Use when you want
+fine-grained control over the loop (e.g. early-stop after partial results,
+custom retry per task).
 
 **`patterns/agent_builds_plan.py`** — minimal "planner emits a `PlanSpec`,
-`materialize()` turns it into a real `Plan`" example. The `plan_tool.py`
-above is the productionised version; this file is the educational walkthrough
-of the underlying mechanism.
+`materialize()` turns it into a real `Plan`" example, without the tool
+wrapper. Educational walkthrough of the underlying mechanism that
+`plan_tool.py` productionises.
 
 ## Concept map
 
