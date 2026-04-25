@@ -9,5 +9,6 @@ Each recipe is self-contained: it shows the imports, the agents, the call, and w
 | [Structured output](structured-output.md) | Basic | Pydantic model output; `.payload` vs `.text()`; with tools |
 | [Plan with resume](plan-with-resume.md) | Full | Typed steps; conditional routing; checkpoint/resume after crash |
 | [Human-in-the-loop](human-in-the-loop.md) | Mid/Full | Approval gate (HumanEngine) and REPL supervision (SupervisorEngine) |
+| [Orchestration tools](orchestration-tools.md) | Full | Outer agent composes work over a sub-agent registry via chain / parallel / plan tools |
 
 Not sure which recipe fits? → [Decision trees](../decisions/index.md)

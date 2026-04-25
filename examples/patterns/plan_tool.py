@@ -1,5 +1,9 @@
 """Orchestration tools — chain, parallel, plan — over a sub-agent registry.
 
+See ``docs/recipes/orchestration-tools.md`` for the full guide
+(decision rules, registry conventions, nested composition, error
+recovery, pitfalls). This module is the implementation that doc points at.
+
 Three reusable :class:`lazybridge.Tool` factories, ordered from simple to
 expressive:
 
@@ -502,6 +506,106 @@ Tool: ``execute_chain(agents=["math"], task="Compute 17 * 23 + 5.")``
 If the registry has no agent for the work (e.g. a coding question with only
 research/math/writer agents), say so to the user instead of inventing tasks.
 
+### Example 9 — nested composition (registry entry is itself composed)
+Registry entries can themselves be ``Agent.chain(...)``, ``Agent.parallel(...)``,
+or ``Agent.from_engine(Plan(...))`` — these are still single agents from your
+point of view. You pick them by name like any other; the inner composition
+runs transparently and rolls its cost/tokens into the outer envelope.
+
+For instance, if the registry has ``"deep_research"`` defined upstream as
+``Agent.chain(searcher, fact_checker, summariser)`` and ``"multi_source"``
+defined as ``Agent.parallel(google, bing, arxiv)``:
+
+User: "Deep-research and write a brief on quantum networking."
+Tool:
+``execute_chain(agents=["deep_research", "writer"], task="Quantum networking")``
+
+User: "Get headcounts for FAANG via every search source we have and total them."
+Tool:
+``execute_plan(
+    task="...",
+    steps=[
+        {"name": "facts", "agent": "multi_source", "task_kind": "literal",
+         "task_text": "FAANG headcounts 2024 from every source"},
+        {"name": "total", "agent": "math", "task_kind": "from_prev"},
+    ],
+)``
+
+You don't recurse into the composed agents' internals — they are leaves to you.
+
+## Nested composition
+
+There are two layers of nesting. Both are available to you.
+
+### Layer 1 — pre-built registry entries (someone else composed them)
+The registry can contain entries that are themselves composed agents:
+
+- ``Agent.chain(a, b, c)`` — one agent that runs three internally in sequence.
+- ``Agent.parallel(a, b, c)`` — one agent that runs three internally on the
+  same task, returns the joined output.
+- ``Agent.from_engine(Plan(...))`` — one agent backed by a full DAG.
+
+From your perspective, all three are just an entry in the registry with a
+name and a description. The nested cost / tokens / errors propagate up
+automatically (LazyBridge folds them into ``Envelope.metadata.nested_*``).
+Pick the simplest layer that fits — don't replicate inside ``execute_plan``
+what a registry entry already does internally.
+
+### Layer 2 — *you* compose at runtime via ``execute_plan``
+You can build nested structures yourself: ``execute_plan`` is the universal
+DAG expression, so any chain, any parallel, and any combination of the two
+fits inside a single ``execute_plan`` call. Use ``parallel=true`` on adjacent
+steps to fan out, and ``task_kind="from_parallel"`` on the next step to join.
+
+### Example 10 — chain with a parallel block in the middle (you build it)
+Pattern: ``a → [b ∥ c] → d``. ``a`` is sequential; ``b`` and ``c`` run
+concurrently from a's output; ``d`` joins them.
+
+Tool:
+``execute_plan(
+    task="...",
+    steps=[
+        {"name": "a", "agent": "research", "task_kind": "literal",
+         "task_text": "Find background on X"},
+        {"name": "b", "agent": "research", "task_kind": "from_step",
+         "task_step": "a", "parallel": true},
+        {"name": "c", "agent": "research", "task_kind": "from_step",
+         "task_step": "a", "parallel": true},
+        {"name": "d", "agent": "writer", "task_kind": "from_parallel",
+         "task_step": "b"},
+    ],
+)``
+
+### Example 11 — parallel of mini-pipelines (you build it)
+Pattern: ``[(a → b) ∥ (c → d)] → e``. Two short pipelines run concurrently,
+then merge.
+
+Tool:
+``execute_plan(
+    task="...",
+    steps=[
+        {"name": "a", "agent": "research", "task_kind": "literal",
+         "task_text": "...", "parallel": true},
+        {"name": "b", "agent": "writer", "task_kind": "from_step",
+         "task_step": "a", "parallel": true},
+        {"name": "c", "agent": "research", "task_kind": "literal",
+         "task_text": "...", "parallel": true},
+        {"name": "d", "agent": "writer", "task_kind": "from_step",
+         "task_step": "c", "parallel": true},
+        {"name": "e", "agent": "writer", "task_kind": "from_parallel",
+         "task_step": "a"},
+    ],
+)``
+The trick: every step that should run in the parallel band gets ``parallel=true``.
+``from_step`` references inside the band wire the mini-pipelines; the join
+step ``e`` uses ``from_parallel`` pointing at the *first* step of the band.
+
+### Bottom line
+- Want a flat sequential pipeline? ``execute_chain``.
+- Want a flat fan-out with no synthesis? ``execute_parallel``.
+- Want anything else, including nested composition? ``execute_plan`` —
+  build the DAG yourself, no recursion needed.
+
 ## Pitfalls
 
 - **Forward references**: ``from_step``/``from_parallel`` must point at a
@@ -526,7 +630,13 @@ research/math/writer agents), say so to the user instead of inventing tasks.
 
 
 def _demo_registry() -> dict[str, Agent]:
-    """Build a small demo registry. Stub tools so the example runs without keys."""
+    """Build a small demo registry. Stub tools so the example runs without keys.
+
+    Demonstrates **nested composition**: ``deep_research`` is itself an
+    ``Agent.chain`` of two leaf agents, and ``multi_source`` is an
+    ``Agent.parallel`` of three. The orchestrator picks them by name like
+    any other registry entry — it doesn't need to know they're composed.
+    """
     from lazybridge import LLMEngine
 
     def web_search(query: str) -> str:
@@ -541,11 +651,17 @@ def _demo_registry() -> dict[str, Agent]:
         """Multiply two numbers."""
         return a * b
 
+    # Leaf agents
     research = Agent(
         engine=LLMEngine("claude-opus-4-7", system="Look up facts via web_search."),
         tools=[web_search],
         name="research",
         description="Web lookups for current facts. No math.",
+    )
+    fact_checker = Agent(
+        engine=LLMEngine("claude-opus-4-7", system="Verify claims; flag uncertainty."),
+        name="fact_checker",
+        description="Checks the previous step's claims, flags weak ones.",
     )
     math = Agent(
         engine=LLMEngine("claude-opus-4-7", system="Solve arithmetic with add/multiply."),
@@ -558,7 +674,41 @@ def _demo_registry() -> dict[str, Agent]:
         name="writer",
         description="Turns prior results into a short paragraph.",
     )
-    return {"research": research, "math": math, "writer": writer}
+
+    # Nested composition — looks like a single agent to the orchestrator.
+    # ``Agent.chain(...)`` returns a regular Agent → drops into the registry as-is.
+    deep_research = Agent.chain(research, fact_checker)
+    deep_research.name = "deep_research"
+    deep_research.description = (
+        "Two-step research pipeline: web lookup followed by fact-checking. "
+        "Use when the answer needs to be defensible. Single call."
+    )
+
+    # ``Agent.parallel(...)`` returns a ``_ParallelAgent`` whose ``run()`` yields
+    # ``list[Envelope]`` rather than a single Envelope. That's incompatible with
+    # ``Step.target`` (which expects one envelope per call), so we wrap it as a
+    # leaf Agent that joins the parallel outputs into a single text envelope.
+    async def _multi_source_run(task: str) -> str:
+        envs = await Agent.parallel(research, research).run(task)
+        return "\n\n---\n\n".join(e.text() for e in envs)
+
+    multi_source = Agent(
+        engine=LLMEngine("claude-opus-4-7", system="You synthesise multi-source results."),
+        tools=[_multi_source_run],
+        name="multi_source",
+        description=(
+            "Run the research agent across multiple sources concurrently and "
+            "synthesise their findings. Good for breadth queries."
+        ),
+    )
+
+    return {
+        "research": research,
+        "math": math,
+        "writer": writer,
+        "deep_research": deep_research,    # nested chain — drops in as-is
+        "multi_source": multi_source,      # parallel wrapped as a single agent
+    }
 
 
 def main() -> None:

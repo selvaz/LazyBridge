@@ -79,6 +79,7 @@ nav:
     - Structured output: recipes/structured-output.md
     - Plan with resume: recipes/plan-with-resume.md
     - Human-in-the-loop: recipes/human-in-the-loop.md
+    - Orchestration tools: recipes/orchestration-tools.md
 
   - Decision trees:
     - Index: decisions/index.md
