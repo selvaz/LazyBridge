@@ -15,10 +15,21 @@ examples/
 ├── langgraph/
 │   ├── 01_react_agent_weather.py        # create_react_agent → Agent(tools=[...])
 │   └── 02_supervisor_research_math.py   # create_supervisor   → Agent(tools=[agent, agent])
-└── crewai/
-    ├── 01_research_crew_single_agent.py # @CrewBase + Flow    → Agent(tools=[...])
-    └── 02_research_and_report.py        # 2-agent sequential  → Agent.chain(a, b)
+├── crewai/
+│   ├── 01_research_crew_single_agent.py # @CrewBase + Flow    → Agent(tools=[...])
+│   └── 02_research_and_report.py        # 2-agent sequential  → Agent.chain(a, b)
+└── patterns/
+    └── dynamic_planner.py               # planner reasons → typed task rounds → re-plan
 ```
+
+## Patterns (LazyBridge-native)
+
+`patterns/dynamic_planner.py` shows a **re-planning planner with parallel
+rounds**: the planner uses `Agent(output=PlanRound)` to emit a typed list of
+tasks per round, the orchestrator dispatches them with `asyncio.gather`, and
+the planner re-runs each round with accumulated results until it sets
+`done=True`. Use it when the work depends on the query and on intermediate
+results — `Plan` is for fixed DAGs, this is for adaptive ones.
 
 ## Concept map
 
