@@ -32,21 +32,24 @@ def test_store_sqlite_preserves_pydantic_via_model_dump(tmp_path):
     ``"x=42 name='hello'"``.  After: a dict that round-trips cleanly
     and can be re-validated back into the model.
     """
-    store = Store(db=str(tmp_path / "s.sqlite"))
-    store.write("k1", _MyModel(x=42, name="hello"))
+    with Store(db=str(tmp_path / "s.sqlite")) as store:
+        store.write("k1", _MyModel(x=42, name="hello"))
 
-    raw = store.read("k1")
-    assert isinstance(raw, dict)
-    assert raw == {"x": 42, "name": "hello"}
+        raw = store.read("k1")
+        assert isinstance(raw, dict)
+        assert raw == {"x": 42, "name": "hello"}
 
-    # Caller can re-hydrate to the model type if they want.
-    assert _MyModel.model_validate(raw) == _MyModel(x=42, name="hello")
+        # Caller can re-hydrate to the model type if they want.
+        assert _MyModel.model_validate(raw) == _MyModel(x=42, name="hello")
 
 
 def test_store_sqlite_preserves_list_of_pydantic():
     """Lists and dicts containing Pydantic models recurse correctly."""
-    with tempfile.TemporaryDirectory() as td:
-        store = Store(db=f"{td}/s.sqlite")
+    # Both contexts must close in nested order so the SQLite file is
+    # released before the temp dir tries to unlink it — Windows refuses
+    # to delete a file with open handles, so a leaked connection here
+    # surfaces as a TemporaryDirectory cleanup failure.
+    with tempfile.TemporaryDirectory() as td, Store(db=f"{td}/s.sqlite") as store:
         items = [_MyModel(x=1, name="a"), _MyModel(x=2, name="b")]
         store.write("items", items)
 

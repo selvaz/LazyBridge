@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin, get_type_hints
 
-from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
     Sentinel,
     _FromParallel,
@@ -116,7 +116,29 @@ class PlanCompiler:
     """Validates a list of Steps at Plan construction time."""
 
     def validate(self, steps: list[Step], tool_map: dict[str, Tool]) -> None:
-        names = {s.name for s in steps}
+        # Duplicate step names — ``_step_map()`` would silently keep the
+        # last definition, hiding the first step's edges.  Surface this
+        # at compile time so the user can pick distinct names before any
+        # LLM call runs.
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for s in steps:
+            if s.name in seen:
+                duplicates.append(s.name)
+            seen.add(s.name)
+        if duplicates:
+            raise PlanCompileError(
+                f"Plan has duplicate step name(s): {sorted(set(duplicates))}.  "
+                f"Step names must be unique — rename collisions or omit "
+                f"one of the duplicates."
+            )
+
+        # Build a position index so we can reject forward (future)
+        # ``from_step`` references — the runtime falls back to the
+        # initial envelope when no history exists for the named step,
+        # which silently masks misordered plans.
+        pos: dict[str, int] = {s.name: i for i, s in enumerate(steps)}
+
         for i, step in enumerate(steps):
             # Tool exists
             if isinstance(step.target, str) and step.target not in tool_map:
@@ -124,14 +146,29 @@ class PlanCompiler:
                     f"Step {step.name!r}: tool {step.target!r} not found in tools. "
                     f"Available: {sorted(tool_map)}"
                 )
-            # from_step references valid step
-            if isinstance(step.task, _FromStep) and step.task.name not in names:
+            # from_step references valid step …
+            if isinstance(step.task, _FromStep) and step.task.name not in pos:
                 raise PlanCompileError(
                     f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step."
                 )
-            if isinstance(step.context, _FromStep) and step.context.name not in names:
+            if isinstance(step.context, _FromStep) and step.context.name not in pos:
                 raise PlanCompileError(
                     f"Step {step.name!r}: context=from_step({step.context.name!r}) references unknown step."
+                )
+            # … and that step must come *before* this one.  A ``from_step``
+            # to a future step quietly degrades to the start envelope at
+            # runtime, which looks like success but isn't.
+            if isinstance(step.task, _FromStep) and pos.get(step.task.name, -1) >= i:
+                raise PlanCompileError(
+                    f"Step {step.name!r}: task=from_step({step.task.name!r}) "
+                    f"references a step that is not earlier in the plan.  "
+                    f"from_step targets must be defined before they're used."
+                )
+            if isinstance(step.context, _FromStep) and pos.get(step.context.name, -1) >= i:
+                raise PlanCompileError(
+                    f"Step {step.name!r}: context=from_step({step.context.name!r}) "
+                    f"references a step that is not earlier in the plan.  "
+                    f"from_step targets must be defined before they're used."
                 )
             # Type compatibility: previous step output must match this step input
             if i > 0 and step.input is not Any:
@@ -153,7 +190,7 @@ class PlanCompiler:
                 if next_hint is not None:
                     literal_args = get_args(next_hint)
                     for arg in literal_args:
-                        if isinstance(arg, str) and arg not in names:
+                        if isinstance(arg, str) and arg not in pos:
                             raise PlanCompileError(
                                 f"Step {step.name!r}: output.next Literal contains {arg!r} "
                                 f"which is not a known step name."
@@ -634,6 +671,31 @@ class Plan:
                 status="running" if current_name else "done",
                 run_uid=run_uid,
             )
+
+        # If we exited the loop because the iteration cap was hit (rather
+        # than because the plan ran to completion with ``current_name``
+        # going None), surface that as an error envelope instead of
+        # quietly returning the last partial result — which previously
+        # made a routing cycle or runaway plan look successful.
+        if current_name and iterations >= self.max_iterations:
+            err = ErrorInfo(
+                type="MaxIterationsExceeded",
+                message=(
+                    f"Plan exceeded max_iterations={self.max_iterations} "
+                    f"while routing; last step was {current_name!r}.  "
+                    f"Suspect a routing cycle (out.next pointing at a "
+                    f"prior step) or an under-sized max_iterations."
+                ),
+                retryable=False,
+            )
+            err_env = Envelope(
+                task=prev_env.task,
+                context=prev_env.context,
+                payload=prev_env.payload,
+                metadata=prev_env.metadata,
+                error=err,
+            )
+            return self._aggregate_nested_metadata(err_env, history)
 
         return self._aggregate_nested_metadata(prev_env, history)
 

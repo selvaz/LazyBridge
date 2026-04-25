@@ -775,6 +775,7 @@ class LLMEngine:
                 await sink.put(None)  # sentinel — loop done
 
         task = asyncio.create_task(_run_loop())
+        cancelled_by_us = False
         try:
             while True:
                 token = await sink.get()
@@ -782,4 +783,26 @@ class LLMEngine:
                     break
                 yield token
         finally:
-            await task  # propagate exceptions
+            # If the consumer broke early (e.g. ``break`` out of the
+            # ``async for``), cancel the background loop instead of
+            # awaiting it — otherwise the provider keeps streaming
+            # into a sink no one is reading, racking up cost and
+            # tying up worker capacity for the lifetime of the turn.
+            if not task.done():
+                task.cancel()
+                cancelled_by_us = True
+            try:
+                await task
+            except asyncio.CancelledError:
+                if not cancelled_by_us:
+                    raise
+            # Emit AGENT_FINISH regardless of how we exited so streaming
+            # runs are observable end-to-end the same way ``run()``
+            # invocations are.  The companion AGENT_START is emitted at
+            # the top of this method.
+            if session:
+                session.emit(
+                    EventType.AGENT_FINISH,
+                    {"agent_name": agent_name, "cancelled": cancelled_by_us},
+                    run_id=run_id,
+                )
