@@ -27,7 +27,32 @@ if TYPE_CHECKING:
     from lazybridge.tools import Tool
 
 
+class ToolTimeoutError(Exception):
+    """Raised when a tool exceeds ``LLMEngine.tool_timeout``.
+
+    The engine catches this internally and reports the failure to the
+    model loop as ``ToolResultContent(is_error=True)`` so the model
+    can recover; it does not abort the agent run.
+    """
+
+
+class StreamStallError(Exception):
+    """Raised when a streaming response goes idle past ``stream_idle_timeout``.
+
+    Distinct from ``request_timeout`` (total deadline) — this fires
+    when the time *between* successive chunks exceeds the threshold,
+    catching half-open streams and partial provider outages without
+    killing fast streams that legitimately take a long time end-to-end.
+    """
+
+
 class LLMEngine:
+    # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
+    # (and any subclass that forgets to call super) still see safe values.
+    max_parallel_tools: int | None = None
+    tool_timeout: float | None = None
+    stream_idle_timeout: float | None = None
+
     """Drives the LLM ↔ tool-call loop for a single agent invocation.
 
     Parameters
@@ -65,6 +90,25 @@ class LLMEngine:
         Per-completion deadline in seconds.  Caps the time a hung
         provider can block an agent run.  ``None`` disables the
         framework-level timeout and defers to the provider SDK.
+    max_parallel_tools:
+        Maximum number of tool calls executed concurrently within a
+        single model turn.  ``None`` (default) means unbounded — every
+        tool call returned by the model runs in parallel.  Set to a
+        small integer (e.g. 4–8) to apply backpressure on wide tool
+        fan-outs and prevent thread/socket/DB exhaustion on a single
+        turn.
+    tool_timeout:
+        Per-tool deadline in seconds.  When set, each tool execution
+        is wrapped in ``asyncio.wait_for``.  On timeout the tool's
+        result is reported as ``is_error=True`` to the model loop so
+        the model can recover; the run does not abort.  ``None``
+        (default) leaves tools unbounded.
+    stream_idle_timeout:
+        Maximum time (seconds) the engine will wait between
+        successive streaming chunks before raising
+        ``StreamStallError``.  Catches half-open streams without
+        killing legitimately long fast streams.  ``None`` (default)
+        leaves streams unbounded — preserving the prior behavior.
     """
 
     def __init__(
@@ -81,6 +125,9 @@ class LLMEngine:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         request_timeout: float | None = 120.0,
+        max_parallel_tools: int | None = None,
+        tool_timeout: float | None = None,
+        stream_idle_timeout: float | None = None,
         cache: bool | Any = False,
     ) -> None:
         self.model = model
@@ -89,6 +136,21 @@ class LLMEngine:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.request_timeout = request_timeout
+        if max_parallel_tools is not None and max_parallel_tools < 1:
+            raise ValueError(
+                f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}"
+            )
+        if tool_timeout is not None and tool_timeout <= 0:
+            raise ValueError(
+                f"tool_timeout must be > 0 or None, got {tool_timeout!r}"
+            )
+        if stream_idle_timeout is not None and stream_idle_timeout <= 0:
+            raise ValueError(
+                f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}"
+            )
+        self.max_parallel_tools = max_parallel_tools
+        self.tool_timeout = tool_timeout
+        self.stream_idle_timeout = stream_idle_timeout
         # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
         # with a deprecation warning. The framework no longer has a
         # separate "parallel mode" — tool calls are always executed via
@@ -487,14 +549,27 @@ class LLMEngine:
                 assistant_blocks.append(ToolUseContent(id=tc.id, name=tc.name, input=tc.arguments))
             messages.append(Message(role=Role.ASSISTANT, content=assistant_blocks))
 
-            # Execute tool calls — always concurrently.  A single tool call
-            # in a turn is just a one-element gather; N calls run in parallel.
+            # Execute tool calls concurrently.  A single tool call in a
+            # turn is just a one-element gather; N calls run in parallel.
             # Tool-is-Tool uniformity: each ``tc`` may target a plain
             # function, an Agent wrapped via ``as_tool()``, or an Agent of
             # Agents — the engine does not special-case any of them.
+            # When ``max_parallel_tools`` is set, a semaphore caps the
+            # in-flight count to apply backpressure on wide fan-outs.
+            sem = (
+                asyncio.Semaphore(self.max_parallel_tools)
+                if self.max_parallel_tools is not None
+                else None
+            )
+
+            async def _run_one(tc: ToolCall) -> Any:
+                if sem is None:
+                    return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
+                async with sem:
+                    return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
+
             raw_results = await asyncio.gather(
-                *[self._exec_tool(tc, tool_map, session=session, run_id=run_id)
-                  for tc in resp.tool_calls],
+                *[_run_one(tc) for tc in resp.tool_calls],
                 return_exceptions=True,
             )
 
@@ -558,7 +633,7 @@ class LLMEngine:
         usage = UsageStats()
         model_out: str | None = None
 
-        async for chunk in executor.astream(req):
+        async for chunk in self._idle_guarded_stream(executor.astream(req)):
             if chunk.delta:
                 content_parts.append(chunk.delta)
                 await sink.put(chunk.delta)
@@ -579,6 +654,34 @@ class LLMEngine:
             model=model_out,
         )
 
+    async def _idle_guarded_stream(self, agen: Any) -> AsyncGenerator[Any, None]:
+        """Yield items from ``agen``, raising on inter-chunk idle timeout.
+
+        Wraps each ``__anext__`` in ``asyncio.wait_for`` so a stalled
+        provider stream raises ``StreamStallError`` instead of pinning
+        a worker forever.  When ``stream_idle_timeout`` is ``None``
+        this is a transparent passthrough.
+        """
+        if self.stream_idle_timeout is None:
+            async for item in agen:
+                yield item
+            return
+        aiter = agen.__aiter__()
+        while True:
+            try:
+                item = await asyncio.wait_for(
+                    aiter.__anext__(), timeout=self.stream_idle_timeout
+                )
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError as exc:
+                raise StreamStallError(
+                    f"Stream went idle for {self.stream_idle_timeout}s without "
+                    "delivering a chunk (set LLMEngine(stream_idle_timeout=...) "
+                    "to a higher value if streams legitimately pause that long)."
+                ) from exc
+            yield item
+
     async def _exec_tool(
         self,
         tc: ToolCall,
@@ -598,7 +701,29 @@ class LLMEngine:
             return err
 
         try:
-            result = await tool.run(**tc.arguments)
+            if self.tool_timeout is not None:
+                try:
+                    result = await asyncio.wait_for(
+                        tool.run(**tc.arguments), timeout=self.tool_timeout
+                    )
+                except asyncio.TimeoutError as exc:
+                    timeout_err = ToolTimeoutError(
+                        f"Tool {tc.name!r} timed out after {self.tool_timeout}s"
+                    )
+                    if session:
+                        session.emit(
+                            EventType.TOOL_ERROR,
+                            {
+                                "tool": tc.name,
+                                "error": str(timeout_err),
+                                "type": "ToolTimeoutError",
+                                "timeout_s": self.tool_timeout,
+                            },
+                            run_id=run_id,
+                        )
+                    return timeout_err
+            else:
+                result = await tool.run(**tc.arguments)
             if session:
                 session.emit(EventType.TOOL_RESULT, {"tool": tc.name, "result": str(result)[:500]}, run_id=run_id)
             return result

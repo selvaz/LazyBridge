@@ -72,7 +72,7 @@ from lazybridge.core.types import (
 # Engines
 from lazybridge.engines.base import Engine
 from lazybridge.engines.human import HumanEngine
-from lazybridge.engines.llm import LLMEngine
+from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
 from lazybridge.engines.supervisor import SupervisorEngine
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
@@ -159,6 +159,8 @@ __all__ = [
     "PlanState",
     "StepResult",
     "PlanCompileError",
+    "ToolTimeoutError",
+    "StreamStallError",
     # Graph
     "GraphSchema",
     "NodeType",
