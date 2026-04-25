@@ -213,7 +213,7 @@ class Session:
         db: str | None = None,
         exporters: list[Any] | None = None,
         redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        redact_on_error: Literal["fallback", "strict"] = "fallback",
+        redact_on_error: Literal["fallback", "strict"] = "strict",
         console: bool = False,
     ) -> None:
         """Construct a Session.
@@ -223,16 +223,23 @@ class Session:
         ``redact_on_error`` governs what happens when a ``redact``
         callable either raises or returns a non-dict:
 
-        * ``"fallback"`` (default) — warn once, then record and export
-          the **original, unredacted** payload.  Observability is
-          preserved at the cost of potentially leaking unredacted data
-          through the event bus.  Safe for development; avoid in
-          compliance-sensitive deployments.
-        * ``"strict"`` — warn once, then **drop the event entirely**.
-          No record in the EventLog, no export to exporters.
-          Fail-closed: unredacted data can never leak via this session.
-          Pick this for compliance workloads where a broken redactor
-          is a bug to be fixed, not a reason to keep leaking.
+        * ``"strict"`` (default) — warn once, then **drop the event
+          entirely**.  No record in the EventLog, no export to
+          exporters.  Fail-closed: unredacted data can never leak via
+          this session.  This is the safe default for compliance
+          workloads where a broken redactor is a bug to be fixed, not
+          a reason to keep leaking.
+        * ``"fallback"`` — warn once, then record and export the
+          **original, unredacted** payload.  Observability is preserved
+          at the cost of potentially leaking unredacted data through
+          the event bus.  Useful for development; opt in explicitly
+          when you want it.
+
+        .. versionchanged:: 1.x
+           Default flipped from ``"fallback"`` to ``"strict"`` to
+           close audit finding #8 (silent data leak when a configured
+           redactor fails).  Pass ``redact_on_error="fallback"`` to
+           restore the prior behaviour.
         """
         if redact_on_error not in ("fallback", "strict"):
             raise ValueError(

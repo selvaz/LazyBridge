@@ -46,7 +46,7 @@ def test_redactor_raising_fallback_records_unredacted_and_warns() -> None:
     def bad(_p: dict) -> dict:
         raise RuntimeError("upstream vault down")
 
-    sess = Session(redact=bad)  # default redact_on_error="fallback"
+    sess = Session(redact=bad, redact_on_error="fallback")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         _emit_sample(sess)
@@ -63,7 +63,7 @@ def test_redactor_non_dict_return_fallback_records_unredacted_and_warns() -> Non
     def wrong(_p: dict) -> None:  # type: ignore[return]
         return None
 
-    sess = Session(redact=wrong)
+    sess = Session(redact=wrong, redact_on_error="fallback")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         _emit_sample(sess)
@@ -154,7 +154,7 @@ def test_warning_emits_once_per_failure_mode() -> None:
     def bad(_p: dict) -> dict:
         raise RuntimeError("boom")
 
-    sess = Session(redact=bad)  # fallback
+    sess = Session(redact=bad, redact_on_error="fallback")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         for _ in range(5):

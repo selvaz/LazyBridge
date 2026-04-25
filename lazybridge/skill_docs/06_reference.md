@@ -106,7 +106,7 @@ Key-value store for PlanState and shared data.
 
 StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None)
 
-### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'fallback', console: 'bool' = False) -> 'None'`
+### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False) -> 'None'`
 
 Container for observability config: exporters, redaction, EventLog.
 
