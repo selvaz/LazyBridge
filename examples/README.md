@@ -19,17 +19,26 @@ examples/
 │   ├── 01_research_crew_single_agent.py # @CrewBase + Flow    → Agent(tools=[...])
 │   └── 02_research_and_report.py        # 2-agent sequential  → Agent.chain(a, b)
 └── patterns/
-    └── dynamic_planner.py               # planner reasons → typed task rounds → re-plan
+    ├── dynamic_planner.py                # planner → typed rounds → asyncio.gather → re-plan
+    └── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
 ```
 
 ## Patterns (LazyBridge-native)
 
-`patterns/dynamic_planner.py` shows a **re-planning planner with parallel
-rounds**: the planner uses `Agent(output=PlanRound)` to emit a typed list of
-tasks per round, the orchestrator dispatches them with `asyncio.gather`, and
-the planner re-runs each round with accumulated results until it sets
-`done=True`. Use it when the work depends on the query and on intermediate
-results — `Plan` is for fixed DAGs, this is for adaptive ones.
+Two ways to build an adaptive planner that picks sub-agents per query:
+
+**`patterns/dynamic_planner.py`** — planner uses `Agent(output=PlanRound)` to
+emit a typed task list per round, the orchestrator dispatches with
+`asyncio.gather`, and the planner re-runs each round with accumulated results
+until it sets `done=True`. Use when you want fine-grained control over the
+loop (e.g. early-stop after partial results, custom retry per task).
+
+**`patterns/agent_builds_plan.py`** — planner emits a `PlanSpec`; a small
+`materialize()` builds a real `Plan(Step(...), ...)` and `Agent.from_engine`
+runs it. Parallel rounds are native (`Step(parallel=True)`), and the
+`PlanCompiler` rejects forward `from_step` references, unknown step names,
+and duplicates *before* any LLM call. Use when one round is enough or when
+you want compile-time DAG validation; pass `replan=True` for multi-round.
 
 ## Concept map
 
