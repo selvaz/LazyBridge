@@ -106,11 +106,11 @@ Key-value store for PlanState and shared data.
 
 StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None)
 
-### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False) -> 'None'`
+### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block']" = 'drop') -> 'None'`
 
 Container for observability config: exporters, redaction, EventLog.
 
-### `EventLog(session_id: 'str', db: 'str | None' = None) -> 'None'`
+### `EventLog(session_id: 'str', db: 'str | None' = None, *, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block']" = 'drop') -> 'None'`
 
 SQLite-backed event log. Thread-safe via thread-local connections.
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import queue
 import sqlite3
 import threading
 import time
 import uuid
+import warnings
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Literal
@@ -23,6 +25,13 @@ CREATE TABLE IF NOT EXISTS events (
     ts REAL NOT NULL
 )
 """
+
+
+# Sentinel pushed through the batched writer's queue by ``flush()`` to
+# force the writer to commit its current accumulated batch immediately,
+# regardless of ``batch_size`` / ``batch_interval``.  Identity check
+# only — never persisted.
+_FLUSH_SENTINEL = object()
 
 
 class EventType(StrEnum):
@@ -42,11 +51,46 @@ class EventType(StrEnum):
 
 
 class EventLog:
-    """SQLite-backed event log. Thread-safe via thread-local connections."""
+    """SQLite-backed event log. Thread-safe via thread-local connections.
 
-    def __init__(self, session_id: str, db: str | None = None) -> None:
+    By default ``record()`` performs an ``INSERT + COMMIT`` per event
+    on the calling thread.  That is fine for low event rates but
+    becomes a bottleneck under sustained load.  Pass
+    ``batched=True`` to delegate persistence to a background daemon
+    thread that drains a bounded queue and commits in batches; the
+    hot path becomes a non-blocking ``queue.put_nowait``.
+
+    Closes audit finding #4 — synchronous per-event commits.
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        db: str | None = None,
+        *,
+        batched: bool = False,
+        batch_size: int = 100,
+        batch_interval: float = 1.0,
+        max_queue_size: int = 10_000,
+        on_full: Literal["drop", "block"] = "drop",
+    ) -> None:
         self.session_id = session_id
         self._db = db
+        if batched:
+            if batch_size < 1:
+                raise ValueError(f"batch_size must be >= 1, got {batch_size!r}")
+            if batch_interval <= 0:
+                raise ValueError(
+                    f"batch_interval must be > 0, got {batch_interval!r}"
+                )
+            if max_queue_size < 1:
+                raise ValueError(
+                    f"max_queue_size must be >= 1, got {max_queue_size!r}"
+                )
+            if on_full not in ("drop", "block"):
+                raise ValueError(
+                    f"on_full must be 'drop' or 'block', got {on_full!r}"
+                )
         # In-memory SQLite needs a SHARED cache otherwise every thread
         # gets its own isolated DB and events emitted from worker
         # threads (e.g. ``SupervisorEngine`` via ``asyncio.to_thread``)
@@ -76,6 +120,26 @@ class EventLog:
         else:
             self._anchor = None
         self._init_schema()
+
+        # Batched writer state — set up after schema so the background
+        # thread can rely on the events table existing on first flush.
+        self._batched = batched
+        self._batch_size = batch_size
+        self._batch_interval = batch_interval
+        self._max_queue_size = max_queue_size
+        self._on_full = on_full
+        self._dropped_count = 0
+        self._writer_thread: threading.Thread | None = None
+        self._writer_queue: queue.Queue[tuple] | None = None
+        self._writer_stop = threading.Event()
+        if batched:
+            self._writer_queue = queue.Queue(maxsize=max_queue_size)
+            self._writer_thread = threading.Thread(
+                target=self._writer_run,
+                name=f"lazybridge-eventlog-{session_id[:8]}",
+                daemon=True,
+            )
+            self._writer_thread.start()
 
     def _conn(self) -> sqlite3.Connection:
         """Return a thread-local connection, initialising schema on first use.
@@ -119,7 +183,34 @@ class EventLog:
         can't race ahead and commit against a connection we're about
         to close — SQLite would otherwise raise ``ProgrammingError:
         Cannot operate on a closed database``.
+
+        When batching is enabled the background writer is signalled to
+        drain its queue and exit before connections are released.
         """
+        # Idempotent: a second close() (typically from ``__del__`` at
+        # GC time) must not re-trigger flush() — that would push a
+        # sentinel into a queue whose writer thread has already
+        # exited, causing flush() to block for the full timeout
+        # waiting for an ack that never comes.
+        if self._closed:
+            return
+        # Drain + stop the writer first.  Done outside the lock so the
+        # writer thread can finish using the EventLog's connections;
+        # ``record_many`` checks ``self._closed`` itself.  Order:
+        # (1) flush so any pending events land, (2) set stop and push a
+        # sentinel so the writer wakes from its long ``queue.get``
+        # timeout immediately, (3) join.
+        if self._batched and self._writer_thread is not None:
+            self.flush(timeout=5.0)
+            self._writer_stop.set()
+            assert self._writer_queue is not None
+            try:
+                self._writer_queue.put_nowait(_FLUSH_SENTINEL)
+            except queue.Full:
+                # Queue is saturated — the writer is busy and will see
+                # the stop flag on its next iteration anyway.
+                pass
+            self._writer_thread.join(timeout=5.0)
         with self._lock:
             if self._closed:
                 return
@@ -156,13 +247,6 @@ class EventLog:
         *,
         run_id: str | None = None,
     ) -> None:
-        row = {
-            "session_id": self.session_id,
-            "run_id": run_id,
-            "event_type": str(event_type),
-            "payload": payload,
-            "ts": time.time(),
-        }
         # Fast-path check: if ``close()`` has fired we fail fast instead
         # of executing against a connection that's about to disappear.
         # The narrow race where close fires after this check is bounded
@@ -170,14 +254,159 @@ class EventLog:
         # or raise ``ProgrammingError``, which the caller can ignore.
         if self._closed:
             raise RuntimeError("EventLog is closed")
+        row = (
+            self.session_id,
+            run_id,
+            str(event_type),
+            json.dumps(payload),
+            time.time(),
+        )
+        if self._batched:
+            self._submit_to_writer(row)
+            return
         conn = self._conn()
         conn.execute(
             "INSERT INTO events (session_id, run_id, event_type, payload, ts) VALUES (?,?,?,?,?)",
-            (row["session_id"], row["run_id"], row["event_type"], json.dumps(row["payload"]), row["ts"]),
+            row,
         )
         conn.commit()
-        # F4: removed stray `return row` — the declared return type is None
-        # and no caller uses the value; the return was a dead-code bug.
+
+    def record_many(self, rows: list[tuple]) -> None:
+        """Insert a batch of pre-serialised rows in a single transaction.
+
+        Each ``row`` is the 5-tuple
+        ``(session_id, run_id, event_type, payload_json, ts)`` —
+        the on-disk shape, not a dict.  Used by the background batched
+        writer; callers should use :meth:`record` instead.
+        """
+        if not rows:
+            return
+        if self._closed:
+            raise RuntimeError("EventLog is closed")
+        conn = self._conn()
+        conn.executemany(
+            "INSERT INTO events (session_id, run_id, event_type, payload, ts) VALUES (?,?,?,?,?)",
+            rows,
+        )
+        conn.commit()
+
+    # ------------------------------------------------------------------
+    # Batched writer — opt-in, ``batched=True`` at construction.
+    # ------------------------------------------------------------------
+
+    def _submit_to_writer(self, row: tuple) -> None:
+        """Push a row to the writer queue.  Behavior on full queue
+        is controlled by ``on_full=`` ('drop' or 'block')."""
+        assert self._writer_queue is not None
+        if self._on_full == "block":
+            self._writer_queue.put(row)
+            return
+        try:
+            self._writer_queue.put_nowait(row)
+        except queue.Full:
+            self._dropped_count += 1
+            # Warn on first drop and at every doubling thereafter so
+            # operators see saturation without flooding logs.
+            n = self._dropped_count
+            if n == 1 or (n & (n - 1)) == 0:
+                warnings.warn(
+                    f"EventLog batched queue is full; dropped {n} event(s) so "
+                    f"far on session {self.session_id[:8]}. Raise "
+                    f"max_queue_size= or on_full='block' if drops aren't "
+                    f"acceptable.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+
+    def _writer_run(self) -> None:
+        """Background thread: drain queue, INSERT in batches, COMMIT.
+
+        Uses ``Queue.task_done()`` after each successful flush so
+        callers can join on the queue to confirm all submitted events
+        have been persisted (used by :meth:`flush`).
+        """
+        assert self._writer_queue is not None
+        batch: list[tuple] = []
+        deadline = time.monotonic() + self._batch_interval
+        while True:
+            timeout = max(0.0, deadline - time.monotonic())
+            try:
+                row = self._writer_queue.get(timeout=timeout)
+                if row is _FLUSH_SENTINEL:
+                    # ``flush()`` (or ``close()``) is asking us to commit
+                    # everything pending right now.  Drain the in-progress
+                    # batch then ack the sentinel itself so
+                    # ``unfinished_tasks`` decrements.
+                    if batch:
+                        self._flush_batch(batch)
+                        batch = []
+                    self._writer_queue.task_done()
+                    # ``close()`` wakes us with a sentinel after setting
+                    # the stop flag — exit immediately rather than going
+                    # back to a (possibly long) batch_interval get().
+                    if self._writer_stop.is_set():
+                        return
+                    deadline = time.monotonic() + self._batch_interval
+                    continue
+                batch.append(row)
+                if len(batch) >= self._batch_size:
+                    self._flush_batch(batch)
+                    batch = []
+                    deadline = time.monotonic() + self._batch_interval
+            except queue.Empty:
+                if batch:
+                    self._flush_batch(batch)
+                    batch = []
+                deadline = time.monotonic() + self._batch_interval
+                if self._writer_stop.is_set():
+                    return
+
+    def _flush_batch(self, batch: list[tuple]) -> None:
+        assert self._writer_queue is not None
+        try:
+            self.record_many(batch)
+        except Exception as exc:  # pragma: no cover - defensive
+            warnings.warn(
+                f"EventLog batched flush failed: "
+                f"{type(exc).__name__}: {exc}.  "
+                f"{len(batch)} event(s) lost.",
+                UserWarning,
+                stacklevel=2,
+            )
+        finally:
+            # Mark each item as done regardless of flush outcome so a
+            # ``flush()`` waiter never deadlocks on a write failure.
+            for _ in batch:
+                self._writer_queue.task_done()
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Block until every event submitted before the call is persisted.
+
+        No-op when ``batched=False``.  Pushes a flush sentinel so the
+        writer commits its current batch immediately rather than waiting
+        for ``batch_size`` or ``batch_interval``, then waits on the
+        queue's ``task_done`` accounting.  Returns early if ``timeout``
+        elapses; the queue may still have items in that case.
+        """
+        if not self._batched or self._writer_queue is None:
+            return
+        try:
+            self._writer_queue.put_nowait(_FLUSH_SENTINEL)
+        except queue.Full:
+            # If the queue is saturated, fall back to a blocking put so
+            # flush still has well-defined semantics — accepting the
+            # backpressure cost is the right trade-off here since the
+            # caller asked for a synchronous barrier.
+            self._writer_queue.put(_FLUSH_SENTINEL)
+        # ``Queue.join`` has no timeout in stdlib; use ``unfinished_tasks``
+        # plus ``all_tasks_done`` polling under the queue's own lock.
+        deadline = time.monotonic() + timeout
+        with self._writer_queue.all_tasks_done:
+            while self._writer_queue.unfinished_tasks > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self._writer_queue.all_tasks_done.wait(timeout=remaining)
 
     def query(self, *, run_id: str | None = None, event_type: EventType | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM events WHERE session_id=?"
@@ -215,6 +444,11 @@ class Session:
         redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         redact_on_error: Literal["fallback", "strict"] = "strict",
         console: bool = False,
+        batched: bool = False,
+        batch_size: int = 100,
+        batch_interval: float = 1.0,
+        max_queue_size: int = 10_000,
+        on_full: Literal["drop", "block"] = "drop",
     ) -> None:
         """Construct a Session.
 
@@ -248,7 +482,15 @@ class Session:
                 f"drop event)."
             )
         self.session_id = str(uuid.uuid4())
-        self.events = EventLog(self.session_id, db=db)
+        self.events = EventLog(
+            self.session_id,
+            db=db,
+            batched=batched,
+            batch_size=batch_size,
+            batch_interval=batch_interval,
+            max_queue_size=max_queue_size,
+            on_full=on_full,
+        )
         self._exporters: list[Any] = list(exporters or [])
         self._redact = redact
         self._redact_on_error = redact_on_error
@@ -368,6 +610,15 @@ class Session:
                         exp._lazybridge_export_warned = True  # type: ignore[attr-defined]
                     except AttributeError:
                         pass
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Drain the EventLog's batched-writer queue.
+
+        No-op when ``batched=False``.  Useful before a checkpoint or
+        a clean shutdown so recently-emitted events are persisted
+        before the caller proceeds.
+        """
+        self.events.flush(timeout=timeout)
 
     def close(self) -> None:
         """Release the underlying EventLog's SQLite connections.
