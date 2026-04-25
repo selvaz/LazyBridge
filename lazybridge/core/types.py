@@ -29,6 +29,7 @@ class NativeTool(StrEnum):
     CODE_EXECUTION = "code_execution"
     FILE_SEARCH = "file_search"  # OpenAI
     COMPUTER_USE = "computer_use"
+    IMAGE_GENERATION = "image_generation"  # OpenAI Responses API (gpt-image-2 family)
     GOOGLE_SEARCH = "google_search"  # Gemini grounding
     GOOGLE_MAPS = "google_maps"  # Gemini grounding
 

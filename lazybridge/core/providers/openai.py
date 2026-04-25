@@ -46,12 +46,23 @@ _REASONING_MODELS = frozenset(
     }
 )
 
-# Responses API native tool type strings
+# Responses API native tool type strings.
+#
+# Tools that need only a ``type`` string fit this simple map.  The newer
+# Responses-API tools that take server-side configuration — ``mcp``
+# (needs ``server_url`` + ``server_label``), ``skills`` (needs skill
+# identifiers), ``hosted_shell``, ``apply_patch``, and ``tool_search`` —
+# are NOT mapped here because the current ``NativeTool`` enum can't
+# carry per-tool config.  Use ``CompletionRequest.tools`` with raw
+# Responses-API shapes if you need them today; first-class wiring is a
+# separate task that has to introduce a richer ``NativeToolConfig``
+# type.
 _RESPONSES_NATIVE_MAP: dict[NativeTool, dict] = {
     NativeTool.WEB_SEARCH: {"type": "web_search_preview"},
     NativeTool.CODE_EXECUTION: {"type": "code_interpreter"},
     NativeTool.FILE_SEARCH: {"type": "file_search"},
     NativeTool.COMPUTER_USE: {"type": "computer_use_preview"},
+    NativeTool.IMAGE_GENERATION: {"type": "image_generation"},
 }
 
 # Effort level mapping: unified → OpenAI reasoning_effort.
@@ -151,6 +162,7 @@ class OpenAIProvider(BaseProvider):
             NativeTool.CODE_EXECUTION,
             NativeTool.FILE_SEARCH,
             NativeTool.COMPUTER_USE,
+            NativeTool.IMAGE_GENERATION,
         }
     )
 

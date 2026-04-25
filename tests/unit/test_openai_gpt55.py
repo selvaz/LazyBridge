@@ -157,3 +157,14 @@ def test_is_reasoning_model_recognises_gpt_5_5() -> None:
     p = _provider()
     assert p._is_reasoning_model("gpt-5.5") is True
     assert p._is_reasoning_model("gpt-5.5-pro") is True
+
+
+def test_image_generation_native_tool_supported() -> None:
+    """Responses-API ``image_generation`` tool is mapped and advertised."""
+    from lazybridge.core.providers.openai import _RESPONSES_NATIVE_MAP
+    from lazybridge.core.types import NativeTool
+
+    assert NativeTool.IMAGE_GENERATION in OpenAIProvider.supported_native_tools
+    assert _RESPONSES_NATIVE_MAP[NativeTool.IMAGE_GENERATION] == {
+        "type": "image_generation"
+    }

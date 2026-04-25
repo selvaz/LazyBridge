@@ -75,7 +75,7 @@ GPT-5.5 (released 2026-04-23) is the new flagship. There is no `gpt-5.5-mini` /
 | gpt-5.4 family | `reasoning_effort` parameter; gpt-5.4-pro is reasoning-by-default |
 | All others | `ThinkingConfig` has no effect; use `temperature` for creativity |
 
-**Native tools:** `WEB_SEARCH` · `CODE_EXECUTION` · `FILE_SEARCH` · `COMPUTER_USE`
+**Native tools:** `WEB_SEARCH` · `CODE_EXECUTION` · `FILE_SEARCH` · `COMPUTER_USE` · `IMAGE_GENERATION`
 
 !!! note "Long-context surcharge"
     Prompts above **272K input tokens** on GPT-5.5 / GPT-5.4 are billed at 2× input

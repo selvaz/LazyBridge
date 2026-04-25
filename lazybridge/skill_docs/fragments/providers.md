@@ -37,7 +37,7 @@ Other models: gpt-5.4-pro ($30/$180), gpt-5.4 ($2.50 / $0.25 cache / $15),
 Thinking: gpt-5.5/gpt-5.5-pro → reasoning_effort none|low|medium|high|xhigh (default medium).
           o-series + gpt-5.4-pro → reasoning_effort low|medium|high.
           Standard GPT models → no thinking support.
-Native tools: WEB_SEARCH, CODE_EXECUTION, FILE_SEARCH, COMPUTER_USE
+Native tools: WEB_SEARCH, CODE_EXECUTION, FILE_SEARCH, COMPUTER_USE, IMAGE_GENERATION
 Cache: automatic via prompt_tokens_details.cached_tokens; cached_input rate
        applied when published (gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano).
 Long-context surcharge (>272K input on gpt-5.x) NOT modeled — cost under-counts.
