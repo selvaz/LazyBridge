@@ -67,25 +67,27 @@ than re-emitting a whole DAG.
 |---|---|
 | `name` | Unique snake_case identifier within the plan. |
 | `agent` | Must match one of the agents passed to `make_planner`. |
-| `task_kind` | `"literal"` (use `task_text`) / `"from_prev"` (default) / `"from_step"` (use `task_step`) / `"from_parallel"` (alias of `from_step` for readability). |
+| `task_kind` | `"literal"` (use `task_text`) / `"from_prev"` (default) / `"from_step"` (use `task_step`) / `"from_parallel"` (alias of `from_step`, single branch) / `"from_parallel_all"` (aggregate the WHOLE parallel band starting at `task_step`). |
 | `task_text` | Required when `task_kind="literal"`. |
 | `task_step` | Required when `task_kind` is `from_step` or `from_parallel`. |
 | `context_kind` / `context_step` | Optional; pull a SECOND step's output into context. Lets the join step combine two parallel branches. |
 | `parallel` | `true` to run concurrently with adjacent `parallel=true` siblings. |
 
-### What `from_parallel` actually does
+### Reading from a parallel band
 
-`from_parallel("name")` is an alias of `from_step` — it forwards a single
-specific branch's envelope, not a list. Two ways to make this useful:
+| Need | Use |
+|---|---|
+| One specific branch as task | `task_kind="from_step"` or `"from_parallel"` (alias) with `task_step="<branch_name>"` |
+| Two specific branches (one as task, one as context) | `task_kind="from_parallel"` for A + `context_kind="from_parallel"` + `context_step` for B |
+| **All N branches into one labelled-text join** | `task_kind="from_parallel_all"` with `task_step` set to the FIRST member of the band |
 
-- **Read one branch.** `task_kind="from_parallel"`, `task_step="<branch_name>"`.
-- **Combine two branches.** Set `task_kind="from_parallel"` for branch A
-  and `context_kind="from_parallel"` + `context_step` for branch B. The
-  join step sees A as task and B as context.
-
-For three or more parallel branches that all need to flow into one
-synthesis step, neither planner is the right tool — call sub-agents
-directly, or have a single sub-agent batch the lookups internally.
+`from_parallel_all` is the framework-native answer to "fan out N legs and
+synthesise all of them" — no extra tool calls or user-code aggregation.
+The synthesiser receives a single envelope whose `task` and `payload` are
+both a labelled-text join (`"[branch_a]\n<text>\n\n[branch_b]\n<text>..."`),
+so the next step's agent reads it via `env.text()` without changes.
+Per-branch token cost still rolls up into the final outer envelope's
+`metadata.nested_*` via the engine's existing aggregation path.
 
 ### Worked examples (builder)
 
@@ -121,6 +123,20 @@ add_step(pid, name="report",    agent="writer",
          context_kind="from_parallel", context_step="hc_google")
 run_plan(pid, task="...")
 ```
+
+**Parallel band + N-branch synthesis (`from_parallel_all`)**
+```python
+pid = create_plan(reasoning="Five parallel lookups feed one synthesiser.")
+for name, topic in [("hc_meta","Meta"),("hc_apple","Apple"),
+                    ("hc_amazon","Amazon"),("hc_netflix","Netflix"),
+                    ("hc_google","Google")]:
+    add_step(pid, name=name, agent="research", task_kind="literal",
+             task_text=f"headcount of {topic} in 2024", parallel=True)
+add_step(pid, name="report", agent="writer",
+         task_kind="from_parallel_all", task_step="hc_meta")  # FIRST band member
+run_plan(pid, task="...")
+```
+The writer sees a labelled-text join of all five branches via `env.text()`.
 
 **Big task — short scout, then re-plan**
 

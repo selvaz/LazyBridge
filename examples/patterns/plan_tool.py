@@ -50,7 +50,17 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from lazybridge import Agent, LLMEngine, Plan, Step, Tool, from_parallel, from_prev, from_step
+from lazybridge import (
+    Agent,
+    LLMEngine,
+    Plan,
+    Step,
+    Tool,
+    from_parallel,
+    from_parallel_all,
+    from_prev,
+    from_step,
+)
 from lazybridge.engines.plan import PlanCompileError
 
 
@@ -64,12 +74,16 @@ class StepSpec(BaseModel):
 
     name: str = Field(..., description="Unique step identifier; referenced by from_step.")
     agent: str = Field(..., description="Sub-agent name; must match one of the planner's agents.")
-    task_kind: Literal["literal", "from_prev", "from_step", "from_parallel"] = Field(
+    task_kind: Literal[
+        "literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"
+    ] = Field(
         default="from_prev",
         description=(
             "literal=use task_text; from_prev=output of preceding step "
             "(default); from_step=output of step named in task_step; "
-            "from_parallel=alias of from_step, one branch's output."
+            "from_parallel=alias of from_step (one branch); "
+            "from_parallel_all=aggregate ALL siblings of the parallel band "
+            "starting at task_step into one labelled-text join."
         ),
     )
     task_text: Optional[str] = Field(
@@ -141,6 +155,13 @@ def _resolve_task(s: StepSpec) -> Any:
                 f"Step {s.name!r}: task_kind='from_parallel' requires task_step."
             )
         return from_parallel(s.task_step)
+    if s.task_kind == "from_parallel_all":
+        if not s.task_step:
+            raise _PlanToolError(
+                f"Step {s.name!r}: task_kind='from_parallel_all' requires task_step "
+                "(the FIRST member of the parallel band you want aggregated)."
+            )
+        return from_parallel_all(s.task_step)
     return from_prev
 
 
@@ -258,7 +279,7 @@ def _validate_step_addition(
     if task_kind == "literal":
         if not task_text:
             return f"task_kind='literal' requires task_text."
-    elif task_kind in ("from_step", "from_parallel"):
+    elif task_kind in ("from_step", "from_parallel", "from_parallel_all"):
         if not task_step:
             return f"task_kind={task_kind!r} requires task_step."
         if task_step not in existing_names:
@@ -266,10 +287,21 @@ def _validate_step_addition(
                 f"task_step={task_step!r} not yet defined "
                 f"(existing: {sorted(existing_names)!r}). Add that step first."
             )
+        if task_kind == "from_parallel_all":
+            # The named step must itself be parallel=True; PlanCompiler
+            # would reject otherwise, but surface it earlier with a
+            # pointed hint so the LLM doesn't wait until run_plan.
+            target = next(s for s in pip.steps if s.name == task_step)
+            if not target.parallel:
+                return (
+                    f"task_kind='from_parallel_all' requires task_step={task_step!r} "
+                    "to be a parallel=True step (the FIRST member of a parallel band). "
+                    "Use from_step / from_parallel for single-branch reads."
+                )
     elif task_kind != "from_prev":
         return (
-            f"task_kind must be one of 'literal' / 'from_prev' / "
-            f"'from_step' / 'from_parallel'; got {task_kind!r}."
+            f"task_kind must be one of 'literal' / 'from_prev' / 'from_step' / "
+            f"'from_parallel' / 'from_parallel_all'; got {task_kind!r}."
         )
     if context_kind is not None:
         if context_kind not in ("from_step", "from_parallel"):
@@ -536,6 +568,12 @@ you exactly what's wrong.
     * ``"from_parallel"`` — alias of ``from_step``; readable name when the
                             referenced step ran with ``parallel=true``.
                             Reads ONE specific branch.
+    * ``"from_parallel_all"`` — aggregate the WHOLE parallel band starting
+                            at ``task_step`` (must be a ``parallel=true``
+                            step). The join step receives a single
+                            labelled-text join of every branch's output
+                            — use this for fan-out + N-branch synthesis
+                            without writing user code.
 - ``task_text`` : required when ``task_kind="literal"``.
 - ``task_step`` : required when ``task_kind`` is ``from_step`` /
                   ``from_parallel``.
@@ -586,6 +624,22 @@ add_step(pid, name="report",    agent="writer",
 run_plan(pid, task="...")
 ```
 
+### Parallel band + N-branch synthesis — builder
+User: "Look up the FAANG headcounts in parallel and write a summary."
+```
+pid = create_plan(reasoning="Five parallel lookups feed one synthesiser via from_parallel_all.")
+add_step(pid, name="hc_meta",   agent="research", task_kind="literal", task_text="headcount of Meta in 2024",     parallel=True)
+add_step(pid, name="hc_apple",  agent="research", task_kind="literal", task_text="headcount of Apple in 2024",    parallel=True)
+add_step(pid, name="hc_amazon", agent="research", task_kind="literal", task_text="headcount of Amazon in 2024",   parallel=True)
+add_step(pid, name="hc_netflix",agent="research", task_kind="literal", task_text="headcount of Netflix in 2024",  parallel=True)
+add_step(pid, name="hc_google", agent="research", task_kind="literal", task_text="headcount of Google in 2024",   parallel=True)
+add_step(pid, name="report",    agent="writer",
+         task_kind="from_parallel_all", task_step="hc_meta")  # FIRST band member
+run_plan(pid, task="...")
+```
+The writer receives a single labelled-text join of all five branches —
+no extra tool calls, no manual iteration in user code.
+
 ### Big task — scout, then re-plan
 User: "Build a competitive analysis of the top 5 AI agent frameworks."
 First plan (scout):
@@ -606,9 +660,11 @@ per-framework deep-dives.
 - **Don't forget ``run_plan``.** Building a plan without running it leaks
   it (it's discarded after a cap of 50 in-progress plans). If you change
   your mind, call ``discard_plan``.
-- **``from_parallel`` reads ONE branch.** Three+ parallel legs that all
-  need to feed one synthesis step? The builder isn't the right tool —
-  call the sub-agents directly.
+- **``from_parallel`` reads ONE branch; ``from_parallel_all`` reads them all.**
+  For three or more parallel legs that should feed one synthesis step,
+  use ``task_kind="from_parallel_all"`` with ``task_step`` set to the
+  FIRST member of the band. The join step receives a labelled-text join
+  of every branch's output.
 - **A ``REJECTED: <hint>`` from ``add_step`` is self-correctable.** Read
   the hint, call ``add_step`` again with the fix. Don't apologise to the
   user; just retry.

@@ -105,7 +105,7 @@ from lazybridge.exporters import (
 from lazybridge.graph import EdgeType, GraphSchema, NodeType
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
-from lazybridge.sentinels import from_parallel, from_prev, from_start, from_step
+from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store, StoreEntry
 from lazybridge.tools import Tool
@@ -122,6 +122,7 @@ __all__ = [
     "from_start",
     "from_step",
     "from_parallel",
+    "from_parallel_all",
     # Tools
     "Tool",
     # Memory & Store

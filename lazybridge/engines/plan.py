@@ -13,6 +13,7 @@ from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
     Sentinel,
     _FromParallel,
+    _FromParallelAll,
     _FromPrev,
     _FromStart,
     _FromStep,
@@ -138,6 +139,8 @@ class PlanCompiler:
         # initial envelope when no history exists for the named step,
         # which silently masks misordered plans.
         pos: dict[str, int] = {s.name: i for i, s in enumerate(steps)}
+        # Position-keyed parallel flag for from_parallel_all band-start checks.
+        is_parallel: dict[str, bool] = {s.name: bool(s.parallel) for s in steps}
 
         for i, step in enumerate(steps):
             # Tool exists
@@ -170,6 +173,31 @@ class PlanCompiler:
                     f"references a step that is not earlier in the plan.  "
                     f"from_step targets must be defined before they're used."
                 )
+            # from_parallel_all: same forward-ref guard plus the band-start
+            # check (the named step must itself be parallel=True; otherwise
+            # the "band" is one step and from_step would be the right tool).
+            for slot, sentinel in (("task", step.task), ("context", step.context)):
+                if isinstance(sentinel, _FromParallelAll):
+                    if sentinel.name not in pos:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_parallel_all"
+                            f"({sentinel.name!r}) references unknown step."
+                        )
+                    if pos[sentinel.name] >= i:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_parallel_all"
+                            f"({sentinel.name!r}) references a step that is "
+                            f"not earlier in the plan."
+                        )
+                    if not is_parallel.get(sentinel.name, False):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_parallel_all"
+                            f"({sentinel.name!r}) references a non-parallel "
+                            f"step.  from_parallel_all aggregates a contiguous "
+                            f"parallel band; its target must be the FIRST "
+                            f"member of that band (i.e. parallel=True). "
+                            f"Use from_step / from_parallel for single-branch reads."
+                        )
             # Type compatibility: previous step output must match this step input
             if i > 0 and step.input is not Any:
                 prev = steps[i - 1]
@@ -803,9 +831,83 @@ class Plan:
                         metadata=e.metadata, error=e.error,
                     )
             return start
+        if isinstance(sentinel, _FromParallelAll):
+            return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)
         return prev
+
+    def _aggregate_parallel_band(
+        self,
+        start_name: str,
+        history: list[StepResult],
+        *,
+        fallback: Envelope,
+    ) -> Envelope:
+        """Build a single Envelope from every consecutive parallel sibling
+        starting at ``start_name`` (in declared order).
+
+        Returns an envelope where ``task`` and ``payload`` are both a
+        labelled-text join — ``"[branch_a]\\n<text>\\n\\n[branch_b]\\n<text>..."``
+        — so the next step's agent reads all branches via ``env.text()``
+        without any change to its tool. The first non-None branch error
+        is propagated so downstream can short-circuit.
+
+        Per-branch cost is already accumulated by the engine via
+        ``_aggregate_nested_metadata`` from ``history``, so this function
+        does not re-sum tokens (would double-count).
+
+        If the named step isn't found in the plan, returns ``fallback``.
+        Compile-time validation rejects non-parallel start names, so the
+        runtime degenerate case (band of size 1) shouldn't fire — but the
+        function tolerates it to keep the engine non-crashy.
+        """
+        # Find the contiguous parallel band starting at start_name.
+        names = [s.name or "" for s in self.steps]
+        try:
+            start_idx = names.index(start_name)
+        except ValueError:
+            return fallback
+
+        # Walk forward while consecutive steps remain parallel.
+        band_names: list[str] = []
+        for i in range(start_idx, len(self.steps)):
+            s = self.steps[i]
+            if i > start_idx and not s.parallel:
+                break
+            band_names.append(s.name or "")
+            if not s.parallel:
+                # Degenerate single-step case (compiler should have rejected).
+                break
+
+        # For each band member, pick the most recent matching history entry.
+        branch_envs: list[tuple[str, Envelope]] = []
+        for n in band_names:
+            for r in reversed(history):
+                if r.step_name == n:
+                    branch_envs.append((n, r.envelope))
+                    break
+
+        if not branch_envs:
+            return fallback
+
+        # Labelled-text join — both ``task`` (next step's prompt) and
+        # ``payload`` (so ``Envelope.text()`` returns it) carry the join.
+        sections = [
+            f"[{n}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
+            for n, e in branch_envs
+        ]
+        joined = "\n\n".join(sections)
+
+        # Short-circuit: first error wins so downstream can detect failure.
+        first_error = next((e.error for _, e in branch_envs if e.error), None)
+
+        return Envelope(
+            task=joined,
+            context=None,
+            payload=joined,
+            error=first_error,
+        )
 
     async def _exec_step(
         self,
@@ -1020,6 +1122,8 @@ def _sentinel_to_ref(sentinel: Any) -> dict[str, Any] | None:
         return {"kind": "from_step", "name": sentinel.name}
     if isinstance(sentinel, _FromParallel):
         return {"kind": "from_parallel", "name": sentinel.name}
+    if isinstance(sentinel, _FromParallelAll):
+        return {"kind": "from_parallel_all", "name": sentinel.name}
     if isinstance(sentinel, str):
         return {"kind": "literal", "value": sentinel}
     return None
@@ -1028,7 +1132,7 @@ def _sentinel_to_ref(sentinel: Any) -> dict[str, Any] | None:
 def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
     if ref is None:
         return from_prev
-    from lazybridge.sentinels import from_parallel, from_start, from_step
+    from lazybridge.sentinels import from_parallel, from_parallel_all, from_start, from_step
 
     kind = ref.get("kind")
     if kind == "from_prev":
@@ -1039,6 +1143,8 @@ def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
         return from_step(ref["name"])
     if kind == "from_parallel":
         return from_parallel(ref["name"])
+    if kind == "from_parallel_all":
+        return from_parallel_all(ref["name"])
     if kind == "literal":
         return ref["value"]
     return from_prev

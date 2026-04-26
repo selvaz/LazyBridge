@@ -25,7 +25,36 @@ class _FromStep:
 
 @dataclass(frozen=True)
 class _FromParallel:
-    """Use the Envelope produced by a specific parallel branch."""
+    """Use the Envelope produced by a specific parallel branch.
+
+    Alias of :class:`_FromStep` — forwards a single branch's envelope.
+    For aggregating ALL siblings in a parallel band, use
+    :class:`_FromParallelAll` (``from_parallel_all("name")``).
+    """
+    name: str
+
+
+@dataclass(frozen=True)
+class _FromParallelAll:
+    """Aggregate every consecutive parallel sibling starting at ``name``.
+
+    The runtime walks the contiguous block of ``parallel=True`` steps that
+    begins at the named step (in declared order) and returns ONE envelope
+    that carries all of them:
+
+    - ``task``     : labelled-text join
+                     (``"[branch_a]\\n<text>\\n\\n[branch_b]\\n<text>..."``)
+                     so ordinary LLM steps consume it without changes.
+    - ``payload``  : ``list[Envelope]`` of all branches in declared order,
+                     for steps that want typed access.
+    - ``metadata`` : summed input/output tokens and cost across branches.
+    - ``error``    : first non-None branch error if any
+                     (short-circuit semantics — caller can detect failure).
+
+    Compile-time check: the named step must (a) exist, (b) come earlier in
+    the plan, and (c) itself be ``parallel=True`` (otherwise the "band" is
+    a single step and the result would be indistinguishable from ``from_step``).
+    """
     name: str
 
 
@@ -42,4 +71,9 @@ def from_parallel(name: str) -> _FromParallel:
     return _FromParallel(name=name)
 
 
-Sentinel = _FromPrev | _FromStart | _FromStep | _FromParallel
+def from_parallel_all(name: str) -> _FromParallelAll:
+    """Aggregate every consecutive parallel sibling starting at ``name``."""
+    return _FromParallelAll(name=name)
+
+
+Sentinel = _FromPrev | _FromStart | _FromStep | _FromParallel | _FromParallelAll
