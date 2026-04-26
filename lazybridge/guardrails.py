@@ -84,12 +84,27 @@ class GuardChain(Guard):
             return GuardAction.modify(current)
         return GuardAction.allow()
 
+    @staticmethod
+    def _enrich_block(action: GuardAction, original: str, current: str) -> GuardAction:
+        """If guards before the blocking one had rewritten the text,
+        surface the accumulated rewrite under
+        ``action.metadata["modifications_before_block"]`` so callers
+        can inspect what was rewritten before the chain decided to
+        block.  The block itself is unchanged.
+        """
+        if current != original:
+            action.metadata = {
+                **(action.metadata or {}),
+                "modifications_before_block": current,
+            }
+        return action
+
     def check_input(self, text: str) -> GuardAction:
         original = text
         for g in self._guards:
             action = g.check_input(text)
             if not action.allowed:
-                return action
+                return self._enrich_block(action, original, text)
             if action.modified_text is not None:
                 text = action.modified_text
         return self._final(original, text)
@@ -99,7 +114,7 @@ class GuardChain(Guard):
         for g in self._guards:
             action = g.check_output(text)
             if not action.allowed:
-                return action
+                return self._enrich_block(action, original, text)
             if action.modified_text is not None:
                 text = action.modified_text
         return self._final(original, text)
@@ -109,7 +124,7 @@ class GuardChain(Guard):
         for g in self._guards:
             action = await g.acheck_input(text)
             if not action.allowed:
-                return action
+                return self._enrich_block(action, original, text)
             if action.modified_text is not None:
                 text = action.modified_text
         return self._final(original, text)
@@ -119,7 +134,7 @@ class GuardChain(Guard):
         for g in self._guards:
             action = await g.acheck_output(text)
             if not action.allowed:
-                return action
+                return self._enrich_block(action, original, text)
             if action.modified_text is not None:
                 text = action.modified_text
         return self._final(original, text)
@@ -149,12 +164,23 @@ class LLMGuard(Guard):
         "You may add a short reason on a second line."
     )
 
-    def __init__(self, agent: Any, policy: str = "block harmful content") -> None:
+    def __init__(
+        self,
+        agent: Any,
+        policy: str = "block harmful content",
+        *,
+        timeout: float | None = 60.0,
+    ) -> None:
         self._agent = agent
         # Strip tag-close / tag-open sequences so a caller-controlled
         # ``policy`` cannot terminate the <policy> block and inject new
         # instructions into the surrounding prompt.
         self._policy = policy.replace("</policy>", "").replace("<policy>", "")
+        # Per-judgement deadline.  Caps the wait on a hung judge so the
+        # surrounding event loop / executor pool isn't starved by a
+        # slow guard.  ``None`` disables (unbounded — only set this in
+        # tests where the judge is a deterministic stub).
+        self._timeout = timeout
 
     @staticmethod
     def _verdict(text: str) -> GuardAction:
@@ -179,14 +205,29 @@ class LLMGuard(Guard):
     async def _ajudge(self, text: str) -> GuardAction:
         # Prefer the agent's async ``run`` surface so the event loop is
         # not blocked when LLMGuard participates in an async GuardChain.
-        # Fall back to an executor for plain callables.
+        # Fall back to an executor for plain callables.  Both paths
+        # honour ``self._timeout`` so a hung judge can't starve the
+        # surrounding event loop or executor pool.
         prompt = self._prompt(text)
         run = getattr(self._agent, "run", None)
-        if run is not None and asyncio.iscoroutinefunction(run):
-            env = await run(prompt)
-            return self._verdict(env.text() if hasattr(env, "text") else str(env))
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._judge, text)
+
+        async def _drive() -> GuardAction:
+            if run is not None and asyncio.iscoroutinefunction(run):
+                env = await run(prompt)
+                return self._verdict(env.text() if hasattr(env, "text") else str(env))
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, self._judge, text)
+
+        if self._timeout is None:
+            return await _drive()
+        try:
+            return await asyncio.wait_for(_drive(), timeout=self._timeout)
+        except TimeoutError:
+            return GuardAction.block(
+                f"LLMGuard judge exceeded timeout={self._timeout}s — "
+                f"failing closed (treat as blocked) so the calling agent "
+                f"doesn't proceed without a verdict."
+            )
 
     def check_input(self, text: str) -> GuardAction:
         return self._judge(text)

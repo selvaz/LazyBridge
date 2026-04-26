@@ -102,19 +102,55 @@ class LMStudioProvider(OpenAIProvider):
     #: select among multiple loaded models.
     default_model = "local-model"
 
-    #: All tier aliases collapse onto the single locally-loaded model —
-    #: cost / capability tiers don't apply to a self-hosted server.
+    #: Tier aliases map to RECOMMENDED open-weight models that fit
+    #: comfortably on a ~16 GB-VRAM consumer GPU (e.g. AMD RX 9070 XT,
+    #: NVIDIA 4070 Ti / 5070).  These strings are passed verbatim to
+    #: LM Studio's ``/v1/chat/completions`` and ``/v1/responses``
+    #: endpoints; LM Studio matches whichever model is currently loaded.
+    #:
+    #: Match the tier's identifier in LM Studio's "Local Server" tab —
+    #: download the matching GGUF / MLX bundle there before calling
+    #: the provider with the tier name.  Override per-call
+    #: (``Agent("lmstudio", model="...")``) when you want a specific
+    #: build (Q4_K_M vs Q5_K_M, MLX vs GGUF, etc.).
+    #:
+    #: Recommendations as of April 2026 — canonical LM Studio
+    #: identifiers from ``lmstudio.ai/models``.  Mix of OpenAI
+    #: open-weight (Apache 2.0), Google Gemma 4 (open weights), and
+    #: Alibaba Qwen 3.5 (dense) so the tier ladder spans MoE and
+    #: dense-small architectures:
+    #:
+    #: * ``top`` — gpt-oss-20b (OpenAI open-weight MoE; 21 B total,
+    #:   3.6 B active; ~13.5 GB at Q4_K_M).  Best all-rounder for a
+    #:   16 GB GPU; perfect-logic class.
+    #: * ``expensive`` — gemma-4-26b-a4b (Google MoE; 26 B total,
+    #:   4 B active; ~14–16 GB at Q4_K_M).  Strong reasoning + native
+    #:   vision; tighter VRAM headroom than ``top`` but better at
+    #:   long context.
+    #: * ``medium`` — qwen3.5-14b (dense 14 B; ~10.7 GB Q4_K_M).
+    #:   Strong general + tool-use, leaves headroom for KV cache.
+    #: * ``cheap`` — qwen3.5-4b (dense 4 B; ~3 GB Q4_K_M).  Fast
+    #:   everyday tasks, fits alongside other workloads on the GPU.
+    #: * ``super_cheap`` — gemma-4-e2b (Google "edge" 2 B; ~1.5 GB at
+    #:   Q4).  Tiny / always-on; routes to a long-context window.
+    #:
+    #: These are SUGGESTIONS — LM Studio passes the model string
+    #: verbatim to its server; whichever build (GGUF / MLX, Q4 / Q5)
+    #: the user downloaded is what answers.  Override per-call when
+    #: you have a specific quant in mind:
+    #: ``Agent("lmstudio", model="lmstudio-community/Qwen3.5-14B-GGUF")``.
     _TIER_ALIASES = {
-        "top": "local-model",
-        "expensive": "local-model",
-        "medium": "local-model",
-        "cheap": "local-model",
-        "super_cheap": "local-model",
+        "top": "gpt-oss-20b",
+        "expensive": "gemma-4-26b-a4b",
+        "medium": "qwen3.5-14b",
+        "cheap": "qwen3.5-4b",
+        "super_cheap": "gemma-4-e2b",
     }
 
-    #: No fallbacks — a local server has exactly one currently-loaded
-    #: model.  Switching models is a user action inside LM Studio, not
-    #: something the provider can do for you.
+    #: No automatic fallback chain — a local server has exactly one
+    #: currently-loaded model and the provider can't trigger LM Studio
+    #: to swap models on the fly.  Use ``Agent(fallback=Agent(...))``
+    #: at the framework level if you want a multi-model retry policy.
     _FALLBACKS: dict[str, list[str]] = {}
 
     #: Native server-side tools (web search, code interpreter, ...) are
@@ -189,9 +225,23 @@ class LMStudioProvider(OpenAIProvider):
         return 0.0
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
-        """Conservative default — most local models ship with ≤8K context.
+        """Per-model output-token defaults for the recommended catalogue.
 
-        Callers running a long-context model (Qwen-2.5-128K, Llama-3.1-128K,
-        ...) should set ``max_tokens=`` explicitly per call.
+        Output tokens, not context.  All recommended models ship with a
+        128K+ context window; the cap here is what we'll request the
+        model emit on a single call.  Callers running a different
+        loaded model should set ``max_tokens=`` explicitly per call.
         """
-        return 4096
+        resolved = (model or self.model or self.default_model or "").lower()
+        if "gpt-oss" in resolved:
+            return 16_384  # 128K context, MoE, comfortable output budget
+        if "gemma-4" in resolved and "26b" in resolved:
+            return 32_768  # 256K context, MoE
+        if "gemma-4-31b" in resolved:
+            return 32_768  # 256K context, dense — only on 24GB+ GPUs
+        if "gemma-4-e4b" in resolved or "gemma-4-e2b" in resolved:
+            return 8_192  # 128K context, edge-class
+        if "qwen3.5" in resolved or "qwen3.6" in resolved:
+            return 32_768  # 262K context — generous output budget
+        # Unknown / placeholder ``local-model`` — pick a safe middle ground.
+        return 8_192

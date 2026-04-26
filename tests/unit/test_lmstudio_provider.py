@@ -12,7 +12,7 @@ Coverage:
     resolve to the LMStudio provider via :func:`_resolve_provider` and
     :meth:`LLMEngine._infer_provider`.
   * ``_resolve_model`` strips the optional ``lmstudio/`` prefix.
-  * Tier aliases all collapse onto ``"local-model"``.
+  * Tier aliases map to recommended ~16 GB-VRAM open-weight models.
   * ``_use_responses_api`` follows the inherited OpenAIProvider routing
     — LM Studio supports both Chat Completions and the Responses API
     (LM Studio v0.3.29+).
@@ -150,11 +150,27 @@ def test_no_native_tools_supported():
     assert LMStudioProvider.supported_native_tools == frozenset()
 
 
-def test_all_five_tiers_defined_and_collapse_to_local_model():
+def test_all_five_tiers_defined():
+    """Every standard tier maps to a non-empty model identifier the
+    user can load into LM Studio."""
     expected = {"top", "expensive", "medium", "cheap", "super_cheap"}
     assert set(LMStudioProvider._TIER_ALIASES) == expected
     for tier in expected:
-        assert LMStudioProvider._TIER_ALIASES[tier] == "local-model"
+        target = LMStudioProvider._TIER_ALIASES[tier]
+        assert isinstance(target, str)
+        assert target  # non-empty
+
+
+def test_tier_aliases_target_recognisable_open_weight_models():
+    """Sanity check: the tier targets are recognisable identifiers
+    (HuggingFace-style or LM Studio Local Server tab names) rather
+    than placeholder values.  This guards against accidental
+    regressions to ``local-model`` for every tier."""
+    aliases = LMStudioProvider._TIER_ALIASES
+    # ``top`` should be the largest reasonable 16 GB-VRAM target.
+    assert "20b" in aliases["top"].lower() or "oss" in aliases["top"].lower()
+    # The smaller tiers reference a smaller-suffix model.
+    assert any(c in aliases["cheap"].lower() for c in ("4b", "mini", "small"))
 
 
 # ---------------------------------------------------------------------------
@@ -188,13 +204,17 @@ def test_resolve_model_passes_bare_model_through():
     assert p._resolve_model(req) == "my-finetune-v2"
 
 
-def test_resolve_model_resolves_tier_alias_to_local_model():
+def test_resolve_model_resolves_tier_alias_to_recommended_model():
+    """Each tier alias resolves to its recommended LM Studio model
+    identifier (defined in ``_TIER_ALIASES``)."""
     p = _bare_provider()
-    req = CompletionRequest(
-        messages=[Message(role=Role.USER, content="hi")],
-        model="top",
-    )
-    assert p._resolve_model(req) == "local-model"
+    for tier in ("top", "expensive", "medium", "cheap", "super_cheap"):
+        req = CompletionRequest(
+            messages=[Message(role=Role.USER, content="hi")],
+            model=tier,
+        )
+        expected = LMStudioProvider._TIER_ALIASES[tier]
+        assert p._resolve_model(req) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -259,10 +279,22 @@ def test_compute_cost_is_zero():
     assert p._compute_cost("anything", 0, 0) == 0.0
 
 
-def test_default_max_tokens():
+def test_default_max_tokens_for_recommended_catalogue():
+    """Per-model output budgets reflect the model's context window.
+    A safe middle ground (8 K) is returned for unknown / placeholder
+    model names so callers running an old fine-tune still get a
+    reasonable default."""
     p = _bare_provider()
-    assert p.get_default_max_tokens() == 4096
-    assert p.get_default_max_tokens("Qwen2.5-7B-Instruct") == 4096
+    # Known recommended models — generous output budget.
+    assert p.get_default_max_tokens("gpt-oss-20b") >= 16_000
+    assert p.get_default_max_tokens("gemma-4-26b-a4b") >= 32_000
+    assert p.get_default_max_tokens("qwen3.5-14b") >= 32_000
+    # Edge / small models — modest budget.
+    assert p.get_default_max_tokens("gemma-4-e2b") == 8_192
+    assert p.get_default_max_tokens("gemma-4-e4b") == 8_192
+    # Placeholder / unknown — safe middle ground.
+    assert p.get_default_max_tokens() == 8_192
+    assert p.get_default_max_tokens("Qwen2.5-7B-Instruct") == 8_192
 
 
 # ---------------------------------------------------------------------------

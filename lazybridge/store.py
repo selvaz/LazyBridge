@@ -28,7 +28,11 @@ class Store:
     def __init__(self, db: str | None = None) -> None:
         self._db = db
         self._local = threading.local()
-        self._lock = threading.Lock()
+        # ``RLock`` (not ``Lock``) so internal helpers like
+        # ``_discard_thread_conn`` can safely re-enter the lock when
+        # called from a code path (``compare_and_swap``) that already
+        # holds it.
+        self._lock = threading.RLock()
         # Track every opened thread-local connection so we can close
         # them deterministically from ``close()``.  ``threading.local``
         # only scopes attributes per thread; without a registry the
@@ -59,6 +63,32 @@ class Store:
             with self._lock:
                 self._all_conns.append(conn)
         return self._local.conn
+
+    def _discard_thread_conn(self) -> None:
+        """Drop this thread's cached SQLite connection.
+
+        Used after a transaction recovery fails (ROLLBACK itself
+        raised) so a future call on this thread doesn't inherit a
+        connection in an undefined transaction state.  The connection
+        is removed from ``_all_conns`` and best-effort closed; the
+        next ``_conn()`` call rebuilds.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        try:
+            del self._local.conn
+        except AttributeError:
+            pass
+        with self._lock:
+            try:
+                self._all_conns.remove(conn)
+            except ValueError:
+                pass
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
 
     def close(self) -> None:
         """Close every thread-local SQLite connection opened by this Store.
@@ -239,10 +269,27 @@ class Store:
                 conn.commit()
                 return True
             except sqlite3.Error:
+                # Inner ROLLBACK can itself fail (e.g. the connection
+                # was already torn down by the OS).  If that happens,
+                # the connection is in an undefined state — discard
+                # this thread's cached connection so the next caller
+                # gets a fresh one instead of inheriting the poison.
+                # Surface the rollback failure as a warning so an
+                # operator can notice persistent transaction issues.
                 try:
                     conn.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as rollback_exc:
+                    import warnings as _warnings
+
+                    _warnings.warn(
+                        f"Store.compare_and_swap: ROLLBACK after error failed "
+                        f"({type(rollback_exc).__name__}: {rollback_exc}).  "
+                        f"Discarding the thread-local connection so the next "
+                        f"call gets a fresh one.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+                    self._discard_thread_conn()
                 raise
 
     def to_text(self, keys: list[str] | None = None) -> str:

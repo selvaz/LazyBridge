@@ -132,6 +132,26 @@ class DeepSeekProvider(OpenAIProvider):
             api_key=key,
             base_url=_DEEPSEEK_BASE_URL,
         )
+        self._structured_drop_warned: bool = False
+
+    def _warn_structured_drop_once(self) -> None:
+        """Warn the first time ``structured_output`` is dropped because
+        ``tools`` are present in the same request.  Stamped on the
+        instance so a long-running provider doesn't spam the log every
+        turn."""
+        if getattr(self, "_structured_drop_warned", False):
+            return
+        import warnings
+
+        warnings.warn(
+            "DeepSeek: structured_output is silently disabled when tools "
+            "are present (the tool-loop returns empty content which can't "
+            "be JSON-parsed).  Validate the final response yourself, or "
+            "drop ``tools`` for the structured-output call.",
+            UserWarning,
+            stacklevel=4,
+        )
+        self._structured_drop_warned = True  # type: ignore[attr-defined]
 
     def _is_reasoning_model(self, model: str) -> bool:
         return model in _REASONING_MODELS
@@ -262,13 +282,20 @@ class DeepSeekProvider(OpenAIProvider):
 
         self._apply_thinking_params(params, model, request)
 
-        # DeepSeek structured output: JSON mode only (not full schema enforcement).
-        # Skip when tools are present — tool calls return empty content, which
-        # breaks JSON parsing. The json() caller uses loop() + repair instead.
+        # DeepSeek structured output: JSON mode only (not full schema
+        # enforcement).  V4 models (deepseek-v4-pro / deepseek-v4-flash)
+        # support response_format + tools simultaneously via strict
+        # mode; legacy models (deepseek-chat / deepseek-reasoner) return
+        # empty content on tool-call turns which breaks JSON parsing,
+        # so the JSON request is dropped (with a one-shot warning).
         has_tools = bool(params.get("tools"))
-        if request.structured_output and not has_tools:
-            params["response_format"] = {"type": "json_object"}
-            self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
+        supports_structured_with_tools = model in _THINKING_CAPABLE_MODELS
+        if request.structured_output:
+            if has_tools and not supports_structured_with_tools:
+                self._warn_structured_drop_once()
+            else:
+                params["response_format"] = {"type": "json_object"}
+                self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
 
         response = self._client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
@@ -359,8 +386,12 @@ class DeepSeekProvider(OpenAIProvider):
         self._apply_thinking_params(params, model, request)
 
         has_tools = bool(params.get("tools"))
-        if request.structured_output and not has_tools:
-            params["response_format"] = {"type": "json_object"}
+        supports_structured_with_tools = model in _THINKING_CAPABLE_MODELS
+        if request.structured_output:
+            if has_tools and not supports_structured_with_tools:
+                self._warn_structured_drop_once()
+            else:
+                params["response_format"] = {"type": "json_object"}
             self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
 
         response = await self._async_client.chat.completions.create(**params)

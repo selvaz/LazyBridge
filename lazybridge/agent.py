@@ -278,6 +278,28 @@ class Agent:
         try:
             return await asyncio.wait_for(self._run_body(task), timeout=timeout)
         except TimeoutError:
+            # Emit a synthetic AGENT_FINISH so callers reading
+            # ``session.events.query()`` see a complete trace even when
+            # the engine's own AGENT_FINISH was skipped by the
+            # ``CancelledError`` propagation (BaseException, not caught
+            # by the engine's ``except Exception``).
+            session = getattr(self, "session", None)
+            if session is not None and hasattr(session, "emit"):
+                from lazybridge.session import EventType
+
+                try:
+                    session.emit(
+                        EventType.AGENT_FINISH,
+                        {
+                            "agent_name": self.name,
+                            "error": f"Agent.run() exceeded timeout={timeout}s",
+                            "cancelled": True,
+                        },
+                    )
+                except Exception:
+                    # Session is best-effort here; never let observability
+                    # mask the underlying timeout.
+                    pass
             return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
 
     async def _run_body(self, task: str | Envelope) -> Envelope:
@@ -298,10 +320,21 @@ class Agent:
         else:
             result = await self._run_engine(env)
 
-        # Provider fallback: if primary failed and a fallback agent is configured,
-        # run the fallback's full pipeline on the same (already-processed) envelope.
+        # Provider fallback: if primary failed and a fallback agent is
+        # configured, run the fallback's full pipeline on the same
+        # already-processed input — but thread the primary's failure
+        # mode into the fallback's ``context`` so the fallback can
+        # adapt (e.g. switch tactics on rate-limit vs schema error).
         if result.error is not None and self.fallback is not None:
-            result = await self.fallback.run(env)
+            err = result.error
+            note = f"Previous attempt failed with {err.type}: {err.message}"
+            merged_context = f"{env.context}\n\n{note}" if env.context else note
+            fallback_env = Envelope(
+                task=env.task,
+                context=merged_context,
+                payload=env.payload,
+            )
+            result = await self.fallback.run(fallback_env)
 
         if self.guard and result.ok:
             action = await self.guard.acheck_output(result.text())

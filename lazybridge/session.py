@@ -518,15 +518,21 @@ class Session:
             self._exporters = [e for e in self._exporters if e is not exporter]
 
     def _warn_once_redact(self, attr: str, msg: str) -> None:
-        """Emit a UserWarning at most once per (redactor, reason) pair.
+        """Emit a UserWarning at most once per (Session, reason) pair.
 
         Reason is distinguished by ``attr`` so a redactor that both raises
         on some events and returns a non-dict on others emits one warning
         per failure mode rather than staying silent after the first.
+
+        State lives on ``self`` (the Session), not on the redactor
+        callable.  A redactor function shared across many short-lived
+        Session instances therefore warns once *per session*; stamping
+        the callable would suppress every session after the first.
         """
         if self._redact is None:
             return
-        if getattr(self._redact, attr, False):
+        flag_name = f"_warn_once_redact_{attr}"
+        if getattr(self, flag_name, False):
             return
         import warnings
 
@@ -534,11 +540,7 @@ class Session:
             f"Session redact callable: {msg}.  redact_on_error={self._redact_on_error!r}.",
             stacklevel=3,
         )
-        try:
-            setattr(self._redact, attr, True)
-        except AttributeError:
-            # Built-in / frozen callable — can't stamp, warn each time.
-            pass
+        setattr(self, flag_name, True)
 
     def emit(
         self,

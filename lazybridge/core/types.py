@@ -327,6 +327,26 @@ class ToolCall:
 
 @dataclass
 class UsageStats:
+    """Token-usage and cost telemetry for one request.
+
+    ``thinking_tokens`` reports the *reasoning* portion of the model's
+    output for providers that expose it.  It is informational and may
+    overlap with ``output_tokens`` depending on the provider:
+
+    * **OpenAI**: ``output_tokens`` (== API ``completion_tokens``) is
+      the *total* output INCLUDING reasoning, and ``thinking_tokens``
+      is the reasoning *subset* of that total.
+    * **Anthropic / DeepSeek**: ``thinking_tokens`` is reported as a
+      separate field; whether it is already inside ``output_tokens``
+      varies by model and SDK version.
+
+    ``cost_usd`` is computed off ``output_tokens`` (which the
+    provider-side billing always uses) plus ``input_tokens`` /
+    ``cached_input_tokens``, so cost is correct regardless of the
+    overlap.  Don't sum ``output_tokens + thinking_tokens`` for a
+    cost dashboard — it would double-count for OpenAI.
+    """
+
     input_tokens: int = 0
     output_tokens: int = 0
     thinking_tokens: int = 0
