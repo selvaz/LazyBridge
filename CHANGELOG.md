@@ -8,6 +8,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [1.0.1] — unreleased — **structural split + MCP integration + HIL & evals to ext**
 
+### Fixed — second-opinion audit (ChatGPT, merged into the same sweep)
+
+- **Z1 — `Any` undefined in DeepSeek provider**
+  (``lazybridge/core/providers/deepseek.py``).  ``Any`` was used at
+  ``_ensure_json_word_in_prompt(... schema: Any = None)`` without
+  being imported.  Worked at runtime under ``from __future__ import
+  annotations`` (deferred evaluation) but broke ``typing.get_type_hints()``
+  and tripped ``ruff F821``.  One-line ``from typing import Any`` fix.
+- **Z2 — SQL guard upgraded from regex to AST validation**
+  (``lazybridge/ext/stat_runtime/query.py``).  The existing
+  ``_MUTATION_RE`` / ``_FILE_READER_RE`` / ``_PATH_LITERAL_RE`` regex
+  pipeline was bypassable (multi-statement smuggling, schema-qualified
+  ``main.read_parquet(...)``, comment injection across the keyword,
+  unsupported-syntax fallthrough) and false-positive prone (forbidden
+  tokens inside string literals).  New ``_validate_with_sqlglot``
+  parses with the DuckDB dialect, rejects multi-statement and
+  unparseable SQL, walks the tree for forbidden node types
+  (``Insert`` / ``Drop`` / ``Pragma`` / ``Command`` / …), forbidden
+  function calls (handles typed ``ReadParquet`` and bare
+  ``Anonymous``, plus ``httpfs_*`` / ``s3_*`` / ``gcs_*`` /
+  ``azure_*`` prefixes), and path-literal replacement scans
+  (``FROM '/etc/passwd'`` and URI schemes).  Regex layer kept as
+  defence-in-depth and as a graceful fallback when sqlglot is
+  missing (with a one-time warning).  27 new red-team tests in
+  ``tests/unit/ext/stat_runtime/test_query_red_team.py`` cover
+  multi-statement, comment bypass, schema-qualified readers, nested
+  CTE mutations, ``Command``-fallback rejections (``LOAD``, ``VACUUM``,
+  ``CALL``), forbidden function-name prefixes, and URI-scheme paths.
+
 ### Fixed — high-severity audit findings (`claude/audit-architecture-competitors-TzBly`)
 
 - **E1 — Plan parallel-band write atomicity**
