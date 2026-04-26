@@ -19,45 +19,42 @@ examples/
 │   ├── 01_research_crew_single_agent.py # @CrewBase + Flow    → Agent(tools=[...])
 │   └── 02_research_and_report.py        # 2-agent sequential  → Agent.chain(a, b)
 └── patterns/
-    ├── dynamic_planner.py                # planner → typed rounds → asyncio.gather → re-plan
-    ├── agent_builds_plan.py              # planner emits PlanSpec → materialise into Plan
-    ├── plan_tool.py                      # make_planner: builder tools (create_plan/add_step/run_plan)
-    └── blackboard_planner.py             # make_blackboard_planner: shared todo-list (no DAG)
+    ├── dynamic_planner.py                # (legacy) planner → typed rounds → asyncio.gather
+    ├── agent_builds_plan.py              # (legacy) planner emits PlanSpec → materialise into Plan
+    ├── plan_tool.py                      # demo of lazybridge.planners.make_planner
+    └── blackboard_planner.py             # demo of lazybridge.planners.make_blackboard_planner
 ```
 
-## Patterns (LazyBridge-native)
+## Patterns
 
-Two planner factories, same input shape (`agents: list[Agent]`), different
-trade-offs. Full guide: [docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
-
-**`patterns/plan_tool.py`** — `make_planner` (DAG builder):
+The two main planner factories now live in-box at
+[`lazybridge.planners`](../lazybridge/planners/) — the example files in
+`patterns/plan_tool.py` and `patterns/blackboard_planner.py` are thin
+runnable demos that import them. Full guide:
+[docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
 
 ```python
-planner = make_planner([research, math, writer])
-planner("Research X and write a brief.")
+from lazybridge.planners import make_planner, make_blackboard_planner
+
+planner_dag        = make_planner([research, math, writer])         # DAG builder
+planner_blackboard = make_blackboard_planner([research, math, writer]) # todo list
 ```
 
-The planner gets each sub-agent as a direct tool *plus* five **builder
-tools** that compose a `Plan` one step at a time:
+**DAG builder (`make_planner`)** — sub-agents as direct tools *plus* five
+**builder tools** that compose a `Plan` one step at a time:
 `create_plan` → `add_step` (×N) → `inspect_plan` (optional) → `run_plan`.
 Each `add_step` validates locally — unknown agent, duplicate name, forward
 `from_step` ref — so the LLM corrects one step at a time instead of
-re-emitting a whole DAG. Native parallel via `parallel=true`. Optional
-`verify=` for high-stakes outputs.
+re-emitting a whole DAG. Native parallel via `parallel=True` and
+`task_kind="from_parallel_all"` for N-branch synthesis. Optional `verify=`
+for high-stakes outputs.
 
-**`patterns/blackboard_planner.py`** — `make_blackboard_planner` (todo list):
-
-```python
-planner = make_blackboard_planner([research, math, writer])
-planner("Research X and write a brief.")
-```
-
-Less precise but simpler. The planner gets each sub-agent as a direct
-tool *plus* four **blackboard tools** for managing a flat todo list:
-`set_plan` → loop(`get_next` → call sub-agent → `mark_done`) → reply.
-No DAG, no structural validation; the LLM revises the plan freely by
-calling `set_plan` again. Use for exploratory work where the shape
-emerges as you go.
+**Blackboard (`make_blackboard_planner`)** — sub-agents as direct tools
+*plus* three blackboard tools for managing a flat todo list:
+`set_plan` → loop(`mark_done` after each sub-agent call) → reply. No DAG,
+no structural validation; the LLM revises the plan freely by calling
+`set_plan` again. Use for exploratory work where the shape emerges as
+you go.
 
 **`patterns/dynamic_planner.py`** *(legacy)* — earlier exploration: planner
 uses `Agent(output=PlanRound)` to emit a typed task list per round, an

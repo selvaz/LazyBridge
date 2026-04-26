@@ -1,0 +1,54 @@
+"""In-box planner factories — give an LLM sub-agents and a planning toolkit.
+
+Two factories, same input shape (``agents: list[Agent]``), different
+trade-offs:
+
+* :func:`make_planner` (in :mod:`lazybridge.planners.builder`) — DAG
+  builder. The LLM composes a :class:`lazybridge.Plan` one step at a
+  time via five validated builder tools (``create_plan``, ``add_step``,
+  ``inspect_plan``, ``run_plan``, ``discard_plan``). Native parallel.
+  Compile-time DAG validation. Optional ``verify=`` judge loop.
+
+* :func:`make_blackboard_planner` (in :mod:`lazybridge.planners.blackboard`) —
+  flat todo list. The LLM manages a list of tasks via three blackboard
+  tools (``set_plan``, ``get_plan``, ``mark_done``). No DAG, no
+  structural validation. Easier to prompt; flexible re-planning.
+
+Pick by trade-off:
+
+- Need parallelism / structural validation / cost-aware verify → ``make_planner``.
+- Exploratory work where the shape emerges as you go → ``make_blackboard_planner``.
+
+Both planners are framework-native (not user code in ``examples/``) so
+they get the same quality bar as the rest of LazyBridge — typed contracts,
+LLM-self-correctable tool errors, no runtime exceptions across the LLM
+boundary, and validated against the unit-test suite.
+"""
+
+from lazybridge.planners.blackboard import (
+    BLACKBOARD_PLANNER_GUIDANCE,
+    make_blackboard_planner,
+)
+from lazybridge.planners.builder import (
+    PLANNER_GUIDANCE,
+    PLANNER_VERIFY_PROMPT,
+    PlanSpec,
+    StepSpec,
+    make_execute_plan_tool,
+    make_plan_builder_tools,
+    make_planner,
+)
+
+__all__ = [
+    # DAG builder
+    "make_planner",
+    "make_plan_builder_tools",
+    "make_execute_plan_tool",
+    "PLANNER_GUIDANCE",
+    "PLANNER_VERIFY_PROMPT",
+    "PlanSpec",
+    "StepSpec",
+    # Blackboard
+    "make_blackboard_planner",
+    "BLACKBOARD_PLANNER_GUIDANCE",
+]
