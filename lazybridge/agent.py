@@ -57,10 +57,17 @@ class Agent:
         Agent.chain(researcher, writer)("AI trends").text()
         Agent.parallel(a, b, c)("task")   # → list[Envelope], no LLM orchestrator
 
-    Tier 5/6 (Plan or SupervisorEngine — same ``tools=`` surface)::
+    Tier 5/6 — pluggable engines (same ``tools=`` surface)::
 
+        # Core engines
         Agent(engine=Plan(...), tools=[...], output=Report, session=session)
+
+        # Extension engines (lazybridge.ext.hil)
+        from lazybridge.ext.hil import SupervisorEngine
         Agent(engine=SupervisorEngine(...), tools=[...], session=session)
+
+    Core and extension engines share the :class:`Engine` protocol; the
+    ``Agent`` surface is identical regardless of where the engine lives.
     """
 
     _is_lazy_agent = True  # recognised by wrap_tool()
@@ -464,8 +471,10 @@ class Agent:
         Verify (Option B) — wrap the tool in a judge/retry loop so every
         call through this tool is vetted by a judge before returning::
 
-            judge = Agent("claude-opus-4-7",
-                          system="Reply 'approved' or 'rejected: <reason>'.")
+            judge = Agent(engine=LLMEngine(
+                "claude-opus-4-7",
+                system="Reply 'approved' or 'rejected: <reason>'.",
+            ))
             synth = Agent(...)
             orchestrator = Agent(
                 ...,

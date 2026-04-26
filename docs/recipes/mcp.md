@@ -89,9 +89,14 @@ tools, the agent will simply have no tools from that server — no error.
 
 ## Lifecycle
 
-The transport connects **lazily** on the first `as_tools()` call (which
-the framework triggers when you build the `Agent`). For explicit cleanup,
-use the server as an async context manager:
+The transport connects **lazily** on the first `as_tools()` call.
+In practice this means *Agent construction time*: `Agent(tools=[server])`
+calls `build_tool_map()` which calls `server.as_tools()` to discover the
+tool catalogue, and that's when the subprocess spawns / HTTP session
+opens. Connection failures therefore surface at the `Agent(...)` call —
+**not** at the first user query — which is what you want for fail-fast
+deployment. For explicit cleanup, use the server as an async context
+manager:
 
 ```python
 async with MCP.stdio("fs", command="...") as fs:

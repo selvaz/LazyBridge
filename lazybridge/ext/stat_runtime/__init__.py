@@ -1,3 +1,7 @@
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+__stability__ = "alpha"
+__lazybridge_min__ = "1.0.0"
+
 """stat_runtime — econometrics and time-series execution layer for LazyBridge.
 
 Provides shared data access, query compilation, model fitting, diagnostics,

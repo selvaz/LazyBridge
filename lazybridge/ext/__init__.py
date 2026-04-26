@@ -11,10 +11,14 @@ Stability: every extension declares ``__stability__`` (one of
 Available extensions::
 
     lazybridge.ext.planners          Planner factories (DAG builder + blackboard)
+    lazybridge.ext.hil               Human-in-the-loop engines (HumanEngine, SupervisorEngine)
+    lazybridge.ext.evals             EvalSuite, EvalCase, llm_judge, assertion helpers
+    lazybridge.ext.mcp               Model Context Protocol client (stdio + HTTP)
     lazybridge.ext.otel              OpenTelemetry span exporter
     lazybridge.ext.stat_runtime      Econometrics & time-series analysis
     lazybridge.ext.data_downloader   Market data ingestion (Yahoo, FRED, ECB)
     lazybridge.ext.quant_agent       Pre-configured quantitative analysis agent
     lazybridge.ext.doc_skills        BM25 local documentation skill runtime
     lazybridge.ext.read_docs         Multi-format document reader
+    lazybridge.ext.veo               Google Veo video-generation utilities
 """

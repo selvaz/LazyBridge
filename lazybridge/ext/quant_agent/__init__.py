@@ -1,3 +1,7 @@
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+__stability__ = "alpha"
+__lazybridge_min__ = "1.0.0"
+
 """lazybridge.ext.quant_agent — Pre-configured quantitative analysis agent.
 
 Hybrid architecture: complex tools get dedicated sub-agent pipelines

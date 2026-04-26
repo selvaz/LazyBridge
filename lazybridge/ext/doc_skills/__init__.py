@@ -1,3 +1,7 @@
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+__stability__ = "alpha"
+__lazybridge_min__ = "1.0.0"
+
 """lazybridge.ext.doc_skills — BM25 local documentation skill runtime.
 
 Index local documentation folders into a portable skill bundle, then expose

@@ -21,7 +21,8 @@ The minimum a generalist user needs to build agents. Stays small, optimised,
 and stable.
 
 - `Agent`, `Envelope`, `Tool`, `Memory`, `Store`, `Session`, `EventLog`
-- `LLMEngine`, `HumanEngine`, `SupervisorEngine`
+- `LLMEngine` (the four other engines — `HumanEngine` and
+  `SupervisorEngine` — are in `lazybridge.ext.hil`)
 - `Plan`, `Step`, `from_prev` / `from_start` / `from_step` / `from_parallel` / `from_parallel_all`
 - `BaseProvider` and the four officially supported providers
   (Anthropic, OpenAI, Google, DeepSeek)
@@ -29,6 +30,7 @@ and stable.
 - Basic exporters (`ConsoleExporter`, `JsonFileExporter`, `CallbackExporter`,
   `FilteredExporter`, `StructuredLogExporter`)
 - LiteLLM bridge (`lazybridge.core.providers.litellm.LiteLLMProvider`)
+  — core provider bridge; optional install via `pip install lazybridge[litellm]`
 
 ### Extension
 Optional, evolving, or domain-specific code. Ships fast in beta.
@@ -84,10 +86,10 @@ extras in `pyproject.toml`:
 
 ```toml
 [project.optional-dependencies]
-mcp        = ["mcp>=0.5.0"]
+mcp        = ["mcp>=1.0,<2.0"]
 rag        = ["chromadb>=0.4"]
-stat       = ["statsmodels>=0.14", "pandas>=2.0"]
-all        = ["lazybridge[mcp,rag,stat]"]
+stats      = ["statsmodels>=0.14", "pandas>=2.0"]   # cf. pyproject.toml
+all        = ["lazybridge[mcp,rag,stats]"]
 ```
 
 Users install only what they need:

@@ -1,3 +1,7 @@
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+__stability__ = "alpha"
+__lazybridge_min__ = "1.0.0"
+
 """data_downloader — market data ingestion for LazyBridge stat_runtime.
 
 Supports Yahoo Finance, FRED, and ECB data sources across a 140-ticker

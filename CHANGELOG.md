@@ -84,10 +84,52 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   explicitly that closure is terminal: a closed server cannot be
   reconnected. Behaviour was already correct; only documentation drifted.
 
+### Fixed — review-driven (post-Sprint 2)
+
+- ``docs/guides/core-vs-ext.md`` no longer contradicts itself —
+  ``HumanEngine`` / ``SupervisorEngine`` are listed only under Ext
+  (they were duplicated under Core, a leftover from before the move).
+  LiteLLM bridge now annotated as "core provider; optional install".
+- Version pinned to **1.0.1** in ``pyproject.toml`` and
+  ``lazybridge.__version__`` (was 1.0.0; the CHANGELOG already
+  documented this release as 1.0.1).
+- ``lazybridge/ext/__init__.py`` registry now lists every shipped
+  extension, including ``mcp``, ``hil``, ``evals``, ``otel``, and ``veo``.
+- ``pyproject.toml [all]`` extra now includes the OTel and MCP
+  dependencies (was missing them despite each having its own
+  ``[otel]`` / ``[mcp]`` extra).
+- ``Agent`` docstring rewritten so it doesn't imply ``HumanEngine`` /
+  ``SupervisorEngine`` are top-level core imports; adds the
+  ``from lazybridge.ext.hil import …`` path explicitly.
+- ``Agent.as_tool`` docstring example fixed: previous version used
+  ``Agent("…", system="…")`` which is not a valid constructor signature
+  — replaced with ``Agent(engine=LLMEngine("…", system="…"))``.
+- ``docs/recipes/mcp.md`` lazy-connect description tightened: connection
+  happens at ``Agent(tools=[server])`` construction time (when
+  ``build_tool_map`` calls ``as_tools``), not at first user query —
+  fail-fast semantics are explicit now.
+
+### Added — review-driven
+
+- All six remaining extensions (``stat_runtime``, ``data_downloader``,
+  ``quant_agent``, ``doc_skills``, ``read_docs``, ``veo``) now declare
+  ``__stability__ = "alpha"`` and ``__lazybridge_min__``, matching the
+  policy's "every extension declares maturity" rule.
+- ``tests/unit/test_core_ext_boundary.py`` — two new architectural
+  guards that fail CI on policy violation:
+    1. **Core never imports from ``lazybridge.ext``.** AST-walks every
+       ``.py`` under ``lazybridge/`` (excluding ``lazybridge/ext/``)
+       and reports any ``import``/``from`` statement targeting the ext
+       namespace.  No third-party import-linter dependency.
+    2. **Every ext module declares ``__stability__`` and
+       ``__lazybridge_min__``** with one of {alpha, beta, stable}.
+       Imports each ext module and validates programmatically.
+
 ### Tests
 
-- 21 new test cases driven by the deep audit. Total suite: 784 passed
-  (was 746 before this version), 3 skipped, 0 regressions.
+- 21 audit-driven cases + 2 architectural guards = 23 new test
+  cases this release. Total suite: 786 passed (was 746 before this
+  version), 3 skipped, 0 regressions.
 
 ### Documentation
 

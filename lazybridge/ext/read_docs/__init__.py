@@ -1,3 +1,7 @@
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+__stability__ = "alpha"
+__lazybridge_min__ = "1.0.0"
+
 """lazybridge.ext.read_docs — Multi-format document reader.
 
 Reads .txt, .md, .pdf, .docx, .html files from a folder or a single file
