@@ -41,6 +41,7 @@ def _resolve_provider(
     from lazybridge.core.providers.anthropic import AnthropicProvider
     from lazybridge.core.providers.deepseek import DeepSeekProvider
     from lazybridge.core.providers.google import GoogleProvider
+    from lazybridge.core.providers.lmstudio import LMStudioProvider
     from lazybridge.core.providers.openai import OpenAIProvider
 
     registry: dict[str, type[BaseProvider]] = {
@@ -51,6 +52,10 @@ def _resolve_provider(
         "google": GoogleProvider,
         "gemini": GoogleProvider,
         "deepseek": DeepSeekProvider,
+        "lmstudio": LMStudioProvider,
+        "lm-studio": LMStudioProvider,
+        "lm_studio": LMStudioProvider,
+        "local": LMStudioProvider,
     }
     key = provider.lower().strip()
 

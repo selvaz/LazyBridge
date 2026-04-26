@@ -194,7 +194,10 @@ class LLMEngine:
         self.provider = provider or self._infer_provider(model)
 
     # Provider name aliases accepted as the model argument
-    _PROVIDER_NAMES = {"anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek"}
+    _PROVIDER_NAMES = {
+        "anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek",
+        "lmstudio", "lm-studio", "lm_studio", "local",
+    }
 
     #: Exact-match provider aliases — first lookup.  ``Agent("anthropic")`` and
     #: ``Agent("claude")`` both resolve to the ``anthropic`` provider.  Users
@@ -207,6 +210,14 @@ class LLMEngine:
         "google": "google",
         "gemini": "google",
         "deepseek": "deepseek",
+        "lmstudio": "lmstudio",
+        "lm-studio": "lmstudio",
+        "lm_studio": "lmstudio",
+        "local": "lmstudio",
+        # LM Studio's conventional placeholder model identifier — accepting
+        # it as a routing alias means ``Agent("local-model")`` Just Works
+        # without forcing users to think about provider names.
+        "local-model": "lmstudio",
     }
 
     #: Ordered substring / prefix rules applied when no exact alias matches.
@@ -217,6 +228,10 @@ class LLMEngine:
     #: "claude-opus-5-*" alias is one call, not a code edit.
     _PROVIDER_RULES: list[tuple[str, str, str]] = [
         ("startswith", "litellm/", "litellm"),  # opt-in catch-all bridge
+        # LM Studio: explicit ``lmstudio/<model>`` prefix routes a specific
+        # locally-loaded model through the local server without any other
+        # configuration — mirrors the ``litellm/`` opt-in pattern.
+        ("startswith", "lmstudio/", "lmstudio"),
         ("contains",  "claude",   "anthropic"),
         ("contains",  "gpt",      "openai"),
         ("startswith", "o1",      "openai"),
