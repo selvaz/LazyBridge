@@ -248,6 +248,24 @@ class Agent:
                     raw.session = self.session
                     _safe_register_agent(self.session, raw)
                     _safe_register_tool_edge(self.session, self, raw, label="as_tool")
+            # Audit A2: ``fallback=`` and ``verify=`` Agents were
+            # excluded from session propagation, so any events they
+            # produced (errors handled by the fallback, judge verdicts
+            # from verify) recorded nowhere.  Apply the same
+            # session-inheritance + graph-registration the tools list
+            # gets, with edge labels that distinguish provenance.
+            for related, label in (
+                (self.fallback, "fallback"),
+                (self.verify, "verify"),
+            ):
+                if (
+                    related is not None
+                    and getattr(related, "_is_lazy_agent", False)
+                    and getattr(related, "session", None) is None
+                ):
+                    related.session = self.session
+                    _safe_register_agent(self.session, related)
+                    _safe_register_tool_edge(self.session, self, related, label=label)
 
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
@@ -441,10 +459,13 @@ class Agent:
 
         # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
         # We need a fresh loop on a worker thread so we don't try to nest.
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, self.run(task)).result()
+        # Audit A1: copy the caller's contextvars context so OTel spans,
+        # request IDs, structured-logging context etc. set in the outer
+        # loop are visible inside the agent's own loop.  Without this,
+        # ``asyncio.run`` on a worker thread starts with a fresh empty
+        # context and observability silently breaks for anyone running
+        # the sync façade from inside an async framework.
+        return _run_coro_with_context(self.run(task))
 
     # ------------------------------------------------------------------
     # Tool exposure
@@ -697,6 +718,30 @@ def _describe_output_type(output: Any) -> str:
     return str(output).replace("typing.", "")
 
 
+def _run_coro_with_context(coro: Any) -> Any:
+    """Run ``coro`` on a fresh event loop in a worker thread, with the
+    caller's :mod:`contextvars` context propagated into it.
+
+    Without ``ctx.run`` here, ``asyncio.run`` on a worker thread starts
+    with an empty context, so contextvars set by the outer framework
+    (OpenTelemetry spans, request IDs, structured-logging context) are
+    invisible to the agent — observability silently breaks for callers
+    using the sync façade from inside an async framework.  Fix lives at
+    the ``__call__`` boundary so every Engine type benefits without
+    individually re-implementing the bridge.  Audit A1.
+    """
+    import concurrent.futures
+    import contextvars
+
+    ctx = contextvars.copy_context()
+
+    def _run() -> Any:
+        return ctx.run(asyncio.run, coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_run).result()
+
+
 def _read_source(src: Any) -> str:
     """Extract a string from any source object — Memory, Store, callable, str."""
     # Memory / Store / objects with .text() or .to_text()
@@ -775,8 +820,5 @@ class _ParallelAgent:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.run(task))
-
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, self.run(task)).result()
+        # Audit A1: propagate caller contextvars into the worker loop.
+        return _run_coro_with_context(self.run(task))

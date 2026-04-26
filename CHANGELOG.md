@@ -8,6 +8,56 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [1.0.1] — unreleased — **structural split + MCP integration + HIL & evals to ext**
 
+### Fixed — high-severity audit findings (`claude/audit-architecture-competitors-TzBly`)
+
+- **E1 — Plan parallel-band write atomicity**
+  (``lazybridge/engines/plan.py``).  When one branch in a ``parallel=True``
+  band failed, branches earlier in the declared order had already
+  committed their ``writes=`` to ``kv`` and the external Store before
+  the loop reached the failure.  Resume re-ran the whole band and
+  partially-double-applied side-effects.  Post-fix the engine scans
+  every branch for failure first and returns WITHOUT applying any
+  writes when any branch errored — clean re-run on resume.
+- **E2 — Plan checkpoint claim race**
+  (``lazybridge/engines/plan.py:_claim_checkpoint``).  Two concurrent
+  fresh runs on the same ``checkpoint_key`` could both pass the claim
+  step (which only read the key without CAS) and both execute step 0
+  before the loser saw a CAS failure on its first save.  Post-fix the
+  claim now writes a ``status="claimed"`` placeholder via CAS up-front,
+  so concurrent fresh runs collide BEFORE either has executed any
+  step.  ``resume=True`` against a ``status="done"`` checkpoint still
+  short-circuits to the cached ``kv`` (documented behaviour preserved).
+- **E4 — Retryable exception classification**
+  (``lazybridge/core/executor.py:_is_retryable``).  Previously fell
+  back to a string scan over the exception message after the
+  status-code check, so transient errors with empty / non-English /
+  SDK-mangled messages (``RateLimitError("")``, ``APITimeoutError``
+  in a Spanish locale) classified as non-retryable.  Post-fix the
+  classifier walks the exception MRO and matches well-known transient
+  class names from a frozenset (``RateLimitError``,
+  ``APITimeoutError``, ``APIConnectionError``, ``ConnectionResetError``,
+  …) before falling back to the string scan.
+- **A1 — Sync ``__call__`` contextvars propagation**
+  (``lazybridge/agent.py``, ``lazybridge/tools.py``).  When
+  ``Agent.__call__`` (or ``Tool.run_sync``) was invoked inside an
+  already-running event loop (FastAPI / Starlette / Jupyter), it
+  spawned a worker-thread loop via ``asyncio.run`` with no context
+  bridge — :mod:`contextvars` set in the outer loop (OTel spans,
+  request IDs, structured-logging context) were invisible inside the
+  agent.  Post-fix every sync façade copies the caller's context via
+  ``contextvars.copy_context().run`` so observability state crosses
+  the loop boundary.
+- **A2 — ``fallback=`` / ``verify=`` agents inherit outer session**
+  (``lazybridge/agent.py``).  Tool-list Agents were registered on the
+  outer session and added to the graph; ``fallback=`` and ``verify=``
+  Agents were skipped, so events they emitted (errors handled by the
+  fallback, judge verdicts) recorded nowhere.  Post-fix both inherit
+  the outer session and appear on the graph with ``fallback`` /
+  ``verify`` edge labels (Agents that already carry their own session
+  are not stomped).
+- **Tests** — ``tests/unit/test_audit_high_findings.py`` (13 new
+  tests, one per finding plus regression coverage).
+
 ### Added — extensions
 
 - **`lazybridge.ext` regime** — formalised core-vs-ext split documented

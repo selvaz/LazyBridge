@@ -141,10 +141,20 @@ class Tool:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro_factory())
+        # Audit A1: propagate the caller's contextvars context (OTel,
+        # structured logging, request IDs) into the worker loop.  A
+        # raw ``asyncio.run`` on a fresh thread would start in an empty
+        # context and silently break observability for sync callers.
         import concurrent.futures
+        import contextvars
+
+        ctx = contextvars.copy_context()
+
+        def _run() -> Any:
+            return ctx.run(asyncio.run, coro_factory())
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro_factory()).result()
+            return pool.submit(_run).result()
 
     def __repr__(self) -> str:
         return f"Tool({self.name!r})"

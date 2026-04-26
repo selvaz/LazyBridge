@@ -477,8 +477,10 @@ class Plan:
         """Acquire ownership of ``checkpoint_key`` for this run.
 
         * Fresh run, key absent or a prior ``status=="done"`` checkpoint
-          → returns ``None``; the first subsequent ``_save_checkpoint``
-          writes the initial state.
+          → CAS-write a ``status="claimed"`` placeholder up-front so two
+          concurrent fresh runs collide here (audit E2) instead of both
+          executing the first step before the loser fails on its first
+          real save.
         * ``resume=True`` and an in-flight checkpoint exists → adopt it,
           stamping our ``run_uid`` via CAS so subsequent saves compare
           against us rather than the crashed run.
@@ -489,13 +491,56 @@ class Plan:
         if store is None or effective_key is None:
             return None
         existing = store.read(effective_key)
+        # Build a "claimed" placeholder snapshot.  next_step / kv /
+        # completed_steps are intentionally empty — the first real
+        # ``_save_checkpoint`` after the first step will overwrite via
+        # CAS that compares against this placeholder.
+        first_step = self.steps[0].name if self.steps else None
+        claimed_snap = {
+            "next_step": first_step,
+            "kv": {},
+            "completed_steps": [],
+            "status": "claimed",
+            "run_uid": run_uid,
+        }
         if not isinstance(existing, dict):
-            return None
+            # Fresh run — claim via CAS from "key must not exist" (None).
+            # A second concurrent fresh run loses this CAS and fails fast.
+            if not store.compare_and_swap(effective_key, None, claimed_snap):
+                raise ConcurrentPlanRunError(
+                    f"Lost race claiming {effective_key!r} — another fresh "
+                    f"run wrote the key between our read and claim.  Retry "
+                    f"with a unique checkpoint_key, or pass "
+                    f"on_concurrent='fork'."
+                )
+            return claimed_snap
         status = existing.get("status")
-        if status in (None, "done"):
-            # Prior run finished cleanly (or key holds a non-plan value) —
-            # safe to overwrite starting from the first save.
-            return existing if status == "done" else None
+        if status == "done":
+            # Prior run finished cleanly.  Two sub-cases:
+            #  * resume=True → DO NOT claim; return the done snap so the
+            #    caller short-circuits to the cached ``kv`` (this is the
+            #    documented "resume after done" no-op).
+            #  * resume=False → claim by CAS-overwriting the done snap so
+            #    concurrent fresh re-runs serialise on the same key
+            #    (audit E2: previously a fresh run vs a fresh run could
+            #    both execute step 0 before the loser saw CAS failure).
+            if self.resume:
+                return existing
+            if not store.compare_and_swap(effective_key, existing, claimed_snap):
+                raise ConcurrentPlanRunError(
+                    f"Lost race claiming completed key {effective_key!r} — "
+                    f"another run moved past 'done' before we could claim. "
+                    f"Retry."
+                )
+            return claimed_snap
+        if status is None:
+            # Key holds a non-plan value (user mis-configured the store).
+            # Don't try to CAS over arbitrary data — surface clearly.
+            raise ConcurrentPlanRunError(
+                f"Checkpoint key {effective_key!r} holds a value with no "
+                f"'status' field; refusing to overwrite.  Use a different "
+                f"checkpoint_key or a dedicated Store."
+            )
         if not self.resume:
             hint = (
                 "Pass on_concurrent='fork' to give each run its own key, "
@@ -623,27 +668,41 @@ class Plan:
                     return_exceptions=True,
                 )
 
-                # Apply writes / history sequentially; bail on first error.
-                last_ok: Envelope | None = None
+                # Atomicity (audit E1): scan ALL branches for failure first.
+                # If any branch errored we return WITHOUT applying any writes
+                # to ``kv`` / ``effective_store`` / ``history`` / ``completed``
+                # — so a later resume re-runs the whole band cleanly instead
+                # of partially-double-applying side-effects from siblings that
+                # succeeded earlier in the iteration order.
+                first_failure_step: str | None = None
+                first_failure_env: Envelope | None = None
                 for s, r in zip(group, raw):
                     step_name = s.name or ""
                     if isinstance(r, BaseException):
-                        err_env = Envelope.error_envelope(r)
-                        last_snap = self._save_checkpoint(
-                            effective_key=effective_key,
-                            last_snapshot=last_snap, next_step=step_name,
-                            kv=kv, completed=completed, status="failed",
-                            run_uid=run_uid,
-                        )
-                        return self._aggregate_nested_metadata(err_env, history)
+                        first_failure_step = step_name
+                        first_failure_env = Envelope.error_envelope(r)
+                        break
                     if r.error is not None:
-                        last_snap = self._save_checkpoint(
-                            effective_key=effective_key,
-                            last_snapshot=last_snap, next_step=step_name,
-                            kv=kv, completed=completed, status="failed",
-                            run_uid=run_uid,
-                        )
-                        return self._aggregate_nested_metadata(r, history)
+                        first_failure_step = step_name
+                        first_failure_env = r
+                        break
+                if first_failure_env is not None:
+                    last_snap = self._save_checkpoint(
+                        effective_key=effective_key,
+                        last_snapshot=last_snap,
+                        next_step=first_failure_step,
+                        kv=kv, completed=completed, status="failed",
+                        run_uid=run_uid,
+                    )
+                    return self._aggregate_nested_metadata(first_failure_env, history)
+
+                # All branches succeeded — apply writes in declared order.
+                last_ok: Envelope | None = None
+                for s, r in zip(group, raw):
+                    step_name = s.name or ""
+                    # Type-narrow: failure-scan above already returned on
+                    # BaseException / r.error; remaining ``r`` are Envelopes.
+                    assert isinstance(r, Envelope)
                     if s.writes and r.payload is not None:
                         kv[s.writes] = r.payload
                         if effective_store:

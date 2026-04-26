@@ -71,11 +71,50 @@ def _resolve_provider(
 # ---------------------------------------------------------------------------
 
 
+# Provider SDKs converge on a small set of class names for transient
+# errors. Matching by ``__class__.__name__`` avoids importing every SDK
+# (no runtime dep added) and survives string-message drift / non-EN
+# locales — both pain points the previous string-only heuristic had
+# (audit E4).  Cross-check: openai, anthropic, google.genai, deepseek
+# (openai-clone), litellm all use one of these names today.
+_RETRYABLE_EXC_CLASSES = frozenset({
+    "RateLimitError",
+    "APITimeoutError",
+    "APIConnectionError",
+    "APIStatusError",            # SDK-generic 5xx wrapper
+    "InternalServerError",
+    "ServiceUnavailableError",
+    "BadGatewayError",
+    "GatewayTimeoutError",
+    "TimeoutError",              # builtins.TimeoutError, asyncio.TimeoutError
+    "ConnectionError",           # builtins.ConnectionError + subclasses
+    "ConnectionResetError",
+    "ConnectionAbortedError",
+    "ConnectionRefusedError",
+    "ReadTimeout",               # httpx
+    "ConnectTimeout",
+    "ConnectError",
+    "RemoteProtocolError",
+    "ProtocolError",
+})
+
+
 def _is_retryable(exc: Exception) -> bool:
+    # 1. Structured: HTTP-status-bearing exceptions.  Cheapest and most
+    #    reliable signal across SDKs.
     for attr in ("status_code", "status", "http_status", "code"):
         code = getattr(exc, attr, None)
         if isinstance(code, int) and (code == 429 or 500 <= code < 600):
             return True
+    # 2. Structured: known transient class names (provider-SDK agnostic).
+    #    Walk the MRO so subclasses (``ConnectionResetError`` →
+    #    ``ConnectionError``) match without per-class enumeration.
+    for cls in type(exc).__mro__:
+        if cls.__name__ in _RETRYABLE_EXC_CLASSES:
+            return True
+    # 3. Last-resort string scan.  Kept for SDKs that wrap upstream
+    #    errors as plain ``Exception`` / ``RuntimeError`` with the
+    #    transient signal only in the message.
     s = str(exc).lower()
     patterns = (
         "rate limit",
