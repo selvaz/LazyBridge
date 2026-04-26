@@ -198,6 +198,21 @@ class PlanCompiler:
                             f"member of that band (i.e. parallel=True). "
                             f"Use from_step / from_parallel for single-branch reads."
                         )
+                    # The target must also be the *first* member of its
+                    # parallel band — i.e. either the first step overall or
+                    # immediately preceded by a non-parallel step.  Otherwise
+                    # the runtime walks forward from a mid-band position and
+                    # silently misses the earlier siblings.
+                    target_idx = pos[sentinel.name]
+                    if target_idx > 0 and steps[target_idx - 1].parallel:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_parallel_all"
+                            f"({sentinel.name!r}) must reference the FIRST "
+                            f"member of a parallel band, but the step "
+                            f"immediately before it ({steps[target_idx - 1].name!r}) "
+                            f"is also parallel=True.  Point the sentinel at the "
+                            f"earliest parallel step in the band instead."
+                        )
             # Type compatibility: previous step output must match this step input
             if i > 0 and step.input is not Any:
                 prev = steps[i - 1]

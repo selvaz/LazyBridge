@@ -203,3 +203,18 @@ def test_from_parallel_single_branch_unchanged() -> None:
     # from_parallel still single-branch: only X visible.
     assert "FACT[X]" in last
     assert "FACT[Y]" not in last
+
+
+def test_compiler_rejects_from_parallel_all_to_mid_band_member() -> None:
+    """The named step must be the FIRST member of its parallel band; pointing
+    at a later sibling would make the runtime walk forward and silently miss
+    earlier branches."""
+    a = _agents()
+    plan = Plan(
+        Step(a["research"], name="b1", task="t1", parallel=True),
+        Step(a["research"], name="b2", task="t2", parallel=True),  # mid-band
+        Step(a["research"], name="b3", task="t3", parallel=True),
+        Step(a["writer"],   name="join", task=from_parallel_all("b2")),
+    )
+    with pytest.raises(PlanCompileError, match="FIRST member"):
+        Agent.from_engine(plan)

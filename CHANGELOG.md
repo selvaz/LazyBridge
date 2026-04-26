@@ -6,6 +6,90 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.1] — unreleased — **structural split + MCP integration**
+
+### Added — extensions
+
+- **`lazybridge.ext` regime** — formalised core-vs-ext split documented
+  in `docs/guides/core-vs-ext.md`. Core is `__stability__ = "beta"`
+  (public API stable in spirit); extensions ship at
+  `__stability__ = "alpha"` by default and may break between minor
+  releases. Promotion: alpha → beta → stable → core, after N minor
+  releases without breakage.
+- **`lazybridge.ext.planners`** — moved from `lazybridge.planners`
+  (clean break, no shim). Exposes `make_planner` (DAG builder) and
+  `make_blackboard_planner` (todo-list).
+- **`lazybridge.ext.otel`** — moved `OTelExporter` here (clean break,
+  no shim). Install with `pip install lazybridge[otel]`.
+- **`lazybridge.ext.mcp`** *(new)* — Model Context Protocol integration
+  at the tool boundary. `MCP.stdio` / `MCP.http` / `MCP.from_transport`
+  build an `MCPServer` that drops into `Agent(tools=[server])` and
+  expands to one `Tool` per MCP tool. Auto-namespacing
+  (`{server}.{tool}`); `allow` / `deny` glob patterns; lazy connect;
+  async-context-manager for explicit lifecycle. Tools-only phase 1;
+  resources and prompts in a later phase. Install with
+  `pip install lazybridge[mcp]`.
+
+### Added — core
+
+- **`from_parallel_all`** sentinel and `_FromParallelAll` aggregator —
+  N-branch parallel-band synthesis. The join step receives a single
+  envelope whose `task` and `payload` are a labelled-text join of every
+  branch's output. PlanCompiler enforces: target step exists and is
+  earlier in the plan, target is a `parallel=True` step, target is the
+  FIRST member of its parallel band. Closes the architectural footgun
+  where `from_parallel("name")` only ever forwarded one branch.
+- **`Tool.from_schema(name, description, parameters, func)`** —
+  construct a Tool with a pre-built JSON Schema instead of inferring
+  from the Python signature. General-purpose; useful for OpenAPI /
+  third-party tool registries beyond MCP.
+- **`build_tool_map` provider expansion** — items in `tools=[...]` with
+  `_is_lazy_tool_provider = True` and an `as_tools() -> list[Tool]`
+  method are expanded into their constituent tools. Same dispatch
+  semantics for plain functions, Agents, and tool collections.
+
+### Removed (clean break)
+
+- `lazybridge.planners` (moved to `lazybridge.ext.planners`; no shim).
+- `lazybridge.OTelExporter` and `lazybridge.exporters.OTelExporter`
+  (moved to `lazybridge.ext.otel.OTelExporter`; no shim).
+- `OTelExporter` from the top-level `lazybridge.__all__`.
+
+### Fixed — audit-driven
+
+- **`MCPServer._lock` lazy-init** — `asyncio.Lock()` is no longer
+  constructed in `__init__` (sync context). Deferred to first async use
+  to avoid the deprecation / runtime-loop coupling on Python 3.12+.
+- **`PlanCompiler` first-member check** for `from_parallel_all` — pre-
+  audit version validated only "is parallel"; post-audit version also
+  validates that the named step is the FIRST member of its band, so
+  pointing at a mid-band step now fails at compile time instead of
+  silently truncating the aggregation.
+- **`build_tool_map` collision warning** — fires once per collided
+  name (was firing on every duplicate after the first); `stacklevel`
+  raised from 2 to 4 so the warning points at the user's
+  `Agent(tools=[...])` call instead of the internal loop.
+- **`MCPServer` reuse contract** — class docstring now states
+  explicitly that closure is terminal: a closed server cannot be
+  reconnected. Behaviour was already correct; only documentation drifted.
+
+### Tests
+
+- 21 new test cases driven by the deep audit. Total suite: 784 passed
+  (was 746 before this version), 3 skipped, 0 regressions.
+
+### Documentation
+
+- `docs/guides/core-vs-ext.md` — new contributor / maintenance guide.
+- `docs/recipes/mcp.md` — full guide with quickstart, multi-server,
+  namespacing, allow/deny (clarified as fnmatch glob, not regex),
+  lifecycle, testing without an SDK, pitfalls, API reference.
+- `docs/recipes/orchestration-tools.md` — updated with
+  `from_parallel_all` worked example, builder API workflow, and links
+  to the in-box `lazybridge.ext.planners`.
+
+---
+
 ## [1.0.0] — 2026-04-21 — **v1 complete rewrite**
 
 v1 is a complete, breaking rewrite. Every public class from 0.x

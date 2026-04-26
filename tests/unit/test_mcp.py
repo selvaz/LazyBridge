@@ -25,7 +25,9 @@ from lazybridge.testing import MockAgent
 
 class FakeTransport(_Transport):
     def __init__(self, tools: list[dict[str, Any]] | None = None) -> None:
-        self._tools = tools or [
+        # Use ``is None`` (not ``or``) so the caller can pass ``tools=[]``
+        # to model an empty catalogue without falling back to the default.
+        self._tools = tools if tools is not None else [
             {
                 "name": "list_directory",
                 "description": "List the contents of a directory.",
@@ -260,3 +262,83 @@ def test_wrapped_func_carries_mcp_metadata() -> None:
     f = list_dir.func
     assert getattr(f, "__mcp_tool_name__", None) == "list_directory"
     assert getattr(f, "__mcp_server_name__", None) == "fs"
+
+
+# ---------------------------------------------------------------------------
+# Audit-driven additions: error surfacing, empty catalogues, lazy lock.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingTransport(_Transport):
+    """Fake transport whose :meth:`connect` always fails — used to verify
+    that lazy-connect errors surface at ``Agent(tools=[server])`` time
+    (or at ``as_tools()`` if called directly), not at first user query."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def connect(self) -> None:
+        raise self._error
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        return None
+
+    async def close(self) -> None:
+        pass
+
+
+def test_transport_connect_error_surfaces_at_as_tools() -> None:
+    fs = MCP.from_transport("fs", _RaisingTransport(RuntimeError("subprocess failed")))
+    with pytest.raises(RuntimeError, match="subprocess failed"):
+        fs.as_tools()
+
+
+def test_transport_connect_error_surfaces_at_agent_construction() -> None:
+    """Agent(tools=[server]) calls build_tool_map → as_tools → connect.
+    A failing connect should bubble up immediately."""
+    fs = MCP.from_transport("fs", _RaisingTransport(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        Agent(engine_or_model="claude-opus-4-7", tools=[fs])
+
+
+def test_empty_tool_catalogue_yields_no_tools() -> None:
+    fs = MCP.from_transport("fs", FakeTransport(tools=[]))
+    assert fs.as_tools() == []
+
+
+def test_allow_filter_to_zero_tools_succeeds_silently() -> None:
+    """Filtering down to nothing is a valid (if degenerate) configuration."""
+    fs = MCP.from_transport(
+        "fs",
+        FakeTransport(),
+        allow=["fs.nonexistent_*"],  # matches nothing
+    )
+    assert fs.as_tools() == []
+
+
+def test_allow_and_deny_intersecting_to_empty_succeeds_silently() -> None:
+    fs = MCP.from_transport(
+        "fs",
+        FakeTransport(),
+        allow=["fs.*"],
+        deny=["fs.*"],
+    )
+    assert fs.as_tools() == []
+
+
+def test_lock_lazy_init_does_not_create_during_construction() -> None:
+    """Constructing an MCPServer outside an event loop must not create
+    an asyncio.Lock (deprecated / errors on Python ≥3.12)."""
+    fs = MCP.from_transport("fs", FakeTransport())
+    # The lock attribute must be present but None until first async use.
+    assert fs._lock is None
+
+
+def test_lock_initialised_on_first_async_use() -> None:
+    fs = MCP.from_transport("fs", FakeTransport())
+    asyncio.run(fs.aconnect())
+    assert fs._lock is not None
+    asyncio.run(fs.aclose())

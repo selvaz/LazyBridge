@@ -212,19 +212,26 @@ def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
     import warnings
 
     result: dict[str, Tool] = {}
+    seen_warnings: set[str] = set()
     for t in tools:
         if getattr(t, "_is_lazy_tool_provider", False):
             expanded = list(t.as_tools())
         else:
             expanded = [wrap_tool(t)]
         for wrapped in expanded:
-            if wrapped.name in result:
+            # Warn the first time a name reappears — not the second, third,
+            # … which were emitting redundant warnings against an already-
+            # shadowed entry.  ``stacklevel=4`` typically points at the
+            # user's ``Agent(tools=[...])`` call rather than at this loop:
+            # build_tool_map → Agent.__init__ → user.
+            if wrapped.name in result and wrapped.name not in seen_warnings:
                 warnings.warn(
                     f"Tool name collision: '{wrapped.name}' appears more than once "
                     f"in the tools list. The first registration will be replaced by "
                     f"the second. Rename one of the tools to avoid silent shadowing.",
                     UserWarning,
-                    stacklevel=2,
+                    stacklevel=4,
                 )
+                seen_warnings.add(wrapped.name)
             result[wrapped.name] = wrapped
     return result

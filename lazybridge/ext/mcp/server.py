@@ -45,6 +45,12 @@ class MCPServer:
 
     Without that, the transport stays open for the process lifetime; the
     underlying subprocess is normally cleaned up when the parent exits.
+
+    **Closure is terminal.** Once :meth:`aclose` (or the ``async with``
+    block) finishes, the server is single-shot: a subsequent
+    :meth:`aconnect` / :meth:`as_tools` raises ``RuntimeError``.
+    Construct a new ``MCPServer`` if you need to re-use the same
+    transport configuration.
     """
 
     _is_lazy_tool_provider = True
@@ -72,13 +78,23 @@ class MCPServer:
         self._tools_cache: list[Tool] | None = None
         self._connected = False
         self._closed = False
-        self._lock = asyncio.Lock()
+        # Lazy-init the asyncio.Lock on first async use.  Constructing it
+        # inside ``__init__`` (a sync context) couples to whatever event
+        # loop happens to be running at instantiation time and warns /
+        # raises on Python ≥3.12 when there is none.  Deferring is safe
+        # because the lock only ever guards async coroutines.
+        self._lock: asyncio.Lock | None = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     # --- lifecycle -----------------------------------------------------
 
     async def aconnect(self) -> None:
         """Connect the underlying transport. Idempotent."""
-        async with self._lock:
+        async with self._get_lock():
             if not self._connected:
                 if self._closed:
                     raise RuntimeError(
@@ -99,7 +115,7 @@ class MCPServer:
 
     async def aclose(self) -> None:
         """Close the underlying transport. Idempotent."""
-        async with self._lock:
+        async with self._get_lock():
             if self._connected and not self._closed:
                 try:
                     await self._transport.close()

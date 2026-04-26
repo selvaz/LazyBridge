@@ -67,8 +67,11 @@ gh = MCP.stdio("github", command="...", prefix="gh_")        # custom prefix
 
 ## Allow / deny lists
 
-Filter the tool catalogue with glob patterns. Patterns match against the
-**full namespaced name**.
+Filter the tool catalogue with **shell-style glob patterns** (Python's
+`fnmatch.fnmatchcase`). Wildcards: `*` matches any sequence, `?` matches a
+single char, `[abc]` matches one of a set. **Not regex** — `fs\.delete_.*`
+would not match anything; use `fs.delete_*` instead. Patterns are matched
+against the **full namespaced name**.
 
 ```python
 fs = MCP.stdio(
@@ -81,7 +84,8 @@ fs = MCP.stdio(
 ```
 
 `allow` and `deny` compose: allow-list filters first, then deny-list
-removes from the kept set.
+removes from the kept set. If both filter the catalogue down to zero
+tools, the agent will simply have no tools from that server — no error.
 
 ## Lifecycle
 
