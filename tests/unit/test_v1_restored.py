@@ -27,9 +27,9 @@ from lazybridge import (
     Session,
     Step,
     Store,
-    SupervisorEngine,
     Tool,
 )
+from lazybridge.ext.hil import SupervisorEngine
 
 # ---------------------------------------------------------------------------
 # Session.graph — auto-registration

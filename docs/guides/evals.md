@@ -3,7 +3,8 @@
 ## Example
 
 ```python
-from lazybridge import Agent, EvalCase, EvalSuite, contains, llm_judge
+from lazybridge import Agent
+from lazybridge.ext.evals import EvalCase, EvalSuite, contains, llm_judge
 
 bot   = Agent("claude-opus-4-7", system="You are a helpful assistant.")
 judge = Agent("claude-opus-4-7", name="judge",

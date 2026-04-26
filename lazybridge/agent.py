@@ -277,7 +277,7 @@ class Agent:
                                payload=action.modified_text)
 
         if self.verify:
-            from lazybridge.evals import verify_with_retry
+            from lazybridge._verify import verify_with_retry
             result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify)
         else:
             result = await self._run_engine(env)
@@ -487,7 +487,7 @@ class Agent:
         else:
             async def _run(task: str) -> Envelope:  # type: ignore[misc]
                 from lazybridge.envelope import Envelope as _Env
-                from lazybridge.evals import verify_with_retry
+                from lazybridge._verify import verify_with_retry
 
                 env = _Env.from_task(str(task))
                 return await verify_with_retry(

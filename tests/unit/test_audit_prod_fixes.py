@@ -18,7 +18,7 @@ import warnings
 import pytest
 
 from lazybridge.agent import Agent
-from lazybridge.engines.human import HumanEngine
+from lazybridge.ext.hil.human import HumanEngine
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.envelope import Envelope
 from lazybridge.memory import Memory
@@ -74,7 +74,7 @@ def test_tools_module_uses_get_running_loop():
 
 
 def test_human_module_uses_get_running_loop():
-    import lazybridge.engines.human as human_mod
+    import lazybridge.ext.hil.human as human_mod
 
     with open(human_mod.__file__) as fh:  # type: ignore[arg-type]
         src = fh.read()

@@ -71,24 +71,15 @@ from lazybridge.core.types import (
 
 # Engines
 from lazybridge.engines.base import Engine
-from lazybridge.engines.human import HumanEngine
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
-from lazybridge.engines.supervisor import SupervisorEngine
+# HumanEngine and SupervisorEngine moved to ``lazybridge.ext.hil`` in 1.0.1.
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 
 # testing utilities (scripted_inputs/ainputs) live in lazybridge.testing; not re-exported here.
-from lazybridge.evals import (
-    EvalCase,
-    EvalReport,
-    EvalSuite,
-    contains,
-    exact_match,
-    llm_judge,
-    max_length,
-    min_length,
-    not_contains,
-)
+# EvalCase / EvalSuite / llm_judge / contains / exact_match / etc. moved to
+# ``lazybridge.ext.evals`` in 1.0.1; the runtime ``verify_with_retry`` helper
+# used by ``Agent(verify=...)`` lives privately in ``lazybridge._verify``.
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
 from lazybridge.exporters import (
@@ -139,21 +130,9 @@ __all__ = [
     "ContentGuard",
     "GuardChain",
     "LLMGuard",
-    # Evals
-    "EvalCase",
-    "EvalReport",
-    "EvalSuite",
-    "exact_match",
-    "contains",
-    "not_contains",
-    "max_length",
-    "min_length",
-    "llm_judge",
     # Engines
     "Engine",
     "LLMEngine",
-    "HumanEngine",
-    "SupervisorEngine",
     "Plan",
     "Step",
     "PlanState",

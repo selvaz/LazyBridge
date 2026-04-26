@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from lazybridge.envelope import Envelope
-from lazybridge.evals import (
+from lazybridge.ext.evals import (
     EvalCase,
     EvalReport,
     EvalSuite,
@@ -106,7 +106,7 @@ def test_suite_with_expected():
 
 def test_report_str_format():
     report = EvalReport()
-    from lazybridge.evals import EvalResult
+    from lazybridge.ext.evals import EvalResult
     report.results.append(EvalResult(case=EvalCase("q", check=contains("x")), output="x", passed=True))
     assert "1/1" in str(report)
     assert "100%" in str(report)

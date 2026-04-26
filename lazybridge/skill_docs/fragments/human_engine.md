@@ -22,7 +22,8 @@ Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
 
 ## example
 ```python
-from lazybridge import Agent, HumanEngine
+from lazybridge import Agent
+from lazybridge.ext.hil import HumanEngine
 from pydantic import BaseModel
 
 class Review(BaseModel):

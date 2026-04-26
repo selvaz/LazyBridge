@@ -32,7 +32,7 @@ from lazybridge import (
     from_step,
 )
 from lazybridge.envelope import EnvelopeMetadata
-from lazybridge.evals import verify_with_retry
+from lazybridge._verify import verify_with_retry
 
 # ---------------------------------------------------------------------------
 # Plan Step(parallel=True) really runs concurrently

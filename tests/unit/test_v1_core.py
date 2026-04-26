@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from lazybridge.engines.plan import Plan, PlanCompileError, PlanCompiler, Step
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
-from lazybridge.evals import EvalCase, EvalSuite, contains, exact_match
+from lazybridge.ext.evals import EvalCase, EvalSuite, contains, exact_match
 from lazybridge.guardrails import ContentGuard, GuardAction, GuardChain
 from lazybridge.memory import Memory
 from lazybridge.sentinels import (

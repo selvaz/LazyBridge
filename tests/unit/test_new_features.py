@@ -11,8 +11,9 @@ import urllib.request
 import pytest
 from pydantic import BaseModel
 
-from lazybridge import Agent, Envelope, HumanEngine, Session, Tool
-from lazybridge.engines.human import _WebUI, _build_web_form
+from lazybridge import Agent, Envelope, Session, Tool
+from lazybridge.ext.hil import HumanEngine
+from lazybridge.ext.hil.human import _WebUI, _build_web_form
 
 
 # =============================================================================
@@ -235,13 +236,13 @@ class TestHumanEngineWebWiring:
         assert h._ui._timeout == 60
 
     def test_terminal_still_works(self):
-        from lazybridge.engines.human import _TerminalUI
+        from lazybridge.ext.hil.human import _TerminalUI
 
         h = HumanEngine(ui="terminal")
         assert isinstance(h._ui, _TerminalUI)
 
     def test_custom_ui_protocol(self):
-        from lazybridge.engines.human import _UIProtocol
+        from lazybridge.ext.hil.human import _UIProtocol
 
         class MyUI(_UIProtocol):
             async def prompt(self, task, *, tools, output_type):

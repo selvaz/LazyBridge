@@ -3,7 +3,8 @@
 ## Example
 
 ```python
-from lazybridge import Agent, SupervisorEngine, Tool, Store
+from lazybridge import Agent, Tool, Store
+from lazybridge.ext.hil import SupervisorEngine
 
 def search(query: str) -> str:
     """Search the web for query."""

@@ -149,7 +149,8 @@ assert mock.call_count == 0
 # pipeline.  Real production code calls input() or reads stdin; tests
 # hand over a finite list of "typed" lines.
 
-from lazybridge import Agent, SupervisorEngine, Store
+from lazybridge import Agent, Store
+from lazybridge.ext.hil import SupervisorEngine
 from lazybridge.testing import scripted_inputs, MockAgent
 
 researcher = MockAgent("draft one", name="researcher")

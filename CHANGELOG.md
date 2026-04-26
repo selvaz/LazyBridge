@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.0.1] — unreleased — **structural split + MCP integration**
+## [1.0.1] — unreleased — **structural split + MCP integration + HIL & evals to ext**
 
 ### Added — extensions
 
@@ -54,6 +54,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `lazybridge.OTelExporter` and `lazybridge.exporters.OTelExporter`
   (moved to `lazybridge.ext.otel.OTelExporter`; no shim).
 - `OTelExporter` from the top-level `lazybridge.__all__`.
+- `lazybridge.HumanEngine` and `lazybridge.SupervisorEngine` (moved to
+  `lazybridge.ext.hil`; no shim). Internal modules
+  `lazybridge.engines.human` / `lazybridge.engines.supervisor` are gone —
+  use `lazybridge.ext.hil.{human,supervisor}` for their internal symbols
+  (e.g. `_TerminalUI` in tests).
+- `lazybridge.EvalSuite` / `EvalCase` / `EvalReport` / `llm_judge` /
+  `contains` / `exact_match` / `min_length` / `max_length` /
+  `not_contains` (moved to `lazybridge.ext.evals`; no shim). The runtime
+  ``verify_with_retry`` helper used by ``Agent(verify=...)`` is now
+  the private `lazybridge._verify` module — same contract, different
+  import path.
 
 ### Fixed — audit-driven
 

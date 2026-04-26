@@ -14,7 +14,8 @@ them do one of four things before returning control to the pipeline:
 
 Usage::
 
-    from lazybridge import Agent, SupervisorEngine, Session, Store, Tool
+    from lazybridge import Agent, Session, Store, Tool
+    from lazybridge.ext.hil import SupervisorEngine
 
     sess = Session()
     researcher = Agent("claude-opus-4-7", name="researcher", session=sess)

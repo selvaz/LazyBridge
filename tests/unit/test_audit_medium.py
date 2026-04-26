@@ -34,9 +34,9 @@ from lazybridge import (
     Plan,
     Session,
     Step,
-    SupervisorEngine,
 )
-from lazybridge.engines.human import _TerminalUI
+from lazybridge.ext.hil import SupervisorEngine
+from lazybridge.ext.hil.human import _TerminalUI
 from lazybridge.guardrails import LLMGuard
 
 # ---------------------------------------------------------------------------

@@ -27,8 +27,6 @@ from lazybridge import (
     CallbackExporter,
     ContentGuard,
     EdgeType,
-    EvalCase,
-    EvalSuite,
     EventType,
     FilteredExporter,
     GraphSchema,
@@ -44,14 +42,13 @@ from lazybridge import (
     Step,
     Store,
     Tool,
-    contains,
-    llm_judge,
     from_step,
     from_parallel,
     from_prev,
     from_start,
 )
 from lazybridge.core.types import CacheConfig
+from lazybridge.ext.evals import EvalCase, EvalSuite, contains, llm_judge
 from lazybridge.testing import MockAgent, scripted_inputs
 
 

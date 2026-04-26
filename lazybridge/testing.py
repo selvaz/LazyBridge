@@ -39,7 +39,8 @@ def scripted_inputs(lines: Iterable[str]) -> Callable[[str], str]:
 
     Example::
 
-        from lazybridge import Agent, SupervisorEngine
+        from lazybridge import Agent
+        from lazybridge.ext.hil import SupervisorEngine
         from lazybridge.testing import scripted_inputs
 
         sup = Agent(

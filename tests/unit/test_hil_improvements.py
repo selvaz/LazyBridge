@@ -11,11 +11,10 @@ import pytest
 from lazybridge import (
     Agent,
     EventType,
-    HumanEngine,
     Session,
-    SupervisorEngine,
 )
-from lazybridge.engines.human import _TerminalUI
+from lazybridge.ext.hil import HumanEngine, SupervisorEngine
+from lazybridge.ext.hil.human import _TerminalUI
 from lazybridge.testing import scripted_ainputs, scripted_inputs
 
 # ---------------------------------------------------------------------------

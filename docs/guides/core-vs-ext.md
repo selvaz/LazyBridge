@@ -36,12 +36,18 @@ Optional, evolving, or domain-specific code. Ships fast in beta.
 - `lazybridge.ext.planners` — `make_planner` (DAG builder) and
   `make_blackboard_planner` (todo list)
 - `lazybridge.ext.otel` — `OTelExporter` (OpenTelemetry span exporter)
+- `lazybridge.ext.hil` — `HumanEngine` and `SupervisorEngine`
+  (human-in-the-loop)
+- `lazybridge.ext.evals` — `EvalSuite`, `EvalCase`, `llm_judge`,
+  `contains`, `exact_match`, `min_length`, `max_length`,
+  `not_contains` (the runtime ``verify_with_retry`` helper used by
+  ``Agent(verify=...)`` is private core: ``lazybridge._verify``)
+- `lazybridge.ext.mcp` — Model Context Protocol client
 - `lazybridge.ext.stat_runtime` — econometrics & time-series tools
 - `lazybridge.ext.data_downloader` — market data ingestion adapters
 - `lazybridge.ext.quant_agent` — pre-configured quant analysis agent
 - `lazybridge.ext.doc_skills` — BM25 local documentation skill runtime
 - `lazybridge.ext.read_docs` — multi-format document reader
-- (planned) `lazybridge.ext.mcp` — Model Context Protocol client
 - (planned) `lazybridge.ext.rag` — retrieval primitives + adapters
 
 ## Stability tags

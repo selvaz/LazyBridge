@@ -27,9 +27,9 @@ from lazybridge import (
     Agent,
     LLMEngine,
     Session,
-    SupervisorEngine,
     Tool,
 )
+from lazybridge.ext.hil import SupervisorEngine
 
 # ---------------------------------------------------------------------------
 # LLMEngine — parallel tool execution is now a capability, not a config

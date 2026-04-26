@@ -109,7 +109,8 @@ to the cached `writes` bucket.
 ### 5 · Human-in-the-loop with a full REPL
 
 ```python
-from lazybridge import Agent, SupervisorEngine
+from lazybridge import Agent
+from lazybridge.ext.hil import SupervisorEngine
 
 sup = Agent(engine=SupervisorEngine(
     tools=[search],

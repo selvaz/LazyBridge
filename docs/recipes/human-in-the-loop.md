@@ -16,7 +16,8 @@ Two levels of involvement:
 The lightest option. The human sees the previous agent's output and types to approve or redirect.
 
 ```python
-from lazybridge import Agent, HumanEngine
+from lazybridge import Agent
+from lazybridge.ext.hil import HumanEngine
 
 def search(query: str) -> str:
     """Search the web for ``query``."""
@@ -46,7 +47,8 @@ The human gets an interactive session and can retry named agents with feedback, 
 tools directly, and inspect stored state before deciding to continue.
 
 ```python
-from lazybridge import Agent, SupervisorEngine
+from lazybridge import Agent
+from lazybridge.ext.hil import SupervisorEngine
 
 researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
 

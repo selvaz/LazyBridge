@@ -23,7 +23,7 @@ from lazybridge.core.structured import (
     normalize_json_schema,
     validate_payload_against_output_type,
 )
-from lazybridge.engines.human import (
+from lazybridge.ext.hil.human import (
     _TerminalUI,
     _WebUI,
     _build_web_form,
@@ -370,7 +370,7 @@ class TestTerminalUI:
     async def test_coerce_field_strict_none_optional(self):
         from typing import Optional
 
-        from lazybridge.engines.human import _TerminalUI
+        from lazybridge.ext.hil.human import _TerminalUI
 
         ui = _TerminalUI()
         result = _TerminalUI._coerce_field_strict(Optional[int], "")
