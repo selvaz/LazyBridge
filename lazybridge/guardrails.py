@@ -72,9 +72,7 @@ class GuardChain(Guard):
     Modifications via :meth:`GuardAction.modify` chain across guards —
     each guard sees the previous guard's rewritten text, and the final
     action carries the accumulated modification when the chain exits
-    cleanly.  Pre-fix the terminal ``GuardAction.allow()`` dropped all
-    rewrites, so a chain like ``GuardChain(RedactEmails, TrimWhitespace)``
-    would silently discard both passes.
+    cleanly.
     """
 
     def __init__(self, *guards: Guard) -> None:

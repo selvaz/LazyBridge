@@ -477,10 +477,9 @@ class Plan:
         """Acquire ownership of ``checkpoint_key`` for this run.
 
         * Fresh run, key absent or a prior ``status=="done"`` checkpoint
-          → CAS-write a ``status="claimed"`` placeholder up-front so two
-          concurrent fresh runs collide here (audit E2) instead of both
-          executing the first step before the loser fails on its first
-          real save.
+          → CAS-write a ``status="claimed"`` placeholder up-front so
+          two concurrent fresh runs collide here, before either has
+          executed any step.
         * ``resume=True`` and an in-flight checkpoint exists → adopt it,
           stamping our ``run_uid`` via CAS so subsequent saves compare
           against us rather than the crashed run.
@@ -520,10 +519,8 @@ class Plan:
             #  * resume=True → DO NOT claim; return the done snap so the
             #    caller short-circuits to the cached ``kv`` (this is the
             #    documented "resume after done" no-op).
-            #  * resume=False → claim by CAS-overwriting the done snap so
-            #    concurrent fresh re-runs serialise on the same key
-            #    (audit E2: previously a fresh run vs a fresh run could
-            #    both execute step 0 before the loser saw CAS failure).
+            #  * resume=False → claim by CAS-overwriting the done snap
+            #    so concurrent fresh re-runs serialise on the same key.
             if self.resume:
                 return existing
             if not store.compare_and_swap(effective_key, existing, claimed_snap):
@@ -668,12 +665,12 @@ class Plan:
                     return_exceptions=True,
                 )
 
-                # Atomicity (audit E1): scan ALL branches for failure first.
-                # If any branch errored we return WITHOUT applying any writes
-                # to ``kv`` / ``effective_store`` / ``history`` / ``completed``
-                # — so a later resume re-runs the whole band cleanly instead
-                # of partially-double-applying side-effects from siblings that
-                # succeeded earlier in the iteration order.
+                # Atomicity: scan ALL branches for failure first.  If any
+                # branch errored we return WITHOUT applying any writes to
+                # ``kv`` / ``effective_store`` / ``history`` / ``completed``
+                # — so a later resume re-runs the whole band cleanly
+                # instead of partially-double-applying side-effects from
+                # siblings that succeeded earlier in the iteration order.
                 first_failure_step: str | None = None
                 first_failure_env: Envelope | None = None
                 for s, r in zip(group, raw):

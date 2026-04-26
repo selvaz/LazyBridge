@@ -148,10 +148,8 @@ class DeepSeekProvider(OpenAIProvider):
     def _resolve_thinking(self, request: CompletionRequest) -> CompletionRequest:
         """Validate that thinking is only requested on models that support it.
 
-        Previously the provider auto-switched to ``deepseek-reasoner``
-        with only a warning — changing the model underneath the caller
-        is too surprising (audit M8).  The caller now has to pick the
-        reasoning model explicitly.
+        The caller has to pick the reasoning model explicitly —
+        auto-switching the model underneath them would be surprising.
         """
         if request.thinking and request.thinking.enabled:
             model = self._resolve_model(request)

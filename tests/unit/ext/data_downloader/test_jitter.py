@@ -1,4 +1,4 @@
-"""Regression test for audit L10 — data_downloader retry jitter."""
+"""Regression test for data_downloader retry jitter."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ pd = pytest.importorskip("pandas", reason="data_downloader requires pandas")
 
 
 def test_http_get_retry_applies_jitter():
-    """Each retry sleep must include a ±25% random jitter so
-    simultaneous workers don't retry in lockstep (audit L10)."""
+    """Each retry sleep includes a ±25% random jitter so simultaneous
+    workers don't retry in lockstep."""
     from lazybridge.ext.data_downloader import downloader as dl
 
     class _Cfg:

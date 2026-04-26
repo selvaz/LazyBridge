@@ -1,10 +1,8 @@
 """Private — ``verify_with_retry`` runtime helper for ``Agent(verify=...)``.
 
-This used to live in ``lazybridge.evals`` together with ``EvalSuite`` /
-``EvalCase`` / ``llm_judge`` etc.  In 1.0.1 the public eval surface
-moved to :mod:`lazybridge.ext.evals` (the eval API is in active
-evolution, not core), but ``verify_with_retry`` stayed in core because
-``Agent`` invokes it directly when ``verify=`` is set.
+The public eval surface (``EvalSuite`` / ``EvalCase`` / ``llm_judge`` /
+matchers) lives in :mod:`lazybridge.ext.evals`.  This helper stays in
+core because ``Agent`` invokes it directly when ``verify=`` is set.
 
 The module is private (leading underscore): no external imports.
 """
@@ -27,13 +25,9 @@ async def verify_with_retry(
     feedback appended as context.  Up to ``max_verify`` attempts; the
     last attempt is returned as-is even if still rejected.
 
-    Pre-fix, each retry appended feedback to the previous retry's
-    ``env.task`` — so by attempt 3 the task was the original prompt
-    layered with two feedback paragraphs, and the judge's
-    ``"Original task: {env.task}"`` line was showing the already-
-    modified task rather than the user's real input.  Now we cache
-    the original task / context outside the loop and rebuild a clean
-    envelope every attempt.
+    The pristine task / context are cached outside the loop and a
+    clean envelope is rebuilt every attempt — so feedback flows via
+    ``context``, never accumulating onto ``env.task``.
     """
     from lazybridge.envelope import Envelope
 

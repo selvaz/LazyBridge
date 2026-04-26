@@ -433,9 +433,9 @@ class LLMEngine:
         structured_cfg: StructuredOutputConfig | None = None
         # Activate structured output when the caller declared a non-str
         # output type — including generic forms like ``list[MyModel]``
-        # or ``dict[str, MyModel]``.  Pre-fix the ``isinstance(type)``
-        # filter rejected generics because ``list[X]`` isn't a ``type``,
-        # so Agent(output=list[Summary]) silently got plain text back.
+        # or ``dict[str, MyModel]``.  ``isinstance(type)`` would reject
+        # generics (``list[X]`` isn't a ``type``), so the check is
+        # explicit identity against ``str`` / ``Any``.
         if output_type is not str and output_type is not Any:
             from typing import get_origin
             if isinstance(output_type, type) or get_origin(output_type) is not None:
@@ -466,7 +466,7 @@ class LLMEngine:
                 tools=tool_defs,
                 native_tools=self.native_tools,
                 tool_choice=provider_tc if tool_defs else None,
-                # F2: always pass structured_cfg regardless of whether tools are
+                # Always pass structured_cfg regardless of whether tools are
                 # present.  On turns where the model emits tool calls the
                 # constraint is honoured but unused (the response carries
                 # tool_use blocks, not text).  On the final turn — when the
@@ -532,7 +532,7 @@ class LLMEngine:
                     payload = resp.content
 
                 if memory:
-                    # F3: pass this turn's marginal token count, not the
+                    # Pass this turn's marginal token count, not the
                     # running cumulative total.  total_in+total_out is the
                     # pipeline total across all turns; Memory's compression
                     # threshold should be measured against per-turn cost.

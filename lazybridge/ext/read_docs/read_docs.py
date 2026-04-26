@@ -155,9 +155,8 @@ def read_folder_docs(
     target = Path(path).expanduser().resolve()
 
     # When exposed as an agent tool, `path` is LLM-controlled and therefore
-    # untrusted. If the caller supplies `base_dir`, refuse any path that
-    # resolves outside that sandbox — this closes the path-traversal hole
-    # flagged as audit M11.
+    # untrusted.  If the caller supplies `base_dir`, refuse any path that
+    # resolves outside that sandbox.
     if base_dir is not None:
         base = Path(base_dir).expanduser().resolve()
         try:
@@ -181,8 +180,8 @@ def read_folder_docs(
         if ".html" in exts:
             exts.add(".htm")
         glob_pattern = "**/*" if recursive else "*"
-        # Walk the tree without following symlinks (audit M12). Doing so
-        # closes symlink-loop hangs and prevents a symlink in the indexed
+        # Walk the tree without following symlinks.  Doing so closes
+        # symlink-loop hangs and prevents a symlink in the indexed
         # folder from silently widening the read surface to other
         # directories.
         files = sorted(

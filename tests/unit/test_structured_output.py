@@ -1,8 +1,8 @@
-"""Structured output improvements.
+"""Structured output behaviour.
 
 Covers:
-* ``output=list[Model]`` activates structured output (pre-fix the
-  ``isinstance(type, type)`` filter rejected generics).
+* ``output=list[Model]`` / ``output=dict[str, Model]`` activate
+  structured output (generic forms are accepted).
 * ``validate_payload_against_output_type`` validates plain Pydantic,
   list[Model], dict[str, Model], str passthrough, mixed payloads.
 * ``Agent(output=Model, output_validator=fn)`` applies validator after

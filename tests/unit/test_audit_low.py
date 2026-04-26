@@ -71,8 +71,8 @@ def test_store_inmemory_unchanged():
 
 
 def test_event_log_query_returns_run_id_field():
-    """Pre-fix callers (like usage_summary) had to re-query the table
-    per row to resolve run_id. It's now part of the result dict."""
+    """``EventLog.query`` exposes ``run_id`` directly in the result dict
+    so callers like ``usage_summary`` don't have to re-query per row."""
     sess = Session()
     sess.emit(EventType.AGENT_START, {"agent_name": "a"}, run_id="r-1")
     sess.emit(EventType.MODEL_RESPONSE, {"input_tokens": 10}, run_id="r-1")

@@ -43,7 +43,7 @@ Tier 6 — full config::
     )
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.0"
 
 # Core public API
 from lazybridge.agent import Agent
@@ -69,17 +69,12 @@ from lazybridge.core.types import (
     UsageStats,
 )
 
-# Engines
+# Engines.  HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
+# are extension surface — import them from ``lazybridge.ext.{hil,evals,otel}``.
 from lazybridge.engines.base import Engine
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
-# HumanEngine and SupervisorEngine moved to ``lazybridge.ext.hil`` in 1.0.1.
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
-
-# testing utilities (scripted_inputs/ainputs) live in lazybridge.testing; not re-exported here.
-# EvalCase / EvalSuite / llm_judge / contains / exact_match / etc. moved to
-# ``lazybridge.ext.evals`` in 1.0.1; the runtime ``verify_with_retry`` helper
-# used by ``Agent(verify=...)`` lives privately in ``lazybridge._verify``.
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
 from lazybridge.exporters import (
@@ -164,7 +159,7 @@ __all__ = [
     "ToolCall",
     "ToolDefinition",
     "UsageStats",
-    # Config objects (Phase 1 of config-object refactor)
+    # Config objects
     "AgentRuntimeConfig",
     "CacheConfig",
     "ObservabilityConfig",

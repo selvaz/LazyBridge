@@ -111,7 +111,7 @@ class GoogleProvider(BaseProvider):
 
     default_model = "gemini-3.1-pro-preview"
 
-    # Tier aliases (audit F2). Gemini 3 preview series used where available.
+    # Tier aliases.  Gemini 3 preview series used where available.
     _TIER_ALIASES = {
         "top": "gemini-3.1-pro-preview",
         "expensive": "gemini-2.5-pro",         # stable GA, distinct from preview top
@@ -443,9 +443,9 @@ class GoogleProvider(BaseProvider):
         google_maps_active = NativeTool.GOOGLE_MAPS in native
 
         # Fail fast on the grounding+structured-output conflict BEFORE we
-        # build tools / call into the SDK (audit M6).  The Gemini API
-        # rejects this combination with 400 INVALID_ARGUMENT, and the
-        # user-facing error is clearer raised here.
+        # build tools / call into the SDK.  The Gemini API rejects this
+        # combination with 400 INVALID_ARGUMENT; the user-facing error
+        # is clearer raised here.
         if request.structured_output and google_search_active:
             raise ValueError(
                 "Gemini cannot combine google_search grounding with structured "

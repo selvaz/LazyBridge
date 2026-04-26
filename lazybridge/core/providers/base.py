@@ -240,8 +240,8 @@ class BaseProvider(ABC):
     # Helpers — stable, callable from subclasses
     # ------------------------------------------------------------------
 
-    #: Tier aliases (audit F2).  Each provider populates this with the
-    #: concrete model it considers "top"/"expensive"/"medium"/"cheap"/
+    #: Tier aliases.  Each provider populates this with the concrete
+    #: model it considers "top"/"expensive"/"medium"/"cheap"/
     #: "super_cheap" so users can write ``Agent("anthropic",
     #: model="cheap")`` without hard-coding preview / date-pinned names.
     #: A string not in this dict is treated as a literal model name

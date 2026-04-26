@@ -199,9 +199,8 @@ def test_from_step_preserves_envelope_metadata():
 
 @pytest.mark.asyncio
 async def test_verify_with_retry_preserves_original_task_across_retries():
-    """Pre-fix, feedback was concatenated onto the task. After 2 retries,
-    the task was 'original\\n\\nFeedback: A\\n\\nFeedback: B'.  Now the
-    task stays pristine and feedback flows via context.
+    """The pristine user task is preserved across all retries; feedback
+    flows via ``env.context``, never concatenated onto ``env.task``.
     """
     tasks_seen: list[str] = []
     contexts_seen: list[str | None] = []
@@ -326,8 +325,8 @@ def test_session_redact_valid_dict_is_applied():
 
 
 def test_agent_warns_on_broken_session_register_agent():
-    """A custom Session subclass whose register_agent raises must
-    produce a visible warning — pre-fix this was silently swallowed.
+    """A custom Session subclass whose ``register_agent`` raises
+    surfaces as a ``UserWarning`` rather than being silently swallowed.
     """
     class _BrokenSession(Session):
         def register_agent(self, agent):

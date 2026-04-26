@@ -133,8 +133,7 @@ class OpenAIProvider(BaseProvider):
 
     default_model = "gpt-5.5"
 
-    # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
-    # GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
+    # Tier aliases.  GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
     # so medium/cheap continue to point at the GPT-5.4 family.
     _TIER_ALIASES = {
         "top": "gpt-5.5-pro",      # extended reasoning flagship
@@ -854,8 +853,7 @@ class OpenAIProvider(BaseProvider):
         # The advertised schema is lost on this path — the model emits some
         # JSON, and structured.apply_structured_validation re-validates
         # against our subset validator on the final chunk.  Warn the
-        # caller so this "best-effort" behaviour isn't a surprise
-        # (audit M13).
+        # caller so this "best-effort" behaviour isn't a surprise.
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
             import warnings as _warnings
 

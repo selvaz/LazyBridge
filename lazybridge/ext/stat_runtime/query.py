@@ -18,14 +18,14 @@ Validation rules:
   - max_rows enforced via DB-level LIMIT (no full-result materialization)
   - Normalized SQL hashed for lineage tracking
 
-Validation pipeline (audit Z2 — replaces regex-only enforcement):
+Validation pipeline:
 
 1. Parse via :mod:`sqlglot` with the DuckDB dialect.  Multi-statement
    SQL, unparseable SQL, or SQL that sqlglot has to fall back to a
    ``Command`` node for (e.g. ``LOAD httpfs``) are all rejected.
 2. Walk the AST for forbidden expression types (``Insert``, ``Update``,
    ``Drop``, ``Pragma``, …).  This catches mutations regardless of
-   nesting (CTE bodies, subqueries) and immune to comment-injection
+   nesting (CTE bodies, subqueries) and is immune to comment-injection
    bypasses that defeat regex scans.
 3. Walk every ``Func`` for forbidden names (``read_parquet``,
    ``read_csv``, ``glob``, ``s3_*``, …).  Catches schema-qualified
@@ -215,9 +215,9 @@ class QueryEngine:
         This is an allowlist model: user SQL may only access data through
         the dataset('name') macro.  Direct file readers are blocked.
 
-        Pipeline: AST validation via sqlglot first (audit Z2); regex
-        layer kept for defence-in-depth and as a fallback when sqlglot
-        isn't installed.
+        Pipeline: AST validation via sqlglot first; regex layer kept
+        for defence-in-depth and as a fallback when sqlglot isn't
+        installed.
         """
         stripped = sql.strip().rstrip(";").strip()
         if not stripped:

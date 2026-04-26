@@ -654,11 +654,9 @@ class Session:
           - "by_agent": {agent_name: {input_tokens, output_tokens, cost_usd}}
           - "by_run":   {run_id:    {agent_name, input_tokens, output_tokens, cost_usd}}
 
-        Post-fix this is O(events) with TWO queries total
-        (AGENT_START + MODEL_RESPONSE) instead of the pre-fix
-        ``2 × N + 2`` pattern where every row triggered a single-row
-        SELECT to resolve its ``run_id``.  ``EventLog.query`` now
-        surfaces ``run_id`` directly in the result dict.
+        O(events) with TWO queries total (AGENT_START +
+        MODEL_RESPONSE).  ``EventLog.query`` exposes ``run_id``
+        directly in the result dict.
         """
         # Two bulk queries.  No per-row DB trip.
         agent_starts = self.events.query(event_type=EventType.AGENT_START)

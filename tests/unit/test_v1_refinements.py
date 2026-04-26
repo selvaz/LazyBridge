@@ -118,10 +118,8 @@ def test_agent_from_engine_accepts_plan():
 
 
 def test_agent_from_provider_applies_tier():
-    """Tier must reach the engine.model so BaseProvider.resolve_model_alias
-    maps it to the concrete model.  Pre-fix, ``model=tier`` was passed to
-    ``Agent.__init__`` which silently ignored it when ``engine=`` was
-    already supplied — the tier was lost.
+    """Tier reaches ``engine.model`` so ``BaseProvider.resolve_model_alias``
+    maps it to the concrete model.
     """
     ag = Agent.from_provider("anthropic", tier="top", name="y")
     assert ag.engine.model == "top"          # tier reaches the engine

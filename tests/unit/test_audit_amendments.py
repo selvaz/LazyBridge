@@ -1,10 +1,7 @@
-"""Tests for the audit-driven amendments (2026-04-23).
+"""LLMEngine runtime knobs and strict provider routing.
 
-Three behaviours under test, each targeting a gap both my manual audit
-and the ChatGPT architecture audit flagged:
-
-1. ``LLMEngine.max_turns`` default raised from 10 to 20 to reduce
-   MaxTurnsExceeded false-positives on legitimate tool loops.
+1. ``LLMEngine.max_turns`` default of 20 — large enough that legitimate
+   tool loops don't false-positive ``MaxTurnsExceeded``.
 2. ``LLMEngine.set_default_provider(None)`` opts into strict routing so
    unknown models raise at construction instead of silently falling
    back to the default provider (Anthropic by default).

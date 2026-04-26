@@ -345,9 +345,9 @@ class AnthropicProvider(BaseProvider):
                 ]
             else:
                 params["system"] = system
-        # Opus 4.7 does not support temperature/top_p/top_k — but we now
-        # warn rather than drop silently so users aren't surprised when
-        # their temperature setting has no effect (audit M7).
+        # Opus 4.7 does not support temperature/top_p/top_k — warn rather
+        # than drop silently so users aren't surprised when their
+        # temperature setting has no effect.
         no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
         if request.temperature is not None:
             if no_sampling:
@@ -554,7 +554,7 @@ class AnthropicProvider(BaseProvider):
                     except (AttributeError, NotImplementedError) as _pe:
                         # messages.parse() not available on this SDK version — fall back.
                         # Log once at DEBUG so users diagnosing "why is validation
-                        # different?" can find the signal (audit L7).
+                        # different?" can find the signal.
                         import logging as _logging
 
                         _logging.getLogger(__name__).debug(

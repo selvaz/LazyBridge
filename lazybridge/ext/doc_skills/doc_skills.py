@@ -346,7 +346,7 @@ def _iter_docs(roots: Sequence[Path], include_exts: Sequence[str]) -> Iterable[P
     seen: set[Path] = set()
     for root in roots:
         for path in sorted(root.rglob("*")):
-            # Skip symlinks outright (audit M12). Following symlinks can
+            # Skip symlinks outright.  Following symlinks can
             # create loops that hang the indexer and lets a symlink inside
             # the indexed directory silently widen the read surface to
             # unrelated files on disk. Callers that want symlinked content

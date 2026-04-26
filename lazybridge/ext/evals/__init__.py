@@ -1,16 +1,12 @@
 """Eval framework — alpha.
 
-Pydantic-typed evaluation cases and a small assertion-helpers library
+Pydantic-typed evaluation cases plus a small assertion-helpers library
 (``contains`` / ``exact_match`` / ``min_length`` / ``max_length`` /
 ``not_contains`` / ``llm_judge``) for batch-grading agent outputs.
 
-This was in core (``lazybridge.evals``) before the 1.0.1 split.  It
-moved out because the eval API is actively evolving (LLM-judge patterns,
-agentic evals) and shouldn't drag down core stability.
-
 The runtime ``verify_with_retry`` helper used by ``Agent(verify=...)``
-stayed in core (private :mod:`lazybridge._verify`) — that's foundational
-plumbing, not an evaluation feature.
+lives in core (private :mod:`lazybridge._verify`) — foundational
+plumbing rather than an evaluation feature.
 """
 
 from __future__ import annotations
@@ -87,8 +83,8 @@ class EvalSuite:
         return report
 
     async def arun(self, agent: Any) -> EvalReport:
-        # F8: run all cases concurrently — sequential awaiting made arun()
-        # as slow as the synchronous run() for large eval suites.
+        # Run all cases concurrently — sequential awaiting would make
+        # arun() as slow as the synchronous run() for large suites.
         async def _run_one(case: EvalCase) -> EvalResult:
             try:
                 env = await agent.run(case.input)

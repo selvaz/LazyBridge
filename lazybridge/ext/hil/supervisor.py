@@ -275,10 +275,9 @@ class SupervisorEngine:
         """Record a HIL decision on the session's event log.
 
         Kinds: ``continue`` | ``retry`` | ``store`` | ``tool`` |
-        ``unknown`` | ``empty``.  Pre-fix the supervisor emitted nothing
-        per-decision — only the outer AGENT_START / AGENT_FINISH were
-        visible, so auditing a multi-step REPL session required diffing
-        states rather than reading an event list.
+        ``unknown`` | ``empty``.  Each decision is its own event so
+        auditing a multi-step REPL session is just a sequential read
+        of the event list.
         """
         if session is None:
             return
@@ -392,8 +391,8 @@ class SupervisorEngine:
         """
         self._show_header(task, agent_name, tools)
         last_output = task
-        # F6: assert is disabled by -O / PYTHONOPTIMIZE=1; use an explicit
-        # RuntimeError so the guard survives optimised production deployments.
+        # ``assert`` is disabled by ``-O`` / ``PYTHONOPTIMIZE=1`` — raise
+        # explicitly so the guard survives optimised production deployments.
         if self._ainput_fn is None:
             raise RuntimeError(
                 "_run_repl_async called without ainput_fn — this is a "

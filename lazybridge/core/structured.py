@@ -142,7 +142,7 @@ def _validate_schema(data: Any, schema: dict[str, Any]) -> str | None:
     If the optional ``jsonschema`` library is installed, delegate to it
     for full Draft-2020 coverage — ``pattern``, ``minLength``, ``maximum``,
     ``format``, etc. are all enforced.  Otherwise we fall back to a
-    minimal subset validator (audit M9).
+    minimal subset validator.
 
     Fallback-validator supported keywords: ``type``, ``required``,
     ``enum``, ``additionalProperties``, ``properties`` (recursive),

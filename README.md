@@ -150,16 +150,19 @@ site via `python -m lazybridge.skill_docs._build`. CI enforces no drift.
 
 ## What makes LazyBridge different
 
-1. **Tool-is-Tool.** Functions, Agents, Agents-of-Agents all plug into
-   `tools=[...]` with the same contract. `SupervisorEngine`,
-   `LLMEngine`, and `Plan` all accept the same `tools=[...]` list.
+1. **Tool-is-Tool.** Functions, Agents, Agents-of-Agents, and tool
+   providers (e.g. an MCP server) all plug into `tools=[...]` with the
+   same contract. `SupervisorEngine`, `LLMEngine`, and `Plan` all
+   accept the same list.
 2. **Compile-time plan validation.** `PlanCompileError` at construction
-   catches broken DAGs before any LLM call. No other Python agent
-   framework does this.
-3. **Parallelism as capability.** No `tool_choice="parallel"` knob —
-   the engine dispatches concurrent tool calls automatically.
-4. **Claude Skill as first-class artifact.** Packaged with the library,
-   loadable by Claude Code / any LLM assistant.
+   catches broken DAGs — duplicate names, forward references, broken
+   `from_step` / `from_parallel` sentinels, parallel-band misuse —
+   before any LLM call.
+3. **Parallelism as capability.** When the engine emits N tool calls in
+   one turn, they run concurrently via `asyncio.gather`. No flag, no
+   `tool_choice="parallel"` knob.
+4. **LLM-assistant skill as first-class artifact.** A signature-first
+   `SKILL.md` ships with the library, loadable by any LLM assistant.
 
 ## Licence
 

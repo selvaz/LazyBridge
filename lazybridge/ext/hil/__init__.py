@@ -1,7 +1,6 @@
 """Human-in-the-loop engines — alpha.
 
-This extension hosts the two LazyBridge engines that involve a human in
-the agent run-loop:
+Two engines that involve a human in the agent run-loop:
 
 - :class:`lazybridge.ext.hil.HumanEngine` — lightweight approval gate.
   Pauses an agent at the engine boundary and waits for a yes / redirect
@@ -9,10 +8,9 @@ the agent run-loop:
 - :class:`lazybridge.ext.hil.SupervisorEngine` — REPL-style human
   supervision with tool calling, agent retries, and store inspection.
 
-Both engines were in ``lazybridge.engines`` before the core/ext split
-formalised in 1.0.1 (see ``docs/guides/core-vs-ext.md``).  They moved
-out of core because HIL is a workflow pattern, not a primitive every
-agent needs, and the code surface (~600 LoC combined) is non-trivial.
+HIL lives in ``ext`` rather than core because it's a workflow pattern,
+not a primitive every agent needs.  See ``docs/guides/core-vs-ext.md``
+for the policy.
 
 Usage::
 

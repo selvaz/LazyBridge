@@ -45,8 +45,8 @@ from lazybridge.guardrails import LLMGuard
 
 
 def test_guard_chain_preserves_accumulated_modifications():
-    """A chain of two modify-only guards must surface BOTH rewrites in
-    the final action — pre-fix the terminal ``allow()`` discarded them.
+    """A chain of two modify-only guards surfaces BOTH rewrites in the
+    final action.
     """
     def strip_emails(text):
         return GuardAction.modify(text.replace("a@b.c", "[EMAIL]"))
@@ -244,8 +244,8 @@ def _scripted(lines):
 
 
 def test_supervisor_tool_call_accepts_whitespace_and_quotes():
-    """REPL ``search( "AI news" )`` must match as a tool call —
-    pre-fix the regex rejected both internal whitespace and quoting.
+    """REPL ``search( "AI news" )`` matches as a tool call — internal
+    whitespace and quoted args are accepted.
     """
     seen: list[str] = []
 

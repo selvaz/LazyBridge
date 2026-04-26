@@ -43,8 +43,8 @@ from lazybridge.session import EventLog, EventType
 # ── L1 ────────────────────────────────────────────────────────────────────────
 
 def test_l1_all_exposes_previously_hidden_names() -> None:
-    # ``not_contains`` / ``max_length`` / ``min_length`` moved to
-    # ``lazybridge.ext.evals`` in 1.0.1 — no longer on the core top-level.
+    # Eval matchers (``not_contains`` / ``max_length`` / ``min_length``)
+    # live in ``lazybridge.ext.evals``, not the core top-level.
     for name in ("GuardError", "EventExporter"):
         assert name in lazybridge.__all__, f"{name} missing from __all__"
         assert hasattr(lazybridge, name), f"{name} not importable from lazybridge"

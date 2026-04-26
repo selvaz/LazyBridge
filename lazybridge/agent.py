@@ -10,11 +10,10 @@ from lazybridge.core.types import AgentRuntimeConfig, ObservabilityConfig, Resil
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
 
-#: Private sentinel — used to distinguish "caller omitted the flat kwarg"
-#: from "caller explicitly passed its default value".  Phase 1 of the
-#: config-object refactor: when a flat kwarg is the sentinel, values from
-#: ``resilience=`` / ``observability=`` / ``runtime=`` fill in; an explicit
-#: value (including the previous documented default) wins.
+#: Private sentinel — distinguishes "caller omitted the flat kwarg" from
+#: "caller explicitly passed its default value".  When a flat kwarg is the
+#: sentinel, values from ``resilience=`` / ``observability=`` / ``runtime=``
+#: fill in; an explicit value (including the documented default) wins.
 _UNSET: Any = object()
 
 
@@ -97,13 +96,10 @@ class Agent:
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
         # ``engine=`` is a non-LLM engine.
         native_tools: list[Any] | None = None,
-        # --- Phase 1 config-object refactor ---
-        # Optional structured alternatives to the flat resilience /
-        # observability kwargs below.  Precedence is flat > config > default:
-        # an explicit flat kwarg always wins, the config fills in anything
-        # omitted, the documented default applies when both are absent.
-        # Mix freely — ``Agent(resilience=cfg, timeout=30.0)`` uses the
-        # config's retries/cache but overrides its timeout.
+        # Structured alternatives to the flat resilience / observability
+        # kwargs below.  Precedence: flat kwarg > config object > default.
+        # ``Agent(resilience=cfg, timeout=30.0)`` uses the config's
+        # retries/cache but overrides its timeout.
         runtime: AgentRuntimeConfig | None = None,
         resilience: ResilienceConfig | None = None,
         observability: ObservabilityConfig | None = None,
@@ -248,12 +244,11 @@ class Agent:
                     raw.session = self.session
                     _safe_register_agent(self.session, raw)
                     _safe_register_tool_edge(self.session, self, raw, label="as_tool")
-            # Audit A2: ``fallback=`` and ``verify=`` Agents were
-            # excluded from session propagation, so any events they
-            # produced (errors handled by the fallback, judge verdicts
-            # from verify) recorded nowhere.  Apply the same
-            # session-inheritance + graph-registration the tools list
-            # gets, with edge labels that distinguish provenance.
+            # ``fallback=`` and ``verify=`` Agents inherit the same
+            # session + graph-registration the tools list gets, so any
+            # events they produce (errors handled by the fallback, judge
+            # verdicts from verify) flow into the outer EventLog.  Edge
+            # labels distinguish provenance.
             for related, label in (
                 (self.fallback, "fallback"),
                 (self.verify, "verify"),
@@ -349,8 +344,8 @@ class Agent:
     async def _validate_and_retry(self, original_env: Envelope, first: Envelope) -> Envelope:
         from lazybridge.core.structured import validate_payload_against_output_type
 
-        # F1-a: initialize feedback before the loop so any future code path that
-        # reaches attempt≥1 always has a defined value, even after refactoring.
+        # Initialise feedback before the loop so any code path that
+        # reaches attempt ≥ 1 always has a defined value.
         feedback: str = ""
         current = first
 
@@ -366,9 +361,10 @@ class Agent:
                 if not current.ok:
                     return current
 
-            # F1-b: schema validation and custom validator are separated so each
-            # failure produces a precise, actionable feedback message rather than
-            # attributing a custom-validator rejection to a schema mismatch.
+            # Schema validation and custom validator are separated so each
+            # failure produces a precise, actionable feedback message —
+            # a custom-validator rejection isn't blamed on a schema
+            # mismatch.
 
             # Step 1 — schema validation
             try:
@@ -458,13 +454,11 @@ class Agent:
             return asyncio.run(self.run(task))
 
         # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
-        # We need a fresh loop on a worker thread so we don't try to nest.
-        # Audit A1: copy the caller's contextvars context so OTel spans,
-        # request IDs, structured-logging context etc. set in the outer
-        # loop are visible inside the agent's own loop.  Without this,
-        # ``asyncio.run`` on a worker thread starts with a fresh empty
-        # context and observability silently breaks for anyone running
-        # the sync façade from inside an async framework.
+        # Spin up a fresh loop on a worker thread, copying the caller's
+        # contextvars context so OTel spans / request IDs / structured-
+        # logging context flow into the agent's loop instead of starting
+        # empty (which would silently break observability for sync
+        # callers running inside an async framework).
         return _run_coro_with_context(self.run(task))
 
     # ------------------------------------------------------------------
@@ -601,9 +595,9 @@ class Agent:
         steps = [Step(target=a, name=a.name) for a in agents]
         plan = Plan(*steps)
         name = kwargs.pop("name", "chain")
-        # F5: do NOT auto-wrap agents as tools — Plan._exec_step dispatches
-        # Agent targets via target.run() directly; the tool wrappers were
-        # built but never used, wasting schema-compilation on every chain call.
+        # Don't auto-wrap agents as tools — ``Plan._exec_step`` dispatches
+        # Agent targets via ``target.run()`` directly, so wrapping them
+        # would just waste schema-compilation on every chain call.
         # Caller-supplied tools= in kwargs still pass through unchanged.
         return cls(engine=plan, name=name, **kwargs)
 
@@ -664,9 +658,8 @@ class Agent:
 def _safe_register_agent(session: Any, agent: Agent) -> None:
     """Register ``agent`` on ``session.graph`` if possible, warning on failure.
 
-    Pre-fix this was a silent ``try: ... except Exception: pass`` at
-    three call sites — a buggy ``register_agent`` on a custom Session
-    subclass would silently drop graph entries and nobody would know.
+    A buggy ``register_agent`` on a custom Session subclass surfaces as
+    a ``UserWarning`` rather than silently dropping graph entries.
     """
     if session is None or not hasattr(session, "register_agent"):
         return
@@ -725,10 +718,9 @@ def _run_coro_with_context(coro: Any) -> Any:
     Without ``ctx.run`` here, ``asyncio.run`` on a worker thread starts
     with an empty context, so contextvars set by the outer framework
     (OpenTelemetry spans, request IDs, structured-logging context) are
-    invisible to the agent — observability silently breaks for callers
-    using the sync façade from inside an async framework.  Fix lives at
-    the ``__call__`` boundary so every Engine type benefits without
-    individually re-implementing the bridge.  Audit A1.
+    invisible to the agent.  Living at the ``__call__`` boundary means
+    every Engine type benefits without individually re-implementing
+    the bridge.
     """
     import concurrent.futures
     import contextvars
@@ -820,5 +812,5 @@ class _ParallelAgent:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.run(task))
-        # Audit A1: propagate caller contextvars into the worker loop.
+        # Propagate caller contextvars into the worker loop.
         return _run_coro_with_context(self.run(task))

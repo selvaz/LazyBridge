@@ -12,7 +12,7 @@ Coverage:
     resolve to the LMStudio provider via :func:`_resolve_provider` and
     :meth:`LLMEngine._infer_provider`.
   * ``_resolve_model`` strips the optional ``lmstudio/`` prefix.
-  * Tier aliases all collapse onto ``"local-model"`` (audit F2 invariant).
+  * Tier aliases all collapse onto ``"local-model"``.
   * ``_use_responses_api`` is hard-disabled — LM Studio only implements
     Chat Completions.
   * ``_compute_cost`` always reports ``0.0`` (local inference is free).

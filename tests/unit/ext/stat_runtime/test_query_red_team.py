@@ -1,4 +1,4 @@
-"""Adversarial / red-team tests for the SQL sandbox (audit Z2).
+"""Adversarial / red-team tests for the SQL sandbox.
 
 These tests exercise bypass attempts the regex-only validator either
 missed or false-positived on.  The post-Z2 AST validator (sqlglot

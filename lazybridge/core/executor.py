@@ -77,11 +77,10 @@ def _resolve_provider(
 
 
 # Provider SDKs converge on a small set of class names for transient
-# errors. Matching by ``__class__.__name__`` avoids importing every SDK
-# (no runtime dep added) and survives string-message drift / non-EN
-# locales — both pain points the previous string-only heuristic had
-# (audit E4).  Cross-check: openai, anthropic, google.genai, deepseek
-# (openai-clone), litellm all use one of these names today.
+# errors.  Matching by ``__class__.__name__`` avoids importing every
+# SDK (no runtime dep added) and survives string-message drift /
+# non-EN locales.  Cross-checked against openai, anthropic,
+# google.genai, deepseek (openai-clone), litellm.
 _RETRYABLE_EXC_CLASSES = frozenset({
     "RateLimitError",
     "APITimeoutError",

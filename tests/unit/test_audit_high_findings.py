@@ -1,19 +1,17 @@
-"""Regression tests for the high-severity audit findings fixed on
-the ``claude/add-gpt-5-5-USgmY`` branch.
+"""Cross-cutting correctness regressions.
 
-Each test maps to one finding:
-
-* E1 — Plan parallel-band atomicity:  failure in one parallel branch
-  leaves NO partial writes from sibling branches.
-* E2 — Plan checkpoint claim race:  two concurrent fresh runs on the
-  same key fail fast at claim time (before either step is executed),
-  not after the loser already wasted side-effects.
-* E4 — Retryable exception classification:  exceptions whose class
-  name matches a known transient family are retried even when the
-  message is empty / non-English.
-* A1 — Sync ``__call__`` contextvars propagation:  a contextvar set
-  in the outer event loop is visible inside the agent's worker loop.
-* A2 — ``fallback=`` / ``verify=`` agents inherit the outer session.
+* Plan parallel-band atomicity: failure in one parallel branch leaves
+  NO partial writes from sibling branches.
+* Plan checkpoint claim race: two concurrent fresh runs on the same
+  key fail fast at claim time (before either step executes), not
+  after the loser wasted side-effects.
+* Retryable exception classifier: exceptions whose class name matches
+  a known transient family are retried even when the message is
+  empty / non-English / SDK-mangled.
+* Sync ``__call__`` contextvars propagation: a contextvar set in the
+  outer event loop is visible inside the agent's worker loop.
+* ``fallback=`` / ``verify=`` agents inherit the outer session and
+  appear on the session graph with labelled edges.
 """
 
 from __future__ import annotations
@@ -40,8 +38,8 @@ from lazybridge.testing import MockAgent
 async def test_e1_parallel_band_failure_does_not_commit_sibling_writes() -> None:
     """When one parallel branch errors, branches earlier in the
     declared order MUST NOT have committed their ``writes=`` to the
-    Store.  Pre-fix, the iterator applied writes mid-loop and bailed
-    on the first error, leaving partial state.
+    Store — the engine scans every branch for failure first and
+    returns without applying any writes if any branch errored.
     """
     store = Store()
 
@@ -59,8 +57,7 @@ async def test_e1_parallel_band_failure_does_not_commit_sibling_writes() -> None
     env = await Agent(engine=plan, name="p").run("task")
     assert not env.ok, "expected failure envelope"
 
-    # Pre-fix: ``a_out`` would be present in the store.
-    # Post-fix: no sibling writes survive a band failure.
+    # No sibling writes survive a band failure.
     assert store.read("a_out") is None
     assert store.read("b_out") is None
     # Checkpoint records the failure at b, with empty kv (no writes
@@ -74,8 +71,8 @@ async def test_e1_parallel_band_failure_does_not_commit_sibling_writes() -> None
 
 @pytest.mark.asyncio
 async def test_e1_parallel_band_success_still_commits_writes() -> None:
-    """Sanity: when every branch succeeds, the post-fix code applies
-    writes in declared order — same external behaviour as pre-fix.
+    """Sanity: when every branch succeeds, writes apply in declared
+    order.
     """
     store = Store()
     a = MockAgent("a-out", name="a")
@@ -100,11 +97,10 @@ async def test_e1_parallel_band_success_still_commits_writes() -> None:
 
 @pytest.mark.asyncio
 async def test_e2_two_fresh_runs_collide_at_claim_not_at_first_save() -> None:
-    """Two concurrent fresh Plan runs on the same checkpoint key MUST
+    """Two concurrent fresh Plan runs on the same checkpoint key
     collide at the up-front claim — the loser raises
     ``ConcurrentPlanRunError`` without first wasting side-effects on
-    step 0.  Pre-fix the loser executed step 0 then failed on its
-    first ``_save_checkpoint``.
+    step 0.
     """
     store = Store()
 
@@ -184,7 +180,7 @@ async def test_e2_done_key_can_be_reclaimed_by_fresh_run() -> None:
 
 def test_e4_retryable_by_class_name_without_message() -> None:
     """Class-name matching catches transients even when the message
-    is empty / non-English / SDK-mangled.  Pre-fix this returned False.
+    is empty / non-English / SDK-mangled.
     """
 
     class RateLimitError(Exception):  # mimics openai/anthropic naming
@@ -273,10 +269,10 @@ class _ProbeEngine:
 @pytest.mark.asyncio
 async def test_a1_sync_call_propagates_contextvars_into_worker_loop() -> None:
     """A contextvar set in the outer event loop must be visible
-    inside ``Agent.__call__``'s worker-thread loop.  Pre-fix the
-    worker started in an empty context, breaking observability for
-    callers using the sync façade from inside an async framework
-    (FastAPI, Starlette, Jupyter).
+    inside ``Agent.__call__``'s worker-thread loop, so observability
+    state (OTel spans, request IDs) survives when callers use the
+    sync façade from inside an async framework (FastAPI, Starlette,
+    Jupyter).
     """
     seen: list[str | None] = []
     outer = Agent(engine=_ProbeEngine(seen), name="probe")

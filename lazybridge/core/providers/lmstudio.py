@@ -97,7 +97,6 @@ class LMStudioProvider(OpenAIProvider):
 
     #: All tier aliases collapse onto the single locally-loaded model —
     #: cost / capability tiers don't apply to a self-hosted server.
-    #: Tests that iterate the standard tier table (audit F2) still pass.
     _TIER_ALIASES = {
         "top": "local-model",
         "expensive": "local-model",
