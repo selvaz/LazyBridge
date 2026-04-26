@@ -13,8 +13,9 @@ Coverage:
     :meth:`LLMEngine._infer_provider`.
   * ``_resolve_model`` strips the optional ``lmstudio/`` prefix.
   * Tier aliases all collapse onto ``"local-model"``.
-  * ``_use_responses_api`` is hard-disabled — LM Studio only implements
-    Chat Completions.
+  * ``_use_responses_api`` follows the inherited OpenAIProvider routing
+    — LM Studio supports both Chat Completions and the Responses API
+    (LM Studio v0.3.29+).
   * ``_compute_cost`` always reports ``0.0`` (local inference is free).
   * Native tools requested by the caller emit a ``UserWarning`` and are
     dropped (LM Studio has no server-side tools).
@@ -201,9 +202,46 @@ def test_resolve_model_resolves_tier_alias_to_local_model():
 # ---------------------------------------------------------------------------
 
 
-def test_responses_api_disabled_for_every_request():
+def test_responses_api_used_for_plain_request():
+    """LM Studio v0.3.29+ supports ``/v1/responses``; the inherited
+    OpenAIProvider routing picks Responses for non-Pydantic requests."""
     p = _bare_provider()
     req = CompletionRequest(messages=[Message(role=Role.USER, content="hi")])
+    assert p._use_responses_api(req) is True
+
+
+def test_responses_api_used_for_dict_schema_structured_output():
+    """Dict-schema structured output flows through Responses with
+    ``text.format.json_schema``."""
+    from lazybridge.core.types import StructuredOutputConfig
+
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        structured_output=StructuredOutputConfig(
+            schema={"type": "object", "properties": {"x": {"type": "integer"}}},
+        ),
+    )
+    assert p._use_responses_api(req) is True
+
+
+def test_chat_completions_used_for_pydantic_schema():
+    """Pydantic-model schemas can't be encoded into ``text.format``
+    cleanly; the inherited router falls back to Chat Completions
+    + ``beta.parse``.  LM Studio supports both endpoints, so this
+    fallback works locally."""
+    from pydantic import BaseModel
+
+    from lazybridge.core.types import StructuredOutputConfig
+
+    class _Out(BaseModel):
+        x: int
+
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        structured_output=StructuredOutputConfig(schema=_Out),
+    )
     assert p._use_responses_api(req) is False
 
 
@@ -288,19 +326,54 @@ def test_llmengine_native_routing_unaffected():
 
 
 # ---------------------------------------------------------------------------
-# complete() round-trip — Chat Completions path used (no Responses API)
+# complete() round-trip — both endpoints supported (LM Studio v0.3.29+)
 # ---------------------------------------------------------------------------
 
 
-def test_complete_uses_chat_completions_endpoint():
-    """A real LM Studio server only exposes /v1/chat/completions — make sure
-    the inherited OpenAI ``complete()`` takes that branch (not /v1/responses).
-    """
+class _FakeResponsesUsage:
+    """Mimics OpenAI's Responses-API usage object (different field names
+    than Chat Completions: ``input_tokens`` / ``output_tokens`` instead
+    of ``prompt_tokens`` / ``completion_tokens``)."""
+
+    def __init__(self, input_tokens=0, output_tokens=0):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class _FakeOutputText:
+    def __init__(self, text=""):
+        self.type = "output_text"
+        self.text = text
+        self.annotations = []
+
+
+class _FakeOutputItem:
+    def __init__(self, content=None):
+        self.type = "message"
+        self.content = content or []
+
+
+class _FakeResponsesResp:
+    """Mimics OpenAI's Responses-API top-level response object."""
+
+    def __init__(self, output_text="", model="local-model", usage=None, status="completed"):
+        self.id = "resp_test"
+        self.model = model
+        self.usage = usage
+        self.status = status
+        self.output = [_FakeOutputItem(content=[_FakeOutputText(text=output_text)])]
+        # Convenience field the OpenAI SDK exposes — the parser may
+        # check either ``output_text`` directly or walk ``output``.
+        self.output_text = output_text
+
+
+def test_complete_uses_responses_endpoint_by_default():
+    """LM Studio v0.3.29+ supports /v1/responses; the inherited OpenAI
+    ``complete()`` takes the Responses branch for plain text requests."""
     sync_client = MagicMock()
-    sync_client.chat.completions.create.return_value = _FakeResponse(
-        [_FakeChoice(message=_FakeMessage(content="hi from local"))],
-        model="local-model",
-        usage=_FakeUsage(prompt_tokens=4, completion_tokens=3),
+    sync_client.responses.create.return_value = _FakeResponsesResp(
+        output_text="hi from local",
+        usage=_FakeResponsesUsage(input_tokens=4, output_tokens=3),
     )
     sync_p, async_p = _patch_openai()
     with sync_p as sync_cls, async_p:
@@ -308,9 +381,8 @@ def test_complete_uses_chat_completions_endpoint():
         prov = LMStudioProvider()
         resp = prov.complete(_basic_request())
 
-    # Chat Completions path — NOT responses.create
-    sync_client.chat.completions.create.assert_called_once()
-    sync_client.responses.create.assert_not_called()
+    sync_client.responses.create.assert_called_once()
+    sync_client.chat.completions.create.assert_not_called()
 
     assert resp.content == "hi from local"
     assert resp.usage.input_tokens == 4
@@ -322,9 +394,9 @@ def test_complete_uses_chat_completions_endpoint():
 def test_complete_strips_prefix_before_call():
     """The model name reaching the SDK must NOT carry the ``lmstudio/`` prefix."""
     sync_client = MagicMock()
-    sync_client.chat.completions.create.return_value = _FakeResponse(
-        [_FakeChoice(message=_FakeMessage(content=""))],
-        usage=_FakeUsage(),
+    sync_client.responses.create.return_value = _FakeResponsesResp(
+        output_text="",
+        usage=_FakeResponsesUsage(),
     )
     sync_p, async_p = _patch_openai()
     with sync_p as sync_cls, async_p:
@@ -332,5 +404,39 @@ def test_complete_strips_prefix_before_call():
         prov = LMStudioProvider(model="lmstudio/Qwen2.5-7B-Instruct")
         prov.complete(_basic_request())
 
-    call_kwargs = sync_client.chat.completions.create.call_args.kwargs
+    call_kwargs = sync_client.responses.create.call_args.kwargs
     assert call_kwargs["model"] == "Qwen2.5-7B-Instruct"
+
+
+def test_complete_uses_chat_completions_endpoint_for_pydantic_schema():
+    """When ``output=`` is a Pydantic model, the inherited router falls
+    back to Chat Completions + ``beta.parse``.  LM Studio supports both
+    endpoints, so this still works locally."""
+    from pydantic import BaseModel
+
+    from lazybridge.core.types import StructuredOutputConfig
+
+    class _Out(BaseModel):
+        x: int
+
+    sync_client = MagicMock()
+    sync_client.beta.chat.completions.parse.return_value = _FakeResponse(
+        [_FakeChoice(message=_FakeMessage(content='{"x": 7}'))],
+        usage=_FakeUsage(prompt_tokens=4, completion_tokens=3),
+    )
+    # ``parsed`` field on the message — what beta.parse populates.
+    sync_client.beta.chat.completions.parse.return_value.choices[0].message.parsed = _Out(x=7)
+
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        sync_cls.return_value = sync_client
+        prov = LMStudioProvider()
+        req = CompletionRequest(
+            messages=[Message(role=Role.USER, content="give me an int")],
+            structured_output=StructuredOutputConfig(schema=_Out),
+        )
+        resp = prov.complete(req)
+
+    sync_client.beta.chat.completions.parse.assert_called_once()
+    sync_client.responses.create.assert_not_called()
+    assert resp.parsed == _Out(x=7)

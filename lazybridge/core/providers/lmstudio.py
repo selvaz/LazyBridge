@@ -2,17 +2,24 @@
 
 `LM Studio <https://lmstudio.ai/>`_ runs any GGUF / MLX model locally and
 exposes them through an OpenAI-compatible REST API (the *local server*
-feature, default ``http://localhost:1234/v1``).  Because the wire format
-matches OpenAI's Chat Completions API, this provider is a thin subclass
-of :class:`~lazybridge.core.providers.openai.OpenAIProvider` that:
+feature, default ``http://localhost:1234/v1``).  Both Chat Completions
+(``/v1/chat/completions``) and Responses (``/v1/responses``) are
+supported — LM Studio added Responses API compatibility in v0.3.29
+(2026), including streaming, reasoning effort, stateful chats via
+``previous_response_id``, MCP tools, and token caching.
+
+This provider is a thin subclass of
+:class:`~lazybridge.core.providers.openai.OpenAIProvider` that:
 
 * Points the underlying ``openai`` client at the local server.
-* Pins traffic to ``/v1/chat/completions`` — LM Studio does **not**
-  implement the newer ``/v1/responses`` endpoint that OpenAIProvider
-  prefers by default.
+* Lets traffic flow to either ``/v1/chat/completions`` or
+  ``/v1/responses`` — the inherited routing decides per-request based
+  on whether a Pydantic model schema is set.
 * Reports zero cost (local inference is free).
 * Drops native-tool support (web search, code interpreter etc. are
-  cloud-only OpenAI features that have no analogue locally).
+  cloud-only OpenAI features that have no analogue locally).  Remote
+  MCP tools, when supported by the loaded model, flow through the
+  standard ``tools=[...]`` path.
 
 Configuration::
 
@@ -149,23 +156,21 @@ class LMStudioProvider(OpenAIProvider):
             resolved = resolved[len(_PREFIX) :]
         return resolved
 
-    def _use_responses_api(self, request: CompletionRequest) -> bool:
-        """LM Studio implements ``/v1/chat/completions`` only — never the Responses API.
-
-        Forcing this to ``False`` means inherited ``complete`` /
-        ``stream`` / ``acomplete`` / ``astream`` always take the Chat
-        Completions branch, which LM Studio supports natively.
-        """
-        return False
+    # ``_use_responses_api`` is intentionally NOT overridden — LM Studio
+    # supports both ``/v1/chat/completions`` and ``/v1/responses``, so
+    # the inherited OpenAIProvider routing (Responses for dict-schema
+    # structured output and tool-call flows; Chat Completions for
+    # Pydantic-model schemas that need ``beta.parse``) is correct as-is.
 
     def _is_reasoning_model(self, model: str) -> bool:
-        """Local models don't expose OpenAI's ``reasoning_effort`` knob.
+        """Whether the loaded model accepts OpenAI's ``reasoning_effort`` knob.
 
-        Even when the loaded model is a thinking model (e.g. an o1
-        distillation), LM Studio doesn't accept the ``reasoning_effort``
-        parameter — it would 400 the request.  Returning ``False`` keeps
-        the inherited param-builder on the standard ``temperature`` /
-        ``max_tokens`` path.
+        LM Studio's Responses API forwards ``reasoning.effort`` to
+        models that support it (e.g. ``openai/gpt-oss-20b``).  Whether a
+        given local model honours the parameter depends on which model
+        is loaded; we conservatively return ``False`` so the inherited
+        param-builder stays on ``max_tokens`` / ``temperature`` and
+        callers wanting reasoning opt in explicitly via ``ThinkingConfig``.
         """
         return False
 
