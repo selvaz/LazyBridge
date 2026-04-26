@@ -394,7 +394,7 @@ def render_reference() -> str:
         "llm_judge": "Guards & evals",
         "CallbackExporter": "Exporters", "ConsoleExporter": "Exporters",
         "FilteredExporter": "Exporters", "JsonFileExporter": "Exporters",
-        "OTelExporter": "Exporters", "StructuredLogExporter": "Exporters",
+        "StructuredLogExporter": "Exporters",
         "GraphSchema": "Graph", "NodeType": "Graph", "EdgeType": "Graph",
     }
 

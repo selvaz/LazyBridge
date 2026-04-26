@@ -123,7 +123,7 @@ def test_h3_plan_short_circuits_on_upstream_error() -> None:
 
 def test_h4_otel_exporter_has_close_and_lock() -> None:
     pytest.importorskip("opentelemetry")
-    from lazybridge.exporters import OTelExporter
+    from lazybridge.ext.otel import OTelExporter
 
     exp = OTelExporter()
     assert hasattr(exp, "close"), "OTelExporter.close is required for orphaned-span cleanup"
@@ -137,7 +137,7 @@ def test_h4_otel_exporter_has_close_and_lock() -> None:
 
 def test_h4_otel_exporter_closes_on_agent_error() -> None:
     pytest.importorskip("opentelemetry")
-    from lazybridge.exporters import OTelExporter
+    from lazybridge.ext.otel import OTelExporter
 
     exp = OTelExporter()
     exp.export({"event_type": "agent_start", "run_id": "r-1", "agent_name": "x"})

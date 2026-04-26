@@ -26,8 +26,8 @@ and stable.
 - `BaseProvider` and the four officially supported providers
   (Anthropic, OpenAI, Google, DeepSeek)
 - `Guard`, `GuardChain`, `ContentGuard`, `LLMGuard`
-- Basic exporters (`ConsoleExporter`, `JsonFileExporter`, `OTelExporter`,
-  `CallbackExporter`, `FilteredExporter`, `StructuredLogExporter`)
+- Basic exporters (`ConsoleExporter`, `JsonFileExporter`, `CallbackExporter`,
+  `FilteredExporter`, `StructuredLogExporter`)
 - LiteLLM bridge (`lazybridge.core.providers.litellm.LiteLLMProvider`)
 
 ### Extension
@@ -35,6 +35,7 @@ Optional, evolving, or domain-specific code. Ships fast in beta.
 
 - `lazybridge.ext.planners` — `make_planner` (DAG builder) and
   `make_blackboard_planner` (todo list)
+- `lazybridge.ext.otel` — `OTelExporter` (OpenTelemetry span exporter)
 - `lazybridge.ext.stat_runtime` — econometrics & time-series tools
 - `lazybridge.ext.data_downloader` — market data ingestion adapters
 - `lazybridge.ext.quant_agent` — pre-configured quant analysis agent

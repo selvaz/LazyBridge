@@ -33,7 +33,7 @@ Tier 5 — structured plan with routing::
 Tier 6 — full config::
 
     from lazybridge import Agent, LLMEngine, Memory, Session
-    from lazybridge.exporters import OTelExporter
+    from lazybridge.ext.otel import OTelExporter
     Agent(
         engine=LLMEngine("claude-opus-4-7", thinking=True, max_turns=20),
         tools=[search],
@@ -90,14 +90,13 @@ from lazybridge.evals import (
     not_contains,
 )
 
-# Exporters
+# Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
 from lazybridge.exporters import (
     CallbackExporter,
     ConsoleExporter,
     EventExporter,
     FilteredExporter,
     JsonFileExporter,
-    OTelExporter,
     StructuredLogExporter,
 )
 
@@ -172,7 +171,6 @@ __all__ = [
     "ConsoleExporter",
     "FilteredExporter",
     "JsonFileExporter",
-    "OTelExporter",
     "StructuredLogExporter",
     # Core types
     "BaseProvider",

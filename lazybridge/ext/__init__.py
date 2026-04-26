@@ -11,6 +11,7 @@ Stability: every extension declares ``__stability__`` (one of
 Available extensions::
 
     lazybridge.ext.planners          Planner factories (DAG builder + blackboard)
+    lazybridge.ext.otel              OpenTelemetry span exporter
     lazybridge.ext.stat_runtime      Econometrics & time-series analysis
     lazybridge.ext.data_downloader   Market data ingestion (Yahoo, FRED, ECB)
     lazybridge.ext.quant_agent       Pre-configured quantitative analysis agent
