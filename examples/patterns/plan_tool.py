@@ -1,13 +1,13 @@
-"""Demo: ``lazybridge.planners.make_planner`` with three sub-agents.
+"""Demo: ``lazybridge.ext.planners.make_planner`` with three sub-agents.
 
-The factory itself lives in :mod:`lazybridge.planners.builder` — this file
+The factory itself lives in :mod:`lazybridge.ext.planners.builder` — this file
 just shows a minimal usage pattern. Run it with provider credentials in
 the environment to see the planner pick between direct sub-agent calls
 and ``execute_plan`` for multi-step work.
 """
 
 from lazybridge import Agent, LLMEngine
-from lazybridge.planners import make_planner
+from lazybridge.ext.planners import make_planner
 
 
 def web_search(query: str) -> str:

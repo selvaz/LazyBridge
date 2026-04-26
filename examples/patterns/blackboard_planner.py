@@ -1,13 +1,13 @@
-"""Demo: ``lazybridge.planners.make_blackboard_planner`` with three sub-agents.
+"""Demo: ``lazybridge.ext.planners.make_blackboard_planner`` with three sub-agents.
 
-The factory itself lives in :mod:`lazybridge.planners.blackboard` — this
+The factory itself lives in :mod:`lazybridge.ext.planners.blackboard` — this
 file just shows a minimal usage pattern. The blackboard planner manages
 a flat to-do list (``set_plan`` / ``get_plan`` / ``mark_done``) instead
 of composing a DAG; less precise but easier to prompt for exploratory work.
 """
 
 from lazybridge import Agent, LLMEngine
-from lazybridge.planners import make_blackboard_planner
+from lazybridge.ext.planners import make_blackboard_planner
 
 
 def web_search(query: str) -> str:

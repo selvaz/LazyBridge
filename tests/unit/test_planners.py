@@ -1,8 +1,8 @@
 """Unit tests for the in-box planner factories.
 
 Covers:
-  - ``lazybridge.planners.make_planner`` (DAG builder + 5 builder tools)
-  - ``lazybridge.planners.make_blackboard_planner`` (flat todo list)
+  - ``lazybridge.ext.planners.make_planner`` (DAG builder + 5 builder tools)
+  - ``lazybridge.ext.planners.make_blackboard_planner`` (flat todo list)
 
 End-to-end behaviour is exercised via :class:`MockAgent` so no provider
 credentials are required.
@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from lazybridge.planners import (
+from lazybridge.ext.planners import (
     BLACKBOARD_PLANNER_GUIDANCE,
     PLANNER_GUIDANCE,
     PLANNER_VERIFY_PROMPT,
@@ -309,3 +309,28 @@ def test_blackboard_planner_guidance_present_and_substantial() -> None:
     assert len(BLACKBOARD_PLANNER_GUIDANCE) > 500
     for k in ["set_plan", "get_plan", "mark_done", "Workflow", "Pitfalls"]:
         assert k in BLACKBOARD_PLANNER_GUIDANCE
+
+
+# ---------------------------------------------------------------------------
+# Deprecation shim — ``lazybridge.planners`` (Sprint 1 backcompat alias)
+# ---------------------------------------------------------------------------
+
+
+def test_deprecated_lazybridge_planners_shim_emits_warning_and_re_exports() -> None:
+    import importlib
+    import sys
+    import warnings
+
+    # Reset module cache so the warning fires on (re-)import.
+    sys.modules.pop("lazybridge.planners", None)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        shim = importlib.import_module("lazybridge.planners")
+
+    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert deprecations, "expected DeprecationWarning on import of lazybridge.planners"
+    assert "moved to lazybridge.ext.planners" in str(deprecations[0].message)
+    # The shim re-exports the same objects.
+    from lazybridge.ext.planners import make_planner as canonical
+    assert shim.make_planner is canonical

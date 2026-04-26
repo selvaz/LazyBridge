@@ -21,20 +21,20 @@ examples/
 └── patterns/
     ├── dynamic_planner.py                # (legacy) planner → typed rounds → asyncio.gather
     ├── agent_builds_plan.py              # (legacy) planner emits PlanSpec → materialise into Plan
-    ├── plan_tool.py                      # demo of lazybridge.planners.make_planner
-    └── blackboard_planner.py             # demo of lazybridge.planners.make_blackboard_planner
+    ├── plan_tool.py                      # demo of lazybridge.ext.planners.make_planner
+    └── blackboard_planner.py             # demo of lazybridge.ext.planners.make_blackboard_planner
 ```
 
 ## Patterns
 
 The two main planner factories now live in-box at
-[`lazybridge.planners`](../lazybridge/planners/) — the example files in
+[`lazybridge.ext.planners`](../lazybridge/ext/planners/) — the example files in
 `patterns/plan_tool.py` and `patterns/blackboard_planner.py` are thin
 runnable demos that import them. Full guide:
 [docs/recipes/orchestration-tools.md](../docs/recipes/orchestration-tools.md).
 
 ```python
-from lazybridge.planners import make_planner, make_blackboard_planner
+from lazybridge.ext.planners import make_planner, make_blackboard_planner
 
 planner_dag        = make_planner([research, math, writer])         # DAG builder
 planner_blackboard = make_blackboard_planner([research, math, writer]) # todo list

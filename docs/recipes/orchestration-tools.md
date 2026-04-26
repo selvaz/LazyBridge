@@ -6,7 +6,7 @@ sequence, or compose them — without you hard-wiring the orchestration up
 front.
 
 LazyBridge ships **two planner factories** in the in-box
-[`lazybridge.planners`][planners-pkg] package, both taking the same input
+[`lazybridge.ext.planners`][planners-pkg] package, both taking the same input
 (`agents: list[Agent]`) and returning a configured `Agent`. Pick by trade-off:
 
 | Factory | Style | Pros | Cons |
@@ -18,13 +18,13 @@ Start with `make_planner` for tasks that benefit from parallelism or
 validation; use `make_blackboard_planner` for exploratory work where the
 shape emerges as the LLM goes.
 
-[planners-pkg]: https://github.com/selvaz/LazyBridge/tree/main/lazybridge/planners
+[planners-pkg]: https://github.com/selvaz/LazyBridge/tree/main/lazybridge/ext/planners
 
 ## Quickstart — `make_planner` (DAG builder)
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazybridge.planners import make_planner
+from lazybridge.ext.planners import make_planner
 
 def web_search(q: str) -> str:
     """Look up current facts."""
@@ -147,7 +147,7 @@ learned. Two simple plans beat one speculative big one.
 ### Optional `verify=` for high-stakes outputs
 
 ```python
-from lazybridge.planners import make_planner, PLANNER_VERIFY_PROMPT
+from lazybridge.ext.planners import make_planner, PLANNER_VERIFY_PROMPT
 
 judge = Agent(
     engine=LLMEngine("claude-opus-4-7", system=PLANNER_VERIFY_PROMPT),
@@ -174,7 +174,7 @@ manages a flat to-do list via three blackboard tools:
 | `mark_done(task_index, result_summary)` | Tick a task; record a 1-3 sentence summary. |
 
 ```python
-from lazybridge.planners import make_blackboard_planner
+from lazybridge.ext.planners import make_blackboard_planner
 
 planner = make_blackboard_planner([research, math, writer])
 planner("Research recent agent frameworks and write a one-paragraph summary.")
@@ -284,7 +284,7 @@ to reshape the plan as understanding evolves.
 !!! note "API reference"
 
     ```python
-    from lazybridge.planners import (
+    from lazybridge.ext.planners import (
         # DAG builder
         make_planner,                # Agent factory.
         make_plan_builder_tools,     # Lower-level: returns the 5 builder Tools.

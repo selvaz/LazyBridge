@@ -24,7 +24,7 @@ Usage
 ::
 
     from lazybridge import Agent
-    from lazybridge.planners import make_planner
+    from lazybridge.ext.planners import make_planner
 
     research = Agent("claude-opus-4-7", tools=[web_search],
                      name="research", description="Web lookups. No math.")

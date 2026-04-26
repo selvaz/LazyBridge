@@ -3,7 +3,7 @@
 Pattern: ``set_plan`` → loop(``get_plan`` → call sub-agent → ``mark_done``)
         → reply. The LLM manages a list of tasks, ticks them as it goes.
 
-Less precise than :func:`lazybridge.planners.make_planner` (no native
+Less precise than :func:`lazybridge.ext.planners.make_planner` (no native
 parallel, no structural validation) but easier to prompt and very flexible —
 the LLM revises freely by calling ``set_plan`` again. Use it for exploratory
 work where the shape emerges as you go.
