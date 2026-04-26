@@ -1,0 +1,250 @@
+"""``MCP`` and ``MCPServer`` — the public surface of the MCP integration.
+
+An :class:`MCPServer` is a *tool provider*: when added to
+``Agent(tools=[...])`` it expands into a list of :class:`lazybridge.Tool`
+objects, one per tool the MCP server exposes. The expansion is lazy —
+the underlying transport connects on the first ``as_tools()`` call.
+
+Public factories on :class:`MCP`:
+
+- :meth:`MCP.stdio` — spawn an MCP server as a subprocess and speak
+  JSON-RPC over its stdio. Common pattern for npx-launched servers
+  like ``@modelcontextprotocol/server-filesystem``.
+- :meth:`MCP.http` — connect to an MCP server over Streamable HTTP.
+- :meth:`MCP.from_transport` — bring-your-own transport, useful for
+  in-process fakes in tests.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+from typing import TYPE_CHECKING, Any, Iterable
+
+from lazybridge.tools import Tool
+
+if TYPE_CHECKING:
+    from lazybridge.ext.mcp.transports import _Transport
+
+
+class MCPServer:
+    """A tool provider backed by an MCP server.
+
+    Add it directly to ``Agent(tools=[...])``; the framework calls
+    :meth:`as_tools` to expand it into individual :class:`Tool` entries.
+    Tool names are namespaced as ``"<server-name>.<mcp-tool-name>"`` by
+    default; pass ``namespace=False`` to keep the raw names, or
+    ``prefix="..."`` to override.
+
+    The transport connects lazily on first :meth:`as_tools`. For explicit
+    cleanup, use the server as an async context manager::
+
+        async with MCP.stdio("fs", command="...", args=[...]) as fs:
+            agent = Agent("claude-opus-4-7", tools=[fs])
+            await agent.run("...")
+
+    Without that, the transport stays open for the process lifetime; the
+    underlying subprocess is normally cleaned up when the parent exits.
+    """
+
+    _is_lazy_tool_provider = True
+
+    def __init__(
+        self,
+        name: str,
+        transport: "_Transport",
+        *,
+        namespace: bool = True,
+        prefix: str | None = None,
+        allow: Iterable[str] | None = None,
+        deny: Iterable[str] | None = None,
+    ) -> None:
+        self.name = name
+        self._transport = transport
+        self._namespace = namespace
+        if prefix is not None:
+            self._prefix = prefix
+        else:
+            self._prefix = f"{name}." if namespace else ""
+        self._allow = list(allow) if allow else None
+        self._deny = list(deny) if deny else None
+
+        self._tools_cache: list[Tool] | None = None
+        self._connected = False
+        self._closed = False
+        self._lock = asyncio.Lock()
+
+    # --- lifecycle -----------------------------------------------------
+
+    async def aconnect(self) -> None:
+        """Connect the underlying transport. Idempotent."""
+        async with self._lock:
+            if not self._connected:
+                if self._closed:
+                    raise RuntimeError(
+                        f"MCPServer {self.name!r} is closed and cannot be reused"
+                    )
+                await self._transport.connect()
+                self._connected = True
+
+    async def alist_tools(self) -> list[Tool]:
+        """Discover and wrap the server's tools. Cached after the first call."""
+        await self.aconnect()
+        if self._tools_cache is not None:
+            return self._tools_cache
+        mcp_tools = await self._transport.list_tools()
+        wrapped = [self._wrap_tool(t) for t in mcp_tools]
+        self._tools_cache = self._filter(wrapped)
+        return self._tools_cache
+
+    async def aclose(self) -> None:
+        """Close the underlying transport. Idempotent."""
+        async with self._lock:
+            if self._connected and not self._closed:
+                try:
+                    await self._transport.close()
+                finally:
+                    self._connected = False
+                    self._closed = True
+
+    async def __aenter__(self) -> "MCPServer":
+        await self.aconnect()
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
+
+    # --- sync façade for build_tool_map -------------------------------
+
+    def as_tools(self) -> list[Tool]:
+        """Sync wrapper around :meth:`alist_tools`. Called by ``build_tool_map``.
+
+        Triggers a lazy connect on first use. If the call happens inside
+        an already-running event loop, the work is dispatched to a worker
+        thread (mirrors :meth:`lazybridge.Tool.run_sync`).
+        """
+        from lazybridge.ext.mcp.transports import _run_sync
+
+        return _run_sync(self.alist_tools())
+
+    # --- internal helpers ---------------------------------------------
+
+    def _wrap_tool(self, mcp_tool: dict[str, Any]) -> Tool:
+        local_name: str = mcp_tool["name"]
+        full_name = f"{self._prefix}{local_name}"
+        description = mcp_tool.get("description") or f"MCP tool {local_name!r}"
+        parameters = mcp_tool.get("inputSchema") or {"type": "object", "properties": {}}
+        # Normalise to a JSON-Schema object root if the server gave something odd.
+        if not isinstance(parameters, dict) or parameters.get("type") != "object":
+            parameters = {"type": "object", "properties": {}}
+
+        async def _call(**kwargs: Any) -> Any:
+            await self.aconnect()
+            return await self._transport.call_tool(local_name, kwargs)
+
+        # Carry the MCP tool name on the wrapped function so callers can
+        # introspect it (used by tests and observability hooks).
+        _call.__mcp_tool_name__ = local_name  # type: ignore[attr-defined]
+        _call.__mcp_server_name__ = self.name  # type: ignore[attr-defined]
+
+        return Tool.from_schema(
+            name=full_name,
+            description=description,
+            parameters=parameters,
+            func=_call,
+        )
+
+    def _filter(self, tools: list[Tool]) -> list[Tool]:
+        """Apply allow/deny glob patterns. Patterns match against the FULL
+        (namespaced) tool name, so users write ``"github.delete_*"`` not
+        ``"delete_*"``."""
+        out = tools
+        if self._allow:
+            out = [t for t in out if any(fnmatch.fnmatchcase(t.name, p) for p in self._allow)]
+        if self._deny:
+            out = [t for t in out if not any(fnmatch.fnmatchcase(t.name, p) for p in self._deny)]
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Public factories
+# ---------------------------------------------------------------------------
+
+
+class MCP:
+    """Public factory for :class:`MCPServer` instances."""
+
+    @classmethod
+    def stdio(
+        cls,
+        name: str,
+        *,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        namespace: bool = True,
+        prefix: str | None = None,
+        allow: Iterable[str] | None = None,
+        deny: Iterable[str] | None = None,
+    ) -> MCPServer:
+        """Build an MCP server bound to a stdio (subprocess) transport."""
+        from lazybridge.ext.mcp.transports import StdioTransport
+
+        return MCPServer(
+            name,
+            transport=StdioTransport(command, args=args, env=env),
+            namespace=namespace,
+            prefix=prefix,
+            allow=allow,
+            deny=deny,
+        )
+
+    @classmethod
+    def http(
+        cls,
+        name: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        namespace: bool = True,
+        prefix: str | None = None,
+        allow: Iterable[str] | None = None,
+        deny: Iterable[str] | None = None,
+    ) -> MCPServer:
+        """Build an MCP server bound to a Streamable HTTP transport."""
+        from lazybridge.ext.mcp.transports import HttpTransport
+
+        return MCPServer(
+            name,
+            transport=HttpTransport(url, headers=headers),
+            namespace=namespace,
+            prefix=prefix,
+            allow=allow,
+            deny=deny,
+        )
+
+    @classmethod
+    def from_transport(
+        cls,
+        name: str,
+        transport: "_Transport",
+        *,
+        namespace: bool = True,
+        prefix: str | None = None,
+        allow: Iterable[str] | None = None,
+        deny: Iterable[str] | None = None,
+    ) -> MCPServer:
+        """Build an MCP server from a custom :class:`_Transport`.
+
+        Useful for tests (in-process fake transport) or for adapters to
+        non-standard MCP variants. The transport must implement the
+        abstract :class:`_Transport` interface.
+        """
+        return MCPServer(
+            name,
+            transport=transport,
+            namespace=namespace,
+            prefix=prefix,
+            allow=allow,
+            deny=deny,
+        )

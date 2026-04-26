@@ -50,6 +50,44 @@ class Tool:
         self._definition: ToolDefinition | None = None
         self._lock = threading.Lock()
 
+    @classmethod
+    def from_schema(
+        cls,
+        name: str,
+        description: str,
+        parameters: dict[str, Any],
+        func: Callable[..., Any],
+        *,
+        strict: bool = False,
+        returns_envelope: bool = False,
+    ) -> "Tool":
+        """Create a Tool with a pre-built JSON Schema for parameters.
+
+        Use this when the schema is already known (from MCP, OpenAPI, a
+        third-party tool registry, ...) and signature introspection would
+        either be unavailable or produce the wrong shape.
+
+        ``parameters`` must be a JSON Schema object (the same shape that
+        ``ToolDefinition.parameters`` carries).
+        """
+        tool = cls.__new__(cls)
+        tool.func = func
+        tool.name = name
+        tool.description = description
+        tool.guidance = None
+        tool.mode = "signature"  # unused — we set ``_definition`` directly
+        tool.schema_llm = None
+        tool.strict = strict
+        tool.returns_envelope = returns_envelope
+        tool._definition = ToolDefinition(
+            name=name,
+            description=description,
+            parameters=parameters,
+            strict=strict,
+        )
+        tool._lock = threading.Lock()
+        return tool
+
     def definition(self) -> ToolDefinition:
         if self._definition is not None:
             return self._definition
@@ -162,19 +200,31 @@ def _agent_as_tool(agent: Any) -> Tool:
 
 
 def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
-    """Wrap and index tools by name."""
+    """Wrap and index tools by name.
+
+    Items in ``tools`` may be:
+      - a callable / Agent / :class:`Tool` (wrapped via :func:`wrap_tool`);
+      - a **tool provider** — any object with ``_is_lazy_tool_provider = True``
+        and an ``as_tools() -> list[Tool]`` method.  The provider is expanded
+        into its constituent tools.  This is how, e.g., an MCP server lands
+        in ``Agent(tools=[github])`` and contributes its whole tool surface.
+    """
     import warnings
 
     result: dict[str, Tool] = {}
     for t in tools:
-        wrapped = wrap_tool(t)
-        if wrapped.name in result:
-            warnings.warn(
-                f"Tool name collision: '{wrapped.name}' appears more than once "
-                f"in the tools list. The first registration will be replaced by "
-                f"the second. Rename one of the tools to avoid silent shadowing.",
-                UserWarning,
-                stacklevel=2,
-            )
-        result[wrapped.name] = wrapped
+        if getattr(t, "_is_lazy_tool_provider", False):
+            expanded = list(t.as_tools())
+        else:
+            expanded = [wrap_tool(t)]
+        for wrapped in expanded:
+            if wrapped.name in result:
+                warnings.warn(
+                    f"Tool name collision: '{wrapped.name}' appears more than once "
+                    f"in the tools list. The first registration will be replaced by "
+                    f"the second. Rename one of the tools to avoid silent shadowing.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            result[wrapped.name] = wrapped
     return result

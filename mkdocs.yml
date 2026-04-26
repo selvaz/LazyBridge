@@ -81,6 +81,7 @@ nav:
     - Plan with resume: recipes/plan-with-resume.md
     - Human-in-the-loop: recipes/human-in-the-loop.md
     - Orchestration tools: recipes/orchestration-tools.md
+    - MCP integration: recipes/mcp.md
 
   - Decision trees:
     - Index: decisions/index.md
