@@ -272,18 +272,12 @@ class MockAgent:
         env = await self.run(task)
         yield env.text()
 
-    def as_tool(
-        self, name: str | None = None, description: str | None = None
-    ) -> Any:
+    def as_tool(self, name: str | None = None, description: str | None = None) -> Any:
         from lazybridge.tools import Tool
 
         agent = self
         effective_name = name or self.name
-        effective_desc = (
-            description
-            or self.description
-            or f"Run the {effective_name} mock agent."
-        )
+        effective_desc = description or self.description or f"Run the {effective_name} mock agent."
 
         async def _run(task: str) -> Envelope:
             return await agent.run(task)
@@ -339,10 +333,7 @@ class MockAgent:
 
     def assert_call_count(self, n: int) -> None:
         if self.call_count != n:
-            raise AssertionError(
-                f"MockAgent({self.name!r}): expected {n} calls, "
-                f"got {self.call_count}"
-            )
+            raise AssertionError(f"MockAgent({self.name!r}): expected {n} calls, got {self.call_count}")
 
     def __repr__(self) -> str:
         return f"MockAgent({self.name!r}, calls={len(self.calls)})"
@@ -379,16 +370,13 @@ class MockAgent:
         # 3. List — one per call, optionally cycling.
         if isinstance(r, list):
             if not r:
-                raise RuntimeError(
-                    f"MockAgent({self.name!r}) responses list is empty"
-                )
+                raise RuntimeError(f"MockAgent({self.name!r}) responses list is empty")
             if self._cursor >= len(r):
                 if self._cycle:
                     self._cursor = 0
                 else:
                     raise RuntimeError(
-                        f"MockAgent({self.name!r}) exhausted after "
-                        f"{len(r)} calls (pass cycle=True to loop)"
+                        f"MockAgent({self.name!r}) exhausted after {len(r)} calls (pass cycle=True to loop)"
                     )
             val = r[self._cursor]
             self._cursor += 1
@@ -402,9 +390,7 @@ class MockAgent:
             return task
         return Envelope.from_task(str(task))
 
-    def _build_envelope(
-        self, env_in: Envelope, raw: Any, elapsed_ms: float
-    ) -> Envelope:
+    def _build_envelope(self, env_in: Envelope, raw: Any, elapsed_ms: float) -> Envelope:
         # Envelope pass-through: responder constructed a fully-formed
         # envelope, so honour it verbatim (error envelopes included).
         # Only backfill ``task`` / ``context`` if the responder omitted
@@ -434,14 +420,8 @@ class MockAgent:
             metadata=self._make_metadata(elapsed_ms),
         )
 
-    def _make_metadata(
-        self, elapsed_ms: float, *, is_error: bool = False
-    ) -> EnvelopeMetadata:
-        latency = (
-            self._default_latency_ms
-            if self._default_latency_ms is not None
-            else elapsed_ms
-        )
+    def _make_metadata(self, elapsed_ms: float, *, is_error: bool = False) -> EnvelopeMetadata:
+        latency = self._default_latency_ms if self._default_latency_ms is not None else elapsed_ms
         return EnvelopeMetadata(
             input_tokens=0 if is_error else self._default_input_tokens,
             output_tokens=0 if is_error else self._default_output_tokens,

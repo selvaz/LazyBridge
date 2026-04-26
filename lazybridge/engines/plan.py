@@ -146,8 +146,7 @@ class PlanCompiler:
             # Tool exists
             if isinstance(step.target, str) and step.target not in tool_map:
                 raise PlanCompileError(
-                    f"Step {step.name!r}: tool {step.target!r} not found in tools. "
-                    f"Available: {sorted(tool_map)}"
+                    f"Step {step.name!r}: tool {step.target!r} not found in tools. Available: {sorted(tool_map)}"
                 )
             # from_step references valid step …
             if isinstance(step.task, _FromStep) and step.task.name not in pos:
@@ -180,8 +179,7 @@ class PlanCompiler:
                 if isinstance(sentinel, _FromParallelAll):
                     if sentinel.name not in pos:
                         raise PlanCompileError(
-                            f"Step {step.name!r}: {slot}=from_parallel_all"
-                            f"({sentinel.name!r}) references unknown step."
+                            f"Step {step.name!r}: {slot}=from_parallel_all({sentinel.name!r}) references unknown step."
                         )
                     if pos[sentinel.name] >= i:
                         raise PlanCompileError(
@@ -392,11 +390,13 @@ class Plan:
             added = True
         if not added:
             return result_env
-        new_meta = result_env.metadata.model_copy(update={
-            "nested_input_tokens": nested_in,
-            "nested_output_tokens": nested_out,
-            "nested_cost_usd": nested_cost,
-        })
+        new_meta = result_env.metadata.model_copy(
+            update={
+                "nested_input_tokens": nested_in,
+                "nested_output_tokens": nested_out,
+                "nested_cost_usd": nested_cost,
+            }
+        )
         return result_env.model_copy(update={"metadata": new_meta})
 
     # ------------------------------------------------------------------
@@ -472,7 +472,9 @@ class Plan:
         return saved
 
     def _claim_checkpoint(
-        self, effective_key: str | None, run_uid: str,
+        self,
+        effective_key: str | None,
+        run_uid: str,
     ) -> dict[str, Any] | None:
         """Acquire ownership of ``checkpoint_key`` for this run.
 
@@ -544,7 +546,7 @@ class Plan:
                 "or use a unique checkpoint_key per concurrent run."
                 if self.on_concurrent == "fail"
                 else "This key should not be shared under fork mode — "
-                     "investigate the code path that produced the collision."
+                "investigate the code path that produced the collision."
             )
             raise ConcurrentPlanRunError(
                 f"Checkpoint {effective_key!r} is already held by "
@@ -657,11 +659,20 @@ class Plan:
                 hist_snap = list(history)
                 kv_snap = dict(kv)
                 raw = await asyncio.gather(
-                    *[self._execute_one(
-                        s, prev_env, start_env, hist_snap, kv_snap,
-                        tool_map=tool_map, session=session, run_id=run_id,
-                        branch_id=s.name,
-                    ) for s in group],
+                    *[
+                        self._execute_one(
+                            s,
+                            prev_env,
+                            start_env,
+                            hist_snap,
+                            kv_snap,
+                            tool_map=tool_map,
+                            session=session,
+                            run_id=run_id,
+                            branch_id=s.name,
+                        )
+                        for s in group
+                    ],
                     return_exceptions=True,
                 )
 
@@ -688,7 +699,9 @@ class Plan:
                         effective_key=effective_key,
                         last_snapshot=last_snap,
                         next_step=first_failure_step,
-                        kv=kv, completed=completed, status="failed",
+                        kv=kv,
+                        completed=completed,
+                        status="failed",
                         run_uid=run_uid,
                     )
                     return self._aggregate_nested_metadata(first_failure_env, history)
@@ -709,15 +722,15 @@ class Plan:
                     last_ok = r
 
                 # Advance past the whole parallel group.
-                current_name = (
-                    all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
-                )
+                current_name = all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
                 prev_env = last_ok or prev_env
                 was_routed = False  # routing does not apply to parallel groups
                 last_snap = self._save_checkpoint(
                     effective_key=effective_key,
-                    last_snapshot=last_snap, next_step=current_name,
-                    kv=kv, completed=completed,
+                    last_snapshot=last_snap,
+                    next_step=current_name,
+                    kv=kv,
+                    completed=completed,
                     status="running" if current_name else "done",
                     run_uid=run_uid,
                 )
@@ -727,8 +740,14 @@ class Plan:
             # Sequential path
             # ──────────────────────────────────────────────────────────────
             result_env = await self._execute_one(
-                step, prev_env, start_env, history, kv,
-                tool_map=tool_map, session=session, run_id=run_id,
+                step,
+                prev_env,
+                start_env,
+                history,
+                kv,
+                tool_map=tool_map,
+                session=session,
+                run_id=run_id,
             )
 
             # If the step errored, persist a "failed" checkpoint that
@@ -850,7 +869,12 @@ class Plan:
         step_env = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
 
         result_env = await self._exec_step(
-            step, step_env, tool_map=tool_map, session=session, run_id=run_id, branch_id=branch_id,
+            step,
+            step_env,
+            tool_map=tool_map,
+            session=session,
+            run_id=run_id,
+            branch_id=branch_id,
         )
         return Envelope(
             task=step_env.task,
@@ -877,8 +901,11 @@ class Plan:
         # the next step.
         if isinstance(sentinel, _FromPrev):
             return Envelope(
-                task=prev.text(), context=prev.context, payload=prev.payload,
-                metadata=prev.metadata, error=prev.error,
+                task=prev.text(),
+                context=prev.context,
+                payload=prev.payload,
+                metadata=prev.metadata,
+                error=prev.error,
             )
         if isinstance(sentinel, _FromStart):
             return start
@@ -889,8 +916,11 @@ class Plan:
                 if r.step_name == sentinel.name:
                     e = r.envelope
                     return Envelope(
-                        task=e.text(), context=e.context, payload=e.payload,
-                        metadata=e.metadata, error=e.error,
+                        task=e.text(),
+                        context=e.context,
+                        payload=e.payload,
+                        metadata=e.metadata,
+                        error=e.error,
                     )
             return start
         if isinstance(sentinel, _FromParallel):
@@ -898,8 +928,11 @@ class Plan:
                 if r.step_name == sentinel.name:
                     e = r.envelope
                     return Envelope(
-                        task=e.text(), context=e.context, payload=e.payload,
-                        metadata=e.metadata, error=e.error,
+                        task=e.text(),
+                        context=e.context,
+                        payload=e.payload,
+                        metadata=e.metadata,
+                        error=e.error,
                     )
             return start
         if isinstance(sentinel, _FromParallelAll):
@@ -964,10 +997,7 @@ class Plan:
 
         # Labelled-text join — both ``task`` (next step's prompt) and
         # ``payload`` (so ``Envelope.text()`` returns it) carry the join.
-        sections = [
-            f"[{n}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
-            for n, e in branch_envs
-        ]
+        sections = [f"[{n}]\n{e.text() if not e.error else f'(error) {e.error.message}'}" for n, e in branch_envs]
         joined = "\n\n".join(sections)
 
         # Short-circuit: first error wins so downstream can detect failure.
@@ -1003,7 +1033,11 @@ class Plan:
                 if tool is None:
                     raise RuntimeError(f"Tool {target!r} not found")
                 task_str = env.task or env.text()
-                raw = await tool.run(**{"task": task_str} if "task" in tool.definition().parameters.get("properties", {}) else _first_arg_kwargs(tool, task_str))
+                raw = await tool.run(
+                    **{"task": task_str}
+                    if "task" in tool.definition().parameters.get("properties", {})
+                    else _first_arg_kwargs(tool, task_str)
+                )
                 # Preserve the inner Envelope (agent-as-tool) so metadata
                 # survives the step boundary; otherwise wrap the raw value.
                 if isinstance(raw, Envelope):
@@ -1022,6 +1056,7 @@ class Plan:
             elif callable(target):
                 # Raw callable
                 import asyncio as _asyncio
+
                 if _asyncio.iscoroutinefunction(target):
                     raw = await target(env.task or env.text())
                 else:
@@ -1133,7 +1168,9 @@ class Plan:
         return cls(*steps, max_iterations=data.get("max_iterations", 100))
 
     # Engine Protocol compatibility
-    async def stream(self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any) -> AsyncIterator[str]:
+    async def stream(
+        self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any
+    ) -> AsyncIterator[str]:
         result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield result.text()
 

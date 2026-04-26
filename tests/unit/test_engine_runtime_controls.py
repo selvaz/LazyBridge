@@ -30,7 +30,6 @@ from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool
 
-
 # ---------------------------------------------------------------------------
 # Constructor validation
 # ---------------------------------------------------------------------------
@@ -157,9 +156,7 @@ async def test_max_parallel_tools_caps_in_flight_count() -> None:
         return idx
 
     n_calls = 6
-    tcs = [
-        ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n_calls)
-    ]
+    tcs = [ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n_calls)]
     provider = _ToolThenAnswerProvider(model="fake-tool-model", tool_calls=tcs)
     engine = _build_engine_with_provider(provider, max_parallel_tools=2)
 
@@ -189,9 +186,7 @@ async def test_unbounded_concurrency_when_max_parallel_tools_is_none() -> None:
         return idx
 
     n_calls = 5
-    tcs = [
-        ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n_calls)
-    ]
+    tcs = [ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n_calls)]
     provider = _ToolThenAnswerProvider(model="fake-tool-model", tool_calls=tcs)
     engine = _build_engine_with_provider(provider)  # default: unbounded
 

@@ -120,9 +120,8 @@ class Memory:
         # "summary" compresses like "sliding" but uses LLM summarization.
         # "sliding" always compresses when turns > window.
         # "auto"    compresses only once token budget is exceeded.
-        should_compress = (
-            self.strategy in ("sliding", "summary")
-            or (self.strategy == "auto" and total > self.max_tokens)
+        should_compress = self.strategy in ("sliding", "summary") or (
+            self.strategy == "auto" and total > self.max_tokens
         )
         if should_compress and len(self._turns) > 10:
             old = self._turns[:-10]
@@ -148,8 +147,7 @@ class Memory:
             lines.append(f"Assistant: {t.assistant}")
         prompt = (
             "Write a concise summary of the following conversation. "
-            "Preserve key facts, decisions, and outcomes in 2-4 sentences:\n\n"
-            + "\n".join(lines)
+            "Preserve key facts, decisions, and outcomes in 2-4 sentences:\n\n" + "\n".join(lines)
         )
         try:
             result = self._summarizer(prompt)

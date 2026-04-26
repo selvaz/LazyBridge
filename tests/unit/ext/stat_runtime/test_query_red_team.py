@@ -23,10 +23,12 @@ class _Catalog:
 
     def get(self, name):
         if name == "ok":
+
             class _Meta:
                 uri = "/data/ok.parquet"
                 file_format = "parquet"
                 time_column = None
+
             return _Meta()
         return None
 
@@ -114,9 +116,7 @@ class TestStringLiteralFalsePositives:
         from lazybridge.ext.stat_runtime.query import _validate_with_sqlglot
 
         # AST in isolation accepts this (no actual file read happens).
-        ok = _validate_with_sqlglot(
-            "SELECT * FROM dataset('ok') WHERE notes = 'remember to read_parquet later'"
-        )
+        ok = _validate_with_sqlglot("SELECT * FROM dataset('ok') WHERE notes = 'remember to read_parquet later'")
         assert ok is True
 
     def test_full_pipeline_still_blocks_via_regex_defense_in_depth(self, engine):
@@ -124,9 +124,7 @@ class TestStringLiteralFalsePositives:
         intentional belt-and-braces.  Document that fix path here:
         if you want literal substrings allowed, drop the regex layer."""
         with pytest.raises(ValueError):
-            engine._validate(
-                "SELECT * FROM dataset('ok') WHERE notes = 'remember to read_parquet later'"
-            )
+            engine._validate("SELECT * FROM dataset('ok') WHERE notes = 'remember to read_parquet later'")
 
 
 # ---------------------------------------------------------------------------
@@ -156,9 +154,7 @@ class TestNestedMutations:
 
     def test_insert_inside_cte_rejected(self, engine):
         with pytest.raises(ValueError):
-            engine._validate(
-                "WITH t AS (SELECT 1) INSERT INTO x SELECT * FROM t"
-            )
+            engine._validate("WITH t AS (SELECT 1) INSERT INTO x SELECT * FROM t")
 
     def test_truncate_rejected(self, engine):
         with pytest.raises(ValueError):
@@ -237,27 +233,16 @@ class TestLegitimateQueriesStillPass:
         engine._validate("SELECT * FROM dataset('ok') ORDER BY date")
 
     def test_dataset_with_cte_passes(self, engine):
-        engine._validate(
-            "WITH t AS (SELECT * FROM dataset('ok')) "
-            "SELECT count(*) FROM t"
-        )
+        engine._validate("WITH t AS (SELECT * FROM dataset('ok')) SELECT count(*) FROM t")
 
     def test_dataset_with_join_passes(self, engine):
-        engine._validate(
-            "SELECT a.x FROM dataset('ok') a JOIN dataset('ok') b ON a.id = b.id"
-        )
+        engine._validate("SELECT a.x FROM dataset('ok') a JOIN dataset('ok') b ON a.id = b.id")
 
     def test_aggregations_pass(self, engine):
-        engine._validate(
-            "SELECT date_trunc('day', ts) AS d, avg(x) "
-            "FROM dataset('ok') GROUP BY 1 ORDER BY 1"
-        )
+        engine._validate("SELECT date_trunc('day', ts) AS d, avg(x) FROM dataset('ok') GROUP BY 1 ORDER BY 1")
 
     def test_window_functions_pass(self, engine):
-        engine._validate(
-            "SELECT x, lag(x) OVER (ORDER BY ts) AS prev "
-            "FROM dataset('ok') ORDER BY ts"
-        )
+        engine._validate("SELECT x, lag(x) OVER (ORDER BY ts) AS prev FROM dataset('ok') ORDER BY ts")
 
 
 # ---------------------------------------------------------------------------

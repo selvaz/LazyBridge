@@ -51,7 +51,7 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-6": (5.0, 25.0),
     "claude-opus-4-5": (5.0, 25.0),
-    "claude-opus-4-1": (15.0, 75.0),   # legacy Opus 4.1 — higher price tier
+    "claude-opus-4-1": (15.0, 75.0),  # legacy Opus 4.1 — higher price tier
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
@@ -327,9 +327,7 @@ class AnthropicProvider(BaseProvider):
         # block with ``cache_control: {type: "ephemeral", ttl: ...}``
         # so Anthropic caches the static prefix.  Cache hits cost ~10%
         # of input; writes cost ~25% more.
-        cache_enabled = (
-            request.cache is not None and request.cache.enabled
-        )
+        cache_enabled = request.cache is not None and request.cache.enabled
         system = self._get_system(request)
         if system:
             if cache_enabled:
@@ -533,12 +531,7 @@ class AnthropicProvider(BaseProvider):
                 # output and may not reliably handle requests that also carry
                 # function-call tool definitions; fall through to output_config
                 # (the else branch) when tools are present.
-                use_native_parse = (
-                    not request.thinking
-                    and not request.native_tools
-                    and not request.tools
-                    and not betas
-                )
+                use_native_parse = not request.thinking and not request.native_tools and not request.tools and not betas
                 if use_native_parse:
                     try:
                         response = self._client.messages.parse(
@@ -697,12 +690,7 @@ class AnthropicProvider(BaseProvider):
                 # output and may not reliably handle requests that also carry
                 # function-call tool definitions; fall through to output_config
                 # (the else branch) when tools are present.
-                use_native_parse = (
-                    not request.thinking
-                    and not request.native_tools
-                    and not request.tools
-                    and not betas
-                )
+                use_native_parse = not request.thinking and not request.native_tools and not request.tools and not betas
                 if use_native_parse:
                     try:
                         response = await self._async_client.messages.parse(

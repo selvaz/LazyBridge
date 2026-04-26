@@ -16,8 +16,6 @@ call sites keep working bit-identically.
 
 from __future__ import annotations
 
-import pytest
-
 from lazybridge import (
     Agent,
     AgentRuntimeConfig,
@@ -93,6 +91,7 @@ def test_resilience_config_fills_in_resilience_kwargs():
 
 def test_resilience_output_validator_fills_in():
     """output_validator is also covered by the config."""
+
     def validator(x):
         return x
 

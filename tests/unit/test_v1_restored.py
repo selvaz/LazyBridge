@@ -85,12 +85,14 @@ def test_session_console_installs_console_exporter():
 def test_console_exporter_writes_event_to_stream():
     buf = io.StringIO()
     exp = ConsoleExporter(stream=buf)
-    exp.export({
-        "event_type": "tool_call",
-        "agent_name": "researcher",
-        "session_id": "ignored",
-        "task": "hello",
-    })
+    exp.export(
+        {
+            "event_type": "tool_call",
+            "agent_name": "researcher",
+            "session_id": "ignored",
+            "task": "hello",
+        }
+    )
     out = buf.getvalue()
     assert "[researcher]" in out
     assert "tool_call" in out
@@ -228,6 +230,7 @@ def test_supervisor_retry_reruns_registered_agent_with_feedback():
 
     class _Ag:
         name = "researcher"
+
         def __call__(self, task: str) -> str:
             calls.append(task)
             return f"<r:{len(calls)}>"
@@ -295,12 +298,15 @@ def test_plan_resume_after_failure_retries_only_failed_step():
     store = Store()
 
     run_counts = {"s1": 0, "s2": 0, "s3": 0}
+
     def s1(task: str) -> str:
         run_counts["s1"] += 1
         return "a"
+
     def s2(task: str) -> str:
         run_counts["s2"] += 1
         return "b"
+
     def s3(task: str) -> str:
         run_counts["s3"] += 1
         if run_counts["s3"] < 2:

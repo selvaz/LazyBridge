@@ -139,8 +139,7 @@ async def test_e2_two_fresh_runs_collide_at_claim_not_at_first_save() -> None:
     # never made it past the up-front claim, so its planned call
     # to ``a`` was suppressed entirely (no double side-effects).
     assert a.call_count == 1, (
-        f"second run should have failed at claim before executing step a, "
-        f"but a.call_count={a.call_count}"
+        f"second run should have failed at claim before executing step a, but a.call_count={a.call_count}"
     )
 
 
@@ -193,7 +192,7 @@ def test_e4_retryable_by_class_name_without_message() -> None:
         pass
 
     assert _is_retryable(RateLimitError(""))
-    assert _is_retryable(APITimeoutError("límite de tasa"))   # non-English
+    assert _is_retryable(APITimeoutError("límite de tasa"))  # non-English
     assert _is_retryable(APIConnectionError("中文"))  # CJK message
 
 
@@ -238,7 +237,8 @@ def test_e4_status_code_path_still_wins() -> None:
 
 
 _request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "request_id", default=None,
+    "request_id",
+    default=None,
 )
 
 
@@ -283,9 +283,7 @@ async def test_a1_sync_call_propagates_contextvars_into_worker_loop() -> None:
     # cannot use the simple ``asyncio.run`` branch).
     outer("hello")
 
-    assert seen == ["trace-42"], (
-        f"contextvar lost across worker-loop boundary: saw {seen!r}"
-    )
+    assert seen == ["trace-42"], f"contextvar lost across worker-loop boundary: saw {seen!r}"
 
 
 # ---------------------------------------------------------------------------

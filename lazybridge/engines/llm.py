@@ -111,7 +111,6 @@ class LLMEngine:
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = None
 
-
     def __init__(
         self,
         model: str,
@@ -138,17 +137,11 @@ class LLMEngine:
         self.retry_delay = retry_delay
         self.request_timeout = request_timeout
         if max_parallel_tools is not None and max_parallel_tools < 1:
-            raise ValueError(
-                f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}"
-            )
+            raise ValueError(f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}")
         if tool_timeout is not None and tool_timeout <= 0:
-            raise ValueError(
-                f"tool_timeout must be > 0 or None, got {tool_timeout!r}"
-            )
+            raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         if stream_idle_timeout is not None and stream_idle_timeout <= 0:
-            raise ValueError(
-                f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}"
-            )
+            raise ValueError(f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}")
         self.max_parallel_tools = max_parallel_tools
         self.tool_timeout = tool_timeout
         self.stream_idle_timeout = stream_idle_timeout
@@ -170,10 +163,7 @@ class LLMEngine:
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system
-        self.native_tools: list[NativeTool] = [
-            NativeTool(t) if isinstance(t, str) else t
-            for t in (native_tools or [])
-        ]
+        self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         # Prompt caching — ``cache=True`` enables the default
         # (5-minute TTL on Anthropic; no-op on OpenAI / Google /
         # DeepSeek because they either cache automatically or need a
@@ -195,8 +185,17 @@ class LLMEngine:
 
     # Provider name aliases accepted as the model argument
     _PROVIDER_NAMES = {
-        "anthropic", "claude", "openai", "gpt", "google", "gemini", "deepseek",
-        "lmstudio", "lm-studio", "lm_studio", "local",
+        "anthropic",
+        "claude",
+        "openai",
+        "gpt",
+        "google",
+        "gemini",
+        "deepseek",
+        "lmstudio",
+        "lm-studio",
+        "lm_studio",
+        "local",
     }
 
     #: Exact-match provider aliases — first lookup.  ``Agent("anthropic")`` and
@@ -232,12 +231,12 @@ class LLMEngine:
         # locally-loaded model through the local server without any other
         # configuration — mirrors the ``litellm/`` opt-in pattern.
         ("startswith", "lmstudio/", "lmstudio"),
-        ("contains",  "claude",   "anthropic"),
-        ("contains",  "gpt",      "openai"),
-        ("startswith", "o1",      "openai"),
-        ("startswith", "o3",      "openai"),
-        ("contains",  "gemini",   "google"),
-        ("contains",  "deepseek", "deepseek"),
+        ("contains", "claude", "anthropic"),
+        ("contains", "gpt", "openai"),
+        ("startswith", "o1", "openai"),
+        ("startswith", "o3", "openai"),
+        ("contains", "gemini", "google"),
+        ("contains", "deepseek", "deepseek"),
     ]
 
     #: Fallback provider when nothing matches.  A warning is emitted on
@@ -365,8 +364,12 @@ class LLMEngine:
 
         try:
             result = await self._loop(
-                env, tools=tools, output_type=output_type,
-                memory=memory, session=session, run_id=run_id,
+                env,
+                tools=tools,
+                output_type=output_type,
+                memory=memory,
+                session=session,
+                run_id=run_id,
             )
         except Exception as exc:
             if session:
@@ -378,12 +381,16 @@ class LLMEngine:
         # Pydantic v2's default-mutable semantics.  This stays correct
         # even if a future version ships with ``frozen=True`` on
         # EnvelopeMetadata.
-        result = result.model_copy(update={
-            "metadata": result.metadata.model_copy(update={
-                "latency_ms": latency_ms,
-                "run_id": run_id,
-            }),
-        })
+        result = result.model_copy(
+            update={
+                "metadata": result.metadata.model_copy(
+                    update={
+                        "latency_ms": latency_ms,
+                        "run_id": run_id,
+                    }
+                ),
+            }
+        )
 
         if session:
             session.emit(
@@ -421,8 +428,7 @@ class LLMEngine:
 
         system = self.system or ""
         if env.context:
-            system = (f"{system}\n\nContext:\n{env.context}".strip()
-                      if system else f"Context:\n{env.context}")
+            system = f"{system}\n\nContext:\n{env.context}".strip() if system else f"Context:\n{env.context}"
 
         task_text = env.task or env.text()
         messages.append(Message(role=Role.USER, content=task_text))
@@ -438,6 +444,7 @@ class LLMEngine:
         # explicit identity against ``str`` / ``Any``.
         if output_type is not str and output_type is not Any:
             from typing import get_origin
+
             if isinstance(output_type, type) or get_origin(output_type) is not None:
                 structured_cfg = StructuredOutputConfig(schema=output_type)
 
@@ -499,9 +506,7 @@ class LLMEngine:
                 # duration rather than stall duration.
                 resp = await self._stream_turn(executor, req, _stream_sink)
             elif self.request_timeout is not None:
-                resp = await asyncio.wait_for(
-                    executor.aexecute(req), timeout=self.request_timeout
-                )
+                resp = await asyncio.wait_for(executor.aexecute(req), timeout=self.request_timeout)
             else:
                 resp = await executor.aexecute(req)
 
@@ -537,7 +542,8 @@ class LLMEngine:
                     # pipeline total across all turns; Memory's compression
                     # threshold should be measured against per-turn cost.
                     memory.add(
-                        task_text, resp.content,
+                        task_text,
+                        resp.content,
                         tokens=resp.usage.input_tokens + resp.usage.output_tokens,
                     )
 
@@ -572,16 +578,12 @@ class LLMEngine:
             # Agents — the engine does not special-case any of them.
             # When ``max_parallel_tools`` is set, a semaphore caps the
             # in-flight count to apply backpressure on wide fan-outs.
-            sem = (
-                asyncio.Semaphore(self.max_parallel_tools)
-                if self.max_parallel_tools is not None
-                else None
-            )
+            sem = asyncio.Semaphore(self.max_parallel_tools) if self.max_parallel_tools is not None else None
 
-            async def _run_one(tc: ToolCall) -> Any:
-                if sem is None:
+            async def _run_one(tc: ToolCall, *, _sem: asyncio.Semaphore | None = sem) -> Any:
+                if _sem is None:
                     return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
-                async with sem:
+                async with _sem:
                     return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
 
             raw_results = await asyncio.gather(
@@ -599,9 +601,9 @@ class LLMEngine:
                     # own ``nested_*`` so aggregation is transitive
                     # across arbitrarily-deep agent trees.
                     nm = tr.metadata
-                    nested_in += (nm.input_tokens + nm.nested_input_tokens)
-                    nested_out += (nm.output_tokens + nm.nested_output_tokens)
-                    nested_cost += (nm.cost_usd + nm.nested_cost_usd)
+                    nested_in += nm.input_tokens + nm.nested_input_tokens
+                    nested_out += nm.output_tokens + nm.nested_output_tokens
+                    nested_cost += nm.cost_usd + nm.nested_cost_usd
                     content = tr.text()
                     is_err = not tr.ok
                 elif isinstance(tr, Exception):
@@ -628,9 +630,13 @@ class LLMEngine:
                 retryable=False,
             ),
             metadata=EnvelopeMetadata(
-                input_tokens=total_in, output_tokens=total_out, cost_usd=cost,
-                nested_input_tokens=nested_in, nested_output_tokens=nested_out,
-                nested_cost_usd=nested_cost, model=model_used,
+                input_tokens=total_in,
+                output_tokens=total_out,
+                cost_usd=cost,
+                nested_input_tokens=nested_in,
+                nested_output_tokens=nested_out,
+                nested_cost_usd=nested_cost,
+                model=model_used,
             ),
         )
 
@@ -685,12 +691,10 @@ class LLMEngine:
         aiter = agen.__aiter__()
         while True:
             try:
-                item = await asyncio.wait_for(
-                    aiter.__anext__(), timeout=self.stream_idle_timeout
-                )
+                item = await asyncio.wait_for(aiter.__anext__(), timeout=self.stream_idle_timeout)
             except StopAsyncIteration:
                 return
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise StreamStallError(
                     f"Stream went idle for {self.stream_idle_timeout}s without "
                     "delivering a chunk (set LLMEngine(stream_idle_timeout=...) "
@@ -719,13 +723,9 @@ class LLMEngine:
         try:
             if self.tool_timeout is not None:
                 try:
-                    result = await asyncio.wait_for(
-                        tool.run(**tc.arguments), timeout=self.tool_timeout
-                    )
-                except asyncio.TimeoutError as exc:
-                    timeout_err = ToolTimeoutError(
-                        f"Tool {tc.name!r} timed out after {self.tool_timeout}s"
-                    )
+                    result = await asyncio.wait_for(tool.run(**tc.arguments), timeout=self.tool_timeout)
+                except TimeoutError:
+                    timeout_err = ToolTimeoutError(f"Tool {tc.name!r} timed out after {self.tool_timeout}s")
                     if session:
                         session.emit(
                             EventType.TOOL_ERROR,
@@ -782,8 +782,12 @@ class LLMEngine:
         async def _run_loop() -> None:
             try:
                 await self._loop(
-                    env, tools=tools, output_type=output_type,
-                    memory=memory, session=session, run_id=run_id,
+                    env,
+                    tools=tools,
+                    output_type=output_type,
+                    memory=memory,
+                    session=session,
+                    run_id=run_id,
                     _stream_sink=sink,
                 )
             finally:

@@ -64,6 +64,7 @@ def _resolve_provider(
     # ``pip install lazybridge[litellm]``.
     if key == "litellm":
         from lazybridge.core.providers.litellm import LiteLLMProvider
+
         return LiteLLMProvider(api_key=api_key, model=model, **kwargs)
 
     if key not in registry:
@@ -81,26 +82,28 @@ def _resolve_provider(
 # SDK (no runtime dep added) and survives string-message drift /
 # non-EN locales.  Cross-checked against openai, anthropic,
 # google.genai, deepseek (openai-clone), litellm.
-_RETRYABLE_EXC_CLASSES = frozenset({
-    "RateLimitError",
-    "APITimeoutError",
-    "APIConnectionError",
-    "APIStatusError",            # SDK-generic 5xx wrapper
-    "InternalServerError",
-    "ServiceUnavailableError",
-    "BadGatewayError",
-    "GatewayTimeoutError",
-    "TimeoutError",              # builtins.TimeoutError, asyncio.TimeoutError
-    "ConnectionError",           # builtins.ConnectionError + subclasses
-    "ConnectionResetError",
-    "ConnectionAbortedError",
-    "ConnectionRefusedError",
-    "ReadTimeout",               # httpx
-    "ConnectTimeout",
-    "ConnectError",
-    "RemoteProtocolError",
-    "ProtocolError",
-})
+_RETRYABLE_EXC_CLASSES = frozenset(
+    {
+        "RateLimitError",
+        "APITimeoutError",
+        "APIConnectionError",
+        "APIStatusError",  # SDK-generic 5xx wrapper
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "BadGatewayError",
+        "GatewayTimeoutError",
+        "TimeoutError",  # builtins.TimeoutError, asyncio.TimeoutError
+        "ConnectionError",  # builtins.ConnectionError + subclasses
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "ConnectionRefusedError",
+        "ReadTimeout",  # httpx
+        "ConnectTimeout",
+        "ConnectError",
+        "RemoteProtocolError",
+        "ProtocolError",
+    }
+)
 
 
 def _is_retryable(exc: Exception) -> bool:

@@ -18,9 +18,9 @@ import warnings
 import pytest
 
 from lazybridge.agent import Agent
-from lazybridge.ext.hil.human import HumanEngine
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.envelope import Envelope
+from lazybridge.ext.hil.human import HumanEngine
 from lazybridge.memory import Memory
 from lazybridge.session import EventType, Session
 from lazybridge.store import Store

@@ -70,6 +70,7 @@ def test_plain_tool_defaults_returns_envelope_false():
     """Function-wrapping tools do NOT return Envelope — the contract
     for tool authors stays "normal Python function".
     """
+
     def echo(x: str) -> str:
         """Return x."""
         return x
@@ -153,7 +154,9 @@ class _RelayOuterEngine:
             task=env.task,
             payload=payload,
             metadata=EnvelopeMetadata(
-                input_tokens=100, output_tokens=50, cost_usd=0.002,
+                input_tokens=100,
+                output_tokens=50,
+                cost_usd=0.002,
                 nested_input_tokens=nested_in,
                 nested_output_tokens=nested_out,
                 nested_cost_usd=nested_cost,
@@ -167,9 +170,7 @@ class _RelayOuterEngine:
 
 
 def test_nested_envelope_propagates_single_level():
-    inner = Agent(engine=_FakeInnerEngine(in_tok=30, out_tok=20, cost=0.001,
-                                          payload="inner-result"),
-                  name="inner")
+    inner = Agent(engine=_FakeInnerEngine(in_tok=30, out_tok=20, cost=0.001, payload="inner-result"), name="inner")
     outer = Agent(engine=_RelayOuterEngine(), tools=[inner], name="outer")
 
     env = outer("do X")
@@ -194,9 +195,7 @@ def test_nested_envelope_propagates_two_levels_transitively():
     ``nested = inner.input + inner.nested_input`` so the chain is
     transitive.
     """
-    leaf = Agent(engine=_FakeInnerEngine(in_tok=10, out_tok=5, cost=0.0003,
-                                         payload="leaf"),
-                 name="leaf")
+    leaf = Agent(engine=_FakeInnerEngine(in_tok=10, out_tok=5, cost=0.0003, payload="leaf"), name="leaf")
     middle = Agent(engine=_RelayOuterEngine(), tools=[leaf], name="middle")
     root = Agent(engine=_RelayOuterEngine(), tools=[middle], name="root")
 
@@ -215,6 +214,7 @@ def test_nested_error_surfaces_through_outer_envelope():
     outer Envelope must carry that error forward rather than silently
     flattening to text.
     """
+
     class _ErroringEngine:
         async def run(self, env, *, tools, output_type, memory, session):
             return Envelope.error_envelope(RuntimeError("inner boom"))
@@ -241,9 +241,7 @@ def test_plan_preserves_inner_envelope_metadata_at_step_boundary():
     """A Plan step whose target is an agent-as-tool must not flatten
     the inner Envelope's metadata when producing its step result.
     """
-    inner = Agent(engine=_FakeInnerEngine(in_tok=42, out_tok=11, cost=0.0005,
-                                          payload="plan-step-out"),
-                  name="worker")
+    inner = Agent(engine=_FakeInnerEngine(in_tok=42, out_tok=11, cost=0.0005, payload="plan-step-out"), name="worker")
 
     inner_tool = inner.as_tool("worker_tool")
 

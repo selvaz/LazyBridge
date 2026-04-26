@@ -67,8 +67,7 @@ class StdioTransport(_Transport):
             from mcp.client.stdio import stdio_client
         except ImportError as e:  # pragma: no cover — exercised only without [mcp]
             raise ImportError(
-                "lazybridge.ext.mcp.MCP.stdio requires the official MCP SDK. "
-                "Install with: pip install lazybridge[mcp]"
+                "lazybridge.ext.mcp.MCP.stdio requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
             ) from e
         from contextlib import AsyncExitStack
 
@@ -89,11 +88,13 @@ class StdioTransport(_Transport):
         result = await self._session.list_tools()
         out: list[dict[str, Any]] = []
         for t in result.tools:
-            out.append({
-                "name": t.name,
-                "description": t.description or "",
-                "inputSchema": t.inputSchema or {"type": "object", "properties": {}},
-            })
+            out.append(
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "inputSchema": t.inputSchema or {"type": "object", "properties": {}},
+                }
+            )
         return out
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -133,17 +134,14 @@ class HttpTransport(_Transport):
             from mcp.client.streamable_http import streamablehttp_client
         except ImportError as e:  # pragma: no cover
             raise ImportError(
-                "lazybridge.ext.mcp.MCP.http requires the official MCP SDK. "
-                "Install with: pip install lazybridge[mcp]"
+                "lazybridge.ext.mcp.MCP.http requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
             ) from e
         from contextlib import AsyncExitStack
 
         self._stack = AsyncExitStack()
         await self._stack.__aenter__()
 
-        read, write, _ = await self._stack.enter_async_context(
-            streamablehttp_client(self._url, headers=self._headers)
-        )
+        read, write, _ = await self._stack.enter_async_context(streamablehttp_client(self._url, headers=self._headers))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
         await self._session.initialize()
 

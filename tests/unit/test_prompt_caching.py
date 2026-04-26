@@ -11,8 +11,6 @@ is where cache_control markers are stamped onto the request dict.
 
 from __future__ import annotations
 
-from typing import Any
-
 from lazybridge.core.providers.anthropic import AnthropicProvider
 from lazybridge.core.types import (
     CacheConfig,
@@ -128,10 +126,12 @@ def test_cache_none_leaves_tools_untouched() -> None:
 
 def test_cache_tools_and_system_both_marked_when_present() -> None:
     p = _fake_provider()
-    params = p._build_params(_req(
-        cache=CacheConfig(enabled=True),
-        tools=[_tool("analyze")],
-    ))
+    params = p._build_params(
+        _req(
+            cache=CacheConfig(enabled=True),
+            tools=[_tool("analyze")],
+        )
+    )
     assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert params["tools"][-1]["cache_control"] == {"type": "ephemeral"}
 

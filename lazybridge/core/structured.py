@@ -115,11 +115,10 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
             }
         elif key in ("items", "additionalProperties") and isinstance(value, dict):
             normalized[key] = normalize_json_schema(value)
-        elif (key == "prefixItems" and isinstance(value, list)) or (key in ("anyOf", "allOf", "oneOf") and isinstance(value, list)):
-            normalized[key] = [
-                normalize_json_schema(sub) if isinstance(sub, dict) else sub
-                for sub in value
-            ]
+        elif (key == "prefixItems" and isinstance(value, list)) or (
+            key in ("anyOf", "allOf", "oneOf") and isinstance(value, list)
+        ):
+            normalized[key] = [normalize_json_schema(sub) if isinstance(sub, dict) else sub for sub in value]
         else:
             normalized[key] = value
 

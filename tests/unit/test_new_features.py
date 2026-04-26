@@ -6,15 +6,13 @@ import asyncio
 import json
 import threading
 import time
-import urllib.request
 
 import pytest
 from pydantic import BaseModel
 
-from lazybridge import Agent, Envelope, Session, Tool
+from lazybridge import Agent, Envelope, Tool
 from lazybridge.ext.hil import HumanEngine
-from lazybridge.ext.hil.human import _WebUI, _build_web_form
-
+from lazybridge.ext.hil.human import _build_web_form, _WebUI
 
 # =============================================================================
 # Web UI — _build_web_form
@@ -92,6 +90,7 @@ class TestWebUIClass:
             # Small delay to let the server start
             await asyncio.sleep(0.2)
             import socket
+
             # Poll until server is ready
             for _ in range(20):
                 try:
@@ -101,14 +100,11 @@ class TestWebUIClass:
                     await asyncio.sleep(0.05)
 
         # Patch _WebUI to capture the port and post immediately
-        original_prompt = ui.prompt
-
-        result_holder: list[str] = []
 
         async def patched_prompt(task: str, *, tools, output_type):
             # Start the server in background, then POST to it
-            import queue as _queue
             import http.server
+            import queue as _queue
             import urllib.parse
 
             response_q: _queue.Queue[str] = _queue.Queue()
@@ -176,7 +172,7 @@ class TestWebUIClass:
             count: int
 
         fields = MyModel.model_fields
-        form_html = _build_web_form("task", [], True, fields)
+        _build_web_form("task", [], True, fields)
         response_q: _queue.Queue[str] = _queue.Queue()
 
         class _H(http.server.BaseHTTPRequestHandler):
@@ -296,7 +292,7 @@ class TestAgentFallback:
 
     @pytest.mark.asyncio
     async def test_fallback_not_used_when_primary_succeeds(self):
-        primary = Agent(engine=_EchoEngine(), name="primary")
+        Agent(engine=_EchoEngine(), name="primary")
         fallback_calls = []
 
         class _TrackEngine:

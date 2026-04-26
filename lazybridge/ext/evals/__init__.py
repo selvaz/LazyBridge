@@ -130,12 +130,12 @@ def not_contains(substring: str) -> Callable[[str], bool]:
 
 def llm_judge(agent: Any, criteria: str) -> Callable[[str], bool]:
     """Returns a judge function using an agent to evaluate output."""
+
     def judge(output: str) -> bool:
         verdict = agent(f"Criteria: {criteria}\nOutput to judge: {output}\nVerdict (approved/rejected):").text()
         return verdict.strip().lower().startswith("approved")
+
     return judge
-
-
 
 
 __all__ = [

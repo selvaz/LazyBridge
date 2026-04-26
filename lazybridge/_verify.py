@@ -60,9 +60,7 @@ async def verify_with_retry(
         # the judge always sees the user's real question.
         feedback = str(verdict)
         feedback_ctx = f"Feedback from judge: {feedback}"
-        merged_context = (
-            f"{original_context}\n\n{feedback_ctx}" if original_context else feedback_ctx
-        )
+        merged_context = f"{original_context}\n\n{feedback_ctx}" if original_context else feedback_ctx
         current_env = Envelope(task=original_task, context=merged_context)
 
     return result

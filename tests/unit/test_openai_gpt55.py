@@ -165,6 +165,4 @@ def test_image_generation_native_tool_supported() -> None:
     from lazybridge.core.types import NativeTool
 
     assert NativeTool.IMAGE_GENERATION in OpenAIProvider.supported_native_tools
-    assert _RESPONSES_NATIVE_MAP[NativeTool.IMAGE_GENERATION] == {
-        "type": "image_generation"
-    }
+    assert _RESPONSES_NATIVE_MAP[NativeTool.IMAGE_GENERATION] == {"type": "image_generation"}

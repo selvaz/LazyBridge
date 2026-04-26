@@ -8,11 +8,8 @@ from __future__ import annotations
 import asyncio
 import warnings
 
-import pytest
-
 from lazybridge import Agent
 from lazybridge.tools import Tool, build_tool_map
-
 
 # ---------------------------------------------------------------------------
 # Tool.from_schema — happy path
@@ -53,7 +50,8 @@ def test_from_schema_definition_is_idempotent() -> None:
 
 def test_from_schema_strict_flag_propagates() -> None:
     t = Tool.from_schema(
-        name="x", description="x",
+        name="x",
+        description="x",
         parameters={"type": "object", "properties": {}},
         func=lambda: None,
         strict=True,
@@ -64,7 +62,8 @@ def test_from_schema_strict_flag_propagates() -> None:
 
 def test_from_schema_returns_envelope_flag_propagates() -> None:
     t = Tool.from_schema(
-        name="x", description="x",
+        name="x",
+        description="x",
         parameters={"type": "object", "properties": {}},
         func=lambda: None,
         returns_envelope=True,
@@ -80,7 +79,8 @@ def test_from_schema_returns_envelope_flag_propagates() -> None:
 def test_from_schema_accepts_empty_object_schema() -> None:
     """A no-arg tool can be wrapped with an empty properties object."""
     t = Tool.from_schema(
-        name="now", description="Return the current time.",
+        name="now",
+        description="Return the current time.",
         parameters={"type": "object", "properties": {}},
         func=lambda: "2026-01-01",
     )
@@ -145,7 +145,8 @@ def test_from_schema_run_supports_async_funcs() -> None:
         return f"async:{kwargs}"
 
     t = Tool.from_schema(
-        name="x", description="x",
+        name="x",
+        description="x",
         parameters={"type": "object", "properties": {}},
         func=fake,
     )
@@ -198,6 +199,7 @@ def test_build_tool_map_mixes_providers_with_plain_callables() -> None:
 def test_build_tool_map_collision_warns_only_once_per_name() -> None:
     """Reproduce the audit fix: a triple-collision should emit ONE warning,
     not two (previously the second + third both warned)."""
+
     def f1():
         """f1."""
         return 1

@@ -5,6 +5,7 @@ Also tests the two-tier tool split (level parameter) and inference module.
 
 import pytest
 
+from lazybridge import Tool
 from lazybridge.ext.stat_runtime.inference import (
     build_interpretation,
     infer_column_roles,
@@ -25,7 +26,6 @@ from lazybridge.ext.stat_runtime.schemas import (
     RunSummary,
 )
 from lazybridge.ext.stat_runtime.tools import stat_tools
-from lazybridge import Tool
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-from typing import TYPE_CHECKING, Any, Iterable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 from lazybridge.tools import Tool
 
@@ -58,7 +59,7 @@ class MCPServer:
     def __init__(
         self,
         name: str,
-        transport: "_Transport",
+        transport: _Transport,
         *,
         namespace: bool = True,
         prefix: str | None = None,
@@ -97,9 +98,7 @@ class MCPServer:
         async with self._get_lock():
             if not self._connected:
                 if self._closed:
-                    raise RuntimeError(
-                        f"MCPServer {self.name!r} is closed and cannot be reused"
-                    )
+                    raise RuntimeError(f"MCPServer {self.name!r} is closed and cannot be reused")
                 await self._transport.connect()
                 self._connected = True
 
@@ -123,7 +122,7 @@ class MCPServer:
                     self._connected = False
                     self._closed = True
 
-    async def __aenter__(self) -> "MCPServer":
+    async def __aenter__(self) -> MCPServer:
         await self.aconnect()
         return self
 
@@ -243,7 +242,7 @@ class MCP:
     def from_transport(
         cls,
         name: str,
-        transport: "_Transport",
+        transport: _Transport,
         *,
         namespace: bool = True,
         prefix: str | None = None,

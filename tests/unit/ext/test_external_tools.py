@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from lazybridge.tools import build_tool_map
 from lazybridge.ext.external_tools import ExternalToolProvider, ExternalToolSpec
+from lazybridge.tools import build_tool_map
 
 
 class FakeExternalClient:

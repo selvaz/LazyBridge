@@ -80,17 +80,11 @@ class EventLog:
             if batch_size < 1:
                 raise ValueError(f"batch_size must be >= 1, got {batch_size!r}")
             if batch_interval <= 0:
-                raise ValueError(
-                    f"batch_interval must be > 0, got {batch_interval!r}"
-                )
+                raise ValueError(f"batch_interval must be > 0, got {batch_interval!r}")
             if max_queue_size < 1:
-                raise ValueError(
-                    f"max_queue_size must be >= 1, got {max_queue_size!r}"
-                )
+                raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size!r}")
             if on_full not in ("drop", "block"):
-                raise ValueError(
-                    f"on_full must be 'drop' or 'block', got {on_full!r}"
-                )
+                raise ValueError(f"on_full must be 'drop' or 'block', got {on_full!r}")
         # In-memory SQLite needs a SHARED cache otherwise every thread
         # gets its own isolated DB and events emitted from worker
         # threads (e.g. ``SupervisorEngine`` via ``asyncio.to_thread``)
@@ -115,7 +109,9 @@ class EventLog:
         # of a thread-local conn would wipe the table.
         if self._uri is not None:
             self._anchor: sqlite3.Connection | None = sqlite3.connect(
-                self._uri, uri=True, check_same_thread=False,
+                self._uri,
+                uri=True,
+                check_same_thread=False,
             )
         else:
             self._anchor = None
@@ -367,9 +363,7 @@ class EventLog:
             self.record_many(batch)
         except Exception as exc:  # pragma: no cover - defensive
             warnings.warn(
-                f"EventLog batched flush failed: "
-                f"{type(exc).__name__}: {exc}.  "
-                f"{len(batch)} event(s) lost.",
+                f"EventLog batched flush failed: {type(exc).__name__}: {exc}.  {len(batch)} event(s) lost.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -540,8 +534,7 @@ class Session:
         import warnings
 
         warnings.warn(
-            f"Session redact callable: {msg}.  "
-            f"redact_on_error={self._redact_on_error!r}.",
+            f"Session redact callable: {msg}.  redact_on_error={self._redact_on_error!r}.",
             stacklevel=3,
         )
         try:
@@ -582,8 +575,7 @@ class Session:
                 else:
                     self._warn_once_redact(
                         "_lazybridge_type_warned",
-                        f"redact returned {type(result).__name__!s}; "
-                        f"expected dict",
+                        f"redact returned {type(result).__name__!s}; expected dict",
                     )
                     if self._redact_on_error == "strict":
                         return
@@ -664,9 +656,7 @@ class Session:
 
         # Build run_id → agent_name map.
         run_agent: dict[str, str] = {
-            row["run_id"]: row["payload"].get("agent_name", "unknown")
-            for row in agent_starts
-            if row.get("run_id")
+            row["run_id"]: row["payload"].get("agent_name", "unknown") for row in agent_starts if row.get("run_id")
         }
 
         total = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
@@ -692,7 +682,9 @@ class Session:
             ag["cost_usd"] += cost
 
             if run_id:
-                rn = by_run.setdefault(run_id, {"agent_name": agent_name, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+                rn = by_run.setdefault(
+                    run_id, {"agent_name": agent_name, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+                )
                 rn["input_tokens"] += in_tok
                 rn["output_tokens"] += out_tok
                 rn["cost_usd"] += cost

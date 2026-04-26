@@ -136,13 +136,10 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Realistic floor given that provider adapters are exercised mostly via
-# focused unit tests + opt-in live tests.  Ratchet up as more
-# provider-dedicated fixture coverage lands.  Target waypoints:
-#   50 — after one round of fake-response fixtures per provider
-#   60 — after tool-loop + structured-output coverage per provider
-#   70 — after streaming + native-tool coverage per provider
-fail_under = 40
+# Coverage gate.  The current floor reflects the structural / pure-Python
+# coverage of core + providers; the remaining gap is in live-API streaming
+# paths and SDK-mocked integration tests.
+fail_under = 70
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

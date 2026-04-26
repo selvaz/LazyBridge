@@ -40,7 +40,6 @@ from lazybridge.core.types import (
     Role,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fakes — minimal OpenAI Chat Completions response shape
 # ---------------------------------------------------------------------------
@@ -249,6 +248,7 @@ def test_executor_resolves_lmstudio_alias_to_provider():
     sync_p, async_p = _patch_openai()
     with sync_p, async_p:
         from lazybridge.core.executor import _resolve_provider
+
         prov = _resolve_provider("lmstudio")
     assert isinstance(prov, LMStudioProvider)
 
@@ -258,12 +258,14 @@ def test_executor_accepts_all_lmstudio_aliases(alias):
     sync_p, async_p = _patch_openai()
     with sync_p, async_p:
         from lazybridge.core.executor import _resolve_provider
+
         prov = _resolve_provider(alias)
     assert isinstance(prov, LMStudioProvider)
 
 
 def test_llmengine_routes_lmstudio_alias():
     from lazybridge.engines.llm import LLMEngine
+
     assert LLMEngine._infer_provider("lmstudio") == "lmstudio"
     assert LLMEngine._infer_provider("lm-studio") == "lmstudio"
     assert LLMEngine._infer_provider("local") == "lmstudio"
@@ -272,12 +274,14 @@ def test_llmengine_routes_lmstudio_alias():
 
 def test_llmengine_routes_lmstudio_prefix():
     from lazybridge.engines.llm import LLMEngine
+
     assert LLMEngine._infer_provider("lmstudio/Qwen2.5-7B-Instruct") == "lmstudio"
 
 
 def test_llmengine_native_routing_unaffected():
     """Adding the lmstudio routes must not steal any other provider's traffic."""
     from lazybridge.engines.llm import LLMEngine
+
     assert LLMEngine._infer_provider("claude-opus-4-7") == "anthropic"
     assert LLMEngine._infer_provider("gpt-4o") == "openai"
     assert LLMEngine._infer_provider("deepseek-v4-flash") == "deepseek"

@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from lazybridge.core.executor import Executor, _is_retryable
@@ -25,7 +23,6 @@ from lazybridge.core.types import (
     Role,
     UsageStats,
 )
-
 
 # ---------------------------------------------------------------------------
 # A. max_turns default bump

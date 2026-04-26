@@ -25,7 +25,6 @@ from lazybridge.engines.plan import ConcurrentPlanRunError, Plan, Step
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
 
-
 # ---------------------------------------------------------------------------
 # Store.compare_and_swap
 # ---------------------------------------------------------------------------
@@ -265,12 +264,10 @@ async def test_fork_mode_each_run_has_distinct_suffixed_key() -> None:
 
     await asyncio.gather(first.run("one"), second.run("two"))
 
-    checkpoint_keys = [
-        k for k in store.keys() if k.startswith("quant_backtest:")
-    ]
+    checkpoint_keys = [k for k in store if k.startswith("quant_backtest:")]
     assert len(checkpoint_keys) == 2, checkpoint_keys
     # The un-suffixed "quant_backtest" key is NOT used in fork mode.
-    assert "quant_backtest" not in store.keys()
+    assert "quant_backtest" not in store
     # Each checkpoint has distinct run_uid and status="done".
     run_uids = {store.read(k)["run_uid"] for k in checkpoint_keys}
     assert len(run_uids) == 2
@@ -287,27 +284,38 @@ async def test_fork_mode_error_isolates_to_one_run() -> None:
     store = Store()
     good_a = MockAgent(lambda env: f"a({env.task})", name="a", delay_ms=10)
     good_b = MockAgent(lambda env: f"b({env.text()})", name="b")
-    good = Agent(engine=Plan(
-        Step(target=good_a, name="a"),
-        Step(target=good_b, name="b"),
-        store=store, checkpoint_key="pipe", on_concurrent="fork",
-    ), name="good")
+    good = Agent(
+        engine=Plan(
+            Step(target=good_a, name="a"),
+            Step(target=good_b, name="b"),
+            store=store,
+            checkpoint_key="pipe",
+            on_concurrent="fork",
+        ),
+        name="good",
+    )
 
     bad_a = MockAgent(
-        ErrorInfo(type="Upstream", message="boom"), name="a",
+        ErrorInfo(type="Upstream", message="boom"),
+        name="a",
     )
     bad_b = MockAgent("unused", name="b")
-    bad = Agent(engine=Plan(
-        Step(target=bad_a, name="a"),
-        Step(target=bad_b, name="b"),
-        store=store, checkpoint_key="pipe", on_concurrent="fork",
-    ), name="bad")
+    bad = Agent(
+        engine=Plan(
+            Step(target=bad_a, name="a"),
+            Step(target=bad_b, name="b"),
+            store=store,
+            checkpoint_key="pipe",
+            on_concurrent="fork",
+        ),
+        name="bad",
+    )
 
     good_env, bad_env = await asyncio.gather(good.run("g"), bad.run("b"))
     assert good_env.ok, good_env.error
     assert not bad_env.ok
 
     # Good's checkpoint is status=done, bad's is status=failed.
-    pipe_keys = [k for k in store.keys() if k.startswith("pipe:")]
+    pipe_keys = [k for k in store if k.startswith("pipe:")]
     statuses = [store.read(k)["status"] for k in pipe_keys]
     assert sorted(statuses) == ["done", "failed"]

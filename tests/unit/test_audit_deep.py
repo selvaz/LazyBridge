@@ -42,6 +42,7 @@ from lazybridge.session import EventLog, EventType
 
 # ── L1 ────────────────────────────────────────────────────────────────────────
 
+
 def test_l1_all_exposes_previously_hidden_names() -> None:
     # Eval matchers (``not_contains`` / ``max_length`` / ``min_length``)
     # live in ``lazybridge.ext.evals``, not the core top-level.
@@ -52,6 +53,7 @@ def test_l1_all_exposes_previously_hidden_names() -> None:
 
 # ── H1 ────────────────────────────────────────────────────────────────────────
 
+
 def test_h1_parallel_agent_uses_get_running_loop() -> None:
     # Walk the AST so documentation that mentions the old name doesn't
     # trick a plain substring search.
@@ -59,18 +61,13 @@ def test_h1_parallel_agent_uses_get_running_loop() -> None:
 
     src = inspect.getsource(_ParallelAgent.__call__)
     tree = ast.parse(src.strip())
-    names = {
-        node.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-    }
-    assert "get_event_loop" not in names, (
-        "_ParallelAgent.__call__ must not use deprecated asyncio.get_event_loop"
-    )
+    names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    assert "get_event_loop" not in names, "_ParallelAgent.__call__ must not use deprecated asyncio.get_event_loop"
     assert "get_running_loop" in names
 
 
 # ── H2 ────────────────────────────────────────────────────────────────────────
+
 
 def test_h2_llm_guard_has_own_async_methods() -> None:
     # The async surface must be defined on LLMGuard itself (not just
@@ -103,6 +100,7 @@ def test_h2_llm_guard_async_uses_agent_run() -> None:
 
 # ── H3 ────────────────────────────────────────────────────────────────────────
 
+
 def test_h3_plan_short_circuits_on_upstream_error() -> None:
     from lazybridge.engines.plan import StepResult
     from lazybridge.sentinels import from_step
@@ -122,6 +120,7 @@ def test_h3_plan_short_circuits_on_upstream_error() -> None:
 
 
 # ── H4 ────────────────────────────────────────────────────────────────────────
+
 
 def test_h4_otel_exporter_has_close_and_lock() -> None:
     pytest.importorskip("opentelemetry")
@@ -149,12 +148,14 @@ def test_h4_otel_exporter_closes_on_agent_error() -> None:
 
 # ── M1 ────────────────────────────────────────────────────────────────────────
 
+
 def test_m1_any_parameter_gets_string_fallback() -> None:
     schema = _annotation_to_schema(Any)
     assert schema == {"type": "string"}
 
 
 # ── M2 ────────────────────────────────────────────────────────────────────────
+
 
 def test_m2_stream_timeout_raises_when_provider_stalls() -> None:
     class _StallEngine:
@@ -185,12 +186,14 @@ def test_m2_stream_timeout_raises_when_provider_stalls() -> None:
 
 # ── M5 ────────────────────────────────────────────────────────────────────────
 
+
 def test_m5_llm_guard_strips_policy_tag_injection() -> None:
     class _NoopAgent:
         def __call__(self, prompt: str) -> Any:  # pragma: no cover - not exercised
             class _E:
                 def text(self) -> str:
                     return "allow"
+
             return _E()
 
     guard = LLMGuard(
@@ -203,6 +206,7 @@ def test_m5_llm_guard_strips_policy_tag_injection() -> None:
 
 # ── M7 ────────────────────────────────────────────────────────────────────────
 
+
 def test_m7_eventlog_record_fails_fast_after_close() -> None:
     log = EventLog(session_id="sess")
     log.close()
@@ -212,6 +216,7 @@ def test_m7_eventlog_record_fails_fast_after_close() -> None:
 
 # ── L2 ────────────────────────────────────────────────────────────────────────
 
+
 def test_l2_store_conn_raises_in_memory_mode() -> None:
     store = Store(db=None)
     with pytest.raises(RuntimeError):
@@ -219,6 +224,7 @@ def test_l2_store_conn_raises_in_memory_mode() -> None:
 
 
 # ── L4 ────────────────────────────────────────────────────────────────────────
+
 
 def test_l4_graph_schema_add_edge_is_idempotent() -> None:
     g = GraphSchema()
@@ -233,6 +239,7 @@ def test_l4_graph_schema_add_edge_is_idempotent() -> None:
 
 
 # ── L5 ────────────────────────────────────────────────────────────────────────
+
 
 def test_l5_openai_role_tool_string_demoted_to_user() -> None:
     pytest.importorskip("openai")

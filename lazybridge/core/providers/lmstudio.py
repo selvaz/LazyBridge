@@ -127,9 +127,7 @@ class LMStudioProvider(OpenAIProvider):
         try:
             import openai as _openai
         except ImportError:
-            raise ImportError(
-                "openai package not installed. Run: pip install openai"
-            ) from None
+            raise ImportError("openai package not installed. Run: pip install openai") from None
 
         base_url = kwargs.pop("base_url", None) or os.environ.get(_BASE_URL_ENV) or _DEFAULT_BASE_URL
         key = self.api_key or os.environ.get(_API_KEY_ENV) or _PLACEHOLDER_API_KEY
@@ -148,7 +146,7 @@ class LMStudioProvider(OpenAIProvider):
         """
         resolved = super()._resolve_model(request)
         if resolved.startswith(_PREFIX):
-            resolved = resolved[len(_PREFIX):]
+            resolved = resolved[len(_PREFIX) :]
         return resolved
 
     def _use_responses_api(self, request: CompletionRequest) -> bool:

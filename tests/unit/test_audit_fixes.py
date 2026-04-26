@@ -31,8 +31,8 @@ from lazybridge import (
     from_prev,
     from_step,
 )
-from lazybridge.envelope import EnvelopeMetadata
 from lazybridge._verify import verify_with_retry
+from lazybridge.envelope import EnvelopeMetadata
 
 # ---------------------------------------------------------------------------
 # Plan Step(parallel=True) really runs concurrently
@@ -103,6 +103,7 @@ def test_plan_parallel_branch_error_fails_the_plan():
     """If one parallel branch raises, the plan surfaces an error envelope
     with a checkpoint pointing at the failing branch.
     """
+
     async def ok(task: str) -> str:
         return "ok"
 
@@ -123,6 +124,7 @@ def test_plan_sequential_still_works_after_refactor():
     """Non-parallel plans must not regress after the parallel-group
     branch was added to the run loop.
     """
+
     def a(task: str) -> str:
         return f"a:{task}"
 
@@ -145,13 +147,16 @@ def test_from_prev_preserves_envelope_metadata():
     sentinel hop; otherwise nested-cost aggregation breaks across Plan
     step boundaries.
     """
+
     class _MeteredEngine:
         async def run(self, env, *, tools, output_type, memory, session):
             return Envelope(
                 task=env.task,
                 payload="out",
                 metadata=EnvelopeMetadata(
-                    input_tokens=50, output_tokens=20, cost_usd=0.003,
+                    input_tokens=50,
+                    output_tokens=20,
+                    cost_usd=0.003,
                 ),
             )
 
@@ -178,6 +183,7 @@ def test_from_prev_preserves_envelope_metadata():
 
 def test_from_step_preserves_envelope_metadata():
     """Same guarantee for an explicit from_step("name") reference."""
+
     def a(task: str) -> str:
         return "A-output"
 
@@ -231,6 +237,7 @@ async def test_verify_with_retry_preserves_original_task_across_retries():
 async def test_verify_with_retry_approved_on_first_returns_immediately():
     class _A:
         calls = 0
+
         async def run(self, env):
             _A.calls += 1
             return Envelope(task=env.task, payload="ok")
@@ -253,6 +260,7 @@ def test_session_emit_warns_on_exporter_exception():
     """A buggy exporter must surface as a DeprecationWarning-style
     warning, not silently eat events.
     """
+
     class _BadExporter:
         def export(self, event):
             raise ValueError("no u")
@@ -270,6 +278,7 @@ def test_session_emit_suppresses_repeated_exporter_warnings():
     """First failure warns; subsequent failures from the same exporter
     are suppressed to avoid log spam.
     """
+
     class _BadExporter:
         def export(self, event):
             raise ValueError("still no")
@@ -294,6 +303,7 @@ def test_session_redact_returning_non_dict_warns_and_preserves_payload():
     """A redactor that returns None / wrong shape must NOT crash the
     emit path or silently produce an empty payload.
     """
+
     def bad_redactor(payload):
         return None
 
@@ -308,6 +318,7 @@ def test_session_redact_returning_non_dict_warns_and_preserves_payload():
 
 def test_session_redact_valid_dict_is_applied():
     """Happy path: a dict-returning redactor is applied verbatim."""
+
     def redact(payload):
         out = dict(payload)
         out["task"] = "[REDACTED]"
@@ -328,6 +339,7 @@ def test_agent_warns_on_broken_session_register_agent():
     """A custom Session subclass whose ``register_agent`` raises
     surfaces as a ``UserWarning`` rather than being silently swallowed.
     """
+
     class _BrokenSession(Session):
         def register_agent(self, agent):
             raise RuntimeError("bad session")

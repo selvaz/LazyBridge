@@ -32,25 +32,20 @@ from lazybridge import (
     GraphSchema,
     Guard,
     GuardAction,
-    GuardChain,
     JsonFileExporter,
     LLMEngine,
-    LLMGuard,
     Memory,
     Plan,
     Session,
     Step,
     Store,
-    Tool,
-    from_step,
-    from_parallel,
     from_prev,
     from_start,
+    from_step,
 )
 from lazybridge.core.types import CacheConfig
 from lazybridge.ext.evals import EvalCase, EvalSuite, contains, llm_judge
 from lazybridge.testing import MockAgent, scripted_inputs
-
 
 # ---------------------------------------------------------------------------
 # guides/agent.md  — main tier example + reliability + sources= live view
@@ -445,6 +440,7 @@ def test_exporters_guide_filtered_compose():
         received.append(e)
 
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp:
         path = tmp.name
     try:
@@ -464,6 +460,7 @@ def test_exporters_guide_filtered_compose():
         assert {e["event_type"] for e in received} == {str(EventType.AGENT_FINISH)}
     finally:
         import os
+
         os.unlink(path)
 
 
@@ -484,12 +481,8 @@ def test_graph_schema_guide_edges_and_roundtrip(tmp_path):
         tools=[researcher, writer],
         session=sess,
     )
-    sess.graph.add_edge(
-        monitor.name, "orchestrator", label="observes", kind=EdgeType.CONTEXT
-    )
-    sess.graph.add_edge(
-        "orchestrator", writer.name, label="if publish=true", kind=EdgeType.ROUTER
-    )
+    sess.graph.add_edge(monitor.name, "orchestrator", label="observes", kind=EdgeType.CONTEXT)
+    sess.graph.add_edge("orchestrator", writer.name, label="if publish=true", kind=EdgeType.ROUTER)
 
     class _Router:
         def __init__(self, name):

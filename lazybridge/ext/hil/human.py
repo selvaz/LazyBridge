@@ -170,7 +170,7 @@ class _TerminalUI(_UIProtocol):
                 parsed = json.loads(trimmed)
                 return TypeAdapter(annotation).validate_python(parsed)
             except (json.JSONDecodeError, ValidationError, TypeError):
-                pass   # fall through to plain-string validation
+                pass  # fall through to plain-string validation
 
         # Final: let Pydantic handle the raw string (int "42", bool "yes", …).
         try:
@@ -195,7 +195,7 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
             label = getattr(ann, "__name__", str(ann))
             rows.append(
                 f'<tr><td><label for="{fname}">'
-                f'{_html.escape(fname)} <small>({_html.escape(label)})</small>'
+                f"{_html.escape(fname)} <small>({_html.escape(label)})</small>"
                 f"</label></td>"
                 f'<td><input type="text" id="{fname}" name="{fname}" '
                 f'style="width:400px" autocomplete="off"></td></tr>'
@@ -278,10 +278,7 @@ class _WebUI(_UIProtocol):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(
-                    b"<html><body><h2>Response submitted. "
-                    b"You may close this tab.</h2></body></html>"
-                )
+                self.wfile.write(b"<html><body><h2>Response submitted. You may close this tab.</h2></body></html>")
                 response_q.put(result)
 
             def log_message(self, *_args: Any) -> None:  # suppress server logs
@@ -307,8 +304,8 @@ class _WebUI(_UIProtocol):
                 loop.run_in_executor(None, lambda: response_q.get(timeout=timeout + 1)),
                 timeout=timeout,
             )
-        except (asyncio.TimeoutError, TimeoutError):
-            raise TimeoutError(f"Web UI timed out after {timeout}s without a response")
+        except TimeoutError as exc:
+            raise TimeoutError(f"Web UI timed out after {timeout}s without a response") from exc
         finally:
             server.shutdown()
 
@@ -387,7 +384,8 @@ class HumanEngine:
                         context=env.context,
                         payload=raw,  # still available via env.payload for debug
                         metadata=EnvelopeMetadata(
-                            latency_ms=latency_ms, run_id=run_id,
+                            latency_ms=latency_ms,
+                            run_id=run_id,
                         ),
                         error=_coerce_error(output_type, coerce_exc),
                     )
@@ -405,8 +403,7 @@ class HumanEngine:
                         )
                         session.emit(
                             EventType.AGENT_FINISH,
-                            {"agent_name": agent_name,
-                             "error": str(coerce_exc)},
+                            {"agent_name": agent_name, "error": str(coerce_exc)},
                             run_id=run_id,
                         )
                     return err_env
@@ -446,7 +443,9 @@ class HumanEngine:
 
         return result
 
-    async def stream(self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any) -> AsyncIterator[str]:
+    async def stream(
+        self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any
+    ) -> AsyncIterator[str]:
         env_out = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield env_out.text()
 
@@ -463,9 +462,6 @@ def _coerce_error(output_type: Any, exc: BaseException) -> Any:
     type_name = getattr(output_type, "__name__", str(output_type))
     return ErrorInfo(
         type="StructuredOutputCoercionError",
-        message=(
-            f"Human input could not be coerced to {type_name}: "
-            f"{type(exc).__name__}: {exc}"
-        ),
+        message=(f"Human input could not be coerced to {type_name}: {type(exc).__name__}: {exc}"),
         retryable=False,
     )

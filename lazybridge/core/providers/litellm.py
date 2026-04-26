@@ -41,8 +41,6 @@ from lazybridge.core.types import (
     CompletionResponse,
     ContentBlock,
     ImageContent,
-    Message,
-    NativeTool,
     Role,
     StreamChunk,
     TextContent,
@@ -64,7 +62,7 @@ _PREFIX = "litellm/"
 def _strip_prefix(model: str) -> str:
     """Drop the ``litellm/`` prefix so LiteLLM sees its native model syntax."""
     if model.startswith(_PREFIX):
-        return model[len(_PREFIX):]
+        return model[len(_PREFIX) :]
     return model
 
 
@@ -76,8 +74,7 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
         result = json.loads(raw)
     except json.JSONDecodeError as exc:
         _logger.warning(
-            "LiteLLM tool-call arguments failed JSON parse (%s); "
-            "storing under _raw_arguments. Raw: %.200s",
+            "LiteLLM tool-call arguments failed JSON parse (%s); storing under _raw_arguments. Raw: %.200s",
             exc,
             raw,
         )
@@ -110,27 +107,30 @@ def _content_blocks_to_openai_parts(
             if block.url:
                 parts.append({"type": "image_url", "image_url": {"url": block.url}})
             elif block.base64_data:
-                parts.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{block.media_type};base64,{block.base64_data}"
-                    },
-                })
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{block.media_type};base64,{block.base64_data}"},
+                    }
+                )
         elif isinstance(block, ToolUseContent):
-            tool_calls.append({
-                "id": block.id,
-                "type": "function",
-                "function": {
-                    "name": block.name,
-                    "arguments": json.dumps(block.input),
-                },
-            })
+            tool_calls.append(
+                {
+                    "id": block.id,
+                    "type": "function",
+                    "function": {
+                        "name": block.name,
+                        "arguments": json.dumps(block.input),
+                    },
+                }
+            )
         elif isinstance(block, ToolResultContent):
-            tool_results.append({
-                "tool_call_id": block.tool_use_id,
-                "content": block.content if isinstance(block.content, str)
-                           else json.dumps(block.content),
-            })
+            tool_results.append(
+                {
+                    "tool_call_id": block.tool_use_id,
+                    "content": block.content if isinstance(block.content, str) else json.dumps(block.content),
+                }
+            )
     return parts, tool_calls, tool_results
 
 
@@ -231,8 +231,7 @@ class LiteLLMProvider(BaseProvider):
             import litellm
         except ImportError as exc:
             raise ImportError(
-                "LiteLLMProvider requires the litellm package. "
-                "Install with: pip install 'lazybridge[litellm]'"
+                "LiteLLMProvider requires the litellm package. Install with: pip install 'lazybridge[litellm]'"
             ) from exc
         self._litellm = litellm
         # Forward extra kwargs to litellm module-level config (e.g.
@@ -270,7 +269,8 @@ class LiteLLMProvider(BaseProvider):
             params["tools"] = _tools_to_openai(request.tools)
             if request.tool_choice is not None:
                 params["tool_choice"] = _tool_choice_to_openai(
-                    request.tool_choice, request.tools,
+                    request.tool_choice,
+                    request.tools,
                 )
         if self.api_key:
             # When set explicitly, hand LiteLLM the key. Otherwise it reads
@@ -361,9 +361,13 @@ class LiteLLMProvider(BaseProvider):
             # content stream completes).
             u = getattr(chunk, "usage", None)
             if u:
-                return "", None, UsageStats(
-                    input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                    output_tokens=getattr(u, "completion_tokens", 0) or 0,
+                return (
+                    "",
+                    None,
+                    UsageStats(
+                        input_tokens=getattr(u, "prompt_tokens", 0) or 0,
+                        output_tokens=getattr(u, "completion_tokens", 0) or 0,
+                    ),
                 )
             return "", None, None
 

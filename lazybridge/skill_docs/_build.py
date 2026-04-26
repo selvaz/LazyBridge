@@ -52,6 +52,7 @@ DOCS_DIR = REPO_ROOT / "docs"
 # Tiny YAML loader (subset sufficient for _meta.yaml)
 # ---------------------------------------------------------------------------
 
+
 def _load_meta() -> dict:
     """Load fragments/_meta.yaml without PyYAML dependency.
 
@@ -64,6 +65,7 @@ def _load_meta() -> dict:
     """
     try:
         import yaml  # type: ignore[import-untyped]
+
         return yaml.safe_load((FRAGMENTS / "_meta.yaml").read_text())
     except ImportError:
         pass
@@ -92,7 +94,7 @@ def _parse_yaml_mini(text: str) -> dict:
             owner, key = pending_key
             owner_indent = _owner_indent(stack, owner)
             if indent > owner_indent:
-                pending_block.append(raw[owner_indent + 2:])  # best-effort dedent
+                pending_block.append(raw[owner_indent + 2 :])  # best-effort dedent
                 continue
             # flush
             owner[key] = "\n".join(pending_block).rstrip() + "\n"  # type: ignore[index]
@@ -224,9 +226,11 @@ def render_skill_tier(tier: str, topics: list[str], titles: dict, intro: str) ->
 
 
 def render_skill_decisions(names: list[str]) -> str:
-    out = ["# LazyBridge — Decision trees\n\n"
-           "When to use which part of the framework. Each tree answers a "
-           "concrete question you hit while building.\n"]
+    out = [
+        "# LazyBridge — Decision trees\n\n"
+        "When to use which part of the framework. Each tree answers a "
+        "concrete question you hit while building.\n"
+    ]
     for name in names:
         frag = _read_fragment(f"decision_{name}")
         if not frag:
@@ -252,7 +256,7 @@ def render_skill_overview(meta: dict) -> str:
         "one `Agent` with swappable engines; tools can be plain functions, "
         "other Agents, or Agents-of-Agents — the composition is closed and "
         "uniform. Parallelism inside an engine is automatic (the LLM or the "
-        "Plan decide); no separate \"parallel mode\" exists.\n\n",
+        'Plan decide); no separate "parallel mode" exists.\n\n',
         "## Pick your tier\n\n",
     ]
     for tier in ("basic", "mid", "full", "advanced"):
@@ -260,14 +264,16 @@ def render_skill_overview(meta: dict) -> str:
         topics = tiers.get(tier, [])
         topic_names = ", ".join(titles.get(t, t) for t in topics) if topics else ""
         out.append(f"\n### {tier.capitalize()}\n{intro}\n\nCovers: {topic_names}\n")
-    out.append("\n## Files\n\n"
-               "* `01_basic.md` — one-shot agents, tools, envelope\n"
-               "* `02_mid.md` — memory, store, session, guards, composition\n"
-               "* `03_full.md` — Plan, sentinels, supervisor, checkpoint\n"
-               "* `04_advanced.md` — engine protocol, providers, serialisation\n"
-               "* `05_decision_trees.md` — \"when to use which\"\n"
-               "* `06_reference.md` — flat API index\n"
-               "* `99_errors.md` — error → cause → fix table\n")
+    out.append(
+        "\n## Files\n\n"
+        "* `01_basic.md` — one-shot agents, tools, envelope\n"
+        "* `02_mid.md` — memory, store, session, guards, composition\n"
+        "* `03_full.md` — Plan, sentinels, supervisor, checkpoint\n"
+        "* `04_advanced.md` — engine protocol, providers, serialisation\n"
+        '* `05_decision_trees.md` — "when to use which"\n'
+        "* `06_reference.md` — flat API index\n"
+        "* `99_errors.md` — error → cause → fix table\n"
+    )
     return "".join(out).rstrip() + "\n"
 
 
@@ -295,7 +301,7 @@ def render_site_guide(topic: str, titles: dict) -> str:
         out.append("\n")
     rules = frag.get("rules")
     if rules:
-        out.append("!!! warning \"Rules & invariants\"\n\n")
+        out.append('!!! warning "Rules & invariants"\n\n')
         for line in rules.rstrip().splitlines():
             out.append(f"    {line}\n")
         out.append("\n")
@@ -305,8 +311,7 @@ def render_site_guide(topic: str, titles: dict) -> str:
     return "".join(out)
 
 
-def render_site_tier(tier: str, topics: list[str], titles: dict, intro: str,
-                     next_steps: str = "") -> str:
+def render_site_tier(tier: str, topics: list[str], titles: dict, intro: str, next_steps: str = "") -> str:
     out = [f"# {tier.capitalize()} tier\n\n", intro.strip() + "\n\n", "## Topics\n\n"]
     for topic in topics:
         slug = topic.replace("_", "-")
@@ -333,8 +338,7 @@ def render_site_decision(name: str, frag: dict[str, str]) -> str:
 
 
 def render_site_decisions_index(names: list[str]) -> str:
-    out = ["# Decision trees\n\n",
-           "Each tree answers a concrete \"when to use which\" question.\n\n"]
+    out = ["# Decision trees\n\n", 'Each tree answers a concrete "when to use which" question.\n\n']
     for name in names:
         frag = _read_fragment(f"decision_{name}")
         if not frag:
@@ -349,6 +353,7 @@ def render_site_decisions_index(names: list[str]) -> str:
 # API reference (walks lazybridge/__init__.py)
 # ---------------------------------------------------------------------------
 
+
 def render_reference() -> str:
     """Flat signature-first API index derived from the package __init__."""
     import importlib
@@ -357,9 +362,10 @@ def render_reference() -> str:
     mod = importlib.import_module("lazybridge")
     exports = list(getattr(mod, "__all__", []))
 
-    out = ["# LazyBridge — API reference\n\n",
-           "Signature-first index of every public symbol. For usage and "
-           "context, see the tier pages.\n\n"]
+    out = [
+        "# LazyBridge — API reference\n\n",
+        "Signature-first index of every public symbol. For usage and context, see the tier pages.\n\n",
+    ]
 
     groups: dict[str, list[tuple[str, str, str]]] = {
         "Agent & tools": [],
@@ -372,25 +378,43 @@ def render_reference() -> str:
         "Core types": [],
     }
     assignment = {
-        "Agent": "Agent & tools", "Tool": "Agent & tools",
-        "Envelope": "Envelope", "EnvelopeMetadata": "Envelope", "ErrorInfo": "Envelope",
-        "from_prev": "Envelope", "from_start": "Envelope",
-        "from_step": "Envelope", "from_parallel": "Envelope",
-        "Engine": "Engines", "LLMEngine": "Engines",
-        "Plan": "Engines", "Step": "Engines", "PlanState": "Engines",
-        "StepResult": "Engines", "PlanCompileError": "Engines",
-        "ToolTimeoutError": "Engines", "StreamStallError": "Engines",
+        "Agent": "Agent & tools",
+        "Tool": "Agent & tools",
+        "Envelope": "Envelope",
+        "EnvelopeMetadata": "Envelope",
+        "ErrorInfo": "Envelope",
+        "from_prev": "Envelope",
+        "from_start": "Envelope",
+        "from_step": "Envelope",
+        "from_parallel": "Envelope",
+        "Engine": "Engines",
+        "LLMEngine": "Engines",
+        "Plan": "Engines",
+        "Step": "Engines",
+        "PlanState": "Engines",
+        "StepResult": "Engines",
+        "PlanCompileError": "Engines",
+        "ToolTimeoutError": "Engines",
+        "StreamStallError": "Engines",
         "Memory": "Memory / Store / Session",
-        "Store": "Memory / Store / Session", "StoreEntry": "Memory / Store / Session",
-        "Session": "Memory / Store / Session", "EventLog": "Memory / Store / Session",
+        "Store": "Memory / Store / Session",
+        "StoreEntry": "Memory / Store / Session",
+        "Session": "Memory / Store / Session",
+        "EventLog": "Memory / Store / Session",
         "EventType": "Memory / Store / Session",
-        "Guard": "Guards", "GuardAction": "Guards",
-        "ContentGuard": "Guards", "GuardChain": "Guards",
+        "Guard": "Guards",
+        "GuardAction": "Guards",
+        "ContentGuard": "Guards",
+        "GuardChain": "Guards",
         "LLMGuard": "Guards",
-        "CallbackExporter": "Exporters", "ConsoleExporter": "Exporters",
-        "FilteredExporter": "Exporters", "JsonFileExporter": "Exporters",
+        "CallbackExporter": "Exporters",
+        "ConsoleExporter": "Exporters",
+        "FilteredExporter": "Exporters",
+        "JsonFileExporter": "Exporters",
         "StructuredLogExporter": "Exporters",
-        "GraphSchema": "Graph", "NodeType": "Graph", "EdgeType": "Graph",
+        "GraphSchema": "Graph",
+        "NodeType": "Graph",
+        "EdgeType": "Graph",
     }
 
     for name in exports:
@@ -425,6 +449,7 @@ def render_reference() -> str:
 # Main build loop
 # ---------------------------------------------------------------------------
 
+
 def _write(path: Path, content: str, changed: list[Path]) -> None:
     """Write content if it differs; track changes for --check."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -445,21 +470,13 @@ def build(check: bool = False) -> int:
     changed: list[Path] = []
 
     # Skill render
-    _write(SKILL_DIR / "00_overview.md",
-           render_skill_overview(meta), changed)
-    _write(SKILL_DIR / "99_errors.md",
-           render_skill_errors(), changed)
-    tier_file_map = {"basic": "01_basic.md", "mid": "02_mid.md",
-                     "full": "03_full.md", "advanced": "04_advanced.md"}
+    _write(SKILL_DIR / "00_overview.md", render_skill_overview(meta), changed)
+    _write(SKILL_DIR / "99_errors.md", render_skill_errors(), changed)
+    tier_file_map = {"basic": "01_basic.md", "mid": "02_mid.md", "full": "03_full.md", "advanced": "04_advanced.md"}
     for tier, fname in tier_file_map.items():
-        _write(SKILL_DIR / fname,
-               render_skill_tier(tier, tiers.get(tier, []), titles,
-                                  intros.get(tier, "")),
-               changed)
-    _write(SKILL_DIR / "05_decision_trees.md",
-           render_skill_decisions(decisions), changed)
-    _write(SKILL_DIR / "06_reference.md",
-           render_reference(), changed)
+        _write(SKILL_DIR / fname, render_skill_tier(tier, tiers.get(tier, []), titles, intros.get(tier, "")), changed)
+    _write(SKILL_DIR / "05_decision_trees.md", render_skill_decisions(decisions), changed)
+    _write(SKILL_DIR / "06_reference.md", render_reference(), changed)
 
     # Site render
     DOCS_DIR.mkdir(exist_ok=True)
@@ -474,20 +491,19 @@ def build(check: bool = False) -> int:
             body = render_site_guide(topic, titles)
             if body:
                 _write(DOCS_DIR / "guides" / f"{slug}.md", body, changed)
-        _write(DOCS_DIR / "tiers" / f"{tier}.md",
-               render_site_tier(tier, topics, titles, intros.get(tier, ""),
-                                nexts.get(tier, "")),
-               changed)
+        _write(
+            DOCS_DIR / "tiers" / f"{tier}.md",
+            render_site_tier(tier, topics, titles, intros.get(tier, ""), nexts.get(tier, "")),
+            changed,
+        )
 
     for name in decisions:
         frag = _read_fragment(f"decision_{name}")
         if not frag:
             continue
         slug = name.replace("_", "-")
-        _write(DOCS_DIR / "decisions" / f"{slug}.md",
-               render_site_decision(name, frag), changed)
-    _write(DOCS_DIR / "decisions" / "index.md",
-           render_site_decisions_index(decisions), changed)
+        _write(DOCS_DIR / "decisions" / f"{slug}.md", render_site_decision(name, frag), changed)
+    _write(DOCS_DIR / "decisions" / "index.md", render_site_decisions_index(decisions), changed)
 
     _write(DOCS_DIR / "reference.md", render_reference(), changed)
 
@@ -522,10 +538,10 @@ def render_skill_errors() -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--check", action="store_true",
-                   help="Fail with exit 1 if committed output differs from render.")
+    p.add_argument("--check", action="store_true", help="Fail with exit 1 if committed output differs from render.")
     args = p.parse_args()
     return build(check=args.check)
 

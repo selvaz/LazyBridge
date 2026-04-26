@@ -140,10 +140,7 @@ class DeepSeekProvider(OpenAIProvider):
         """True when the request will run in thinking/reasoning mode."""
         if model in _REASONING_MODELS:
             return True
-        return (
-            model in _THINKING_CAPABLE_MODELS
-            and bool(request.thinking and request.thinking.enabled)
-        )
+        return model in _THINKING_CAPABLE_MODELS and bool(request.thinking and request.thinking.enabled)
 
     def _resolve_thinking(self, request: CompletionRequest) -> CompletionRequest:
         """Validate that thinking is only requested on models that support it.

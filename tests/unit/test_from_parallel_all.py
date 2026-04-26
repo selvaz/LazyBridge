@@ -8,10 +8,8 @@ from lazybridge import (
     Step,
     from_parallel,
     from_parallel_all,
-    from_step,
 )
 from lazybridge.engines.plan import PlanCompileError, _sentinel_from_ref, _sentinel_to_ref
-from lazybridge.envelope import EnvelopeMetadata
 from lazybridge.testing import MockAgent
 
 
@@ -19,12 +17,16 @@ def _agents():
     return {
         "research": MockAgent(
             lambda env: f"FACT[{env.task[:60]}]",
-            name="research", description="research",
-            default_input_tokens=10, default_output_tokens=20, default_cost_usd=0.01,
+            name="research",
+            description="research",
+            default_input_tokens=10,
+            default_output_tokens=20,
+            default_cost_usd=0.01,
         ),
         "writer": MockAgent(
             lambda env: f"PROSE<<{env.text()[:300]}>>",
-            name="writer", description="writer",
+            name="writer",
+            description="writer",
         ),
     }
 
@@ -37,10 +39,10 @@ def _agents():
 def test_from_parallel_all_aggregates_three_branches() -> None:
     a = _agents()
     plan = Plan(
-        Step(a["research"], name="apple",  task="Apple HC",  parallel=True),
+        Step(a["research"], name="apple", task="Apple HC", parallel=True),
         Step(a["research"], name="google", task="Google HC", parallel=True),
-        Step(a["research"], name="meta",   task="Meta HC",   parallel=True),
-        Step(a["writer"],   name="report", task=from_parallel_all("apple")),
+        Step(a["research"], name="meta", task="Meta HC", parallel=True),
+        Step(a["writer"], name="report", task=from_parallel_all("apple")),
     )
     env = Agent.from_engine(plan)("ignored")
 
@@ -59,7 +61,7 @@ def test_from_parallel_all_preserves_declared_order() -> None:
         Step(a["research"], name="b", task="B", parallel=True),
         Step(a["research"], name="a", task="A", parallel=True),
         Step(a["research"], name="c", task="C", parallel=True),
-        Step(a["writer"],   name="report", task=from_parallel_all("b")),
+        Step(a["writer"], name="report", task=from_parallel_all("b")),
     )
     Agent.from_engine(plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
@@ -77,11 +79,11 @@ def test_from_parallel_all_text_join_visible_via_env_text() -> None:
     plan = Plan(
         Step(a["research"], name="x", task="X", parallel=True),
         Step(a["research"], name="y", task="Y", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel_all("x")),
+        Step(a["writer"], name="join", task=from_parallel_all("x")),
     )
     Agent.from_engine(plan)("ignored")
     env_in = a["writer"].calls[-1].env_in
-    assert env_in.text() == env_in.task        # both carry the join
+    assert env_in.text() == env_in.task  # both carry the join
     assert "[x]\nFACT[X]" in env_in.text()
     assert "[y]\nFACT[Y]" in env_in.text()
 
@@ -95,7 +97,7 @@ def test_from_parallel_all_costs_roll_up_via_history() -> None:
         Step(a["research"], name="r1", task="t1", parallel=True),
         Step(a["research"], name="r2", task="t2", parallel=True),
         Step(a["research"], name="r3", task="t3", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel_all("r1")),
+        Step(a["writer"], name="join", task=from_parallel_all("r1")),
     )
     final = Agent.from_engine(plan)("ignored")
     # Three research calls × 10 in / 20 out / 0.01 cost roll up into the
@@ -111,10 +113,10 @@ def test_from_parallel_all_only_band_when_followed_by_non_parallel() -> None:
     plan = Plan(
         Step(a["research"], name="b1", task="b1", parallel=True),
         Step(a["research"], name="b2", task="b2", parallel=True),
-        Step(a["research"], name="serial",   task="serial"),  # NOT parallel — ends band
+        Step(a["research"], name="serial", task="serial"),  # NOT parallel — ends band
         Step(a["research"], name="b3", task="b3", parallel=True),
         Step(a["research"], name="b4", task="b4", parallel=True),
-        Step(a["writer"],   name="join1", task=from_parallel_all("b1")),
+        Step(a["writer"], name="join1", task=from_parallel_all("b1")),
     )
     Agent.from_engine(plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
@@ -132,7 +134,7 @@ def test_compiler_rejects_from_parallel_all_to_unknown_step() -> None:
     a = _agents()
     plan = Plan(
         Step(a["research"], name="x", task="x", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel_all("missing")),
+        Step(a["writer"], name="join", task=from_parallel_all("missing")),
     )
     with pytest.raises(PlanCompileError, match="unknown step"):
         Agent.from_engine(plan)
@@ -141,7 +143,7 @@ def test_compiler_rejects_from_parallel_all_to_unknown_step() -> None:
 def test_compiler_rejects_from_parallel_all_forward_reference() -> None:
     a = _agents()
     plan = Plan(
-        Step(a["writer"],   name="join", task=from_parallel_all("future")),
+        Step(a["writer"], name="join", task=from_parallel_all("future")),
         Step(a["research"], name="future", task="x", parallel=True),
     )
     with pytest.raises(PlanCompileError, match="not earlier"):
@@ -153,7 +155,7 @@ def test_compiler_rejects_from_parallel_all_to_non_parallel_step() -> None:
     a = _agents()
     plan = Plan(
         Step(a["research"], name="not_parallel", task="x"),  # parallel=False
-        Step(a["writer"],   name="join", task=from_parallel_all("not_parallel")),
+        Step(a["writer"], name="join", task=from_parallel_all("not_parallel")),
     )
     with pytest.raises(PlanCompileError, match="non-parallel"):
         Agent.from_engine(plan)
@@ -179,7 +181,7 @@ def test_plan_to_dict_preserves_from_parallel_all() -> None:
     plan = Plan(
         Step(a["research"], name="r1", task="t1", parallel=True),
         Step(a["research"], name="r2", task="t2", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel_all("r1")),
+        Step(a["writer"], name="join", task=from_parallel_all("r1")),
     )
     d = plan.to_dict()
     join_step = next(s for s in d["steps"] if s["name"] == "join")
@@ -196,7 +198,7 @@ def test_from_parallel_single_branch_unchanged() -> None:
     plan = Plan(
         Step(a["research"], name="x", task="X", parallel=True),
         Step(a["research"], name="y", task="Y", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel("x")),
+        Step(a["writer"], name="join", task=from_parallel("x")),
     )
     Agent.from_engine(plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
@@ -214,7 +216,7 @@ def test_compiler_rejects_from_parallel_all_to_mid_band_member() -> None:
         Step(a["research"], name="b1", task="t1", parallel=True),
         Step(a["research"], name="b2", task="t2", parallel=True),  # mid-band
         Step(a["research"], name="b3", task="t3", parallel=True),
-        Step(a["writer"],   name="join", task=from_parallel_all("b2")),
+        Step(a["writer"], name="join", task=from_parallel_all("b2")),
     )
     with pytest.raises(PlanCompileError, match="FIRST member"):
         Agent.from_engine(plan)

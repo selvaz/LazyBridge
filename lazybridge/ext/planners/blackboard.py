@@ -9,10 +9,7 @@ the LLM revises freely by calling ``set_plan`` again. Use it for exploratory
 work where the shape emerges as you go.
 """
 
-from typing import Optional
-
 from lazybridge import Agent, LLMEngine, Tool
-
 
 BLACKBOARD_PLANNER_GUIDANCE = """\
 # How to handle a request
@@ -43,10 +40,10 @@ def make_blackboard_planner(
     agents: list[Agent],
     *,
     model: str = "claude-opus-4-7",
-    system: Optional[str] = None,
+    system: str | None = None,
     name: str = "blackboard_planner",
     verbose: bool = False,
-    verify: Optional[Agent] = None,
+    verify: Agent | None = None,
     max_verify: int = 3,
 ) -> Agent:
     """Planner that manages a shared todo-list blackboard.
@@ -71,18 +68,14 @@ def make_blackboard_planner(
         if not state["tasks"]:
             return "(no plan; call set_plan)"
         lines = [f"reasoning: {state['reasoning']}"]
-        for i, (t, d, r) in enumerate(
-            zip(state["tasks"], state["done"], state["results"])
-        ):
+        for i, (t, d, r) in enumerate(zip(state["tasks"], state["done"], state["results"])):
             mark = "[x]" if d else "[ ]"
             row = f"  {i}. {mark} {t}"
             if r:
                 row += f"\n       → {r}"
             lines.append(row)
         nxt = next((i for i, d in enumerate(state["done"]) if not d), None)
-        lines.append(
-            f"next: {nxt}" if nxt is not None else "all tasks done — reply to user"
-        )
+        lines.append(f"next: {nxt}" if nxt is not None else "all tasks done — reply to user")
         return "\n".join(lines)
 
     def set_plan(reasoning: str, tasks: list[str]) -> str:

@@ -51,7 +51,7 @@ Reading from a parallel band — three patterns
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,7 +68,6 @@ from lazybridge import (
 )
 from lazybridge.engines.plan import PlanCompileError
 
-
 # ---------------------------------------------------------------------------
 # Plan spec — what the planner LLM emits when calling execute_plan
 # ---------------------------------------------------------------------------
@@ -79,9 +78,7 @@ class StepSpec(BaseModel):
 
     name: str = Field(..., description="Unique step identifier; referenced by from_step.")
     agent: str = Field(..., description="Sub-agent name; must match one of the planner's agents.")
-    task_kind: Literal[
-        "literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"
-    ] = Field(
+    task_kind: Literal["literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"] = Field(
         default="from_prev",
         description=(
             "literal=use task_text; from_prev=output of preceding step "
@@ -91,14 +88,12 @@ class StepSpec(BaseModel):
             "starting at task_step into one labelled-text join."
         ),
     )
-    task_text: Optional[str] = Field(
-        default=None, description="Required when task_kind='literal'."
-    )
-    task_step: Optional[str] = Field(
+    task_text: str | None = Field(default=None, description="Required when task_kind='literal'.")
+    task_step: str | None = Field(
         default=None,
         description="Required when task_kind='from_step' or 'from_parallel'.",
     )
-    context_kind: Optional[Literal["from_step", "from_parallel"]] = Field(
+    context_kind: Literal["from_step", "from_parallel"] | None = Field(
         default=None,
         description=(
             "Optional secondary input pulled into the step's context. Useful "
@@ -108,9 +103,7 @@ class StepSpec(BaseModel):
             "doesn't deliver them; call the agents directly instead."
         ),
     )
-    context_step: Optional[str] = Field(
-        default=None, description="Required when context_kind is set."
-    )
+    context_step: str | None = Field(default=None, description="Required when context_kind is set.")
     parallel: bool = Field(
         default=False,
         description="If True, run concurrently with adjacent parallel siblings.",
@@ -144,21 +137,15 @@ class _PlanToolError(Exception):
 def _resolve_task(s: StepSpec) -> Any:
     if s.task_kind == "literal":
         if not s.task_text:
-            raise _PlanToolError(
-                f"Step {s.name!r}: task_kind='literal' requires task_text."
-            )
+            raise _PlanToolError(f"Step {s.name!r}: task_kind='literal' requires task_text.")
         return s.task_text
     if s.task_kind == "from_step":
         if not s.task_step:
-            raise _PlanToolError(
-                f"Step {s.name!r}: task_kind='from_step' requires task_step."
-            )
+            raise _PlanToolError(f"Step {s.name!r}: task_kind='from_step' requires task_step.")
         return from_step(s.task_step)
     if s.task_kind == "from_parallel":
         if not s.task_step:
-            raise _PlanToolError(
-                f"Step {s.name!r}: task_kind='from_parallel' requires task_step."
-            )
+            raise _PlanToolError(f"Step {s.name!r}: task_kind='from_parallel' requires task_step.")
         return from_parallel(s.task_step)
     if s.task_kind == "from_parallel_all":
         if not s.task_step:
@@ -174,9 +161,7 @@ def _resolve_context(s: StepSpec) -> Any:
     if s.context_kind is None:
         return None
     if not s.context_step:
-        raise _PlanToolError(
-            f"Step {s.name!r}: context_kind={s.context_kind!r} requires context_step."
-        )
+        raise _PlanToolError(f"Step {s.name!r}: context_kind={s.context_kind!r} requires context_step.")
     if s.context_kind == "from_parallel":
         return from_parallel(s.context_step)
     return from_step(s.context_step)
@@ -188,10 +173,7 @@ def _materialize(spec: PlanSpec, registry: dict[str, Agent]) -> Plan:
 
     unknown = sorted({s.agent for s in spec.steps if s.agent not in registry})
     if unknown:
-        raise _PlanToolError(
-            f"Unknown agent name(s) {unknown!r}. "
-            f"Available: {sorted(registry)!r}."
-        )
+        raise _PlanToolError(f"Unknown agent name(s) {unknown!r}. Available: {sorted(registry)!r}.")
 
     real_steps: list[Step] = []
     for s in spec.steps:
@@ -267,30 +249,27 @@ def _validate_step_addition(
     name: str,
     agent: str,
     task_kind: str,
-    task_text: Optional[str],
-    task_step: Optional[str],
-    context_kind: Optional[str],
-    context_step: Optional[str],
+    task_text: str | None,
+    task_step: str | None,
+    context_kind: str | None,
+    context_step: str | None,
     registry: dict[str, Agent],
-) -> Optional[str]:
+) -> str | None:
     """Return an error string, or ``None`` if the step is valid."""
     if agent not in registry:
-        return (
-            f"unknown agent {agent!r}. Available: {sorted(registry)!r}."
-        )
+        return f"unknown agent {agent!r}. Available: {sorted(registry)!r}."
     existing_names = {s.name for s in pip.steps}
     if name in existing_names:
         return f"duplicate step name {name!r}; existing: {sorted(existing_names)!r}."
     if task_kind == "literal":
         if not task_text:
-            return f"task_kind='literal' requires task_text."
+            return "task_kind='literal' requires task_text."
     elif task_kind in ("from_step", "from_parallel", "from_parallel_all"):
         if not task_step:
             return f"task_kind={task_kind!r} requires task_step."
         if task_step not in existing_names:
             return (
-                f"task_step={task_step!r} not yet defined "
-                f"(existing: {sorted(existing_names)!r}). Add that step first."
+                f"task_step={task_step!r} not yet defined (existing: {sorted(existing_names)!r}). Add that step first."
             )
         if task_kind == "from_parallel_all":
             # The named step must itself be parallel=True; PlanCompiler
@@ -310,17 +289,11 @@ def _validate_step_addition(
         )
     if context_kind is not None:
         if context_kind not in ("from_step", "from_parallel"):
-            return (
-                f"context_kind must be 'from_step' or 'from_parallel'; "
-                f"got {context_kind!r}."
-            )
+            return f"context_kind must be 'from_step' or 'from_parallel'; got {context_kind!r}."
         if not context_step:
             return f"context_kind={context_kind!r} requires context_step."
         if context_step not in existing_names:
-            return (
-                f"context_step={context_step!r} not yet defined "
-                f"(existing: {sorted(existing_names)!r})."
-            )
+            return f"context_step={context_step!r} not yet defined (existing: {sorted(existing_names)!r})."
     return None
 
 
@@ -384,10 +357,10 @@ def make_plan_builder_tools(
         name: str,
         agent: str,
         task_kind: Literal["literal", "from_prev", "from_step", "from_parallel"] = "from_prev",
-        task_text: Optional[str] = None,
-        task_step: Optional[str] = None,
-        context_kind: Optional[Literal["from_step", "from_parallel"]] = None,
-        context_step: Optional[str] = None,
+        task_text: str | None = None,
+        task_step: str | None = None,
+        context_kind: Literal["from_step", "from_parallel"] | None = None,
+        context_step: str | None = None,
         parallel: bool = False,
     ) -> str:
         """Append one step to a plan; validated immediately.
@@ -415,21 +388,30 @@ def make_plan_builder_tools(
             return f"REJECTED: unknown plan_id {plan_id!r}."
         pip = plans[plan_id]
         err = _validate_step_addition(
-            pip, name, agent, task_kind, task_text, task_step,
-            context_kind, context_step, registry,
+            pip,
+            name,
+            agent,
+            task_kind,
+            task_text,
+            task_step,
+            context_kind,
+            context_step,
+            registry,
         )
         if err:
             return f"REJECTED: {err}"
-        pip.steps.append(StepSpec(
-            name=name,
-            agent=agent,
-            task_kind=task_kind,
-            task_text=task_text,
-            task_step=task_step,
-            context_kind=context_kind,
-            context_step=context_step,
-            parallel=parallel,
-        ))
+        pip.steps.append(
+            StepSpec(
+                name=name,
+                agent=agent,
+                task_kind=task_kind,
+                task_text=task_text,
+                task_step=task_step,
+                context_kind=context_kind,
+                context_step=context_step,
+                parallel=parallel,
+            )
+        )
         return f"ok ({len(pip.steps)} step(s) in plan {plan_id})"
 
     # --- inspect_plan ----------------------------------------------------
@@ -462,7 +444,7 @@ def make_plan_builder_tools(
             return _format_compile_error(e, registry)
         try:
             env = await runner.run(spec.task)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return f"PLAN_RUNTIME_ERROR: {type(e).__name__}: {e}"
         if env.error:
             return f"PLAN_RUNTIME_ERROR: {env.error.message}"
@@ -478,8 +460,7 @@ def make_plan_builder_tools(
 
     # Customise descriptions so the LLM sees the registry inline.
     agents_summary = "Available sub-agents:\n" + "\n".join(
-        f"- {n}: {(a.description or '').strip() or 'no description'}"
-        for n, a in registry.items()
+        f"- {n}: {(a.description or '').strip() or 'no description'}" for n, a in registry.items()
     )
 
     add_step.__doc__ = (add_step.__doc__ or "") + "\n\n" + agents_summary
@@ -685,10 +666,10 @@ def make_planner(
     agents: list[Agent],
     *,
     model: str = "claude-opus-4-7",
-    system: Optional[str] = None,
+    system: str | None = None,
     name: str = "planner",
     verbose: bool = False,
-    verify: Optional[Agent] = None,
+    verify: Agent | None = None,
     max_verify: int = 3,
 ) -> Agent:
     """Build a planner :class:`Agent` over the given sub-agents.
@@ -762,4 +743,3 @@ EXACTLY one of:
 
 Do NOT rewrite the answer. Only judge it.
 """
-

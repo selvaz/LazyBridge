@@ -69,19 +69,20 @@ def test_validate_list_of_models_from_json_string():
 
 def test_validate_dict_str_to_model():
     out = validate_payload_against_output_type(
-        {"first": {"title": "a", "score": 0.1}}, dict[str, Hit],
+        {"first": {"title": "a", "score": 0.1}},
+        dict[str, Hit],
     )
     assert isinstance(out["first"], Hit)
 
 
 def test_validate_str_output_passes_through():
     assert validate_payload_against_output_type("anything", str) == "anything"
-    assert validate_payload_against_output_type(42, str) == 42   # no validation
+    assert validate_payload_against_output_type(42, str) == 42  # no validation
 
 
 def test_validate_raises_on_mismatch():
     with pytest.raises(ValidationError):
-        validate_payload_against_output_type({"title": "a"}, Hit)   # score missing
+        validate_payload_against_output_type({"title": "a"}, Hit)  # score missing
 
 
 # ---------------------------------------------------------------------------
@@ -113,10 +114,12 @@ class _EngineReturning:
 def test_agent_retries_on_invalid_structured_payload():
     """Engine returns a broken dict first, then a valid one; Agent's
     validation-retry loop should yield the valid Hit."""
-    engine = _EngineReturning([
-        {"title": "x"},                  # missing score — raises ValidationError
-        {"title": "ok", "score": 0.9},   # valid
-    ])
+    engine = _EngineReturning(
+        [
+            {"title": "x"},  # missing score — raises ValidationError
+            {"title": "ok", "score": 0.9},  # valid
+        ]
+    )
     agent = Agent(engine=engine, output=Hit, max_output_retries=2, name="a")
 
     env = agent("task")
@@ -129,11 +132,13 @@ def test_agent_retries_on_invalid_structured_payload():
 def test_agent_returns_last_invalid_payload_after_max_retries():
     """All attempts produce invalid payloads → Agent gives up and returns
     the last attempt unchanged (so the caller sees it in ``.payload``)."""
-    engine = _EngineReturning([
-        {"title": "a"},    # invalid
-        {"title": "b"},    # invalid
-        {"title": "c"},    # invalid
-    ])
+    engine = _EngineReturning(
+        [
+            {"title": "a"},  # invalid
+            {"title": "b"},  # invalid
+            {"title": "c"},  # invalid
+        ]
+    )
     agent = Agent(engine=engine, output=Hit, max_output_retries=2, name="a")
 
     env = agent("task")
@@ -146,10 +151,12 @@ def test_agent_returns_last_invalid_payload_after_max_retries():
 def test_agent_output_validator_rejects_forces_retry():
     """output_validator returning None/True is fine; raising forces a
     retry with the error fed back as feedback context."""
-    engine = _EngineReturning([
-        Hit(title="bad", score=0.0),
-        Hit(title="good", score=0.9),
-    ])
+    engine = _EngineReturning(
+        [
+            Hit(title="bad", score=0.0),
+            Hit(title="good", score=0.9),
+        ]
+    )
 
     def validator(hit: Hit) -> Hit:
         if hit.score < 0.5:
@@ -157,9 +164,11 @@ def test_agent_output_validator_rejects_forces_retry():
         return hit
 
     agent = Agent(
-        engine=engine, output=Hit,
+        engine=engine,
+        output=Hit,
         output_validator=validator,
-        max_output_retries=2, name="a",
+        max_output_retries=2,
+        name="a",
     )
     env = agent("task")
     assert isinstance(env.payload, Hit)
@@ -168,9 +177,11 @@ def test_agent_output_validator_rejects_forces_retry():
 
 
 def test_agent_list_output_validates_collection():
-    engine = _EngineReturning([
-        [{"title": "a", "score": 0.1}, {"title": "b", "score": 0.2}],
-    ])
+    engine = _EngineReturning(
+        [
+            [{"title": "a", "score": 0.1}, {"title": "b", "score": 0.2}],
+        ]
+    )
     agent = Agent(engine=engine, output=list[Hit], name="a")
     env = agent("task")
     assert isinstance(env.payload, list)
@@ -179,9 +190,11 @@ def test_agent_list_output_validates_collection():
 
 def test_agent_str_output_skips_validation_retry_loop():
     """When output=str, the validation retry path is bypassed entirely."""
-    engine = _EngineReturning([
-        "anything",
-    ])
+    engine = _EngineReturning(
+        [
+            "anything",
+        ]
+    )
     agent = Agent(engine=engine, output=str, max_output_retries=2)
     env = agent("task")
     assert env.payload == "anything"

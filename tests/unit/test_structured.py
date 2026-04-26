@@ -114,9 +114,7 @@ def test_parse_missing_required_raises():
     # required fields: ..."; jsonschema says "'name' is a required
     # property".  Both indicate the same failure; the test must not
     # break depending on whether jsonschema happens to be installed.
-    with pytest.raises(
-        StructuredOutputError, match=r"missing required|is a required property"
-    ):
+    with pytest.raises(StructuredOutputError, match=r"missing required|is a required property"):
         parse_structured_output('{"other": "value"}', schema)
 
 

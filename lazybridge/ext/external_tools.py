@@ -42,7 +42,7 @@ class ExternalToolSpec:
     strict: bool = False
 
     @classmethod
-    def from_mapping(cls, raw: Mapping[str, Any]) -> "ExternalToolSpec":
+    def from_mapping(cls, raw: Mapping[str, Any]) -> ExternalToolSpec:
         """Build a spec from common external registry shapes.
 
         Accepted inputs:
@@ -155,7 +155,7 @@ class JsonHttpExternalToolClient:
 
         request = urllib.request.Request(url, data=encoded, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - user-provided gateway URL
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = response.read()
                 if not data:
                     return None
@@ -206,7 +206,9 @@ class ExternalToolProvider:
 
     def list_specs(self) -> list[ExternalToolSpec]:
         raw_specs = self._specs if self._specs is not None else list(self.client.list_tools())
-        specs = [spec if isinstance(spec, ExternalToolSpec) else ExternalToolSpec.from_mapping(spec) for spec in raw_specs]
+        specs = [
+            spec if isinstance(spec, ExternalToolSpec) else ExternalToolSpec.from_mapping(spec) for spec in raw_specs
+        ]
         if self.include is not None:
             specs = [spec for spec in specs if spec.name in self.include]
         if self.exclude:

@@ -136,10 +136,10 @@ class OpenAIProvider(BaseProvider):
     # Tier aliases.  GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
     # so medium/cheap continue to point at the GPT-5.4 family.
     _TIER_ALIASES = {
-        "top": "gpt-5.5-pro",      # extended reasoning flagship
-        "expensive": "gpt-5.5",    # general flagship (released 2026-04-23)
+        "top": "gpt-5.5-pro",  # extended reasoning flagship
+        "expensive": "gpt-5.5",  # general flagship (released 2026-04-23)
         "medium": "gpt-5.4-mini",  # fast mid-range; no 5.5-mini yet
-        "cheap": "gpt-5.4-nano",   # best value; no 5.5-nano yet
+        "cheap": "gpt-5.4-nano",  # best value; no 5.5-nano yet
         "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
@@ -178,11 +178,7 @@ class OpenAIProvider(BaseProvider):
                 cached = max(0, min(cached_input_tokens, input_tokens))
                 uncached = input_tokens - cached
                 cached_rate = cached_price if cached_price is not None else in_price
-                return (
-                    uncached * in_price
-                    + cached * cached_rate
-                    + output_tokens * out_price
-                ) / 1_000_000
+                return (uncached * in_price + cached * cached_rate + output_tokens * out_price) / 1_000_000
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
@@ -889,10 +885,7 @@ class OpenAIProvider(BaseProvider):
                 else:
                     by_id[key] = dict(v)
                     ordered.append(by_id[key])
-            return [
-                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                for v in ordered
-            ]
+            return [ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"])) for v in ordered]
 
         for chunk in self._client.chat.completions.create(**params):
             if chunk.usage:

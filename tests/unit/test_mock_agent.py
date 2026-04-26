@@ -32,7 +32,6 @@ from lazybridge.sentinels import from_prev
 from lazybridge.session import Session
 from lazybridge.testing import DEFAULT, MockAgent, MockCall
 
-
 # ---------------------------------------------------------------------------
 # 1. Response specifications
 # ---------------------------------------------------------------------------
@@ -469,8 +468,10 @@ async def test_plan_aggregates_metadata_on_error_path_too() -> None:
     prior-step nested aggregation — so callers can see what was spent
     before the failure."""
     a = MockAgent(
-        "a-out", name="a",
-        default_input_tokens=200, default_output_tokens=80,
+        "a-out",
+        name="a",
+        default_input_tokens=200,
+        default_output_tokens=80,
         default_cost_usd=0.004,
     )
     b = MockAgent(
@@ -497,10 +498,8 @@ async def test_plan_aggregation_transitive_across_three_steps() -> None:
     """Aggregation is transitive — a three-step chain's outer envelope
     sees step 1 + step 2 in nested_* (step 3 is the leaf / direct)."""
     a = MockAgent("a", name="a", default_input_tokens=10, default_output_tokens=5)
-    b = MockAgent(lambda env: f"b({env.text()})", name="b",
-                  default_input_tokens=20, default_output_tokens=10)
-    c = MockAgent(lambda env: f"c({env.text()})", name="c",
-                  default_input_tokens=40, default_output_tokens=15)
+    b = MockAgent(lambda env: f"b({env.text()})", name="b", default_input_tokens=20, default_output_tokens=10)
+    c = MockAgent(lambda env: f"c({env.text()})", name="c", default_input_tokens=40, default_output_tokens=15)
 
     plan = Plan(
         Step(target=a, name="a"),
@@ -513,7 +512,7 @@ async def test_plan_aggregation_transitive_across_three_steps() -> None:
     assert env.metadata.input_tokens == 40
     assert env.metadata.output_tokens == 15
     # Nested = a + b.
-    assert env.metadata.nested_input_tokens == 30   # 10 + 20
+    assert env.metadata.nested_input_tokens == 30  # 10 + 20
     assert env.metadata.nested_output_tokens == 15  # 5 + 10
 
 
@@ -542,15 +541,10 @@ def test_session_propagates_to_mock_agent_when_used_as_tool() -> None:
     from lazybridge.agent import _safe_register_agent, _safe_register_tool_edge
 
     for raw in outer._tools_raw:
-        if (
-            getattr(raw, "_is_lazy_agent", False)
-            and getattr(raw, "session", None) is None
-        ):
+        if getattr(raw, "_is_lazy_agent", False) and getattr(raw, "session", None) is None:
             raw.session = outer.session
             _safe_register_agent(outer.session, raw)
-            _safe_register_tool_edge(
-                outer.session, outer, raw, label="as_tool"
-            )
+            _safe_register_tool_edge(outer.session, outer, raw, label="as_tool")
 
     assert inner.session is sess
 

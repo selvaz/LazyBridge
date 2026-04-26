@@ -30,7 +30,6 @@ from lazybridge.envelope import Envelope
 from lazybridge.sentinels import from_step
 from lazybridge.session import EventType, Session
 
-
 # ---------------------------------------------------------------------------
 # PlanCompiler hardening
 # ---------------------------------------------------------------------------
@@ -47,38 +46,46 @@ def _validate(steps: list[Step]) -> None:
 
 def test_plan_compiler_rejects_duplicate_step_names() -> None:
     with pytest.raises(PlanCompileError, match="duplicate step name"):
-        _validate([
-            _noop_tool_step("a"),
-            _noop_tool_step("b"),
-            _noop_tool_step("a"),  # duplicate
-        ])
+        _validate(
+            [
+                _noop_tool_step("a"),
+                _noop_tool_step("b"),
+                _noop_tool_step("a"),  # duplicate
+            ]
+        )
 
 
 def test_plan_compiler_rejects_forward_from_step_reference() -> None:
     """from_step() must point at a step that comes before the using step."""
-    with pytest.raises(PlanCompileError, match="from_step.*not earlier"):
-        _validate([
-            _noop_tool_step("a"),
-            _noop_tool_step("b", task=from_step("c")),
-            _noop_tool_step("c"),
-        ])
+    with pytest.raises(PlanCompileError, match=r"from_step.*not earlier"):
+        _validate(
+            [
+                _noop_tool_step("a"),
+                _noop_tool_step("b", task=from_step("c")),
+                _noop_tool_step("c"),
+            ]
+        )
 
 
 def test_plan_compiler_rejects_self_from_step_reference() -> None:
     """A step referencing itself via from_step() is also forward-pointing."""
-    with pytest.raises(PlanCompileError, match="from_step.*not earlier"):
-        _validate([
-            _noop_tool_step("a"),
-            _noop_tool_step("b", task=from_step("b")),
-        ])
+    with pytest.raises(PlanCompileError, match=r"from_step.*not earlier"):
+        _validate(
+            [
+                _noop_tool_step("a"),
+                _noop_tool_step("b", task=from_step("b")),
+            ]
+        )
 
 
 def test_plan_compiler_accepts_backward_from_step_reference() -> None:
     """Backward ``from_step()`` is the supported case — must compile."""
-    _validate([
-        _noop_tool_step("a"),
-        _noop_tool_step("b", task=from_step("a")),
-    ])
+    _validate(
+        [
+            _noop_tool_step("a"),
+            _noop_tool_step("b", task=from_step("a")),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------

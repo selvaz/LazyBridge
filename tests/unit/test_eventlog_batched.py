@@ -21,7 +21,6 @@ import pytest
 
 from lazybridge.session import EventType, Session
 
-
 # ---------------------------------------------------------------------------
 # Construction validation
 # ---------------------------------------------------------------------------

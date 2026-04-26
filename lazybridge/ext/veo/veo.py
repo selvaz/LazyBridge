@@ -166,7 +166,7 @@ def veo_tool(
     output_dir: Annotated[str, "Directory for generated .mp4 files."] = "generated_videos",
     poll_interval_seconds: Annotated[int, "Seconds between operation status polls."] = 10,
     timeout_seconds: Annotated[int, "Maximum total wait time in seconds."] = 900,
-) -> "Tool":
+) -> Tool:
     """
     Create a Tool that generates videos with Google Veo.
 

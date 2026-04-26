@@ -47,9 +47,7 @@ class Store:
             # refactor wires a SQLite call into the in-memory path.
             # Fail fast with a real error instead of handing back
             # ``None`` behind a ``type: ignore``.
-            raise RuntimeError(
-                "Store._conn called in in-memory mode — use the _mem path."
-            )
+            raise RuntimeError("Store._conn called in in-memory mode — use the _mem path.")
         if self._closed:
             raise RuntimeError("Store is closed")
         if not hasattr(self._local, "conn"):
@@ -142,7 +140,9 @@ class Store:
             row = self._conn().execute("SELECT * FROM store WHERE key=?", (key,)).fetchone()
             if not row:
                 return None
-            return StoreEntry(key=row["key"], value=json.loads(row["value"]), written_at=row["written_at"], agent_id=row["agent_id"])
+            return StoreEntry(
+                key=row["key"], value=json.loads(row["value"]), written_at=row["written_at"], agent_id=row["agent_id"]
+            )
         with self._lock:
             return self._mem.get(key)
 
@@ -175,6 +175,15 @@ class Store:
             return [r["key"] for r in rows]
         with self._lock:
             return list(self._mem.keys())
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.keys()
+
+    def __len__(self) -> int:
+        return len(self.keys())
 
     def compare_and_swap(
         self,
@@ -218,16 +227,13 @@ class Store:
         with self._lock:
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute(
-                    "SELECT value FROM store WHERE key=?", (key,)
-                ).fetchone()
+                row = conn.execute("SELECT value FROM store WHERE key=?", (key,)).fetchone()
                 cur = json.loads(row["value"]) if row else None
                 if not _json_eq(cur, expected):
                     conn.execute("ROLLBACK")
                     return False
                 conn.execute(
-                    "INSERT OR REPLACE INTO store (key, value, written_at, "
-                    "agent_id) VALUES (?,?,?,?)",
+                    "INSERT OR REPLACE INTO store (key, value, written_at, agent_id) VALUES (?,?,?,?)",
                     (key, serialised_new, time.time(), agent_id),
                 )
                 conn.commit()

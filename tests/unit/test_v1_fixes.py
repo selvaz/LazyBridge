@@ -13,9 +13,11 @@ from lazybridge.tools import Tool, build_tool_map
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_agent(response: str = "hello", *, name: str = "agent") -> Agent:
     """Agent whose engine is mocked to return a fixed response."""
     from lazybridge.engines.llm import LLMEngine
+
     engine = LLMEngine.__new__(LLMEngine)
     engine.model = "claude-opus-4-7"
     engine.thinking = False
@@ -27,9 +29,11 @@ def _make_agent(response: str = "hello", *, name: str = "agent") -> Agent:
     engine._agent_name = name
 
     async def _fake_run(env, *, tools, output_type, memory, session):
-        return Envelope(task=env.task, payload=response,
-                        metadata=EnvelopeMetadata(input_tokens=10, output_tokens=20,
-                                                  cost_usd=0.001))
+        return Envelope(
+            task=env.task,
+            payload=response,
+            metadata=EnvelopeMetadata(input_tokens=10, output_tokens=20, cost_usd=0.001),
+        )
 
     async def _fake_stream(env, *, tools, output_type, memory, session):
         for ch in response:
@@ -55,6 +59,7 @@ def _make_agent(response: str = "hello", *, name: str = "agent") -> Agent:
 
 
 # ── 1. agent.as_tool() ────────────────────────────────────────────────────────
+
 
 class TestAsToolMethod:
     def test_returns_tool(self):
@@ -88,7 +93,7 @@ class TestAsToolMethod:
         result = asyncio.run(t.run(task="question"))
         assert isinstance(result, Envelope)
         assert result.text() == "the answer"
-        assert str(result) == "the answer"    # __str__ falls through to text()
+        assert str(result) == "the answer"  # __str__ falls through to text()
         assert t.returns_envelope is True
 
     def test_tool_definition_has_task_param(self):
@@ -105,6 +110,7 @@ class TestAsToolMethod:
 
 # ── 2. Session.usage_summary() ────────────────────────────────────────────────
 
+
 class TestUsageSummary:
     def test_empty_session(self):
         sess = Session()
@@ -118,12 +124,8 @@ class TestUsageSummary:
         sess = Session()
         run_id = "run-1"
         sess.emit(EventType.AGENT_START, {"agent_name": "researcher"}, run_id=run_id)
-        sess.emit(EventType.MODEL_RESPONSE,
-                  {"input_tokens": 100, "output_tokens": 50, "cost_usd": 0.01},
-                  run_id=run_id)
-        sess.emit(EventType.MODEL_RESPONSE,
-                  {"input_tokens": 200, "output_tokens": 80, "cost_usd": 0.02},
-                  run_id=run_id)
+        sess.emit(EventType.MODEL_RESPONSE, {"input_tokens": 100, "output_tokens": 50, "cost_usd": 0.01}, run_id=run_id)
+        sess.emit(EventType.MODEL_RESPONSE, {"input_tokens": 200, "output_tokens": 80, "cost_usd": 0.02}, run_id=run_id)
 
         s = sess.usage_summary()
         assert s["total"]["input_tokens"] == 300
@@ -135,9 +137,11 @@ class TestUsageSummary:
         for i, name in enumerate(["agent_a", "agent_b"]):
             rid = f"run-{i}"
             sess.emit(EventType.AGENT_START, {"agent_name": name}, run_id=rid)
-            sess.emit(EventType.MODEL_RESPONSE,
-                      {"input_tokens": 10 * (i + 1), "output_tokens": 5, "cost_usd": 0.001},
-                      run_id=rid)
+            sess.emit(
+                EventType.MODEL_RESPONSE,
+                {"input_tokens": 10 * (i + 1), "output_tokens": 5, "cost_usd": 0.001},
+                run_id=rid,
+            )
 
         s = sess.usage_summary()
         assert "agent_a" in s["by_agent"]
@@ -148,9 +152,7 @@ class TestUsageSummary:
     def test_by_run_breakdown(self):
         sess = Session()
         sess.emit(EventType.AGENT_START, {"agent_name": "x"}, run_id="r1")
-        sess.emit(EventType.MODEL_RESPONSE,
-                  {"input_tokens": 5, "output_tokens": 3, "cost_usd": 0.0},
-                  run_id="r1")
+        sess.emit(EventType.MODEL_RESPONSE, {"input_tokens": 5, "output_tokens": 3, "cost_usd": 0.0}, run_id="r1")
         s = sess.usage_summary()
         assert "r1" in s["by_run"]
         assert s["by_run"]["r1"]["input_tokens"] == 5
@@ -158,36 +160,39 @@ class TestUsageSummary:
     def test_null_cost_treated_as_zero(self):
         sess = Session()
         sess.emit(EventType.AGENT_START, {"agent_name": "x"}, run_id="r")
-        sess.emit(EventType.MODEL_RESPONSE,
-                  {"input_tokens": 1, "output_tokens": 1, "cost_usd": None},
-                  run_id="r")
+        sess.emit(EventType.MODEL_RESPONSE, {"input_tokens": 1, "output_tokens": 1, "cost_usd": None}, run_id="r")
         s = sess.usage_summary()
         assert s["total"]["cost_usd"] == 0.0
 
 
 # ── 3. LLMEngine native_tools ─────────────────────────────────────────────────
 
+
 class TestNativeTools:
     def test_native_tools_stored(self):
         from lazybridge.core.types import NativeTool
         from lazybridge.engines.llm import LLMEngine
+
         engine = LLMEngine("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH])
         assert NativeTool.WEB_SEARCH in engine.native_tools
 
     def test_native_tools_from_str(self):
         from lazybridge.core.types import NativeTool
         from lazybridge.engines.llm import LLMEngine
+
         engine = LLMEngine("claude-opus-4-7", native_tools=["web_search"])
         assert engine.native_tools[0] == NativeTool.WEB_SEARCH
 
     def test_native_tools_empty_default(self):
         from lazybridge.engines.llm import LLMEngine
+
         engine = LLMEngine("claude-opus-4-7")
         assert engine.native_tools == []
 
     def test_native_tools_attribute_set(self):
         from lazybridge.core.types import NativeTool
         from lazybridge.engines.llm import LLMEngine
+
         engine = LLMEngine("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH, "code_execution"])
         assert len(engine.native_tools) == 2
         assert NativeTool.WEB_SEARCH in engine.native_tools
@@ -195,6 +200,7 @@ class TestNativeTools:
 
 
 # ── 4. stream() full loop ─────────────────────────────────────────────────────
+
 
 class TestStreamLoop:
     def test_stream_yields_tokens(self):
@@ -223,6 +229,7 @@ class TestStreamLoop:
         import inspect
 
         from lazybridge.engines.llm import LLMEngine
+
         sig = inspect.signature(LLMEngine.stream)
         params = list(sig.parameters.keys())
         assert "env" in params
@@ -232,6 +239,7 @@ class TestStreamLoop:
 
 
 # ── 5. sources= robustification ──────────────────────────────────────────────
+
 
 class TestSourcesInjection:
     def test_store_as_source(self):
@@ -314,6 +322,7 @@ class TestSourcesInjection:
 
 # ── 6. _ParallelAgent semaphore fix ──────────────────────────────────────────
 
+
 class TestParallelAgent:
     def test_parallel_returns_list(self):
         a1 = _make_agent("result1", name="a1")
@@ -337,8 +346,10 @@ class TestParallelAgent:
 
         class _BoomEngine:
             _agent_name = "bad"
+
             async def run(self, env, *, tools, output_type, memory, session):
                 raise RuntimeError("boom")
+
             async def stream(self, *a, **k):
                 raise NotImplementedError
 

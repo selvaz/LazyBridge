@@ -103,7 +103,7 @@ def test_tool_run_sync_on_agent_as_tool_returns_envelope_with_text():
     out = inner_tool.run_sync(task="hello")
     assert isinstance(out, Envelope)
     assert out.text() == "fake:hello"
-    assert str(out) == "fake:hello"   # Envelope.__str__ safety net
+    assert str(out) == "fake:hello"  # Envelope.__str__ safety net
     assert inner_tool.returns_envelope is True
 
 
@@ -122,6 +122,7 @@ class _EchoEngine:
 
     async def run(self, env, *, tools, output_type, memory, session):
         from lazybridge.envelope import Envelope
+
         # If there's exactly one tool, call it with the task — simulates an
         # LLM agent that decided to delegate.  Otherwise just echo.
         if len(tools) == 1:
@@ -163,8 +164,7 @@ def test_nested_agents_share_outer_session_by_default():
         return query
 
     middle = Agent(engine=_EchoEngine("m"), tools=[leaf], name="middle")
-    Agent(engine=_EchoEngine("o"), tools=[middle], name="outer",
-          session=sess)
+    Agent(engine=_EchoEngine("o"), tools=[middle], name="outer", session=sess)
 
     # Middle inherited outer's session; leaf is a plain callable so it
     # doesn't have one.
@@ -192,6 +192,7 @@ def test_same_tools_list_works_on_llm_and_supervisor_engines():
     Agents without API divergence.  Only observable behaviour differs —
     the LLM decides when to invoke tools, the supervisor lets a human.
     """
+
     def calc(x: str) -> str:
         """Return x doubled."""
         return f"calc({x})"

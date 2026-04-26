@@ -124,7 +124,7 @@ class Agent:
         # Useful for provider redundancy: Agent("claude-opus-4-7", fallback=Agent("gpt-4o")).
         # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
         # same envelope, so it should be configured with compatible output= / tools=.
-        fallback: "Agent | None" = _UNSET,
+        fallback: Agent | None = _UNSET,
         # Prompt caching — when True, marks the static prefix (system
         # prompt + tools) as cacheable so providers that support it
         # (Anthropic today; OpenAI/DeepSeek auto-cache; Google uses a
@@ -185,6 +185,7 @@ class Agent:
         # work the same as ``Agent("claude", native_tools=[...])``.
         if native_tools and hasattr(self.engine, "native_tools"):
             from lazybridge.core.types import NativeTool
+
             resolved = [NativeTool(t) if isinstance(t, str) else t for t in native_tools]
             # Merge without dup — preserve order of existing + append new.
             existing = list(getattr(self.engine, "native_tools", []) or [])
@@ -237,10 +238,7 @@ class Agent:
                 # MockAgent from lazybridge.testing, user subclasses) with
                 # the ``_is_lazy_agent`` marker gets the outer session
                 # propagated when it has none of its own.
-                if (
-                    getattr(raw, "_is_lazy_agent", False)
-                    and getattr(raw, "session", None) is None
-                ):
+                if getattr(raw, "_is_lazy_agent", False) and getattr(raw, "session", None) is None:
                     raw.session = self.session
                     _safe_register_agent(self.session, raw)
                     _safe_register_tool_edge(self.session, self, raw, label="as_tool")
@@ -280,9 +278,7 @@ class Agent:
         try:
             return await asyncio.wait_for(self._run_body(task), timeout=timeout)
         except TimeoutError:
-            return Envelope.error_envelope(
-                TimeoutError(f"Agent.run() exceeded timeout={timeout}s")
-            )
+            return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
 
     async def _run_body(self, task: str | Envelope) -> Envelope:
         env = self._to_envelope(task)
@@ -293,11 +289,11 @@ class Agent:
             if not action.allowed:
                 return Envelope.error_envelope(ValueError(action.message or "Blocked by guard"))
             if action.modified_text is not None:
-                env = Envelope(task=action.modified_text, context=env.context,
-                               payload=action.modified_text)
+                env = Envelope(task=action.modified_text, context=env.context, payload=action.modified_text)
 
         if self.verify:
             from lazybridge._verify import verify_with_retry
+
             result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify)
         else:
             result = await self._run_engine(env)
@@ -311,11 +307,11 @@ class Agent:
             action = await self.guard.acheck_output(result.text())
             if not action.allowed:
                 from lazybridge.envelope import ErrorInfo
+
                 result = Envelope(
                     task=result.task,
                     payload=result.payload,
-                    error=ErrorInfo(type="GuardBlocked",
-                                   message=action.message or "Output blocked"),
+                    error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
                     metadata=result.metadata,
                 )
 
@@ -506,16 +502,21 @@ class Agent:
         effective_desc = description or self.description or f"Run the {effective_name} agent."
 
         if verify is None:
+
             async def _run(task: str) -> Envelope:
                 return await agent.run(task)
         else:
+
             async def _run(task: str) -> Envelope:  # type: ignore[misc]
-                from lazybridge.envelope import Envelope as _Env
                 from lazybridge._verify import verify_with_retry
+                from lazybridge.envelope import Envelope as _Env
 
                 env = _Env.from_task(str(task))
                 return await verify_with_retry(
-                    agent, env, verify, max_verify=max_verify,
+                    agent,
+                    env,
+                    verify,
+                    max_verify=max_verify,
                 )
 
         _run.__name__ = effective_name
@@ -669,14 +670,17 @@ def _safe_register_agent(session: Any, agent: Agent) -> None:
         import warnings
 
         warnings.warn(
-            f"session.register_agent({getattr(agent, 'name', '?')!r}) raised "
-            f"{type(exc).__name__}: {exc}",
+            f"session.register_agent({getattr(agent, 'name', '?')!r}) raised {type(exc).__name__}: {exc}",
             stacklevel=2,
         )
 
 
 def _safe_register_tool_edge(
-    session: Any, outer: Agent, inner: Agent, *, label: str,
+    session: Any,
+    outer: Agent,
+    inner: Agent,
+    *,
+    label: str,
 ) -> None:
     """Register a graph edge between two agents, warning on failure."""
     if session is None or not hasattr(session, "register_tool_edge"):
@@ -796,10 +800,10 @@ class _ParallelAgent:
                     return await _coro()
             return await _coro()
 
-        results = await asyncio.gather(*[_run_one(a) for a in self.agents],
-                                       return_exceptions=True)
+        results = await asyncio.gather(*[_run_one(a) for a in self.agents], return_exceptions=True)
         return [
-            r if isinstance(r, Envelope)
+            r
+            if isinstance(r, Envelope)
             else Envelope.error_envelope(r if isinstance(r, Exception) else RuntimeError(str(r)))
             for r in results
         ]

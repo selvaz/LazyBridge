@@ -60,16 +60,25 @@ _DATASET_MACRO_RE = re.compile(
 # These are only allowed in the internally-generated expanded SQL.
 # Used both by the AST walker (exact name match) and by the regex
 # fallback when sqlglot is unavailable.
-_FORBIDDEN_FUNC_NAMES: frozenset[str] = frozenset({
-    "read_parquet", "read_csv", "read_csv_auto",
-    "read_json", "read_json_auto",
-    "read_text", "read_blob",
-    "st_read",
-    "iceberg_scan", "delta_scan",
-    "parquet_scan", "parquet_metadata", "parquet_schema",
-    "glob",
-    "http_get",
-})
+_FORBIDDEN_FUNC_NAMES: frozenset[str] = frozenset(
+    {
+        "read_parquet",
+        "read_csv",
+        "read_csv_auto",
+        "read_json",
+        "read_json_auto",
+        "read_text",
+        "read_blob",
+        "st_read",
+        "iceberg_scan",
+        "delta_scan",
+        "parquet_scan",
+        "parquet_metadata",
+        "parquet_schema",
+        "glob",
+        "http_get",
+    }
+)
 
 # Function-name prefixes that should always be rejected (covers
 # httpfs_*, s3_*, gcs_* helper families that we don't want to
@@ -125,18 +134,40 @@ def _path_like(value: str) -> bool:
         return True
     # URI schemes DuckDB knows about.
     lowered = value.lower()
-    if any(lowered.startswith(p) for p in (
-        "http://", "https://", "s3://", "gcs://", "azure://", "file://",
-        "hdfs://", "abfs://", "abfss://", "r2://",
-    )):
+    if any(
+        lowered.startswith(p)
+        for p in (
+            "http://",
+            "https://",
+            "s3://",
+            "gcs://",
+            "azure://",
+            "file://",
+            "hdfs://",
+            "abfs://",
+            "abfss://",
+            "r2://",
+        )
+    ):
         return True
     # Filename-with-extension heuristic — DuckDB auto-detects
     # parquet/csv/json/etc. by suffix.
     if "." in value and not value.startswith("'"):
         suffix = value.rsplit(".", 1)[-1].lower()
         if suffix in {
-            "parquet", "csv", "tsv", "json", "jsonl", "ndjson",
-            "txt", "log", "gz", "zst", "bz2", "arrow", "ipc",
+            "parquet",
+            "csv",
+            "tsv",
+            "json",
+            "jsonl",
+            "ndjson",
+            "txt",
+            "log",
+            "gz",
+            "zst",
+            "bz2",
+            "arrow",
+            "ipc",
         }:
             return True
     return False
@@ -353,8 +384,7 @@ def _validate_with_sqlglot(sql: str) -> bool:
         raise ValueError("Empty SQL query")
     if len(statements) > 1:
         raise ValueError(
-            f"Multi-statement SQL is not allowed (got {len(statements)} statements). "
-            "Submit one SELECT query at a time."
+            f"Multi-statement SQL is not allowed (got {len(statements)} statements). Submit one SELECT query at a time."
         )
     root = statements[0]
 
@@ -372,8 +402,7 @@ def _validate_with_sqlglot(sql: str) -> bool:
     allowed_roots = (exp.Select, exp.Subquery, exp.With, exp.Union, exp.Intersect, exp.Except)
     if not isinstance(root, allowed_roots):
         raise ValueError(
-            f"Only SELECT / WITH (CTE) / set-operation statements are allowed. "
-            f"Got: {type(root).__name__}."
+            f"Only SELECT / WITH (CTE) / set-operation statements are allowed. Got: {type(root).__name__}."
         )
 
     # ── 4. Forbidden function calls ───────────────────────────────────
@@ -386,9 +415,7 @@ def _validate_with_sqlglot(sql: str) -> bool:
         name = _func_name(func).lower()
         if not name:
             continue
-        if name in _FORBIDDEN_FUNC_NAMES or any(
-            name.startswith(p) for p in _FORBIDDEN_FUNC_PREFIXES
-        ):
+        if name in _FORBIDDEN_FUNC_NAMES or any(name.startswith(p) for p in _FORBIDDEN_FUNC_PREFIXES):
             raise ValueError(
                 f"Direct file access function '{name}' is not allowed. "
                 "Use the dataset('name') macro to access registered datasets."
@@ -457,9 +484,7 @@ def _check_forbidden_types(root, exp_module) -> None:
     for node in root.walk():
         if isinstance(node, forbidden_classes):
             label = label_for.get(type(node), type(node).__name__)
-            raise ValueError(
-                f"Forbidden SQL construct: {label}. Only SELECT queries are allowed."
-            )
+            raise ValueError(f"Forbidden SQL construct: {label}. Only SELECT queries are allowed.")
 
 
 def _func_name(func) -> str:

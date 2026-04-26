@@ -263,9 +263,7 @@ class AgentRuntimeConfig:
 #: the ``tools`` list on the request, so typos fail fast at request
 #: construction instead of being silently ignored by the provider API
 #: (or worse, triggering a cryptic server-side error several RTTs in).
-_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset(
-    {"auto", "required", "none", "any"}
-)
+_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset({"auto", "required", "none", "any"})
 
 
 @dataclass

@@ -142,6 +142,8 @@ def quant_agent(
         print(resp.text())
         rt.close()
     """
+    from lazybridge import Agent, Tool
+    from lazybridge.engines.llm import LLMEngine
     from lazybridge.ext.data_downloader import (
         DataDownloader,
         TickerDatabase,
@@ -161,8 +163,6 @@ def quant_agent(
         stat_skill_tools,
         stat_tools,
     )
-    from lazybridge import Agent, Tool
-    from lazybridge.engines.llm import LLMEngine
 
     # Runtime
     rt = StatRuntime(artifacts_dir=artifacts_dir)

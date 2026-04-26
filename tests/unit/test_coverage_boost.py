@@ -9,24 +9,17 @@ import logging
 import tempfile
 from io import StringIO
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
 from lazybridge import Agent, Envelope, Session, Tool
 from lazybridge.core.structured import (
-    StructuredOutputError,
     _enum_match,
     _validate_schema,
     _validate_schema_subset,
     normalize_json_schema,
     validate_payload_against_output_type,
-)
-from lazybridge.ext.hil.human import (
-    _TerminalUI,
-    _WebUI,
-    _build_web_form,
 )
 from lazybridge.exporters import (
     CallbackExporter,
@@ -35,21 +28,23 @@ from lazybridge.exporters import (
     JsonFileExporter,
     StructuredLogExporter,
 )
+from lazybridge.ext.hil.human import (
+    _TerminalUI,
+)
 from lazybridge.skill_docs._build import (
     _parse_fragment,
     _parse_yaml_mini,
     _promote_lists,
     render_reference,
-    render_skill_decisions,
-    render_skill_errors,
-    render_skill_overview,
-    render_skill_tier,
     render_site_decision,
     render_site_decisions_index,
     render_site_guide,
     render_site_tier,
+    render_skill_decisions,
+    render_skill_errors,
+    render_skill_overview,
+    render_skill_tier,
 )
-
 
 # =============================================================================
 # skill_docs/_build.py — _parse_yaml_mini
@@ -188,9 +183,7 @@ class TestRenderFunctions:
         assert out == ""
 
     def test_render_site_tier_with_topics(self):
-        out = render_site_tier(
-            "basic", ["topic_a", "topic_b"], {"topic_a": "Topic A"}, "Intro"
-        )
+        out = render_site_tier("basic", ["topic_a", "topic_b"], {"topic_a": "Topic A"}, "Intro")
         assert "Basic tier" in out
         assert "topic-a" in out  # slug
 
@@ -318,6 +311,7 @@ class TestExporters:
         events = []
         sess = Session(exporters=[CallbackExporter(events.append)])
         from lazybridge.session import EventType
+
         sess.emit(EventType.AGENT_START, {"agent_name": "a"}, run_id="r1")
         assert any(e.get("event_type") == "agent_start" for e in events)
 
@@ -368,12 +362,10 @@ class TestTerminalUI:
 
     @pytest.mark.asyncio
     async def test_coerce_field_strict_none_optional(self):
-        from typing import Optional
-
         from lazybridge.ext.hil.human import _TerminalUI
 
-        ui = _TerminalUI()
-        result = _TerminalUI._coerce_field_strict(Optional[int], "")
+        _TerminalUI()
+        result = _TerminalUI._coerce_field_strict(int | None, "")
         assert result is None
 
     @pytest.mark.asyncio
@@ -393,9 +385,7 @@ class TestTerminalUI:
 
     @pytest.mark.asyncio
     async def test_coerce_field_optional_empty(self):
-        from typing import Optional
-
-        result = _TerminalUI._coerce_field(Optional[str], "")
+        result = _TerminalUI._coerce_field(str | None, "")
         assert result is None
 
     @pytest.mark.asyncio
@@ -486,9 +476,7 @@ class TestNormalizeJsonSchema:
     def test_recursively_normalizes_properties(self):
         schema = {
             "type": "object",
-            "properties": {
-                "child": {"type": "object", "properties": {"y": {"type": "int"}}}
-            },
+            "properties": {"child": {"type": "object", "properties": {"y": {"type": "int"}}}},
         }
         result = normalize_json_schema(schema)
         assert result["properties"]["child"]["additionalProperties"] is False
@@ -673,8 +661,6 @@ def _make_fake_executor(response_text: str = "fake response"):
     from lazybridge.core.types import (
         CompletionRequest,
         CompletionResponse,
-        Message,
-        Role,
         StreamChunk,
         UsageStats,
     )
@@ -792,17 +778,15 @@ class TestLLMEngine:
     @pytest.mark.asyncio
     async def test_run_with_tool_call(self):
         """LLMEngine correctly runs a tool when the provider returns a tool_call."""
+        from lazybridge.core.executor import Executor
         from lazybridge.core.providers.base import BaseProvider
         from lazybridge.core.types import (
             CompletionRequest,
             CompletionResponse,
-            Message,
-            Role,
             StreamChunk,
             ToolCall,
             UsageStats,
         )
-        from lazybridge.core.executor import Executor
         from lazybridge.engines.llm import LLMEngine
 
         calls = []
@@ -895,7 +879,7 @@ class TestAgentUncoveredPaths:
     async def test_agent_session_propagation_to_tool_agents(self):
         sess = Session()
         inner = Agent(engine=_EchoEngine2(), name="inner")
-        outer = Agent(engine=_EchoEngine2(), name="outer", tools=[inner], session=sess)
+        Agent(engine=_EchoEngine2(), name="outer", tools=[inner], session=sess)
         # inner should have inherited the session
         assert inner.session is sess
 
@@ -906,7 +890,6 @@ class TestAgentUncoveredPaths:
 
     @pytest.mark.asyncio
     async def test_agent_timeout_wraps_run(self):
-        import asyncio
 
         class _SlowEngine:
             model = "slow"
@@ -986,21 +969,23 @@ class TestAnnotationToSchema:
 
     def _schema(self, annotation):
         from lazybridge.core.tool_schema import _annotation_to_schema
+
         return _annotation_to_schema(annotation)
 
     def test_optional_x(self):
-        from typing import Optional
-        s = self._schema(Optional[int])
+        s = self._schema(int | None)
         assert s == {"anyOf": [{"type": "integer"}, {"type": "null"}]}
 
     def test_union_two_types(self):
         from typing import Union
+
         s = self._schema(Union[int, str])
         assert "anyOf" in s
         assert len(s["anyOf"]) == 2
 
     def test_annotated_with_string(self):
         from typing import Annotated
+
         s = self._schema(Annotated[int, "The count"])
         assert s["type"] == "integer"
         assert s["description"] == "The count"
@@ -1016,23 +1001,27 @@ class TestAnnotationToSchema:
 
     def test_annotated_no_metadata(self):
         from typing import Annotated
+
         s = self._schema(Annotated[str, 42])
         assert "type" in s
 
     def test_literal_strings(self):
         from typing import Literal
+
         s = self._schema(Literal["a", "b"])
         assert s["type"] == "string"
         assert set(s["enum"]) == {"a", "b"}
 
     def test_literal_ints(self):
         from typing import Literal
+
         s = self._schema(Literal[1, 2, 3])
         assert s["type"] == "integer"
         assert 1 in s["enum"]
 
     def test_literal_mixed(self):
         from typing import Literal
+
         s = self._schema(Literal[1, "a"])
         assert "enum" in s
 
@@ -1123,6 +1112,7 @@ class TestAnnotationToSchema:
 class TestInMemoryArtifactStore:
     def _make_store(self):
         from lazybridge.core.tool_schema import InMemoryArtifactStore
+
         return InMemoryArtifactStore()
 
     def _make_artifact(self, fp="abc123"):

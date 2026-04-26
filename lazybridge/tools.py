@@ -60,7 +60,7 @@ class Tool:
         *,
         strict: bool = False,
         returns_envelope: bool = False,
-    ) -> "Tool":
+    ) -> Tool:
         """Create a Tool with a pre-built JSON Schema for parameters.
 
         Use this when the schema is already known (from MCP, OpenAPI, a

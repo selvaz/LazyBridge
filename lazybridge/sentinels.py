@@ -8,18 +8,21 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class _FromPrev:
     """Use the Envelope produced by the previous step (default)."""
+
     pass
 
 
 @dataclass(frozen=True)
 class _FromStart:
     """Use the initial task/context Envelope passed to the Plan."""
+
     pass
 
 
 @dataclass(frozen=True)
 class _FromStep:
     """Use the Envelope produced by a named step."""
+
     name: str
 
 
@@ -31,6 +34,7 @@ class _FromParallel:
     For aggregating ALL siblings in a parallel band, use
     :class:`_FromParallelAll` (``from_parallel_all("name")``).
     """
+
     name: str
 
 
@@ -55,6 +59,7 @@ class _FromParallelAll:
     the plan, and (c) itself be ``parallel=True`` (otherwise the "band" is
     a single step and the result would be indistinguishable from ``from_step``).
     """
+
     name: str
 
 

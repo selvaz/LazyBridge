@@ -125,13 +125,20 @@ class SupervisorEngine:
             # Otherwise fall back to the sync REPL on a worker thread.
             if self._ainput_fn is not None:
                 final = await self._run_repl_async(
-                    task_text, effective_tools, agent_name,
-                    session=session, run_id=run_id,
+                    task_text,
+                    effective_tools,
+                    agent_name,
+                    session=session,
+                    run_id=run_id,
                 )
             else:
                 final = await asyncio.to_thread(
-                    self._run_repl, task_text, effective_tools, agent_name,
-                    session, run_id,
+                    self._run_repl,
+                    task_text,
+                    effective_tools,
+                    agent_name,
+                    session,
+                    run_id,
                 )
         except Exception as exc:
             if session:
@@ -219,11 +226,7 @@ class SupervisorEngine:
         # Best-effort quote-stripping only when the whole arg is a single
         # quoted token (don't strip from ``"foo", "bar"``).
         stripped = args_str.strip()
-        if (
-            len(stripped) >= 2
-            and stripped[0] == stripped[-1]
-            and stripped[0] in ("'", '"')
-        ):
+        if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in ("'", '"'):
             args_str = stripped[1:-1]
         tool = tools[tool_name]
         try:
@@ -250,9 +253,7 @@ class SupervisorEngine:
         for key, agent in self._agents.items():
             if key.lower() == name.lower():
                 return agent
-        raise ValueError(
-            f"Unknown agent '{name}'. Available: {', '.join(self._agents.keys()) or '(none)'}"
-        )
+        raise ValueError(f"Unknown agent '{name}'. Available: {', '.join(self._agents.keys()) or '(none)'}")
 
     def _run_retry(self, agent: Any, task: str, feedback: str) -> str:
         prompt = f"{task}\n\nFeedback: {feedback}" if feedback else task
@@ -370,7 +371,13 @@ class SupervisorEngine:
         while True:
             user_input = self._get_input(f"[{agent_name}] > ").strip()
             final, last_output = self._handle_command(
-                user_input, task, tools, agent_name, last_output, session, run_id,
+                user_input,
+                task,
+                tools,
+                agent_name,
+                last_output,
+                session,
+                run_id,
             )
             if final is not None:
                 return final
@@ -403,7 +410,13 @@ class SupervisorEngine:
         while True:
             user_input = (await self._ainput_fn(f"[{agent_name}] > ")).strip()
             final, last_output = self._handle_command(
-                user_input, task, tools, agent_name, last_output, session, run_id,
+                user_input,
+                task,
+                tools,
+                agent_name,
+                last_output,
+                session,
+                run_id,
             )
             if final is not None:
                 return final

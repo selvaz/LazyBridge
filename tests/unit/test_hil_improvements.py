@@ -109,6 +109,7 @@ def test_human_engine_emits_hil_decision_input_kind():
     AGENT_FINISH, so downstream tooling can tell human answers apart
     from LLM answers.
     """
+
     # A terminal UI whose ``prompt`` just returns a canned string.
     class _FakeUI:
         async def prompt(self, task, *, tools, output_type):
@@ -156,6 +157,7 @@ def test_supervisor_uses_async_repl_when_ainput_fn_supplied():
 @pytest.mark.asyncio
 async def test_supervisor_async_repl_with_tool_call():
     """Full async REPL including a scripted tool invocation."""
+
     def echo(q: str) -> str:
         """Echo."""
         return f"e:{q}"

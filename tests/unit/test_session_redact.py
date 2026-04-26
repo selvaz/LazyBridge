@@ -117,7 +117,9 @@ def test_strict_mode_also_skips_exporters() -> None:
         raise RuntimeError("no-op")
 
     sess = Session(
-        redact=bad, redact_on_error="strict", exporters=[_Capture()],
+        redact=bad,
+        redact_on_error="strict",
+        exporters=[_Capture()],
     )
     _emit_sample(sess)
     assert seen == []
@@ -126,6 +128,7 @@ def test_strict_mode_also_skips_exporters() -> None:
 def test_strict_mode_still_works_on_well_behaved_redactor() -> None:
     """Strict is only a failure-mode flag — when the redactor works,
     the redacted payload flows through exactly as in fallback mode."""
+
     def redact(p: dict) -> dict:
         return {**p, "ssn": "***"}
 

@@ -9,14 +9,11 @@ core needs.
 
 from __future__ import annotations
 
-import json
 import sys
 import types
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # litellm stub — injected into sys.modules before LiteLLMProvider imports it.
@@ -108,6 +105,7 @@ def _make_provider(completion_impl=None, acompletion_impl=None, **provider_kwarg
     """Build a LiteLLMProvider instance backed by a fresh stub."""
     stub = _install_stub_litellm(completion_impl, acompletion_impl)
     from lazybridge.core.providers.litellm import LiteLLMProvider
+
     return LiteLLMProvider(**provider_kwargs), stub
 
 
@@ -132,6 +130,7 @@ def test_init_raises_on_missing_litellm(monkeypatch):
     monkeypatch.setattr("builtins.__import__", blocker)
 
     from lazybridge.core.providers.litellm import LiteLLMProvider
+
     with pytest.raises(ImportError, match="lazybridge\\[litellm\\]"):
         LiteLLMProvider()
 
@@ -144,6 +143,7 @@ def test_init_raises_on_missing_litellm(monkeypatch):
 def _basic_request(**overrides):
     """Make a minimal CompletionRequest for translation tests."""
     from lazybridge.core.types import CompletionRequest, Message, Role
+
     defaults = dict(
         messages=[Message(role=Role.USER, content="hello")],
         model="litellm/groq/llama-3.3-70b",
@@ -182,6 +182,7 @@ def test_bare_model_passed_through_unchanged():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import CompletionRequest, Message, Role
+
     req = CompletionRequest(
         messages=[Message(role=Role.USER, content="x")],
         model="mistral/mistral-large-latest",
@@ -217,25 +218,31 @@ def test_tools_emitted_as_openai_function_shape():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import ToolDefinition
-    req = _basic_request(tools=[
-        ToolDefinition(
-            name="search",
-            description="Search the web.",
-            parameters={"type": "object", "properties": {"q": {"type": "string"}}},
-            strict=True,
-        ),
-    ], tool_choice="search")
+
+    req = _basic_request(
+        tools=[
+            ToolDefinition(
+                name="search",
+                description="Search the web.",
+                parameters={"type": "object", "properties": {"q": {"type": "string"}}},
+                strict=True,
+            ),
+        ],
+        tool_choice="search",
+    )
     prov.complete(req)
 
-    assert captured["tools"] == [{
-        "type": "function",
-        "function": {
-            "name": "search",
-            "description": "Search the web.",
-            "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
-            "strict": True,
-        },
-    }]
+    assert captured["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "search",
+                "description": "Search the web.",
+                "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+                "strict": True,
+            },
+        }
+    ]
     # tool_choice names a specific tool → OpenAI shape
     assert captured["tool_choice"] == {
         "type": "function",
@@ -253,6 +260,7 @@ def test_tool_choice_keywords_passed_through():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import ToolDefinition
+
     req = _basic_request(
         tools=[ToolDefinition(name="search", description="", parameters={})],
         tool_choice="auto",
@@ -271,6 +279,7 @@ def test_tool_choice_any_maps_to_required():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import ToolDefinition
+
     req = _basic_request(
         tools=[ToolDefinition(name="search", description="", parameters={})],
         tool_choice="any",
@@ -305,6 +314,7 @@ def test_native_tools_warn_and_drop():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import NativeTool
+
     req = _basic_request(native_tools=[NativeTool.WEB_SEARCH])
     with pytest.warns(UserWarning, match="native_tools"):
         prov.complete(req)
@@ -345,6 +355,7 @@ def test_no_api_key_omitted():
 
 def test_plain_text_response():
     """Content + stop_reason + usage round-trip into CompletionResponse."""
+
     def fake_completion(**kwargs):
         return _FakeResponse(
             [_FakeChoice(message=_FakeMessage(content="the answer is 42"))],
@@ -363,14 +374,17 @@ def test_plain_text_response():
 
 def test_tool_calls_parsed():
     """tool_calls on the response are converted into ToolCall dataclasses."""
+
     def fake_completion(**kwargs):
         msg = _FakeMessage(
             content="",
-            tool_calls=[_FakeToolCall(
-                id="call_1",
-                name="search",
-                arguments='{"query": "AI news"}',
-            )],
+            tool_calls=[
+                _FakeToolCall(
+                    id="call_1",
+                    name="search",
+                    arguments='{"query": "AI news"}',
+                )
+            ],
         )
         return _FakeResponse(
             [_FakeChoice(message=msg, finish_reason="tool_calls")],
@@ -387,12 +401,17 @@ def test_tool_calls_parsed():
 
 def test_malformed_tool_call_arguments_fall_back_gracefully():
     """Bad JSON in arguments falls into _raw_arguments rather than raising."""
+
     def fake_completion(**kwargs):
         msg = _FakeMessage(
             content="",
-            tool_calls=[_FakeToolCall(
-                id="c1", name="search", arguments="not-json{{{",
-            )],
+            tool_calls=[
+                _FakeToolCall(
+                    id="c1",
+                    name="search",
+                    arguments="not-json{{{",
+                )
+            ],
         )
         return _FakeResponse([_FakeChoice(message=msg)], usage=_FakeUsage())
 
@@ -403,6 +422,7 @@ def test_malformed_tool_call_arguments_fall_back_gracefully():
 
 def test_cost_from_hidden_params():
     """LiteLLM's _hidden_params.response_cost becomes usage.cost_usd."""
+
     def fake_completion(**kwargs):
         return _FakeResponse(
             [_FakeChoice(message=_FakeMessage(content="ok"))],
@@ -417,6 +437,7 @@ def test_cost_from_hidden_params():
 
 def test_missing_cost_stays_none():
     """When LiteLLM can't price the model, cost_usd is None."""
+
     def fake_completion(**kwargs):
         return _FakeResponse(
             [_FakeChoice(message=_FakeMessage(content="ok"))],
@@ -430,6 +451,7 @@ def test_missing_cost_stays_none():
 
 def test_empty_choices_returns_empty_content():
     """Defensive path: provider hands back no choices."""
+
     def fake_completion(**kwargs):
         return _FakeResponse([], usage=_FakeUsage())
 
@@ -446,8 +468,10 @@ def test_empty_choices_returns_empty_content():
 
 def _stream_chunks(*chunks):
     """Build a LiteLLM-style stream generator from pre-built chunks."""
+
     def _gen():
         yield from chunks
+
     return _gen
 
 
@@ -479,15 +503,33 @@ def test_stream_yields_deltas_then_final_chunk():
 def test_stream_accumulates_tool_calls_across_chunks():
     """Tool-call deltas from multiple chunks merge into one complete ToolCall on the final chunk."""
     chunks = [
-        _FakeResponse([_FakeChoice(delta=_FakeDelta(
-            tool_calls=[_FakeToolCall(id="call_1", name="search", arguments='{"query"', index=0)],
-        ))]),
-        _FakeResponse([_FakeChoice(delta=_FakeDelta(
-            tool_calls=[_FakeToolCall(arguments=': "AI"', index=0)],
-        ))]),
-        _FakeResponse([_FakeChoice(delta=_FakeDelta(
-            tool_calls=[_FakeToolCall(arguments="}", index=0)],
-        ))]),
+        _FakeResponse(
+            [
+                _FakeChoice(
+                    delta=_FakeDelta(
+                        tool_calls=[_FakeToolCall(id="call_1", name="search", arguments='{"query"', index=0)],
+                    )
+                )
+            ]
+        ),
+        _FakeResponse(
+            [
+                _FakeChoice(
+                    delta=_FakeDelta(
+                        tool_calls=[_FakeToolCall(arguments=': "AI"', index=0)],
+                    )
+                )
+            ]
+        ),
+        _FakeResponse(
+            [
+                _FakeChoice(
+                    delta=_FakeDelta(
+                        tool_calls=[_FakeToolCall(arguments="}", index=0)],
+                    )
+                )
+            ]
+        ),
         _FakeResponse(
             [_FakeChoice(delta=_FakeDelta(), finish_reason="tool_calls")],
             usage=_FakeUsage(),
@@ -548,13 +590,15 @@ async def test_astream_yields_async_chunks():
     class _AIter:
         def __init__(self, items):
             self._items = iter(items)
+
         def __aiter__(self):
             return self
+
         async def __anext__(self):
             try:
                 return next(self._items)
-            except StopIteration:
-                raise StopAsyncIteration
+            except StopIteration as exc:
+                raise StopAsyncIteration from exc
 
     async def fake_acompletion(**kw):
         return _AIter(chunks)
@@ -580,6 +624,7 @@ def test_llmengine_routes_litellm_prefix_to_litellm_provider():
     _install_stub_litellm()
 
     from lazybridge.engines.llm import LLMEngine
+
     assert LLMEngine._infer_provider("litellm/groq/llama") == "litellm"
 
 
@@ -588,6 +633,7 @@ def test_llmengine_keeps_native_claude_routing_intact():
     _install_stub_litellm()
 
     from lazybridge.engines.llm import LLMEngine
+
     assert LLMEngine._infer_provider("claude-opus-4-7") == "anthropic"
 
 
@@ -596,8 +642,10 @@ def test_executor_resolves_litellm_provider_instance():
     _install_stub_litellm()
 
     from lazybridge.core.executor import _resolve_provider
+
     prov = _resolve_provider("litellm", model="litellm/groq/llama-3.3-70b")
     from lazybridge.core.providers.litellm import LiteLLMProvider
+
     assert isinstance(prov, LiteLLMProvider)
 
 
@@ -616,15 +664,23 @@ def test_tool_result_block_becomes_role_tool_message():
 
     prov, _ = _make_provider(fake_completion)
     from lazybridge.core.types import (
-        CompletionRequest, Message, Role, TextContent, ToolResultContent,
+        CompletionRequest,
+        Message,
+        Role,
+        TextContent,
+        ToolResultContent,
     )
+
     req = CompletionRequest(
         messages=[
             Message(role=Role.USER, content="search"),
             Message(role=Role.ASSISTANT, content=[TextContent("calling tool")]),
-            Message(role=Role.TOOL, content=[
-                ToolResultContent(tool_use_id="c1", content="results here"),
-            ]),
+            Message(
+                role=Role.TOOL,
+                content=[
+                    ToolResultContent(tool_use_id="c1", content="results here"),
+                ],
+            ),
         ],
         model="litellm/x/y",
     )

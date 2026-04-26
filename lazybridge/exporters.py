@@ -113,4 +113,3 @@ class ConsoleExporter:
         prefix = f"[{agent}] " if agent else ""
         line = f"{prefix}{etype}  " + "  ".join(parts)
         print(line, file=self._stream)
-

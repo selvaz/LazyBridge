@@ -16,15 +16,12 @@ from lazybridge.ext.planners import (
     BLACKBOARD_PLANNER_GUIDANCE,
     PLANNER_GUIDANCE,
     PLANNER_VERIFY_PROMPT,
-    PlanSpec,
-    StepSpec,
     make_blackboard_planner,
     make_execute_plan_tool,
     make_plan_builder_tools,
     make_planner,
 )
 from lazybridge.testing import MockAgent
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -35,15 +32,18 @@ def _agents() -> dict[str, MockAgent]:
     return {
         "research": MockAgent(
             lambda env: f"FACT[{env.task[:60]}]",
-            name="research", description="research",
+            name="research",
+            description="research",
         ),
         "math": MockAgent(
             lambda env: f"NUM({env.text()[:60]})",
-            name="math", description="math",
+            name="math",
+            description="math",
         ),
         "writer": MockAgent(
             lambda env: f"PROSE<<{env.text()[:300]}>>",
-            name="writer", description="writer",
+            name="writer",
+            description="writer",
         ),
     }
 
@@ -61,8 +61,7 @@ def test_make_planner_wires_subagents_plus_five_builder_tools() -> None:
     a = _agents()
     planner = make_planner(list(a.values()))
     expected = sorted(
-        ["research", "math", "writer",
-         "create_plan", "add_step", "inspect_plan", "run_plan", "discard_plan"]
+        ["research", "math", "writer", "create_plan", "add_step", "inspect_plan", "run_plan", "discard_plan"]
     )
     assert sorted(planner._tool_map.keys()) == expected
 
@@ -152,10 +151,15 @@ def test_add_step_rejects_forward_from_step_reference() -> None:
     a = _agents()
     create, add, *_ = make_plan_builder_tools(a)
     pid = asyncio.run(create.run(reasoning="x")).split("plan_id=")[1].split(" ")[0]
-    out = asyncio.run(add.run(
-        plan_id=pid, name="bad", agent="writer",
-        task_kind="from_step", task_step="future",
-    ))
+    out = asyncio.run(
+        add.run(
+            plan_id=pid,
+            name="bad",
+            agent="writer",
+            task_kind="from_step",
+            task_step="future",
+        )
+    )
     assert out.startswith("REJECTED") and "not yet defined" in out
 
 
@@ -171,10 +175,12 @@ def test_add_step_rejects_from_parallel_all_on_non_parallel_target() -> None:
     a = _agents()
     create, add, *_ = make_plan_builder_tools(a)
     pid = asyncio.run(create.run(reasoning="x")).split("plan_id=")[1].split(" ")[0]
-    asyncio.run(add.run(plan_id=pid, name="serial", agent="research",
-                        task_kind="literal", task_text="x"))  # parallel=False
-    out = asyncio.run(add.run(plan_id=pid, name="join", agent="writer",
-                              task_kind="from_parallel_all", task_step="serial"))
+    asyncio.run(
+        add.run(plan_id=pid, name="serial", agent="research", task_kind="literal", task_text="x")
+    )  # parallel=False
+    out = asyncio.run(
+        add.run(plan_id=pid, name="join", agent="writer", task_kind="from_parallel_all", task_step="serial")
+    )
     assert out.startswith("REJECTED") and "parallel=True" in out
 
 
@@ -195,18 +201,19 @@ def test_builder_from_parallel_all_synthesises_all_branches() -> None:
     a = _agents()
     create, add, _, run, _ = make_plan_builder_tools(a)
     pid = asyncio.run(create.run(reasoning="5 lookups + synth")).split("plan_id=")[1].split(" ")[0]
-    for n, t in [("hc_meta","Meta"),("hc_apple","Apple"),("hc_amazon","Amazon"),
-                 ("hc_netflix","Netflix"),("hc_google","Google")]:
-        asyncio.run(add.run(plan_id=pid, name=n, agent="research",
-                            task_kind="literal", task_text=t, parallel=True))
-    asyncio.run(add.run(plan_id=pid, name="report", agent="writer",
-                        task_kind="from_parallel_all", task_step="hc_meta"))
+    for n, t in [
+        ("hc_meta", "Meta"),
+        ("hc_apple", "Apple"),
+        ("hc_amazon", "Amazon"),
+        ("hc_netflix", "Netflix"),
+        ("hc_google", "Google"),
+    ]:
+        asyncio.run(add.run(plan_id=pid, name=n, agent="research", task_kind="literal", task_text=t, parallel=True))
+    asyncio.run(add.run(plan_id=pid, name="report", agent="writer", task_kind="from_parallel_all", task_step="hc_meta"))
     asyncio.run(run.run(plan_id=pid, task="x"))
     synth_in = a["writer"].calls[-1].env_in.text()
     for tag in ["Meta", "Apple", "Amazon", "Netflix", "Google"]:
-        assert f"FACT[{tag}]" in synth_in, (
-            f"writer didn't see all 5 branches; missing FACT[{tag}] in:\n{synth_in}"
-        )
+        assert f"FACT[{tag}]" in synth_in, f"writer didn't see all 5 branches; missing FACT[{tag}] in:\n{synth_in}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +226,11 @@ def test_make_execute_plan_tool_alias_returns_builder_tools() -> None:
     res = make_execute_plan_tool(a)
     assert isinstance(res, list) and len(res) == 5
     assert {t.name for t in res} == {
-        "create_plan", "add_step", "inspect_plan", "run_plan", "discard_plan",
+        "create_plan",
+        "add_step",
+        "inspect_plan",
+        "run_plan",
+        "discard_plan",
     }
 
 
@@ -231,8 +242,7 @@ def test_make_execute_plan_tool_alias_returns_builder_tools() -> None:
 def test_make_blackboard_planner_wires_three_tools_plus_subagents() -> None:
     a = _agents()
     planner = make_blackboard_planner(list(a.values()))
-    expected = sorted(["research", "math", "writer",
-                       "set_plan", "get_plan", "mark_done"])
+    expected = sorted(["research", "math", "writer", "set_plan", "get_plan", "mark_done"])
     assert sorted(planner._tool_map.keys()) == expected
 
 
@@ -249,9 +259,11 @@ def test_make_blackboard_planner_rejects_duplicate_names() -> None:
 
 
 def test_blackboard_set_then_mark_done_flow() -> None:
-    planner = make_blackboard_planner([
-        MockAgent("R", name="research", description="r"),
-    ])
+    planner = make_blackboard_planner(
+        [
+            MockAgent("R", name="research", description="r"),
+        ]
+    )
     set_plan = planner._tool_map["set_plan"]
     get_plan = planner._tool_map["get_plan"]
     mark_done = planner._tool_map["mark_done"]
@@ -309,5 +321,3 @@ def test_blackboard_planner_guidance_present_and_substantial() -> None:
     assert len(BLACKBOARD_PLANNER_GUIDANCE) > 500
     for k in ["set_plan", "get_plan", "mark_done", "Workflow", "Pitfalls"]:
         assert k in BLACKBOARD_PLANNER_GUIDANCE
-
-

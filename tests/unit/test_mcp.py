@@ -17,7 +17,6 @@ from lazybridge.ext.mcp import MCP, MCPServer
 from lazybridge.ext.mcp.transports import _Transport
 from lazybridge.testing import MockAgent
 
-
 # ---------------------------------------------------------------------------
 # Fake transport — captures call_tool invocations; configurable tool list.
 # ---------------------------------------------------------------------------
@@ -27,35 +26,39 @@ class FakeTransport(_Transport):
     def __init__(self, tools: list[dict[str, Any]] | None = None) -> None:
         # Use ``is None`` (not ``or``) so the caller can pass ``tools=[]``
         # to model an empty catalogue without falling back to the default.
-        self._tools = tools if tools is not None else [
-            {
-                "name": "list_directory",
-                "description": "List the contents of a directory.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
+        self._tools = (
+            tools
+            if tools is not None
+            else [
+                {
+                    "name": "list_directory",
+                    "description": "List the contents of a directory.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
                 },
-            },
-            {
-                "name": "read_file",
-                "description": "Read a file from disk.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
+                {
+                    "name": "read_file",
+                    "description": "Read a file from disk.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
                 },
-            },
-            {
-                "name": "delete_file",
-                "description": "Delete a file from disk.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
+                {
+                    "name": "delete_file",
+                    "description": "Delete a file from disk.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
                 },
-            },
-        ]
+            ]
+        )
         self.connected = False
         self.closed = False
         self.calls: list[tuple[str, dict[str, Any]]] = []

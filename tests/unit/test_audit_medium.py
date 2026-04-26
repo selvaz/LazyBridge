@@ -48,6 +48,7 @@ def test_guard_chain_preserves_accumulated_modifications():
     """A chain of two modify-only guards surfaces BOTH rewrites in the
     final action.
     """
+
     def strip_emails(text):
         return GuardAction.modify(text.replace("a@b.c", "[EMAIL]"))
 
@@ -68,6 +69,7 @@ def test_guard_chain_unmodified_allows_cleanly():
     """No guard modified anything → terminal action is a plain allow()
     with ``modified_text`` None (not a no-op modify).
     """
+
     def noop(text):
         return GuardAction.allow()
 
@@ -82,6 +84,7 @@ def test_guard_chain_block_short_circuits_even_with_prior_modifications():
     """If guard N blocks AFTER guard N-1 modified, the block action
     wins — modifications from earlier guards don't bypass the block.
     """
+
     def rewrite(text):
         return GuardAction.modify("REWRITTEN")
 

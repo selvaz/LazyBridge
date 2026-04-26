@@ -35,7 +35,7 @@ def test_as_tool_propagates_session_to_nested_agent():
     tool, B must inherit A's session so nested events are observable.
     """
     sess = Session()
-    inner = Agent("claude-opus-4-7", name="inner")   # no session
+    inner = Agent("claude-opus-4-7", name="inner")  # no session
     assert inner.session is None
 
     Agent("claude-opus-4-7", name="outer", session=sess, tools=[inner])
@@ -58,7 +58,7 @@ def test_as_tool_does_not_override_existing_session():
     sess_inner = Session()
     inner = Agent("claude-opus-4-7", name="inner", session=sess_inner)
     Agent("claude-opus-4-7", name="outer", session=sess_outer, tools=[inner])
-    assert inner.session is sess_inner   # unchanged
+    assert inner.session is sess_inner  # unchanged
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ def test_agent_from_provider_applies_tier():
     maps it to the concrete model.
     """
     ag = Agent.from_provider("anthropic", tier="top", name="y")
-    assert ag.engine.model == "top"          # tier reaches the engine
+    assert ag.engine.model == "top"  # tier reaches the engine
     assert ag.engine.provider == "anthropic"  # explicit provider preserved
 
     ag_cheap = Agent.from_provider("openai", tier="cheap", name="z")
@@ -169,6 +169,7 @@ def test_envelope_error_channel_round_trip():
 def test_plan_round_trip_preserves_topology():
     def fetch(task: str) -> str:
         return "f"
+
     def rank(task: str) -> str:
         return "r"
 
@@ -190,6 +191,7 @@ def test_plan_round_trip_preserves_topology():
 def test_plan_round_trip_preserves_from_step_sentinels():
     def a(task: str) -> str:
         return "a"
+
     def b(task: str) -> str:
         return "b"
 
@@ -208,6 +210,7 @@ def test_plan_round_trip_preserves_from_step_sentinels():
 def test_plan_round_trip_executes_correctly_after_reload():
     def producer(task: str) -> str:
         return f"produced:{task}"
+
     def consumer(task: str) -> str:
         return f"consumed({task})"
 
@@ -230,7 +233,7 @@ def test_plan_from_dict_raises_on_missing_registry_entry():
     plan = Plan(Step(fn, name="fn"))
     blob = plan.to_dict()
     with pytest.raises(KeyError, match="fn"):
-        Plan.from_dict(blob, registry={})   # no 'fn' → should raise
+        Plan.from_dict(blob, registry={})  # no 'fn' → should raise
 
 
 def test_plan_tool_name_targets_survive_round_trip_without_registry():
@@ -241,5 +244,5 @@ def test_plan_tool_name_targets_survive_round_trip_without_registry():
 
     plan = Plan(Step(target="mytool", name="step1"))
     blob = plan.to_dict()
-    restored = Plan.from_dict(blob)   # no registry needed
+    restored = Plan.from_dict(blob)  # no registry needed
     assert restored.steps[0].target == "mytool"

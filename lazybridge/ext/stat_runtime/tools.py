@@ -36,8 +36,8 @@ import logging
 from pathlib import Path
 from typing import Annotated, Any
 
-from lazybridge.ext.stat_runtime.schemas import ModelFamily
 from lazybridge import Tool
+from lazybridge.ext.stat_runtime.schemas import ModelFamily
 
 _logger = logging.getLogger(__name__)
 

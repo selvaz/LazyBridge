@@ -81,8 +81,7 @@ def test_core_never_imports_from_lazybridge_ext() -> None:
     if failures:
         msg = (
             "Core modules must not import from lazybridge.ext (see "
-            "docs/guides/core-vs-ext.md, rule #1). Found:\n"
-            + "\n".join(failures)
+            "docs/guides/core-vs-ext.md, rule #1). Found:\n" + "\n".join(failures)
         )
         pytest.fail(msg)
 
@@ -121,6 +120,5 @@ def test_every_ext_module_declares_stability() -> None:
     if missing:
         pytest.fail(
             "Extensions must declare __stability__ and __lazybridge_min__ "
-            "(policy in docs/guides/core-vs-ext.md):\n"
-            + "\n".join(f"  - {m}" for m in missing)
+            "(policy in docs/guides/core-vs-ext.md):\n" + "\n".join(f"  - {m}" for m in missing)
         )

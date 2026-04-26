@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from lazybridge import Tool
 from lazybridge.ext.data_downloader.downloader import DataDownloader
 from lazybridge.ext.data_downloader.ticker_db import TickerDatabase
-from lazybridge import Tool
 
 
 def _error(exc: Exception) -> dict:
