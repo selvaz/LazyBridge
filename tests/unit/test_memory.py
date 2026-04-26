@@ -175,10 +175,10 @@ def test_text_reflects_latest_state():
 
 # ── summarizer: sync / async / Agent-like — all bridge correctly ─────────────
 #
-# Audit finding #3 — Memory.add() is sync; an ``async def`` summarizer
-# passed via ``summarizer=`` used to return an un-awaited coroutine,
-# stringified to ``"<coroutine object at 0x…>"`` with a runtime warning.
-# The fix drives awaitables to completion (running-loop-safe via a
+# ``Memory.add()`` is sync but accepts an ``async def`` summarizer.
+# An un-awaited coroutine would stringify to ``"<coroutine object at
+# 0x…>"`` with a runtime warning, so the implementation drives the
+# awaitable to completion (running-loop-safe via a
 # worker thread when needed) and falls back to keyword extraction on
 # raise — never silent garbage.
 

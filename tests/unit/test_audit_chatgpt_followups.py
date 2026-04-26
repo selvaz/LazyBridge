@@ -1,4 +1,4 @@
-"""Tests covering audit-derived hardening of Plan + LLMEngine.stream.
+"""Plan compile-time validation + LLMEngine.stream cancellation guarantees.
 
 * PlanCompiler rejects duplicate step names.
 * PlanCompiler rejects ``from_step()`` references to future / same-position steps.

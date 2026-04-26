@@ -1,9 +1,8 @@
 """Tests for ``CompletionRequest.tool_choice`` pre-validation.
 
-Closes audit finding #4 — a misspelled tool name in ``tool_choice`` used
-to pass silently through to the provider API, which either swallowed it
-or returned a cryptic server error.  The dataclass now validates on
-construction so typos fail locally before any RTT is spent.
+The dataclass validates on construction so a misspelled tool name in
+``tool_choice`` fails locally before any RTT is spent against a
+provider that would either swallow it or return a cryptic error.
 """
 
 from __future__ import annotations

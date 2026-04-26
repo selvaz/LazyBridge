@@ -1,21 +1,21 @@
-"""Regression tests for MEDIUM audit fixes.
+"""Guardrails / provider routing / HIL coercion guarantees.
 
 Covers:
 
-* ``GuardChain`` now preserves ``modified_text`` across the chain (the
-  terminal ``allow()`` was discarding earlier rewrites).
+* ``GuardChain`` preserves ``modified_text`` across the chain.
 * ``LLMGuard`` wraps untrusted content in ``<content>`` tags and parses
   the verdict anchored at the first line, so prompt-injection doesn't
   flip the verdict.
 * ``LLMEngine._infer_provider`` warns loudly when falling back to the
-  default (``Agent("grok-2")`` previously routed silently to Anthropic).
+  default — an unknown model like ``grok-2`` reports the route choice
+  instead of silently going to Anthropic.
 * ``LLMEngine.run`` uses ``model_copy`` rather than in-place mutation,
   so the metadata update survives a future ``frozen=True`` flip.
 * ``GraphSchema`` names non-LLM engines (``HumanEngine``,
   ``SupervisorEngine``, ``Plan``) instead of rendering empty strings.
 * ``SupervisorEngine`` REPL regex tolerates whitespace and quoted args.
-* ``HumanEngine._coerce_field`` coerces Optional / Union / list[T] /
-  nested BaseModel via ``pydantic.TypeAdapter``.
+* ``HumanEngine._coerce_field`` coerces ``X | None`` / Union /
+  ``list[T]`` / nested BaseModel via ``pydantic.TypeAdapter``.
 """
 
 from __future__ import annotations

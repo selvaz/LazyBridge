@@ -322,9 +322,9 @@ class AnthropicProvider(BaseProvider):
             "max_tokens": request.max_tokens or self.get_default_max_tokens(model),
             "messages": self._messages_to_anthropic(request),
         }
-        # Prompt caching (audit finding #7).  When the caller opts in
-        # via ``request.cache``, wrap the system prompt in a content
-        # block with ``cache_control: {type: "ephemeral", ttl: ...}``
+        # Prompt caching.  When the caller opts in via ``request.cache``,
+        # wrap the system prompt in a content block with
+        # ``cache_control: {type: "ephemeral", ttl: ...}``
         # so Anthropic caches the static prefix.  Cache hits cost ~10%
         # of input; writes cost ~25% more.
         cache_enabled = request.cache is not None and request.cache.enabled

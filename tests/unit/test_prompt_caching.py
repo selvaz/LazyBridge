@@ -1,8 +1,8 @@
 """Tests for the prompt-caching interface (``CacheConfig`` + per-provider wiring).
 
-Closes audit finding #7 — a framework-level opt-in for Anthropic prompt
-caching so large static system prompts (typical in quant / compliance
-workflows) cost ~10% per subsequent call instead of full rate.
+A framework-level opt-in for Anthropic prompt caching so large static
+system prompts (typical in quant / compliance workflows) cost ~10% per
+subsequent call instead of full rate.
 
 Coverage strategy: the Anthropic SDK itself isn't invoked in unit tests
 (no credentials), so we exercise the pure ``_build_params`` path which

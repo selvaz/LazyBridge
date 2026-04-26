@@ -1,12 +1,12 @@
-"""Regression tests for the production-readiness audit fix set.
+"""Production-readiness regressions.
 
 Covers:
-  * B1 — LLMEngine passes retry config to its Executor.
-  * B2 — No calls to deprecated ``asyncio.get_event_loop`` in hot paths.
-  * M1 — Store and Session EventLog close thread-local SQLite conns.
-  * M2 — Memory caps turns at ``max_turns`` even under ``strategy="none"``.
-  * M3 — Bare-except no longer swallows Pydantic coercion errors silently.
-  * M4 — Agent.run(timeout=) surfaces a TimeoutError envelope.
+  * LLMEngine passes retry config to its Executor.
+  * No calls to deprecated ``asyncio.get_event_loop`` in hot paths.
+  * Store and Session EventLog close thread-local SQLite conns.
+  * Memory caps turns at ``max_turns`` even under ``strategy="none"``.
+  * Pydantic coercion errors are not silently swallowed.
+  * Agent.run(timeout=) surfaces a TimeoutError envelope.
 """
 
 from __future__ import annotations
@@ -146,8 +146,8 @@ async def test_human_engine_records_coercion_failure(monkeypatch):
     """HumanEngine: when the human's input can't be coerced to the
     requested ``output_type``, the engine must return an **error
     envelope** — not a silently-downgraded string payload the caller
-    can't tell apart from a successful answer (audit finding #6).
-    The raw string is still exposed via ``.payload`` for debug.
+    can't tell apart from a successful answer.  The raw string is
+    still exposed via ``.payload`` for debug.
     """
     from pydantic import BaseModel
 

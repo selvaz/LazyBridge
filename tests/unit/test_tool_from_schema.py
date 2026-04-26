@@ -197,8 +197,8 @@ def test_build_tool_map_mixes_providers_with_plain_callables() -> None:
 
 
 def test_build_tool_map_collision_warns_only_once_per_name() -> None:
-    """Reproduce the audit fix: a triple-collision should emit ONE warning,
-    not two (previously the second + third both warned)."""
+    """A triple-collision emits ONE warning per collided name —
+    each duplicate after the first does not fire its own warning."""
 
     def f1():
         """f1."""

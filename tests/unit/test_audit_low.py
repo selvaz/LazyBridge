@@ -1,12 +1,10 @@
-"""Regression tests for LOW audit fixes.
+"""Store / Session / GraphSchema / EventLog behavioural guarantees.
 
 Covers:
-* ``Store.write`` preserves Pydantic payloads on SQLite backend (was
-  stringifying to ``__repr__`` via ``default=str``).
-* ``Session.usage_summary`` is O(events) with TWO bulk queries, not
-  ``2N+2`` single-row lookups.
+* ``Store.write`` preserves Pydantic payloads on the SQLite backend.
+* ``Session.usage_summary`` is O(events) with two bulk queries.
 * ``GraphSchema.clear()`` drops nodes and edges.
-* ``EventLog.query`` now surfaces ``run_id`` directly.
+* ``EventLog.query`` surfaces ``run_id`` directly in each row.
 """
 
 from __future__ import annotations

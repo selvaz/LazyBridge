@@ -1,9 +1,10 @@
 """Tests for ``Session(redact=..., redact_on_error=...)``.
 
-Closes audit finding #5 — redactor failures (raising OR returning a
-non-dict) used to fall silently back to the original unredacted
-payload.  Fine for development but risky for compliance workloads.
-``redact_on_error="strict"`` now drops such events entirely.
+Redactor failures (raising OR returning a non-dict) under
+``redact_on_error="strict"`` (the default) drop the event entirely so
+no unredacted data leaks; ``redact_on_error="fallback"`` warns once
+and persists the original payload for callers who prefer lossless
+event capture.
 """
 
 from __future__ import annotations

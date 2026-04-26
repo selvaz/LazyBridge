@@ -1,26 +1,25 @@
-"""Regression tests for the deep-audit fix set (claude/audit-lazyv1-cleanup).
+"""Cross-cutting correctness regressions.
 
-One test per fix so a breakage points straight at the offending area.
+One test per behaviour so a breakage points straight at the offending area.
 
-  * L1 — new names present in ``__all__``.
-  * H1 — ``_ParallelAgent.__call__`` no longer references
-          ``asyncio.get_event_loop``.
-  * H2 — ``LLMGuard`` has real ``acheck_input`` / ``acheck_output``.
-  * H3 — ``Plan`` short-circuits when a referenced upstream errored.
-  * H4 — ``OTelExporter.close`` exists and flushes orphaned spans;
-          ``_spans`` is guarded by a lock.
-  * M1 — Tool schema falls back to ``{"type": "string"}`` for ``Any``.
-  * M2 — ``Agent.stream`` raises on a stalled provider when ``timeout``
-          is set.
-  * M4 — OpenAI streaming de-duplicates tool calls by id when the
-          same id arrives under two indices.
-  * M5 — ``LLMGuard`` scrubs policy tag-close sequences.
-  * M7 — ``EventLog.record`` fast-fails after ``close()``.
-  * L2 — ``Store._conn`` raises instead of returning ``None`` when
-          called in in-memory mode.
-  * L4 — ``GraphSchema.add_edge`` is idempotent for identical tuples.
-  * L5 — OpenAI translator demotes string ``Role.TOOL`` messages to
-          ``user`` instead of emitting an invalid ``{"role": "tool"}``.
+  * Public ``__all__`` exposes ``GuardError`` / ``EventExporter``.
+  * ``_ParallelAgent.__call__`` uses ``asyncio.get_running_loop``
+    (not the deprecated ``get_event_loop``).
+  * ``LLMGuard`` has real ``acheck_input`` / ``acheck_output``.
+  * ``Plan`` short-circuits when a referenced upstream step errored.
+  * ``OTelExporter.close`` flushes orphaned spans; ``_spans`` is
+    guarded by a lock.
+  * Tool schema falls back to ``{"type": "string"}`` for ``Any``.
+  * ``Agent.stream`` raises on a stalled provider when ``timeout`` is set.
+  * OpenAI streaming de-duplicates tool calls by id when the same id
+    arrives under two indices.
+  * ``LLMGuard`` scrubs ``</policy>`` / ``<policy>`` tag-close
+    sequences from caller-supplied policy text.
+  * ``EventLog.record`` fast-fails after ``close()``.
+  * ``Store._conn`` raises (not returns ``None``) in in-memory mode.
+  * ``GraphSchema.add_edge`` is idempotent for identical tuples.
+  * OpenAI translator demotes string ``Role.TOOL`` messages to
+    ``user`` instead of emitting an invalid ``{"role": "tool"}``.
 """
 
 from __future__ import annotations

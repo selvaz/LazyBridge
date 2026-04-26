@@ -268,7 +268,7 @@ def test_wrapped_func_carries_mcp_metadata() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Audit-driven additions: error surfacing, empty catalogues, lazy lock.
+# Edge cases: error surfacing, empty catalogues, lazy lock.
 # ---------------------------------------------------------------------------
 
 

@@ -373,9 +373,9 @@ class HumanEngine:
                 except (json.JSONDecodeError, ValidationError, TypeError) as coerce_exc:
                     # Coercion failed — the caller asked for a typed
                     # ``output_type``, the human's input didn't match,
-                    # and we must NOT silently hand back a string payload
-                    # that breaks ``.payload.field`` access downstream
-                    # (audit finding #6).  Emit the audit-trail event
+                    # and we must NOT silently hand back a string
+                    # payload that would break ``.payload.field``
+                    # access downstream.  Emit the audit-trail event
                     # AND return an explicit error envelope so ``.ok``
                     # is False and the caller can react.
                     latency_ms = (time.monotonic() - t_start) * 1000

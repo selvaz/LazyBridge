@@ -1,6 +1,6 @@
 """Tests for ``EventLog`` batched async writer.
 
-Closes audit finding #4 — synchronous per-event SQLite commits.
+Avoids synchronous per-event SQLite commits on the hot path.
 
 Covers:
   * Batched mode persists all events submitted before ``flush()``.

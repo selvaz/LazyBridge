@@ -1,16 +1,16 @@
-"""Tests for the CRITICAL / HIGH audit fixes.
+"""Cross-cutting Plan / Session / verify guarantees.
 
 Covers:
-* Plan ``Step(parallel=True)`` — now actually runs concurrently
-  via ``asyncio.gather`` in declared-consecutive groups
-* ``_resolve_sentinel`` preserves Envelope metadata across from_prev /
-  from_step / from_parallel
+* Plan ``Step(parallel=True)`` runs concurrently via ``asyncio.gather``
+  in declared-consecutive groups.
+* ``_resolve_sentinel`` preserves Envelope metadata across
+  ``from_prev`` / ``from_step`` / ``from_parallel``.
 * ``verify_with_retry`` keeps the pristine original task on every
-  retry; feedback flows through ``context``, not ``task``
+  retry; feedback flows through ``context``, not ``task``.
 * ``Session.emit`` warns on exporter failure instead of swallowing
-  silently; ``_redact`` return validated
-* Silent ``except Exception: pass`` on session.register_agent /
-  register_tool_edge replaced with ``warnings.warn``
+  silently; ``_redact`` return is validated.
+* ``session.register_agent`` / ``register_tool_edge`` failures surface
+  as ``UserWarning`` instead of being silently swallowed.
 """
 
 from __future__ import annotations

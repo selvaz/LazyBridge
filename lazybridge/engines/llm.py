@@ -260,9 +260,9 @@ class LLMEngine:
             # Redirect the safety-net to a different built-in:
             LLMEngine.set_default_provider("openai")
 
-        The audit finding that motivated this helper: ``Agent("grok-2")``
-        would default-route to Anthropic and fail several RTTs later
-        with a cryptic provider-side "unknown model" error.  Disabling
+        Why this helper exists: ``Agent("grok-2")`` would default-route
+        to Anthropic and fail several RTTs later with a cryptic
+        provider-side "unknown model" error.  Disabling
         the fallback turns that into a loud ``ValueError`` at
         construction time.
         """

@@ -175,10 +175,10 @@ class CacheConfig:
     """Mark the static prefix of a request (system prompt + tool
     definitions) as cacheable.
 
-    Closes audit finding #7 — providers with explicit prompt caching
-    (Anthropic) need a ``cache_control`` marker on the last block of
-    each cached segment; we make that a one-flag opt-in instead of
-    asking callers to hand-craft provider-specific content lists.
+    Providers with explicit prompt caching (Anthropic) need a
+    ``cache_control`` marker on the last block of each cached
+    segment; this makes it a one-flag opt-in instead of asking
+    callers to hand-craft provider-specific content lists.
 
     Provider-specific behaviour:
 
@@ -289,10 +289,10 @@ class CompletionRequest:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # Validate ``tool_choice`` up-front: non-keyword values must name
-        # an actual tool in ``self.tools``.  The previous contract
-        # (audit finding #4) let a typo pass silently to the provider
-        # API, where it either errored cryptically or was ignored.
+        # Validate ``tool_choice`` up-front: non-keyword values must
+        # name an actual tool in ``self.tools``.  Without this check a
+        # typo would pass silently to the provider API, where it
+        # either errored cryptically or was ignored.
         if self.tool_choice is None:
             return
         if self.tool_choice in _TOOL_CHOICE_KEYWORDS:

@@ -59,8 +59,6 @@ class EventLog:
     ``batched=True`` to delegate persistence to a background daemon
     thread that drains a bounded queue and commits in batches; the
     hot path becomes a non-blocking ``queue.put_nowait``.
-
-    Closes audit finding #4 — synchronous per-event commits.
     """
 
     def __init__(
@@ -463,11 +461,10 @@ class Session:
           the event bus.  Useful for development; opt in explicitly
           when you want it.
 
-        .. versionchanged:: 1.x
-           Default flipped from ``"fallback"`` to ``"strict"`` to
-           close audit finding #8 (silent data leak when a configured
-           redactor fails).  Pass ``redact_on_error="fallback"`` to
-           restore the prior behaviour.
+        Default is ``"strict"``: a redactor that fails closes the
+        event rather than persisting it unredacted.  Pass
+        ``redact_on_error="fallback"`` to keep the unredacted event
+        flowing when redaction fails (lower fidelity, but lossless).
         """
         if redact_on_error not in ("fallback", "strict"):
             raise ValueError(
@@ -554,11 +551,9 @@ class Session:
             # Validate the redactor — two failure modes:
             #   (a) it raises
             #   (b) it returns something that isn't a dict
-            # Both used to fall back silently to the original payload
-            # (audit finding #5).  The default (``redact_on_error=
-            # "fallback"``) preserves that behaviour but warns once;
-            # ``"strict"`` drops the event entirely so no unredacted
-            # data can ever leak via this session.
+            # ``redact_on_error="fallback"`` warns once and persists
+            # the original payload; ``"strict"`` (the default) drops
+            # the event so no unredacted data can leak via this session.
             try:
                 result: Any = self._redact(payload)
             except Exception as exc:
