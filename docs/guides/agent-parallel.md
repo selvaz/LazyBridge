@@ -64,3 +64,7 @@ for env in results:   # list[Envelope], one per agent
       instead — the engine fans out tool calls automatically when the
       model emits more than one in a turn.
 
+## See also
+
+- [Agent.chain](chain.md) — sequential rather than fan-out.
+- [Plan](plan.md) — when you need typed steps with parallel bands.

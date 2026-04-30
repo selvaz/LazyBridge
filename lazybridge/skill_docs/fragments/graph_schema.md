@@ -77,3 +77,5 @@ assert len(replay.nodes()) == 3
 - ``from_dict`` reconstructs descriptors only — the ``provider`` /
   ``model`` strings on ``AgentNode`` are not live ``LLMEngine``s.
 
+## see-also
+- [Session](session.md) — populates the graph as agents register.

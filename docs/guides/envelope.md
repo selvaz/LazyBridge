@@ -1,5 +1,14 @@
 # Envelope
 
+**`Envelope` is the universal request/response object** — every
+`agent.run()` returns one.  `payload` is typed when `output=Model` is
+set, otherwise it's the raw text.  `metadata` carries cost / token /
+latency telemetry, with `nested_*` buckets for Agent-of-Agents
+roll-up.
+
+**Use `.text()`** for "give me a string regardless of payload type",
+**`.payload`** for the typed result, **`.ok`** to check error state.
+
 ## Example
 
 ```python
@@ -86,3 +95,7 @@ def process(env: "Envelope[Article]") -> str:
     - ``Envelope.error_envelope(exc)`` is the canonical way for engines to
       convert an exception into an envelope without raising up the stack.
 
+## See also
+
+- [Agent](agent.md) — the producer.
+- [Sentinels](sentinels.md) — how `Plan` steps reference prior envelopes.

@@ -29,6 +29,17 @@ build_tool_map(tools: list) -> dict[str, Tool]
   drives them to completion so REPL callers (e.g. SupervisorEngine) never
   see a raw coroutine.
 
+## narrative
+**Use `Tool` for** any callable you want an LLM to invoke — local
+Python functions, agents wrapped via `as_tool`, or pre-built
+provider-specific helpers. Pass plain functions to `tools=[...]` and
+the framework wraps them automatically; reach for `Tool(...)` only
+when you need to override the name, description, or schema mode.
+
+**Reach for `mode="llm"` / `"hybrid"`** when the function lacks type
+hints and you can't add them — see [Function → Tool](tool-schema.md)
+for the trade-offs.
+
 ## example
 ```python
 from lazybridge import Tool, Agent
@@ -61,4 +72,9 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
   and a one-word condition (sunny / cloudy / rainy) for ``city``."
 - ``strict=True`` rejects optional / defaulted args under some providers;
   if a call fails with "unknown parameter", try ``strict=False``.
+
+## see-also
+- [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).
+- [Native tools](native-tools.md) — provider-hosted alternatives.
+- [Agent](agent.md) — the surface that consumes tools.
 

@@ -79,9 +79,30 @@ plan = Plan(
 
 See [Parallel plan steps](../guides/parallel-steps.md) for the full reference.
 
+## Pitfalls
+
+- **`PlanCompileError` fires at `Plan(...)` time.** A misspelled step
+  name, a forward reference in `from_step`, or a parallel-band misuse
+  surfaces *before any LLM call*. Treat the construction error as the
+  contract: fix the DAG, don't paper over it at runtime.
+- **Concurrent runs on the same `checkpoint_key` are serialised.**
+  `on_concurrent="fail"` (default) raises `ConcurrentPlanRunError` on
+  collision — pick distinct keys per run, or pass
+  `on_concurrent="fork"` to namespace each run under a uid suffix.
+  `resume=True` is incompatible with `fork`.
+- **`writes` is the only persisted state.** In-memory `history` does
+  not survive across processes — only values written into named
+  `writes` buckets. Design steps so that the bucket carries everything
+  a future resume needs.
+- **Parallel bands are atomic.** If any branch in a band errors, the
+  framework applies *no* writes from that band. A future `resume=True`
+  re-runs the whole band cleanly rather than double-applying side
+  effects from the siblings that succeeded.
+
 ## Next
 
 - [Sentinels](../guides/sentinels.md) — `from_prev`, `from_start`, `from_step`, `from_parallel` in detail
 - [Checkpoint & resume](../guides/checkpoint.md) — store mechanics and `PlanState` shape
 - [Parallel plan steps](../guides/parallel-steps.md) — concurrent branches and joins
 - [SupervisorEngine](../guides/supervisor.md) — add a human REPL step to any pipeline
+- [Operations checklist](../guides/operations.md) — production knobs (timeout, fallback, resume)

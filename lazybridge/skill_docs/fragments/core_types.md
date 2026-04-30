@@ -110,3 +110,6 @@ async def astream(self, request):
   decides whether to honour each one; unsupported combinations raise
   at ``complete`` time.
 
+## see-also
+- [Engine protocol](engine-protocol.md) — consumes most of these types.
+- [BaseProvider](base-provider.md) — produces `CompletionResponse`.

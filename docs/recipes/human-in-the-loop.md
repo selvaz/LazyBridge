@@ -78,9 +78,29 @@ REPL commands available to the human:
 | `store <key>` | Print the value at `store[key]` |
 | `<tool>(<args>)` | Call a registered tool directly |
 
+## Pitfalls
+
+- **`HumanEngine` blocks the current process.** In a web app, supply a
+  custom `ui=` adapter implementing `prompt(task, *, tools, output_type)
+  -> str`. The terminal default is fine for CLI tools and tests; not
+  for HTTP services.
+- **`SupervisorEngine` has no whole-session timeout.** `timeout=` is
+  per-prompt — if the human never types `continue`, the worker thread
+  blocks indefinitely. For long-running services, wrap the surrounding
+  `Agent.run()` in your own `asyncio.wait_for`, or upgrade the
+  `Supervisor` to enforce a global REPL deadline (planned for 1.1).
+- **HIL events are critical.** With
+  `Session(batched=True, on_full="hybrid")` (the default), `HIL_DECISION`
+  events block the producer rather than risk dropping audit records.
+  See the [Operations checklist](../guides/operations.md).
+- **`default=` is the unattended-run safety net.** Set it whenever
+  `HumanEngine` or `SupervisorEngine` runs in CI or behind an automated
+  test harness — without it a missed prompt raises `TimeoutError`.
+
 ## Next
 
 - [HumanEngine guide](../guides/human-engine.md) — full signature and options
 - [SupervisorEngine guide](../guides/supervisor.md) — full REPL reference
 - [Decision: HumanEngine vs SupervisorEngine](../decisions/human-engine-vs-supervisor.md)
 - [Plan with resume](plan-with-resume.md) — add checkpoint/resume to a supervised pipeline
+- [Operations checklist](../guides/operations.md) — production knobs (timeout, fallback, back-pressure)

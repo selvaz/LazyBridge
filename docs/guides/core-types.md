@@ -115,3 +115,7 @@ async def astream(self, request):
     - ``StreamChunk`` carries incremental updates; providers yield them
       during ``stream`` / ``astream``.
 
+## See also
+
+- [Engine protocol](engine-protocol.md) — consumes most of these types.
+- [BaseProvider](base-provider.md) — produces `CompletionResponse`.

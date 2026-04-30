@@ -81,3 +81,6 @@ Agent.from_engine(plan_reloaded)("AI trends")
       without a registry entry — the tool is resolved at run time from the
       Agent's tool map.
 
+## See also
+
+- [Plan](plan.md) — what gets serialised.

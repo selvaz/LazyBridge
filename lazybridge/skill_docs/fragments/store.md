@@ -24,6 +24,16 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
   timeout (persistent). Safe to share across concurrent agents.
 - Store is not transactional; each write commits immediately.
 
+## narrative
+**Use `Store`** for cross-process or cross-run state — pipeline
+checkpoints, computed artefacts a downstream agent should read live, or
+shared scratch space across a fan-out.  SQLite mode is durable and
+thread-safe.
+
+**Don't use `Store`** for in-prompt conversation context — that's
+`Memory`'s job.  `Store` is "what should survive a crash"; `Memory` is
+"what should the model see in the next turn".
+
 ## example
 ```python
 from lazybridge import Agent, Store, Plan, Step
@@ -54,3 +64,6 @@ print(monitor("status?").text())
 - ``store.to_text()`` can be expensive for stores with thousands of keys;
   pass ``keys=[...]`` to limit the slice.
 
+## see-also
+- [Memory](memory.md) — separate concept (in-prompt conversation context).
+- [Checkpoint & resume](checkpoint.md) — `Plan` uses `Store` under the hood.

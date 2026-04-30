@@ -83,6 +83,27 @@ class SearchResult(BaseModel):
 
 See [Plan with resume](plan-with-resume.md) for a full routing example.
 
+## Pitfalls
+
+- **`.text()` returns the JSON dump, not the typed object.** Read
+  `.payload` for field access; reach for `.text()` only when you want
+  the serialised string.
+- **Validation failures retry with feedback.** When the model returns
+  output that doesn't satisfy the Pydantic schema, the engine retries up
+  to `max_output_retries` (default 2) with the validation error fed
+  back as context. After exhausting retries, the original (invalid)
+  Envelope is returned as-is — check `.ok`.
+- **`output_validator=` runs after schema validation.** Use it for
+  domain checks Pydantic can't express (e.g. "the sum of `bullets`
+  must be ≤ 5 items"). It can raise `ValueError` to force another
+  retry pass; the rejection reason is fed back to the model.
+- **Provider drift on JSON mode.** Anthropic uses tool-call
+  enforcement; OpenAI uses Responses-API JSON mode; Google uses
+  `response_schema`. The Envelope shape is identical across providers
+  but a few edge cases (deeply nested `Optional`, `Union[A, B]`) may
+  produce subtly different outputs — keep your schemas flat where you
+  can.
+
 ## Next
 
 - [Plan with resume](plan-with-resume.md) — multi-step typed pipeline with routing

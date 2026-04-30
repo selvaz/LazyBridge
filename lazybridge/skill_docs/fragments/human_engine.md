@@ -20,6 +20,16 @@ Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
   raw string, they don't call tools interactively. If you want the
   human to call tools, use ``SupervisorEngine``.
 
+## narrative
+**Use `HumanEngine`** for an approval gate or a structured form: the
+human types a string (or fills Pydantic fields), the agent treats it as
+an LLM response.  Drop-in replacement for `LLMEngine` in any pipeline
+where you want to insert a human at a specific step.
+
+**Use `SupervisorEngine` instead** when the human needs to call tools,
+retry agents with feedback, or run a real REPL — `HumanEngine` is the
+lighter approval-only variant.
+
 ## example
 ```python
 from lazybridge import Agent
@@ -49,3 +59,6 @@ pipeline("draft the release notes")
 - ``timeout=`` uses the event loop, not signals; it works in async
   contexts but may hang in tightly-blocking sync nests.
 
+## see-also
+- [SupervisorEngine](supervisor.md) — full HIL REPL with tools and retry.
+- [Agent.chain](chain.md) — typical pattern for inserting HumanEngine mid-pipeline.

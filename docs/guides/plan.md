@@ -99,3 +99,10 @@ print(result.text())
       step; ``resume=True`` reads the checkpoint and picks up at the next
       unrun step (failed runs restart from the failing step, not the next).
 
+## See also
+
+- [Sentinels](sentinels.md) — `from_prev` / `from_step` / `from_parallel`.
+- [Parallel plan steps](parallel-steps.md) — concurrent bands.
+- [Checkpoint & resume](checkpoint.md) — crash recovery.
+- [SupervisorEngine](supervisor.md) — alternative engine for HIL pipelines.
+- [verify=](verify.md) — judge placement at the engine level.

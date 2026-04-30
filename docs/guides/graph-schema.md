@@ -82,3 +82,6 @@ assert len(replay.nodes()) == 3
     - Serialisation is descriptor-only: reconstructing a runnable pipeline
       from a saved graph is the caller's job.
 
+## See also
+
+- [Session](session.md) — populates the graph as agents register.

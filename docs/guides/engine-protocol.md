@@ -85,3 +85,7 @@ print(Agent(engine=EchoEngine())("hello").text())
     - Agents set ``engine._agent_name`` before invocation. Use it when
       emitting events for observability.
 
+## See also
+
+- [BaseProvider](base-provider.md) — the layer below an engine.
+- [Plan](plan.md) — example of a non-LLM engine.

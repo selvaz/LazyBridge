@@ -74,8 +74,30 @@ editor = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find the top 3 AI papers from April 2026 and summarise them").text())
 ```
 
+## Pitfalls
+
+- **Type hints aren't optional.** A function without annotations renders an
+  empty JSON schema, the model can't fill the arguments, and the tool either
+  isn't called or fails with a `ToolArgumentParseError`. Annotate every
+  parameter, or pass `mode="llm"` with a `schema_llm=` agent — see
+  [Function → Tool](../guides/tool-schema.md).
+- **Docstrings are part of the contract.** "Returns the weather" is weaker
+  than "Returns the current temperature in Celsius and a one-word condition
+  (sunny / cloudy / rainy) for ``city``." Treat the docstring as the prompt
+  the model reads when deciding whether to call the tool.
+- **Malformed argument JSON now fails loudly.** When a model emits
+  un-parseable arguments the engine emits a structured `TOOL_ERROR`
+  (`type="ToolArgumentParseError"`) before the tool runs. The tool body is
+  not invoked; the model sees the parse error on the next turn and
+  self-corrects, instead of failing later with a misleading
+  "missing required field" message.
+- **Tool name collisions are silently shadowed.** When two tools share a
+  name, `build_tool_map` warns once and keeps the last one. Pick stable,
+  unique names — the LLM only ever sees the kept registration.
+
 ## Next
 
 - [Structured output](structured-output.md) — get a typed Pydantic model back instead of plain text
 - [Function → Tool schema modes](../guides/tool-schema.md) — when type hints are missing
 - [Agent.chain](../guides/chain.md) — linear pipeline passing output between agents
+- [MCP integration](mcp.md) — get a whole tool catalogue from an MCP server

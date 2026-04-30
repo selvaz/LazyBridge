@@ -1,5 +1,14 @@
 # Store
 
+**Use `Store`** for cross-process or cross-run state — pipeline
+checkpoints, computed artefacts a downstream agent should read live, or
+shared scratch space across a fan-out.  SQLite mode is durable and
+thread-safe.
+
+**Don't use `Store`** for in-prompt conversation context — that's
+`Memory`'s job.  `Store` is "what should survive a crash"; `Memory` is
+"what should the model see in the next turn".
+
 ## Example
 
 ```python
@@ -60,3 +69,7 @@ print(monitor("status?").text())
       timeout (persistent). Safe to share across concurrent agents.
     - Store is not transactional; each write commits immediately.
 
+## See also
+
+- [Memory](memory.md) — separate concept (in-prompt conversation context).
+- [Checkpoint & resume](checkpoint.md) — `Plan` uses `Store` under the hood.

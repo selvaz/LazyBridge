@@ -80,3 +80,6 @@ print(Agent(engine=EchoEngine())("hello").text())
 - The engine receives ``tools``, not ``agent._tool_map``. Treat it as
   a flat list; don't assume the Agent's internal structure.
 
+## see-also
+- [BaseProvider](base-provider.md) — the layer below an engine.
+- [Plan](plan.md) — example of a non-LLM engine.

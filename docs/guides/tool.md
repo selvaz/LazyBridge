@@ -1,5 +1,15 @@
 # Tool
 
+**Use `Tool` for** any callable you want an LLM to invoke — local
+Python functions, agents wrapped via `as_tool`, or pre-built
+provider-specific helpers. Pass plain functions to `tools=[...]` and
+the framework wraps them automatically; reach for `Tool(...)` only
+when you need to override the name, description, or schema mode.
+
+**Reach for `mode="llm"` / `"hybrid"`** when the function lacks type
+hints and you can't add them — see [Function → Tool](tool-schema.md)
+for the trade-offs.
+
 ## Example
 
 ```python
@@ -68,3 +78,8 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
       drives them to completion so REPL callers (e.g. SupervisorEngine) never
       see a raw coroutine.
 
+## See also
+
+- [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).
+- [Native tools](native-tools.md) — provider-hosted alternatives.
+- [Agent](agent.md) — the surface that consumes tools.

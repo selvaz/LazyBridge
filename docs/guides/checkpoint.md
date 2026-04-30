@@ -1,5 +1,16 @@
 # Checkpoint & resume
 
+**`Plan` checkpoints** to a `Store` after every step.  A crashed
+or interrupted run picks up at the failed step on the next call with
+`resume=True`; a clean prior run short-circuits to the cached `writes`
+bucket.
+
+**`on_concurrent="fail"`** (default) gives single-writer semantics —
+two concurrent runs sharing a `checkpoint_key` collide via CAS and the
+loser raises `ConcurrentPlanRunError`.  **`on_concurrent="fork"`**
+isolates each run under a per-uid suffixed key (good for fan-out
+workflows; incompatible with `resume=True`).
+
 ## Example
 
 ```python
@@ -75,3 +86,7 @@ print(result.payload)  # {"hits": ..., "ranked": ..., "draft": ...}
       must be JSON-serialisable (string, dict, Pydantic model via
       ``.model_dump()``).
 
+## See also
+
+- [Plan](plan.md) — the engine that writes checkpoints.
+- [Store](store.md) — the durable layer behind checkpoints.

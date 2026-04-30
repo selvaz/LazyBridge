@@ -48,3 +48,7 @@ print(pipeline("AI trends April 2026").text())            # invocation → Envel
 - The outer chain Agent has its own name ("chain" by default); set
   ``name="…"`` if you want it to appear distinctly in ``Session.graph``.
 
+## see-also
+- [Agent.parallel](agent-parallel.md) — deterministic fan-out.
+- [Agent.as_tool](as-tool.md) — agents wrapping agents the implicit way.
+- [Plan](plan.md) — typed hand-offs and conditional routing.

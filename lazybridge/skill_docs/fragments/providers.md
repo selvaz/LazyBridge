@@ -70,6 +70,16 @@ Cache: automatic on repeated prefixes ≥1024 tokens; no opt-in needed.
 DEPRECATED (retire 2026-07-24): deepseek-reasoner, deepseek-chat → both map to deepseek-v4-flash.
 Native tools: none (function calling supported).
 
+## narrative
+**`providers.md`** is the catalogue of built-in providers and the
+shape of the `tier` aliases (`super_cheap` / `cheap` / `medium` /
+`expensive` / `top`) each one resolves.  Pick a model directly with
+`Agent("model-id")` or by tier with
+`Agent.from_provider("anthropic", tier="top")`.
+
+For a brand-new provider see [Provider registry](register-provider.md);
+to author one from scratch see [BaseProvider](base-provider.md).
+
 ## example
 ```python
 from lazybridge import Agent
@@ -90,3 +100,8 @@ b = Agent("claude-haiku-4-5")
 - gpt-5-mini does NOT exist. The current OpenAI mini variant is gpt-5.4-mini.
 - gemini-2.0-flash is deprecated June 1 2026; use gemini-2.5-flash-lite instead.
 - Adaptive thinking (Anthropic claude-opus/sonnet 4.6+) ignores budget_tokens.
+
+## see-also
+- [BaseProvider](base-provider.md) — the contract every provider satisfies.
+- [Provider registry](register-provider.md) — runtime aliases and rules.
+- [Native tools](native-tools.md) — what each provider exposes server-side.

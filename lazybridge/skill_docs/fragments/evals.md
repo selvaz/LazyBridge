@@ -30,6 +30,15 @@ llm_judge(agent: Agent, criteria: str) -> Callable   # cheap Agent as judge
 - ``llm_judge`` accepts an Agent and a string policy; the judge
   evaluates output and must respond with ``"approved"`` to pass.
 
+## narrative
+**Use `EvalSuite`** as a thin pytest-ish harness for an agent's
+text-output behaviour: deterministic checks (`contains`, `exact_match`),
+optional `llm_judge` for grading subjective outputs.
+
+**Don't use `EvalSuite`** for fine-grained unit tests of internal
+helpers — those are pytest's job.  Reach for `EvalSuite` when the unit
+under test is the *agent's response*, not a function.
+
 ## example
 ```python
 from lazybridge import Agent
@@ -62,3 +71,6 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
   check sees the JSON serialisation.
 - ``EvalSuite.run`` is synchronous; use ``arun`` in async test harnesses.
 
+## see-also
+- [verify=](verify.md) — runtime version of a judge (gates each call).
+- [Testing (MockAgent)](testing.md) — deterministic doubles for unit tests.

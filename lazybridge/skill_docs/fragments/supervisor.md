@@ -32,6 +32,16 @@ REPL commands:
 - Session propagation: an Agent wrapping a SupervisorEngine receives
   session events for AGENT_START / AGENT_FINISH like any other engine.
 
+## narrative
+**Use `SupervisorEngine`** for full human-in-the-loop control: a REPL
+where the operator can call tools, retry agents with feedback, store
+keys, or hand control back with `continue`.  It implements the same
+`Engine` protocol as `LLMEngine`, so `Agent(engine=SupervisorEngine())`
+slots into any pipeline.
+
+**Use `HumanEngine` instead** for approval-only flows where the human
+types one response and the pipeline moves on.
+
 ## example
 ```python
 from lazybridge import Agent, Tool, Store
@@ -73,3 +83,6 @@ pipeline("AI policy brief")
 - Tool calls in the REPL go via ``run_sync``. If a tool's ``func`` is
   async, it's driven to completion automatically (post-v1 fix).
 
+## see-also
+- [HumanEngine](human-engine.md) — lighter approval-only variant.
+- [Plan](plan.md) — typical container for a supervisor mid-pipeline.

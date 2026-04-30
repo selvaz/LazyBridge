@@ -1,5 +1,14 @@
 # verify=
 
+**Use `verify=`** to wrap a run (or a tool call) in a judge/retry
+loop: each output is scored, rejection feeds the judge's reason back
+into the next attempt as context, capped at `max_verify`.  Two
+placements:
+
+* **Agent-level** (`Agent(..., verify=judge)`) — gates the whole run.
+* **Tool-level** (`agent.as_tool(..., verify=judge)`) — gates each call
+  through the wrapped agent, leaving the outer pipeline untouched.
+
 ## Example
 
 ```python
@@ -80,3 +89,7 @@ plan = Plan(
     - Plan-level is just a special case of agent-level: wrap the step's
       agent with its own ``verify=``.
 
+## See also
+
+- [Agent.as_tool](as-tool.md) — tool-level verify placement (Option B).
+- [Plan](plan.md) — alternative: explicit retry steps via routing.

@@ -25,6 +25,15 @@ Usage: Agent("model", guard=GuardChain(my_filter, LLMGuard(judge, "no PII")))
   become the engine's task; output rewrites replace the payload string.
 - ``GuardChain`` short-circuits on the first ``allowed=False``.
 
+## narrative
+**Use `Guard`** to filter both the input task and the output payload
+before the engine runs / after it returns.  A regex-based
+`ContentGuard` is essentially free; an `LLMGuard` (LLM-as-judge) costs
+tokens but catches policy violations regex can't see.
+
+**Compose with `GuardChain`**: cheap deterministic guards first, then
+the LLM fallback only when needed.  First blocker wins.
+
 ## example
 ```python
 from lazybridge import Agent, ContentGuard, GuardChain, LLMGuard, GuardAction
@@ -59,3 +68,7 @@ print(env.error.message)
   ``LLMGuard`` only for what regex can't handle. Saves tokens.
 - Guards see ``Envelope.text()``, not the typed payload. If you're using
   structured output, the guard operates on the JSON serialisation.
+
+## see-also
+- [Session](session.md) — events emitted by guard outcomes.
+- [verify=](verify.md) — different placement (judge around a tool call).

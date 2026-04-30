@@ -71,3 +71,8 @@ plan = Plan(
     - A plain string passed as ``task=`` is used verbatim — useful for
       hard-coded prompts at intermediate steps.
 
+## See also
+
+- [Plan](plan.md) — the engine that interprets sentinels.
+- [Parallel plan steps](parallel-steps.md) — `from_parallel_all` aggregation.
+- [Envelope](envelope.md) — the object sentinels carry between steps.

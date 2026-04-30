@@ -76,3 +76,5 @@ Agent.from_engine(plan_reloaded)("AI trends")
   bump the number and ``from_dict`` will refuse older shapes; migrate
   explicitly rather than silently.
 
+## see-also
+- [Plan](plan.md) — what gets serialised.

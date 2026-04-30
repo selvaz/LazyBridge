@@ -94,3 +94,7 @@ Agent.from_provider("mistral", tier="top")("hello").text()
     - Register the provider with ``LLMEngine.register_provider_alias`` or
       ``register_provider_rule`` so ``Agent("mymodel-foo")`` routes to it.
 
+## See also
+
+- [Engine protocol](engine-protocol.md) — the layer above a provider.
+- [Provider registry](register-provider.md) — how new providers are wired in.

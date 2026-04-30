@@ -89,3 +89,6 @@ Agent.from_provider("mistral", tier="top")("hello").text()
 - Don't hard-code API keys; honour ``os.environ`` the same way the
   built-ins do for consistency.
 
+## see-also
+- [Engine protocol](engine-protocol.md) — the layer above a provider.
+- [Provider registry](register-provider.md) — how new providers are wired in.

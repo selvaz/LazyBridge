@@ -24,6 +24,17 @@ LLMEngine.register_provider_rule(
   Tests should snapshot/restore these tables if they register rules
   (see ``tests/unit/test_v1_refinements.py:restore_provider_rules``).
 
+## narrative
+**Use the provider registry** to make `Agent("my-model")` route to a
+custom provider without forking the framework.  Two granularities:
+
+* `register_provider_alias("mistral", "mistral")` — exact-match alias.
+* `register_provider_rule("claude-opus-5", "anthropic")` — substring or
+  prefix rule (later registrations win).
+* `set_default_provider(None)` — disable the safety-net fallback so an
+  unrecognised model raises `ValueError` at construction instead of
+  routing somewhere unintended.
+
 ## example
 ```python
 import pytest
@@ -63,3 +74,6 @@ def restore_provider_rules():
 - Tests that register rules leak state into subsequent tests unless
   you use the restore fixture pattern.
 
+## see-also
+- [BaseProvider](base-provider.md) — what you implement for a brand-new provider.
+- [Providers](providers.md) — the built-in catalogue.

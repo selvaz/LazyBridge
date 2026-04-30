@@ -28,6 +28,15 @@ Agent("model", native_tools=[NativeTool.WEB_SEARCH, ...]) -> Agent
   ``Envelope.metadata`` (``model``, ``provider``) and, where providers
   return them, via raw ``CompletionResponse.grounding_sources``.
 
+## narrative
+**Use a native tool** when the provider already hosts the capability
+(web search, code execution, file search) and your data doesn't need to
+leave the provider's environment.  No code, no schema — pass an enum.
+
+**Don't use a native tool** when you need full control over the
+implementation, custom auth, or you want to swap providers without
+re-testing the tool surface.  Write a regular `Tool` instead.
+
 ## example
 ```python
 from lazybridge import Agent, NativeTool
@@ -62,3 +71,6 @@ Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
   code execution time). They appear in ``Envelope.metadata.cost_usd``
   when the provider reports them.
 
+## see-also
+- [Tool](tool.md) — write your own when native isn't a fit.
+- [Providers](providers.md) — which native tools each provider supports.

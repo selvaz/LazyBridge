@@ -31,6 +31,18 @@ Agent(..., tools=[func])                  # wrap_tool applied automatically
   extra fields, no coercion). Available on Anthropic + OpenAI strict
   modes; increases reliability at the cost of some flexibility.
 
+## narrative
+**Use `mode="signature"`** (the default) for any function with type
+hints and a docstring.  The schema is produced deterministically with no
+LLM cost — the right choice for >95% of user code.
+
+**Use `mode="llm"`** for legacy functions you can't easily annotate —
+opaque `**kwargs`, third-party callables, auto-generated wrappers.  Pay
+tokens once at construction time.
+
+**Use `mode="hybrid"`** when the codebase is mixed: the signature path
+covers what it can, the LLM only fills annotated gaps.
+
 ## example
 ```python
 from lazybridge import Agent, Tool
@@ -88,3 +100,6 @@ tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
   rely on extra kwargs or variadic args may fail strict validation;
   try without strict first.
 
+## see-also
+- [Tool](tool.md) — the wrapper that consumes a schema mode.
+- [Native tools](native-tools.md) — the no-schema-needed alternative.

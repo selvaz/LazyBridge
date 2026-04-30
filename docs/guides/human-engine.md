@@ -1,5 +1,14 @@
 # HumanEngine
 
+**Use `HumanEngine`** for an approval gate or a structured form: the
+human types a string (or fills Pydantic fields), the agent treats it as
+an LLM response.  Drop-in replacement for `LLMEngine` in any pipeline
+where you want to insert a human at a specific step.
+
+**Use `SupervisorEngine` instead** when the human needs to call tools,
+retry agents with feedback, or run a real REPL — `HumanEngine` is the
+lighter approval-only variant.
+
 ## Example
 
 ```python
@@ -55,3 +64,7 @@ pipeline("draft the release notes")
       raw string, they don't call tools interactively. If you want the
       human to call tools, use ``SupervisorEngine``.
 
+## See also
+
+- [SupervisorEngine](supervisor.md) — full HIL REPL with tools and retry.
+- [Agent.chain](chain.md) — typical pattern for inserting HumanEngine mid-pipeline.

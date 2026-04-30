@@ -66,3 +66,7 @@ plan = Plan(
 - When passing a ``str`` as ``task=``, it's treated as a LITERAL, not a
   sentinel. Don't write ``task="from_prev"`` expecting the sentinel.
 
+## see-also
+- [Plan](plan.md) — the engine that interprets sentinels.
+- [Parallel plan steps](parallel-steps.md) — `from_parallel_all` aggregation.
+- [Envelope](envelope.md) — the object sentinels carry between steps.

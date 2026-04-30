@@ -59,3 +59,6 @@ for env in results:   # list[Envelope], one per agent
   Timeouts return an error Envelope in the slot, preserving the
   positional contract.
 
+## see-also
+- [Agent.chain](chain.md) — sequential rather than fan-out.
+- [Plan](plan.md) — when you need typed steps with parallel bands.

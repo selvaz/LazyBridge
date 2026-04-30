@@ -53,3 +53,8 @@ print(pipeline("AI trends April 2026").text())            # invocation → Envel
     - For fan-out on the same task see ``Agent.parallel``. For typed /
       conditional flows see ``Plan``.
 
+## See also
+
+- [Agent.parallel](agent-parallel.md) — deterministic fan-out.
+- [Agent.as_tool](as-tool.md) — agents wrapping agents the implicit way.
+- [Plan](plan.md) — typed hand-offs and conditional routing.

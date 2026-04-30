@@ -24,6 +24,14 @@ Usage: Agent("model", tools=[researcher.as_tool()])
 - Nested agents inherit the outer session and register an ``as_tool``
   edge in the graph automatically (see Agent docs).
 
+## narrative
+**Use `as_tool()`** when you want to expose an agent as a tool with a
+specific name, description, or a `verify=` judge — the gated-call shape.
+
+**Don't bother calling `as_tool()`** for the simple case: passing an
+`Agent` directly to `tools=[...]` already wraps it for you.  Reach for
+the explicit form only when overriding name / description / verify.
+
 ## example
 ```python
 from lazybridge import Agent
@@ -56,3 +64,7 @@ orchestrator = Agent("claude-opus-4-7",
   the wrapped agent's ``output=``. If you need a typed payload in the
   caller, orchestrate via ``Plan`` with ``Step(output=Model)`` instead.
 
+## see-also
+- [Agent.chain](chain.md) — the linear-pipeline alternative.
+- [verify=](verify.md) — judge placement around a tool call.
+- [Agent](agent.md) — the surface that consumes the wrapped tool.
