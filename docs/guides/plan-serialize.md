@@ -59,8 +59,8 @@ Agent.from_engine(plan_reloaded)("AI trends")
     #     {
     #       "name": str,
     #       "target": {"kind": "tool"|"agent"|"callable", "name": str},
-    #       "task": {"kind": "from_prev"|"from_start"|"from_step"|"from_parallel"|"literal", ...},
-    #       "context": {... or null},
+    #       "task":     {"kind": "from_prev"|"from_start"|"from_step"|"from_parallel"|"literal", ...},
+    #       "context":  {... single ref}  OR  [{...}, {...}]  OR  null,    # single OR list
     #       "parallel": bool,
     #       "writes": str | null,
     #     },

@@ -117,14 +117,23 @@ separate engine, no graph wrappers. See [the MCP recipe](docs/recipes/mcp.md).
 ### 5 · Declared typed pipeline with resume
 
 ```python
-from lazybridge import Agent, Plan, Step, Store, from_step
+from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 
 store = Store(db="pipeline.sqlite")
 
+# Idiomatic shape: each step has an explicit task instruction; upstream
+# data flows through `context=`.  `context=[from_step("a"), from_step("b")]`
+# also works to pull from multiple upstream steps without a combiner.
 plan = Plan(
-    Step(researcher, name="search", writes="hits",   output=Hits),
-    Step(ranker,     name="rank",   task=from_step("search"), output=Ranked),
-    Step(writer,     name="write",  task=from_step("rank")),
+    Step(researcher, name="search",
+         writes="hits", output=Hits),
+    Step(ranker,     name="rank",
+         task="Rank these search hits by relevance; return the top 5.",
+         context=from_prev,
+         output=Ranked),
+    Step(writer,     name="write",
+         task="Write a 200-word brief from the ranked items.",
+         context=from_step("rank")),
     store=store, checkpoint_key="research", resume=True,
 )
 

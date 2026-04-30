@@ -13,7 +13,9 @@ Do you want to declare that N agents run at once on the same task?
 Do you want declared concurrent branches inside a typed workflow?
     → Plan(Step(a, parallel=True),
            Step(b, parallel=True),
-           Step(join, task=from_parallel("a")))   # plus aggregation step
+           Step(join,
+                task="Aggregate the branches.",
+                context=[from_parallel("a"), from_parallel("b")]))
 
 ## tree_mermaid
 flowchart TD

@@ -3,13 +3,16 @@ Step(target, *, parallel: bool = False, name: str | None = None, ...)
 from_parallel(name: str) -> Sentinel
 
 # Typical shape: N parallel branches followed by a join step.
+# Idiomatic: ``task=`` is the join's instruction (a literal); upstream
+# branch outputs flow through ``context=`` — a list of sentinels reads
+# all branches without an intermediate combiner.
 Plan(
     Step(a, name="a", parallel=True),
     Step(b, name="b", parallel=True),
     Step(c, name="c", parallel=True),
     Step(join, name="join",
-         task=from_parallel("a"),
-         context=from_parallel("b")),
+         task="Synthesise the three branches into one report.",
+         context=[from_parallel("a"), from_parallel("b"), from_parallel("c")]),
 )
 
 ## rules
@@ -37,7 +40,7 @@ the application layer (no Plan, no aggregation, just `list[Envelope]`).
 
 ## example
 ```python
-from lazybridge import Agent, Plan, Step, from_parallel, Store
+from lazybridge import Agent, Plan, Step, from_parallel, from_parallel_all, Store
 
 store = Store(db="monitor.sqlite")
 
@@ -47,10 +50,16 @@ plan = Plan(
     Step(openai_search,    name="search_o", parallel=True, writes="findings_o"),
     Step(google_search,    name="search_g", parallel=True, writes="findings_g"),
 
-    # Join: synthesiser reads all three branches via context=.
+    # Join — explicit task instruction; the three branch outputs flow
+    # in via the list-context.  ``from_parallel_all("search_a")`` would
+    # also work and produces a single labelled-text join, but the list
+    # form is more flexible (e.g. add a literal style note: see below).
     Step(synthesiser, name="synth",
-         task=from_parallel("search_a"),
-         context=from_parallel("search_o"),  # could concatenate more
+         task="Compare the three sources; flag agreement and disagreement.",
+         context=[from_parallel("search_a"),
+                  from_parallel("search_o"),
+                  from_parallel("search_g"),
+                  "Style: terse, factual, no superlatives."],
          writes="plan"),
 
     store=store,

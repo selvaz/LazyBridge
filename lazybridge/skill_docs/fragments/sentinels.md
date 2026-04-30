@@ -55,10 +55,17 @@ from lazybridge import Plan, Step, from_prev, from_start, from_step
 
 plan = Plan(
     Step(researcher,    name="research",  output=Hits),
-    Step(fact_checker,  name="check",     task=from_prev),    # check researcher's output
-    Step(writer,        name="write",     task=from_start),   # writer sees ORIGINAL user task
-    Step(editor,        name="edit",      task=from_step("write"),
-                                          context=from_step("check")),
+    # Each step has an explicit task instruction; the upstream data
+    # flows through ``context=`` (the idiomatic shape).
+    Step(fact_checker,  name="check",
+         task="Score each item for factual correctness; list any rejects.",
+         context=from_prev),                                  # check researcher's output
+    Step(writer,        name="write",
+         task="Draft a 200-word answer to the user's task.",
+         context=from_start),                                  # writer sees ORIGINAL user task
+    Step(editor,        name="edit",
+         task="Polish the draft; remove items the fact-checker flagged.",
+         context=[from_step("write"), from_step("check")]),   # multi-source via list-context
 )
 
 # context= can carry MANY sources at once (no combiner step needed).

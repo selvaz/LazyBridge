@@ -257,11 +257,20 @@ in the Store.
 ```python
 store = Store(db="pipeline.sqlite")
 plan = Plan(
-    Step(extract,   name="extract",  writes="raw"),
-    Step(transform, name="transform", task=from_prev, writes="clean"),
-    Step(validate,  name="validate",  task=from_prev, writes="verdict",
+    Step(extract,   name="extract",
+         writes="raw"),
+    Step(transform, name="transform",
+         task="Transform raw records to the canonical schema; drop nulls.",
+         context=from_prev,
+         writes="clean"),
+    Step(validate,  name="validate",
+         task="Verify business rules; flag rows that fail.",
+         context=from_prev,
+         writes="verdict",
          output=Verdict),
-    Step(load,      name="load",      task=from_step("transform")),
+    Step(load,      name="load",
+         task="Load the cleaned records into the warehouse.",
+         context=from_step("transform")),
     store=store,
     checkpoint_key="etl-2026-04-30",
     resume=True,                             # picks up at the failed step
@@ -286,9 +295,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 store = Store(db="backtest.sqlite")
 plan = Plan(
-    Step(load_data,  name="load",   writes="prices"),
-    Step(run_strategy, name="run",  task=from_prev, writes="trades"),
-    Step(score,      name="score",  task=from_prev, output=Metrics),
+    Step(load_data,  name="load",
+         writes="prices"),
+    Step(run_strategy, name="run",
+         task="Execute the strategy over the price series; emit a trade log.",
+         context=from_prev,
+         writes="trades"),
+    Step(score,      name="score",
+         task="Compute Sharpe, max-drawdown, and total return.",
+         context=from_prev,
+         output=Metrics),
     store=store,
     checkpoint_key="backtest",
     on_concurrent="fork",                    # f"backtest:{run_uid}" per run
@@ -315,9 +331,19 @@ class Verdict(BaseModel):
     next: Literal["write", "publish"]        # "write" → loop back
 
 plan = Plan(
-    Step(writer,    name="write",    task=from_start, writes="draft"),
-    Step(reviewer,  name="review",   task=from_prev,  output=Verdict),
-    Step(publisher, name="publish",  task=from_step("write")),
+    Step(writer,    name="write",
+         task="Draft a 200-word answer to the user's question.",
+         context=from_start,                          # writer always sees the original task
+         writes="draft"),
+    Step(reviewer,  name="review",
+         task="Score the draft for accuracy, tone, and length. "
+              "Set next='publish' if the draft passes; otherwise "
+              "set next='write' and provide actionable feedback.",
+         context=from_prev,
+         output=Verdict),
+    Step(publisher, name="publish",
+         task="Final-format and publish the approved draft.",
+         context=from_step("write")),
     max_iterations=8,                        # cap the loop
 )
 ```
@@ -334,13 +360,21 @@ def normalise(text: str) -> str:
     return text.strip().lower()
 
 plan = Plan(
-    Step(researcher, name="search"),                  # Agent
-    Step(normalise,  name="clean", task=from_prev),   # plain callable
-    Step("score",    name="score", task=from_prev),   # tool name (resolved on the wrapping Agent)
-    Step(writer,     name="write", task=from_step("clean")),
+    # Agent: LLM step — explicit instruction, data via context.
+    Step(researcher, name="search"),
+    # Plain callable: receives the previous step's text as its first
+    # arg.  ``task=from_prev`` is the natural shape here — the function
+    # signature IS the contract; there is no system prompt to instruct.
+    Step(normalise,  name="clean", task=from_prev),
+    # Tool name target: resolved on the wrapping Agent's tool set.
+    # Same shape as a plain callable — task is the first argument value.
+    Step("score",    name="score", task=from_prev),
+    # Agent again: explicit instruction + named context source.
+    Step(writer,     name="write",
+         task="Write a 150-word brief; cite normalised, scored items.",
+         context=from_step("clean")),
 )
 
-# Tool-name targets resolve against the outer Agent's tool set.
 Agent.from_engine(plan, tools=[score_tool])("…")
 ```
 

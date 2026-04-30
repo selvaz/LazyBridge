@@ -36,10 +36,21 @@ store = Store(db="pipeline.sqlite")
 # --- Plan construction validates the DAG — no LLM call happens yet ---
 
 plan = Plan(
-    Step(searcher, name="search",     writes="results", output=SearchResult),
-    Step(analyser, name="analyse",    task=from_prev,   output=Analysis),   # receives search's Envelope
-    Step(writer,   name="write",      task=from_step("analyse")),           # jumps to analyse's Envelope by name
-    Step(apology,  name="no_results"),                                      # reached only if SearchResult.next == "no_results"
+    Step(searcher, name="search",
+         writes="results",
+         output=SearchResult),
+    # Idiomatic shape: an explicit ``task=`` instruction; upstream data
+    # flows through ``context=``.  The agent doesn't have to guess what
+    # to do with the envelope it received.
+    Step(analyser, name="analyse",
+         task="Analyse the search results; assign a confidence in [0,1].",
+         context=from_prev,
+         output=Analysis),
+    Step(writer,   name="write",
+         task="Write a 250-word brief from the analyser's findings; cite items.",
+         context=from_step("analyse")),
+    Step(apology,  name="no_results",
+         task="Apologise that no results were found and suggest broader queries."),
     store=store,
     checkpoint_key="weekly-brief",
     resume=True,           # skip steps that already completed successfully
@@ -67,13 +78,23 @@ The checkpoint key (`"weekly-brief"`) namespaces state in the Store — change i
 Mark steps with `parallel=True` to run them concurrently, then join with `from_parallel`:
 
 ```python
-from lazybridge import from_parallel
+from lazybridge import from_parallel, from_prev
 
 plan = Plan(
     Step(searcher,     name="search"),
-    Step(us_analyser,  name="us",  task=from_prev,         parallel=True),
-    Step(eu_analyser,  name="eu",  task=from_prev,         parallel=True),
-    Step(summariser,   name="join", task=from_parallel("us")),  # receives list[Envelope]
+    Step(us_analyser,  name="us",
+         task="Score the US-relevant items.",
+         context=from_prev,
+         parallel=True),
+    Step(eu_analyser,  name="eu",
+         task="Score the EU-relevant items.",
+         context=from_prev,
+         parallel=True),
+    # Join: explicit instruction + list-context that pulls both branches
+    # without an intermediate combiner.
+    Step(summariser,   name="join",
+         task="Summarise US and EU findings into one global report.",
+         context=[from_parallel("us"), from_parallel("eu")]),
 )
 ```
 

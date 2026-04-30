@@ -194,11 +194,20 @@ in the Store.
 ```python
 store = Store(db="pipeline.sqlite")
 plan = Plan(
-    Step(extract,   name="extract",  writes="raw"),
-    Step(transform, name="transform", task=from_prev, writes="clean"),
-    Step(validate,  name="validate",  task=from_prev, writes="verdict",
+    Step(extract,   name="extract",
+         writes="raw"),
+    Step(transform, name="transform",
+         task="Transform raw records to the canonical schema; drop nulls.",
+         context=from_prev,
+         writes="clean"),
+    Step(validate,  name="validate",
+         task="Verify business rules; flag rows that fail.",
+         context=from_prev,
+         writes="verdict",
          output=Verdict),
-    Step(load,      name="load",      task=from_step("transform")),
+    Step(load,      name="load",
+         task="Load the cleaned records into the warehouse.",
+         context=from_step("transform")),
     store=store,
     checkpoint_key="etl-2026-04-30",
     resume=True,                             # picks up at the failed step
@@ -223,9 +232,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 store = Store(db="backtest.sqlite")
 plan = Plan(
-    Step(load_data,  name="load",   writes="prices"),
-    Step(run_strategy, name="run",  task=from_prev, writes="trades"),
-    Step(score,      name="score",  task=from_prev, output=Metrics),
+    Step(load_data,  name="load",
+         writes="prices"),
+    Step(run_strategy, name="run",
+         task="Execute the strategy over the price series; emit a trade log.",
+         context=from_prev,
+         writes="trades"),
+    Step(score,      name="score",
+         task="Compute Sharpe, max-drawdown, and total return.",
+         context=from_prev,
+         output=Metrics),
     store=store,
     checkpoint_key="backtest",
     on_concurrent="fork",                    # f"backtest:{run_uid}" per run
@@ -252,9 +268,19 @@ class Verdict(BaseModel):
     next: Literal["write", "publish"]        # "write" → loop back
 
 plan = Plan(
-    Step(writer,    name="write",    task=from_start, writes="draft"),
-    Step(reviewer,  name="review",   task=from_prev,  output=Verdict),
-    Step(publisher, name="publish",  task=from_step("write")),
+    Step(writer,    name="write",
+         task="Draft a 200-word answer to the user's question.",
+         context=from_start,                          # writer always sees the original task
+         writes="draft"),
+    Step(reviewer,  name="review",
+         task="Score the draft for accuracy, tone, and length. "
+              "Set next='publish' if the draft passes; otherwise "
+              "set next='write' and provide actionable feedback.",
+         context=from_prev,
+         output=Verdict),
+    Step(publisher, name="publish",
+         task="Final-format and publish the approved draft.",
+         context=from_step("write")),
     max_iterations=8,                        # cap the loop
 )
 ```
@@ -271,13 +297,21 @@ def normalise(text: str) -> str:
     return text.strip().lower()
 
 plan = Plan(
-    Step(researcher, name="search"),                  # Agent
-    Step(normalise,  name="clean", task=from_prev),   # plain callable
-    Step("score",    name="score", task=from_prev),   # tool name (resolved on the wrapping Agent)
-    Step(writer,     name="write", task=from_step("clean")),
+    # Agent: LLM step — explicit instruction, data via context.
+    Step(researcher, name="search"),
+    # Plain callable: receives the previous step's text as its first
+    # arg.  ``task=from_prev`` is the natural shape here — the function
+    # signature IS the contract; there is no system prompt to instruct.
+    Step(normalise,  name="clean", task=from_prev),
+    # Tool name target: resolved on the wrapping Agent's tool set.
+    # Same shape as a plain callable — task is the first argument value.
+    Step("score",    name="score", task=from_prev),
+    # Agent again: explicit instruction + named context source.
+    Step(writer,     name="write",
+         task="Write a 150-word brief; cite normalised, scored items.",
+         context=from_step("clean")),
 )
 
-# Tool-name targets resolve against the outer Agent's tool set.
 Agent.from_engine(plan, tools=[score_tool])("…")
 ```
 
@@ -394,10 +428,17 @@ from lazybridge import Plan, Step, from_prev, from_start, from_step
 
 plan = Plan(
     Step(researcher,    name="research",  output=Hits),
-    Step(fact_checker,  name="check",     task=from_prev),    # check researcher's output
-    Step(writer,        name="write",     task=from_start),   # writer sees ORIGINAL user task
-    Step(editor,        name="edit",      task=from_step("write"),
-                                          context=from_step("check")),
+    # Each step has an explicit task instruction; the upstream data
+    # flows through ``context=`` (the idiomatic shape).
+    Step(fact_checker,  name="check",
+         task="Score each item for factual correctness; list any rejects.",
+         context=from_prev),                                  # check researcher's output
+    Step(writer,        name="write",
+         task="Draft a 200-word answer to the user's task.",
+         context=from_start),                                  # writer sees ORIGINAL user task
+    Step(editor,        name="edit",
+         task="Polish the draft; remove items the fact-checker flagged.",
+         context=[from_step("write"), from_step("check")]),   # multi-source via list-context
 )
 
 # context= can carry MANY sources at once (no combiner step needed).
@@ -432,13 +473,16 @@ Step(target, *, parallel: bool = False, name: str | None = None, ...)
 from_parallel(name: str) -> Sentinel
 
 # Typical shape: N parallel branches followed by a join step.
+# Idiomatic: ``task=`` is the join's instruction (a literal); upstream
+# branch outputs flow through ``context=`` — a list of sentinels reads
+# all branches without an intermediate combiner.
 Plan(
     Step(a, name="a", parallel=True),
     Step(b, name="b", parallel=True),
     Step(c, name="c", parallel=True),
     Step(join, name="join",
-         task=from_parallel("a"),
-         context=from_parallel("b")),
+         task="Synthesise the three branches into one report.",
+         context=[from_parallel("a"), from_parallel("b"), from_parallel("c")]),
 )
 
 **rules**
@@ -458,7 +502,7 @@ Plan(
 **example**
 
 ```python
-from lazybridge import Agent, Plan, Step, from_parallel, Store
+from lazybridge import Agent, Plan, Step, from_parallel, from_parallel_all, Store
 
 store = Store(db="monitor.sqlite")
 
@@ -468,10 +512,16 @@ plan = Plan(
     Step(openai_search,    name="search_o", parallel=True, writes="findings_o"),
     Step(google_search,    name="search_g", parallel=True, writes="findings_g"),
 
-    # Join: synthesiser reads all three branches via context=.
+    # Join — explicit task instruction; the three branch outputs flow
+    # in via the list-context.  ``from_parallel_all("search_a")`` would
+    # also work and produces a single labelled-text join, but the list
+    # form is more flexible (e.g. add a literal style note: see below).
     Step(synthesiser, name="synth",
-         task=from_parallel("search_a"),
-         context=from_parallel("search_o"),  # could concatenate more
+         task="Compare the three sources; flag agreement and disagreement.",
+         context=[from_parallel("search_a"),
+                  from_parallel("search_o"),
+                  from_parallel("search_g"),
+                  "Style: terse, factual, no superlatives."],
          writes="plan"),
 
     store=store,
