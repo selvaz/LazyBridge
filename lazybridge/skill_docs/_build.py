@@ -205,7 +205,12 @@ def _read_fragment(name: str) -> dict[str, str]:
 # Renderers
 # ---------------------------------------------------------------------------
 
-SKILL_SECTIONS = ("signature", "rules", "example", "pitfalls", "see-also")
+#: Sections rendered into the LLM-track tier files (skill_docs/0X_*.md).
+#: ``see-also`` is intentionally NOT here — cross-links are useful in
+#: the human site (where they resolve via mkdocs to other guides) but
+#: noise in the dense LLM reference.  The skill mirror under
+#: ``docs/skill/`` would also pick up broken links if we kept them.
+SKILL_SECTIONS = ("signature", "rules", "example", "pitfalls")
 SITE_SECTIONS = ("narrative", "example", "pitfalls", "see-also")
 
 

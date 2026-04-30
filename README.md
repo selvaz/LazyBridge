@@ -1,25 +1,35 @@
 # LazyBridge
 
 **Zero-boilerplate Python agent framework.** One `Agent`, swappable
-engines (LLM, Human, Supervisor, Plan), and one tool contract —
-functions, agents, and agents-of-agents all compose the same way.
-Parallelism is automatic when the engine decides; declared when you do.
+engines (LLM / Plan / Human / Supervisor), and one tool contract —
+plain functions, other Agents, and Agents-of-Agents all compose the
+same way. Parallelism is automatic when the engine decides;
+deterministic when you declare it.
 
-Pipelines are validated at construction time: a misspelled step name
-or an unknown reference surfaces as `PlanCompileError` **before any
-LLM call**, not at the first production failure.
+Pipelines are validated at construction time: a misspelled step name,
+a forward-reference in `from_step`, or a parallel-band misuse surfaces
+as `PlanCompileError` **before any LLM call** — not at the first
+production failure.
 
 ```python
 from lazybridge import Agent
 print(Agent("claude-opus-4-7")("hello").text())
 ```
 
-## Who it's for
+## Documentation — two tracks
 
-- **Simple LLM calls with tools or structured output** — stay at Basic. `Agent` is all you need.
-- **Real apps** that need conversation memory, tracing, guardrails, or multi-agent chains — Mid tier.
-- **Production pipelines** with typed hand-offs, conditional routing, crash-resume — Full tier.
-- **Framework extension** (new providers, custom engines) — Advanced tier.
+LazyBridge ships docs for two audiences. **Same source of truth** —
+fragment files under `lazybridge/skill_docs/fragments/` render into
+both surfaces via `python -m lazybridge.skill_docs._build` (CI enforces
+no drift).
+
+| Audience | Where | Style |
+|---|---|---|
+| **Humans** | [MkDocs site](https://selvaz.github.io/LazyBridge/) — [Quickstart](docs/quickstart.md) → [tier pages](docs/tiers/) → [guides](docs/guides/) → [decision trees](docs/decisions/) → [recipes](docs/recipes/) → [API reference](docs/reference.md) | Narrative-first; mermaid diagrams; copy-paste recipes |
+| **LLM assistants** | [Claude Skill](lazybridge/skill_docs/SKILL.md) packaged with the wheel; mirrored at [`docs/skill/`](docs/skill/); [`llms.txt`](llms.txt) entry-point | Signature-first; rules block; dense; predictable section structure (`signature` / `rules` / `example` / `pitfalls`) |
+
+Both tracks cover the same surface — Basic / Mid / Full / Advanced
+tiers, decision trees ("when to use which"), and the errors table.
 
 ## Pick your tier
 
@@ -28,14 +38,14 @@ LazyBridge grows with you — every tier is additive.
 | Tier | For | Key imports |
 |---|---|---|
 | [**Basic**](docs/tiers/basic.md) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
-| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `HumanEngine` · `EvalSuite` |
+| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` (alpha) · `HumanEngine` · `EvalSuite` |
 | [**Full**](docs/tiers/full.md) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
 | [**Advanced**](docs/tiers/advanced.md) | extending the framework | `Engine` · `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
 
 ## Install
 
 ```bash
-pip install lazybridge[anthropic]   # or [openai], [google], [deepseek], [all]
+pip install lazybridge[anthropic]   # or [openai], [google], [deepseek], [litellm], [mcp], [otel], [all]
 ```
 
 Set an API key for your provider of choice (`ANTHROPIC_API_KEY`,
@@ -57,8 +67,8 @@ print(Agent("claude-opus-4-7", tools=[get_weather])(
 ).text())
 ```
 
-No decorators, no JSON schemas. If your function lacks type hints, pass
-`mode="llm"` to have a cheap agent infer the schema — see
+No decorators, no JSON schemas. If your function lacks type hints,
+pass `mode="llm"` to have a cheap agent infer the schema — see
 [Function → Tool](docs/guides/tool-schema.md).
 
 ### 2 · Native tools (no code at all)
@@ -81,11 +91,30 @@ editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("summarise AI trends April 2026").text())
 ```
 
-Parallelism is emergent: when `editor` decides to call two tools in the
-same turn, they run concurrently via `asyncio.gather`. No flag, no
-config, no "parallel mode".
+Parallelism is emergent: when `editor` decides to call two tools in
+the same turn, they run concurrently via `asyncio.gather`. No flag,
+no config, no "parallel mode".
 
-### 4 · Declared typed pipeline with resume
+### 4 · MCP servers as tool catalogues (alpha)
+
+```python
+from lazybridge import Agent
+from lazybridge.ext.mcp import MCP
+
+fs = MCP.stdio(
+    "fs",
+    command="npx",
+    args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+    cache_tools_ttl=60.0,            # refresh tool list every 60s
+)
+agent = Agent("claude-opus-4-7", tools=[fs])
+agent("Read README.md and summarise the install steps")
+```
+
+The MCP server expands into one LazyBridge `Tool` per MCP tool — no
+separate engine, no graph wrappers. See [the MCP recipe](docs/recipes/mcp.md).
+
+### 5 · Declared typed pipeline with resume
 
 ```python
 from lazybridge import Agent, Plan, Step, Store, from_step
@@ -102,11 +131,42 @@ plan = Plan(
 Agent.from_engine(plan)("AI trends April 2026")
 ```
 
-If a step fails mid-plan, the next run with `resume=True` retries from
-the failing step only. If the plan is already done, it short-circuits
-to the cached `writes` bucket.
+If a step fails mid-plan, the next run with `resume=True` retries
+from the failing step only. If the plan is already done, it
+short-circuits to the cached `writes` bucket. Concurrent runs on the
+same `checkpoint_key` are serialised via CAS — pass
+`on_concurrent="fork"` for fan-out workflows.
 
-### 5 · Human-in-the-loop with a full REPL
+### 6 · Production observability (OTel GenAI conventions)
+
+```python
+from lazybridge import Agent, Session, JsonFileExporter
+from lazybridge.ext.otel import OTelExporter
+
+sess = Session(
+    db="events.sqlite",
+    batched=True,                     # non-blocking emit
+    on_full="hybrid",                 # default — block on AGENT_*/TOOL_*, drop telemetry
+    exporters=[
+        JsonFileExporter("run.jsonl"),
+        OTelExporter(endpoint="http://otelcol:4318"),
+    ],
+)
+
+researcher = Agent("claude-opus-4-7", tools=[search], name="researcher", session=sess)
+print(researcher("summarise this week's AI news").text())
+
+# Cost / tokens / latency breakdown across nested agents.
+print(sess.usage_summary())
+sess.flush()                          # drain the writer before exit
+```
+
+`OTelExporter` emits `gen_ai.system` / `gen_ai.usage.input_tokens` /
+`gen_ai.tool.call.id` and the rest of the OpenTelemetry GenAI Semantic
+Conventions, with proper parent-child span hierarchy
+(`invoke_agent → chat / execute_tool`).
+
+### 7 · Human-in-the-loop with a full REPL
 
 ```python
 from lazybridge import Agent
@@ -130,38 +190,34 @@ lighter [`HumanEngine`](docs/guides/human-engine.md) instead.
 * [Structured output with Pydantic](https://selvaz.github.io/LazyBridge/recipes/structured-output/)
 * [Pipeline with typed steps and crash resume](https://selvaz.github.io/LazyBridge/recipes/plan-with-resume/)
 * [Human-in-the-loop: approval gates and REPL](https://selvaz.github.io/LazyBridge/recipes/human-in-the-loop/)
+* [MCP integration (alpha)](https://selvaz.github.io/LazyBridge/recipes/mcp/)
 * [Decision trees — "when to use which"](https://selvaz.github.io/LazyBridge/decisions/)
-
-## Documentation
-
-* **For humans** — [MkDocs site](https://selvaz.github.io/LazyBridge/):
-  [Quickstart](docs/quickstart.md), per-tier pages, guides, decision
-  trees ("when to use which"), API reference, errors table.
-* **For LLM assistants** — a first-class
-  [Claude Skill](lazybridge/skill_docs/SKILL.md) ships with the
-  package: `00_overview`, `01_basic` … `04_advanced`,
-  `05_decision_trees`, `06_reference`, `99_errors`. Same content as
-  the site, rendered dense and signature-first for LLM consumption.
-  A minimal [`llms.txt`](llms.txt) index points at both.
-
-Documentation is single-source — fragment files under
-`lazybridge/skill_docs/fragments/` render into the skill **and** the
-site via `python -m lazybridge.skill_docs._build`. CI enforces no drift.
 
 ## What makes LazyBridge different
 
 1. **Tool-is-Tool.** Functions, Agents, Agents-of-Agents, and tool
-   providers (e.g. an MCP server) all plug into `tools=[...]` with the
-   same contract. `SupervisorEngine`, `LLMEngine`, and `Plan` all
+   providers (e.g. an MCP server) all plug into `tools=[...]` with
+   the same contract. `SupervisorEngine`, `LLMEngine`, and `Plan` all
    accept the same list.
-2. **Compile-time plan validation.** `PlanCompileError` at construction
-   catches broken DAGs — duplicate names, forward references, broken
-   `from_step` / `from_parallel` sentinels, parallel-band misuse —
-   before any LLM call.
-3. **Parallelism as capability.** When the engine emits N tool calls in
-   one turn, they run concurrently via `asyncio.gather`. No flag, no
-   `tool_choice="parallel"` knob.
-4. **LLM-assistant skill as first-class artifact.** A signature-first
+2. **Compile-time plan validation.** `PlanCompileError` at
+   construction catches broken DAGs — duplicate names, forward
+   references, broken `from_step` / `from_parallel` sentinels,
+   parallel-band misuse — before any LLM call.
+3. **CAS-protected crash resume.** `Plan` checkpoints to `Store` via
+   `compare_and_swap`. Two concurrent runs on the same
+   `checkpoint_key` deterministically converge — first writer wins,
+   second raises `ConcurrentPlanRunError` instead of silently
+   overwriting. `on_concurrent="fork"` isolates parallel runs.
+4. **Parallelism as capability.** When the engine emits N tool calls
+   in one turn, they run concurrently via `asyncio.gather`. No flag,
+   no `tool_choice="parallel"` knob.
+5. **Transitive cost roll-up.** `Envelope.metadata.nested_*` aggregates
+   token / cost telemetry across an Agent-of-Agents tree — the outer
+   envelope reports total pipeline spend without double-counting.
+6. **OTel GenAI conventions out of the box.** `OTelExporter` ships
+   `gen_ai.*` attributes and proper parent-child spans; existing
+   GenAI dashboards render LazyBridge traces unchanged.
+7. **LLM-assistant skill as first-class artifact.** A signature-first
    `SKILL.md` ships with the library, loadable by any LLM assistant.
 
 ## Licence

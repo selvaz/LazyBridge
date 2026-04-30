@@ -108,6 +108,21 @@ Without the context manager, the transport stays open for the process
 lifetime; the underlying subprocess is normally cleaned up when the
 parent process exits.
 
+## Tool catalogue cache
+
+The discovered tool list is cached for `cache_tools_ttl` seconds
+(default **60 s**). After expiry the next `as_tools()` re-fetches from
+the upstream server, so an MCP server that hot-loads or unloads tools
+is eventually reflected in the agent's tool list. Two override paths:
+
+```python
+# Disable expiry entirely — pre-1.0.x always-cache behaviour.
+fs = MCP.stdio("fs", command="...", cache_tools_ttl=None)
+
+# Force a refresh on an out-of-band signal (plugin install / uninstall).
+fs.invalidate_tools_cache()
+```
+
 ## How it works
 
 `MCPServer` carries the marker attribute `_is_lazy_tool_provider = True`.
@@ -166,6 +181,7 @@ server = MCP.from_transport("fs", FakeTransport())
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = 60.0,
     ) -> MCPServer
 
     MCP.http(
@@ -177,6 +193,7 @@ server = MCP.from_transport("fs", FakeTransport())
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = 60.0,
     ) -> MCPServer
 
     MCP.from_transport(
@@ -187,7 +204,10 @@ server = MCP.from_transport("fs", FakeTransport())
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = 60.0,
     ) -> MCPServer
+
+    server.invalidate_tools_cache() -> None
     ```
 
 !!! warning "Phase 1 scope"

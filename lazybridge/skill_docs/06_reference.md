@@ -5,7 +5,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: "'Agent | None'" = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
+### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: 'Agent | None' = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
 
 Universal agent — delegates execution to a swappable Engine.
 
@@ -55,14 +55,6 @@ Contract every engine must satisfy.
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
 
-### `HumanEngine(*, timeout: 'float | None' = None, ui: "Literal['terminal', 'web'] | _UIProtocol" = 'terminal', default: 'str | None' = None) -> 'None'`
-
-Presents the task to a human and returns their response as an Envelope.
-
-### `SupervisorEngine(*, tools: 'list[Tool | Callable | Any] | None' = None, agents: 'list[Any] | None' = None, store: 'Store | None' = None, input_fn: 'Callable[[str], str] | None' = None, ainput_fn: 'Callable[[str], Awaitable[str]] | None' = None, timeout: 'float | None' = None, default: 'str | None' = None) -> 'None'`
-
-Human-in-the-loop engine with tool-calling and agent retry.
-
 ### `Plan(*steps: 'Step', max_iterations: 'int' = 100, store: 'Store | None' = None, checkpoint_key: 'str | None' = None, resume: 'bool' = False, on_concurrent: "Literal['fail', 'fork']" = 'fail') -> 'None'`
 
 Structured multi-step execution engine.
@@ -94,7 +86,7 @@ Raised when a streaming response goes idle past ``stream_idle_timeout``.
 
 ## Memory / Store / Session
 
-### `Memory(*, strategy: "Literal['auto', 'sliding', 'summary', 'none']" = 'auto', max_tokens: 'int | None' = 4000, max_turns: 'int | None' = 1000, store: 'Any | None' = None, summarizer: 'Any | None' = None) -> 'None'`
+### `Memory(*, strategy: "Literal['auto', 'sliding', 'summary', 'none']" = 'auto', max_tokens: 'int | None' = 4000, max_turns: 'int | None' = 1000, store: 'Any | None' = None, summarizer: 'Any | None' = None, summarizer_timeout: 'float | None' = 30.0) -> 'None'`
 
 Conversation memory with configurable compression strategy.
 
@@ -106,11 +98,11 @@ Key-value store for PlanState and shared data.
 
 StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None)
 
-### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block']" = 'drop') -> 'None'`
+### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block', 'hybrid']" = 'hybrid', critical_events: 'frozenset[str] | set[str] | None' = None) -> 'None'`
 
 Container for observability config: exporters, redaction, EventLog.
 
-### `EventLog(session_id: 'str', db: 'str | None' = None, *, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block']" = 'drop') -> 'None'`
+### `EventLog(session_id: 'str', db: 'str | None' = None, *, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block', 'hybrid']" = 'hybrid', critical_events: 'frozenset[str] | set[str] | None' = None) -> 'None'`
 
 SQLite-backed event log. Thread-safe via thread-local connections.
 
@@ -119,7 +111,7 @@ SQLite-backed event log. Thread-safe via thread-local connections.
 Enum where members are also (and must be) strings
 
 
-## Guards & evals
+## Guards
 
 ### `Guard()`
 
@@ -137,33 +129,9 @@ Function-based guard.
 
 Run multiple guards in sequence; first block wins.
 
-### `LLMGuard(agent: 'Any', policy: 'str' = 'block harmful content') -> 'None'`
+### `LLMGuard(agent: 'Any', policy: 'str' = 'block harmful content', *, timeout: 'float | None' = 60.0) -> 'None'`
 
 Use an Agent as a judge. Returns block if the verdict begins with 'block' or 'deny'.
-
-### `EvalCase(input: 'str', check: 'Callable[..., bool]', expected: 'Any' = None, description: 'str' = '') -> None`
-
-EvalCase(input: 'str', check: 'Callable[..., bool]', expected: 'Any' = None, description: 'str' = '')
-
-### `EvalReport(results: 'list[EvalResult]' = <factory>) -> None`
-
-EvalReport(results: 'list[EvalResult]' = <factory>)
-
-### `EvalSuite(*cases: 'EvalCase') -> 'None'`
-
-Run a set of EvalCases against any agent callable.
-
-### `exact_match(expected: 'str') -> 'Callable[[str, str], bool]'`
-
-*(no docstring)*
-
-### `contains(substring: 'str') -> 'Callable[[str], bool]'`
-
-*(no docstring)*
-
-### `llm_judge(agent: 'Any', criteria: 'str') -> 'Callable[[str], bool]'`
-
-Returns a judge function using an agent to evaluate output.
 
 
 ## Exporters
@@ -183,10 +151,6 @@ Forward only events whose type is in ``event_types`` to ``inner``.
 ### `JsonFileExporter(path: 'str') -> 'None'`
 
 Append each event as a JSON line to ``path``.
-
-### `OTelExporter(endpoint: 'str | None' = None, *, exporter: 'Any | None' = None) -> 'None'`
-
-Export events as OpenTelemetry spans (requires opentelemetry-sdk).
 
 ### `StructuredLogExporter(logger_name: 'str' = 'lazybridge') -> 'None'`
 
@@ -210,21 +174,13 @@ Enum where members are also (and must be) strings
 
 ## Core types
 
+### `from_parallel_all(name: 'str') -> '_FromParallelAll'`
+
+Aggregate every consecutive parallel sibling starting at ``name``.
+
 ### `GuardError`
 
 Raised when a Guard blocks execution.
-
-### `not_contains(substring: 'str') -> 'Callable[[str], bool]'`
-
-*(no docstring)*
-
-### `max_length(n: 'int') -> 'Callable[[str], bool]'`
-
-*(no docstring)*
-
-### `min_length(n: 'int') -> 'Callable[[str], bool]'`
-
-*(no docstring)*
 
 ### `EventExporter(*args, **kwargs)`
 
@@ -276,7 +232,7 @@ Unified tool/function definition (JSON Schema based).
 
 ### `UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cached_input_tokens: 'int' = 0, cost_usd: 'float | None' = None) -> None`
 
-UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cached_input_tokens: 'int' = 0, cost_usd: 'float | None' = None)
+Token-usage and cost telemetry for one request.
 
 ### `AgentRuntimeConfig(resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None) -> None`
 

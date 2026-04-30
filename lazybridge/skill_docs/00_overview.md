@@ -13,11 +13,11 @@ Tier-organised reference. Load on demand. The whole framework is one `Agent` wit
 Covers: Agent, Tool, Native tools (web search, code execution, …), Function → Tool (schema modes), Envelope
 
 ### Mid
-**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, or a simple human approval gate.
+**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, a simple human approval gate, or to wire in an MCP server as a tool catalogue.
 
 **Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
 
-Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Agent.parallel, HumanEngine, EvalSuite
+Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Agent.parallel, HumanEngine, EvalSuite, MCP integration (alpha)
 
 ### Full
 **Use this when** you need a declared, multi-step pipeline: typed hand-offs, conditional routing, crash recovery via checkpoint/resume, or OTel/JSON observability.

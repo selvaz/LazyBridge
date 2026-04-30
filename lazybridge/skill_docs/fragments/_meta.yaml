@@ -17,6 +17,7 @@ tiers:
     - agent_parallel
     - human_engine
     - evals
+    - mcp
   full:
     - plan
     - sentinels
@@ -61,6 +62,7 @@ titles:
   agent_parallel: Agent.parallel
   human_engine: HumanEngine
   evals: EvalSuite
+  mcp: MCP integration (alpha)
   plan: Plan
   sentinels: Sentinels (from_prev / from_start / from_step / from_parallel)
   parallel_steps: Parallel plan steps
@@ -81,7 +83,7 @@ tier_intros:
 
     **Move to Mid when** you need memory across calls, shared state, tracing, guardrails, or more than one agent in sequence.
   mid: |
-    **Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, or a simple human approval gate.
+    **Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, a simple human approval gate, or to wire in an MCP server as a tool catalogue.
 
     **Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
   full: |

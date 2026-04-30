@@ -38,6 +38,8 @@ nav:
     - Advanced: tiers/advanced.md
 
   - Guides:
+    - Production:
+      - Operations checklist: guides/operations.md
     - Basic:
       - Agent: guides/agent.md
       - Tool: guides/tool.md
@@ -52,6 +54,7 @@ nav:
       - Agent.chain: guides/chain.md
       - Agent.parallel: guides/agent-parallel.md
       - Agent.as_tool: guides/as-tool.md
+      - MCP integration (alpha): guides/mcp.md
       - HumanEngine: guides/human-engine.md
       - EvalSuite: guides/evals.md
       - Testing (MockAgent): guides/testing.md

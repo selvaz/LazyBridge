@@ -1,6 +1,6 @@
 # Mid tier
 
-**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, or a simple human approval gate.
+**Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, a simple human approval gate, or to wire in an MCP server as a tool catalogue.
 
 **Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
 
@@ -15,6 +15,7 @@
 * [Agent.parallel](../guides/agent-parallel.md)
 * [HumanEngine](../guides/human-engine.md)
 * [EvalSuite](../guides/evals.md)
+* [MCP integration (alpha)](../guides/mcp.md)
 
 ## Next steps
 
