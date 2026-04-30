@@ -29,6 +29,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# These tests patch ``openai.OpenAI`` / ``openai.AsyncOpenAI`` via
+# ``unittest.mock.patch``, which resolves the dotted path by importing
+# the ``openai`` module — so we need the SDK to be importable.  CI
+# installs ``[openai]``; minimal local dev environments (just
+# ``[test]``) don't, and skipping cleanly is the expected behaviour for
+# optional-provider tests.  The ``LMStudioProvider`` module itself
+# imports openai lazily, so the import below only affects this file.
+pytest.importorskip("openai")
+
 from lazybridge.core.providers.lmstudio import (
     _DEFAULT_BASE_URL,
     _PLACEHOLDER_API_KEY,

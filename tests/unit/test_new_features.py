@@ -106,6 +106,7 @@ class TestWebUIClass:
             import http.server
             import queue as _queue
             import urllib.parse
+            import urllib.request
 
             response_q: _queue.Queue[str] = _queue.Queue()
 
@@ -166,6 +167,7 @@ class TestWebUIClass:
         import http.server
         import queue as _queue
         import urllib.parse
+        import urllib.request
 
         class MyModel(BaseModel):
             name: str
