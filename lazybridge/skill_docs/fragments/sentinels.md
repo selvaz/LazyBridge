@@ -20,6 +20,11 @@ from_parallel(name: str) # named parallel branch's output
   ran concurrently with siblings.
 - A plain string passed as ``task=`` is used verbatim — useful for
   hard-coded prompts at intermediate steps.
+- ``context=`` accepts a single sentinel/string OR a **list** of them.
+  Each list item resolves independently; the parts join with
+  blank-line separators in the step's ``Envelope.context``.  Mix
+  sentinels with literal strings to inject fixed boilerplate alongside
+  upstream data without an intermediate combiner step.
 
 ## narrative
 Sentinels are how Plan steps declare "where does my input come from?".
@@ -54,6 +59,19 @@ plan = Plan(
     Step(writer,        name="write",     task=from_start),   # writer sees ORIGINAL user task
     Step(editor,        name="edit",      task=from_step("write"),
                                           context=from_step("check")),
+)
+
+# context= can carry MANY sources at once (no combiner step needed).
+plan2 = Plan(
+    Step(researcher,    name="research"),
+    Step(policy_loader, name="policy"),
+    Step(synthesiser,   name="synth",
+         task="Draft a brief that cites both sources and follows the style note.",
+         context=[
+             from_step("research"),
+             from_step("policy"),
+             "Style: neutral, third person, no superlatives.",
+         ]),
 )
 ```
 

@@ -17,13 +17,14 @@ Plan(
 ) -> Engine
 
 Step(
-    target: str | Callable | Agent,        # tool name, function, or Agent
-    task: Sentinel | str = from_prev,      # where my input comes from
-    context: Sentinel | str | None = None, # extra side-context (doesn't replace task)
-    sources: list = (),                    # live-view objects with .text()
-    writes: str | None = None,             # Store key under which payload is saved
+    target: str | Callable | Agent,                    # tool name, function, or Agent
+    task: Sentinel | str = from_prev,                  # where my input comes from
+    context: Sentinel | str
+           | list[Sentinel | str] | None = None,        # one OR many side-context sources
+    sources: list = (),                                 # live-view objects with .text()
+    writes: str | None = None,                         # Store key under which payload is saved
     input: type = Any,
-    output: type = str,                    # Pydantic triggers structured output + routing
+    output: type = str,                                 # Pydantic triggers structured output + routing
     parallel: bool = False,
     name: str | None = None,
 )
@@ -76,6 +77,12 @@ Usage: Agent(engine=Plan(Step(a), Step(b)))
     * ``on_concurrent="fork"`` — each run claims an isolated
       ``f"{checkpoint_key}:{run_uid}"`` keyspace (fan-out workflows).
       Incompatible with ``resume=True``.
+- ``context=`` accepts **a single sentinel/string OR a list of them**.
+  A list lets a step pull data from N upstream steps without an
+  intermediate combiner — items resolve independently and the parts
+  are joined with blank-line separators (same shape as ``sources``).
+  Each list item is validated at compile time; mixing sentinels with
+  literal strings is supported.
 
 **example**
 
@@ -103,11 +110,21 @@ class Ranked(BaseModel):
 
 store = Store(db="research.sqlite")
 
+# Idiomatic shape: each step has an explicit `task=` instruction;
+# upstream data flows through `context=`.  The agent doesn't have to
+# guess what to do with the data it received.
 plan = Plan(
-    Step(searcher, name="search", writes="hits", output=Hits),
-    Step(ranker,   name="rank",   task=from_prev,        output=Ranked),
-    Step(writer,   name="write",  task=from_step("rank")),
-    Step(apology,  name="empty"),                                # only on Hits.next == "empty"
+    Step(searcher, name="search",
+         writes="hits", output=Hits),
+    Step(ranker,   name="rank",
+         task="Rank these search hits by relevance; return the top 5.",
+         context=from_prev,
+         output=Ranked),
+    Step(writer,   name="write",
+         task="Write a 200-word brief from the ranked items below.",
+         context=from_step("rank")),
+    Step(apology,  name="empty",
+         task="Apologise that no results were found and suggest broader terms."),
     store=store, checkpoint_key="research", resume=True,
 )
 print(Agent.from_engine(plan)("AI trends April 2026").text())
@@ -131,7 +148,8 @@ plan = Plan(
     # starting at search_a.  The synthesiser receives all three branch
     # outputs in declared order, ready for cross-source synthesis.
     Step(synthesiser, name="synth",
-         task=from_parallel_all("search_a"),
+         task="Compare the three search results; flag agreement and disagreement.",
+         context=from_parallel_all("search_a"),
          writes="brief"),
     store=Store(db="weekly.sqlite"),
 )
@@ -150,7 +168,7 @@ def make_pipeline(items: list[str]) -> Plan:
     crashed branch leaves the band re-runnable on resume."""
     branches = [
         Step(item_processor, name=f"proc_{i}", parallel=True,
-             task=f"process item: {item}",          # literal string; not from_prev
+             task=f"Run end-of-day analysis on {item}.",  # literal, per-branch
              writes=f"out_{i}",
              output=ItemResult)
         for i, item in enumerate(items)
@@ -158,7 +176,8 @@ def make_pipeline(items: list[str]) -> Plan:
     return Plan(
         *branches,
         Step(summariser, name="summary",
-             task=from_parallel_all(branches[0].name),
+             task="Summarise the per-ticker analyses into a single bulleted report.",
+             context=from_parallel_all(branches[0].name),
              output=Report),
     )
 
@@ -262,6 +281,49 @@ plan = Plan(
 Agent.from_engine(plan, tools=[score_tool])("…")
 ```
 
+### 8. Multi-source synthesis with `context=[...]`
+
+Pull data from N upstream steps without inserting a combiner.  Each
+list item resolves independently and the parts join with blank-line
+separators in the step's ``Envelope.context``.  Mix sentinels with
+literal strings to inject fixed boilerplate alongside upstream data.
+
+```python
+from lazybridge import Plan, Step, from_step, from_prev
+
+plan = Plan(
+    Step(searcher,      name="search",   writes="hits"),
+    Step(policy_loader, name="policy",   task="Load the 2026 acceptable-use policy."),
+    Step(competitor,    name="bench",    task="Find three relevant prior posts."),
+
+    # Synthesiser pulls from three different upstream steps PLUS a
+    # literal string that injects compliance boilerplate.  No
+    # combiner step needed.
+    Step(synthesiser, name="synth",
+         task="Draft a 300-word brief; cite each source explicitly.",
+         context=[
+             from_step("search"),
+             from_step("policy"),
+             from_step("bench"),
+             "Style: neutral, third-person, no superlatives.",
+         ],
+         output=Brief),
+
+    # A pure-passthrough downstream step still uses from_prev — fine,
+    # because synthesiser already produced the final draft.
+    Step(publisher, name="publish", task=from_prev),
+)
+```
+
+Why prefer this over an intermediate combiner step:
+
+* **Fewer LLM calls** — no extra round-trip just to glue context.
+* **Compile-time validated** — every list item is type-checked and
+  forward-ref-checked at ``Plan(...)`` construction.
+* **Reads better** — the synthesiser declares its inputs explicitly
+  next to its instruction; readers don't have to trace back through
+  a combiner step.
+
 **pitfalls**
 
 - Forgetting ``output=Model`` on a step and then expecting the next
@@ -319,6 +381,11 @@ from_parallel(name: str) # named parallel branch's output
   ran concurrently with siblings.
 - A plain string passed as ``task=`` is used verbatim — useful for
   hard-coded prompts at intermediate steps.
+- ``context=`` accepts a single sentinel/string OR a **list** of them.
+  Each list item resolves independently; the parts join with
+  blank-line separators in the step's ``Envelope.context``.  Mix
+  sentinels with literal strings to inject fixed boilerplate alongside
+  upstream data without an intermediate combiner step.
 
 **example**
 
@@ -331,6 +398,19 @@ plan = Plan(
     Step(writer,        name="write",     task=from_start),   # writer sees ORIGINAL user task
     Step(editor,        name="edit",      task=from_step("write"),
                                           context=from_step("check")),
+)
+
+# context= can carry MANY sources at once (no combiner step needed).
+plan2 = Plan(
+    Step(researcher,    name="research"),
+    Step(policy_loader, name="policy"),
+    Step(synthesiser,   name="synth",
+         task="Draft a brief that cites both sources and follows the style note.",
+         context=[
+             from_step("research"),
+             from_step("policy"),
+             "Style: neutral, third person, no superlatives.",
+         ]),
 )
 ```
 

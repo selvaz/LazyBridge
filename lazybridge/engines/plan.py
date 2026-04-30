@@ -40,7 +40,12 @@ class Step:
     Args:
         target:  Tool name (str), callable, or Agent. Required.
         task:    Sentinel or str for the step's task. Default: from_prev.
-        context: Sentinel or str for extra context. Default: none.
+        context: Sentinel, str, or **list of either** for extra context.
+                 A list joins its resolved parts with blank-line separators
+                 (same shape as ``sources``) so a step can pull data from
+                 multiple upstream steps without an intermediate combiner.
+                 Each list item is validated independently at compile time.
+                 Default: none.
         sources: Live-view objects with a .text() method injected into context.
         writes:  Key under which Envelope.payload is saved in the Store.
         input:   Expected input payload type (PlanCompiler validates).
@@ -51,7 +56,7 @@ class Step:
 
     target: Any
     task: Sentinel | str = field(default_factory=lambda: from_prev)
-    context: Sentinel | str | None = None
+    context: Sentinel | str | list[Sentinel | str] | None = None
     sources: list[Any] = field(default_factory=list)
     writes: str | None = None
     input: type = Any
@@ -148,15 +153,43 @@ class PlanCompiler:
                 raise PlanCompileError(
                     f"Step {step.name!r}: tool {step.target!r} not found in tools. Available: {sorted(tool_map)}"
                 )
+
+            # ``context=`` accepts a single sentinel/str OR a list of them.
+            # Normalise to a list so every check below iterates uniformly;
+            # ``None`` becomes an empty list.
+            context_items: list[Sentinel | str]
+            if step.context is None:
+                context_items = []
+            elif isinstance(step.context, list):
+                context_items = list(step.context)
+            else:
+                context_items = [step.context]
+
+            # Each item in a context list must be a known sentinel or a
+            # plain string.  Anything else falls through ``_resolve_sentinel``
+            # to the ``prev`` envelope at runtime — a silent degradation we
+            # want to catch at construction.
+            _SENTINEL_TYPES = (_FromPrev, _FromStart, _FromStep, _FromParallel, _FromParallelAll)
+            for n, item in enumerate(context_items):
+                if not isinstance(item, (str, *_SENTINEL_TYPES)):
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: context[{n}] has type "
+                        f"{type(item).__name__!r} — must be a Sentinel "
+                        f"(from_prev / from_start / from_step(...) / "
+                        f"from_parallel(...) / from_parallel_all(...)) "
+                        f"or a literal str."
+                    )
+
             # from_step references valid step …
             if isinstance(step.task, _FromStep) and step.task.name not in pos:
                 raise PlanCompileError(
                     f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step."
                 )
-            if isinstance(step.context, _FromStep) and step.context.name not in pos:
-                raise PlanCompileError(
-                    f"Step {step.name!r}: context=from_step({step.context.name!r}) references unknown step."
-                )
+            for n, ctx_item in enumerate(context_items):
+                if isinstance(ctx_item, _FromStep) and ctx_item.name not in pos:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references unknown step."
+                    )
             # … and that step must come *before* this one.  A ``from_step``
             # to a future step quietly degrades to the start envelope at
             # runtime, which looks like success but isn't.
@@ -166,16 +199,21 @@ class PlanCompiler:
                     f"references a step that is not earlier in the plan.  "
                     f"from_step targets must be defined before they're used."
                 )
-            if isinstance(step.context, _FromStep) and pos.get(step.context.name, -1) >= i:
-                raise PlanCompileError(
-                    f"Step {step.name!r}: context=from_step({step.context.name!r}) "
-                    f"references a step that is not earlier in the plan.  "
-                    f"from_step targets must be defined before they're used."
-                )
+            for n, ctx_item in enumerate(context_items):
+                if isinstance(ctx_item, _FromStep) and pos.get(ctx_item.name, -1) >= i:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) "
+                        f"references a step that is not earlier in the plan.  "
+                        f"from_step targets must be defined before they're used."
+                    )
             # from_parallel_all: same forward-ref guard plus the band-start
             # check (the named step must itself be parallel=True; otherwise
             # the "band" is one step and from_step would be the right tool).
-            for slot, sentinel in (("task", step.task), ("context", step.context)):
+            sentinels_to_check: list[tuple[str, Any]] = [("task", step.task)]
+            for n, ctx_item in enumerate(context_items):
+                slot_label = f"context[{n}]" if isinstance(step.context, list) else "context"
+                sentinels_to_check.append((slot_label, ctx_item))
+            for slot, sentinel in sentinels_to_check:
                 if isinstance(sentinel, _FromParallelAll):
                     if sentinel.name not in pos:
                         raise PlanCompileError(
@@ -856,11 +894,19 @@ class Plan:
 
         ctx_parts: list[str] = []
         if step.context is not None:
-            ctx_env = self._resolve_sentinel(step.context, prev_env, start_env, history, kv)
-            if ctx_env.context:
-                ctx_parts.append(ctx_env.context)
-            if ctx_env.payload and isinstance(ctx_env.payload, str):
-                ctx_parts.append(ctx_env.payload)
+            # ``context=`` accepts a single Sentinel/str OR a list of them.
+            # The list form lets a step pull data from multiple upstream
+            # steps without inserting an intermediate combiner — each item
+            # resolves independently and the parts are joined with the
+            # same blank-line separator we use for ``sources``.  A single
+            # item normalises to a 1-list so the resolver path is uniform.
+            items = step.context if isinstance(step.context, list) else [step.context]
+            for item in items:
+                ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv)
+                if ctx_env.context:
+                    ctx_parts.append(ctx_env.context)
+                if ctx_env.payload and isinstance(ctx_env.payload, str):
+                    ctx_parts.append(ctx_env.payload)
         for src in step.sources:
             if hasattr(src, "text"):
                 ctx_parts.append(src.text())
@@ -1266,7 +1312,14 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
         "parallel": step.parallel,
     }
     if step.context is not None:
-        d["context"] = _sentinel_to_ref(step.context)
+        # ``context=`` is single-or-list — preserve the shape on disk so
+        # ``from_dict`` round-trips faithfully.  A single sentinel/str
+        # serialises to one ref dict; a list serialises to a list of
+        # ref dicts.
+        if isinstance(step.context, list):
+            d["context"] = [_sentinel_to_ref(item) for item in step.context]
+        else:
+            d["context"] = _sentinel_to_ref(step.context)
     if step.writes:
         d["writes"] = step.writes
     return d
@@ -1275,7 +1328,15 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
 def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
     target = _target_from_ref(data["target"], registry)
     task = _sentinel_from_ref(data.get("task"))
-    context = _sentinel_from_ref(data["context"]) if "context" in data else None
+    context: Sentinel | str | list[Sentinel | str] | None
+    if "context" not in data:
+        context = None
+    else:
+        raw = data["context"]
+        if isinstance(raw, list):
+            context = [_sentinel_from_ref(item) for item in raw]
+        else:
+            context = _sentinel_from_ref(raw)
     return Step(
         target=target,
         task=task,
