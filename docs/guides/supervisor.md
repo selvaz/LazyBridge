@@ -1,4 +1,4 @@
-# SupervisorEngine
+# SupervisorEngine (alpha — ext.hil)
 
 **Use `SupervisorEngine`** for full human-in-the-loop control: a REPL
 where the operator can call tools, retry agents with feedback, store

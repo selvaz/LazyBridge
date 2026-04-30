@@ -316,12 +316,41 @@ def render_site_guide(topic: str, titles: dict) -> str:
     return "".join(out)
 
 
-def render_site_tier(tier: str, topics: list[str], titles: dict, intro: str, next_steps: str = "") -> str:
-    out = [f"# {tier.capitalize()} tier\n\n", intro.strip() + "\n\n", "## Topics\n\n"]
+def render_site_tier(
+    tier: str,
+    topics: list[str],
+    titles: dict,
+    intro: str,
+    next_steps: str = "",
+    walkthrough: str = "",
+    extras: str = "",
+) -> str:
+    """Render a tier landing page.
+
+    Sections, in order:
+
+    1. ``# <Tier> tier``
+    2. The ``intro`` block ("Use this when… / Move to … when…").
+    3. Optional ``## Walkthrough`` — a pedagogical narrative explaining
+       how the tier's topics fit together.  Lets the page act as a
+       mini-tutorial instead of a bare TOC.
+    4. ``## Topics`` — the list of generated guide pages.
+    5. Optional ``## Also see`` — extra hand-maintained guides that
+       belong to this tier but aren't generated from a fragment
+       (``operations.md``, ``testing.md``, ``litellm.md``,
+       ``core-vs-ext.md``).  Free-form markdown; emitted verbatim.
+    6. Optional ``## Next steps``.
+    """
+    out = [f"# {tier.capitalize()} tier\n\n", intro.strip() + "\n\n"]
+    if walkthrough:
+        out.append("## Walkthrough\n\n" + walkthrough.strip() + "\n\n")
+    out.append("## Topics\n\n")
     for topic in topics:
         slug = topic.replace("_", "-")
         label = titles.get(topic, topic)
         out.append(f"* [{label}](../guides/{slug}.md)\n")
+    if extras:
+        out.append("\n## Also see\n\n" + extras.strip() + "\n")
     if next_steps:
         out.append("\n## Next steps\n\n" + next_steps.strip() + "\n")
     return "".join(out).rstrip() + "\n"
@@ -471,6 +500,8 @@ def build(check: bool = False) -> int:
     titles = meta.get("titles", {}) or {}
     intros = meta.get("tier_intros", {}) or {}
     nexts = meta.get("tier_next", {}) or {}
+    walks = meta.get("tier_walkthroughs", {}) or {}
+    extras = meta.get("tier_extras", {}) or {}
 
     changed: list[Path] = []
 
@@ -498,7 +529,15 @@ def build(check: bool = False) -> int:
                 _write(DOCS_DIR / "guides" / f"{slug}.md", body, changed)
         _write(
             DOCS_DIR / "tiers" / f"{tier}.md",
-            render_site_tier(tier, topics, titles, intros.get(tier, ""), nexts.get(tier, "")),
+            render_site_tier(
+                tier,
+                topics,
+                titles,
+                intros.get(tier, ""),
+                nexts.get(tier, ""),
+                walkthrough=walks.get(tier, ""),
+                extras=extras.get(tier, ""),
+            ),
             changed,
         )
 

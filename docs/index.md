@@ -78,6 +78,9 @@ site via `python -m lazybridge.skill_docs._build`.
 **Production pipeline?**
 → [Full tier](tiers/full.md) — [Plan](guides/plan.md) · [Checkpoint & resume](guides/checkpoint.md) · [Exporters](guides/exporters.md)
 
+**Shipping to production?**
+→ [Operations checklist](guides/operations.md) — back-pressure · OTel GenAI · `timeout` / `cache` / `fallback` · resume policy · CI hardening
+
 **Extending the framework?**
 → [Advanced tier](tiers/advanced.md) — [Engine protocol](guides/engine-protocol.md) · [BaseProvider](guides/base-provider.md)
 

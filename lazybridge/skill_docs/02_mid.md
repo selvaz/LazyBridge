@@ -501,7 +501,7 @@ for env in results:   # list[Envelope], one per agent
   Timeouts return an error Envelope in the slot, preserving the
   positional contract.
 
-## HumanEngine
+## HumanEngine (alpha — ext.hil)
 
 **signature**
 
@@ -558,7 +558,7 @@ pipeline("draft the release notes")
 - ``timeout=`` uses the event loop, not signals; it works in async
   contexts but may hang in tightly-blocking sync nests.
 
-## EvalSuite
+## EvalSuite (alpha — ext.evals)
 
 **signature**
 
@@ -628,7 +628,7 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
   check sees the JSON serialisation.
 - ``EvalSuite.run`` is synchronous; use ``arun`` in async test harnesses.
 
-## MCP integration (alpha)
+## MCP integration (alpha — ext.mcp)
 
 **signature**
 

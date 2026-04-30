@@ -1,4 +1,4 @@
-# HumanEngine
+# HumanEngine (alpha — ext.hil)
 
 **Use `HumanEngine`** for an approval gate or a structured form: the
 human types a string (or fills Pydantic fields), the agent treats it as

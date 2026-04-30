@@ -1,4 +1,4 @@
-# EvalSuite
+# EvalSuite (alpha — ext.evals)
 
 **Use `EvalSuite`** as a thin pytest-ish harness for an agent's
 text-output behaviour: deterministic checks (`contains`, `exact_match`),
