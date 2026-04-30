@@ -400,7 +400,9 @@ def test_tool_calls_parsed():
 
 
 def test_malformed_tool_call_arguments_fall_back_gracefully():
-    """Bad JSON in arguments falls into _raw_arguments rather than raising."""
+    """Bad JSON in arguments lands in ``_raw_arguments`` AND is tagged
+    with ``_parse_error`` so the engine surfaces a structured TOOL_ERROR
+    rather than letting the tool fail later (audit M-A)."""
 
     def fake_completion(**kwargs):
         msg = _FakeMessage(
@@ -417,7 +419,9 @@ def test_malformed_tool_call_arguments_fall_back_gracefully():
 
     prov, _ = _make_provider(fake_completion)
     resp = prov.complete(_basic_request())
-    assert resp.tool_calls[0].arguments == {"_raw_arguments": "not-json{{{"}
+    args = resp.tool_calls[0].arguments
+    assert args["_raw_arguments"] == "not-json{{{"
+    assert args.get("_parse_error")
 
 
 def test_cost_from_hidden_params():

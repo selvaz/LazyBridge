@@ -128,17 +128,33 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["lazybridge"]
-# Extensions are omitted because they carry optional-dependency code
-# that the default test environment doesn't install.  Provider adapters
-# stay included so the gate reflects core surface.
+# Coverage scope (audit M-I).  The previous policy omitted *all* of
+# ``lazybridge/ext/*`` which meant cross-cutting extensions
+# (``ext.otel``, ``ext.mcp``, ``ext.hil``, ``ext.planners``,
+# ``ext.evals``) were invisible to the gate even though they ship in
+# the default test suite.  Now we omit only the domain-specific
+# extensions whose tests live under ``tests/unit/ext`` (ignored by
+# default to avoid pulling in optional deps like duckdb / yfinance) —
+# the remaining ``ext`` modules are gated as first-class surface.
 omit = [
-    "lazybridge/ext/*",
+    "lazybridge/ext/stat_runtime/*",
+    "lazybridge/ext/data_downloader/*",
+    "lazybridge/ext/doc_skills/*",
+    "lazybridge/ext/veo/*",
+    "lazybridge/ext/quant_agent/*",
+    "lazybridge/ext/read_docs/*",
+    # external_tools.py has a dedicated test module under
+    # tests/unit/ext/ that is also ignored in the default run.
+    "lazybridge/ext/external_tools.py",
 ]
 
 [tool.coverage.report]
-# Coverage gate.  The current floor reflects the structural / pure-Python
-# coverage of core + providers; the remaining gap is in live-API streaming
-# paths and SDK-mocked integration tests.
+# Coverage gate (audit M-I).  ``fail_under`` now covers a strictly
+# larger surface than the prior policy — cross-cutting ``ext.*``
+# modules (otel / mcp / hil / planners / evals) are gated as
+# first-class.  Target for 1.1.0 is 80; raising in increments avoids
+# flap-cycling the gate while we backfill provider streaming + ext.hil
+# web-UI tests.
 fail_under = 70
 show_missing = true
 exclude_lines = [

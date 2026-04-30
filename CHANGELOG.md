@@ -6,6 +6,73 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased] — short-term audit hardening
+
+Closes the high-severity findings from the deep architecture audit
+(plan §5.1).  All changes are additive; defaults shift only on
+`Session(batched=True)` (`on_full="hybrid"` instead of `"drop"`) which
+strictly improves the safety of the existing path — critical events
+that previously could be dropped under saturation now block the
+producer.  Pass `on_full="drop"` to opt back into the legacy policy.
+
+### Hardening
+
+- **OTel GenAI conventions** (audit H-D).  `OTelExporter` now emits
+  `gen_ai.system` / `gen_ai.request.model` / `gen_ai.usage.*` /
+  `gen_ai.tool.*` attributes per the OpenTelemetry Semantic
+  Conventions for Generative AI, and constructs a real parent-child
+  span hierarchy (`invoke_agent → chat`, `invoke_agent → execute_tool`)
+  with cross-agent context propagation through OTel contextvars.
+  Tool spans correlate via `tool_use_id` so N parallel invocations
+  of the same tool no longer collide.  Span registry is per-instance
+  so multiple `OTelExporter`s in a process don't fight over the
+  global tracer provider.
+- **`Memory.summarizer_timeout=`** (audit H-B).  Default 30 s.  An LLM
+  summariser that hangs no longer blocks `add()` — the keyword
+  fallback runs and a one-shot warning surfaces.  Compression also
+  computes the summary OUTSIDE `Memory._lock`, so concurrent `add()`
+  calls progress while a slow summariser is in flight.
+- **Per-event-type back-pressure in `EventLog`** (audit H-A).  New
+  default `on_full="hybrid"` — the writer queue blocks the producer
+  for audit-critical events (`AGENT_*` / `TOOL_*` / `HIL_DECISION`)
+  but drops cheap telemetry (`LOOP_STEP` / `MODEL_REQUEST` /
+  `MODEL_RESPONSE`) under saturation.  Override the set via
+  `Session(critical_events=...)`.  `"block"` and `"drop"` policies
+  remain available unchanged.
+- **MCP `_tools_cache` TTL + invalidation** (audit H-E).  New
+  `cache_tools_ttl` parameter on `MCPServer` / `MCP.stdio` / `MCP.http`
+  (default 60 s) and an `invalidate_tools_cache()` method.  An MCP
+  server that hot-loads or unloads tools is eventually reflected in
+  the agent's tool list instead of forever-stale.
+- **Loud surfacing of malformed tool-call arguments** (audit M-A).
+  Provider `_safe_json_loads` helpers (OpenAI, LiteLLM) now tag the
+  raw argument blob with `_parse_error` on JSON decode failure or
+  non-object payload.  `LLMEngine._exec_tool` short-circuits on the
+  tag and emits a structured `TOOL_ERROR` (`type:
+  "ToolArgumentParseError"`, `parse_error`, `raw_arguments`) instead
+  of letting the tool fail downstream with a misleading
+  "missing required field" message.  Tool events also carry
+  `tool_use_id` for downstream correlation.
+
+### Tests / CI
+
+- New `tests/unit/test_audit_short_term.py` (17 tests) covering each
+  of the above plus the streaming + tool-call accumulation regression
+  for Gemini / DeepSeek shape (audit M-B).
+- Coverage policy widened (audit M-I): `lazybridge/ext/{otel,mcp,hil,
+  planners,evals}` are now in scope for the gate (previously omitted
+  wholesale).  Domain extensions (`stat_runtime`, `data_downloader`,
+  `doc_skills`, `veo`, `quant_agent`, `read_docs`, `external_tools`)
+  remain omitted because their dedicated test suites live under
+  `tests/unit/ext/` and are skipped by the default run.  Gate stays
+  at 70 with broader coverage; target for 1.1 is 80.
+- New CI workflows (audit M-J): `release.yml` (PyPI Trusted Publishing
+  on `v*.*.*` tags), `codeql.yml` (weekly scheduled SAST + per-PR),
+  `dependabot.yml` (weekly action + pip updates with major SDK pins
+  preserved).  Pre-commit hooks now run as a CI job.
+
+---
+
 ## [1.0.0] — 2026-04-26 — initial public release
 
 ### Core

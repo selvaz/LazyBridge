@@ -67,7 +67,13 @@ def _strip_prefix(model: str) -> str:
 
 
 def _safe_json_loads(raw: str) -> dict[str, Any]:
-    """Parse tool-call arguments. Return raw string on failure — never raise."""
+    """Parse tool-call arguments. Return a tagged dict on failure — never raise.
+
+    On JSON-decode failure (or a non-object payload) we tag the result
+    with ``_parse_error`` so :meth:`LLMEngine._exec_tool` surfaces a
+    structured ``TOOL_ERROR`` instead of letting the tool fail later
+    with a misleading "missing required field" message (audit M-A).
+    """
     if not raw:
         return {}
     try:
@@ -78,8 +84,13 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
             exc,
             raw,
         )
-        return {"_raw_arguments": raw}
-    return result if isinstance(result, dict) else {"_raw_arguments": raw}
+        return {"_raw_arguments": raw, "_parse_error": str(exc)}
+    if not isinstance(result, dict):
+        return {
+            "_raw_arguments": raw,
+            "_parse_error": (f"tool-call arguments parsed as {type(result).__name__}, expected object"),
+        }
+    return result
 
 
 def _content_blocks_to_openai_parts(

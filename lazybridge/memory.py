@@ -60,6 +60,13 @@ class Memory:
     #: want unbounded history can pass ``max_turns=None`` explicitly.
     _DEFAULT_MAX_TURNS = 1000
 
+    #: Default deadline applied to LLM-summariser calls when the
+    #: summariser returns a coroutine / awaitable.  A hung summariser
+    #: must never starve the agent; on timeout the keyword-extraction
+    #: fallback runs instead, never silent loss.  ``None`` disables the
+    #: deadline (legacy behaviour).
+    _DEFAULT_SUMMARIZER_TIMEOUT = 30.0
+
     def __init__(
         self,
         *,
@@ -68,6 +75,7 @@ class Memory:
         max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
         summarizer: Any | None = None,
+        summarizer_timeout: float | None = _DEFAULT_SUMMARIZER_TIMEOUT,
     ) -> None:
         self.strategy = strategy
         self.max_tokens = max_tokens
@@ -78,11 +86,45 @@ class Memory:
         self._summary: str = ""
         self._overflow_warned = False
         self._summarizer = summarizer
+        if summarizer_timeout is not None and summarizer_timeout <= 0:
+            raise ValueError(f"summarizer_timeout must be > 0 or None, got {summarizer_timeout!r}")
+        self.summarizer_timeout = summarizer_timeout
+        # Guard against overlapping summariser calls when ``add()`` is
+        # invoked concurrently.  Only one compression runs at a time;
+        # other ``add()``s append turns and skip the compression branch.
+        self._compressing = False
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
+        # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
             self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))
-            self._maybe_compress()
+            plan = self._plan_compression()
+
+        # Phase 2 — compute the summary OUTSIDE the lock so a slow or
+        # hung summariser (LLM call, network) can't deadlock concurrent
+        # ``add()`` callers waiting on the same Memory instance.  The
+        # ``_compressing`` flag taken in ``_plan_compression`` is cleared
+        # in ``finally`` so an exception path can't leave it stuck.
+        if plan is not None:
+            head_turns, drop_count = plan
+            try:
+                if self._summarizer is not None:
+                    new_summary = self._llm_summary(head_turns)
+                else:
+                    new_summary = self._rule_summary(head_turns)
+                with self._lock:
+                    self._summary = new_summary
+                    # Drop the first ``drop_count`` turns; any turns
+                    # appended concurrently during summarisation remain
+                    # in place after the cut.
+                    self._turns = self._turns[drop_count:]
+            finally:
+                with self._lock:
+                    self._compressing = False
+
+        # Phase 3 — enforce the hard turn cap last so it can never be
+        # bypassed by a long-running summariser.
+        with self._lock:
             self._enforce_turn_cap()
 
     def _enforce_turn_cap(self) -> None:
@@ -113,9 +155,19 @@ class Memory:
             )
             self._overflow_warned = True
 
-    def _maybe_compress(self) -> None:
+    def _plan_compression(self) -> tuple[list[_Turn], int] | None:
+        """Decide whether to compress and snapshot the head turns.
+
+        Caller MUST hold ``self._lock``.  Returns ``(head_copy,
+        drop_count)`` when compression should run, or ``None`` when no
+        action is needed (already compressing / strategy disabled / not
+        enough turns).  Marks ``self._compressing`` so a second
+        concurrent ``add()`` skips the work.
+        """
+        if self._compressing:
+            return None
         if self.strategy == "none" or not self.max_tokens:
-            return
+            return None
         total = sum(t.token_estimate for t in self._turns)
         # "summary" compresses like "sliding" but uses LLM summarization.
         # "sliding" always compresses when turns > window.
@@ -123,13 +175,11 @@ class Memory:
         should_compress = self.strategy in ("sliding", "summary") or (
             self.strategy == "auto" and total > self.max_tokens
         )
-        if should_compress and len(self._turns) > 10:
-            old = self._turns[:-10]
-            if self._summarizer is not None:
-                self._summary = self._llm_summary(old)
-            else:
-                self._summary = self._rule_summary(old)
-            self._turns = self._turns[-10:]
+        if not (should_compress and len(self._turns) > 10):
+            return None
+        head = list(self._turns[:-10])  # snapshot; safe to summarise outside lock
+        self._compressing = True
+        return head, len(head)
 
     def _llm_summary(self, turns: list[_Turn]) -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.
@@ -139,6 +189,12 @@ class Memory:
         dangling — without this the result is silently stringified as
         ``"<coroutine object at 0x…>"`` and the Python runtime emits a
         "coroutine was never awaited" RuntimeWarning.
+
+        ``summarizer_timeout`` (set on the Memory) is enforced when the
+        summariser returns a coroutine / awaitable — on deadline the
+        keyword-extraction fallback runs.  Sync summarisers cannot be
+        cancelled mid-call, so the timeout is advisory there: the
+        caller must enforce it inside their own callable if needed.
         """
         assert self._summarizer is not None
         lines: list[str] = []
@@ -152,8 +208,25 @@ class Memory:
         try:
             result = self._summarizer(prompt)
             if inspect.iscoroutine(result) or inspect.isawaitable(result):
-                result = _drive_to_completion(result)
+                result = _drive_to_completion(result, timeout=self.summarizer_timeout)
             return result.text() if hasattr(result, "text") else str(result)
+        except TimeoutError:
+            # Hung judge / network stall — fall back to keywords rather
+            # than letting the agent run sit on a stuck future.  The
+            # warning is one-shot per Memory so a degenerate summariser
+            # is visible without flooding logs.
+            if not self._overflow_warned:
+                import warnings
+
+                warnings.warn(
+                    f"Memory summariser exceeded summarizer_timeout="
+                    f"{self.summarizer_timeout}s; falling back to keyword "
+                    f"extraction.  Raise summarizer_timeout= or pick a "
+                    f"faster summariser to silence.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+            return self._rule_summary(turns)
         except Exception:
             return self._rule_summary(turns)
 
@@ -192,7 +265,7 @@ class Memory:
             self._summary = ""
 
 
-def _drive_to_completion(awaitable: Any) -> Any:
+def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:
     """Drive an awaitable from sync context regardless of loop state.
 
     * No loop running → ``asyncio.run(...)``.
@@ -201,13 +274,24 @@ def _drive_to_completion(awaitable: Any) -> Any:
 
     Mirrors the bridge used by :meth:`Agent.__call__` so Memory's
     compression path has identical async semantics.
+
+    When ``timeout`` is set the awaitable is wrapped in
+    ``asyncio.wait_for``; on deadline a :class:`TimeoutError` propagates
+    so the caller can fall back gracefully.
     """
+
+    async def _run() -> Any:
+        coro = _ensure_coroutine(awaitable)
+        if timeout is None:
+            return await coro
+        return await asyncio.wait_for(coro, timeout=timeout)
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(_ensure_coroutine(awaitable))
+        return asyncio.run(_run())
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, _ensure_coroutine(awaitable)).result()
+        return pool.submit(asyncio.run, _run()).result()
 
 
 async def _ensure_coroutine(awaitable: Any) -> Any:

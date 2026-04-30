@@ -109,8 +109,20 @@ _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
 
 
 def _safe_json_loads(raw: str) -> dict[str, Any]:
+    """Parse tool-call arguments JSON.  Return a tagged dict on failure
+    so the engine can surface a clear TOOL_ERROR rather than letting
+    the tool fail with a misleading "missing required field" message.
+
+    The shape on parse failure is::
+
+        {"_raw_arguments": "<original string>",
+         "_parse_error":   "<JSONDecodeError message>"}
+
+    ``LLMEngine._exec_tool`` detects ``_parse_error`` and short-circuits
+    to a structured error before the tool runs (audit M-A).
+    """
     try:
-        return json.loads(raw) if raw else {}
+        result = json.loads(raw) if raw else {}
     except json.JSONDecodeError as exc:
         _logger.warning(
             "Failed to parse tool-call arguments as JSON (%s). "
@@ -118,7 +130,16 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
             exc,
             raw,
         )
-        return {"_raw_arguments": raw}
+        return {"_raw_arguments": raw, "_parse_error": str(exc)}
+    if not isinstance(result, dict):
+        # Tool calls must take an object — anything else (list, scalar,
+        # null) is a malformed argument blob.  Tag it so the engine
+        # can surface the model's actual output.
+        return {
+            "_raw_arguments": raw,
+            "_parse_error": (f"tool-call arguments parsed as {type(result).__name__}, expected object"),
+        }
+    return result
 
 
 class OpenAIProvider(BaseProvider):

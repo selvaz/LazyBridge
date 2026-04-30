@@ -50,6 +50,28 @@ class EventType(StrEnum):
     HIL_DECISION = "hil_decision"
 
 
+#: Events the ``"hybrid"`` back-pressure policy considers critical.  An
+#: ``EventLog`` configured with ``on_full="hybrid"`` blocks the producer
+#: when the writer queue is saturated *only* for these event types, and
+#: drops the cheap high-volume ones (``LOOP_STEP``, ``MODEL_REQUEST``,
+#: ``MODEL_RESPONSE``).  This matches the operator expectation that an
+#: audit-relevant trace (an agent completing, a tool failing) must
+#: never silently disappear, while transient telemetry can.
+#:
+#: Override per-Session via ``Session(critical_events=[...])`` if the
+#: defaults don't fit the deployment.
+DEFAULT_CRITICAL_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        EventType.AGENT_START.value,
+        EventType.AGENT_FINISH.value,
+        EventType.TOOL_ERROR.value,
+        EventType.TOOL_CALL.value,
+        EventType.TOOL_RESULT.value,
+        EventType.HIL_DECISION.value,
+    }
+)
+
+
 class EventLog:
     """SQLite-backed event log. Thread-safe via thread-local connections.
 
@@ -70,7 +92,8 @@ class EventLog:
         batch_size: int = 100,
         batch_interval: float = 1.0,
         max_queue_size: int = 10_000,
-        on_full: Literal["drop", "block"] = "drop",
+        on_full: Literal["drop", "block", "hybrid"] = "hybrid",
+        critical_events: frozenset[str] | set[str] | None = None,
     ) -> None:
         self.session_id = session_id
         self._db = db
@@ -81,8 +104,8 @@ class EventLog:
                 raise ValueError(f"batch_interval must be > 0, got {batch_interval!r}")
             if max_queue_size < 1:
                 raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size!r}")
-            if on_full not in ("drop", "block"):
-                raise ValueError(f"on_full must be 'drop' or 'block', got {on_full!r}")
+            if on_full not in ("drop", "block", "hybrid"):
+                raise ValueError(f"on_full must be 'drop', 'block', or 'hybrid', got {on_full!r}")
         # In-memory SQLite needs a SHARED cache otherwise every thread
         # gets its own isolated DB and events emitted from worker
         # threads (e.g. ``SupervisorEngine`` via ``asyncio.to_thread``)
@@ -122,7 +145,15 @@ class EventLog:
         self._batch_interval = batch_interval
         self._max_queue_size = max_queue_size
         self._on_full = on_full
+        # Per-event-type back-pressure — the ``"hybrid"`` policy uses
+        # this set to decide which events block under saturation.  A
+        # caller-supplied set wins over the defaults (frozen for safety
+        # against post-construction mutation).
+        self._critical_events: frozenset[str] = (
+            frozenset(critical_events) if critical_events is not None else DEFAULT_CRITICAL_EVENT_TYPES
+        )
         self._dropped_count = 0
+        self._dropped_critical_count = 0
         self._writer_thread: threading.Thread | None = None
         self._writer_queue: queue.Queue[tuple] | None = None
         self._writer_stop = threading.Event()
@@ -256,7 +287,7 @@ class EventLog:
             time.time(),
         )
         if self._batched:
-            self._submit_to_writer(row)
+            self._submit_to_writer(row, event_type=str(event_type))
             return
         conn = self._conn()
         conn.execute(
@@ -288,26 +319,58 @@ class EventLog:
     # Batched writer — opt-in, ``batched=True`` at construction.
     # ------------------------------------------------------------------
 
-    def _submit_to_writer(self, row: tuple) -> None:
-        """Push a row to the writer queue.  Behavior on full queue
-        is controlled by ``on_full=`` ('drop' or 'block')."""
+    def _submit_to_writer(self, row: tuple, *, event_type: str) -> None:
+        """Push a row to the writer queue.
+
+        ``on_full`` policy:
+
+        * ``"block"``  — back-pressure unconditionally; the producer
+          waits until the writer drains.
+        * ``"drop"``   — back-pressure never; on saturation the row is
+          dropped silently (with a doubling-interval warning).  Useful
+          for "telemetry must not block production traffic".
+        * ``"hybrid"`` — block for *critical* event types
+          (``AGENT_*``, ``TOOL_*``, ``HIL_DECISION`` by default; see
+          ``critical_events``) and drop the cheap high-volume ones
+          (``LOOP_STEP`` / ``MODEL_REQUEST`` / ``MODEL_RESPONSE``).
+          Default; balances audit completeness against producer
+          latency.
+        """
         assert self._writer_queue is not None
         if self._on_full == "block":
+            self._writer_queue.put(row)
+            return
+        if self._on_full == "hybrid" and event_type in self._critical_events:
+            # Block on the audit-critical path; drop only for cheap
+            # telemetry.  Producer latency takes precedence over
+            # losing an AGENT_FINISH or TOOL_ERROR.
             self._writer_queue.put(row)
             return
         try:
             self._writer_queue.put_nowait(row)
         except queue.Full:
             self._dropped_count += 1
+            if event_type in self._critical_events:
+                # Reachable only when ``on_full="drop"``: the operator
+                # opted out of back-pressure entirely, so we still drop
+                # but track separately so it's distinguishable from
+                # benign telemetry loss in the warning text.
+                self._dropped_critical_count += 1
             # Warn on first drop and at every doubling thereafter so
             # operators see saturation without flooding logs.
             n = self._dropped_count
             if n == 1 or (n & (n - 1)) == 0:
+                critical_note = (
+                    f" ({self._dropped_critical_count} of which were critical event types)"
+                    if self._dropped_critical_count
+                    else ""
+                )
                 warnings.warn(
-                    f"EventLog batched queue is full; dropped {n} event(s) so "
-                    f"far on session {self.session_id[:8]}. Raise "
-                    f"max_queue_size= or on_full='block' if drops aren't "
-                    f"acceptable.",
+                    f"EventLog batched queue is full; dropped {n} event(s)"
+                    f"{critical_note} so far on session {self.session_id[:8]}. "
+                    f"Raise max_queue_size=, switch to on_full='hybrid' "
+                    f"(default — blocks only on critical events), or "
+                    f"on_full='block' if drops aren't acceptable.",
                     UserWarning,
                     stacklevel=4,
                 )
@@ -440,9 +503,30 @@ class Session:
         batch_size: int = 100,
         batch_interval: float = 1.0,
         max_queue_size: int = 10_000,
-        on_full: Literal["drop", "block"] = "drop",
+        on_full: Literal["drop", "block", "hybrid"] = "hybrid",
+        critical_events: frozenset[str] | set[str] | None = None,
     ) -> None:
         """Construct a Session.
+
+        Back-pressure policy
+        --------------------
+        ``on_full`` selects what happens when the batched-writer queue
+        is saturated (``batched=True``):
+
+        * ``"hybrid"`` (default) — block for audit-critical event types
+          (``AGENT_*``, ``TOOL_*``, ``HIL_DECISION``; override via
+          ``critical_events=``) and silently drop the cheap high-volume
+          ones (``LOOP_STEP`` / ``MODEL_REQUEST`` / ``MODEL_RESPONSE``).
+          A buggy slow exporter no longer makes ``AGENT_FINISH`` or
+          ``TOOL_ERROR`` disappear, while a steady-state telemetry
+          firehose still doesn't add latency to the producer.
+        * ``"block"`` — back-pressure unconditionally.  Pick this when
+          every event must persist (compliance) and producer latency
+          can absorb the wait.
+        * ``"drop"``  — never back-pressure.  Saturation drops events
+          silently (with a doubling-interval warning).  Pick this when
+          telemetry must not block production traffic and lossy traces
+          are acceptable.
 
         Redactor failure modes
         ----------------------
@@ -481,6 +565,7 @@ class Session:
             batch_interval=batch_interval,
             max_queue_size=max_queue_size,
             on_full=on_full,
+            critical_events=critical_events,
         )
         self._exporters: list[Any] = list(exporters or [])
         self._redact = redact

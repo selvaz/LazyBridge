@@ -711,13 +711,54 @@ class LLMEngine:
         run_id: str,
     ) -> Any:
         if session:
-            session.emit(EventType.TOOL_CALL, {"tool": tc.name, "arguments": tc.arguments}, run_id=run_id)
+            # ``tool_use_id`` is the provider-supplied call id; it lets
+            # downstream consumers (OTel exporter, audit dashboards)
+            # correlate a TOOL_CALL with its eventual TOOL_RESULT /
+            # TOOL_ERROR even when N parallel invocations of the same
+            # tool name are in flight in a single turn.
+            session.emit(
+                EventType.TOOL_CALL,
+                {"tool": tc.name, "tool_use_id": tc.id, "arguments": tc.arguments},
+                run_id=run_id,
+            )
+
+        # Loud surfacing of malformed tool-call arguments (audit M-A).
+        # Provider ``_safe_json_loads`` tags un-parseable arg blobs with
+        # ``_parse_error`` so we can short-circuit here with a structured
+        # error instead of letting the tool fail later with a misleading
+        # "missing required field" message — the model then has the
+        # *real* failure (its JSON output was malformed) in the next
+        # turn and can self-correct.
+        parse_err = tc.arguments.get("_parse_error") if isinstance(tc.arguments, dict) else None
+        if parse_err:
+            raw = tc.arguments.get("_raw_arguments", "") if isinstance(tc.arguments, dict) else ""
+            err = RuntimeError(
+                f"Tool {tc.name!r} received malformed JSON arguments ({parse_err}). Raw arguments: {raw!r}"
+            )
+            if session:
+                session.emit(
+                    EventType.TOOL_ERROR,
+                    {
+                        "tool": tc.name,
+                        "tool_use_id": tc.id,
+                        "error": str(err),
+                        "type": "ToolArgumentParseError",
+                        "raw_arguments": raw,
+                        "parse_error": parse_err,
+                    },
+                    run_id=run_id,
+                )
+            return err
 
         tool = tool_map.get(tc.name)
         if tool is None:
             err = RuntimeError(f"Unknown tool: {tc.name!r}")
             if session:
-                session.emit(EventType.TOOL_ERROR, {"tool": tc.name, "error": str(err)}, run_id=run_id)
+                session.emit(
+                    EventType.TOOL_ERROR,
+                    {"tool": tc.name, "tool_use_id": tc.id, "error": str(err)},
+                    run_id=run_id,
+                )
             return err
 
         try:
@@ -731,6 +772,7 @@ class LLMEngine:
                             EventType.TOOL_ERROR,
                             {
                                 "tool": tc.name,
+                                "tool_use_id": tc.id,
                                 "error": str(timeout_err),
                                 "type": "ToolTimeoutError",
                                 "timeout_s": self.tool_timeout,
@@ -741,13 +783,22 @@ class LLMEngine:
             else:
                 result = await tool.run(**tc.arguments)
             if session:
-                session.emit(EventType.TOOL_RESULT, {"tool": tc.name, "result": str(result)[:500]}, run_id=run_id)
+                session.emit(
+                    EventType.TOOL_RESULT,
+                    {"tool": tc.name, "tool_use_id": tc.id, "result": str(result)[:500]},
+                    run_id=run_id,
+                )
             return result
         except Exception as exc:
             if session:
                 session.emit(
                     EventType.TOOL_ERROR,
-                    {"tool": tc.name, "error": str(exc), "type": type(exc).__name__},
+                    {
+                        "tool": tc.name,
+                        "tool_use_id": tc.id,
+                        "error": str(exc),
+                        "type": type(exc).__name__,
+                    },
                     run_id=run_id,
                 )
             return exc

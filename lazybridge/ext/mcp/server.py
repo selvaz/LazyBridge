@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -56,6 +57,13 @@ class MCPServer:
 
     _is_lazy_tool_provider = True
 
+    #: Default lifetime of the discovered-tools cache.  After expiry the
+    #: next ``alist_tools()`` call re-fetches from the upstream MCP
+    #: server, picking up any tools added or removed since the last
+    #: discovery (audit H-E).  ``None`` disables expiry — the
+    #: pre-1.0.x behaviour.
+    _DEFAULT_CACHE_TTL = 60.0
+
     def __init__(
         self,
         name: str,
@@ -65,6 +73,7 @@ class MCPServer:
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = _DEFAULT_CACHE_TTL,
     ) -> None:
         self.name = name
         self._transport = transport
@@ -76,7 +85,11 @@ class MCPServer:
         self._allow = list(allow) if allow else None
         self._deny = list(deny) if deny else None
 
+        if cache_tools_ttl is not None and cache_tools_ttl <= 0:
+            raise ValueError(f"cache_tools_ttl must be > 0 or None, got {cache_tools_ttl!r}")
+        self._cache_ttl: float | None = cache_tools_ttl
         self._tools_cache: list[Tool] | None = None
+        self._tools_cache_ts: float = 0.0
         self._connected = False
         self._closed = False
         # Lazy-init the asyncio.Lock on first async use.  Constructing it
@@ -103,14 +116,37 @@ class MCPServer:
                 self._connected = True
 
     async def alist_tools(self) -> list[Tool]:
-        """Discover and wrap the server's tools. Cached after the first call."""
+        """Discover and wrap the server's tools.
+
+        Cached for ``cache_tools_ttl`` seconds (default 60 s).  Once the
+        cache expires the next call re-fetches from the upstream
+        transport so an MCP server that hot-loads or unloads tools is
+        eventually reflected in the agent's tool list (audit H-E).
+        Pass ``cache_tools_ttl=None`` to disable expiry entirely (the
+        pre-1.0.x behaviour) and :meth:`invalidate_tools_cache` to flush
+        explicitly.
+        """
         await self.aconnect()
-        if self._tools_cache is not None:
+        now = time.monotonic()
+        if self._tools_cache is not None and (
+            self._cache_ttl is None or (now - self._tools_cache_ts) < self._cache_ttl
+        ):
             return self._tools_cache
         mcp_tools = await self._transport.list_tools()
         wrapped = [self._wrap_tool(t) for t in mcp_tools]
         self._tools_cache = self._filter(wrapped)
+        self._tools_cache_ts = now
         return self._tools_cache
+
+    def invalidate_tools_cache(self) -> None:
+        """Drop the cached tool list so the next call re-fetches.
+
+        Use this when an out-of-band signal tells you the MCP server's
+        tool registry has changed (plugin install / uninstall, hot
+        reload).  No-op when nothing is cached yet.
+        """
+        self._tools_cache = None
+        self._tools_cache_ts = 0.0
 
     async def aclose(self) -> None:
         """Close the underlying transport. Idempotent."""
@@ -201,6 +237,7 @@ class MCP:
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = MCPServer._DEFAULT_CACHE_TTL,
     ) -> MCPServer:
         """Build an MCP server bound to a stdio (subprocess) transport."""
         from lazybridge.ext.mcp.transports import StdioTransport
@@ -212,6 +249,7 @@ class MCP:
             prefix=prefix,
             allow=allow,
             deny=deny,
+            cache_tools_ttl=cache_tools_ttl,
         )
 
     @classmethod
@@ -225,6 +263,7 @@ class MCP:
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = MCPServer._DEFAULT_CACHE_TTL,
     ) -> MCPServer:
         """Build an MCP server bound to a Streamable HTTP transport."""
         from lazybridge.ext.mcp.transports import HttpTransport
@@ -236,6 +275,7 @@ class MCP:
             prefix=prefix,
             allow=allow,
             deny=deny,
+            cache_tools_ttl=cache_tools_ttl,
         )
 
     @classmethod
@@ -248,6 +288,7 @@ class MCP:
         prefix: str | None = None,
         allow: Iterable[str] | None = None,
         deny: Iterable[str] | None = None,
+        cache_tools_ttl: float | None = MCPServer._DEFAULT_CACHE_TTL,
     ) -> MCPServer:
         """Build an MCP server from a custom :class:`_Transport`.
 
@@ -262,4 +303,5 @@ class MCP:
             prefix=prefix,
             allow=allow,
             deny=deny,
+            cache_tools_ttl=cache_tools_ttl,
         )

@@ -1318,20 +1318,23 @@ def test_litellm_safe_json_loads_empty_string():
 
 
 def test_litellm_safe_json_loads_malformed_returns_raw_arguments():
+    """Malformed JSON keeps the raw string AND tags ``_parse_error`` so
+    the engine can surface a structured TOOL_ERROR (audit M-A)."""
     from lazybridge.core.providers.litellm import _safe_json_loads
 
     out = _safe_json_loads("{not valid json")
-    assert "_raw_arguments" in out
     assert out["_raw_arguments"] == "{not valid json"
+    assert out.get("_parse_error")
 
 
 def test_litellm_safe_json_loads_non_dict_top_level_returns_raw_arguments():
-    """LiteLLM's parser returns the raw string when the top-level JSON
-    isn't a dict — function-call args should always be objects."""
+    """LiteLLM's parser tags non-object payloads — function-call args
+    must always be objects (audit M-A)."""
     from lazybridge.core.providers.litellm import _safe_json_loads
 
     out = _safe_json_loads("[1, 2, 3]")
-    assert out == {"_raw_arguments": "[1, 2, 3]"}
+    assert out["_raw_arguments"] == "[1, 2, 3]"
+    assert "expected object" in out["_parse_error"]
 
 
 # ---------------------------------------------------------------------------
@@ -1447,10 +1450,13 @@ def test_openai_safe_json_loads_empty():
 
 
 def test_openai_safe_json_loads_malformed_returns_raw_arguments():
+    """Malformed JSON keeps the raw string AND tags ``_parse_error`` so
+    the engine can surface a structured TOOL_ERROR (audit M-A)."""
     from lazybridge.core.providers.openai import _safe_json_loads
 
     out = _safe_json_loads("{not valid")
-    assert out == {"_raw_arguments": "{not valid"}
+    assert out["_raw_arguments"] == "{not valid"
+    assert out.get("_parse_error")
 
 
 # ---------------------------------------------------------------------------
