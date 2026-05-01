@@ -102,7 +102,7 @@ is last in declared order so linear fall-through never reaches it.
 
 ```python
 from pydantic import BaseModel
-from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
+from lazybridge import Agent, Plan, Step, Store, from_prev, from_step, when
 
 class Hits(BaseModel):
     items: list[str]
@@ -116,13 +116,10 @@ plan = Plan(
     Step(searcher, name="search",
          task="Search the web for the user's topic.",
          writes="hits", output=Hits,
-         # routes = {target_step_name: predicate(envelope) -> bool}.
-         # The lambda below returns True when there are no items, in
-         # which case the Plan jumps to the step named "apology"
-         # instead of falling through to "rank".
-         routes={
-             "apology": lambda env: not env.payload.items,
-         }),
+         # ``when`` DSL: when ``items`` is empty, route to "apology"
+         # instead of falling through to "rank".  No lambda, no
+         # ``env.payload.<name>`` plumbing.
+         routes={"apology": when.field("items").empty()}),
     Step(ranker,        name="rank",
          task="Rank these search hits by relevance; return the top 5.",
          context=from_prev,
@@ -180,7 +177,7 @@ because Plan sentinels can't reference forward steps.
 
 ```python
 from pydantic import BaseModel
-from lazybridge import Plan, Step, Store, from_start, from_prev, from_step
+from lazybridge import Plan, Step, Store, from_start, from_prev, from_step, when
 
 class Verdict(BaseModel):
     feedback: str
@@ -201,10 +198,8 @@ plan = Plan(
          context=from_prev,
          output=Verdict,
          writes="verdict",                     # writer reads this via sources= next loop
-         routes={
-             # Loop back to the writer when the reviewer rejected.
-             "write": lambda env: not env.payload.approved,
-         }),
+         # Loop back to the writer when the reviewer rejected.
+         routes={"write": when.field("approved").is_(False)}),
     Step(publisher, name="publish",
          task="Final-format and publish the approved draft.",
          context=from_step("write")),

@@ -178,6 +178,10 @@ Enum where members are also (and must be) strings
 
 Aggregate every consecutive parallel sibling starting at ``name``.
 
+### `when`
+
+Entry point for the predicate DSL.
+
 ### `GuardError`
 
 Raised when a Guard blocks execution.

@@ -154,33 +154,43 @@ jump to that target.  If none returns `True`, the Plan falls through
 linearly to the next declared step.
 
 **Worked example.**  Search returns a `Hits` model; if there are no
-items, jump to the `apology` step.
+items, jump to the `apology` step.  The recommended form uses the
+``when`` DSL — declarative, no Python plumbing:
 
 ```python
 from pydantic import BaseModel
-from lazybridge import Plan, Step, Envelope
+from lazybridge import Plan, Step, when
 
 class Hits(BaseModel):
     items: list[str]
 
-# Predicate: receives the FULL Envelope.  ``env.payload`` is a typed
-# Hits instance because ``output=Hits`` is set on the step.  Return
-# True when we want to jump to the "apology" target.
-def no_results(env: Envelope) -> bool:
-    return not env.payload.items
-
 plan = Plan(
     Step(searcher, name="search", output=Hits,
-         # Branch table: when ``no_results`` returns True, route to
-         # the step named "apology" instead of falling through to "rank".
-         routes={"apology": no_results}),
+         # Branch table: when items is empty, route to "apology"
+         # instead of falling through to "rank".
+         routes={"apology": when.field("items").empty()}),
     Step(ranker,        name="rank"),
     Step(writer,        name="write"),
     Step(apology_agent, name="apology"),    # terminal: last in declared order
 )
 ```
 
-For one-line predicates, an inline lambda is fine — equivalent shape:
+When the predicate is too complex for the DSL, drop down to a named
+function that takes the Envelope:
+
+```python
+from lazybridge import Envelope
+
+def needs_review(env: Envelope) -> bool:
+    """Route here when the score is low AND the topic is sensitive."""
+    return env.payload.score < 0.5 and env.payload.topic in {"medical", "legal"}
+
+Step(classifier, name="classify", output=Score,
+     routes={"review": needs_review})
+```
+
+A bare lambda also works — it's the escape hatch for one-off
+predicates that don't deserve a name:
 
 ```python
 Step(searcher, name="search", output=Hits,
@@ -301,7 +311,7 @@ is last in declared order so linear fall-through never reaches it.
 
 ```python
 from pydantic import BaseModel
-from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
+from lazybridge import Agent, Plan, Step, Store, from_prev, from_step, when
 
 class Hits(BaseModel):
     items: list[str]
@@ -315,13 +325,10 @@ plan = Plan(
     Step(searcher, name="search",
          task="Search the web for the user's topic.",
          writes="hits", output=Hits,
-         # routes = {target_step_name: predicate(envelope) -> bool}.
-         # The lambda below returns True when there are no items, in
-         # which case the Plan jumps to the step named "apology"
-         # instead of falling through to "rank".
-         routes={
-             "apology": lambda env: not env.payload.items,
-         }),
+         # ``when`` DSL: when ``items`` is empty, route to "apology"
+         # instead of falling through to "rank".  No lambda, no
+         # ``env.payload.<name>`` plumbing.
+         routes={"apology": when.field("items").empty()}),
     Step(ranker,        name="rank",
          task="Rank these search hits by relevance; return the top 5.",
          context=from_prev,
@@ -379,7 +386,7 @@ because Plan sentinels can't reference forward steps.
 
 ```python
 from pydantic import BaseModel
-from lazybridge import Plan, Step, Store, from_start, from_prev, from_step
+from lazybridge import Plan, Step, Store, from_start, from_prev, from_step, when
 
 class Verdict(BaseModel):
     feedback: str
@@ -400,10 +407,8 @@ plan = Plan(
          context=from_prev,
          output=Verdict,
          writes="verdict",                     # writer reads this via sources= next loop
-         routes={
-             # Loop back to the writer when the reviewer rejected.
-             "write": lambda env: not env.payload.approved,
-         }),
+         # Loop back to the writer when the reviewer rejected.
+         routes={"write": when.field("approved").is_(False)}),
     Step(publisher, name="publish",
          task="Final-format and publish the approved draft.",
          context=from_step("write")),

@@ -74,15 +74,16 @@ model.  Two forms — pick the one that fits who decides:
 ```python
 from pydantic import BaseModel
 from typing import Literal
-from lazybridge import Plan, Step
+from lazybridge import Plan, Step, when
 
 class SearchResult(BaseModel):
     items: list[str]
 
 # Form A — your code decides via a predicate.
-# routes = {target_step_name: predicate(envelope) -> bool}.
+# Use the ``when`` DSL for the common cases — it reads as English
+# and never asks you to type ``lambda env: env.payload.<name>``.
 Step(searcher, name="search", output=SearchResult,
-     routes={"apology": lambda env: not env.payload.items})
+     routes={"apology": when.field("items").empty()})
 
 # Form B — the LLM decides via a Literal field.
 class SearchDecision(BaseModel):

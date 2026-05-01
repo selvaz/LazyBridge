@@ -15,7 +15,7 @@ conditionally route to each other, and the whole thing resumes from the failing 
 ## The pattern
 
 ```python
-from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
+from lazybridge import Agent, Plan, Step, Store, from_prev, from_step, when
 from pydantic import BaseModel
 
 # --- Declare output types for each step that needs them ---
@@ -44,11 +44,11 @@ plan = Plan(
     Step(searcher, name="search",
          writes="results",
          output=SearchResult,
-         # routes = {target_step_name: predicate(envelope) -> bool}.
-         # The lambda returns True when no items were found, in which
-         # case the Plan jumps to the step named "apology" instead of
-         # falling through to "analyse".
-         routes={"apology": lambda env: not env.payload.items}),
+         # ``when`` DSL: when ``items`` is empty, route to the step
+         # named "apology" instead of falling through to "analyse".
+         # Equivalent to ``lambda env: not env.payload.items``, but
+         # declarative and discoverable.
+         routes={"apology": when.field("items").empty()}),
     # Idiomatic shape: an explicit ``task=`` instruction; upstream data
     # flows through ``context=``.
     Step(analyser, name="analyse",
