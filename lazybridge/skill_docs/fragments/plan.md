@@ -133,18 +133,58 @@ where, without reading any Pydantic class.
 
 #### Form A — `routes={...}` (predicate map)
 
-Use when **your code** decides the branch.  Each key is the name of a
-target step; each value is a callable `(Envelope) -> bool`.  After the
-step runs, predicates are evaluated in declared order; the first one
-that returns truthy makes Plan jump to that target.  If none match,
-linear progression continues.
+Use when **your code** decides the branch.  The shape is fixed:
+
+```python
+routes = {
+    "target_step_name": predicate,         # predicate(envelope) -> bool
+    "another_target":   another_predicate,
+    # ...
+}
+```
+
+* **Key** = name of a step declared in the same `Plan` (validated at
+  construction).
+* **Value** = callable `(Envelope) -> bool`.  The framework calls it
+  with the step's output Envelope.
+
+After the step runs, the framework evaluates each predicate in
+declared order.  The **first one that returns `True`** makes Plan
+jump to that target.  If none returns `True`, the Plan falls through
+linearly to the next declared step.
+
+**Worked example.**  Search returns a `Hits` model; if there are no
+items, jump to the `apology` step.
+
+```python
+from pydantic import BaseModel
+from lazybridge import Plan, Step, Envelope
+
+class Hits(BaseModel):
+    items: list[str]
+
+# Predicate: receives the FULL Envelope.  ``env.payload`` is a typed
+# Hits instance because ``output=Hits`` is set on the step.  Return
+# True when we want to jump to the "apology" target.
+def no_results(env: Envelope) -> bool:
+    return not env.payload.items
+
+plan = Plan(
+    Step(searcher, name="search", output=Hits,
+         # Branch table: when ``no_results`` returns True, route to
+         # the step named "apology" instead of falling through to "rank".
+         routes={"apology": no_results}),
+    Step(ranker,        name="rank"),
+    Step(writer,        name="write"),
+    Step(apology_agent, name="apology"),    # terminal: last in declared order
+)
+```
+
+For one-line predicates, an inline lambda is fine — equivalent shape:
 
 ```python
 Step(searcher, name="search", output=Hits,
-     routes={
-         # If search found nothing, jump to the apology step.
-         "empty": lambda env: not env.payload.items,
-     })
+     routes={"apology": lambda env: not env.payload.items})
 ```
 
 The branch table is right there at the call site — no need to inspect
@@ -275,19 +315,21 @@ plan = Plan(
     Step(searcher, name="search",
          task="Search the web for the user's topic.",
          writes="hits", output=Hits,
-         # The branch table is explicit at the call site.
-         # The predicate gets the FULL Envelope; .payload is typed.
+         # routes = {target_step_name: predicate(envelope) -> bool}.
+         # The lambda below returns True when there are no items, in
+         # which case the Plan jumps to the step named "apology"
+         # instead of falling through to "rank".
          routes={
-             "empty": lambda env: not env.payload.items,
+             "apology": lambda env: not env.payload.items,
          }),
-    Step(ranker,   name="rank",
+    Step(ranker,        name="rank",
          task="Rank these search hits by relevance; return the top 5.",
          context=from_prev,
          output=Ranked),
-    Step(writer,   name="write",
+    Step(writer,        name="write",
          task="Write a 200-word brief from the ranked items below.",
          context=from_step("rank")),
-    Step(apology,  name="empty",                    # ← terminal: last in order
+    Step(apology_agent, name="apology",                # ← terminal: last in declared order
          task="Apologise that no results were found and suggest broader terms."),
     store=store, checkpoint_key="research", resume=True,
 )

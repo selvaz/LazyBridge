@@ -80,16 +80,18 @@ class SearchResult(BaseModel):
     items: list[str]
 
 # Form A — your code decides via a predicate.
+# routes = {target_step_name: predicate(envelope) -> bool}.
 Step(searcher, name="search", output=SearchResult,
-     routes={"no_results": lambda env: not env.payload.items})
+     routes={"apology": lambda env: not env.payload.items})
 
 # Form B — the LLM decides via a Literal field.
 class SearchDecision(BaseModel):
     items: list[str]
-    branch: Literal["process", "no_results"] | None = None
+    # The Literal values must match step names declared in the Plan.
+    next_step: Literal["analyse", "apology"] | None = None
 
 Step(searcher, name="search", output=SearchDecision,
-     routes_by="branch")
+     routes_by="next_step")
 ```
 
 Both are visible at the `Step(...)` line — no need to read the

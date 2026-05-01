@@ -44,21 +44,21 @@ plan = Plan(
     Step(searcher, name="search",
          writes="results",
          output=SearchResult,
-         # Routing is declared on the Step — no need to read SearchResult
-         # to know what the step does.  The predicate gets the FULL
-         # Envelope; .payload is the typed SearchResult.
-         routes={"no_results": lambda env: not env.payload.items}),
+         # routes = {target_step_name: predicate(envelope) -> bool}.
+         # The lambda returns True when no items were found, in which
+         # case the Plan jumps to the step named "apology" instead of
+         # falling through to "analyse".
+         routes={"apology": lambda env: not env.payload.items}),
     # Idiomatic shape: an explicit ``task=`` instruction; upstream data
-    # flows through ``context=``.  The agent doesn't have to guess what
-    # to do with the envelope it received.
+    # flows through ``context=``.
     Step(analyser, name="analyse",
          task="Analyse the search results; assign a confidence in [0,1].",
          context=from_prev,
          output=Analysis),
-    Step(writer,   name="write",
+    Step(writer,        name="write",
          task="Write a 250-word brief from the analyser's findings; cite items.",
          context=from_step("analyse")),
-    Step(apology,  name="no_results",                    # ← terminal: last in declared order
+    Step(apology_agent, name="apology",                # ← terminal: last in declared order
          task="Apologise that no results were found and suggest broader queries."),
     store=store,
     checkpoint_key="weekly-brief",
