@@ -50,12 +50,13 @@ Step(synthesiser, name="synth",
 Step(summariser, name="summary", task=from_prev)
 ```
 
-A typical pipeline shape:
+A typical pipeline shape — solid arrows are linear progression,
+dashed arrows are conditional routing driven by `payload.next`:
 
 ```mermaid
 flowchart LR
-    A[search\noutput=Hits] -->|next| B[rank\noutput=Ranked]
-    A -->|next=empty| F[apology]
+    A[search\noutput=Hits with next] -.->|next=rank| B[rank\noutput=Ranked]
+    A -.->|next=empty| F[apology — terminal]
     B --> C[fact_check]
     C --> D[write\nwrites=draft]
     D --> E[(Store\nkey=draft)]
@@ -71,6 +72,93 @@ hand-offs — `chain` is sugar for the simplest `Plan` shape and reads
 better at the call site.  Move to `Plan` once you need typed
 hand-offs, conditional routing, parallel bands, named writes, or
 crash-resume.
+
+### Two control mechanisms that are easy to confuse
+
+`Plan` has two separate features that both manipulate "what runs
+next".  They are **completely orthogonal** — production pipelines use
+both, but they answer different questions.
+
+#### Routing — *which step runs next, in this run*
+
+Routing is **control flow within a single run**.  Plan reads
+`payload.next` after every step; if the value is the name of an
+existing step, Plan jumps there instead of falling through to the
+next declared step.
+
+```python
+class Hits(BaseModel):
+    items: list[str]
+    next: Literal["rank", "empty"] = "rank"   # ← THIS field activates routing
+
+# After "search":
+#   Hits.next == "rank"   → Plan runs "rank"  next
+#   Hits.next == "empty"  → Plan runs "empty" next
+```
+
+There is nothing magic.  `payload.next` is just `getattr(env.payload,
+"next", None)`.  Any Pydantic model with a field named `next` triggers
+the routing path.  Three rules to know:
+
+* **Compile-time validated** — when `next: Literal["a", "b"]` is
+  declared, `PlanCompiler` rejects values that don't match a step
+  name *before* any LLM call.
+* **No fall-through after a route** — once a step is reached via
+  `.next`, the Plan does not "return" to the linear order.  Use
+  routing to fork into terminal branches (e.g. an `apology` step that
+  ends the run when there's nothing to write about), not to detour
+  through a side step.
+* **Loops are allowed** — a step can route back to an earlier one
+  (self-correction patterns).  `max_iterations` (default 100) is the
+  safety net; runaway loops surface as `MaxIterationsExceeded`.
+
+#### Crash-resume — *what survives across runs*
+
+Crash-resume is **durability across run boundaries**.  Configure with
+`Plan(store=..., checkpoint_key="...", resume=True)`: after every step
+the plan state (next-step pointer, completed step list, `writes`
+buckets, status) is written to the store via
+`compare_and_swap`.  Re-running with the same `checkpoint_key` and
+`resume=True` picks up at the failed step.
+
+```python
+plan = Plan(
+    Step(extract,   name="extract",   writes="raw"),
+    Step(transform, name="transform", writes="clean"),
+    Step(load,      name="load"),
+    store=Store(db="etl.sqlite"),
+    checkpoint_key="run-2026-04-30",
+    resume=True,
+)
+```
+
+Three rules to know:
+
+* **No control-flow effect** — checkpointing has nothing to do with
+  routing.  It only decides which steps a *future* run skips, never
+  which step runs now.
+* **Only `writes=` survives** — in-memory `history` is rebuilt empty
+  on resume.  Any state a future run needs must be persisted via
+  `writes="key"`.
+* **Concurrent runs serialised by CAS** — `on_concurrent="fail"`
+  (default) raises `ConcurrentPlanRunError` on collision.  For
+  fan-out workflows, use `on_concurrent="fork"` (incompatible with
+  `resume=True`).
+
+#### Side-by-side cheat sheet
+
+|                    | Routing                                       | Crash-resume                                            |
+| ---                | ---                                           | ---                                                     |
+| Controls           | Which step runs **next**                      | What survives a **process restart**                     |
+| Trigger            | `output=Model` with a `next: Literal[...]`    | `Plan(store=…, checkpoint_key=…, resume=True)`          |
+| Time scale         | Within one `Plan.run`                         | Across separate `Plan.run` invocations                  |
+| Validation surface | `PlanCompileError` at construction            | `ConcurrentPlanRunError` at runtime CAS                 |
+| Required           | A Pydantic model with a `next` string field   | An instantiated `Store` + a checkpoint key              |
+| Combinable         | Yes — production pipelines normally use both | Yes                                                     |
+
+**They appear together in real examples** because production
+pipelines need both: routing decides the path, crash-resume keeps the
+work that has already been done.  But neither implies the other.
 
 ## Example
 
@@ -173,13 +261,21 @@ agent = Agent.from_engine(make_pipeline(["AAPL", "GOOG", "MSFT"]))
 agent("end-of-day market scan")
 ```
 
-### 4. Crash-resume after a failed step
+### 4. Crash-resume after a failed step (**checkpoint only, no routing**)
 
 Resume reads the persisted checkpoint and restarts at the failing
 step.  No re-running of completed steps; their `writes` are already
-in the Store.
+in the Store.  This pattern uses **only crash-resume** — no `next`
+field anywhere, every step runs in declared order; compare with
+Pattern 6 below for routing-only.
 
 ```python
+class ValidationReport(BaseModel):
+    """Plain typed output — NO ``next`` field, so no routing.
+    The pipeline just records this payload via ``writes="verdict"``."""
+    rejected_rows: list[int]
+    accepted_rows: int
+
 store = Store(db="pipeline.sqlite")
 plan = Plan(
     Step(extract,   name="extract",
@@ -192,13 +288,13 @@ plan = Plan(
          task="Verify business rules; flag rows that fail.",
          context=from_prev,
          writes="verdict",
-         output=Verdict),
+         output=ValidationReport),                # typed payload, NO routing
     Step(load,      name="load",
          task="Load the cleaned records into the warehouse.",
          context=from_step("transform")),
     store=store,
     checkpoint_key="etl-2026-04-30",
-    resume=True,                             # picks up at the failed step
+    resume=True,                                  # picks up at the failed step
 )
 
 # Run 1 — `transform` crashes.  Store now holds {raw: ...} and a
@@ -207,6 +303,13 @@ plan = Plan(
 # persisted), `transform` retries; the rest of the pipeline runs.
 Agent.from_engine(plan)("today's batch")
 ```
+
+Note that ``ValidationReport`` is a plain typed output: it has no
+``next`` field, so this pipeline has **no routing** — every step runs
+in declared order.  Crash-resume here is purely about durability
+(``store=`` + ``checkpoint_key=`` + ``resume=True``).  Compare with
+Pattern 6 below where ``Verdict`` *does* have a ``next`` field and
+that's where routing kicks in.
 
 ### 5. Concurrent fan-out runs with `on_concurrent="fork"`
 
@@ -241,37 +344,62 @@ with ThreadPoolExecutor(max_workers=8) as pool:
 # Each run has an isolated checkpoint; their writes don't trample.
 ```
 
-### 6. Self-correction loop via routing
+### 6. Self-correction loop via **routing**
 
-A `Verdict` step routes back to the writer when the draft fails
-quality checks.  `max_iterations` is the safety net — the loop must
-terminate within it or returns `MaxIterationsExceeded`.
+This pattern is the opposite of Pattern 4: **routing only, no
+checkpoints**.  A reviewer step has a Pydantic output with a `next`
+field — Plan reads `payload.next` after the step and jumps to the
+matching step name.  The writer-review-publish cycle loops until the
+reviewer returns `next="publish"`; `max_iterations` is the safety
+net.
 
 ```python
 from typing import Literal
 from pydantic import BaseModel
 
 class Verdict(BaseModel):
+    """Routing model — the ``next`` field is what makes the Plan
+    branch.  Without ``next: Literal[...]`` this would be a plain
+    typed output (like ``ValidationReport`` in Pattern 4) and there
+    would be no routing."""
     feedback: str
-    next: Literal["write", "publish"]        # "write" → loop back
+    next: Literal["write", "publish"]            # ← THIS field activates routing
 
 plan = Plan(
     Step(writer,    name="write",
          task="Draft a 200-word answer to the user's question.",
-         context=from_start,                          # writer always sees the original task
+         context=from_start,                      # writer always sees the original task
          writes="draft"),
     Step(reviewer,  name="review",
          task="Score the draft for accuracy, tone, and length. "
               "Set next='publish' if the draft passes; otherwise "
               "set next='write' and provide actionable feedback.",
          context=from_prev,
-         output=Verdict),
+         output=Verdict),                         # ← routing model
     Step(publisher, name="publish",
          task="Final-format and publish the approved draft.",
          context=from_step("write")),
-    max_iterations=8,                        # cap the loop
+    max_iterations=8,                             # cap the loop
 )
 ```
+
+What the Plan does between steps:
+
+* After `write` — `Verdict` not produced yet; falls through to
+  `review` (the next declared step).
+* After `review` — Plan reads `payload.next`.
+  * `next == "write"` → loop back, writer runs again with the
+    reviewer's feedback in its context (because of `context=from_start`,
+    the writer still sees the original task; you'd add
+    `from_step("review")` to the writer's context list to feed the
+    feedback in).
+  * `next == "publish"` → jump to publisher.
+* After `publish` — no `.next`, no further declared step → Plan ends.
+
+This Plan has **no `store=` / `checkpoint_key=`**, so it gets no
+crash-resume — restart and the loop starts from scratch.  Adding
+those two parameters would make the loop survive process restarts
+without changing the routing behaviour at all.
 
 ### 7. Mixed step targets — agents, tools, callables
 

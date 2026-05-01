@@ -4,6 +4,14 @@
 **Goal:** Run a multi-step pipeline where each step has a declared output type, steps can
 conditionally route to each other, and the whole thing resumes from the failing step after a crash.
 
+!!! note "Two orthogonal features in one recipe"
+    This recipe combines **routing** (`next: Literal[...]` on a Pydantic
+    output, decides which step runs next) and **crash-resume** (`store=`
+    + `checkpoint_key=` + `resume=True`, decides what survives a process
+    restart).  They are independent — see the
+    [Plan guide](../guides/plan.md#two-control-mechanisms-that-are-easy-to-confuse)
+    for each on its own.
+
 ## The pattern
 
 ```python
