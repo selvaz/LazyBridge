@@ -86,23 +86,70 @@ Routing is **control flow within a single run**.  Plan reads
 existing step, Plan jumps there instead of falling through to the
 next declared step.
 
-```python
-class Hits(BaseModel):
-    items: list[str]
-    next: Literal["rank", "empty"] = "rank"   # ← THIS field activates routing
+##### How can I tell at a glance whether a step routes?
 
-# After "search":
-#   Hits.next == "rank"   → Plan runs "rank"  next
-#   Hits.next == "empty"  → Plan runs "empty" next
+You can't — by looking at the `Step(...)` line alone.  **Routing is
+declared on the `output=` model, not on the `Step`.**  Plan does
+exactly this after every step:
+
+```python
+# pseudocode — what the Plan engine literally does
+next_val = getattr(result_env.payload, "next", None)
+if isinstance(next_val, str) and next_val in step_names:
+    jump_to(next_val)         # ← routing step
+else:
+    fall_through_to_next()    # ← linear step
 ```
 
-There is nothing magic.  `payload.next` is just `getattr(env.payload,
-"next", None)`.  Any Pydantic model with a field named `next` triggers
-the routing path.  Three rules to know:
+So the rule is:
+
+> A step routes **if and only if** its ``output=`` model has a field
+> named ``next`` whose value is a string matching an existing step name.
+
+Two `Step(...)` calls that look identical can behave completely
+differently — the difference is in the model:
+
+```python
+# --- Linear step: output model has NO ``next`` field ----------
+class Ranked(BaseModel):
+    top: list[str]
+
+Step(ranker, name="rank", output=Ranked)
+# After "rank" → Plan runs the next declared step.
+
+# --- Routing step: output model HAS a ``next`` field ----------
+class Hits(BaseModel):
+    items: list[str]
+    next: Literal["rank", "empty"] = "rank"   # ← THIS activates routing
+
+Step(searcher, name="search", output=Hits)
+# After "search" → Plan reads Hits.next and jumps to "rank" OR "empty".
+```
+
+**Naming convention** — to make routing visible at the call site
+without going to look at the model, give routing models a name that
+ends in `Decision`, `Verdict`, or `Branch`:
+
+```python
+class SearchDecision(BaseModel):     # ← naming says "this routes"
+    items: list[str]
+    next: Literal["rank", "empty"] = "rank"
+
+Step(searcher, name="search", output=SearchDecision)
+# Reader sees ``output=SearchDecision`` and knows the next step
+# isn't necessarily the one declared after "search".
+```
+
+It is just a convention; the framework looks at the `next` field, not
+the class name.  But it makes the call site self-documenting.
+
+##### Three rules of routing
 
 * **Compile-time validated** — when `next: Literal["a", "b"]` is
   declared, `PlanCompiler` rejects values that don't match a step
-  name *before* any LLM call.
+  name *before* any LLM call.  ``Literal`` is strongly recommended
+  for that reason; a plain ``next: str`` skips the compile-time
+  check.
 * **No fall-through after a route** — once a step is reached via
   `.next`, the Plan does not "return" to the linear order.  Use
   routing to fork into terminal branches (e.g. an `apology` step that
