@@ -89,12 +89,21 @@ Usage: Agent(engine=Plan(Step(a), Step(b)))
 The patterns below cover the full surface.  Each is a minimal,
 self-contained shape; combine them as needed in real pipelines.
 
-### 1. Linear typed pipeline with conditional routing
+### 1. Linear typed pipeline with terminal-fork routing
 
-The everyday shape: search → rank → write, with an early-out when
-search finds nothing.  `next: Literal[...]` on the search step's
-output drives the route; the `apology` step is reached only when the
-search produced no hits.
+The everyday shape: search → rank → write, with an **early-out** to
+``apology`` when the searcher returns nothing.  This is **Pattern B**
+from the routing-patterns subsection above:
+
+* ``Hits.next`` is ``Optional[Literal["empty"]]`` with default
+  ``None`` — set to ``"empty"`` only on the early-out, ``None`` on the
+  happy path.
+* ``None`` makes the Plan fall through linearly (search → rank →
+  write).
+* ``"empty"`` routes to the terminal ``apology`` step, which has no
+  ``next`` and ends the run.
+* ``apology`` is the **last** declared step so linear fall-through
+  never reaches it.
 
 ```python
 from typing import Literal
@@ -103,7 +112,9 @@ from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 
 class Hits(BaseModel):
     items: list[str]
-    next: Literal["rank", "empty"] = "rank"   # routes the plan
+    # Set to "empty" only when there are no hits; default None lets
+    # the happy path fall through linearly to "rank".
+    next: Literal["empty"] | None = None
 
 class Ranked(BaseModel):
     top: list[str]
@@ -111,10 +122,11 @@ class Ranked(BaseModel):
 store = Store(db="research.sqlite")
 
 # Idiomatic shape: each step has an explicit `task=` instruction;
-# upstream data flows through `context=`.  The agent doesn't have to
-# guess what to do with the data it received.
+# upstream data flows through `context=`.
 plan = Plan(
     Step(searcher, name="search",
+         task="Search the web for the user's topic. "
+              "If you find no relevant items, set next='empty'; otherwise leave next=None.",
          writes="hits", output=Hits),
     Step(ranker,   name="rank",
          task="Rank these search hits by relevance; return the top 5.",
@@ -123,7 +135,7 @@ plan = Plan(
     Step(writer,   name="write",
          task="Write a 200-word brief from the ranked items below.",
          context=from_step("rank")),
-    Step(apology,  name="empty",
+    Step(apology,  name="empty",                   # ← terminal: reached only via routing
          task="Apologise that no results were found and suggest broader terms."),
     store=store, checkpoint_key="research", resume=True,
 )

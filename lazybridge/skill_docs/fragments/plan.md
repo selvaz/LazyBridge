@@ -235,6 +235,85 @@ the class name.  But it makes the call site self-documenting.
   (self-correction patterns).  `max_iterations` (default 100) is the
   safety net; runaway loops surface as `MaxIterationsExceeded`.
 
+##### Three routing patterns — pick one and stick to it
+
+Once you understand "no fall-through after a route", three concrete
+patterns cover every real pipeline.  Mixing them in the same Plan is
+where bugs live.
+
+**Pattern A — Linear-only** (no routing anywhere).  No model has a
+``next`` field; every step falls through to the next declared step.
+Default and simplest.
+
+```python
+class Hits(BaseModel):    items: list[str]
+class Ranked(BaseModel):  top: list[str]
+
+Plan(
+    Step(searcher, name="search", output=Hits),
+    Step(ranker,   name="rank",   output=Ranked),
+    Step(writer,   name="write"),
+)
+```
+
+**Pattern B — Terminal-fork** (one decision step, terminal branch).
+Exactly one step has a routing model; the routed-to branch is
+terminal (no further declared step links to it linearly).  Use
+``Optional[Literal[...]]`` with default ``None`` so the happy path
+falls through linearly:
+
+```python
+class Hits(BaseModel):
+    items: list[str]
+    next: Literal["empty"] | None = None     # only set on early-out
+
+Plan(
+    Step(searcher, name="search", output=Hits),    # may route to "empty"
+    Step(ranker,   name="rank",   output=Ranked),  # linear (Hits.next was None)
+    Step(writer,   name="write"),                  # linear
+    Step(apology,  name="empty"),                  # reached only via routing
+)
+```
+
+Be careful: the *order* of declared steps matters because of linear
+fall-through.  Above, `apology` is last — if you wrote
+``Step(apology, name="empty"), Step(writer, name="write")`` instead,
+the linear path would run `apology` after `rank`.  Put terminal-fork
+targets at the end of the declared list.
+
+**Pattern C — Always-routing** (every step declares its successor).
+Every output model has a ``next``; the Plan's flow is fully
+explicit.  Most verbose but easiest to read at the model level.
+
+```python
+class Hits(BaseModel):
+    items: list[str]
+    next: Literal["rank", "empty"] = "rank"
+
+class Ranked(BaseModel):
+    top: list[str]
+    next: Literal["write"] = "write"           # explicitly continues
+
+class WriteResult(BaseModel):
+    text: str
+    # No `next` field → after this step (was_routed=True), Plan ends.
+
+Plan(
+    Step(searcher, name="search", output=Hits),
+    Step(ranker,   name="rank",   output=Ranked),
+    Step(writer,   name="write",  output=WriteResult),
+    Step(apology,  name="empty"),                # reached only via routing
+)
+```
+
+**The trap to avoid**: a "half-routed" pipeline like
+``Hits.next: Literal["rank", "empty"]`` where ``Ranked`` then has no
+``next``.  After ``search→rank`` (via routing), ``rank`` has no
+``next`` and ``was_routed=True`` → the Plan **ends without running
+``write``**.  This is the most common bug; use Pattern B (with
+``Optional`` default ``None``) or Pattern C (chain ``next``
+through), never the half-form.
+
 #### Crash-resume — *what survives across runs*
 
 Crash-resume is **durability across run boundaries**.  Configure with
@@ -287,12 +366,21 @@ work that has already been done.  But neither implies the other.
 The patterns below cover the full surface.  Each is a minimal,
 self-contained shape; combine them as needed in real pipelines.
 
-### 1. Linear typed pipeline with conditional routing
+### 1. Linear typed pipeline with terminal-fork routing
 
-The everyday shape: search → rank → write, with an early-out when
-search finds nothing.  `next: Literal[...]` on the search step's
-output drives the route; the `apology` step is reached only when the
-search produced no hits.
+The everyday shape: search → rank → write, with an **early-out** to
+``apology`` when the searcher returns nothing.  This is **Pattern B**
+from the routing-patterns subsection above:
+
+* ``Hits.next`` is ``Optional[Literal["empty"]]`` with default
+  ``None`` — set to ``"empty"`` only on the early-out, ``None`` on the
+  happy path.
+* ``None`` makes the Plan fall through linearly (search → rank →
+  write).
+* ``"empty"`` routes to the terminal ``apology`` step, which has no
+  ``next`` and ends the run.
+* ``apology`` is the **last** declared step so linear fall-through
+  never reaches it.
 
 ```python
 from typing import Literal
@@ -301,7 +389,9 @@ from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 
 class Hits(BaseModel):
     items: list[str]
-    next: Literal["rank", "empty"] = "rank"   # routes the plan
+    # Set to "empty" only when there are no hits; default None lets
+    # the happy path fall through linearly to "rank".
+    next: Literal["empty"] | None = None
 
 class Ranked(BaseModel):
     top: list[str]
@@ -309,10 +399,11 @@ class Ranked(BaseModel):
 store = Store(db="research.sqlite")
 
 # Idiomatic shape: each step has an explicit `task=` instruction;
-# upstream data flows through `context=`.  The agent doesn't have to
-# guess what to do with the data it received.
+# upstream data flows through `context=`.
 plan = Plan(
     Step(searcher, name="search",
+         task="Search the web for the user's topic. "
+              "If you find no relevant items, set next='empty'; otherwise leave next=None.",
          writes="hits", output=Hits),
     Step(ranker,   name="rank",
          task="Rank these search hits by relevance; return the top 5.",
@@ -321,7 +412,7 @@ plan = Plan(
     Step(writer,   name="write",
          task="Write a 200-word brief from the ranked items below.",
          context=from_step("rank")),
-    Step(apology,  name="empty",
+    Step(apology,  name="empty",                   # ← terminal: reached only via routing
          task="Apologise that no results were found and suggest broader terms."),
     store=store, checkpoint_key="research", resume=True,
 )
