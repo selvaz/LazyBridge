@@ -477,14 +477,16 @@ class TestPlanExecution:
         assert result.ok
 
     def test_plan_with_routing(self):
+        """Routing via ``Step(routes_by="kind")`` — LLM-decided branch
+        name read off a Literal field on the structured output."""
         chosen: list[str] = []
 
         class RouteOut(BaseModel):
             result: str
-            next: Literal["branch_a", "branch_b"] = "branch_a"
+            kind: Literal["branch_a", "branch_b"] = "branch_a"
 
         async def router(task: str) -> RouteOut:
-            return RouteOut(result="go_a", next="branch_a")
+            return RouteOut(result="go_a", kind="branch_a")
 
         async def branch_a(task: str) -> str:
             chosen.append("a")
@@ -496,7 +498,7 @@ class TestPlanExecution:
 
         tools = build_tool_map([router, branch_a, branch_b])
         plan = Plan(
-            Step("router", name="router", output=RouteOut),
+            Step("router", name="router", output=RouteOut, routes_by="kind"),
             Step("branch_a", name="branch_a"),
             Step("branch_b", name="branch_b"),
         )
@@ -506,5 +508,7 @@ class TestPlanExecution:
             return await plan.run(env, tools=list(tools.values()), output_type=str, memory=None, session=None)
 
         asyncio.run(run())
-        assert "a" in chosen
-        assert "b" not in chosen
+        # Routing is a detour: branch_a runs (routed-to), then linear
+        # progression resumes from branch_a's position → branch_b.
+        # Both branches execute.
+        assert chosen == ["a", "b"]

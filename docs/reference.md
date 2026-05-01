@@ -59,7 +59,7 @@ Drives the LLM ↔ tool-call loop for a single agent invocation.
 
 Structured multi-step execution engine.
 
-### `Step(target: 'Any', task: 'Sentinel | str' = <factory>, context: 'Sentinel | str | list[Sentinel | str] | None' = None, sources: 'list[Any]' = <factory>, writes: 'str | None' = None, input: 'type' = typing.Any, output: 'type' = <class 'str'>, parallel: 'bool' = False, name: 'str | None' = None) -> None`
+### `Step(target: 'Any', task: 'Sentinel | str' = <factory>, context: 'Sentinel | str | list[Sentinel | str] | None' = None, sources: 'list[Any]' = <factory>, writes: 'str | None' = None, input: 'type' = typing.Any, output: 'type' = <class 'str'>, parallel: 'bool' = False, name: 'str | None' = None, routes: 'dict[str, Callable[[Any], bool]] | None' = None, routes_by: 'str | None' = None) -> None`
 
 A single node in a Plan.
 

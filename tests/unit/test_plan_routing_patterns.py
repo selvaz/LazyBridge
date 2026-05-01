@@ -1,16 +1,23 @@
-"""Regression tests pinning the three Plan routing patterns.
+"""Regression tests for the new explicit-routing API.
 
-The semantics — driven by ``_routing`` in ``lazybridge/engines/plan.py``
-— are:
+The routing surface is **two mutually-exclusive declarations on the
+Step itself** — visible at the call site, no model pollution:
 
-* a step routes if and only if its payload has a string ``next`` that
-  matches an existing step name;
-* once any step has routed, subsequent linear fall-through is
-  disabled — a routed-to step that has no ``next`` ends the Plan.
+* ``Step(..., routes={"target": predicate(env) -> bool, ...})``
+* ``Step(..., output=Model, routes_by="field")``
 
-The patterns documented in ``fragments/plan.md`` rely on those rules.
-This test file pins them so a future engine refactor cannot silently
-break documented examples.
+Semantics:
+
+* Routing is a **detour**.  After the routed-to step runs, linear
+  progression resumes from its declared position.  No "no fall-through"
+  mode.
+* Compile-time validation: target step names must exist; ``routes_by``
+  fields must be ``Literal[...]`` (or ``Literal[...] | None``) of step
+  names.
+* ``routes`` and ``routes_by`` are mutually exclusive.
+
+This file pins the contract so a future refactor cannot silently break
+documented examples.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import pytest
 from pydantic import BaseModel
 
 from lazybridge import Plan, Step
+from lazybridge.engines.plan import PlanCompileError
 from lazybridge.envelope import Envelope
 from lazybridge.testing import MockAgent
 
@@ -39,11 +47,11 @@ def _run(plan: Plan) -> Envelope:
 
 
 # ---------------------------------------------------------------------------
-# Pattern A — linear-only
+# Linear (no routing at all)
 # ---------------------------------------------------------------------------
 
 
-def test_pattern_a_linear_runs_every_step_in_declared_order() -> None:
+def test_linear_runs_every_step_in_declared_order() -> None:
     a = MockAgent("A", name="a")
     b = MockAgent("B", name="b")
     c = MockAgent("C", name="c")
@@ -60,166 +68,304 @@ def test_pattern_a_linear_runs_every_step_in_declared_order() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pattern B — terminal-fork via ``Optional[Literal[...]]`` default ``None``
+# routes={...}: predicate-based, decided by the framework's own logic
 # ---------------------------------------------------------------------------
 
 
-class _Hits(BaseModel):
-    items: list[str]
-    # ``None`` → linear fall-through; ``"empty"`` → route to terminal step.
-    next: Literal["empty"] | None = None
+def test_routes_predicate_branches_when_predicate_returns_truthy() -> None:
+    """``routes`` is visible at the call site.  The predicate decides."""
 
+    class Hits(BaseModel):
+        items: list[str]
 
-def test_pattern_b_happy_path_falls_through_linearly() -> None:
-    """``Hits.next=None`` → search → rank → write → fall through to empty.
-
-    NOTE: with this layout (apology last in declared order), the happy
-    path linearly progresses into ``apology`` after ``write``.  In real
-    pipelines you'd give ``write`` a ``next`` field, or rely on
-    ``write`` being the last declared step.  This test pins what
-    actually happens today so docs and code stay aligned.
-    """
-    searcher = MockAgent(_Hits(items=["a"], next=None), name="search", output=_Hits)
+    searcher = MockAgent(Hits(items=[]), name="search", output=Hits)
     ranker = MockAgent("ranked", name="rank")
     writer = MockAgent("written", name="write")
     apology = MockAgent("sorry", name="empty")
+
     plan = Plan(
-        Step(searcher, name="search", output=_Hits),
+        Step(
+            searcher,
+            name="search",
+            output=Hits,
+            routes={"empty": lambda env: not env.payload.items},
+        ),
         Step(ranker, name="rank"),
         Step(writer, name="write"),
-        Step(apology, name="empty"),
+        Step(apology, name="empty"),  # terminal: last in declared order
     )
     plan._validate({})
     _run(plan)
-    assert len(searcher.calls) == 1
-    assert len(ranker.calls) == 1
-    assert len(writer.calls) == 1
-    # Linear fall-through after ``write`` reaches ``empty``; documented
-    # in Pattern B's caveat.
-    assert len(apology.calls) == 1
-
-
-def test_pattern_b_early_out_routes_to_terminal_and_skips_intermediate() -> None:
-    """``Hits.next='empty'`` → search jumps straight to apology; rank
-    and write are never reached."""
-    searcher = MockAgent(_Hits(items=[], next="empty"), name="search", output=_Hits)
-    ranker = MockAgent("ranked", name="rank")
-    writer = MockAgent("written", name="write")
-    apology = MockAgent("sorry", name="empty")
-    plan = Plan(
-        Step(searcher, name="search", output=_Hits),
-        Step(ranker, name="rank"),
-        Step(writer, name="write"),
-        Step(apology, name="empty"),
-    )
-    plan._validate({})
-    _run(plan)
+    # Predicate matched (no items) → search routed to "empty";
+    # apology is the last declared step → Plan ends after it.
     assert len(searcher.calls) == 1
     assert len(ranker.calls) == 0
     assert len(writer.calls) == 0
     assert len(apology.calls) == 1
 
 
-# ---------------------------------------------------------------------------
-# Pattern C — always-routing (every output model declares ``next``)
-# ---------------------------------------------------------------------------
+def test_routes_predicate_falls_through_linearly_when_no_match() -> None:
+    """When no predicate fires, linear progression continues."""
 
+    class Hits(BaseModel):
+        items: list[str]
 
-class _HitsAR(BaseModel):
-    items: list[str]
-    next: Literal["rank", "empty"] = "rank"
-
-
-class _RankedAR(BaseModel):
-    top: list[str]
-    next: Literal["write"] = "write"  # explicitly chains to "write"
-
-
-class _WriteResult(BaseModel):
-    text: str
-    # No ``next`` field: after this step (was_routed=True) the Plan ends.
-
-
-def test_pattern_c_always_routing_chains_through_to_terminal() -> None:
-    """Each routing model points at the next step; the final step has
-    no ``next`` and the Plan ends there with ``apology`` never reached."""
-    searcher = MockAgent(_HitsAR(items=["a"], next="rank"), name="search", output=_HitsAR)
-    ranker = MockAgent(_RankedAR(top=["a"], next="write"), name="rank", output=_RankedAR)
-    writer = MockAgent(_WriteResult(text="draft"), name="write", output=_WriteResult)
-    apology = MockAgent("sorry", name="empty")
-    plan = Plan(
-        Step(searcher, name="search", output=_HitsAR),
-        Step(ranker, name="rank", output=_RankedAR),
-        Step(writer, name="write", output=_WriteResult),
-        Step(apology, name="empty"),
-    )
-    plan._validate({})
-    _run(plan)
-    assert len(searcher.calls) == 1
-    assert len(ranker.calls) == 1
-    assert len(writer.calls) == 1
-    # ``apology`` was reachable only via routing; once write was the
-    # routed-to terminal, the Plan ended without falling through.
-    assert len(apology.calls) == 0
-
-
-# ---------------------------------------------------------------------------
-# The trap — half-routed pipeline
-# ---------------------------------------------------------------------------
-
-
-class _HitsTrap(BaseModel):
-    items: list[str]
-    next: Literal["rank", "empty"] = "rank"  # routes
-
-
-class _RankedTrap(BaseModel):
-    top: list[str]
-    # NO `next` field — but reached via routing → Plan ends here.
-
-
-def test_half_routed_pipeline_terminates_after_first_routed_step() -> None:
-    """Pin the documented gotcha: a model with ``next`` that routes to
-    a step whose model has no ``next`` ends the Plan there.  This is
-    the failure mode the docs explicitly warn against."""
-    searcher = MockAgent(_HitsTrap(items=["a"], next="rank"), name="search", output=_HitsTrap)
-    ranker = MockAgent(_RankedTrap(top=["a"]), name="rank", output=_RankedTrap)
+    searcher = MockAgent(Hits(items=["a"]), name="search", output=Hits)
+    ranker = MockAgent("ranked", name="rank")
     writer = MockAgent("written", name="write")
     apology = MockAgent("sorry", name="empty")
+
     plan = Plan(
-        Step(searcher, name="search", output=_HitsTrap),
-        Step(ranker, name="rank", output=_RankedTrap),
+        Step(
+            searcher,
+            name="search",
+            output=Hits,
+            routes={"empty": lambda env: not env.payload.items},
+        ),
+        Step(ranker, name="rank"),
         Step(writer, name="write"),
         Step(apology, name="empty"),
     )
     plan._validate({})
     _run(plan)
+    # items=["a"] → predicate False → linear: rank, write, then empty
+    # (linear fall-through reaches empty because it's the next declared).
     assert len(searcher.calls) == 1
     assert len(ranker.calls) == 1
-    # Plan ends after rank — write and apology never reached.  This is
-    # what the "no fall-through after a route" rule says.
-    assert len(writer.calls) == 0
-    assert len(apology.calls) == 0
+    assert len(writer.calls) == 1
+    assert len(apology.calls) == 1
 
 
 # ---------------------------------------------------------------------------
-# Compile-time validation of routing literals
+# routes_by="field": LLM-decided via a Literal field on the payload
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_next_literal_value_rejected_at_construction() -> None:
-    """``next: Literal["nonexistent"]`` is caught by PlanCompiler before
-    any LLM call."""
-    from lazybridge.engines.plan import PlanCompileError
+def test_routes_by_field_branches_to_named_step() -> None:
+    """``routes_by="kind"`` reads ``env.payload.kind`` and jumps."""
 
-    class _Bad(BaseModel):
-        next: Literal["nonexistent"]
+    class Classify(BaseModel):
+        kind: Literal["urgent", "normal"] = "normal"
 
-    a = MockAgent(_Bad(next="nonexistent"), name="a", output=_Bad)
-    b = MockAgent("B", name="b")
+    classifier = MockAgent(Classify(kind="urgent"), name="classify", output=Classify)
+    urgent = MockAgent("escalated", name="urgent")
+    normal = MockAgent("queued", name="normal")
     plan = Plan(
-        Step(a, name="a", output=_Bad),
+        Step(classifier, name="classify", output=Classify, routes_by="kind"),
+        Step(urgent, name="urgent"),
+        Step(normal, name="normal"),
+    )
+    plan._validate({})
+    _run(plan)
+    assert len(classifier.calls) == 1
+    assert len(urgent.calls) == 1
+    # Detour semantics: after `urgent` (routed-to), linear progression
+    # resumes → `normal` also runs.
+    assert len(normal.calls) == 1
+
+
+def test_routes_by_optional_literal_falls_through_on_none() -> None:
+    """``routes_by`` reading ``Literal[...] | None`` with value None
+    skips routing — the model "decided not to route"."""
+
+    class Decision(BaseModel):
+        # Default None: no early-out signal.
+        target: Literal["alt"] | None = None
+
+    decider = MockAgent(Decision(target=None), name="d", output=Decision)
+    alt = MockAgent("alt-result", name="alt")
+    main = MockAgent("main-result", name="main")
+    plan = Plan(
+        Step(decider, name="d", output=Decision, routes_by="target"),
+        Step(main, name="main"),
+        Step(alt, name="alt"),
+    )
+    plan._validate({})
+    _run(plan)
+    # target=None → no routing → linear: main, alt.
+    assert len(decider.calls) == 1
+    assert len(main.calls) == 1
+    assert len(alt.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Detour semantics (the big behavioural change vs. the old `.next` rule)
+# ---------------------------------------------------------------------------
+
+
+def test_detour_semantics_resume_linear_after_routed_step() -> None:
+    """Routing is a *detour*: routing to step X then runs X, after
+    which linear progression continues from X's declared position."""
+
+    class Hits(BaseModel):
+        items: list[str]
+
+    searcher = MockAgent(Hits(items=[]), name="search", output=Hits)
+    ranker = MockAgent("ranked", name="rank")
+    detour_step = MockAgent("detoured", name="detour")
+    writer = MockAgent("written", name="write")
+
+    plan = Plan(
+        Step(
+            searcher,
+            name="search",
+            output=Hits,
+            routes={"detour": lambda env: not env.payload.items},
+        ),
+        Step(ranker, name="rank"),
+        Step(detour_step, name="detour"),
+        Step(writer, name="write"),
+    )
+    plan._validate({})
+    _run(plan)
+    # search → routes to "detour" → detour runs → linear progression
+    # resumes from detour's position → write runs.
+    # ranker was skipped because we jumped over it.
+    assert len(searcher.calls) == 1
+    assert len(ranker.calls) == 0
+    assert len(detour_step.calls) == 1
+    assert len(writer.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Compile-time validation
+# ---------------------------------------------------------------------------
+
+
+def test_routes_and_routes_by_are_mutually_exclusive() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+
+    class Out(BaseModel):
+        kind: Literal["b"] = "b"
+
+    plan = Plan(
+        Step(a, name="a", output=Out, routes={"b": lambda env: True}, routes_by="kind"),
         Step(b, name="b"),
     )
-    with pytest.raises(PlanCompileError, match="nonexistent"):
+    with pytest.raises(PlanCompileError, match="mutually exclusive"):
         plan._validate({})
+
+
+def test_routes_target_must_be_existing_step_name() -> None:
+    a = MockAgent("A", name="a")
+    plan = Plan(
+        Step(a, name="a", routes={"ghost": lambda env: True}),
+    )
+    with pytest.raises(PlanCompileError, match="ghost"):
+        plan._validate({})
+
+
+def test_routes_predicate_must_be_callable() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+    plan = Plan(
+        Step(a, name="a", routes={"b": "not callable"}),  # type: ignore[dict-item]
+        Step(b, name="b"),
+    )
+    with pytest.raises(PlanCompileError, match="not callable"):
+        plan._validate({})
+
+
+def test_routes_by_requires_pydantic_output() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+    plan = Plan(
+        Step(a, name="a", routes_by="kind"),  # output= defaults to str
+        Step(b, name="b"),
+    )
+    with pytest.raises(PlanCompileError, match="Pydantic model"):
+        plan._validate({})
+
+
+def test_routes_by_requires_field_to_exist_on_model() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+
+    class Out(BaseModel):
+        result: str
+
+    plan = Plan(
+        Step(a, name="a", output=Out, routes_by="kind"),
+        Step(b, name="b"),
+    )
+    with pytest.raises(PlanCompileError, match="no field of that name"):
+        plan._validate({})
+
+
+def test_routes_by_requires_literal_typed_field() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+
+    class Out(BaseModel):
+        kind: str  # plain str, not Literal[...]
+
+    plan = Plan(
+        Step(a, name="a", output=Out, routes_by="kind"),
+        Step(b, name="b"),
+    )
+    with pytest.raises(PlanCompileError, match="Literal"):
+        plan._validate({})
+
+
+def test_routes_by_literal_values_must_be_valid_step_names() -> None:
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+
+    class Out(BaseModel):
+        kind: Literal["b", "ghost"] = "b"
+
+    plan = Plan(
+        Step(a, name="a", output=Out, routes_by="kind"),
+        Step(b, name="b"),
+    )
+    with pytest.raises(PlanCompileError, match="ghost"):
+        plan._validate({})
+
+
+def test_routes_by_optional_literal_is_accepted() -> None:
+    """``Literal[...] | None`` is a legal annotation for routes_by."""
+    a = MockAgent("A", name="a")
+    b = MockAgent("B", name="b")
+
+    class Out(BaseModel):
+        kind: Literal["b"] | None = None
+
+    Plan(
+        Step(a, name="a", output=Out, routes_by="kind"),
+        Step(b, name="b"),
+    )._validate({})
+
+
+# ---------------------------------------------------------------------------
+# Loops via routes (self-correction pattern) — bounded by max_iterations
+# ---------------------------------------------------------------------------
+
+
+def test_routes_can_loop_back_to_an_earlier_step() -> None:
+    """A predicate that sometimes routes back to an earlier step
+    creates a loop; the iteration cap stops it."""
+    counter = {"n": 0}
+
+    def review_response(env: Envelope) -> str:
+        counter["n"] += 1
+        return f"review-{counter['n']}"
+
+    writer = MockAgent("draft", name="write")
+    reviewer = MockAgent(review_response, name="review")
+
+    plan = Plan(
+        Step(writer, name="write"),
+        Step(
+            reviewer,
+            name="review",
+            # Loop until reviewer has been called 3 times.
+            routes={"write": lambda env: counter["n"] < 3},
+        ),
+        max_iterations=20,
+    )
+    plan._validate({})
+    _run(plan)
+    # Loop ran writer→review three times then linear-fall-through ended.
+    assert len(writer.calls) == 3
+    assert len(reviewer.calls) == 3

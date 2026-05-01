@@ -5,11 +5,11 @@
 conditionally route to each other, and the whole thing resumes from the failing step after a crash.
 
 !!! note "Two orthogonal features in one recipe"
-    This recipe combines **routing** (`next: Literal[...]` on a Pydantic
-    output, decides which step runs next) and **crash-resume** (`store=`
-    + `checkpoint_key=` + `resume=True`, decides what survives a process
-    restart).  They are independent — see the
-    [Plan guide](../guides/plan.md#two-control-mechanisms-that-are-easy-to-confuse)
+    This recipe combines **routing** (declared on the `Step` via
+    `routes={...}` predicates or `routes_by="field"`) with
+    **crash-resume** (`store=` + `checkpoint_key=` + `resume=True`,
+    decides what survives a process restart).  They are independent
+    — see the [Plan guide](../guides/plan.md#routing-choose-the-path-explicitly)
     for each on its own.
 
 ## The pattern
@@ -17,14 +17,11 @@ conditionally route to each other, and the whole thing resumes from the failing 
 ```python
 from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 from pydantic import BaseModel
-from typing import Literal
 
 # --- Declare output types for each step that needs them ---
 
-# "next" field → Plan routes to the matching step name after this step completes.
 class SearchResult(BaseModel):
     items: list[str]
-    next: Literal["analyse", "no_results"] = "analyse"
 
 class Analysis(BaseModel):
     summary: str
@@ -46,7 +43,11 @@ store = Store(db="pipeline.sqlite")
 plan = Plan(
     Step(searcher, name="search",
          writes="results",
-         output=SearchResult),
+         output=SearchResult,
+         # Routing is declared on the Step — no need to read SearchResult
+         # to know what the step does.  The predicate gets the FULL
+         # Envelope; .payload is the typed SearchResult.
+         routes={"no_results": lambda env: not env.payload.items}),
     # Idiomatic shape: an explicit ``task=`` instruction; upstream data
     # flows through ``context=``.  The agent doesn't have to guess what
     # to do with the envelope it received.
@@ -57,7 +58,7 @@ plan = Plan(
     Step(writer,   name="write",
          task="Write a 250-word brief from the analyser's findings; cite items.",
          context=from_step("analyse")),
-    Step(apology,  name="no_results",
+    Step(apology,  name="no_results",                    # ← terminal: last in declared order
          task="Apologise that no results were found and suggest broader queries."),
     store=store,
     checkpoint_key="weekly-brief",

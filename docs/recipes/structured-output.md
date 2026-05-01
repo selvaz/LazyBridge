@@ -66,22 +66,36 @@ else:
     print(f"failed ({env.error.type}): {env.error.message}")
 ```
 
-## Routing via `next` field
+## Routing on a structured-output step
 
-Add a `next: Literal[...]` field to your model and `Plan` uses it to route to the
-matching step — no extra wiring needed:
+Routing is **declared on the `Step`**, not hidden on the output
+model.  Two forms — pick the one that fits who decides:
 
 ```python
 from pydantic import BaseModel
 from typing import Literal
+from lazybridge import Plan, Step
 
 class SearchResult(BaseModel):
     items: list[str]
-    next: Literal["process", "no_results"] = "process"
-    # Plan will route to the "process" or "no_results" step based on this value
+
+# Form A — your code decides via a predicate.
+Step(searcher, name="search", output=SearchResult,
+     routes={"no_results": lambda env: not env.payload.items})
+
+# Form B — the LLM decides via a Literal field.
+class SearchDecision(BaseModel):
+    items: list[str]
+    branch: Literal["process", "no_results"] | None = None
+
+Step(searcher, name="search", output=SearchDecision,
+     routes_by="branch")
 ```
 
-See [Plan with resume](plan-with-resume.md) for a full routing example.
+Both are visible at the `Step(...)` line — no need to read the
+model to know whether the step branches.
+
+See [Plan with resume](plan-with-resume.md) for a full pipeline.
 
 ## Pitfalls
 

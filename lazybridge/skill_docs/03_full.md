@@ -24,9 +24,12 @@ Step(
     sources: list = (),                                 # live-view objects with .text()
     writes: str | None = None,                         # Store key under which payload is saved
     input: type = Any,
-    output: type = str,                                 # Pydantic triggers structured output + routing
+    output: type = str,
     parallel: bool = False,
     name: str | None = None,
+    # ── Routing — exactly one (or neither): ───────────────────────────
+    routes: dict[str, Callable[[Envelope], bool]] | None = None,
+    routes_by: str | None = None,
 )
 
 # Sentinels — see the dedicated guide for full semantics.
@@ -52,16 +55,17 @@ Usage: Agent(engine=Plan(Step(a), Step(b)))
 - Step names are unique. ``PlanCompileError`` fires at Agent construction
   on duplicate names, dangling ``from_step`` / ``from_parallel`` /
   ``from_parallel_all`` references, forward references, mid-band
-  ``from_parallel_all`` start, or unknown ``next`` Literal values.
-- ``output=SomeModel`` activates structured output at that step. If the
-  model has a ``next: Literal["a", "b", ...]`` field, the plan routes to
-  the matching step on completion; otherwise execution falls through to
-  the next declared step.
-- ``parallel=True`` marks a branch in a concurrent band. The engine
+  ``from_parallel_all`` start, unknown ``routes=`` targets, or
+  malformed ``routes_by=`` fields.
+- ``output=SomeModel`` is **only** for typing the step's payload.  It
+  does NOT control routing — a `next` field on the model is just a
+  regular field.  Routing is declared **on the Step**, see below.
+- ``parallel=True`` marks a branch in a concurrent band.  The engine
   bundles consecutive ``parallel=True`` steps and dispatches them via
-  ``asyncio.gather``. **Atomicity:** if any branch errors, no
+  ``asyncio.gather``.  **Atomicity:** if any branch errors, no
   ``writes`` from the band are applied — a future ``resume=True`` re-runs
-  the whole band cleanly.
+  the whole band cleanly.  Routing primitives (`routes` / `routes_by`)
+  are ignored on parallel branches.
 - ``writes="key"`` stores the step's payload into ``store[key]``.
   Required for checkpoint data and for downstream agents reading via
   ``sources=[store]``. Plan writes go through the same store as
@@ -91,43 +95,32 @@ self-contained shape; combine them as needed in real pipelines.
 
 ### 1. Linear typed pipeline with terminal-fork routing
 
-The everyday shape: search → rank → write, with an **early-out** to
-``apology`` when the searcher returns nothing.  This is **Pattern B**
-from the routing-patterns subsection above:
-
-* ``Hits.next`` is ``Optional[Literal["empty"]]`` with default
-  ``None`` — set to ``"empty"`` only on the early-out, ``None`` on the
-  happy path.
-* ``None`` makes the Plan fall through linearly (search → rank →
-  write).
-* ``"empty"`` routes to the terminal ``apology`` step, which has no
-  ``next`` and ends the run.
-* ``apology`` is the **last** declared step so linear fall-through
-  never reaches it.
+The everyday shape: search → rank → write, with an early-out to
+``apology`` when the searcher returns nothing.  ``routes=`` on the
+search step makes the branch explicit at the call site; ``apology``
+is last in declared order so linear fall-through never reaches it.
 
 ```python
-from typing import Literal
 from pydantic import BaseModel
 from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
 
 class Hits(BaseModel):
     items: list[str]
-    # Set to "empty" only when there are no hits; default None lets
-    # the happy path fall through linearly to "rank".
-    next: Literal["empty"] | None = None
 
 class Ranked(BaseModel):
     top: list[str]
 
 store = Store(db="research.sqlite")
 
-# Idiomatic shape: each step has an explicit `task=` instruction;
-# upstream data flows through `context=`.
 plan = Plan(
     Step(searcher, name="search",
-         task="Search the web for the user's topic. "
-              "If you find no relevant items, set next='empty'; otherwise leave next=None.",
-         writes="hits", output=Hits),
+         task="Search the web for the user's topic.",
+         writes="hits", output=Hits,
+         # The branch table is explicit at the call site.
+         # The predicate gets the FULL Envelope; .payload is typed.
+         routes={
+             "empty": lambda env: not env.payload.items,
+         }),
     Step(ranker,   name="rank",
          task="Rank these search hits by relevance; return the top 5.",
          context=from_prev,
@@ -135,18 +128,98 @@ plan = Plan(
     Step(writer,   name="write",
          task="Write a 200-word brief from the ranked items below.",
          context=from_step("rank")),
-    Step(apology,  name="empty",                   # ← terminal: reached only via routing
+    Step(apology,  name="empty",                    # ← terminal: last in order
          task="Apologise that no results were found and suggest broader terms."),
     store=store, checkpoint_key="research", resume=True,
 )
 print(Agent.from_engine(plan)("AI trends April 2026").text())
 ```
 
-### 2. Fan-out + fan-in with explicit aggregation
+### 2. LLM-decided routing via a Literal field
+
+When the LLM should pick the branch — e.g. classification — use
+``routes_by="<field>"``.  The output model declares the legal values
+as a ``Literal[...]``; the compiler checks they're real step names.
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class Triage(BaseModel):
+    summary: str
+    severity: Literal["urgent", "normal", "spam"] | None = None
+
+plan = Plan(
+    Step(classifier, name="classify",
+         task="Classify the incoming ticket. Set severity to "
+              "'urgent' for outages, 'spam' for marketing, otherwise 'normal'.",
+         output=Triage,
+         routes_by="severity"),    # reads env.payload.severity
+    Step(escalator,  name="urgent",
+         task="Page the on-call team and open a P0."),
+    Step(triager,    name="normal",
+         task="Add to the support backlog with the summary."),
+    Step(closer,     name="spam",  # last in order → terminal
+         task="Close the ticket as spam."),
+)
+```
+
+If the LLM sets ``severity=None`` (or omits it), no routing happens
+and linear progression continues — useful when "I'm not sure" should
+fall through to a default branch.
+
+### 3. Self-correction loop
+
+A reviewer step routes back to the writer when the draft fails
+quality checks.  ``max_iterations`` is the safety net.  Feedback is
+threaded back to the writer via a shared `Store` (the reviewer
+writes its verdict, the writer reads it through `sources=[store]`)
+because Plan sentinels can't reference forward steps.
+
+```python
+from pydantic import BaseModel
+from lazybridge import Plan, Step, Store, from_start, from_prev, from_step
+
+class Verdict(BaseModel):
+    feedback: str
+    approved: bool
+
+store = Store()      # in-memory; the reviewer's writes flow live to writer's sources
+
+plan = Plan(
+    Step(writer,    name="write",
+         task="Draft a 200-word answer.  If a 'verdict' is in the store, "
+              "rewrite the previous draft addressing the feedback.",
+         context=from_start,
+         sources=[store],                      # reads any prior reviewer verdict live
+         writes="draft"),
+    Step(reviewer,  name="review",
+         task="Score the draft for accuracy, tone, length.  "
+              "Set approved=True only if all three pass.",
+         context=from_prev,
+         output=Verdict,
+         writes="verdict",                     # writer reads this via sources= next loop
+         routes={
+             # Loop back to the writer when the reviewer rejected.
+             "write": lambda env: not env.payload.approved,
+         }),
+    Step(publisher, name="publish",
+         task="Final-format and publish the approved draft.",
+         context=from_step("write")),
+    store=store,
+    max_iterations=8,                          # cap the loop
+)
+```
+
+When ``approved=True`` the predicate is False → linear → publish.
+When ``approved=False`` the predicate is True → route back to write
+→ writer sees the feedback through `sources=[store]` and re-drafts.
+
+### 4. Fan-out + fan-in with explicit aggregation
 
 Three independent searchers run concurrently; the join step reads
-ALL of them via `from_parallel_all`, which renders a labelled-text
-join `"[search_a]\n<text>\n\n[search_b]\n<text>..."`.
+ALL of them via `from_parallel_all`.  Routing primitives are not
+involved — parallel bands have their own control flow.
 
 ```python
 from lazybridge import Plan, Step, Store, from_parallel_all
@@ -156,9 +229,6 @@ plan = Plan(
     Step(openai_search,    name="search_o", parallel=True, writes="findings_o"),
     Step(google_search,    name="search_g", parallel=True, writes="findings_g"),
 
-    # `from_parallel_all("search_a")` aggregates the entire parallel band
-    # starting at search_a.  The synthesiser receives all three branch
-    # outputs in declared order, ready for cross-source synthesis.
     Step(synthesiser, name="synth",
          task="Compare the three search results; flag agreement and disagreement.",
          context=from_parallel_all("search_a"),
@@ -167,20 +237,13 @@ plan = Plan(
 )
 ```
 
-### 3. Map-reduce — N items processed in parallel, then summarised
-
-Same pattern as fan-out, but the parallel band is *generated* from a
-list — useful when the number of branches is data-driven (one per
-ticker, one per region, one per document).
+### 5. Map-reduce — N items processed in parallel, then summarised
 
 ```python
 def make_pipeline(items: list[str]) -> Plan:
-    """Build a Plan that processes each item concurrently and then
-    summarises the lot.  Parallel-band atomicity guarantees that a
-    crashed branch leaves the band re-runnable on resume."""
     branches = [
         Step(item_processor, name=f"proc_{i}", parallel=True,
-             task=f"Run end-of-day analysis on {item}.",  # literal, per-branch
+             task=f"Run end-of-day analysis on {item}.",
              writes=f"out_{i}",
              output=ItemResult)
         for i, item in enumerate(items)
@@ -188,7 +251,7 @@ def make_pipeline(items: list[str]) -> Plan:
     return Plan(
         *branches,
         Step(summariser, name="summary",
-             task="Summarise the per-ticker analyses into a single bulleted report.",
+             task="Summarise the per-ticker analyses into a bulleted report.",
              context=from_parallel_all(branches[0].name),
              output=Report),
     )
@@ -197,25 +260,19 @@ agent = Agent.from_engine(make_pipeline(["AAPL", "GOOG", "MSFT"]))
 agent("end-of-day market scan")
 ```
 
-### 4. Crash-resume after a failed step (**checkpoint only, no routing**)
+### 6. Crash-resume after a failed step (no routing)
 
-Resume reads the persisted checkpoint and restarts at the failing
-step.  No re-running of completed steps; their `writes` are already
-in the Store.  This pattern uses **only crash-resume** — no `next`
-field anywhere, every step runs in declared order; compare with
-Pattern 6 below for routing-only.
+Pure crash-resume — every step runs in declared order; ``resume=True``
+picks up at the failed step.
 
 ```python
 class ValidationReport(BaseModel):
-    """Plain typed output — NO ``next`` field, so no routing.
-    The pipeline just records this payload via ``writes="verdict"``."""
     rejected_rows: list[int]
     accepted_rows: int
 
 store = Store(db="pipeline.sqlite")
 plan = Plan(
-    Step(extract,   name="extract",
-         writes="raw"),
+    Step(extract,   name="extract",   writes="raw"),
     Step(transform, name="transform",
          task="Transform raw records to the canonical schema; drop nulls.",
          context=from_prev,
@@ -224,155 +281,48 @@ plan = Plan(
          task="Verify business rules; flag rows that fail.",
          context=from_prev,
          writes="verdict",
-         output=ValidationReport),                # typed payload, NO routing
+         output=ValidationReport),
     Step(load,      name="load",
          task="Load the cleaned records into the warehouse.",
          context=from_step("transform")),
     store=store,
     checkpoint_key="etl-2026-04-30",
-    resume=True,                                  # picks up at the failed step
+    resume=True,
 )
-
-# Run 1 — `transform` crashes.  Store now holds {raw: ...} and a
-# `status="failed", next_step="transform"` checkpoint.
-# Run 2 — same key, `resume=True`.  `extract` is skipped (already
-# persisted), `transform` retries; the rest of the pipeline runs.
 Agent.from_engine(plan)("today's batch")
 ```
 
-Note that ``ValidationReport`` is a plain typed output: it has no
-``next`` field, so this pipeline has **no routing** — every step runs
-in declared order.  Crash-resume here is purely about durability
-(``store=`` + ``checkpoint_key=`` + ``resume=True``).  Compare with
-Pattern 6 below where ``Verdict`` *does* have a ``next`` field and
-that's where routing kicks in.
-
-### 5. Concurrent fan-out runs with `on_concurrent="fork"`
+### 7. Concurrent fan-out runs with `on_concurrent="fork"`
 
 Many runs of the same pipeline (one per ticker / seed / variant) on
 the same `Store` without colliding — each run claims its own
-isolated keyspace.  `resume` is intentionally not allowed here
-because there is no shared checkpoint to resume.
+isolated keyspace.
 
 ```python
 from concurrent.futures import ThreadPoolExecutor
 
 store = Store(db="backtest.sqlite")
 plan = Plan(
-    Step(load_data,  name="load",
-         writes="prices"),
+    Step(load_data,    name="load",  writes="prices"),
     Step(run_strategy, name="run",
          task="Execute the strategy over the price series; emit a trade log.",
          context=from_prev,
          writes="trades"),
-    Step(score,      name="score",
+    Step(score,        name="score",
          task="Compute Sharpe, max-drawdown, and total return.",
          context=from_prev,
          output=Metrics),
     store=store,
     checkpoint_key="backtest",
-    on_concurrent="fork",                    # f"backtest:{run_uid}" per run
+    on_concurrent="fork",
 )
 
 agent = Agent.from_engine(plan)
 with ThreadPoolExecutor(max_workers=8) as pool:
     list(pool.map(lambda t: agent(t), ["AAPL", "GOOG", "MSFT", "AMZN"]))
-# Each run has an isolated checkpoint; their writes don't trample.
-```
-
-### 6. Self-correction loop via **routing**
-
-This pattern is the opposite of Pattern 4: **routing only, no
-checkpoints**.  A reviewer step has a Pydantic output with a `next`
-field — Plan reads `payload.next` after the step and jumps to the
-matching step name.  The writer-review-publish cycle loops until the
-reviewer returns `next="publish"`; `max_iterations` is the safety
-net.
-
-```python
-from typing import Literal
-from pydantic import BaseModel
-
-class Verdict(BaseModel):
-    """Routing model — the ``next`` field is what makes the Plan
-    branch.  Without ``next: Literal[...]`` this would be a plain
-    typed output (like ``ValidationReport`` in Pattern 4) and there
-    would be no routing."""
-    feedback: str
-    next: Literal["write", "publish"]            # ← THIS field activates routing
-
-plan = Plan(
-    Step(writer,    name="write",
-         task="Draft a 200-word answer to the user's question.",
-         context=from_start,                      # writer always sees the original task
-         writes="draft"),
-    Step(reviewer,  name="review",
-         task="Score the draft for accuracy, tone, and length. "
-              "Set next='publish' if the draft passes; otherwise "
-              "set next='write' and provide actionable feedback.",
-         context=from_prev,
-         output=Verdict),                         # ← routing model
-    Step(publisher, name="publish",
-         task="Final-format and publish the approved draft.",
-         context=from_step("write")),
-    max_iterations=8,                             # cap the loop
-)
-```
-
-What the Plan does between steps:
-
-* After `write` — `Verdict` not produced yet; falls through to
-  `review` (the next declared step).
-* After `review` — Plan reads `payload.next`.
-  * `next == "write"` → loop back, writer runs again with the
-    reviewer's feedback in its context (because of `context=from_start`,
-    the writer still sees the original task; you'd add
-    `from_step("review")` to the writer's context list to feed the
-    feedback in).
-  * `next == "publish"` → jump to publisher.
-* After `publish` — no `.next`, no further declared step → Plan ends.
-
-This Plan has **no `store=` / `checkpoint_key=`**, so it gets no
-crash-resume — restart and the loop starts from scratch.  Adding
-those two parameters would make the loop survive process restarts
-without changing the routing behaviour at all.
-
-### 7. Mixed step targets — agents, tools, callables
-
-`Step.target` is uniform: anything that can be a tool can be a step.
-A single Plan can mix LLM agents, plain Python callables, and named
-tools registered on the surrounding agent.
-
-```python
-def normalise(text: str) -> str:
-    """Pure Python — no LLM, instant."""
-    return text.strip().lower()
-
-plan = Plan(
-    # Agent: LLM step — explicit instruction, data via context.
-    Step(researcher, name="search"),
-    # Plain callable: receives the previous step's text as its first
-    # arg.  ``task=from_prev`` is the natural shape here — the function
-    # signature IS the contract; there is no system prompt to instruct.
-    Step(normalise,  name="clean", task=from_prev),
-    # Tool name target: resolved on the wrapping Agent's tool set.
-    # Same shape as a plain callable — task is the first argument value.
-    Step("score",    name="score", task=from_prev),
-    # Agent again: explicit instruction + named context source.
-    Step(writer,     name="write",
-         task="Write a 150-word brief; cite normalised, scored items.",
-         context=from_step("clean")),
-)
-
-Agent.from_engine(plan, tools=[score_tool])("…")
 ```
 
 ### 8. Multi-source synthesis with `context=[...]`
-
-Pull data from N upstream steps without inserting a combiner.  Each
-list item resolves independently and the parts join with blank-line
-separators in the step's ``Envelope.context``.  Mix sentinels with
-literal strings to inject fixed boilerplate alongside upstream data.
 
 ```python
 from lazybridge import Plan, Step, from_step, from_prev
@@ -382,9 +332,7 @@ plan = Plan(
     Step(policy_loader, name="policy",   task="Load the 2026 acceptable-use policy."),
     Step(competitor,    name="bench",    task="Find three relevant prior posts."),
 
-    # Synthesiser pulls from three different upstream steps PLUS a
-    # literal string that injects compliance boilerplate.  No
-    # combiner step needed.
+    # Pulls from three upstream steps PLUS a literal style note.
     Step(synthesiser, name="synth",
          task="Draft a 300-word brief; cite each source explicitly.",
          context=[
@@ -395,47 +343,52 @@ plan = Plan(
          ],
          output=Brief),
 
-    # A pure-passthrough downstream step still uses from_prev — fine,
-    # because synthesiser already produced the final draft.
     Step(publisher, name="publish", task=from_prev),
 )
 ```
 
-Why prefer this over an intermediate combiner step:
+### 9. Mixed step targets — agents, tools, callables
 
-* **Fewer LLM calls** — no extra round-trip just to glue context.
-* **Compile-time validated** — every list item is type-checked and
-  forward-ref-checked at ``Plan(...)`` construction.
-* **Reads better** — the synthesiser declares its inputs explicitly
-  next to its instruction; readers don't have to trace back through
-  a combiner step.
+`Step.target` is uniform: anything that can be a tool can be a step.
+
+```python
+def normalise(text: str) -> str:
+    """Pure Python — no LLM, instant."""
+    return text.strip().lower()
+
+plan = Plan(
+    Step(researcher, name="search"),                  # Agent
+    Step(normalise,  name="clean", task=from_prev),   # plain callable: task=sentinel is natural
+    Step("score",    name="score", task=from_prev),   # tool name (resolved on the wrapping Agent)
+    Step(writer,     name="write",
+         task="Write a 150-word brief.",
+         context=from_step("clean")),
+)
+
+Agent.from_engine(plan, tools=[score_tool])("…")
+```
 
 **pitfalls**
 
-- Forgetting ``output=Model`` on a step and then expecting the next
-  step to read ``.field`` — the next step sees a plain string. Declare
-  types where you need them; the example above flags this everywhere
-  it matters.
+- Forgetting ``output=Model`` on a step where you want typed payload
+  hand-off — the next step sees a plain string.  Declare ``output=``
+  where you need types; ``routes_by`` requires it for compile-time
+  validation.
 - Cyclic step references or unknown step names → ``PlanCompileError``
-  at construction. A ``next: Literal[...]`` Literal value that doesn't
-  match any step name is also caught at compile time.
+  at construction.  This includes ``routes={"ghost": ...}`` and
+  ``routes_by`` Literal values that don't match any step name.
 - Routing CYCLES (``A → B → A``) are NOT a compile error (they may be
-  intentional, e.g. self-correction loops). They surface at runtime
-  as ``MaxIterationsExceeded`` once ``max_iterations`` fires. Pick a
-  cap that bounds your worst-case loop count.
+  intentional, e.g. self-correction loops).  They surface at runtime
+  as ``MaxIterationsExceeded`` once ``max_iterations`` fires.
 - ``resume=True`` without ``store=`` is a silent no-op (no checkpoint
   to read or write). Pass both, and pick a ``checkpoint_key``.
 - ``on_concurrent="fork"`` + ``resume=True`` is a configuration error
   (raises at construction). Fork mode gives each run its own key, so
-  there's no shared checkpoint to resume from. If you need both
-  resume and fan-out, use ``on_concurrent="fail"`` with distinct
-  per-run keys.
+  there's no shared checkpoint to resume from.
 - ``from_parallel_all("X")`` requires ``X`` to be the FIRST member of
-  its parallel band — the engine walks forward from there. The
-  compiler rejects mid-band starts.
+  its parallel band — the engine walks forward from there.
 - A step that fails persists a ``status="failed"`` checkpoint pointing
-  back at itself.  Subsequent ``resume=True`` runs retry that step,
-  with all earlier ``writes`` still readable.
+  back at itself.  Subsequent ``resume=True`` runs retry that step.
 - Plan writes go through the *same* store as application writes —
   namespace your keys (e.g. prefix with the pipeline name) so a
   step's ``writes="results"`` doesn't collide with an unrelated

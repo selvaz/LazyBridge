@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin, get_type_hints
 
@@ -52,6 +52,32 @@ class Step:
         output:  Expected output payload type (triggers structured output).
         parallel: True if this step runs concurrently with siblings.
         name:    Override for display / from_step() lookups.
+
+        routes:  **Predicate-based routing**.  Mapping ``{step_name:
+                 predicate(envelope) -> bool}``.  After this step runs,
+                 predicates are evaluated in declared order; the first
+                 one that returns truthy makes the Plan jump to the
+                 corresponding step.  If none match (or ``routes`` is
+                 ``None``), execution falls through linearly to the
+                 next declared step.  Mutually exclusive with
+                 ``routes_by``.
+        routes_by: **LLM-decided routing via a named field on the
+                 step's structured output**.  Pass the attribute name
+                 (e.g. ``"kind"``) — Plan reads ``env.payload.<name>``
+                 and, if it's a string matching an existing step name,
+                 jumps there.  The output model must declare that
+                 field as ``Literal["a", "b", ...]`` (or
+                 ``Literal[...] | None``); compile-time validation
+                 rejects values that don't match a step name.
+                 Mutually exclusive with ``routes``.
+
+    Routing is a **detour**.  After the routed-to step runs, linear
+    progression resumes from its position in the declared order — no
+    "no fall-through after routing" trap.  To make a step terminal,
+    place it at the end of the declared step list (linear progression
+    past the last step ends the Plan).  Loops are simply routes back
+    to an earlier step; ``Plan(max_iterations=...)`` is the safety
+    net.
     """
 
     target: Any
@@ -63,6 +89,10 @@ class Step:
     output: type = str
     parallel: bool = False
     name: str | None = None
+    # Routing — exactly one (or neither) of these may be set.  See
+    # the Step docstring for semantics.
+    routes: dict[str, Callable[[Any], bool]] | None = None
+    routes_by: str | None = None
 
     def __post_init__(self) -> None:
         if self.name is None:
@@ -116,6 +146,30 @@ class ConcurrentPlanRunError(RuntimeError):
 
 class PlanCompileError(Exception):
     pass
+
+
+def _extract_literal_string_values(annotation: Any) -> list[str]:
+    """Return the list of string literals from a ``Literal[...]`` or
+    ``Literal[...] | None`` / ``Optional[Literal[...]]`` annotation.
+
+    Returns an empty list when the annotation isn't a Literal of
+    strings (so the caller can flag a malformed ``routes_by`` field).
+    """
+    # Direct Literal["a", "b"]
+    args = get_args(annotation)
+    if not args:
+        return []
+    # Pure Literal[...] — args are the values (or types).
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return [a for a in args if isinstance(a, str)]
+    # Union: walk every arm and recurse; collect string literals from
+    # the Literal arm(s).  Handles ``Literal["a"] | None`` and the
+    # equivalent ``Optional[Literal["a"]]``.
+    found: list[str] = []
+    for arm in args:
+        found.extend(_extract_literal_string_values(arm))
+    return found
 
 
 class PlanCompiler:
@@ -262,18 +316,84 @@ class PlanCompiler:
                             f"Step {step.name!r}: input={step.input.__name__!r} but previous step "
                             f"{prev.name!r} produces output={prev.output if isinstance(prev.output, str) else prev.output.__name__!r}."
                         )
-            # out.next fields must reference existing steps
-            if step.output is not str and isinstance(step.output, type):
+            # ── Routing validation ──────────────────────────────────────
+            # routes= and routes_by= are mutually exclusive.
+            if step.routes is not None and step.routes_by is not None:
+                raise PlanCompileError(
+                    f"Step {step.name!r}: routes= and routes_by= are mutually "
+                    f"exclusive.  Use predicate-based routing (routes={{...}}) "
+                    f"OR field-driven routing (routes_by='attr'), not both."
+                )
+
+            # routes={"step_name": predicate} — every key must be a step
+            # name; every value must be callable.  Self-loops and
+            # backward routes are allowed (for self-correction loops);
+            # the only structural requirement is that the target exists.
+            if step.routes is not None:
+                if not isinstance(step.routes, dict):
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes= must be a dict, got {type(step.routes).__name__}."
+                    )
+                for target_name, predicate in step.routes.items():
+                    if not isinstance(target_name, str):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes= keys must be step "
+                            f"names (str), got {type(target_name).__name__}."
+                        )
+                    if target_name not in pos:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes={{{target_name!r}: ...}} "
+                            f"references unknown step.  Known steps: "
+                            f"{sorted(pos)}."
+                        )
+                    if not callable(predicate):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes[{target_name!r}] is "
+                            f"not callable; expected a function "
+                            f"(envelope) -> bool."
+                        )
+
+            # routes_by="field" — the step's output model must declare
+            # ``field`` as Literal[...] (or Literal[...] | None) of step
+            # names.  Validates target names at compile time.
+            if step.routes_by is not None:
+                if not isinstance(step.routes_by, str) or not step.routes_by:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes_by= must be a non-empty string naming a field on the output model."
+                    )
+                if step.output is str or not isinstance(step.output, type):
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes_by={step.routes_by!r} "
+                        f"requires a Pydantic model as output= (got "
+                        f"{step.output!r})."
+                    )
                 hints = get_type_hints(step.output) if hasattr(step.output, "__annotations__") else {}
-                next_hint = hints.get("next")
-                if next_hint is not None:
-                    literal_args = get_args(next_hint)
-                    for arg in literal_args:
-                        if isinstance(arg, str) and arg not in pos:
-                            raise PlanCompileError(
-                                f"Step {step.name!r}: output.next Literal contains {arg!r} "
-                                f"which is not a known step name."
-                            )
+                if step.routes_by not in hints:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes_by={step.routes_by!r} "
+                        f"but {step.output.__name__!r} has no field of "
+                        f"that name.  Declared fields: {sorted(hints)}."
+                    )
+                # Walk the type to find the Literal arms.  Accept
+                # ``Literal[...]`` and ``Optional[Literal[...]]`` /
+                # ``Literal[...] | None``.
+                literal_values = _extract_literal_string_values(hints[step.routes_by])
+                if not literal_values:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes_by={step.routes_by!r} "
+                        f"requires the field to be typed "
+                        f"``Literal['a', 'b', ...]`` (optionally union'd "
+                        f"with None).  Got annotation "
+                        f"{hints[step.routes_by]!r}."
+                    )
+                for value in literal_values:
+                    if value not in pos:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes_by={step.routes_by!r} "
+                            f"includes Literal value {value!r} which is not "
+                            f"a known step name.  Known steps: "
+                            f"{sorted(pos)}."
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +404,10 @@ class PlanCompiler:
 class Plan:
     """Structured multi-step execution engine.
 
-    Steps run sequentially by default. Routing via ``output.next: Literal[...]``
-    field in Pydantic output models. Parallel steps via step.parallel=True.
+    Steps run sequentially by default.  Routing is **explicit** at the
+    Step level via ``Step(routes={...})`` (predicate map) or
+    ``Step(routes_by="field")`` (LLM-decided via a Literal field on
+    the structured output).  Parallel branches via ``step.parallel=True``.
 
     PlanCompiler runs at Agent construction time; errors surface before any LLM call.
     """
@@ -655,7 +777,6 @@ class Plan:
         prev_env = env
         start_env = env
         iterations = 0
-        was_routed = False  # True when the current step was reached via out.next, not linear order
         effective_store = store or self.store
 
         all_step_names = [s.name for s in self.steps]
@@ -675,8 +796,9 @@ class Plan:
             # sees the SAME ``prev_env`` / ``history`` / ``kv`` snapshot —
             # a branch cannot observe its siblings' effects.  State updates
             # apply sequentially after the gather so ``writes`` are
-            # deterministic.  Routing (``out.next``) is ignored on parallel
-            # branches — control flow after the group falls through to the
+            # deterministic.  Routing (``routes`` / ``routes_by``) is
+            # ignored on parallel branches — control flow after the group
+            # falls through to the
             # next declared step in linear order (the conventional "join").
             if step.parallel:
                 try:
@@ -759,10 +881,12 @@ class Plan:
                     completed.append(step_name)
                     last_ok = r
 
-                # Advance past the whole parallel group.
+                # Advance past the whole parallel group.  Routing
+                # primitives (``routes`` / ``routes_by``) are NOT
+                # consulted on parallel branches — control flow after
+                # a band always falls through linearly.
                 current_name = all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
                 prev_env = last_ok or prev_env
-                was_routed = False  # routing does not apply to parallel groups
                 last_snap = self._save_checkpoint(
                     effective_key=effective_key,
                     last_snapshot=last_snap,
@@ -812,10 +936,8 @@ class Plan:
             completed.append(step.name or "")
             prev_env = result_env
 
-            # Determine next step via out.next or linear progression
-            next_name, next_was_routed = self._routing(result_env, step, step_map, was_routed=was_routed)
-            current_name = next_name
-            was_routed = next_was_routed
+            # Determine next step via routes / routes_by or linear progression.
+            current_name = self._routing(result_env, step, step_map)
 
             # Save checkpoint after each step so a crash mid-plan can resume
             last_snap = self._save_checkpoint(
@@ -839,8 +961,8 @@ class Plan:
                 message=(
                     f"Plan exceeded max_iterations={self.max_iterations} "
                     f"while routing; last step was {current_name!r}.  "
-                    f"Suspect a routing cycle (out.next pointing at a "
-                    f"prior step) or an under-sized max_iterations."
+                    f"Suspect a routing cycle (routes / routes_by pointing "
+                    f"at an earlier step) or an under-sized max_iterations."
                 ),
                 retryable=False,
             )
@@ -1131,35 +1253,54 @@ class Plan:
         result_env: Envelope,
         step: Step,
         step_map: dict[str, Step],
-        *,
-        was_routed: bool = False,
-    ) -> tuple[str | None, bool]:
-        """Determine next step. Returns (next_step_name, is_routed).
+    ) -> str | None:
+        """Determine the next step's name, or ``None`` to end the Plan.
 
-        If the current step's output has a ``next`` field, follow it (explicit routing).
-        If this step was itself reached via routing (was_routed=True), do NOT apply
-        linear progression — only follow explicit out.next. This prevents sibling
-        branches from running after one branch completes.
+        Routing is **explicit and visible at the Step level**: ``routes=``
+        (predicate map) or ``routes_by=`` (field name on the structured
+        output) declares the branches.  Falls through to linear
+        progression when no branch matches.
+
+        After a routed-to step runs, linear progression resumes from
+        its declared position — routing is a *detour*, not a "no
+        fall-through" mode.  To make a step terminal, place it last in
+        the declared step list.
         """
-        payload = result_env.payload
-        if payload is not None and hasattr(payload, "next"):
-            next_val = payload.next
-            if isinstance(next_val, str) and next_val in step_map:
-                return next_val, True  # routed explicitly
+        # 1. Predicate-based routing.  First matching predicate wins.
+        if step.routes:
+            for target_name, predicate in step.routes.items():
+                try:
+                    if predicate(result_env):
+                        return target_name
+                except Exception as exc:
+                    # A misbehaving predicate is a bug, not a runtime
+                    # condition — surface it instead of silently
+                    # falling through to linear progression and
+                    # masking the failure.
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: routes predicate for {target_name!r} raised {type(exc).__name__}: {exc}"
+                    ) from exc
 
-        # If we got here via explicit routing, stop — don't bleed into next linear step
-        if was_routed:
-            return None, False
+        # 2. Field-driven routing.  Read the named attribute off the
+        #    payload; if it's a string matching a step name, jump.
+        elif step.routes_by:
+            payload = result_env.payload
+            if payload is not None and hasattr(payload, step.routes_by):
+                value = getattr(payload, step.routes_by)
+                if isinstance(value, str) and value in step_map:
+                    return value
+                # ``None`` and any other non-matching value fall through
+                # to linear — the model "decided not to route".
 
-        # Linear progression
+        # 3. Linear progression — next declared step, or end of plan.
         steps_list = list(step_map.keys())
         try:
             idx = steps_list.index(step.name or "")
             if idx + 1 < len(steps_list):
-                return steps_list[idx + 1], False
+                return steps_list[idx + 1]
         except ValueError:
             pass
-        return None, False
+        return None
 
     # ------------------------------------------------------------------
     # Serialisation — to_dict / from_dict  (Plan round-trip)
@@ -1322,6 +1463,12 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
             d["context"] = _sentinel_to_ref(step.context)
     if step.writes:
         d["writes"] = step.writes
+    if step.routes is not None:
+        # Predicates can't be JSON-serialised — record only target step
+        # names; ``from_dict`` rebinds via ``registry["routes:<step>:<target>"]``.
+        d["routes"] = sorted(step.routes.keys())
+    if step.routes_by is not None:
+        d["routes_by"] = step.routes_by
     return d
 
 
@@ -1337,6 +1484,22 @@ def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
             context = [_sentinel_from_ref(item) for item in raw]
         else:
             context = _sentinel_from_ref(raw)
+    routes: dict[str, Callable[[Any], bool]] | None = None
+    if "routes" in data:
+        # Predicates live in Python; rebind by registry key
+        # ``f"routes:{step_name}:{target}"``.  Missing keys raise
+        # ``KeyError`` so the load fails loud.
+        step_name = data.get("name", "<unnamed>")
+        routes = {}
+        for target_name in data["routes"]:
+            key = f"routes:{step_name}:{target_name}"
+            if key not in registry:
+                raise KeyError(
+                    f"Plan.from_dict: no entry in registry for "
+                    f"{key!r} (predicate for routes={{{target_name!r}: ...}}). "
+                    f"Pass registry={{{key!r}: predicate}} to rebind."
+                )
+            routes[target_name] = registry[key]
     return Step(
         target=target,
         task=task,
@@ -1344,4 +1507,6 @@ def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
         writes=data.get("writes"),
         parallel=data.get("parallel", False),
         name=data.get("name"),
+        routes=routes,
+        routes_by=data.get("routes_by"),
     )

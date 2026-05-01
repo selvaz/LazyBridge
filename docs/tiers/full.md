@@ -59,7 +59,7 @@ TTL, and the production knobs on `Agent` (`timeout`, `cache`,
 **By the end of Full you can:**
 
 - declare a typed multi-step pipeline that fails-fast at construction (`PlanCompileError`)
-- route conditionally via `output.next: Literal[...]`
+- route conditionally via `Step(routes={...})` predicates or `Step(routes_by="field")`
 - run parallel bands and aggregate them via `from_parallel_all` or `context=[...]`
 - resume from the failed step with CAS-protected checkpoints
 - run N copies of the same pipeline concurrently with `on_concurrent="fork"`
