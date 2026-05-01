@@ -606,10 +606,19 @@ class Plan:
         store = self._checkpoint_store()
         if store is None or effective_key is None:
             return None
+        # Snapshot the mutable buckets at write time.  Without these
+        # copies, the returned ``new_snap`` would share its ``kv`` /
+        # ``completed_steps`` references with the live mutating values
+        # in ``Plan.run``.  The next iteration's mutation (``kv[step
+        # .writes] = ...``) would change ``last_snap`` retroactively;
+        # the subsequent CAS would compare the mutated last_snap to
+        # the previously-written-to-disk JSON and report a false
+        # collision (``ConcurrentPlanRunError`` against our own
+        # run_uid).  The fix is mechanical — break the aliasing.
         new_snap: dict[str, Any] = {
             "next_step": next_step,
-            "kv": kv,
-            "completed_steps": completed,
+            "kv": dict(kv),
+            "completed_steps": list(completed),
             "status": status,
             "run_uid": run_uid,
         }
