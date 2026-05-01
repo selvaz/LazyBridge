@@ -26,11 +26,11 @@ dashed arrows are conditional routes:
 
 ```mermaid
 flowchart LR
-    A[search\nroutes={...}] -.->|predicate true| F[apology]
-    A --> B[rank]
-    B --> C[fact_check]
-    C --> D[write\nwrites=draft]
-    D --> E[(Store\nkey=draft)]
+    A["search<br/>routes={...}"] -.->|predicate true| F["apology"]
+    A --> B["rank"]
+    B --> C["fact_check"]
+    C --> D["write<br/>writes=draft"]
+    D --> E[("Store<br/>key=draft")]
     style A fill:#e8f5e9
     style B fill:#e8f5e9
     style C fill:#fff3e0
