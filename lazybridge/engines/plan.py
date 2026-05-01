@@ -1312,6 +1312,103 @@ class Plan:
         return None
 
     # ------------------------------------------------------------------
+    # run_many — concurrent fan-out over N inputs
+    # ------------------------------------------------------------------
+    #
+    # Replaces the boilerplate
+    #
+    #     async def run_one(t): return await plan.run(Envelope(task=t), ...)
+    #     def driver(t): return asyncio.run(run_one(t))
+    #     with ThreadPoolExecutor(max_workers=N) as pool:
+    #         results = list(pool.map(driver, tasks))
+    #
+    # with a single declarative call.  The "concurrent fan-out" pattern
+    # really wants one of two shapes — fork-isolated runs (different
+    # ``checkpoint_key`` per run) or default single-key runs — and the
+    # Plan already knows which it is via ``on_concurrent``.  ``run_many``
+    # picks the right asyncio shape on the caller's behalf.
+
+    def run_many(
+        self,
+        tasks: list[str | Envelope],
+        *,
+        concurrency: int | None = None,
+    ) -> list[Envelope]:
+        """Run this Plan concurrently against ``N`` inputs; sync return.
+
+        Each ``task`` is dispatched as its own ``Plan.run`` invocation
+        on a fresh asyncio task; results are returned as a list in
+        input order.  Pair with ``Plan(on_concurrent="fork", ...)`` for
+        true fan-out workflows where each input claims its own
+        per-run keyspace.
+
+        Errors are returned as error envelopes in the corresponding
+        slot — the call never raises (matches ``Agent.parallel``
+        semantics).
+
+        ``concurrency`` caps the number of in-flight runs via an
+        asyncio semaphore.  ``None`` (default) lets every task fire
+        immediately.
+
+        See :meth:`arun_many` for the async variant when the caller is
+        already inside an event loop.
+        """
+        # Re-use the sync-bridge that ``Agent.__call__`` ships with —
+        # it propagates contextvars (OTel spans, request ids, …) into
+        # the worker loop so observability flows through fan-outs.
+        from lazybridge.agent import _run_coro_with_context
+
+        return _run_coro_with_context(self.arun_many(tasks, concurrency=concurrency))
+
+    async def arun_many(
+        self,
+        tasks: list[str | Envelope],
+        *,
+        concurrency: int | None = None,
+    ) -> list[Envelope]:
+        """Async counterpart to :meth:`run_many`.
+
+        Use this directly when you're already inside an event loop and
+        want to ``await`` the fan-out without the sync-bridge overhead.
+        """
+        sem = asyncio.Semaphore(concurrency) if concurrency else None
+
+        async def _one(task: str | Envelope) -> Envelope:
+            # ``Envelope.from_task`` populates BOTH ``task`` and
+            # ``payload`` so the first step's ``from_prev`` resolves to
+            # the user's input rather than an empty string.
+            env = task if isinstance(task, Envelope) else Envelope.from_task(str(task))
+
+            async def _go() -> Envelope:
+                return await self.run(
+                    env,
+                    tools=[],
+                    output_type=str,
+                    memory=None,
+                    session=None,
+                )
+
+            if sem is None:
+                return await _go()
+            async with sem:
+                return await _go()
+
+        raw = await asyncio.gather(
+            *[_one(t) for t in tasks],
+            return_exceptions=True,
+        )
+        # Wrap raised exceptions as error envelopes so the contract is
+        # "list of envelopes in input order".  Plan.run normally
+        # returns an error envelope itself, so this branch only fires
+        # for genuine framework bugs / cancellations.
+        return [
+            r
+            if isinstance(r, Envelope)
+            else Envelope.error_envelope(r if isinstance(r, BaseException) else RuntimeError(str(r)))
+            for r in raw
+        ]
+
+    # ------------------------------------------------------------------
     # Serialisation — to_dict / from_dict  (Plan round-trip)
     # ------------------------------------------------------------------
     #
