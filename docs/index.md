@@ -32,7 +32,7 @@ rewrite needed when you move up.
     guardrails, simple chain / parallel composition, MCP servers,
     basic HIL, evals.
     `Memory` · `Store` · `Session` · `Guards` · `chain` · `parallel`
-    · `as_tool` · `MCP` (alpha) · `HumanEngine` · `EvalSuite`
+    · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite`
 
 -   **[Full →](tiers/full.md)**
 
@@ -90,7 +90,7 @@ site via `python -m lazybridge.skill_docs._build`.
 * [Structured output with Pydantic](recipes/structured-output.md)
 * [Pipeline with typed steps and crash resume](recipes/plan-with-resume.md)
 * [Human-in-the-loop: approval gates and REPL](recipes/human-in-the-loop.md)
-* [MCP integration (alpha)](recipes/mcp.md)
+* [MCP integration](recipes/mcp.md)
 * [Orchestration tools — chain / parallel / plan as tools](recipes/orchestration-tools.md)
 * [Decision trees — "when to use which"](decisions/index.md)
 

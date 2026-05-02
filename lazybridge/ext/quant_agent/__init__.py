@@ -1,8 +1,13 @@
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+#: ``"domain"`` = worked example shipped with the framework; not part of
+#: the LazyBridge framework contract and may be moved or removed.
+__stability__ = "domain"
 __lazybridge_min__ = "1.0.0"
 
-"""lazybridge.ext.quant_agent — Pre-configured quantitative analysis agent.
+"""lazybridge.ext.quant_agent — Pre-configured quantitative analysis agent (domain example).
+
+Domain example shipped with LazyBridge — not part of the framework
+contract. Pin to a specific lazybridge release if you depend on it.
 
 Hybrid architecture: complex tools get dedicated sub-agent pipelines
 (agent_tool) for intelligent parameter construction; simple tools use

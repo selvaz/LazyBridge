@@ -40,7 +40,7 @@ TTL, and the production knobs on `Agent` (`timeout`, `cache`,
 * [Plan](../guides/plan.md)
 * [Sentinels (from_prev / from_start / from_step / from_parallel)](../guides/sentinels.md)
 * [Parallel plan steps](../guides/parallel-steps.md)
-* [SupervisorEngine (alpha — ext.hil)](../guides/supervisor.md)
+* [SupervisorEngine (ext.hil)](../guides/supervisor.md)
 * [Checkpoint & resume](../guides/checkpoint.md)
 * [Exporters](../guides/exporters.md)
 * [GraphSchema](../guides/graph-schema.md)

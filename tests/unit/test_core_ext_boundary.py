@@ -94,7 +94,7 @@ def test_every_ext_module_declares_stability() -> None:
     assert ext_root.is_dir(), "expected lazybridge/ext/ directory"
 
     missing: list[str] = []
-    valid_levels = {"alpha", "beta", "stable"}
+    valid_levels = {"alpha", "beta", "stable", "domain"}
 
     for child in sorted(ext_root.iterdir()):
         if not child.is_dir():

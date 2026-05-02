@@ -1,8 +1,13 @@
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+#: ``"domain"`` = worked example shipped with the framework; not part of
+#: the LazyBridge framework contract and may be moved or removed.
+__stability__ = "domain"
 __lazybridge_min__ = "1.0.0"
 
-"""stat_runtime — econometrics and time-series execution layer for LazyBridge.
+"""stat_runtime — econometrics and time-series execution layer (domain example).
+
+Domain example shipped with LazyBridge — not part of the framework
+contract. Pin to a specific lazybridge release if you depend on it.
 
 Provides shared data access, query compilation, model fitting, diagnostics,
 visualization, forecasting, run persistence, and Tool integrations for

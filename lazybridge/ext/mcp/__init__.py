@@ -1,4 +1,4 @@
-"""Model Context Protocol (MCP) integration for LazyBridge — alpha.
+"""Model Context Protocol (MCP) integration for LazyBridge.
 
 MCP is a JSON-RPC protocol for exposing tools, resources, and prompts to
 LLM clients. LazyBridge integrates MCP at the **tool boundary** — an
@@ -38,7 +38,7 @@ Install with::
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+__stability__ = "stable"
 __lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.mcp.server import MCP, MCPServer

@@ -1,4 +1,4 @@
-"""Eval framework — alpha.
+"""Eval framework.
 
 Pydantic-typed evaluation cases plus a small assertion-helpers library
 (``contains`` / ``exact_match`` / ``min_length`` / ``max_length`` /
@@ -12,7 +12,7 @@ plumbing rather than an evaluation feature.
 from __future__ import annotations
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+__stability__ = "stable"
 __lazybridge_min__ = "1.0.0"
 
 import asyncio

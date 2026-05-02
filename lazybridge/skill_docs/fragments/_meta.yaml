@@ -47,9 +47,9 @@ decisions:
   - need_advanced
 
 # Pretty titles for tier landing pages + decision tree pages.
-# Topics that live in ``lazybridge.ext.*`` carry an ``(alpha)`` tag so
-# users discover the stability boundary on the tier page itself, not
-# only after reading the core-vs-ext policy guide.
+# Topics that live in ``lazybridge.ext.*`` carry their stability tag so
+# users discover the boundary on the tier page itself, not only after
+# reading the core-vs-ext policy guide.
 titles:
   agent: Agent
   tool: Tool
@@ -63,13 +63,13 @@ titles:
   chain: Agent.chain
   as_tool: Agent.as_tool
   agent_parallel: Agent.parallel
-  human_engine: HumanEngine (alpha — ext.hil)
-  evals: EvalSuite (alpha — ext.evals)
-  mcp: MCP integration (alpha — ext.mcp)
+  human_engine: HumanEngine (ext.hil)
+  evals: EvalSuite (ext.evals)
+  mcp: MCP integration (ext.mcp)
   plan: Plan
   sentinels: Sentinels (from_prev / from_start / from_step / from_parallel)
   parallel_steps: Parallel plan steps
-  supervisor: SupervisorEngine (alpha — ext.hil)
+  supervisor: SupervisorEngine (ext.hil)
   checkpoint: Checkpoint & resume
   exporters: Exporters
   graph_schema: GraphSchema
@@ -185,7 +185,7 @@ tier_walkthroughs:
     `Agent.as_tool` (implicit when you pass an Agent as a tool) for
     Agent-of-Agents trees.
 
-    The tier closes with the alpha extensions you'll likely reach for:
+    The tier closes with the stable extensions you'll likely reach for:
     `MCP` to consume an external tool catalogue, `HumanEngine` for an
     approval gate, `EvalSuite` for behaviour testing.  See
     [core-vs-ext](../guides/core-vs-ext.md) for the stability promises.
@@ -243,7 +243,7 @@ tier_walkthroughs:
 tier_extras:
   mid: |
     * [Testing (MockAgent)](../guides/testing.md) — deterministic agent doubles for unit tests
-    * [Core vs Extension policy](../guides/core-vs-ext.md) — what `(alpha)` means and how extensions become core
+    * [Core vs Extension policy](../guides/core-vs-ext.md) — stability tiers (`stable` / `alpha` / `domain`) and the promotion path
   full: |
     * [Operations checklist](../guides/operations.md) — production deployment knobs
   advanced: |

@@ -24,10 +24,10 @@
     ],
     "extension_modules": [
       "lazybridge.ext.hil — HumanEngine, SupervisorEngine",
-      "lazybridge.ext.mcp — Model Context Protocol integration (alpha)",
+      "lazybridge.ext.mcp — Model Context Protocol integration",
       "lazybridge.ext.otel — OpenTelemetry exporter (GenAI conventions)",
       "lazybridge.ext.evals — EvalSuite, EvalCase, llm_judge",
-      "lazybridge.ext.planners — make_planner, make_blackboard_planner"
+      "lazybridge.ext.planners — make_planner, make_blackboard_planner (alpha)"
     ]
   }
 }

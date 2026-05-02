@@ -17,14 +17,14 @@ Covers: Agent, Tool, Native tools (web search, code execution, …), Function �
 
 **Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
 
-Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Agent.parallel, HumanEngine (alpha — ext.hil), EvalSuite (alpha — ext.evals), MCP integration (alpha — ext.mcp)
+Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Agent.parallel, HumanEngine (ext.hil), EvalSuite (ext.evals), MCP integration (ext.mcp)
 
 ### Full
 **Use this when** you need a declared, multi-step pipeline: typed hand-offs, conditional routing, crash recovery via checkpoint/resume, or OTel/JSON observability.
 
 **Stay at Mid** if your pipeline is a straight line with no typed models between steps and you don't need resume semantics.
 
-Covers: Plan, Sentinels (from_prev / from_start / from_step / from_parallel), Parallel plan steps, SupervisorEngine (alpha — ext.hil), Checkpoint & resume, Exporters, GraphSchema, verify=
+Covers: Plan, Sentinels (from_prev / from_start / from_step / from_parallel), Parallel plan steps, SupervisorEngine (ext.hil), Checkpoint & resume, Exporters, GraphSchema, verify=
 
 ### Advanced
 **Use this when** you are extending the framework itself: adding a new LLM provider, writing a custom execution engine, or serialising Plans across processes.

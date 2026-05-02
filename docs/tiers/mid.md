@@ -21,7 +21,7 @@ pipelines, `Agent.parallel` for deterministic fan-out, and
 `Agent.as_tool` (implicit when you pass an Agent as a tool) for
 Agent-of-Agents trees.
 
-The tier closes with the alpha extensions you'll likely reach for:
+The tier closes with the stable extensions you'll likely reach for:
 `MCP` to consume an external tool catalogue, `HumanEngine` for an
 approval gate, `EvalSuite` for behaviour testing.  See
 [core-vs-ext](../guides/core-vs-ext.md) for the stability promises.
@@ -35,14 +35,14 @@ approval gate, `EvalSuite` for behaviour testing.  See
 * [Agent.chain](../guides/chain.md)
 * [Agent.as_tool](../guides/as-tool.md)
 * [Agent.parallel](../guides/agent-parallel.md)
-* [HumanEngine (alpha — ext.hil)](../guides/human-engine.md)
-* [EvalSuite (alpha — ext.evals)](../guides/evals.md)
-* [MCP integration (alpha — ext.mcp)](../guides/mcp.md)
+* [HumanEngine (ext.hil)](../guides/human-engine.md)
+* [EvalSuite (ext.evals)](../guides/evals.md)
+* [MCP integration (ext.mcp)](../guides/mcp.md)
 
 ## Also see
 
 * [Testing (MockAgent)](../guides/testing.md) — deterministic agent doubles for unit tests
-* [Core vs Extension policy](../guides/core-vs-ext.md) — what `(alpha)` means and how extensions become core
+* [Core vs Extension policy](../guides/core-vs-ext.md) — stability tiers (`stable` / `alpha` / `domain`) and the promotion path
 
 ## Next steps
 

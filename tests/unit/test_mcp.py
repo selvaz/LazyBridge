@@ -82,10 +82,10 @@ class FakeTransport(_Transport):
 # ---------------------------------------------------------------------------
 
 
-def test_mcp_module_stability_is_alpha() -> None:
+def test_mcp_module_stability_is_stable() -> None:
     import lazybridge.ext.mcp as mcp_pkg
 
-    assert mcp_pkg.__stability__ == "alpha"
+    assert mcp_pkg.__stability__ == "stable"
     assert mcp_pkg.__lazybridge_min__ == "1.0.0"
 
 

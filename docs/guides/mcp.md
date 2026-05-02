@@ -1,4 +1,4 @@
-# MCP integration (alpha — ext.mcp)
+# MCP integration (ext.mcp)
 
 **Use MCP** when a tool catalogue already exists as an MCP server
 (`@modelcontextprotocol/server-filesystem`, `mcp-postgres`, GitHub

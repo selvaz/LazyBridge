@@ -1,13 +1,14 @@
 # Core vs Extension policy
 
-LazyBridge is split into two regimes within a single PyPI package. Both are
-under active development; the regimes differ in their stability commitment
-and iteration speed.
+LazyBridge ships as a single PyPI package with two regimes — `lazybridge/`
+(core) and `lazybridge.ext.*` (extensions and worked examples). Both
+co-exist in the same install; the regimes differ in their stability
+commitment and iteration speed.
 
 | Regime | Location | Stability | Versioning |
 |---|---|---|---|
 | **Core** | `lazybridge/` (top-level modules) | **Beta** — public API stable in spirit; breaking changes possible in minor releases but called out in the CHANGELOG and avoided where reasonable | Targeting semver once we declare 2.0 / "stable" |
-| **Extension** | `lazybridge.ext.*` (subpackages) | **Alpha** — interface may change between any two releases | No compat guarantees; pin exact versions in production |
+| **Extension** | `lazybridge.ext.*` (subpackages) | Tagged per module — see *Stability tags* below | Per-tag commitment |
 
 Calling core "beta" rather than "stable" is a deliberate honesty: we
 haven't run it at scale long enough to claim semver-level commitments.
@@ -21,7 +22,7 @@ The minimum a generalist user needs to build agents. Stays small, optimised,
 and stable.
 
 - `Agent`, `Envelope`, `Tool`, `Memory`, `Store`, `Session`, `EventLog`
-- `LLMEngine` (the four other engines — `HumanEngine` and
+- `LLMEngine` (the human-in-the-loop engines — `HumanEngine` and
   `SupervisorEngine` — are in `lazybridge.ext.hil`)
 - `Plan`, `Step`, `from_prev` / `from_start` / `from_step` / `from_parallel` / `from_parallel_all`
 - `BaseProvider` and the four officially supported providers
@@ -32,25 +33,24 @@ and stable.
 - LiteLLM bridge (`lazybridge.core.providers.litellm.LiteLLMProvider`)
   — core provider bridge; optional install via `pip install lazybridge[litellm]`
 
-### Extension
-Optional, evolving, or domain-specific code. Ships fast in beta.
+### Extensions and worked examples
 
-- `lazybridge.ext.planners` — `make_planner` (DAG builder) and
-  `make_blackboard_planner` (todo list)
-- `lazybridge.ext.otel` — `OTelExporter` (OpenTelemetry span exporter)
-- `lazybridge.ext.hil` — `HumanEngine` and `SupervisorEngine`
-  (human-in-the-loop)
-- `lazybridge.ext.evals` — `EvalSuite`, `EvalCase`, `llm_judge`,
-  `contains`, `exact_match`, `min_length`, `max_length`,
-  `not_contains` (the runtime ``verify_with_retry`` helper used by
-  ``Agent(verify=...)`` is private core: ``lazybridge._verify``)
-- `lazybridge.ext.mcp` — Model Context Protocol client
-- `lazybridge.ext.stat_runtime` — econometrics & time-series tools
-- `lazybridge.ext.data_downloader` — market data ingestion adapters
-- `lazybridge.ext.quant_agent` — pre-configured quant analysis agent
-- `lazybridge.ext.doc_skills` — BM25 local documentation skill runtime
-- `lazybridge.ext.read_docs` — multi-format document reader
-- (planned) `lazybridge.ext.rag` — retrieval primitives + adapters
+Everything under `lazybridge.ext.*`. Each module declares its tier via
+`__stability__`. Four tiers exist:
+
+| Tier | What it means | Modules today |
+|---|---|---|
+| **`stable`** | Field-tested, documented, semver-grade commitment. Same level as core. | `mcp`, `otel`, `hil`, `evals`, `external_tools` |
+| **`beta`** | Generally stable; breakage possible in minor releases and called out in the CHANGELOG. | (none currently) |
+| **`alpha`** | Experimental. Interface may change between any two releases. Use is fine; pin exact versions in production. | `planners` |
+| **`domain`** | Worked **example** shipped with the framework — *not part of the LazyBridge framework contract*. Lives in the package as a reference for the patterns the framework enables, and may be removed or extracted to its own package without notice. | `stat_runtime`, `data_downloader`, `quant_agent`, `doc_skills`, `read_docs`, `veo` |
+
+The `domain` tier is the new piece. It exists to be honest about what
+the framework *is* versus what *uses* the framework. The framework is
+`Agent` + `Plan` + `Tool` + the engines + the providers. The 6
+`domain`-tagged modules are realistic examples of what you can build
+on top — they happen to be useful, but they aren't framework primitives,
+and we don't promise their APIs.
 
 ## Stability tags
 
@@ -58,26 +58,32 @@ Every extension module declares its maturity:
 
 ```python
 # lazybridge/ext/<name>/__init__.py
-__stability__ = "alpha" | "beta" | "stable"
+__stability__ = "stable" | "beta" | "alpha" | "domain"
 __lazybridge_min__ = "1.0.0"
 ```
 
-- **`alpha`** — interface may change between any two releases. Default
-  for new extensions. Use is fine; pin exact versions in production.
-- **`beta`** — interface is generally stable but breaking changes are
-  allowed in minor releases. Documented in the module's CHANGELOG entry.
-  Same level as core today.
-- **`stable`** — strict semver: breaking changes only across major
-  releases. Reaching this is the path to promotion (see "Promotion to
-  core" below).
-
-Extensions ship at `alpha` by default. They are promoted to `beta` once
-the API has been settled across at least one minor release without
-breaking changes; to `stable` once two minor releases without changes.
-
 A module's `__stability__` is part of its public contract. Users can
-introspect it programmatically (`getattr(lazybridge.ext.X, "__stability__")`)
-to gate adoption decisions.
+introspect it programmatically:
+
+```python
+import lazybridge.ext.mcp as mcp
+assert getattr(mcp, "__stability__") == "stable"
+```
+
+### Promotion / demotion paths
+
+- **alpha → beta** — the API has held across one minor release without
+  breaking changes.
+- **beta → stable** — the API has held across two further minor releases.
+  Earns strict semver.
+- **stable → core** — see *Promotion to core* below.
+- **domain → ext** — a domain module that turns out to be generally
+  useful can be promoted by removing the `domain` disclaimer, choosing
+  an `alpha` or `beta` tag, and adopting the standard ext API contract.
+
+The `domain` tier never auto-promotes. It's a deliberate choice the
+maintainer makes when a module crosses from "example" to "framework
+extension".
 
 ## Optional dependencies
 
@@ -87,9 +93,9 @@ extras in `pyproject.toml`:
 ```toml
 [project.optional-dependencies]
 mcp        = ["mcp>=1.0,<2.0"]
-rag        = ["chromadb>=0.4"]
+otel       = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 stats      = ["statsmodels>=0.14", "pandas>=2.0"]   # cf. pyproject.toml
-all        = ["lazybridge[mcp,rag,stats]"]
+all        = ["lazybridge[mcp,otel,stats]"]
 ```
 
 Users install only what they need:
@@ -97,7 +103,7 @@ Users install only what they need:
 ```bash
 pip install lazybridge              # core only
 pip install lazybridge[mcp]         # core + MCP
-pip install lazybridge[mcp,rag]     # core + MCP + RAG
+pip install lazybridge[mcp,otel]    # core + MCP + OTel
 pip install lazybridge[all]         # everything
 ```
 
@@ -108,7 +114,7 @@ Importing an extension whose extra is not installed raises a clean
 try:
     from lazybridge.ext.mcp import MCP
 except ImportError as e:
-    # "lazybridge.ext.mcp requires 'mcp>=0.5.0'.  Install with: pip install lazybridge[mcp]"
+    # "lazybridge.ext.mcp requires 'mcp>=1.0,<2.0'.  Install with: pip install lazybridge[mcp]"
     ...
 ```
 
@@ -126,20 +132,17 @@ These exist to keep the regimes from rotting into each other:
    incompatibly changing one of those names requires a major bump.
 4. **Extensions never appear in the top-level `lazybridge` namespace.**
    Always accessed as `from lazybridge.ext.X import …`.
-5. **Tests for core** live in `tests/unit/` and gate every commit.
+5. **`domain` modules are not part of the framework contract.** A
+   release may move, restructure, or extract them to a separate
+   package. If you depend on one, pin the lazybridge release and read
+   the changelog before upgrading.
+6. **Tests for core** live in `tests/unit/` and gate every commit.
    **Tests for ext** live alongside (`tests/unit/ext/`) but may be
    marked `slow` / `requires_extra` and skipped in fast CI.
 
-## Promotion to stable (and to core)
+## Promotion to core
 
-**Alpha → beta.** API has held across one minor release without breaking
-changes. Bumps `__stability__` and removes "expect breakage" warnings.
-
-**Beta → stable.** API has held across two minor releases without
-breaking changes. Bumps `__stability__`. Earns strict semver.
-
-**Stable ext → core.** A long-stable extension can be promoted to core
-when:
+A long-`stable` extension can be promoted to core when:
 
 - It has been at `__stability__ = "stable"` for ≥ 2 minor releases,
 - It has no optional-extra dependencies (or its deps move to core),
@@ -161,8 +164,9 @@ release and removed.
 
 ## Why split at all
 
-Single-package PyPI release keeps install simple. Two regimes keep two
-needs in tension: users want core to never break under their feet; the
-maintainers want to ship new patterns (MCP, RAG, planners, …) without
-waiting for major-version cadence. Separating the two by namespace
-lets both happen without compromising either.
+Single-package PyPI release keeps install simple. Tiered stability tags
+keep two needs in tension: users want core and stable extensions to
+never break under their feet; the maintainers want to ship new patterns
+and worked examples without waiting for major-version cadence. The
+split-by-namespace + per-module tag lets both happen without
+compromising either.

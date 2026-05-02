@@ -545,7 +545,7 @@ Agent.from_engine(plan)("framework update — April 2026")
   succeeds but B crashes, resume retries the whole block, not just B.
   (Tracked for future work.)
 
-## SupervisorEngine (alpha — ext.hil)
+## SupervisorEngine (ext.hil)
 
 **signature**
 

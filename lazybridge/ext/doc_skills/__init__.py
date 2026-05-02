@@ -1,8 +1,13 @@
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+#: ``"domain"`` = worked example shipped with the framework; not part of
+#: the LazyBridge framework contract and may be moved or removed.
+__stability__ = "domain"
 __lazybridge_min__ = "1.0.0"
 
-"""lazybridge.ext.doc_skills — BM25 local documentation skill runtime.
+"""lazybridge.ext.doc_skills — BM25 local documentation skill runtime (domain example).
+
+Domain example shipped with LazyBridge — not part of the framework
+contract. Pin to a specific lazybridge release if you depend on it.
 
 Index local documentation folders into a portable skill bundle, then expose
 the bundle as a LazyBridge tool or pipeline that any agent can call.

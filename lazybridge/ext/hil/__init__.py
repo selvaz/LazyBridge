@@ -1,4 +1,4 @@
-"""Human-in-the-loop engines — alpha.
+"""Human-in-the-loop engines.
 
 Two engines that involve a human in the agent run-loop:
 
@@ -21,7 +21,7 @@ Usage::
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+__stability__ = "stable"
 __lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.hil.human import HumanEngine

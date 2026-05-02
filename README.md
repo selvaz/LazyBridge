@@ -38,7 +38,7 @@ LazyBridge grows with you — every tier is additive.
 | Tier | For | Key imports |
 |---|---|---|
 | [**Basic**](docs/tiers/basic.md) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
-| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` (alpha) · `HumanEngine` · `EvalSuite` |
+| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite` |
 | [**Full**](docs/tiers/full.md) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
 | [**Advanced**](docs/tiers/advanced.md) | extending the framework | `Engine` · `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
 
@@ -95,7 +95,7 @@ Parallelism is emergent: when `editor` decides to call two tools in
 the same turn, they run concurrently via `asyncio.gather`. No flag,
 no config, no "parallel mode".
 
-### 4 · MCP servers as tool catalogues (alpha)
+### 4 · MCP servers as tool catalogues
 
 ```python
 from lazybridge import Agent
@@ -199,7 +199,7 @@ lighter [`HumanEngine`](docs/guides/human-engine.md) instead.
 * [Structured output with Pydantic](https://selvaz.github.io/LazyBridge/recipes/structured-output/)
 * [Pipeline with typed steps and crash resume](https://selvaz.github.io/LazyBridge/recipes/plan-with-resume/)
 * [Human-in-the-loop: approval gates and REPL](https://selvaz.github.io/LazyBridge/recipes/human-in-the-loop/)
-* [MCP integration (alpha)](https://selvaz.github.io/LazyBridge/recipes/mcp/)
+* [MCP integration](https://selvaz.github.io/LazyBridge/recipes/mcp/)
 * [Decision trees — "when to use which"](https://selvaz.github.io/LazyBridge/decisions/)
 
 ## What makes LazyBridge different

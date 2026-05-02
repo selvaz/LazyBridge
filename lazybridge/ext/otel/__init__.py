@@ -1,4 +1,4 @@
-"""OpenTelemetry exporter for LazyBridge sessions (alpha).
+"""OpenTelemetry exporter for LazyBridge sessions.
 
 Install with::
 
@@ -18,7 +18,7 @@ child spans inside it.
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
+__stability__ = "stable"
 __lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.otel.exporter import OTelExporter
