@@ -102,6 +102,8 @@ class SupervisorEngine:
         output_type: type,
         memory: Memory | None,
         session: Session | None,
+        store: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
+        plan_state: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
     ) -> Envelope:
         # Agents can pass additional tools via tools=; merge with engine-level.
         effective_tools = dict(self._tools)

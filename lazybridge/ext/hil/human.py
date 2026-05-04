@@ -346,6 +346,8 @@ class HumanEngine:
         output_type: type,
         memory: Memory | None,
         session: Session | None,
+        store: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
+        plan_state: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
     ) -> Envelope:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from lazybridge.envelope import Envelope
@@ -18,6 +18,10 @@ class Engine(Protocol):
 
     ``run`` is the primary entry point: receives an Envelope, produces an Envelope.
     ``stream`` is optional; engines that do not support streaming raise NotImplementedError.
+
+    The optional ``store`` and ``plan_state`` kwargs are consumed by
+    :class:`Plan.run` for checkpoint / resume; other engines accept and
+    ignore them.
     """
 
     async def run(
@@ -28,6 +32,8 @@ class Engine(Protocol):
         output_type: type,
         memory: Memory | None,
         session: Session | None,
+        store: Any | None = None,
+        plan_state: Any | None = None,
     ) -> Envelope: ...
 
     async def stream(
