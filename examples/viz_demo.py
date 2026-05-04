@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 
-from lazybridge import Agent, Session, Tool
+from lazybridge import Agent, LLMEngine, Session, Tool
 from lazybridge.ext.viz import Visualizer
 
 DB = "examples/viz_demo.db"
@@ -32,36 +32,33 @@ def search(query: str) -> str:
 def summarise(text: str) -> str:
     """Stub summariser tool that pretends to compress text."""
     time.sleep(0.3)
-    return f"[summary] {text[:120]}…"
+    return f"[summary] {text[:120]}..."
 
 
 def main() -> None:
     sess = Session(db=DB, console=False)
 
     researcher = Agent(
-        "claude-haiku-4-5",
+        engine=LLMEngine("claude-haiku-4-5", system="Find facts. Cite sources."),
+        tools=[Tool(search)],
         name="researcher",
-        tools=[Tool.from_function(search)],
         session=sess,
-        system="Find facts. Cite sources.",
     )
     analyst = Agent(
-        "claude-haiku-4-5",
+        engine=LLMEngine("claude-haiku-4-5", system="Summarise findings."),
+        tools=[Tool(summarise)],
         name="analyst",
-        tools=[Tool.from_function(summarise)],
         session=sess,
-        system="Summarise findings.",
     )
     writer = Agent(
-        "claude-haiku-4-5",
+        engine=LLMEngine("claude-haiku-4-5", system="Write a short brief."),
         name="writer",
         session=sess,
-        system="Write a short brief.",
     )
     pipeline = Agent.chain(researcher, analyst, writer)
 
     with Visualizer(sess) as viz:
-        print(f"[viz] open → {viz.url}")
+        print(f"[viz] open -> {viz.url}")
         print("[viz] running pipeline…")
         envelope = pipeline("Brief me on the state of fusion energy in 2026.")
         print("[viz] pipeline done")

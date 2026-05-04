@@ -9,10 +9,11 @@
 //   Agent               → 3-D parallelepiped
 //   Tool                → hexagon
 //   Router              → diamond
+//   Store               → cylinder (rect + two ellipses)
 //
-// Exports: setGraph, ensureToolNode, pulse, fireHitRing, setInFlight,
-//          flashError, zoomIn, zoomOut, zoomReset, setVisibleLayers, getLayers,
-//          refreshNodeLabels
+// Exports: setGraph, ensureToolNode, ensureStoreEdge, pulse, flashLink,
+//          fireHitRing, setInFlight, flashError, zoomIn, zoomOut, zoomReset,
+//          setVisibleLayers, getLayers, refreshNodeLabels
 
 import { state, emit } from "/static/state.js";
 import { installDefs } from "/static/graph-defs.js";
@@ -54,10 +55,15 @@ const TX = 115; // horizontal gap between tools of same parent
 
 function idOf(r) { return typeof r === "object" ? r.id : r; }
 
+// Make a safe CSS/DOM id fragment from any string
+function safeId(s) { return String(s).replace(/[^a-zA-Z0-9]/g, "_"); }
+
 // ---- hierarchical layout ----------------------------------------------------
 
 export function computeLayout(nodes, links) {
-  const agentIds = new Set(nodes.filter(n => n.type !== "tool").map(n => n.id));
+  const agentIds = new Set(
+    nodes.filter(n => n.type !== "tool" && n.type !== "store").map(n => n.id)
+  );
 
   // Predecessors map (agent→agent, context + nested-agent tool edges)
   const pred = new Map(nodes.map(n => [n.id, new Set()]));
@@ -98,22 +104,18 @@ export function computeLayout(nodes, links) {
     if ((l.kind === "context" || l.kind === "router") && agentIds.has(idOf(l.target)))
       hasContextPred.add(idOf(l.target));
   }
-  // Also treat nested (tool-edge agent→agent) as flow for start/end logic.
-  // The sub-agent's result flows BACK to the caller via tool_result, so:
-  //   - caller gets a "successor" (the sub-agent call)
-  //   - sub-agent gets a "predecessor" (the caller)
-  //   - sub-agent also gets a "successor" (its result is consumed by the caller)
-  // This prevents tool-nested agents from being mis-classified as END.
   for (const l of links) {
     if (l.kind === "tool" && agentIds.has(idOf(l.source)) && agentIds.has(idOf(l.target))) {
       hasContextSucc.add(idOf(l.source));
       hasContextPred.add(idOf(l.target));
-      hasContextSucc.add(idOf(l.target)); // result consumed by caller → not an end node
+      hasContextSucc.add(idOf(l.target));
     }
   }
 
   // Position agents + compute raw start/end flags
   const agentPos = new Map();
+  let maxAgentX = 0;
+  let allAgentYs = [];
   for (let i = 0; i <= maxLayer; i++) {
     const group = byLayer[i];
     group.forEach((n, j) => {
@@ -124,6 +126,8 @@ export function computeLayout(nodes, links) {
       n._layer = i;
       n._isStart = !hasContextPred.has(n.id);
       n._isEnd   = !hasContextSucc.has(n.id);
+      if (Math.abs(x) > maxAgentX) maxAgentX = Math.abs(x);
+      allAgentYs.push(y);
     });
   }
 
@@ -137,7 +141,8 @@ export function computeLayout(nodes, links) {
     if (agentIds.has(s) && !agentIds.has(t)) {
       if (!toolsByParent.has(s)) toolsByParent.set(s, []);
       const tn = nodes.find(n => n.id === t);
-      if (tn && !toolsByParent.get(s).includes(tn)) toolsByParent.get(s).push(tn);
+      if (tn && tn.type !== "store" && !toolsByParent.get(s).includes(tn))
+        toolsByParent.get(s).push(tn);
     }
   }
   for (const [parentId, tools] of toolsByParent) {
@@ -149,6 +154,18 @@ export function computeLayout(nodes, links) {
       t._ty = pos.y + TY;
       t._layer = parentLayer;  // same visual row as parent
     });
+  }
+
+  // Position store node to the right of all agent positions
+  const storeNode = nodes.find(n => n.id === "__STORE__");
+  if (storeNode) {
+    const rightX  = maxAgentX + AX * 0.8;
+    const centerY = allAgentYs.length
+      ? allAgentYs.reduce((a, b) => a + b, 0) / allAgentYs.length
+      : 0;
+    storeNode._tx = rightX;
+    storeNode._ty = centerY;
+    storeNode._layer = -99; // excluded from layer filter logic
   }
 
   // Fallback for disconnected nodes
@@ -163,7 +180,8 @@ export function computeLayout(nodes, links) {
 
 export function getLayers() {
   const layers = new Set();
-  for (const n of state.nodes) if (n._layer !== undefined) layers.add(n._layer);
+  for (const n of state.nodes)
+    if (n._layer !== undefined && n._layer !== -99) layers.add(n._layer);
   return [...layers].sort((a, b) => a - b);
 }
 
@@ -217,12 +235,14 @@ export function setVisibleLayers(layerSet) {
 function _applyLayerFilter() {
   if (!gNodes) return;
   gNodes.selectAll(".node").each(function(d) {
-    const vis = _visibleLayers === null || _visibleLayers.has(d._layer);
+    // Store node is always visible (layer -99 bypasses filter)
+    const vis = d._layer === -99 || _visibleLayers === null || _visibleLayers.has(d._layer);
     d3.select(this).classed("layer-hidden", !vis);
   });
   gLinks.selectAll(".link").each(function(l) {
     const sLay = l.source?._layer; const tLay = l.target?._layer;
     const vis = _visibleLayers === null ||
+      (sLay === -99 || tLay === -99) ||
       (_visibleLayers.has(sLay) && _visibleLayers.has(tLay));
     d3.select(this).classed("layer-hidden", !vis);
   });
@@ -232,7 +252,6 @@ function _applyLayerFilter() {
 
 export function setGraph(nodes, links) {
   // Remove tool nodes that are duplicates of existing agent nodes
-  // (a nested agent registered as both agent and tool).
   const agentNames = new Set(nodes.filter(n => n.type === "agent").map(n => n.name));
   const deduped = nodes.filter(n => !(n.type === "tool" && agentNames.has(n.name)));
   // Remap links that pointed to the dropped tool node to the agent node
@@ -252,7 +271,8 @@ export function setGraph(nodes, links) {
   }
   state.nodes = deduped;
   state.links = remapped;
-  computeLayout(nodes, links);
+  _injectStoreNode();
+  computeLayout(state.nodes, state.links);
   _injectIONodes();
   _anchorNodes(state.nodes);
   redraw();
@@ -260,8 +280,6 @@ export function setGraph(nodes, links) {
 }
 
 export function ensureToolNode(toolName, agentId) {
-  // If this tool name corresponds to an existing agent node, use that node id directly
-  // (nested agent — don't create a duplicate tool node).
   const existingAgent = state.nodes.find(n => n.type === "agent" && n.name === toolName);
   const id = existingAgent ? existingAgent.id : `tool:${toolName}`;
 
@@ -278,17 +296,46 @@ export function ensureToolNode(toolName, agentId) {
   return id;
 }
 
+// Ensure a directed edge between fromId and toId for store interactions.
+// Idempotent — will not add a duplicate edge.
+export function ensureStoreEdge(fromId, toId, kind = "store_write") {
+  const exists = state.links.find(l =>
+    idOf(l.source) === fromId && idOf(l.target) === toId && l.kind === kind
+  );
+  if (!exists) {
+    state.links.push({ source: fromId, target: toId, kind });
+    computeLayout(state.nodes, state.links);
+    _injectIONodes();
+    _anchorNodes(state.nodes);
+    redraw();
+  }
+}
+
+// Inject the __STORE__ virtual node once (idempotent).
+function _injectStoreNode() {
+  if (!state.nodes.find(n => n.id === "__STORE__")) {
+    state.nodes.push({
+      id: "__STORE__",
+      name: "Store",
+      type: "store",
+      _virtual: true,
+      _layer: -99,
+    });
+  }
+}
+
 // Inject virtual __START__ and __END__ nodes + flow links into state.nodes/links.
 // Called after every computeLayout(). Safe to call multiple times (removes old IO nodes first).
 function _injectIONodes() {
   const IO_IDS = new Set(["__START__", "__END__"]);
-  // Strip previous virtual nodes/links
+  // Strip previous virtual START/END nodes/links (keep __STORE__ and store edges)
   const base  = state.nodes.filter(n => !IO_IDS.has(n.id));
   const blink = state.links.filter(l => !IO_IDS.has(idOf(l.source)) && !IO_IDS.has(idOf(l.target)));
   state.nodes.length = 0; base.forEach(n => state.nodes.push(n));
   state.links.length = 0; blink.forEach(l => state.links.push(l));
 
-  const agents = base.filter(n => n.type !== "tool" && n._layer !== undefined);
+  // Only agent/io nodes participate in start/end detection (not tool, not store)
+  const agents = base.filter(n => n.type !== "tool" && n.type !== "store" && n._layer !== undefined && n._layer !== -99);
   if (!agents.length) return;
 
   const startAgents = agents.filter(n => n._isStart);
@@ -333,7 +380,9 @@ function redraw() {
   linkSel = gLinks.selectAll(".link").data(state.links, keyLink);
   linkSel.exit().remove();
   linkSel = linkSel.enter()
-    .append("line").attr("class", l => `link ${l.kind || "tool"}`)
+    .append("path")
+    .attr("class", l => `link ${l.kind || "tool"}`)
+    .attr("id", l => `lb-link-${safeId(idOf(l.source))}-${safeId(idOf(l.target))}`)
     .merge(linkSel);
 
   nodeSel = gNodes.selectAll(".node").data(state.nodes, n => n.id);
@@ -373,15 +422,23 @@ function redraw() {
       g.append("rect").attr("class", "io-bg")
         .attr("x", -44).attr("y", -16).attr("width", 88).attr("height", 32)
         .attr("rx", 16).attr("ry", 16);
+    } else if (d.type === "store") {
+      // Cylinder: bottom cap first (so it renders behind body)
+      g.append("ellipse").attr("class", "store-cap store-cap-bot")
+        .attr("rx", 25).attr("ry", 9).attr("cy", 18);
+      g.append("rect").attr("class", "store-body")
+        .attr("x", -25).attr("y", -18).attr("width", 50).attr("height", 36).attr("rx", 4);
+      g.append("ellipse").attr("class", "store-cap store-cap-top")
+        .attr("rx", 25).attr("ry", 9).attr("cy", -18);
     } else {
       g.append("path").attr("class", "node-bg").attr("d", DIAMOND_PATH);
     }
   });
 
   // Labels
-  enter.append("text").attr("class", "node-label").attr("dy", 5)
+  enter.append("text").attr("class", "node-label").attr("dy", d => d.type === "store" ? 5 : 5)
     .text(n => n.type === "io" ? n.name : trunc(n.name, n.type === "agent" ? 10 : 12));
-  enter.filter(d => d.type !== "io").append("text").attr("class", "node-sub")
+  enter.filter(d => d.type !== "io" && d.type !== "store").append("text").attr("class", "node-sub")
     .attr("dy", d => d.type === "agent" ? BOX.h / 2 + BOX.d + 14 : NODE_R + 14)
     .text(n => sublabel(n));
 
@@ -397,8 +454,8 @@ function redraw() {
   enter.filter(d => d.type === "io").append("text").attr("class", "node-sub io-hint")
     .attr("dy", 28).text("click to inspect");
 
-  // Pin icon (non-IO nodes only)
-  enter.filter(d => d.type !== "io").append("text").attr("class", "pin-icon")
+  // Pin icon (non-IO, non-store nodes only)
+  enter.filter(d => d.type !== "io" && d.type !== "store").append("text").attr("class", "pin-icon")
     .attr("dy", d => d.type === "agent" ? -(BOX.h / 2 + BOX.d + 22) : -(NODE_R + 22))
     .attr("text-anchor", "middle").style("display", "none").text("📌");
 
@@ -408,7 +465,7 @@ function redraw() {
 
   // IO role class (for CSS)
   nodeSel.attr("data-role", d => d._role || null);
-  // Refresh dynamic text (ctx sources may have changed with new links)
+  // Refresh dynamic text
   nodeSel.select(".node-ctx").text(d => _ctxLabel(d.id));
   nodeSel.select(".node-task").text(d => {
     const t = state.agentTasks.get(d.name) || state.agentTasks.get(d.id) || "";
@@ -430,9 +487,7 @@ function _updatePin(d) {
 
 function onTick() {
   if (!linkSel || !nodeSel) return;
-  linkSel
-    .attr("x1", l => l.source.x).attr("y1", l => l.source.y)
-    .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
+  linkSel.attr("d", l => `M${l.source.x},${l.source.y}L${l.target.x},${l.target.y}`);
   nodeSel.attr("transform", n => `translate(${n.x ?? 0},${n.y ?? 0})`);
 }
 
@@ -460,7 +515,6 @@ function _ctxLabel(nodeId) {
 }
 
 // Update task + ctx text on all rendered agent nodes.
-// Called by dispatch whenever agentTasks changes.
 export function refreshNodeLabels() {
   if (!nodeSel) return;
   nodeSel.select(".node-task").text(d => {
@@ -472,10 +526,25 @@ export function refreshNodeLabels() {
 
 // ---- Animation API ----------------------------------------------------------
 
+export function flashLink(srcId, dstId) {
+  const pid = `lb-link-${safeId(srcId)}-${safeId(dstId)}`;
+  const el  = document.getElementById(pid);
+  if (!el) return;
+  el.classList.remove("link-flash");
+  // Force reflow so re-adding the class triggers animation
+  void el.getBoundingClientRect();
+  el.classList.add("link-flash");
+  setTimeout(() => el.classList.remove("link-flash"), 900);
+}
+
 export function pulse(srcId, dstId, color) {
   const src = state.nodes.find(n => n.id === srcId);
   const dst = state.nodes.find(n => n.id === dstId);
-  if (src && dst) { spawnPulse(gPulses, src, dst, color); fireHitRing(dstId, color); }
+  if (src && dst) {
+    spawnPulse(gPulses, src, dst, color);
+    fireHitRing(dstId, color);
+    flashLink(srcId, dstId);
+  }
 }
 
 export function fireHitRing(nodeId, color) {

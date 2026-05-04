@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import threading
 import time
 import urllib.error
@@ -80,16 +81,22 @@ IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 session = Session(console=True)
 store   = Store(db=str(OUTPUT_DIR / "pipeline.sqlite"))
 
-# Each region uses a different provider for article writers to spread the
-# token-per-minute rate limit across multiple orgs.
+# Each region uses a different provider + model for article writers to spread
+# token-per-minute rate limits across multiple orgs.
 # Google is excluded from article writers: mixing native_tools + custom tools
-# requires tool_config.include_server_side_tool_invocations which the Google
-# provider does not currently expose. Discovery-only agents (no custom tools)
-# can still use Google.
+# requires tool_config.include_server_side_tool_invocations, which the current
+# Google AI SDK version does not support. Discovery-only agents (no custom
+# tools) can still use Google.
 REGION_ARTICLE_PROVIDER = {
     "United States": "anthropic",
     "China":         "openai",
-    "India":         "google",
+    "India":         "openai",    # was "google" — Google can't mix tools
+}
+
+REGION_ARTICLE_MODEL = {
+    "United States": "cheap",
+    "China":         "cheap",
+    "India":         "o4-mini",   # literal model name; cheaper than gpt-5.4-nano
 }
 
 # Semaphore: max concurrent Wikimedia API calls (Commons throttles aggressively)
@@ -224,6 +231,9 @@ def save_markdown(
     filename: Annotated[str, "File name"] = "daily_news.md",
 ) -> dict:
     """Write a Markdown string to the reports directory and return the path."""
+    import re as _re
+    # Strip markdown link syntax that models sometimes inject: [text](url) → text
+    filename = _re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", filename)
     path = (OUTPUT_DIR / Path(filename).name).resolve()
     path.write_text(content, encoding="utf-8")
     return {"saved": True, "path": str(path)}
@@ -335,9 +345,10 @@ _TABLE_INSTRUCTIONS = {
 def _article_writer(index: int, region: str, depth: str) -> Agent:
     cfg = DEPTH_CONFIG[depth]
     provider = REGION_ARTICLE_PROVIDER.get(region, "anthropic")
+    model    = REGION_ARTICLE_MODEL.get(region, "cheap")
     return Agent(
         engine=LLMEngine(
-            "cheap",
+            model,
             provider=provider,
             system=_ARTICLE_WRITER_SYSTEM.format(
                 region=region,
@@ -446,9 +457,34 @@ _DESIGNER_CSS = """
 """
 
 
-def _make_designer_tools(output_dir: Path) -> list[Tool]:
-    import re
+# Regex that matches <figure>...</figure> blocks and bare self-closing <img> tags.
+# Used to strip image payloads from designer context to prevent base64 garbling.
+_FIG_RE = re.compile(r'<figure\b[^>]*>.*?</figure>|<img\b[^>]*/>', re.DOTALL)
 
+
+def _strip_figs(html: str) -> str:
+    """Remove figure blocks and bare img tags from an HTML string."""
+    return _FIG_RE.sub('', html)
+
+
+def _raw_at_stripped(raw: str, n: int) -> int:
+    """Return the index in *raw* where *n* figure-stripped chars end.
+
+    Walks *raw* skipping over figure/img blocks so we can map a stripped-char
+    boundary back to the correct position in the original HTML.
+    """
+    pos = 0
+    counted = 0
+    for m in _FIG_RE.finditer(raw):
+        before = m.start() - pos
+        if counted + before >= n:
+            return pos + (n - counted)
+        counted += before
+        pos = m.end()
+    return min(pos + (n - counted), len(raw))
+
+
+def _make_designer_tools(output_dir: Path) -> list[Tool]:
     # Sentinel injected once so we can split/patch sections reliably
     _SECTION_SENTINEL = "data-designer-section"
 
@@ -515,13 +551,16 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
                 heading_html = chunk
                 body_chunk = parts[i + 2] if i + 2 < len(parts) else ""
                 headline_text = re.sub(r"<[^>]+>", "", heading_html).strip()
-                # Truncate body to ~4000 chars to keep section manageable
-                preview = body_chunk[:4000]
+                # Strip figure/img blocks before truncating — embedded base64 payloads
+                # can be hundreds of KB and cause the designer model to output garbled data
+                # when they're split mid-string by the 4000-char limit.
+                body_no_figs = _strip_figs(body_chunk)
+                preview = body_no_figs[:4000]
                 sections.append({
                     "index": idx,
                     "headline": headline_text,
                     "html": heading_html + preview,
-                    "truncated": len(body_chunk) > 4000,
+                    "truncated": len(body_no_figs) > 4000,
                 })
                 i += 3
             else:
@@ -558,9 +597,26 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
         section_end = m.end() + (next_h2.start() if next_h2 else len(html[m.end():]))
         original_section = html[m.start():section_end]
 
-        # The styled_html from the designer replaces the heading+first part of body;
-        # append back any tail content we didn't send (beyond 4000 chars)
-        tail = original_section[len(styled_html):] if len(original_section) > len(styled_html) else ""
+        # Re-inject figure/img blocks that were stripped before sending to the designer.
+        # Images are placed immediately after the closing </h2> tag.
+        orig_figs = ''.join(_FIG_RE.findall(original_section))
+        if orig_figs:
+            styled_html = re.sub(
+                r'</h2>',
+                lambda _m: _m.group(0) + orig_figs,
+                styled_html,
+                count=1,
+            )
+
+        # Tail: original body content beyond the 4000 figure-stripped-char boundary.
+        # We must map that boundary back to a position in the raw (un-stripped) body
+        # because figure blocks occupy zero stripped chars but many raw chars.
+        h2_end = re.search(r'</h2>', original_section)
+        body_start = h2_end.end() if h2_end else 0
+        body_raw = original_section[body_start:]
+        tail_offset = _raw_at_stripped(body_raw, 4000)
+        tail = body_raw[tail_offset:]
+
         html = html[:m.start()] + styled_html + tail + html[section_end:]
         p.write_text(html, encoding="utf-8")
         return {"patched": True, "index": index, "path": str(p)}
@@ -600,7 +656,7 @@ Scan all articles. For every "Image: /local/path" line collect:
 Ignore lines where the path does not start with "/" or a drive letter.
 
 ─── STEP 2 — call save_markdown ────────────────────────────────────────────
-filename: daily_news_{TODAY}.md
+filename: `daily_news_{TODAY}.md`  (use this exact string, no markdown formatting)
 Build the global document — paste ALL article content VERBATIM (including
 tables) but REMOVE every "Image: ..." line from the text:
 

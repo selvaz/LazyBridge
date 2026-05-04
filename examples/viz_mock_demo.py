@@ -47,8 +47,9 @@ def _store_provider() -> dict:
     return dict(_store)
 
 
-def _write(key: str, value, agent: str) -> None:
+def _write(key: str, value, agent: str, sess: Session, run: str) -> None:
     _store[key] = {"value": value, "agent": agent, "ts": time.time()}
+    sess.emit(EventType.STORE_WRITE, {"agent_name": agent, "key": key, "value": str(value)[:500]}, run_id=run)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +154,7 @@ def _emit_planner(sess: Session, run: str, query: str) -> str:
         "agent_name": "planner", "model": "claude-opus-4-7", "step": 3,
         "content": plan_out, "usage": {"input_tokens": 220, "output_tokens": 52},
     }, run_id=run)
-    _write("research_plan", plan_out, "planner")
+    _write("research_plan", plan_out, "planner", sess, run)
     sess.emit(EventType.AGENT_FINISH, {"agent_name": "planner", "result": plan_out}, run_id=run)
     return plan_out
 
@@ -303,7 +304,7 @@ def _emit_parallel_research(sess: Session, run: str, plan: str) -> None:
         "content": sub_result,
         "usage": {"input_tokens": 152, "output_tokens": 28},
     }, run_id=run)
-    _write("verification_result", sub_result, "sub_researcher")
+    _write("verification_result", sub_result, "sub_researcher", sess, run)
     sess.emit(EventType.AGENT_FINISH, {
         "agent_name": "sub_researcher", "result": sub_result,
     }, run_id=run)
@@ -342,14 +343,14 @@ def _emit_parallel_research(sess: Session, run: str, plan: str) -> None:
         "agent_name": "researcher_a", "model": "claude-haiku-4-5", "step": 3,
         "content": ra_out, "usage": {"input_tokens": 288, "output_tokens": 52},
     }, run_id=run)
-    _write("research_a_findings", ra_out, "researcher_a")
+    _write("research_a_findings", ra_out, "researcher_a", sess, run)
     sess.emit(EventType.AGENT_FINISH, {"agent_name": "researcher_a", "result": ra_out}, run_id=run)
     p(0.1)
     sess.emit(EventType.MODEL_RESPONSE, {
         "agent_name": "researcher_b", "model": "claude-haiku-4-5", "step": 3,
         "content": rb_out, "usage": {"input_tokens": 305, "output_tokens": 58},
     }, run_id=run)
-    _write("research_b_findings", rb_out, "researcher_b")
+    _write("research_b_findings", rb_out, "researcher_b", sess, run)
     sess.emit(EventType.AGENT_FINISH, {"agent_name": "researcher_b", "result": rb_out}, run_id=run)
 
     return ra_out, rb_out
@@ -359,6 +360,8 @@ def _emit_merger(sess: Session, run: str, ra: str, rb: str) -> str:
     p = lambda s: time.sleep(s)
     combined = f"{ra} | {rb}"
     sess.emit(EventType.AGENT_START, {"agent_name": "merger", "task": combined}, run_id=run)
+    sess.emit(EventType.STORE_READ, {"agent_name": "merger", "key": "research_a_findings"}, run_id=run)
+    sess.emit(EventType.STORE_READ, {"agent_name": "merger", "key": "research_b_findings"}, run_id=run)
     p(0.4)
     sess.emit(EventType.MODEL_REQUEST, {
         "agent_name": "merger", "model": "claude-haiku-4-5", "step": 1,
@@ -400,7 +403,7 @@ def _emit_merger(sess: Session, run: str, ra: str, rb: str) -> str:
         "agent_name": "merger", "model": "claude-haiku-4-5", "step": 2,
         "content": merger_out, "usage": {"input_tokens": 320, "output_tokens": 61},
     }, run_id=run)
-    _write("merged_facts", merger_out, "merger")
+    _write("merged_facts", merger_out, "merger", sess, run)
     sess.emit(EventType.AGENT_FINISH, {"agent_name": "merger", "result": merger_out}, run_id=run)
     return merger_out
 
@@ -408,6 +411,7 @@ def _emit_merger(sess: Session, run: str, ra: str, rb: str) -> str:
 def _emit_writer(sess: Session, run: str, facts: str) -> None:
     p = lambda s: time.sleep(s)
     sess.emit(EventType.AGENT_START, {"agent_name": "writer", "task": facts}, run_id=run)
+    sess.emit(EventType.STORE_READ, {"agent_name": "writer", "key": "merged_facts"}, run_id=run)
     p(0.4)
     sess.emit(EventType.MODEL_REQUEST, {
         "agent_name": "writer", "model": "claude-haiku-4-5", "step": 1,
@@ -435,7 +439,7 @@ def _emit_writer(sess: Session, run: str, facts: str) -> None:
         "agent_name": "writer", "name": "format_text",
         "result": "Formatted. Word count: 89. Readability score: A.",
     }, run_id=run)
-    _write("final_brief", final, "writer")
+    _write("final_brief", final, "writer", sess, run)
     sess.emit(EventType.AGENT_FINISH, {"agent_name": "writer", "result": final}, run_id=run)
 
 

@@ -15,6 +15,9 @@ export const state = {
   agentTasks: new Map(),    // agent name -> last task string (from agent_start events)
   pipelineTask: null,       // first task seen — shown in START node inspector
   pipelineOutputs: new Map(), // agent name -> result string (from agent_finish events)
+  storeProvenance: new Map(),  // key -> {agent: name, ts: number}
+  memoryEntries: new Map(),    // agent_name -> [{key, value, ts}]
+  sessionInfo: {},             // {session_id, run_id, mode}
 };
 
 const EVENTS_CAP = 5000;

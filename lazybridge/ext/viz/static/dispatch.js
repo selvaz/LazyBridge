@@ -3,7 +3,10 @@
 // through the timeline re-fires the visual gesture for that event.
 
 import { state, on, pushEvent, emit } from "/static/state.js";
-import { pulse, fireHitRing, setInFlight, flashError, ensureToolNode, refreshNodeLabels } from "/static/graph.js";
+import {
+  pulse, flashLink, fireHitRing, setInFlight, flashError,
+  ensureToolNode, ensureStoreEdge, refreshNodeLabels,
+} from "/static/graph.js";
 import { getJSON } from "/static/auth.js";
 
 const COLOR = {
@@ -35,23 +38,56 @@ function _gesture(ev, { replay = false } = {}) {
   const agent = ev.agent_name;
 
   switch (t) {
-    case "agent_start":
+    case "agent_start": {
       if (agent) fireHitRing(agent, COLOR.store);
+      if (ev.session_id) state.sessionInfo.session_id = ev.session_id;
       if (agent && ev.task) {
         state.agentTasks.set(agent, ev.task);
         if (!state.pipelineTask) state.pipelineTask = ev.task;
         refreshNodeLabels();
       }
+      // Pulse along incoming context edges — shows context arriving at this agent
+      if (agent && !replay) {
+        const dstNode = state.nodes.find(n => n.name === agent || n.id === agent);
+        if (dstNode) {
+          const inEdges = state.links.filter(l => {
+            const tId = typeof l.target === "object" ? l.target.id : l.target;
+            const k = l.kind || "";
+            return tId === dstNode.id && (k === "context" || k === "router");
+          });
+          for (const edge of inEdges) {
+            const srcId = typeof edge.source === "object" ? edge.source.id : edge.source;
+            if (!srcId.startsWith("__")) pulse(srcId, dstNode.id, COLOR.store);
+          }
+        }
+      }
       break;
+    }
 
-    case "agent_finish":
+    case "agent_finish": {
       if (agent) fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
       if (ev.error && agent) flashError(agent);
       if (agent && (ev.result != null)) state.pipelineOutputs.set(agent, ev.result);
+      // Pulse along every outgoing context/router edge
+      if (agent && !ev.error) {
+        const srcNode = state.nodes.find(n => n.name === agent || n.id === agent);
+        if (srcNode) {
+          const outEdges = state.links.filter(l => {
+            const s = typeof l.source === "object" ? l.source.id : l.source;
+            const k = l.kind || "";
+            return s === srcNode.id && (k === "context" || k === "router" || k === "flow");
+          });
+          for (const edge of outEdges) {
+            const dstId = typeof edge.target === "object" ? edge.target.id : edge.target;
+            if (!dstId.startsWith("__")) pulse(srcNode.id, dstId, COLOR.agent);
+          }
+        }
+      }
       break;
+    }
 
     case "model_request":
-      if (agent) setInFlight(agent, !replay); // don't leave in-flight on replay
+      if (agent) setInFlight(agent, !replay);
       if (agent && replay) fireHitRing(agent, COLOR.think);
       break;
 
@@ -93,6 +129,50 @@ function _gesture(ev, { replay = false } = {}) {
     case "hil_decision":
       if (agent) fireHitRing(agent, COLOR.router);
       break;
+
+    case "store_write": {
+      const key = ev.key, val = ev.value;
+      if (agent && key) {
+        state.storeProvenance.set(key, { agent, ts: ev.ts || performance.now() / 1000 });
+        ensureStoreEdge(agent, "__STORE__", "store_write");
+        pulse(agent, "__STORE__", COLOR.store);
+        emit("storeProvenanceChanged");
+      }
+      refreshStore();
+      break;
+    }
+
+    case "store_read": {
+      const key = ev.key;
+      if (agent && key) {
+        ensureStoreEdge("__STORE__", agent, "store_read");
+        pulse("__STORE__", agent, COLOR.store);
+        // Highlight the write edge from the original writer too
+        const prov = state.storeProvenance.get(key);
+        if (prov && prov.agent !== agent) {
+          flashLink(prov.agent, "__STORE__");
+        }
+      }
+      break;
+    }
+
+    case "memory_write": {
+      if (agent && ev.key) {
+        if (!state.memoryEntries.has(agent)) state.memoryEntries.set(agent, []);
+        const entries = state.memoryEntries.get(agent);
+        const idx = entries.findIndex(e => e.key === ev.key);
+        const entry = { key: ev.key, value: ev.value, ts: ev.ts };
+        if (idx >= 0) entries[idx] = entry; else entries.push(entry);
+        fireHitRing(agent, COLOR.think);
+        emit("memoryChanged");
+      }
+      break;
+    }
+
+    case "memory_read": {
+      if (agent) fireHitRing(agent, COLOR.think);
+      break;
+    }
   }
 }
 

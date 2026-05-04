@@ -475,11 +475,11 @@ class GoogleProvider(BaseProvider):
                         include_server_side_tool_invocations=True,
                     )
                 )
-            except (AttributeError, TypeError):
-                _logger.debug(
-                    "Google SDK does not support FunctionCallingConfig."
-                    "include_server_side_tool_invocations — mixed native+custom tools"
-                    " may fail with 400 INVALID_ARGUMENT on this SDK version."
+            except Exception:
+                _logger.warning(
+                    "Google SDK does not support FunctionCallingConfig"
+                    ".include_server_side_tool_invocations — skipping tool_config."
+                    " Mixed native+custom tools may fail with 400 INVALID_ARGUMENT."
                 )
 
         # Google Maps: lat/lng goes in ToolConfig.retrieval_config, not inside GoogleMaps()

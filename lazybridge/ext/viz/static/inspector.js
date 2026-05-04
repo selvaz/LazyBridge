@@ -37,14 +37,33 @@ export function initInspector() {
     document.getElementById("store-badge").textContent = Object.keys(state.store || {}).length;
     if (activeTab === "store") renderStore();
     // If node card is open, refresh its store section
-    if (activeTab === "node" && state.selectedNode) renderNodeCard(state.selectedNode);
+    if (activeTab === "node" && state.selectedNode) {
+      _refreshNodeTab(state.selectedNode);
+    }
+  });
+  on("storeProvenanceChanged", () => {
+    if (activeTab === "node" && state.selectedNode?.id === "__STORE__") renderStoreCard();
+  });
+  on("memoryChanged", () => {
+    if (activeTab === "node" && state.selectedNode) {
+      _refreshNodeTab(state.selectedNode);
+    }
   });
   on("nodeClick", (n) => {
     switchTab("node");
     if (n.id === "__START__") renderStartCard();
     else if (n.id === "__END__") renderEndCard();
+    else if (n.id === "__STORE__") renderStoreCard();
     else renderNodeCard(n);
   });
+}
+
+function _refreshNodeTab(node) {
+  if (!node) return;
+  if (node.id === "__START__") renderStartCard();
+  else if (node.id === "__END__") renderEndCard();
+  else if (node.id === "__STORE__") renderStoreCard();
+  else renderNodeCard(node);
 }
 
 function switchTab(t) {
@@ -55,10 +74,11 @@ function switchTab(t) {
   } else if (t === "store") {
     renderStore();
   } else if (t === "node") {
-    if (!state.selectedNode) { body.innerHTML = `<div class="placeholder">Click any node on the graph.</div>`; return; }
-    if (state.selectedNode.id === "__START__") renderStartCard();
-    else if (state.selectedNode.id === "__END__") renderEndCard();
-    else renderNodeCard(state.selectedNode);
+    if (!state.selectedNode) {
+      body.innerHTML = `<div class="placeholder">Click any node on the graph.</div>`;
+      return;
+    }
+    _refreshNodeTab(state.selectedNode);
   }
 }
 
@@ -139,6 +159,35 @@ function renderEndCard() {
     </div>`;
 }
 
+// ---- Store node card -----------------------------------------------------
+
+function renderStoreCard() {
+  const entries = Object.entries(state.store || {});
+  body.innerHTML = `<div class="agent-card">
+    <div class="ac-nameplate">
+      <span class="ac-type-icon" style="color:var(--accent-store);font-size:22px">🗄</span>
+      <div>
+        <div class="ac-name" style="color:var(--accent-store)">Shared Store</div>
+        <div class="ac-badges"><span class="ac-badge" style="color:var(--accent-store)">${entries.length} keys</span></div>
+      </div>
+    </div>
+    ${entries.length ? `
+    <div class="ac-section">
+      <div class="ac-section-title">ENTRIES</div>
+      ${entries.map(([k, v]) => {
+        const prov = state.storeProvenance.get(k);
+        const val  = typeof v === "object" && v?.value !== undefined ? v.value : v;
+        const writer = prov?.agent || (typeof v === "object" ? v.agent : null);
+        return `<div style="margin-bottom:10px;padding:8px;background:rgba(80,250,123,0.04);border-left:2px solid var(--accent-store);border-radius:0 6px 6px 0">
+          <div style="font-size:9px;font-weight:700;color:var(--accent-store);margin-bottom:3px">${escapeHtml(k)}</div>
+          ${writer ? `<div style="font-size:9px;color:var(--text-dim);margin-bottom:4px">written by ${escapeHtml(writer)}</div>` : ""}
+          <pre style="font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin:0;max-height:100px;overflow:auto">${escapeHtml(String(val).slice(0, 400))}</pre>
+        </div>`;
+      }).join("")}
+    </div>` : `<div class="ac-section"><div class="placeholder">Store is empty.</div></div>`}
+  </div>`;
+}
+
 // ---- Agent card (D&D character sheet) ------------------------------------
 
 function renderNodeCard(node) {
@@ -165,10 +214,28 @@ function renderNodeCard(node) {
       return srcNode?.name || src;
     });
 
+  // Store keys read by this agent (from store_read edges)
+  const storeReads = state.links
+    .filter(l => {
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      const tgt = typeof l.target === "object" ? l.target.id : l.target;
+      return s === "__STORE__" && tgt === node.id;
+    })
+    .map(l => l.label || l.kind || "?");
+
   // Store contributions (entries where .agent matches this node's name)
   const storeContribs = Object.entries(state.store || {})
     .filter(([, v]) => v && typeof v === "object" && v.agent === node.name)
     .map(([k, v]) => ({ key: k, ts: v.ts }));
+
+  // Also check provenance for keys written by this agent
+  const provenanceWrites = [...state.storeProvenance.entries()]
+    .filter(([, prov]) => prov.agent === node.name)
+    .map(([k]) => k)
+    .filter(k => !storeContribs.find(c => c.key === k));
+
+  // Memory entries for this agent
+  const memEntries = state.memoryEntries.get(node.name) || [];
 
   // Task assigned to this agent (from agent_start events)
   const task = state.agentTasks.get(node.name) || state.agentTasks.get(node.id);
@@ -240,17 +307,44 @@ function renderNodeCard(node) {
         </div>
       </div>` : ""}
 
-      ${storeContribs.length ? `
+      ${storeContribs.length || provenanceWrites.length ? `
       <div class="ac-section">
-        <div class="ac-section-title">STORE CONTRIBUTIONS (${storeContribs.length})</div>
+        <div class="ac-section-title">STORE WRITES (${storeContribs.length + provenanceWrites.length})</div>
         <div class="ac-store-list">
           ${storeContribs.map(c => `
             <div class="ac-store-item" title="${escapeHtml(c.key)}">
-              <span class="ac-store-dot">●</span>
+              <span class="ac-store-dot" style="color:var(--accent-store)">●</span>
               <span class="ac-store-key">${escapeHtml(c.key)}</span>
               ${c.ts ? `<span class="ac-store-ts">${new Date(c.ts * 1000).toLocaleTimeString()}</span>` : ""}
             </div>`).join("")}
+          ${provenanceWrites.map(k => `
+            <div class="ac-store-item">
+              <span class="ac-store-dot" style="color:var(--accent-store)">●</span>
+              <span class="ac-store-key">${escapeHtml(k)}</span>
+            </div>`).join("")}
         </div>
+      </div>` : ""}
+
+      ${storeReads.length ? `
+      <div class="ac-section">
+        <div class="ac-section-title">STORE READS</div>
+        <div class="ac-store-list">
+          ${storeReads.map(k => `
+            <div class="ac-store-item">
+              <span class="ac-store-dot" style="color:var(--accent-store);opacity:0.5">○</span>
+              <span class="ac-store-key">${escapeHtml(k)}</span>
+            </div>`).join("")}
+        </div>
+      </div>` : ""}
+
+      ${memEntries.length ? `
+      <div class="ac-section">
+        <div class="ac-section-title">MEMORY (${memEntries.length})</div>
+        ${memEntries.map(e => `
+          <div style="margin-bottom:8px;padding:6px 8px;background:rgba(179,136,255,0.05);border-left:2px solid var(--accent-think, #b388ff);border-radius:0 4px 4px 0">
+            <div style="font-size:9px;font-weight:700;color:var(--accent-think,#b388ff);margin-bottom:2px">${escapeHtml(e.key)}</div>
+            <pre style="font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin:0;max-height:80px;overflow:auto">${escapeHtml(String(e.value ?? "").slice(0, 300))}</pre>
+          </div>`).join("")}
       </div>` : ""}
 
       ${!isActive && !tools.length && !task ? `

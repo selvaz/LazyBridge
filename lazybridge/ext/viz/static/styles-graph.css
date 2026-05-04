@@ -11,6 +11,19 @@
 #canvas .link.router  { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
 #canvas .link.flow    { stroke-dasharray: 3 6; stroke: rgba(140, 170, 220, 0.15); stroke-width: 1; }
 
+/* Store-type links */
+#canvas .link.store_write { stroke: rgba(80, 250, 123, 0.30); stroke-dasharray: 2 5; }
+#canvas .link.store_read  { stroke: rgba(80, 250, 123, 0.20); stroke-dasharray: 1 7; }
+
+/* Link flash animation */
+#canvas .link.link-flash {
+  animation: linkFlash 900ms ease-out forwards;
+}
+@keyframes linkFlash {
+  0%   { stroke-opacity: 0.9; stroke-width: 3; }
+  100% { stroke-opacity: 0.25; stroke-width: 1.4; }
+}
+
 /* ---- IO nodes (START / END) -------------------------------------------- */
 
 #canvas .node.io .io-bg {
@@ -210,6 +223,22 @@
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+/* ---- Store cylinder node ----------------------------------------------- */
+
+#canvas .node.store .store-body {
+  fill: rgba(8, 28, 18, 0.90);
+  stroke: var(--accent-store);
+  stroke-width: 2;
+  filter: url(#glow);
+}
+#canvas .node.store .store-cap {
+  stroke: var(--accent-store);
+  stroke-width: 1.5;
+}
+#canvas .node.store .store-cap-top { fill: rgba(40, 90, 55, 0.85); }
+#canvas .node.store .store-cap-bot { fill: rgba(20, 55, 35, 0.80); }
+#canvas .node.store .node-label { fill: var(--accent-store); font-weight: 700; font-size: 10px; }
 
 /* ---- Error flash -------------------------------------------------------- */
 
