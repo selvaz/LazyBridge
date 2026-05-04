@@ -574,7 +574,9 @@ def test_deepseek_apply_thinking_params_no_op_when_thinking_disabled():
     req = _user_request("hi")
     params: dict = {"temperature": 0.5}
     p._apply_thinking_params(params, "deepseek-v4-flash", req)
-    assert "extra_body" not in params
+    # V4 thinking-capable models get an explicit disable to prevent the API
+    # from returning reasoning_content (which would break multi-turn tool calls).
+    assert params["extra_body"] == {"thinking": {"type": "disabled"}}
     assert params["temperature"] == 0.5
 
 

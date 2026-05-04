@@ -45,9 +45,7 @@ def quarto_version() -> str | None:
     if not path:
         return None
     try:
-        result = subprocess.run(
-            [path, "--version"], capture_output=True, text=True, timeout=10, check=False
-        )
+        result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10, check=False)
     except (subprocess.SubprocessError, OSError):
         return None
     if result.returncode != 0:

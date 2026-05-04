@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import threading
-import time
 from urllib.parse import urlparse
 
 import pytest

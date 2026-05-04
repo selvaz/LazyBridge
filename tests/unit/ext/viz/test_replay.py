@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from lazybridge.ext.viz.exporter import EventHub
 from lazybridge.ext.viz.replay import ReplayController, reconstruct_graph
 

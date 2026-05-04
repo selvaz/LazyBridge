@@ -109,7 +109,7 @@ class TestQmdRendering:
                 provenance=Provenance(step_name="s"),
             )
         )
-        report = bus.assemble(title="Title With \"Quote\"")
+        report = bus.assemble(title='Title With "Quote"')
         qmd = render_report_to_qmd(report, bibliography_path="refs.json")
         assert qmd.startswith("---\n")
         assert 'title: "Title With \\"Quote\\""' in qmd

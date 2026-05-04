@@ -55,7 +55,7 @@ def render_table_section(section: TableSection) -> str:
     parts: list[str] = []
     if section.caption.strip():
         parts.append(f"<p><strong>{escape_html(section.caption)}</strong></p>")
-    parts.append('<table>')
+    parts.append("<table>")
     parts.append("<thead><tr>")
     for h in section.headers:
         parts.append(f"<th>{escape_html(h)}</th>")

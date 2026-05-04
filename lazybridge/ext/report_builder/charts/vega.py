@@ -23,6 +23,7 @@ from uuid import uuid4
 from lazybridge.ext.report_builder.charts import RenderedChart
 from lazybridge.ext.report_builder.fragments import ChartSpec
 
+
 def validate(spec: dict) -> list[str]:
     """Return a list of human-readable problems with ``spec``.
 
@@ -96,7 +97,7 @@ def render(chart_spec: ChartSpec, *, raster: bool = False) -> RenderedChart:
         # PNG only when an explicit raster is needed.
         try:
             svg = vl.vegalite_to_svg(spec)
-        except Exception as exc:  # noqa: BLE001  — surface any vl-convert failure
+        except Exception as exc:
             raise RuntimeError(f"vl_convert.vegalite_to_svg failed: {exc}") from exc
         # PNG is best-effort: not every spec rasterizes cleanly; we still
         # have the SVG as the lossless option, so we treat PNG failures as

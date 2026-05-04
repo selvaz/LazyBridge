@@ -75,8 +75,7 @@ def require_vl_convert():
         return vl_convert
     except ImportError:
         raise ImportError(
-            "vl-convert-python is required for Vega-Lite chart rendering. "
-            "Run: pip install lazybridge[report-charts]"
+            "vl-convert-python is required for Vega-Lite chart rendering. Run: pip install lazybridge[report-charts]"
         ) from None
 
 
@@ -89,8 +88,7 @@ def require_plotly():
         return pio
     except ImportError:
         raise ImportError(
-            "plotly is required for Plotly chart rendering. "
-            "Run: pip install lazybridge[report-charts]"
+            "plotly is required for Plotly chart rendering. Run: pip install lazybridge[report-charts]"
         ) from None
 
 
@@ -102,8 +100,7 @@ def require_habanero():
         return Crossref
     except ImportError:
         raise ImportError(
-            "habanero is required for Crossref citation enrichment. "
-            "Run: pip install lazybridge[report-citations]"
+            "habanero is required for Crossref citation enrichment. Run: pip install lazybridge[report-citations]"
         ) from None
 
 
@@ -115,8 +112,7 @@ def require_httpx():
         return httpx
     except ImportError:
         raise ImportError(
-            "httpx is required for OpenAlex citation lookup. "
-            "Run: pip install lazybridge[report-citations]"
+            "httpx is required for OpenAlex citation lookup. Run: pip install lazybridge[report-citations]"
         ) from None
 
 
@@ -141,8 +137,7 @@ def require_python_docx():
         return docx
     except ImportError:
         raise ImportError(
-            "python-docx is required for DOCX post-processing. "
-            "Run: pip install lazybridge[report-fallback]"
+            "python-docx is required for DOCX post-processing. Run: pip install lazybridge[report-fallback]"
         ) from None
 
 

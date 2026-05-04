@@ -15,11 +15,10 @@ no LLM in the loop on the rendering path.
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
 from lazybridge.ext.report_builder.assemblers import AssembledReport, RenderedSection
 from lazybridge.ext.report_builder.fragments import Fragment
-
 
 # ---------------------------------------------------------------------------
 # Fragment-level rendering
@@ -72,9 +71,7 @@ def render_fragment_to_qmd(fragment: Fragment) -> str:
         if fragment.table is None:
             parts.append("<!-- empty table fragment -->")
         else:
-            parts.append(
-                _table_to_pipe(fragment.table.headers, fragment.table.rows, fragment.table.caption)
-            )
+            parts.append(_table_to_pipe(fragment.table.headers, fragment.table.rows, fragment.table.caption))
     elif fragment.kind == "chart":
         if fragment.chart is None:
             parts.append("<!-- empty chart fragment -->")
@@ -150,9 +147,7 @@ def _render_provenance_appendix(report: AssembledReport) -> str:
     rows: list[list[str]] = []
     for i, p in enumerate(report.provenance_log, start=1):
         tokens = (
-            f"{p.tokens_in or 0}/{p.tokens_out or 0}"
-            if (p.tokens_in is not None or p.tokens_out is not None)
-            else "—"
+            f"{p.tokens_in or 0}/{p.tokens_out or 0}" if (p.tokens_in is not None or p.tokens_out is not None) else "—"
         )
         rows.append(
             [

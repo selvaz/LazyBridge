@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from unittest.mock import patch
 
 from lazybridge.ext.report_builder import Citation
@@ -76,8 +75,10 @@ class TestOpenalexToCsl:
 class TestEnrichFromUrl:
     def test_falls_back_to_minimal_when_lookups_fail(self):
         # Make both lookups return None so we exercise the fallback path.
-        with patch("lazybridge.ext.report_builder.citations._crossref_lookup", return_value=None), \
-             patch("lazybridge.ext.report_builder.citations._openalex_lookup", return_value=None):
+        with (
+            patch("lazybridge.ext.report_builder.citations._crossref_lookup", return_value=None),
+            patch("lazybridge.ext.report_builder.citations._openalex_lookup", return_value=None),
+        ):
             store = Store(db=None)
             cit = enrich_from_url("https://example.com/abc", store=store)
             assert isinstance(cit, Citation)
@@ -102,12 +103,15 @@ class TestEnrichFromUrl:
         ):
             first = enrich_from_url(url, store=store)
         # Now wipe the lookup and confirm we still get the result back from cache.
-        with patch(
-            "lazybridge.ext.report_builder.citations._crossref_lookup",
-            return_value=None,
-        ), patch(
-            "lazybridge.ext.report_builder.citations._openalex_lookup",
-            return_value=None,
+        with (
+            patch(
+                "lazybridge.ext.report_builder.citations._crossref_lookup",
+                return_value=None,
+            ),
+            patch(
+                "lazybridge.ext.report_builder.citations._openalex_lookup",
+                return_value=None,
+            ),
         ):
             second = enrich_from_url(url, store=store)
         assert second.title == first.title == "Cached"

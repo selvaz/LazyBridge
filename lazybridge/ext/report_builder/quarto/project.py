@@ -7,16 +7,36 @@ generate it programmatically so users don't have to hand-write it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 # Bootswatch themes bundled with Quarto.  We default to ``cosmo`` which
 # is clean, conservative, and renders well in both light + print.
 _VALID_HTML_THEMES = {
-    "cosmo", "flatly", "journal", "litera", "lumen", "lux", "materia",
-    "minty", "morph", "pulse", "quartz", "sandstone", "simplex", "sketchy",
-    "slate", "solar", "spacelab", "superhero", "united", "vapor", "yeti",
-    "zephyr", "cyborg", "darkly",
+    "cosmo",
+    "flatly",
+    "journal",
+    "litera",
+    "lumen",
+    "lux",
+    "materia",
+    "minty",
+    "morph",
+    "pulse",
+    "quartz",
+    "sandstone",
+    "simplex",
+    "sketchy",
+    "slate",
+    "solar",
+    "spacelab",
+    "superhero",
+    "united",
+    "vapor",
+    "yeti",
+    "zephyr",
+    "cyborg",
+    "darkly",
 }
 
 
@@ -40,9 +60,9 @@ def build_quarto_yml(
     if theme not in _VALID_HTML_THEMES:
         # Don't reject — pass it through so users can supply custom themes;
         # just warn-via-comment in the file so a misspelling is debuggable.
-        theme_line = f'    theme: {theme}  # NOTE: not in our known Bootswatch list'
+        theme_line = f"    theme: {theme}  # NOTE: not in our known Bootswatch list"
     else:
-        theme_line = f'    theme: {theme}'
+        theme_line = f"    theme: {theme}"
 
     fmt_lines: list[str] = []
     if "html" in formats:
@@ -58,8 +78,8 @@ def build_quarto_yml(
         fmt_lines.append("  typst:")
         fmt_lines.append("    toc: true")
         fmt_lines.append("    margin:")
-        fmt_lines.append('      x: 1.25in')
-        fmt_lines.append('      y: 1in')
+        fmt_lines.append("      x: 1.25in")
+        fmt_lines.append("      y: 1in")
     if "docx" in formats:
         fmt_lines.append("  docx:")
         fmt_lines.append("    toc: true")

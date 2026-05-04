@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from lazybridge.ext.report_builder import FragmentBus, fragment_tools

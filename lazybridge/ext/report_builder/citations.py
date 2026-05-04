@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from lazybridge.ext.report_builder.fragments import Citation
@@ -70,7 +70,7 @@ def _crossref_lookup(doi: str) -> dict[str, Any] | None:
         cr = Crossref(mailto="lazybridge-citations@users.noreply.github.com")
         result = cr.works(ids=doi)
         return result.get("message") if isinstance(result, dict) else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -100,7 +100,7 @@ def _openalex_lookup(query: str) -> dict[str, Any] | None:
                 payload = r.json()
                 results = payload.get("results", [])
                 return results[0] if results else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     return None
 
@@ -156,7 +156,9 @@ def _from_csl(csl: dict[str, Any], fallback_url: str | None) -> Citation:
     title = csl.get("title", "Untitled")
     issued = (csl.get("issued") or {}).get("date-parts") or [[None]]
     year = issued[0][0] if issued and issued[0] else None
-    authors = [a.get("literal") or " ".join(filter(None, [a.get("given"), a.get("family")])) for a in csl.get("author", [])]
+    authors = [
+        a.get("literal") or " ".join(filter(None, [a.get("given"), a.get("family")])) for a in csl.get("author", [])
+    ]
     authors = [a for a in authors if a]
     return Citation(
         key=csl.get("id") or _safe_key(title, year),
@@ -165,7 +167,7 @@ def _from_csl(csl: dict[str, Any], fallback_url: str | None) -> Citation:
         authors=authors,
         year=year if isinstance(year, int) else None,
         doi=csl.get("DOI"),
-        accessed=datetime.now(timezone.utc),
+        accessed=datetime.now(UTC),
         csl=csl,
     )
 
@@ -203,7 +205,7 @@ def enrich_from_url(url: str, *, store: Store | None = None) -> Citation:
             key=_safe_key(url, None),
             title=url,
             url=url,
-            accessed=datetime.now(timezone.utc),
+            accessed=datetime.now(UTC),
         )
     else:
         cit = _from_csl(csl, fallback_url=url)

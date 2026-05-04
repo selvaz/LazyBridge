@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from lazybridge.session import EventType, Session
 from lazybridge.ext.viz import Visualizer
+from lazybridge.session import EventType, Session
 
 
 def test_live_mode_wires_exporter_and_serves(tmp_path):

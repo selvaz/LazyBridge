@@ -13,7 +13,6 @@ Two construction paths:
 
 from __future__ import annotations
 
-import threading
 import time
 import webbrowser
 from typing import TYPE_CHECKING, Any

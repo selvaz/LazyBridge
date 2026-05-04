@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-import time
 from typing import Any
 
 from lazybridge.ext.viz._normalizer import normalise_event

@@ -31,7 +31,7 @@ class TestBlackboard:
         # Alphabetical by section id (None first if any).
         assert section_ids == ["cn", "in", "us"]
         # us bucket has both us fragments.
-        us = [s for s in out.sections if s.section_id == "us"][0]
+        us = next(s for s in out.sections if s.section_id == "us")
         assert len(us.fragments) == 2
 
     def test_orders_within_section_by_hint_then_time(self):
@@ -70,7 +70,7 @@ class TestBlackboard:
         keys = {c.key for c in out.citations}
         assert keys == {"k1", "k2"}
         # First-occurrence wins.
-        k1 = [c for c in out.citations if c.key == "k1"][0]
+        k1 = next(c for c in out.citations if c.key == "k1")
         assert k1.title == "T1"
 
     def test_metadata_assembler_marker(self):

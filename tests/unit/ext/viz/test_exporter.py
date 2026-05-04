@@ -51,7 +51,7 @@ def test_unsubscribe_stops_delivery():
     hub.publish({"event_type": "x"})
     try:
         q.get_nowait()
-        assert False, "should be empty"
+        raise AssertionError("should be empty")
     except queue.Empty:
         pass
 

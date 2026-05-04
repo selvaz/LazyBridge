@@ -11,7 +11,7 @@ markdown_mod = pytest.importorskip("markdown")
 bleach_mod = pytest.importorskip("bleach")
 jinja2_mod = pytest.importorskip("jinja2")
 
-from lazybridge.ext.report_builder.renderer import (  # noqa: E402
+from lazybridge.ext.report_builder.renderer import (
     VALID_TEMPLATES,
     VALID_THEMES,
     _word_overlap,
@@ -23,7 +23,6 @@ from lazybridge.ext.report_builder.renderer import (  # noqa: E402
     load_theme_css,
     markdown_to_clean_html,
 )
-
 
 # ---------------------------------------------------------------------------
 # escape_html
@@ -253,7 +252,12 @@ class TestBuildHtmlDocumentJinja2:
         assert "report-shell" in html
 
     def test_executive_summary_has_meta_chip(self):
-        meta = {"generated_at": "2026-05-01", "theme": "financial", "template": "executive_summary", "charts_embedded": 2}
+        meta = {
+            "generated_at": "2026-05-01",
+            "theme": "financial",
+            "template": "executive_summary",
+            "charts_embedded": 2,
+        }
         html = build_html_document_jinja2("<p>x</p>", "T", "", "executive_summary", meta)
         assert "meta-chip" in html
         assert "2026-05-01" in html

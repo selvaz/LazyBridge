@@ -48,10 +48,10 @@ class EventType(StrEnum):
     # ``{"agent_name": ..., "kind": "continue"|"retry"|"store"|"tool"|"input",
     #    "command": "<raw repl input>", "result": "<brief>"}``.
     HIL_DECISION = "hil_decision"
-    STORE_WRITE  = "store_write"
-    STORE_READ   = "store_read"
+    STORE_WRITE = "store_write"
+    STORE_READ = "store_read"
     MEMORY_WRITE = "memory_write"
-    MEMORY_READ  = "memory_read"
+    MEMORY_READ = "memory_read"
 
 
 #: Events the ``"hybrid"`` back-pressure policy considers critical.  An

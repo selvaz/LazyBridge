@@ -25,12 +25,11 @@ Design notes
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
-
 
 # ---------------------------------------------------------------------------
 # Citation
@@ -87,9 +86,7 @@ class Citation(BaseModel):
         if self.doi:
             record["DOI"] = self.doi
         if self.accessed:
-            record["accessed"] = {
-                "date-parts": [[self.accessed.year, self.accessed.month, self.accessed.day]]
-            }
+            record["accessed"] = {"date-parts": [[self.accessed.year, self.accessed.month, self.accessed.day]]}
         return record
 
 
@@ -115,7 +112,7 @@ class Provenance(BaseModel):
     tokens_out: int | None = None
     cost_usd: float | None = None
     latency_ms: float | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +181,7 @@ class Fragment(BaseModel):
     # Per-fragment metadata.
     citations: list[Citation] = Field(default_factory=list)
     provenance: Provenance | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @model_validator(mode="after")
     def _check_payload_matches_kind(self) -> Fragment:

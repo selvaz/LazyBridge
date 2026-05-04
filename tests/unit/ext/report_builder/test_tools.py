@@ -47,7 +47,16 @@ class TestReportToolsFactory:
 
     def test_schema_has_expected_params(self, tmp_path):
         props = report_tools(tmp_path)[0].definition().parameters["properties"]
-        for param in ("title", "theme", "template", "sections", "markdown_path", "charts", "output_filename", "output_format"):
+        for param in (
+            "title",
+            "theme",
+            "template",
+            "sections",
+            "markdown_path",
+            "charts",
+            "output_filename",
+            "output_format",
+        ):
             assert param in props, f"Missing param: {param}"
 
     def test_output_dir_created_on_first_call(self, tmp_path):
@@ -76,9 +85,7 @@ class TestGenerateReportErrors:
         assert "sections" in result["message"] or "markdown_path" in result["message"]
 
     def test_missing_markdown_file_returns_error(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(tmp_path / "nonexistent.md"), title="T"
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(tmp_path / "nonexistent.md"), title="T")
         assert result["error"] is True
         assert result["type"] == "FileNotFoundError"
 
@@ -102,9 +109,7 @@ class TestGenerateReportErrors:
     def test_unknown_output_format_returns_error(self, tmp_path):
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md), title="T", output_format="docx"
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", output_format="docx")
         assert result["error"] is True
 
     def test_invalid_chart_spec_returns_error(self, tmp_path):
@@ -114,9 +119,7 @@ class TestGenerateReportErrors:
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
         # missing required 'title' and 'path' fields
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md), title="T", charts=[{"name": "x"}]
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", charts=[{"name": "x"}])
         assert result["error"] is True
 
     def test_missing_chart_png_returns_error(self, tmp_path):
@@ -220,9 +223,7 @@ class TestMarkdownPathFlow:
     def test_custom_output_filename(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("# T", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md), title="T", output_filename="custom_name.html"
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", output_filename="custom_name.html")
         assert not result.get("error")
         assert Path(result["html_path"]).name == "custom_name.html"
 
@@ -251,12 +252,14 @@ class TestSectionsFlow:
     def test_table_section_renders(self, tmp_path):
         result = report_tools(tmp_path)[0].func(
             title="T",
-            sections=[{
-                "type": "table",
-                "caption": "Sales Summary",
-                "headers": ["Region", "Revenue"],
-                "rows": [["EMEA", "1.2M"], ["APAC", "0.9M"]],
-            }],
+            sections=[
+                {
+                    "type": "table",
+                    "caption": "Sales Summary",
+                    "headers": ["Region", "Revenue"],
+                    "rows": [["EMEA", "1.2M"], ["APAC", "0.9M"]],
+                }
+            ],
         )
         assert not result.get("error"), result.get("message")
         html = Path(result["html_path"]).read_text(encoding="utf-8")
@@ -340,17 +343,13 @@ class TestTemplateVariants:
     def test_deep_dive_contains_toc(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("## Revenue\n\nText.\n\n## Segments\n\nMore.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md), title="T", template="deep_dive"
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", template="deep_dive")
         html = Path(result["html_path"]).read_text(encoding="utf-8")
         assert "dd-toc" in html
 
     def test_executive_summary_contains_meta_chip(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("# Report\n\nContent.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md), title="T", template="executive_summary"
-        )
+        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", template="executive_summary")
         html = Path(result["html_path"]).read_text(encoding="utf-8")
         assert "meta-chip" in html

@@ -11,15 +11,16 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import queue as _queue
 import secrets
+import sys
 import threading
 import time
-import logging
-import sys
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from lazybridge.ext.viz.exporter import EventHub
@@ -56,12 +57,13 @@ class _QuietThreadingHTTPServer(ThreadingHTTPServer):
     delegate any other exception to the stdlib handler unchanged.
     """
 
-    def handle_error(self, request: Any, client_address: Any) -> None:  # noqa: D401
+    def handle_error(self, request: Any, client_address: Any) -> None:
         exc = sys.exc_info()[1]
         if exc is not None and _is_client_disconnect(exc):
             _log.debug("client %s disconnected: %s", client_address, exc)
             return
         super().handle_error(request, client_address)
+
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -90,7 +92,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     server_version = "LazyBridgeViz/1.0"
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:
         # Default BaseHTTPRequestHandler logging spams stderr with a
         # line per request which fights with the server's own console
         # output. The Visualizer prints a single banner; per-request
@@ -152,7 +154,7 @@ class _Handler(BaseHTTPRequestHandler):
     # GET routes
     # ------------------------------------------------------------------
 
-    def do_GET(self) -> None:  # noqa: N802 — stdlib API
+    def do_GET(self) -> None:
         url = urlparse(self.path)
         params = parse_qs(url.query)
         path = url.path
@@ -198,7 +200,7 @@ class _Handler(BaseHTTPRequestHandler):
     # POST routes — replay controls
     # ------------------------------------------------------------------
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         url = urlparse(self.path)
         params = parse_qs(url.query)
         if not self._auth_ok(params):
@@ -274,7 +276,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _sse_write_comment(self, comment: str) -> None:
-        self.wfile.write(f": {comment}\n\n".encode("utf-8"))
+        self.wfile.write(f": {comment}\n\n".encode())
         self.wfile.flush()
 
 

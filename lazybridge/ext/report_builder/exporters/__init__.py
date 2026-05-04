@@ -12,8 +12,9 @@ explicit ``"weasyprint"`` skips Quarto entirely.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Literal
 
 from lazybridge.ext.report_builder.assemblers import AssembledReport
 

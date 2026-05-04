@@ -21,14 +21,12 @@ Trade-offs vs the Quarto path:
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
 from lazybridge.ext.report_builder.assemblers import AssembledReport, RenderedSection
 from lazybridge.ext.report_builder.exporters import Exporter
 from lazybridge.ext.report_builder.fragments import Fragment
-
 
 # Map Bootswatch-ish names down to the existing 4 themes shipped in the
 # extension.  Anything we don't know stays as-is and the renderer raises
@@ -77,9 +75,7 @@ class WeasyPrintExporter(Exporter):
             "generated_at": report.metadata.get("generated_at", ""),
             "theme": local_theme,
             "template": "default",
-            "charts_embedded": sum(
-                1 for f in self._iter_fragments(report) if f.kind == "chart"
-            ),
+            "charts_embedded": sum(1 for f in self._iter_fragments(report) if f.kind == "chart"),
         }
         full_html = build_html_document_jinja2(body_html, report.title, css, "default", meta)
 
@@ -218,9 +214,11 @@ class WeasyPrintExporter(Exporter):
         for section in report.sections:
             slides_html.append(_section_to_reveal_slides(section))
         if report.citations:
-            sources = "<ul>" + "".join(
-                f"<li>{_html_escape(_format_citation_line(c))}</li>" for c in report.citations
-            ) + "</ul>"
+            sources = (
+                "<ul>"
+                + "".join(f"<li>{_html_escape(_format_citation_line(c))}</li>" for c in report.citations)
+                + "</ul>"
+            )
             slides_html.append(f"<section><h2>Sources</h2>{sources}</section>")
 
         body = "\n".join(slides_html)
@@ -234,7 +232,7 @@ class WeasyPrintExporter(Exporter):
             f"{body}"
             "</div></div>"
             '<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>'
-            '<script>Reveal.initialize({hash: true});</script>'
+            "<script>Reveal.initialize({hash: true});</script>"
             "</body></html>"
         )
         path = output_dir / "report.revealjs.html"
@@ -268,9 +266,7 @@ def _provenance_md_table(report: AssembledReport) -> str:
     rows: list[list[str]] = []
     for i, p in enumerate(report.provenance_log, start=1):
         tokens = (
-            f"{p.tokens_in or 0}/{p.tokens_out or 0}"
-            if (p.tokens_in is not None or p.tokens_out is not None)
-            else "—"
+            f"{p.tokens_in or 0}/{p.tokens_out or 0}" if (p.tokens_in is not None or p.tokens_out is not None) else "—"
         )
         rows.append(
             [
@@ -320,9 +316,7 @@ def _fragment_to_reveal_html(fragment: Fragment) -> str:
         return f'<div class="text">{body}</div>'
     if fragment.kind == "callout":
         return (
-            f'<aside class="callout {fragment.callout_style or "note"}">'
-            f"{_html_escape(fragment.body_md or '')}"
-            "</aside>"
+            f'<aside class="callout {fragment.callout_style or "note"}">{_html_escape(fragment.body_md or "")}</aside>'
         )
     if fragment.kind == "chart" and fragment.chart:
         rendered = render_chart(fragment.chart)
@@ -330,8 +324,7 @@ def _fragment_to_reveal_html(fragment: Fragment) -> str:
     if fragment.kind == "table" and fragment.table:
         thead = "".join(f"<th>{_html_escape(h)}</th>" for h in fragment.table.headers)
         trows = "".join(
-            "<tr>" + "".join(f"<td>{_html_escape(str(c))}</td>" for c in row) + "</tr>"
-            for row in fragment.table.rows
+            "<tr>" + "".join(f"<td>{_html_escape(str(c))}</td>" for c in row) + "</tr>" for row in fragment.table.rows
         )
         return f"<table><thead><tr>{thead}</tr></thead><tbody>{trows}</tbody></table>"
     return ""

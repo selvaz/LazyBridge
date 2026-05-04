@@ -34,7 +34,7 @@ import json
 import threading
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from lazybridge.ext.report_builder.fragments import Fragment
 from lazybridge.store import Store

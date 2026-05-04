@@ -22,13 +22,12 @@ file; no LLM API keys are required.
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 
 import pytest
 
 from lazybridge import Agent, Plan, Step, from_parallel_all
-from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.envelope import Envelope
 from lazybridge.ext.report_builder import (
     BlackboardAssembler,
     Citation,
@@ -38,10 +37,8 @@ from lazybridge.ext.report_builder import (
     Provenance,
     fragment_tools,
 )
-from lazybridge.ext.report_builder.fragments import ChartSpec, TableSpec
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -127,13 +124,13 @@ def _export_step(env: Envelope, *, bus: FragmentBus, out_dir: Path) -> Envelope:
 class TestParallelMockPipeline:
     def _build_plan(self, bus: FragmentBus, out_dir: Path):
         us = MockAgent(_research_response(bus, "2.us", "US tech earnings", "claude-haiku-4-5"), name="us")
-        cn = MockAgent(_research_response(bus, "3.cn", "China EV exports",  "gemini-2.5-flash"), name="cn")
-        in_ = MockAgent(_research_response(bus, "4.in", "India services",   "gpt-5-mini"),       name="in")
+        cn = MockAgent(_research_response(bus, "3.cn", "China EV exports", "gemini-2.5-flash"), name="cn")
+        in_ = MockAgent(_research_response(bus, "4.in", "India services", "gpt-5-mini"), name="in")
         synth = MockAgent(_synth_response(bus), name="synth")
 
         plan = Plan(
-            Step(target=us,  parallel=True, name="us"),
-            Step(target=cn,  parallel=True, name="cn"),
+            Step(target=us, parallel=True, name="us"),
+            Step(target=cn, parallel=True, name="cn"),
             Step(target=in_, parallel=True, name="in"),
             Step(target=synth, task=from_parallel_all("us"), name="synth"),
             Step(
@@ -144,12 +141,17 @@ class TestParallelMockPipeline:
         return plan, us, cn, in_, synth
 
     def test_each_agent_called_once(self, tmp_path):
-        bus = FragmentBus("mock-pipeline", assembler=OutlineAssembler({
-            "1.exec": "Executive Summary",
-            "2.us": "United States",
-            "3.cn": "China",
-            "4.in": "India",
-        }))
+        bus = FragmentBus(
+            "mock-pipeline",
+            assembler=OutlineAssembler(
+                {
+                    "1.exec": "Executive Summary",
+                    "2.us": "United States",
+                    "3.cn": "China",
+                    "4.in": "India",
+                }
+            ),
+        )
         plan, us, cn, in_, synth = self._build_plan(bus, tmp_path)
         Agent(name="pipeline", engine=plan)("Run today's briefing.")
 
@@ -159,12 +161,17 @@ class TestParallelMockPipeline:
         synth.assert_call_count(1)
 
     def test_fragments_arrive_via_parallel_band(self, tmp_path):
-        bus = FragmentBus("mock-band", assembler=OutlineAssembler({
-            "1.exec": "Executive Summary",
-            "2.us": "United States",
-            "3.cn": "China",
-            "4.in": "India",
-        }))
+        bus = FragmentBus(
+            "mock-band",
+            assembler=OutlineAssembler(
+                {
+                    "1.exec": "Executive Summary",
+                    "2.us": "United States",
+                    "3.cn": "China",
+                    "4.in": "India",
+                }
+            ),
+        )
         plan, *_ = self._build_plan(bus, tmp_path)
         Agent(name="pipeline", engine=plan)("Today.")
 
@@ -177,9 +184,9 @@ class TestParallelMockPipeline:
     def test_outline_assembled_in_declared_order(self, tmp_path):
         OUTLINE = {
             "1.exec": "Executive Summary",
-            "2.us":   "United States",
-            "3.cn":   "China",
-            "4.in":   "India",
+            "2.us": "United States",
+            "3.cn": "China",
+            "4.in": "India",
         }
         bus = FragmentBus("mock-order", assembler=OutlineAssembler(OUTLINE))
         plan, *_ = self._build_plan(bus, tmp_path)
@@ -190,9 +197,17 @@ class TestParallelMockPipeline:
         assert section_ids == list(OUTLINE.keys())
 
     def test_provenance_aggregates_step_names(self, tmp_path):
-        bus = FragmentBus("mock-prov", assembler=OutlineAssembler({
-            "1.exec": "E", "2.us": "U", "3.cn": "C", "4.in": "I",
-        }))
+        bus = FragmentBus(
+            "mock-prov",
+            assembler=OutlineAssembler(
+                {
+                    "1.exec": "E",
+                    "2.us": "U",
+                    "3.cn": "C",
+                    "4.in": "I",
+                }
+            ),
+        )
         plan, *_ = self._build_plan(bus, tmp_path)
         Agent(name="pipeline", engine=plan)("Today.")
 
@@ -201,9 +216,17 @@ class TestParallelMockPipeline:
         assert step_names == {"2.us", "3.cn", "4.in", "synth"}
 
     def test_costs_and_tokens_roll_up(self, tmp_path):
-        bus = FragmentBus("mock-cost", assembler=OutlineAssembler({
-            "1.exec": "E", "2.us": "U", "3.cn": "C", "4.in": "I",
-        }))
+        bus = FragmentBus(
+            "mock-cost",
+            assembler=OutlineAssembler(
+                {
+                    "1.exec": "E",
+                    "2.us": "U",
+                    "3.cn": "C",
+                    "4.in": "I",
+                }
+            ),
+        )
         plan, *_ = self._build_plan(bus, tmp_path)
         Agent(name="pipeline", engine=plan)("Today.")
 
@@ -214,16 +237,21 @@ class TestParallelMockPipeline:
         assert report.metadata["cost_usd_total"] == pytest.approx(3 * 0.0042 + 0.018)
 
     def test_export_produces_html(self, tmp_path):
-        bus = FragmentBus("mock-export", assembler=OutlineAssembler({
-            "1.exec": "Executive Summary",
-            "2.us":   "United States",
-            "3.cn":   "China",
-            "4.in":   "India",
-        }))
+        bus = FragmentBus(
+            "mock-export",
+            assembler=OutlineAssembler(
+                {
+                    "1.exec": "Executive Summary",
+                    "2.us": "United States",
+                    "3.cn": "China",
+                    "4.in": "India",
+                }
+            ),
+        )
         plan, *_ = self._build_plan(bus, tmp_path)
         Agent(name="pipeline", engine=plan)("Today.")
 
-        html = (tmp_path / "report.html")
+        html = tmp_path / "report.html"
         assert html.exists()
         text = html.read_text(encoding="utf-8")
         assert "Mock Pipeline Report" in text
@@ -299,9 +327,7 @@ class TestMockDrivenFragmentTools:
     def test_invalid_table_returns_error_dict(self, tmp_path):
         """Bad input lands as a structured error — agent can self-correct."""
         bus = FragmentBus("tooled-err")
-        append_table = next(
-            t for t in fragment_tools(bus) if t.name == "append_table"
-        )
+        append_table = next(t for t in fragment_tools(bus) if t.name == "append_table")
 
         result = append_table.run_sync(headers=["A", "B"], rows=[["only-one-cell"]])
         assert result.get("error") is True
@@ -336,6 +362,7 @@ class TestConcurrencyUnderPlan:
             def _respond(env: Envelope):
                 bus.append(Fragment(kind="text", body_md=f"frag-{idx}", section=f"s-{idx}"))
                 return f"OK-{idx}"
+
             return _respond
 
         agents = [
@@ -442,7 +469,7 @@ class TestRenderedOutputShape:
         bus = FragmentBus("bb", assembler=BlackboardAssembler())
 
         a = MockAgent(_research_response(bus, "alpha", "A-h", "m-1"))
-        b = MockAgent(_research_response(bus, "zulu",  "Z-h", "m-2"))
+        b = MockAgent(_research_response(bus, "zulu", "Z-h", "m-2"))
 
         plan = Plan(
             Step(target=a, parallel=True, name="a"),

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import threading
 
-import pytest
-
 from lazybridge.ext.report_builder import FragmentBus
 from lazybridge.ext.report_builder.bus import store_key_for
 from lazybridge.ext.report_builder.fragments import Fragment

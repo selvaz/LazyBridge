@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 
 import pytest
 
@@ -12,7 +11,6 @@ from lazybridge.ext.report_builder import (
     Citation,
     FragmentBus,
     OutlineAssembler,
-    fragment_tools,
 )
 from lazybridge.ext.report_builder.exporters.weasyprint import WeasyPrintExporter
 from lazybridge.ext.report_builder.fragments import (
@@ -163,9 +161,7 @@ class TestOutlineWithExporter:
 class TestBusExportConvenience:
     def test_bus_export_picks_weasyprint_when_quarto_absent(self, tmp_path, monkeypatch):
         # Force the resolver to pick WeasyPrint regardless of system state.
-        monkeypatch.setattr(
-            "lazybridge.ext.report_builder.exporters.find_quarto", lambda: None
-        )
+        monkeypatch.setattr("lazybridge.ext.report_builder.exporters.find_quarto", lambda: None)
         bus = _seed_bus()
         produced = bus.export(["html"], tmp_path, title="Auto")
         assert "html" in produced

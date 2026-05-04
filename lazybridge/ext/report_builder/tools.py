@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from lazybridge import Tool
 
@@ -130,27 +130,24 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
 
             # ── validate theme / template ─────────────────────────────
             if theme not in VALID_THEMES:
-                return _error(ValueError(
-                    f"Unknown theme {theme!r}. Choose from: {sorted(VALID_THEMES)}"
-                ))
+                return _error(ValueError(f"Unknown theme {theme!r}. Choose from: {sorted(VALID_THEMES)}"))
             if template not in VALID_TEMPLATES:
-                return _error(ValueError(
-                    f"Unknown template {template!r}. Choose from: {sorted(VALID_TEMPLATES)}"
-                ))
+                return _error(ValueError(f"Unknown template {template!r}. Choose from: {sorted(VALID_TEMPLATES)}"))
 
             # ── validate output_format ────────────────────────────────
             valid_formats = {"html", "pdf", "both"}
             if output_format not in valid_formats:
-                return _error(ValueError(
-                    f"Unknown output_format {output_format!r}. Choose from: {sorted(valid_formats)}"
-                ))
+                return _error(
+                    ValueError(f"Unknown output_format {output_format!r}. Choose from: {sorted(valid_formats)}")
+                )
 
             # ── require at least one content source ───────────────────
             if sections is None and markdown_path is None:
-                return _error(ValueError(
-                    "Provide either 'sections' (typed content blocks) "
-                    "or 'markdown_path' (path to a .md file)."
-                ))
+                return _error(
+                    ValueError(
+                        "Provide either 'sections' (typed content blocks) or 'markdown_path' (path to a .md file)."
+                    )
+                )
 
             # ── validate output path ──────────────────────────────────
             _out.mkdir(parents=True, exist_ok=True)
@@ -179,9 +176,9 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
                         elif t == "table":
                             parsed_sections.append(TableSection(**s))
                         else:
-                            return _error(ValueError(
-                                f"sections[{i}]: unknown type {t!r}. Use 'text', 'chart', or 'table'."
-                            ))
+                            return _error(
+                                ValueError(f"sections[{i}]: unknown type {t!r}. Use 'text', 'chart', or 'table'.")
+                            )
                     except Exception as exc:
                         return _error(ValueError(f"sections[{i}] is invalid: {exc}"))
 
@@ -240,6 +237,7 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
 
             if output_format in ("pdf", "both"):
                 from lazybridge.ext.report_builder._deps import require_weasyprint
+
                 weasyprint = require_weasyprint()
                 pdf_path = html_path.with_suffix(".pdf")
                 weasyprint.HTML(string=final_html).write_pdf(str(pdf_path))
@@ -257,7 +255,7 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
             description=(
                 "Assemble a self-contained HTML (and optionally PDF) report from typed content sections "
                 "or a Markdown file, with optional embedded chart PNG images. "
-                "4 layout templates × 4 CSS themes. Charts auto-placed or ordered via sections."
+                "4 layout templates x 4 CSS themes. Charts auto-placed or ordered via sections."
             ),
             guidance=(
                 "Two input modes: (1) 'sections' — pass typed text/chart/table dicts directly, "
@@ -278,7 +276,7 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
 # =============================================================================
 
 
-def fragment_tools(  # noqa: C901 — many small append helpers, branching is benign
+def fragment_tools(
     bus,  # type: ignore[no-untyped-def]  — circular at import time, see below
     *,
     default_section: str | None = None,
@@ -362,7 +360,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
                 provenance=_make_provenance(),
             )
             return {"id": bus.append(f), "kind": "text"}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _error(exc)
 
     # ------------------------------------------------------------------
@@ -398,7 +396,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
                 provenance=_make_provenance(),
             )
             return {"id": bus.append(f), "kind": "chart", "engine": engine}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _error(exc)
 
     # ------------------------------------------------------------------
@@ -417,9 +415,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
         try:
             for i, row in enumerate(rows):
                 if len(row) != len(headers):
-                    raise ValueError(
-                        f"row {i} has {len(row)} cells but headers has {len(headers)} columns"
-                    )
+                    raise ValueError(f"row {i} has {len(row)} cells but headers has {len(headers)} columns")
             table = TableSpec(headers=headers, rows=[[str(c) for c in row] for row in rows], caption=caption)
             f = Fragment(
                 kind="table",
@@ -430,7 +426,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
                 provenance=_make_provenance(),
             )
             return {"id": bus.append(f), "kind": "table"}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _error(exc)
 
     # ------------------------------------------------------------------
@@ -456,7 +452,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
                 provenance=_make_provenance(),
             )
             return {"id": bus.append(f), "kind": "callout", "style": style}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _error(exc)
 
     # ------------------------------------------------------------------
@@ -475,7 +471,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
 
             cit = enrich_from_url(url, store=bus._store)  # type: ignore[attr-defined]
             return cit.model_dump(mode="json")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _error(exc)
 
     # ------------------------------------------------------------------
@@ -491,7 +487,7 @@ def fragment_tools(  # noqa: C901 — many small append helpers, branching is be
         try:
             items = bus.fragments() if section is None else bus.by_section(section)
             return [f.model_dump(mode="json") for f in items]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [_error(exc)]
 
     return [

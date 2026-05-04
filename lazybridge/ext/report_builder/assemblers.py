@@ -22,13 +22,12 @@ Two strategies ship by default:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 from lazybridge.ext.report_builder.fragments import Citation, Fragment, Provenance
-
 
 # ---------------------------------------------------------------------------
 # Output model
@@ -101,7 +100,7 @@ def _summary_metadata(fragments: list[Fragment]) -> dict:
     total_out = sum(f.provenance.tokens_out or 0 for f in fragments if f.provenance)
     total_cost = sum(f.provenance.cost_usd or 0.0 for f in fragments if f.provenance)
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "fragment_count": len(fragments),
         "tokens_in_total": total_in,
         "tokens_out_total": total_out,
