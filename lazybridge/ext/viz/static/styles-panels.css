@@ -93,6 +93,27 @@
 }
 .ac-l { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
 
+/* Task + context sources in agent card */
+.ac-task {
+  font-size: 11.5px;
+  color: var(--text);
+  line-height: 1.5;
+  padding: 4px 8px;
+  background: rgba(0, 212, 255, 0.05);
+  border-left: 2px solid var(--accent-agent);
+  border-radius: 0 6px 6px 0;
+}
+.ac-ctx-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-ctx-source {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(80, 250, 123, 0.08);
+  border: 1px solid rgba(80, 250, 123, 0.22);
+  color: var(--accent-store);
+}
+
 .ac-store-list { display: flex; flex-direction: column; gap: 5px; }
 .ac-store-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .ac-store-dot  { color: var(--accent-store); font-size: 8px; }

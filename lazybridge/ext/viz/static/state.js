@@ -12,6 +12,9 @@ export const state = {
   nodes: [],             // graph nodes (mutable as tools appear)
   links: [],             // graph links
   inFlight: new Set(),   // node ids currently between MODEL_REQUEST and MODEL_RESPONSE
+  agentTasks: new Map(),    // agent name -> last task string (from agent_start events)
+  pipelineTask: null,       // first task seen — shown in START node inspector
+  pipelineOutputs: new Map(), // agent name -> result string (from agent_finish events)
 };
 
 const EVENTS_CAP = 5000;

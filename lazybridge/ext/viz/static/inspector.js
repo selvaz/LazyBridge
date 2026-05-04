@@ -41,7 +41,9 @@ export function initInspector() {
   });
   on("nodeClick", (n) => {
     switchTab("node");
-    renderNodeCard(n);
+    if (n.id === "__START__") renderStartCard();
+    else if (n.id === "__END__") renderEndCard();
+    else renderNodeCard(n);
   });
 }
 
@@ -53,8 +55,10 @@ function switchTab(t) {
   } else if (t === "store") {
     renderStore();
   } else if (t === "node") {
-    if (state.selectedNode) renderNodeCard(state.selectedNode);
-    else body.innerHTML = `<div class="placeholder">Click any node on the graph.</div>`;
+    if (!state.selectedNode) { body.innerHTML = `<div class="placeholder">Click any node on the graph.</div>`; return; }
+    if (state.selectedNode.id === "__START__") renderStartCard();
+    else if (state.selectedNode.id === "__END__") renderEndCard();
+    else renderNodeCard(state.selectedNode);
   }
 }
 
@@ -62,6 +66,77 @@ function syncTabUI() {
   for (const tab of root.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.tab === activeTab);
   }
+}
+
+// ---- START / END node cards ----------------------------------------------
+
+function renderStartCard() {
+  const task = state.pipelineTask;
+  const agents = [...state.agentTasks.entries()];
+  body.innerHTML = `
+    <div class="agent-card">
+      <div class="ac-nameplate">
+        <span class="ac-type-icon" style="color:var(--accent-store);font-size:22px">▶</span>
+        <div>
+          <div class="ac-name" style="color:var(--accent-store)">Pipeline START</div>
+          <div class="ac-badges">
+            <span class="ac-badge" style="color:var(--accent-store);border-color:rgba(80,250,123,.3)">entry point</span>
+          </div>
+        </div>
+      </div>
+      ${task ? `
+      <div class="ac-section">
+        <div class="ac-section-title">PIPELINE TASK</div>
+        <div class="ac-task">${escapeHtml(task)}</div>
+      </div>` : `<div class="ac-section"><div class="placeholder">No task recorded yet.</div></div>`}
+      ${agents.length ? `
+      <div class="ac-section">
+        <div class="ac-section-title">AGENT TASKS (${agents.length})</div>
+        ${agents.map(([a, t]) => `
+          <div style="margin-bottom:8px">
+            <div style="font-size:9px;color:var(--text-dim);margin-bottom:3px">${escapeHtml(a)}</div>
+            <div class="ac-task">${escapeHtml(truncate(t, 200))}</div>
+          </div>`).join("")}
+      </div>` : ""}
+    </div>`;
+}
+
+function renderEndCard() {
+  const outputs = [...state.pipelineOutputs.entries()];
+  const totalEvts  = state.events.length;
+  const llmCalls   = state.events.filter(e => e.event_type === "model_response").length;
+  const totalIn    = state.events.reduce((s, e) => s + (e.usage?.input_tokens  || 0), 0);
+  const totalOut   = state.events.reduce((s, e) => s + (e.usage?.output_tokens || 0), 0);
+  body.innerHTML = `
+    <div class="agent-card">
+      <div class="ac-nameplate">
+        <span class="ac-type-icon" style="color:var(--accent-router);font-size:22px">■</span>
+        <div>
+          <div class="ac-name" style="color:var(--accent-router)">Pipeline END</div>
+          <div class="ac-badges">
+            <span class="ac-badge" style="color:var(--accent-router);border-color:rgba(255,179,64,.3)">exit point</span>
+          </div>
+        </div>
+      </div>
+      <div class="ac-section">
+        <div class="ac-section-title">RUN STATS</div>
+        <div class="ac-stats">
+          <div class="ac-stat"><span class="ac-v">${totalEvts}</span><span class="ac-l">events</span></div>
+          <div class="ac-stat"><span class="ac-v">${llmCalls}</span><span class="ac-l">LLM calls</span></div>
+          ${totalIn  ? `<div class="ac-stat"><span class="ac-v">${fmtTok(totalIn)}</span><span class="ac-l">in-tok</span></div>`  : ""}
+          ${totalOut ? `<div class="ac-stat"><span class="ac-v">${fmtTok(totalOut)}</span><span class="ac-l">out-tok</span></div>` : ""}
+        </div>
+      </div>
+      ${outputs.length ? `
+      <div class="ac-section">
+        <div class="ac-section-title">AGENT OUTPUTS (${outputs.length})</div>
+        ${outputs.map(([a, r]) => `
+          <div style="margin-bottom:10px">
+            <div style="font-size:9px;font-weight:700;color:var(--accent-router);margin-bottom:4px">${escapeHtml(a)}</div>
+            <pre style="font-family:JetBrains Mono,monospace;font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto;margin:0">${escapeHtml(String(r).slice(0, 1200))}</pre>
+          </div>`).join("")}
+      </div>` : `<div class="ac-section"><div class="placeholder">Pipeline not finished yet.</div></div>`}
+    </div>`;
 }
 
 // ---- Agent card (D&D character sheet) ------------------------------------
@@ -78,10 +153,25 @@ function renderNodeCard(node) {
       return tgt.replace(/^tool:/, "");
     });
 
+  // Context sources: nodes that send context INTO this node
+  const ctxSources = state.links
+    .filter(l => {
+      const tgt = typeof l.target === "object" ? l.target.id : l.target;
+      return tgt === node.id && (l.kind === "context" || l.kind === "router");
+    })
+    .map(l => {
+      const src = typeof l.source === "object" ? l.source.id : l.source;
+      const srcNode = state.nodes.find(n => n.id === src);
+      return srcNode?.name || src;
+    });
+
   // Store contributions (entries where .agent matches this node's name)
   const storeContribs = Object.entries(state.store || {})
     .filter(([, v]) => v && typeof v === "object" && v.agent === node.name)
     .map(([k, v]) => ({ key: k, ts: v.ts }));
+
+  // Task assigned to this agent (from agent_start events)
+  const task = state.agentTasks.get(node.name) || state.agentTasks.get(node.id);
 
   // Activity stats
   const evts     = state.events.filter(e => e.agent_name === node.name || e.agent_name === node.id);
@@ -109,6 +199,20 @@ function renderNodeCard(node) {
           </div>
         </div>
       </div>
+
+      ${task ? `
+      <div class="ac-section">
+        <div class="ac-section-title">TASK</div>
+        <div class="ac-task">${escapeHtml(truncate(task, 320))}</div>
+      </div>` : ""}
+
+      ${ctxSources.length ? `
+      <div class="ac-section">
+        <div class="ac-section-title">CONTEXT FROM</div>
+        <div class="ac-ctx-sources">
+          ${ctxSources.map(s => `<span class="ac-ctx-source">→ ${escapeHtml(s)}</span>`).join("")}
+        </div>
+      </div>` : ""}
 
       ${node.system || node.description ? `
       <div class="ac-section">
@@ -149,7 +253,7 @@ function renderNodeCard(node) {
         </div>
       </div>` : ""}
 
-      ${!isActive && !tools.length ? `
+      ${!isActive && !tools.length && !task ? `
       <div class="ac-section">
         <div class="placeholder" style="padding-top:12px">Agent registered — not yet active in this run.</div>
       </div>` : ""}

@@ -72,6 +72,47 @@ main {
 .meta .pill { padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); }
 .meta .pill .v { color: var(--text); margin-left: 6px; }
 
+/* Level filter overlay (top-right of canvas) */
+#level-filter {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+.lf-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: rgba(10, 15, 30, 0.75);
+  backdrop-filter: blur(8px);
+  color: var(--text-dim);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  text-align: center;
+  min-width: 36px;
+}
+.lf-btn.active {
+  color: var(--accent-agent);
+  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(0, 212, 255, 0.10);
+}
+.lf-btn.lf-all.active {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+.lf-btn:hover {
+  border-color: var(--accent-agent);
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--text);
+}
+
 /* Canvas */
 #canvas-wrap {
   position: relative;
@@ -100,6 +141,39 @@ main {
   transition: opacity 0.4s ease;
 }
 #canvas-hint.hidden { opacity: 0; }
+
+/* Zoom controls overlay */
+#zoom-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+#zoom-controls button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(10, 15, 30, 0.75);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+#zoom-controls button:hover {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: var(--accent-agent);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+}
+#zoom-reset { font-size: 13px !important; }
 
 /* Inspector */
 #inspector {

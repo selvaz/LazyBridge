@@ -9,6 +9,26 @@
 #canvas .link.tool    { stroke-dasharray: 0; }
 #canvas .link.context { stroke-dasharray: 5 4; }
 #canvas .link.router  { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
+#canvas .link.flow    { stroke-dasharray: 3 6; stroke: rgba(140, 170, 220, 0.15); stroke-width: 1; }
+
+/* ---- IO nodes (START / END) -------------------------------------------- */
+
+#canvas .node.io .io-bg {
+  fill: rgba(8, 18, 38, 0.88);
+  stroke-width: 2;
+  transition: stroke-width 0.2s ease;
+}
+#canvas .node.io[data-role="start"] .io-bg {
+  stroke: var(--accent-store);
+  filter: url(#flare);
+}
+#canvas .node.io[data-role="end"] .io-bg {
+  stroke: var(--accent-router);
+  filter: url(#flare);
+}
+#canvas .node.io[data-role="start"] .node-label { fill: var(--accent-store); font-weight: 700; }
+#canvas .node.io[data-role="end"]   .node-label { fill: var(--accent-router); font-weight: 700; }
+#canvas .node.io .io-hint { font-size: 7.5px; opacity: 0.4; }
 
 /* ---- Agent — 3-D parallelepiped ---------------------------------------- */
 
@@ -84,6 +104,27 @@
   text-anchor: middle;
   pointer-events: none;
 }
+/* Task line — truncated task text shown below sublabel */
+#canvas .node-task {
+  fill: var(--accent-agent);
+  font-family: "Inter", sans-serif;
+  font-size: 8.5px;
+  font-weight: 400;
+  font-style: italic;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.85;
+}
+/* Context sources line — "ctx: A, B" */
+#canvas .node-ctx {
+  fill: var(--accent-store);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 7.5px;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
 #canvas .pin-icon {
   font-size: 10px;
   pointer-events: none;
@@ -110,6 +151,65 @@
 /* ---- Pulse packets ------------------------------------------------------- */
 
 #canvas .pulse { pointer-events: none; filter: url(#glow); }
+
+/* ---- START / END node emphasis ----------------------------------------- */
+
+#canvas .node-start .box-front {
+  stroke: var(--accent-store) !important;
+  stroke-width: 2.5;
+  filter: url(#flare);
+}
+#canvas .node-start .box-top,
+#canvas .node-start .box-right {
+  stroke: var(--accent-store) !important;
+  stroke-opacity: 0.7;
+}
+#canvas .node-start .node-bg {
+  stroke: var(--accent-store) !important;
+  filter: url(#flare);
+}
+
+#canvas .node-end .box-front {
+  stroke: var(--accent-router) !important;
+  stroke-width: 2.5;
+  filter: url(#flare);
+}
+#canvas .node-end .box-top,
+#canvas .node-end .box-right {
+  stroke: var(--accent-router) !important;
+  stroke-opacity: 0.7;
+}
+#canvas .node-end .node-bg {
+  stroke: var(--accent-router) !important;
+  filter: url(#flare);
+}
+
+/* ---- Role badges (START / END labels) ---------------------------------- */
+
+#canvas .role-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+#canvas .start-badge {
+  fill: var(--accent-store);
+  filter: drop-shadow(0 0 4px rgba(80, 250, 123, 0.7));
+}
+#canvas .end-badge {
+  fill: var(--accent-router);
+  filter: drop-shadow(0 0 4px rgba(255, 179, 64, 0.7));
+}
+
+/* ---- Layer filter: hide nodes/links not in selected layers -------------- */
+
+#canvas .layer-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
 
 /* ---- Error flash -------------------------------------------------------- */
 

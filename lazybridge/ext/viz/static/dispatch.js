@@ -3,7 +3,7 @@
 // through the timeline re-fires the visual gesture for that event.
 
 import { state, on, pushEvent, emit } from "/static/state.js";
-import { pulse, fireHitRing, setInFlight, flashError, ensureToolNode } from "/static/graph.js";
+import { pulse, fireHitRing, setInFlight, flashError, ensureToolNode, refreshNodeLabels } from "/static/graph.js";
 import { getJSON } from "/static/auth.js";
 
 const COLOR = {
@@ -37,11 +37,17 @@ function _gesture(ev, { replay = false } = {}) {
   switch (t) {
     case "agent_start":
       if (agent) fireHitRing(agent, COLOR.store);
+      if (agent && ev.task) {
+        state.agentTasks.set(agent, ev.task);
+        if (!state.pipelineTask) state.pipelineTask = ev.task;
+        refreshNodeLabels();
+      }
       break;
 
     case "agent_finish":
       if (agent) fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
       if (ev.error && agent) flashError(agent);
+      if (agent && (ev.result != null)) state.pipelineOutputs.set(agent, ev.result);
       break;
 
     case "model_request":
