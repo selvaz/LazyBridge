@@ -1,37 +1,88 @@
-"""report_builder — professional HTML report assembler (domain example).
+"""report_builder — fragment-based parallel report assembly + classic single-shot tool.
 
-Domain example shipped with LazyBridge — not part of the framework contract.
+Two complementary entry points ship in this extension:
 
-Assembles self-contained HTML reports from LLM-authored Markdown files and
-pre-generated chart PNG images produced by upstream tools (e.g. stat_runtime).
-Charts are embedded as base64 data URIs and auto-placed inline next to the
-best-matching section heading — no external files are needed to view the output.
+1. **Single-shot tool** (the original ``report_tools()`` flow).  An LLM
+   hands a fully-formed report — sections or a Markdown file plus chart
+   PNGs — to ``generate_report`` once at the end of a pipeline.  Best when
+   one agent does the work end-to-end.
 
-Intended workflow::
+2. **Parallel-fragment workflow** (the new ``FragmentBus`` + ``fragment_tools()``).
+   Each Step in a Plan emits typed fragments (text / chart / table /
+   callout) into a shared bus.  At the end an ``Assembler``
+   (``BlackboardAssembler`` or ``OutlineAssembler``) recombines them; an
+   ``Exporter`` writes HTML, PDF, DOCX, and Reveal.js slides via Quarto
+   with a pure-Python (WeasyPrint + Pandoc) fallback.
 
-    # 1. Analysis tools produce a Markdown narrative and chart PNGs
-    # 2. generate_report assembles them into a polished HTML document
+Quick start (parallel-fragment workflow)::
 
-    from lazybridge import Agent
-    from lazybridge.ext.report_builder import report_tools
-
-    agent = Agent("anthropic", tools=report_tools("./reports"))
-    agent(
-        "Analyse the data, write a narrative in ./output/analysis.md, "
-        "save chart PNGs to ./output/charts/, then call generate_report."
+    from lazybridge import Plan, Step, Agent
+    from lazybridge.ext.report_builder import (
+        FragmentBus, fragment_tools, OutlineAssembler,
     )
 
-Install::
+    bus = FragmentBus("daily-news", assembler=OutlineAssembler({
+        "1.exec": "Executive Summary",
+        "2.us":   "United States",
+    }))
 
-    pip install lazybridge[report]
+    researcher = Agent(
+        model="anthropic:claude-haiku-4-5",
+        tools=fragment_tools(bus, default_section="2.us", step_name="us"),
+    )
 
-Available themes: executive, financial, technical, research.
+    plan = Plan(
+        Step(researcher, parallel=True, name="us"),
+        Step(lambda env: bus.export(["html","pdf","revealjs"], "./out", title="News")),
+    )
+    plan.run("Today's news.")
+
+Install extras (additive over ``[report]``)::
+
+    pip install 'lazybridge[report,report-charts,report-citations,report-fallback]'
+    # And install the Quarto CLI separately for the primary render path:
+    # macOS: brew install quarto / Linux: download .deb from quarto.org
 """
 
 __stability__ = "domain"
 __lazybridge_min__ = "1.0.0"
 
+from lazybridge.ext.report_builder.assemblers import (
+    AssembledReport,
+    Assembler,
+    BlackboardAssembler,
+    OutlineAssembler,
+    RenderedSection,
+)
+from lazybridge.ext.report_builder.bus import FragmentBus
+from lazybridge.ext.report_builder.fragments import (
+    ChartSpec,
+    Citation,
+    Fragment,
+    Provenance,
+    TableSpec,
+)
 from lazybridge.ext.report_builder.schemas import ChartRef, ReportResult
-from lazybridge.ext.report_builder.tools import report_tools
+from lazybridge.ext.report_builder.tools import fragment_tools, report_tools
 
-__all__ = ["report_tools", "ChartRef", "ReportResult"]
+__all__ = [
+    # Original single-shot API
+    "report_tools",
+    "ChartRef",
+    "ReportResult",
+    # Fragment workflow — runtime
+    "FragmentBus",
+    "fragment_tools",
+    # Fragment workflow — schema
+    "Fragment",
+    "Citation",
+    "Provenance",
+    "ChartSpec",
+    "TableSpec",
+    # Fragment workflow — assembly
+    "Assembler",
+    "AssembledReport",
+    "BlackboardAssembler",
+    "OutlineAssembler",
+    "RenderedSection",
+]

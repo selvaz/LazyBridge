@@ -271,3 +271,286 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
             ),
         )
     ]
+
+
+# =============================================================================
+# fragment_tools — the new parallel-assembly tool surface
+# =============================================================================
+
+
+def fragment_tools(  # noqa: C901 — many small append helpers, branching is benign
+    bus,  # type: ignore[no-untyped-def]  — circular at import time, see below
+    *,
+    default_section: str | None = None,
+    step_name: str | None = None,
+) -> list[Tool]:
+    """Return the tools an LLM agent can call to contribute to a shared report.
+
+    Each tool stamps a :class:`Provenance` entry with ``step_name`` (when
+    supplied) and a UTC timestamp, and writes the resulting fragment to
+    *bus*.  ``default_section`` is appended to fragments whose tool call
+    omits ``section`` — useful when the parent Step already knows where its
+    contributions belong.
+
+    Usage::
+
+        bus = FragmentBus("daily-news")
+        agent = Agent(
+            model="anthropic:claude-haiku-4-5",
+            tools=fragment_tools(bus, default_section="us", step_name="us_research"),
+        )
+
+    The bus instance is shared across every Agent in the pipeline; LLM tool
+    calls land in the same in-memory (or SQLite-persisted) collection.
+    """
+    # Import here so ``tools.py`` doesn't pull bus / fragments at module
+    # load — keeps the existing ``report_tools`` import path lean.
+    from lazybridge.ext.report_builder.bus import FragmentBus
+    from lazybridge.ext.report_builder.fragments import (
+        ChartSpec,
+        Citation,
+        Fragment,
+        Provenance,
+        TableSpec,
+    )
+
+    if not isinstance(bus, FragmentBus):  # pragma: no cover — caller error
+        raise TypeError(f"fragment_tools(bus) expected a FragmentBus, got {type(bus).__name__}")
+
+    def _resolve_section(section: str | None) -> str | None:
+        return section if section is not None else default_section
+
+    def _make_provenance() -> Provenance:
+        return Provenance(step_name=step_name)
+
+    def _coerce_citations(items: list[dict] | None) -> list[Citation]:
+        if not items:
+            return []
+        out: list[Citation] = []
+        for it in items:
+            if isinstance(it, Citation):
+                out.append(it)
+            else:
+                out.append(Citation.model_validate(it))
+        return out
+
+    # ------------------------------------------------------------------
+    # append_text
+    # ------------------------------------------------------------------
+
+    def append_text(
+        heading: str,
+        body_markdown: str,
+        section: str | None = None,
+        order_hint: float = 0.0,
+        citations: list[dict] | None = None,
+    ) -> dict:
+        """Append a Markdown text fragment.
+
+        body_markdown supports Pandoc citation syntax: ``[@key]``, ``[@key, p. 2]``.
+        Provide matching citation objects in `citations` so the bibliography
+        section resolves at render time.
+        """
+        try:
+            f = Fragment(
+                kind="text",
+                heading=heading or None,
+                body_md=body_markdown,
+                section=_resolve_section(section),
+                order_hint=order_hint,
+                citations=_coerce_citations(citations),
+                provenance=_make_provenance(),
+            )
+            return {"id": bus.append(f), "kind": "text"}
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+    # ------------------------------------------------------------------
+    # append_chart
+    # ------------------------------------------------------------------
+
+    def append_chart(
+        engine: str,
+        spec: dict,
+        title: str,
+        heading: str | None = None,
+        section: str | None = None,
+        order_hint: float = 0.0,
+        data: list[dict] | None = None,
+        citations: list[dict] | None = None,
+    ) -> dict:
+        """Append a chart fragment.
+
+        engine: 'vega-lite' (recommended) or 'plotly'.
+        spec: the engine-native JSON spec (Vega-Lite v5 schema, or Plotly figure dict).
+        data: optional inline rows that override spec.data.values for Vega-Lite,
+              or splice into the first Plotly trace's x/y.
+        """
+        try:
+            chart = ChartSpec(engine=engine, spec=spec, data=data, title=title)
+            f = Fragment(
+                kind="chart",
+                heading=heading,
+                chart=chart,
+                section=_resolve_section(section),
+                order_hint=order_hint,
+                citations=_coerce_citations(citations),
+                provenance=_make_provenance(),
+            )
+            return {"id": bus.append(f), "kind": "chart", "engine": engine}
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+    # ------------------------------------------------------------------
+    # append_table
+    # ------------------------------------------------------------------
+
+    def append_table(
+        headers: list[str],
+        rows: list[list[str]],
+        caption: str = "",
+        heading: str | None = None,
+        section: str | None = None,
+        order_hint: float = 0.0,
+    ) -> dict:
+        """Append a table fragment.  Rows must have the same length as headers."""
+        try:
+            for i, row in enumerate(rows):
+                if len(row) != len(headers):
+                    raise ValueError(
+                        f"row {i} has {len(row)} cells but headers has {len(headers)} columns"
+                    )
+            table = TableSpec(headers=headers, rows=[[str(c) for c in row] for row in rows], caption=caption)
+            f = Fragment(
+                kind="table",
+                heading=heading,
+                table=table,
+                section=_resolve_section(section),
+                order_hint=order_hint,
+                provenance=_make_provenance(),
+            )
+            return {"id": bus.append(f), "kind": "table"}
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+    # ------------------------------------------------------------------
+    # append_callout
+    # ------------------------------------------------------------------
+
+    def append_callout(
+        style: str,
+        body_markdown: str,
+        heading: str | None = None,
+        section: str | None = None,
+        order_hint: float = 0.0,
+    ) -> dict:
+        """Append a callout (note / tip / important / warning / caution)."""
+        try:
+            f = Fragment(
+                kind="callout",
+                heading=heading,
+                body_md=body_markdown,
+                callout_style=style,  # type: ignore[arg-type]
+                section=_resolve_section(section),
+                order_hint=order_hint,
+                provenance=_make_provenance(),
+            )
+            return {"id": bus.append(f), "kind": "callout", "style": style}
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+    # ------------------------------------------------------------------
+    # cite_url
+    # ------------------------------------------------------------------
+
+    def cite_url(url: str) -> dict:
+        """Resolve a URL or DOI to a populated citation via Crossref/OpenAlex.
+
+        Returns a citation dict the agent can attach to subsequent
+        append_text / append_chart calls in their `citations=[...]` list.
+        Cached by URL — calling repeatedly is cheap.
+        """
+        try:
+            from lazybridge.ext.report_builder.citations import enrich_from_url
+
+            cit = enrich_from_url(url, store=bus._store)  # type: ignore[attr-defined]
+            return cit.model_dump(mode="json")
+        except Exception as exc:  # noqa: BLE001
+            return _error(exc)
+
+    # ------------------------------------------------------------------
+    # list_fragments
+    # ------------------------------------------------------------------
+
+    def list_fragments(section: str | None = None) -> list[dict]:
+        """Return the fragments currently in the bus, optionally filtered by section.
+
+        Synthesis steps use this to read what the upstream agents wrote and
+        produce executive summaries / cross-cutting analysis.
+        """
+        try:
+            items = bus.fragments() if section is None else bus.by_section(section)
+            return [f.model_dump(mode="json") for f in items]
+        except Exception as exc:  # noqa: BLE001
+            return [_error(exc)]
+
+    return [
+        Tool(
+            append_text,
+            name="append_text",
+            description="Append a Markdown text fragment to the shared report bus.",
+            guidance=(
+                "Use for narrative prose. Pandoc citations: [@key]. Pass citation "
+                "objects (returned by cite_url) in the citations argument so the "
+                "bibliography resolves. order_hint is a float — fragments sort "
+                "ascending within a section."
+            ),
+        ),
+        Tool(
+            append_chart,
+            name="append_chart",
+            description="Append a chart fragment (Vega-Lite or Plotly).",
+            guidance=(
+                "engine='vega-lite' is the safer default (pure-Rust rasterizer, "
+                "no Chrome). Pass spec as the raw JSON dict from the Vega-Lite v5 "
+                "schema, or a Plotly figure dict. data=[{x:..., y:...}, ...] is "
+                "an optional convenience for spec-data splicing."
+            ),
+        ),
+        Tool(
+            append_table,
+            name="append_table",
+            description="Append a tabular fragment to the shared report bus.",
+            guidance=(
+                "headers and rows must agree in column count. caption shows above "
+                "the table. Stick to plain strings — leading-zero numerics, "
+                "currencies, etc. should be pre-formatted."
+            ),
+        ),
+        Tool(
+            append_callout,
+            name="append_callout",
+            description="Append a callout box (note/tip/important/warning/caution).",
+            guidance="style is one of: note, tip, important, warning, caution.",
+        ),
+        Tool(
+            cite_url,
+            name="cite_url",
+            description="Resolve a URL or DOI to a structured citation via Crossref/OpenAlex.",
+            guidance=(
+                "Returns a citation dict; pass it as one of the items in the "
+                "citations=[...] argument of subsequent append_* calls. Results "
+                "are cached so calling repeatedly with the same URL is free."
+            ),
+        ),
+        Tool(
+            list_fragments,
+            name="list_fragments",
+            description="Read fragments currently in the report bus.  Optionally filter by section.",
+            guidance=(
+                "Use this in synthesis steps that need to summarise upstream "
+                "contributions. Returns the full Fragment dict — including "
+                "kind, heading, body_md, chart, table, citations, provenance."
+            ),
+        ),
+    ]
