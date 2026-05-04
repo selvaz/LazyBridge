@@ -2,12 +2,12 @@
 
 Two complementary entry points ship in this extension:
 
-1. **Single-shot tool** (the original ``report_tools()`` flow).  An LLM
+1. **Single-shot tool** (the original ``report_tools(output_dir=)`` flow).  An LLM
    hands a fully-formed report — sections or a Markdown file plus chart
    PNGs — to ``generate_report`` once at the end of a pipeline.  Best when
    one agent does the work end-to-end.
 
-2. **Parallel-fragment workflow** (the new ``FragmentBus`` + ``fragment_tools()``).
+2. **Parallel-fragment workflow** (the new ``FragmentBus`` + ``fragment_tools(bus=)``).
    Each Step in a Plan emits typed fragments (text / chart / table /
    callout) into a shared bus.  At the end an ``Assembler``
    (``BlackboardAssembler`` or ``OutlineAssembler``) recombines them; an
@@ -28,7 +28,7 @@ Quick start (parallel-fragment workflow)::
 
     researcher = Agent(
         model="anthropic:claude-haiku-4-5",
-        tools=fragment_tools(bus, default_section="2.us", step_name="us"),
+        tools=fragment_tools(bus=bus, default_section="2.us", step_name="us"),
     )
 
     plan = Plan(

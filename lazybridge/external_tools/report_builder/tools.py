@@ -1,6 +1,6 @@
 """Tool factory for report_builder.
 
-Closure-based factory — each call to ``report_tools(output_dir)`` returns a
+Closure-based factory — each call to ``report_tools(output_dir=output_dir)`` returns a
 ``generate_report`` tool permanently bound to that output directory.
 
 Usage::
@@ -8,7 +8,7 @@ Usage::
     from lazybridge import Agent
     from lazybridge.external_tools.report_builder import report_tools
 
-    agent = Agent("anthropic", tools=report_tools("./reports"))
+    agent = Agent("anthropic", tools=report_tools(output_dir="./reports"))
     agent(
         "Generate a Q1 analysis report. Use analysis.md and the charts "
         "in ./output/charts/ for the Revenue and Segment sections."
@@ -22,10 +22,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from lazybridge import Tool
-
-
-def _error(exc: Exception) -> dict[str, Any]:
-    return {"error": True, "type": type(exc).__name__, "message": str(exc)}
 
 
 def report_tools(*, output_dir: str | Path) -> list[Tool]:
@@ -43,7 +39,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
         from lazybridge import Agent
         from lazybridge.external_tools.report_builder import report_tools
 
-        agent = Agent("anthropic", tools=report_tools("./reports"))
+        agent = Agent("anthropic", tools=report_tools(output_dir="./reports"))
         agent("Assemble the quarterly report from analysis.md and the chart PNGs.")
     """
     _out = Path(output_dir).resolve()
@@ -108,145 +104,138 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
         HTML is fully self-contained (no external files required to view it).
 
         Returns a dict with html_path and/or pdf_path, plus title, charts_embedded,
-        theme, and template.  On failure returns {"error": True, "type": ..., "message": ...}.
+        theme, and template.  Raises on validation or runtime errors — the
+        engine wraps the exception into an is_error=True tool result.
         """
+        from lazybridge.external_tools.report_builder.renderer import (
+            VALID_TEMPLATES,
+            VALID_THEMES,
+            _chart_to_figure_html,
+            build_html_document_jinja2,
+            inject_charts_into_html,
+            load_theme_css,
+            markdown_to_clean_html,
+        )
+        from lazybridge.external_tools.report_builder.schemas import (
+            ChartRef,
+            ChartSection,
+            TableSection,
+            TextSection,
+        )
+        from lazybridge.external_tools.report_builder.section_renderer import sections_to_html
+
+        # ── validate theme / template ─────────────────────────────
+        if theme not in VALID_THEMES:
+            raise ValueError(f"Unknown theme {theme!r}. Choose from: {sorted(VALID_THEMES)}")
+        if template not in VALID_TEMPLATES:
+            raise ValueError(f"Unknown template {template!r}. Choose from: {sorted(VALID_TEMPLATES)}")
+
+        # ── validate output_format ────────────────────────────────
+        valid_formats = {"html", "pdf", "both"}
+        if output_format not in valid_formats:
+            raise ValueError(f"Unknown output_format {output_format!r}. Choose from: {sorted(valid_formats)}")
+
+        # ── require at least one content source ───────────────────
+        if sections is None and markdown_path is None:
+            raise ValueError(
+                "Provide either 'sections' (typed content blocks) or 'markdown_path' (path to a .md file)."
+            )
+
+        # ── validate output path ──────────────────────────────────
+        _out.mkdir(parents=True, exist_ok=True)
+        safe_base = Path(output_filename).name
+        if not safe_base.endswith(".html"):
+            safe_base += ".html"
+        html_path = (_out / safe_base).resolve()
         try:
-            from lazybridge.external_tools.report_builder.renderer import (
-                VALID_TEMPLATES,
-                VALID_THEMES,
-                _chart_to_figure_html,
-                build_html_document_jinja2,
-                inject_charts_into_html,
-                load_theme_css,
-                markdown_to_clean_html,
-            )
-            from lazybridge.external_tools.report_builder.schemas import (
-                ChartRef,
-                ChartSection,
-                TableSection,
-                TextSection,
-            )
-            from lazybridge.external_tools.report_builder.section_renderer import sections_to_html
+            html_path.relative_to(_out)
+        except ValueError as exc:
+            raise ValueError(f"Unsafe output filename: {output_filename!r}") from exc
 
-            # ── validate theme / template ─────────────────────────────
-            if theme not in VALID_THEMES:
-                return _error(ValueError(f"Unknown theme {theme!r}. Choose from: {sorted(VALID_THEMES)}"))
-            if template not in VALID_TEMPLATES:
-                return _error(ValueError(f"Unknown template {template!r}. Choose from: {sorted(VALID_TEMPLATES)}"))
+        # ── build body_html ───────────────────────────────────────
+        charts_embedded = 0
 
-            # ── validate output_format ────────────────────────────────
-            valid_formats = {"html", "pdf", "both"}
-            if output_format not in valid_formats:
-                return _error(
-                    ValueError(f"Unknown output_format {output_format!r}. Choose from: {sorted(valid_formats)}")
-                )
+        if sections is not None:
+            # --- typed sections flow ---
+            parsed_sections = []
+            for i, s in enumerate(sections):
+                t = s.get("type", "")
+                try:
+                    if t == "text":
+                        parsed_sections.append(TextSection(**s))
+                    elif t == "chart":
+                        parsed_sections.append(ChartSection(**s))
+                    elif t == "table":
+                        parsed_sections.append(TableSection(**s))
+                    else:
+                        raise ValueError(f"sections[{i}]: unknown type {t!r}. Use 'text', 'chart', or 'table'.")
+                except ValueError:
+                    raise
+                except Exception as exc:
+                    raise ValueError(f"sections[{i}] is invalid: {exc}") from exc
 
-            # ── require at least one content source ───────────────────
-            if sections is None and markdown_path is None:
-                return _error(
-                    ValueError(
-                        "Provide either 'sections' (typed content blocks) or 'markdown_path' (path to a .md file)."
-                    )
-                )
+            body_html, charts_embedded = sections_to_html(parsed_sections)
 
-            # ── validate output path ──────────────────────────────────
-            _out.mkdir(parents=True, exist_ok=True)
-            safe_base = Path(output_filename).name
-            if not safe_base.endswith(".html"):
-                safe_base += ".html"
-            html_path = (_out / safe_base).resolve()
-            try:
-                html_path.relative_to(_out)
-            except ValueError:
-                return _error(ValueError(f"Unsafe output filename: {output_filename!r}"))
+        else:
+            # --- markdown_path flow ---
+            md_path = Path(markdown_path)
+            if not md_path.exists():
+                raise FileNotFoundError(f"Markdown file not found: {markdown_path}")
+            markdown_text = md_path.read_text(encoding="utf-8")
+            body_html = markdown_to_clean_html(markdown_text)
 
-            # ── build body_html ───────────────────────────────────────
-            charts_embedded = 0
-
-            if sections is not None:
-                # --- typed sections flow ---
-                parsed_sections = []
-                for i, s in enumerate(sections):
-                    t = s.get("type", "")
+            chart_refs: list[ChartRef] = []
+            if charts:
+                for i, c in enumerate(charts):
                     try:
-                        if t == "text":
-                            parsed_sections.append(TextSection(**s))
-                        elif t == "chart":
-                            parsed_sections.append(ChartSection(**s))
-                        elif t == "table":
-                            parsed_sections.append(TableSection(**s))
-                        else:
-                            return _error(
-                                ValueError(f"sections[{i}]: unknown type {t!r}. Use 'text', 'chart', or 'table'.")
-                            )
+                        chart_refs.append(ChartRef(**c))
                     except Exception as exc:
-                        return _error(ValueError(f"sections[{i}] is invalid: {exc}"))
+                        raise ValueError(f"charts[{i}] is invalid: {exc}") from exc
 
-                body_html, charts_embedded = sections_to_html(parsed_sections)
+            chart_items: list[tuple[str, str]] = []
+            for ref in chart_refs:
+                cp = Path(ref.path)
+                if not cp.exists():
+                    raise FileNotFoundError(f"Chart image not found: {ref.path}")
+                if not cp.is_file():
+                    raise ValueError(f"Chart path is not a file: {ref.path}")
+                chart_items.append((ref.match_name, _chart_to_figure_html(cp, ref.title)))
+                charts_embedded += 1
 
-            else:
-                # --- markdown_path flow ---
-                md_path = Path(markdown_path)
-                if not md_path.exists():
-                    return _error(FileNotFoundError(f"Markdown file not found: {markdown_path}"))
-                markdown_text = md_path.read_text(encoding="utf-8")
-                body_html = markdown_to_clean_html(markdown_text)
+            if chart_items:
+                body_html = inject_charts_into_html(body_html, chart_items)
 
-                chart_refs: list[ChartRef] = []
-                if charts:
-                    for i, c in enumerate(charts):
-                        try:
-                            chart_refs.append(ChartRef(**c))
-                        except Exception as exc:
-                            return _error(ValueError(f"charts[{i}] is invalid: {exc}"))
+        # ── apply theme + template ────────────────────────────────
+        css = load_theme_css(theme)
+        meta = {
+            "generated_at": date.today().isoformat(),
+            "theme": theme,
+            "template": template,
+            "charts_embedded": charts_embedded,
+        }
+        final_html = build_html_document_jinja2(body_html, title, css, template, meta)
 
-                chart_items: list[tuple[str, str]] = []
-                for ref in chart_refs:
-                    cp = Path(ref.path)
-                    if not cp.exists():
-                        return _error(FileNotFoundError(f"Chart image not found: {ref.path}"))
-                    if not cp.is_file():
-                        return _error(ValueError(f"Chart path is not a file: {ref.path}"))
-                    chart_items.append((ref.match_name, _chart_to_figure_html(cp, ref.title)))
-                    charts_embedded += 1
+        # ── write outputs ─────────────────────────────────────────
+        result: dict[str, Any] = {
+            "title": title,
+            "charts_embedded": charts_embedded,
+            "theme": theme,
+            "template": template,
+        }
 
-                if chart_items:
-                    body_html = inject_charts_into_html(body_html, chart_items)
+        if output_format in ("html", "both"):
+            html_path.write_text(final_html, encoding="utf-8")
+            result["html_path"] = str(html_path)
 
-            # ── apply theme + template ────────────────────────────────
-            css = load_theme_css(theme)
-            meta = {
-                "generated_at": date.today().isoformat(),
-                "theme": theme,
-                "template": template,
-                "charts_embedded": charts_embedded,
-            }
-            final_html = build_html_document_jinja2(body_html, title, css, template, meta)
+        if output_format in ("pdf", "both"):
+            from lazybridge.external_tools.report_builder._deps import require_weasyprint
 
-            # ── write outputs ─────────────────────────────────────────
-            result: dict[str, Any] = {
-                "title": title,
-                "charts_embedded": charts_embedded,
-                "theme": theme,
-                "template": template,
-            }
+            weasyprint = require_weasyprint()
+            pdf_path = html_path.with_suffix(".pdf")
+            weasyprint.HTML(string=final_html).write_pdf(str(pdf_path))
+            result["pdf_path"] = str(pdf_path)
 
-            if output_format in ("html", "both"):
-                html_path.write_text(final_html, encoding="utf-8")
-                result["html_path"] = str(html_path)
-
-            if output_format in ("pdf", "both"):
-                from lazybridge.external_tools.report_builder._deps import require_weasyprint
-
-                weasyprint = require_weasyprint()
-                pdf_path = html_path.with_suffix(".pdf")
-                weasyprint.HTML(string=final_html).write_pdf(str(pdf_path))
-                result["pdf_path"] = str(pdf_path)
-
-            return result
-
-        except Exception as exc:
-            return _error(exc)
+        return result
 
     return [
         Tool(
@@ -295,7 +284,7 @@ def fragment_tools(
         bus = FragmentBus("daily-news")
         agent = Agent(
             model="anthropic:claude-haiku-4-5",
-            tools=fragment_tools(bus, default_section="us", step_name="us_research"),
+            tools=fragment_tools(bus=bus, default_section="us", step_name="us_research"),
         )
 
     The bus instance is shared across every Agent in the pipeline; LLM tool
@@ -313,7 +302,7 @@ def fragment_tools(
     )
 
     if not isinstance(bus, FragmentBus):  # pragma: no cover — caller error
-        raise TypeError(f"fragment_tools(bus) expected a FragmentBus, got {type(bus).__name__}")
+        raise TypeError(f"fragment_tools(bus=bus) expected a FragmentBus, got {type(bus).__name__}")
 
     def _resolve_section(section: str | None) -> str | None:
         return section if section is not None else default_section
@@ -349,19 +338,16 @@ def fragment_tools(
         Provide matching citation objects in `citations` so the bibliography
         section resolves at render time.
         """
-        try:
-            f = Fragment(
-                kind="text",
-                heading=heading or None,
-                body_md=body_markdown,
-                section=_resolve_section(section),
-                order_hint=order_hint,
-                citations=_coerce_citations(citations),
-                provenance=_make_provenance(),
-            )
-            return {"id": bus.append(f), "kind": "text"}
-        except Exception as exc:
-            return _error(exc)
+        f = Fragment(
+            kind="text",
+            heading=heading or None,
+            body_md=body_markdown,
+            section=_resolve_section(section),
+            order_hint=order_hint,
+            citations=_coerce_citations(citations),
+            provenance=_make_provenance(),
+        )
+        return {"id": bus.append(f), "kind": "text"}
 
     # ------------------------------------------------------------------
     # append_chart
@@ -384,20 +370,17 @@ def fragment_tools(
         data: optional inline rows that override spec.data.values for Vega-Lite,
               or splice into the first Plotly trace's x/y.
         """
-        try:
-            chart = ChartSpec(engine=engine, spec=spec, data=data, title=title)
-            f = Fragment(
-                kind="chart",
-                heading=heading,
-                chart=chart,
-                section=_resolve_section(section),
-                order_hint=order_hint,
-                citations=_coerce_citations(citations),
-                provenance=_make_provenance(),
-            )
-            return {"id": bus.append(f), "kind": "chart", "engine": engine}
-        except Exception as exc:
-            return _error(exc)
+        chart = ChartSpec(engine=engine, spec=spec, data=data, title=title)
+        f = Fragment(
+            kind="chart",
+            heading=heading,
+            chart=chart,
+            section=_resolve_section(section),
+            order_hint=order_hint,
+            citations=_coerce_citations(citations),
+            provenance=_make_provenance(),
+        )
+        return {"id": bus.append(f), "kind": "chart", "engine": engine}
 
     # ------------------------------------------------------------------
     # append_table
@@ -412,22 +395,19 @@ def fragment_tools(
         order_hint: float = 0.0,
     ) -> dict:
         """Append a table fragment.  Rows must have the same length as headers."""
-        try:
-            for i, row in enumerate(rows):
-                if len(row) != len(headers):
-                    raise ValueError(f"row {i} has {len(row)} cells but headers has {len(headers)} columns")
-            table = TableSpec(headers=headers, rows=[[str(c) for c in row] for row in rows], caption=caption)
-            f = Fragment(
-                kind="table",
-                heading=heading,
-                table=table,
-                section=_resolve_section(section),
-                order_hint=order_hint,
-                provenance=_make_provenance(),
-            )
-            return {"id": bus.append(f), "kind": "table"}
-        except Exception as exc:
-            return _error(exc)
+        for i, row in enumerate(rows):
+            if len(row) != len(headers):
+                raise ValueError(f"row {i} has {len(row)} cells but headers has {len(headers)} columns")
+        table = TableSpec(headers=headers, rows=[[str(c) for c in row] for row in rows], caption=caption)
+        f = Fragment(
+            kind="table",
+            heading=heading,
+            table=table,
+            section=_resolve_section(section),
+            order_hint=order_hint,
+            provenance=_make_provenance(),
+        )
+        return {"id": bus.append(f), "kind": "table"}
 
     # ------------------------------------------------------------------
     # append_callout
@@ -441,19 +421,16 @@ def fragment_tools(
         order_hint: float = 0.0,
     ) -> dict:
         """Append a callout (note / tip / important / warning / caution)."""
-        try:
-            f = Fragment(
-                kind="callout",
-                heading=heading,
-                body_md=body_markdown,
-                callout_style=style,  # type: ignore[arg-type]
-                section=_resolve_section(section),
-                order_hint=order_hint,
-                provenance=_make_provenance(),
-            )
-            return {"id": bus.append(f), "kind": "callout", "style": style}
-        except Exception as exc:
-            return _error(exc)
+        f = Fragment(
+            kind="callout",
+            heading=heading,
+            body_md=body_markdown,
+            callout_style=style,  # type: ignore[arg-type]
+            section=_resolve_section(section),
+            order_hint=order_hint,
+            provenance=_make_provenance(),
+        )
+        return {"id": bus.append(f), "kind": "callout", "style": style}
 
     # ------------------------------------------------------------------
     # cite_url
@@ -466,13 +443,10 @@ def fragment_tools(
         append_text / append_chart calls in their `citations=[...]` list.
         Cached by URL — calling repeatedly is cheap.
         """
-        try:
-            from lazybridge.external_tools.report_builder.citations import enrich_from_url
+        from lazybridge.external_tools.report_builder.citations import enrich_from_url
 
-            cit = enrich_from_url(url, store=bus._store)  # type: ignore[attr-defined]
-            return cit.model_dump(mode="json")
-        except Exception as exc:
-            return _error(exc)
+        cit = enrich_from_url(url, store=bus._store)  # type: ignore[attr-defined]
+        return cit.model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # list_fragments
@@ -484,11 +458,8 @@ def fragment_tools(
         Synthesis steps use this to read what the upstream agents wrote and
         produce executive summaries / cross-cutting analysis.
         """
-        try:
-            items = bus.fragments() if section is None else bus.by_section(section)
-            return [f.model_dump(mode="json") for f in items]
-        except Exception as exc:
-            return [_error(exc)]
+        items = bus.fragments() if section is None else bus.by_section(section)
+        return [f.model_dump(mode="json") for f in items]
 
     return [
         Tool(

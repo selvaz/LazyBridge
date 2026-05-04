@@ -23,7 +23,7 @@ def _by_name(tools, name):
 
 class TestToolList:
     def test_returns_six_tools(self, bus):
-        tools = fragment_tools(bus)
+        tools = fragment_tools(bus=bus)
         names = sorted(t.name for t in tools)
         assert names == [
             "append_callout",
@@ -36,12 +36,12 @@ class TestToolList:
 
     def test_rejects_non_bus_argument(self):
         with pytest.raises(TypeError):
-            fragment_tools("not a bus")  # type: ignore[arg-type]
+            fragment_tools(bus="not a bus")  # type: ignore[arg-type]
 
 
 class TestAppendText:
     def test_text_lands_in_bus(self, bus):
-        tool = _by_name(fragment_tools(bus, default_section="intro"), "append_text")
+        tool = _by_name(fragment_tools(bus=bus, default_section="intro"), "append_text")
         result = _call(tool, heading="H", body_markdown="Body")
         assert "id" in result
         assert result["kind"] == "text"
@@ -53,27 +53,28 @@ class TestAppendText:
         assert f.section == "intro"
 
     def test_explicit_section_overrides_default(self, bus):
-        tool = _by_name(fragment_tools(bus, default_section="d"), "append_text")
+        tool = _by_name(fragment_tools(bus=bus, default_section="d"), "append_text")
         _call(tool, heading="x", body_markdown="y", section="elsewhere")
         assert bus.fragments()[0].section == "elsewhere"
 
     def test_provenance_step_name_stamped(self, bus):
-        tool = _by_name(fragment_tools(bus, step_name="research"), "append_text")
+        tool = _by_name(fragment_tools(bus=bus, step_name="research"), "append_text")
         _call(tool, heading="x", body_markdown="y")
         f = bus.fragments()[0]
         assert f.provenance is not None
         assert f.provenance.step_name == "research"
 
-    def test_invalid_text_returns_error_dict(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_text")
-        result = _call(tool, heading="", body_markdown="")
-        assert result.get("error") is True
-        assert "type" in result
+    def test_invalid_text_raises(self, bus):
+        from pydantic import ValidationError
+
+        tool = _by_name(fragment_tools(bus=bus), "append_text")
+        with pytest.raises((ValueError, ValidationError)):
+            _call(tool, heading="", body_markdown="")
 
 
 class TestAppendChart:
     def test_vega_chart_lands(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_chart")
+        tool = _by_name(fragment_tools(bus=bus), "append_chart")
         result = _call(
             tool,
             engine="vega-lite",
@@ -87,15 +88,17 @@ class TestAppendChart:
         assert f.chart.engine == "vega-lite"
         assert f.chart.title == "T"
 
-    def test_invalid_engine_errors(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_chart")
-        result = _call(tool, engine="bogus", spec={"mark": "bar"}, title="t")
-        assert result.get("error") is True
+    def test_invalid_engine_raises(self, bus):
+        from pydantic import ValidationError
+
+        tool = _by_name(fragment_tools(bus=bus), "append_chart")
+        with pytest.raises((ValueError, ValidationError)):
+            _call(tool, engine="bogus", spec={"mark": "bar"}, title="t")
 
 
 class TestAppendTable:
     def test_table_lands(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_table")
+        tool = _by_name(fragment_tools(bus=bus), "append_table")
         result = _call(
             tool,
             headers=["a", "b"],
@@ -107,16 +110,15 @@ class TestAppendTable:
         assert f.table.headers == ["a", "b"]
         assert f.table.caption == "Cap"
 
-    def test_row_length_mismatch_errors(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_table")
-        result = _call(tool, headers=["a", "b"], rows=[["1"]])
-        assert result.get("error") is True
-        assert "headers" in result.get("message", "")
+    def test_row_length_mismatch_raises(self, bus):
+        tool = _by_name(fragment_tools(bus=bus), "append_table")
+        with pytest.raises(ValueError, match="headers"):
+            _call(tool, headers=["a", "b"], rows=[["1"]])
 
 
 class TestAppendCallout:
     def test_callout_with_default_style(self, bus):
-        tool = _by_name(fragment_tools(bus), "append_callout")
+        tool = _by_name(fragment_tools(bus=bus), "append_callout")
         result = _call(tool, style="warning", body_markdown="Take care")
         assert result.get("kind") == "callout"
         f = bus.fragments()[0]
@@ -125,7 +127,7 @@ class TestAppendCallout:
 
 class TestListFragments:
     def test_lists_all_when_no_filter(self, bus):
-        tools = fragment_tools(bus)
+        tools = fragment_tools(bus=bus)
         text_tool = _by_name(tools, "append_text")
         list_tool = _by_name(tools, "list_fragments")
 
@@ -145,7 +147,7 @@ class TestCiteUrlGracefulFallback:
         # caught by the broad except in citations.py and we fall back to a
         # minimal citation.  The test confirms the call produces *something*
         # usable rather than crashing.
-        tools = fragment_tools(bus)
+        tools = fragment_tools(bus=bus)
         tool = _by_name(tools, "cite_url")
         result = _call(tool, url="https://example.com/no-such-paper-abcdef")
         # Either a Citation dict or a structured error — both shapes mean

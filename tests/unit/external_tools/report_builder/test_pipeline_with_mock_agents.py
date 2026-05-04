@@ -277,7 +277,7 @@ class TestMockDrivenFragmentTools:
 
     def test_append_text_via_tool_call(self, tmp_path):
         bus = FragmentBus("tooled")
-        tools = fragment_tools(bus, default_section="body", step_name="research")
+        tools = fragment_tools(bus=bus, default_section="body", step_name="research")
         append_text = next(t for t in tools if t.name == "append_text")
 
         def _respond(env: Envelope):
@@ -302,7 +302,7 @@ class TestMockDrivenFragmentTools:
 
     def test_append_chart_via_tool_call(self, tmp_path):
         bus = FragmentBus("tooled-chart")
-        tools = fragment_tools(bus)
+        tools = fragment_tools(bus=bus)
         append_chart = next(t for t in tools if t.name == "append_chart")
 
         def _respond(env: Envelope):
@@ -324,19 +324,21 @@ class TestMockDrivenFragmentTools:
         assert f.chart.engine == "vega-lite"
         assert f.chart.title == "Demo"
 
-    def test_invalid_table_returns_error_dict(self, tmp_path):
-        """Bad input lands as a structured error — agent can self-correct."""
-        bus = FragmentBus("tooled-err")
-        append_table = next(t for t in fragment_tools(bus) if t.name == "append_table")
+    def test_invalid_table_raises(self, tmp_path):
+        """Bad input raises; the engine wraps it into is_error=True for the LLM."""
+        import pytest
 
-        result = append_table.run_sync(headers=["A", "B"], rows=[["only-one-cell"]])
-        assert result.get("error") is True
+        bus = FragmentBus("tooled-err")
+        append_table = next(t for t in fragment_tools(bus=bus) if t.name == "append_table")
+
+        with pytest.raises(ValueError):
+            append_table.run_sync(headers=["A", "B"], rows=[["only-one-cell"]])
         # Bus untouched.
         assert len(bus) == 0
 
     def test_list_fragments_round_trip_via_tool(self, tmp_path):
         bus = FragmentBus("tooled-list")
-        tools = fragment_tools(bus, default_section="x")
+        tools = fragment_tools(bus=bus, default_section="x")
         append_text = next(t for t in tools if t.name == "append_text")
         list_fragments = next(t for t in tools if t.name == "list_fragments")
 

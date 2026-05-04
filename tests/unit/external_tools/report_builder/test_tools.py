@@ -29,24 +29,24 @@ _PNG = (
 
 class TestReportToolsFactory:
     def test_returns_list(self, tmp_path):
-        tools = report_tools(tmp_path)
+        tools = report_tools(output_dir=tmp_path)
         assert isinstance(tools, list)
 
     def test_returns_one_tool(self, tmp_path):
-        assert len(report_tools(tmp_path)) == 1
+        assert len(report_tools(output_dir=tmp_path)) == 1
 
     def test_tool_is_lazybridge_tool(self, tmp_path):
-        assert isinstance(report_tools(tmp_path)[0], Tool)
+        assert isinstance(report_tools(output_dir=tmp_path)[0], Tool)
 
     def test_tool_name(self, tmp_path):
-        assert report_tools(tmp_path)[0].name == "generate_report"
+        assert report_tools(output_dir=tmp_path)[0].name == "generate_report"
 
     def test_tool_has_description(self, tmp_path):
-        tool = report_tools(tmp_path)[0]
+        tool = report_tools(output_dir=tmp_path)[0]
         assert tool.description and len(tool.description) > 10
 
     def test_schema_has_expected_params(self, tmp_path):
-        props = report_tools(tmp_path)[0].definition().parameters["properties"]
+        props = report_tools(output_dir=tmp_path)[0].definition().parameters["properties"]
         for param in (
             "title",
             "theme",
@@ -68,7 +68,7 @@ class TestReportToolsFactory:
         md = tmp_path / "test.md"
         md.write_text("# Hello", encoding="utf-8")
 
-        result = report_tools(new_dir)[0].func(markdown_path=str(md), title="Test")
+        result = report_tools(output_dir=new_dir)[0].func(markdown_path=str(md), title="Test")
         assert not result.get("error")
         assert new_dir.exists()
 
@@ -79,78 +79,78 @@ class TestReportToolsFactory:
 
 
 class TestGenerateReportErrors:
-    def test_no_content_source_returns_error(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(title="T")
-        assert result["error"] is True
-        assert "sections" in result["message"] or "markdown_path" in result["message"]
+    """The tool now raises on validation/runtime errors; the engine wraps the
+    exception into an is_error=True tool result. Each test asserts the right
+    exception type leaks out of the underlying callable."""
 
-    def test_missing_markdown_file_returns_error(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(markdown_path=str(tmp_path / "nonexistent.md"), title="T")
-        assert result["error"] is True
-        assert result["type"] == "FileNotFoundError"
+    def test_no_content_source_raises(self, tmp_path):
+        with pytest.raises(ValueError, match=r"sections|markdown_path"):
+            report_tools(output_dir=tmp_path)[0].func(title="T")
 
-    def test_unknown_theme_returns_error(self, tmp_path):
+    def test_missing_markdown_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            report_tools(output_dir=tmp_path)[0].func(markdown_path=str(tmp_path / "nonexistent.md"), title="T")
+
+    def test_unknown_theme_raises(self, tmp_path):
         pytest.importorskip("markdown")
         pytest.importorskip("bleach")
 
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", theme="neon")
-        assert result["error"] is True
-        assert "neon" in result["message"]
+        with pytest.raises(ValueError, match="neon"):
+            report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T", theme="neon")
 
-    def test_unknown_template_returns_error(self, tmp_path):
+    def test_unknown_template_raises(self, tmp_path):
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", template="bogus")
-        assert result["error"] is True
-        assert "bogus" in result["message"]
+        with pytest.raises(ValueError, match="bogus"):
+            report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T", template="bogus")
 
-    def test_unknown_output_format_returns_error(self, tmp_path):
+    def test_unknown_output_format_raises(self, tmp_path):
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", output_format="docx")
-        assert result["error"] is True
+        with pytest.raises(ValueError):
+            report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T", output_format="docx")
 
-    def test_invalid_chart_spec_returns_error(self, tmp_path):
+    def test_invalid_chart_spec_raises(self, tmp_path):
         pytest.importorskip("markdown")
         pytest.importorskip("bleach")
 
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
         # missing required 'title' and 'path' fields
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", charts=[{"name": "x"}])
-        assert result["error"] is True
+        with pytest.raises(ValueError):
+            report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T", charts=[{"name": "x"}])
 
-    def test_missing_chart_png_returns_error(self, tmp_path):
+    def test_missing_chart_png_raises(self, tmp_path):
         pytest.importorskip("markdown")
         pytest.importorskip("bleach")
 
         md = tmp_path / "t.md"
         md.write_text("# Hi", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
-            markdown_path=str(md),
-            title="T",
-            charts=[{"path": str(tmp_path / "missing.png"), "title": "Chart", "name": "Hi"}],
-        )
-        assert result["error"] is True
-        assert result["type"] == "FileNotFoundError"
+        with pytest.raises(FileNotFoundError):
+            report_tools(output_dir=tmp_path)[0].func(
+                markdown_path=str(md),
+                title="T",
+                charts=[{"path": str(tmp_path / "missing.png"), "title": "Chart", "name": "Hi"}],
+            )
 
-    def test_invalid_section_type_returns_error(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(
-            title="T",
-            sections=[{"type": "video", "url": "x"}],
-        )
-        assert result["error"] is True
-        assert "video" in result["message"]
+    def test_invalid_section_type_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="video"):
+            report_tools(output_dir=tmp_path)[0].func(
+                title="T",
+                sections=[{"type": "video", "url": "x"}],
+            )
 
-    def test_invalid_section_fields_returns_error(self, tmp_path):
-        # ChartSection requires 'path' and 'title'
-        result = report_tools(tmp_path)[0].func(
-            title="T",
-            sections=[{"type": "chart"}],
-        )
-        assert result["error"] is True
+    def test_invalid_section_fields_raises(self, tmp_path):
+        # ChartSection requires 'path' and 'title' — Pydantic raises ValidationError
+        from pydantic import ValidationError
+
+        with pytest.raises((ValueError, ValidationError)):
+            report_tools(output_dir=tmp_path)[0].func(
+                title="T",
+                sections=[{"type": "chart"}],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ class TestMarkdownPathFlow:
         md = tmp_path / "report.md"
         md.write_text("# Hello\n\nThis is a test report.", encoding="utf-8")
 
-        result = report_tools(tmp_path / "out")[0].func(markdown_path=str(md), title="Test Report")
+        result = report_tools(output_dir=tmp_path / "out")[0].func(markdown_path=str(md), title="Test Report")
 
         assert not result.get("error"), result.get("message")
         assert result["title"] == "Test Report"
@@ -180,7 +180,7 @@ class TestMarkdownPathFlow:
     def test_output_is_valid_html(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("# Section\n\nContent.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T")
+        result = report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T")
 
         html = Path(result["html_path"]).read_text(encoding="utf-8")
         assert "<!doctype html>" in html.lower()
@@ -192,7 +192,7 @@ class TestMarkdownPathFlow:
         md.write_text("# Test", encoding="utf-8")
 
         for theme in ("executive", "financial", "technical", "research"):
-            result = report_tools(tmp_path)[0].func(
+            result = report_tools(output_dir=tmp_path)[0].func(
                 markdown_path=str(md),
                 title="T",
                 theme=theme,
@@ -208,7 +208,7 @@ class TestMarkdownPathFlow:
         md = tmp_path / "r.md"
         md.write_text("# Revenue\n\nText.", encoding="utf-8")
 
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             markdown_path=str(md),
             title="T",
             charts=[{"path": str(png_path), "title": "Revenue Chart", "name": "Revenue"}],
@@ -223,7 +223,9 @@ class TestMarkdownPathFlow:
     def test_custom_output_filename(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("# T", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", output_filename="custom_name.html")
+        result = report_tools(output_dir=tmp_path)[0].func(
+            markdown_path=str(md), title="T", output_filename="custom_name.html"
+        )
         assert not result.get("error")
         assert Path(result["html_path"]).name == "custom_name.html"
 
@@ -240,7 +242,7 @@ class TestSectionsFlow:
         pytest.importorskip("jinja2")
 
     def test_text_section_renders(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             title="T",
             sections=[{"type": "text", "heading": "Overview", "body": "Some **bold** text."}],
         )
@@ -250,7 +252,7 @@ class TestSectionsFlow:
         assert "<strong>" in html
 
     def test_table_section_renders(self, tmp_path):
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             title="T",
             sections=[
                 {
@@ -271,7 +273,7 @@ class TestSectionsFlow:
         png_path = tmp_path / "c.png"
         png_path.write_bytes(_PNG)
 
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             title="T",
             sections=[{"type": "chart", "path": str(png_path), "title": "My Chart"}],
         )
@@ -285,7 +287,7 @@ class TestSectionsFlow:
         png_path.write_bytes(_PNG)
 
         # charts param is ignored when sections is provided
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             title="T",
             sections=[{"type": "chart", "path": str(png_path), "title": "My Chart"}],
             charts=[{"path": str(png_path), "title": "Ignored", "name": "x"}],
@@ -298,7 +300,7 @@ class TestSectionsFlow:
         png_path = tmp_path / "c.png"
         png_path.write_bytes(_PNG)
 
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             title="T",
             sections=[
                 {"type": "text", "heading": "Intro", "body": "Hello."},
@@ -329,7 +331,7 @@ class TestTemplateVariants:
     def test_all_templates_produce_valid_html(self, tmp_path, template):
         md = tmp_path / "r.md"
         md.write_text("## Revenue\n\nText.\n\n## Segments\n\nMore.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(
+        result = report_tools(output_dir=tmp_path)[0].func(
             markdown_path=str(md),
             title="T",
             template=template,
@@ -343,13 +345,15 @@ class TestTemplateVariants:
     def test_deep_dive_contains_toc(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("## Revenue\n\nText.\n\n## Segments\n\nMore.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", template="deep_dive")
+        result = report_tools(output_dir=tmp_path)[0].func(markdown_path=str(md), title="T", template="deep_dive")
         html = Path(result["html_path"]).read_text(encoding="utf-8")
         assert "dd-toc" in html
 
     def test_executive_summary_contains_meta_chip(self, tmp_path):
         md = tmp_path / "r.md"
         md.write_text("# Report\n\nContent.", encoding="utf-8")
-        result = report_tools(tmp_path)[0].func(markdown_path=str(md), title="T", template="executive_summary")
+        result = report_tools(output_dir=tmp_path)[0].func(
+            markdown_path=str(md), title="T", template="executive_summary"
+        )
         html = Path(result["html_path"]).read_text(encoding="utf-8")
         assert "meta-chip" in html

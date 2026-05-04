@@ -165,11 +165,11 @@ def read_folder_docs(
         base = Path(base_dir).expanduser().resolve()
         try:
             target.relative_to(base)
-        except ValueError:
-            return f"[Error: refused — path {str(target)!r} escapes base_dir {str(base)!r}]"
+        except ValueError as exc:
+            raise PermissionError(f"refused — path {str(target)!r} escapes base_dir {str(base)!r}") from exc
 
     if not target.exists():
-        return f"[Error: path not found — {path}]"
+        raise FileNotFoundError(f"path not found — {path}")
 
     if target.is_file():
         files = [target]
@@ -194,7 +194,7 @@ def read_folder_docs(
         if not files:
             return f"[No documents found in '{path}' matching extensions: {extensions}]"
     else:
-        return f"[Error: path is neither a file nor a directory — {path}]"
+        raise ValueError(f"path is neither a file nor a directory — {path}")
 
     records: list[dict] = []
     for fpath in files:

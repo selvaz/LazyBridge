@@ -690,7 +690,7 @@ When done, reply with only the absolute html_path on a single line.
 
 final_orchestrator = Agent(
     engine=LLMEngine("medium", provider="deepseek", system=_FINAL_ORCHESTRATOR_SYSTEM),
-    tools=[save_md_tool, *report_tools(OUTPUT_DIR)],
+    tools=[save_md_tool, *report_tools(output_dir=OUTPUT_DIR)],
     name="final_orchestrator",
     session=session,
 )
