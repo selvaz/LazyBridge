@@ -6,6 +6,7 @@ export const state = {
   events: [],            // chronological, capped at 5000
   byId: new Map(),       // _seq -> event
   selectedSeq: null,
+  selectedNode: null,    // last clicked graph node object
   store: {},
   storeFresh: new Map(), // key -> ts when last updated, used for highlight
   nodes: [],             // graph nodes (mutable as tools appear)

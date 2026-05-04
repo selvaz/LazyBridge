@@ -1,54 +1,78 @@
 /* Graph nodes, links, and pulse animations */
 
 #canvas .link {
-  stroke: rgba(140, 170, 220, 0.28);
+  stroke: rgba(140, 170, 220, 0.25);
   stroke-width: 1.4;
   fill: none;
-  transition: stroke 0.3s ease, stroke-width 0.3s ease;
-}
-#canvas .link.active {
-  stroke: rgba(0, 212, 255, 0.7);
-  stroke-width: 2;
-  filter: url(#glow);
+  transition: stroke 0.3s ease;
 }
 #canvas .link.tool    { stroke-dasharray: 0; }
 #canvas .link.context { stroke-dasharray: 5 4; }
 #canvas .link.router  { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
 
-/* ---- Node shapes ---- */
+/* ---- Agent — 3-D parallelepiped ---------------------------------------- */
 
-/* Agent = circle */
-#canvas .node.agent .node-bg {
-  fill: rgba(20, 30, 50, 0.85);
+/* Right side face: dark shadow */
+#canvas .node.agent .box-right {
+  fill: rgba(0, 40, 60, 0.70);
+  stroke: var(--accent-agent);
+  stroke-width: 0.8;
+  stroke-opacity: 0.5;
+}
+/* Top face: lighter, lit from above */
+#canvas .node.agent .box-top {
+  fill: rgba(0, 80, 110, 0.55);
+  stroke: var(--accent-agent);
+  stroke-width: 0.8;
+  stroke-opacity: 0.6;
+}
+/* Front face: main surface */
+#canvas .node.agent .box-front {
+  fill: rgba(8, 18, 38, 0.92);
   stroke: var(--accent-agent);
   stroke-width: 2;
   filter: url(#glow);
-  transition: stroke 0.25s ease, stroke-width 0.2s ease;
+  transition: stroke-width 0.2s ease;
+}
+/* Pinned dashes on front face */
+#canvas .node.agent.pinned .box-front { stroke-dasharray: 6 3; }
+
+/* in-flight: front face pulses */
+#canvas .node.agent.in-flight .box-front {
+  animation: agentPulse 1.5s ease-in-out infinite;
+}
+@keyframes agentPulse {
+  0%, 100% { stroke-width: 2; }
+  50%      { stroke-width: 5; filter: url(#flare); }
 }
 
-/* Tool = hexagon */
+/* ---- Tool — hexagon ---------------------------------------------------- */
+
 #canvas .node.tool .node-bg {
-  fill: rgba(30, 15, 40, 0.88);
+  fill: rgba(28, 10, 38, 0.90);
   stroke: var(--accent-tool);
   stroke-width: 2;
   filter: url(#glow);
-  transition: stroke 0.25s ease;
+  transition: stroke-width 0.2s ease;
 }
+#canvas .node.tool.pinned .node-bg { stroke-dasharray: 5 3; }
 
-/* Router = diamond */
+/* ---- Router — diamond --------------------------------------------------- */
+
 #canvas .node.router .node-bg {
-  fill: rgba(30, 25, 10, 0.88);
+  fill: rgba(28, 22, 8, 0.90);
   stroke: var(--accent-router);
   stroke-width: 2;
   filter: url(#glow);
-  transition: stroke 0.25s ease;
 }
+
+/* ---- Shared label styles ----------------------------------------------- */
 
 #canvas .node-label {
   fill: var(--text);
   font-family: "Inter", sans-serif;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   text-anchor: middle;
   pointer-events: none;
   user-select: none;
@@ -60,28 +84,15 @@
   text-anchor: middle;
   pointer-events: none;
 }
-
-/* Pin icon — shown when node is pinned */
 #canvas .pin-icon {
   font-size: 10px;
   pointer-events: none;
   user-select: none;
-  filter: drop-shadow(0 0 3px rgba(255,200,100,0.6));
-}
-#canvas .node.pinned .node-bg {
-  stroke-dasharray: 5 3;
+  filter: drop-shadow(0 0 3px rgba(255, 200, 100, 0.7));
 }
 
-/* Active state — in-flight between MODEL_REQUEST and MODEL_RESPONSE */
-#canvas .node.in-flight .node-bg {
-  animation: nodePulse 1.6s ease-in-out infinite;
-}
-@keyframes nodePulse {
-  0%, 100% { stroke-width: 2; }
-  50%      { stroke-width: 5; filter: url(#flare); }
-}
+/* ---- Hit ring (all node types) ------------------------------------------ */
 
-/* Hit ring — briefly appears when a node receives an event */
 #canvas .hit-ring {
   fill: none;
   stroke-width: 2;
@@ -89,19 +100,20 @@
   opacity: 0;
 }
 #canvas .hit-ring.fire {
-  animation: ringFire 0.8s ease-out forwards;
+  animation: ringFire 0.85s ease-out forwards;
 }
 @keyframes ringFire {
-  0%   { opacity: 0.9; r: 26; stroke-width: 3; }
-  100% { opacity: 0;   r: 58; stroke-width: 0.5; }
+  0%   { opacity: 0.9; r: 28; stroke-width: 3; }
+  100% { opacity: 0;   r: 62; stroke-width: 0.5; }
 }
 
-#canvas .pulse {
-  pointer-events: none;
-  filter: url(#glow);
-}
+/* ---- Pulse packets ------------------------------------------------------- */
 
-/* Error flash */
+#canvas .pulse { pointer-events: none; filter: url(#glow); }
+
+/* ---- Error flash -------------------------------------------------------- */
+
+#canvas .node.error .box-front,
 #canvas .node.error .node-bg {
   stroke: var(--accent-error) !important;
   animation: errorShake 0.4s ease-in-out;

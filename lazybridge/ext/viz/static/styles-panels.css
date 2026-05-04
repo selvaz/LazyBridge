@@ -1,5 +1,106 @@
 /* Inspector + timeline interior styling */
 
+/* ---- Agent card (D&D scheda) ------------------------------------------- */
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: "Inter", sans-serif;
+}
+.ac-nameplate {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.ac-type-icon {
+  font-size: 26px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ac-type-icon.type-agent  { color: var(--accent-agent); }
+.ac-type-icon.type-tool   { color: var(--accent-tool); }
+.ac-type-icon.type-router { color: var(--accent-router); }
+.ac-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  margin-bottom: 5px;
+}
+.ac-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.ac-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-dim);
+}
+.ac-badge.provider { color: var(--accent-agent); border-color: rgba(0,212,255,0.25); }
+.ac-badge.model    { color: #b388ff; border-color: rgba(179,136,255,0.25); }
+.ac-badge.type-agent  { color: var(--accent-agent); border-color: rgba(0,212,255,0.3); }
+.ac-badge.type-tool   { color: var(--accent-tool);  border-color: rgba(255,62,201,0.3); }
+.ac-badge.type-router { color: var(--accent-router); border-color: rgba(255,179,64,0.3); }
+.ac-badge.live    { color: var(--accent-store); border-color: rgba(80,250,123,0.35); }
+.ac-badge.dormant { color: var(--text-dim); border-color: transparent; }
+
+.ac-section {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.ac-section:last-child { border-bottom: none; }
+.ac-section-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+.ac-system {
+  font-style: italic;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ac-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-tool {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(255, 62, 201, 0.10);
+  border: 1px solid rgba(255, 62, 201, 0.25);
+  color: var(--accent-tool);
+}
+.ac-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ac-stat { display: flex; flex-direction: column; align-items: center; min-width: 44px; }
+.ac-v {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-agent);
+  line-height: 1.1;
+}
+.ac-l { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+.ac-store-list { display: flex; flex-direction: column; gap: 5px; }
+.ac-store-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.ac-store-dot  { color: var(--accent-store); font-size: 8px; }
+.ac-store-key  { color: var(--accent-store); font-family: "JetBrains Mono", monospace; font-size: 10.5px; flex: 1; }
+.ac-store-ts   { color: var(--text-dim); font-size: 9.5px; flex-shrink: 0; }
+
+/* ---- Inspector tabs ----------------------------------------------------- */
+
 #inspector .tabs {
   display: flex;
   gap: 2px;

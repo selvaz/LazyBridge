@@ -1,19 +1,23 @@
-// D3 force-directed graph with live mutation: nodes and edges
-// can appear at runtime (tool nodes are discovered from events).
+// D3 force-directed graph with live mutation.
 //
 // Visual encoding per node type:
-//   agent  → circle
+//   agent  → 3-D parallelepiped (box with top + right face)
 //   tool   → hexagon
 //   router → diamond
 //
-// Nodes are pinnable: end of drag → pinned (fx/fy fixed).
-// Double-click to unpin. A pin icon appears on pinned nodes.
+// Drag to pin a node (📌); double-click to unpin.
 
 import { state, emit } from "/static/state.js";
 import { installDefs } from "/static/graph-defs.js";
 import { spawnPulse } from "/static/graph-pulse.js";
 
-const NODE_R = 22;
+// --- geometry constants ---------------------------------------------------
+
+const NODE_R = 22;          // radius for tools / routers and collision
+
+const BOX = { w: 60, h: 32, d: 10 }; // agent box (front face + 3-D offset)
+const AGENT_COLL_R = BOX.w / 2 + BOX.d + 14; // collision radius for agents
+
 // Precomputed hexagon path (flat-top, r=NODE_R)
 const HEX_PATH = (() => {
   const pts = Array.from({ length: 6 }, (_, i) => {
@@ -22,36 +26,68 @@ const HEX_PATH = (() => {
   });
   return "M" + pts.map(p => p.join(",")).join("L") + "Z";
 })();
+
 // Diamond path for routers
 const DIAMOND_PATH =
-  `M0,${-NODE_R - 4} L${NODE_R + 4},0 L0,${NODE_R + 4} L${-NODE_R - 4},0 Z`;
+  `M0,${-(NODE_R + 4)} L${NODE_R + 4},0 L0,${NODE_R + 4} L${-(NODE_R + 4)},0 Z`;
+
+// Returns {front, top, right} polygon point-strings for an agent box
+function boxFaces() {
+  const hw = BOX.w / 2, hh = BOX.h / 2, d = BOX.d;
+  const p = (pts) => pts.map(([x, y]) => `${x},${y}`).join(" ");
+  const ftl = [-hw, -hh], ftr = [hw, -hh];
+  const fbl = [-hw,  hh], fbr = [hw,  hh];
+  const btl = [-hw + d, -hh - d], btr = [hw + d, -hh - d];
+  const bbr = [ hw + d,  hh - d];
+  return {
+    front: p([ftl, ftr, fbr, fbl]),
+    top:   p([ftl, ftr, btr, btl]),
+    right: p([ftr, fbr, bbr, btr]),
+  };
+}
+
+// -------------------------------------------------------------------------
 
 let svg, gLinks, gNodes, gPulses, sim, nodeSel, linkSel;
 
 export function initGraph() {
-  const el = document.getElementById("canvas");
+  const el   = document.getElementById("canvas");
   const rect = el.getBoundingClientRect();
   svg = d3.select(el).attr("viewBox", `0 0 ${rect.width} ${rect.height}`);
   installDefs(svg);
 
   const root = svg.append("g").attr("class", "viewport");
-  gLinks = root.append("g").attr("class", "links");
-  gNodes = root.append("g").attr("class", "nodes");
+  gLinks  = root.append("g").attr("class", "links");
+  gNodes  = root.append("g").attr("class", "nodes");
   gPulses = root.append("g").attr("class", "pulses");
 
-  svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", (ev) => {
+  svg.call(d3.zoom().scaleExtent([0.15, 4]).on("zoom", (ev) => {
     root.attr("transform", ev.transform);
   }));
 
   sim = d3.forceSimulation()
-    .force("link", d3.forceLink().id(d => d.id).distance(160).strength(0.5))
-    .force("charge", d3.forceManyBody().strength(-420))
+    .force("link",   d3.forceLink().id(d => d.id).distance(170).strength(0.45))
+    .force("charge", d3.forceManyBody().strength(-480))
     .force("center", d3.forceCenter(rect.width / 2, rect.height / 2))
-    .force("collide", d3.forceCollide(NODE_R + 12))
+    .force("collide", d3.forceCollide(n => n.type === "agent" ? AGENT_COLL_R : NODE_R + 14))
     .on("tick", onTick);
 }
 
 export function setGraph(nodes, links) {
+  // Enrich agent nodes with their outgoing tool names (for the card panel)
+  for (const n of nodes) {
+    if (n.type === "agent") {
+      n.tools = links
+        .filter(l => {
+          const src = typeof l.source === "object" ? l.source.id : l.source;
+          return src === n.id && l.kind === "tool";
+        })
+        .map(l => {
+          const tgt = typeof l.target === "object" ? l.target.id : l.target;
+          return tgt.replace(/^tool:/, "");
+        });
+    }
+  }
   state.nodes = nodes;
   state.links = links;
   redraw();
@@ -62,8 +98,16 @@ export function ensureToolNode(toolName, agentId) {
   if (!state.nodes.find(n => n.id === id)) {
     state.nodes.push({ id, name: toolName, type: "tool" });
   }
-  if (!state.links.find(l => l.source === agentId && l.target === id && l.kind === "tool")) {
+  if (!state.links.find(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    return s === agentId && l.target === id && l.kind === "tool";
+  })) {
     state.links.push({ source: agentId, target: id, kind: "tool" });
+  }
+  // Keep agent's tools list in sync
+  const agentNode = state.nodes.find(n => n.id === agentId);
+  if (agentNode && agentNode.tools && !agentNode.tools.includes(toolName)) {
+    agentNode.tools.push(toolName);
   }
   redraw();
   return id;
@@ -84,17 +128,9 @@ function redraw() {
     .attr("class", n => `node ${n.type}`)
     .attr("data-id", n => n.id)
     .call(d3.drag()
-      .on("start", (ev, d) => {
-        if (!ev.active) sim.alphaTarget(0.3).restart();
-        d.fx = d.x; d.fy = d.y;
-      })
-      .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
-      .on("end", (ev, d) => {
-        if (!ev.active) sim.alphaTarget(0);
-        // Pin node in place — keep fx/fy set
-        d._pinned = true;
-        updatePinIcon(d);
-      }));
+      .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+      .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d._pinned = true; updatePinIcon(d); }));
 
   // Double-click unpins
   enter.on("dblclick", (ev, d) => {
@@ -104,33 +140,40 @@ function redraw() {
     sim.alpha(0.3).restart();
   });
 
-  // Hit ring (animation layer)
+  // Hit-ring circle (same for all types, rendered before shape)
   enter.append("circle").attr("class", "hit-ring");
 
   // Shape per type
   enter.each(function(d) {
     const g = d3.select(this);
-    if (d.type === "tool") {
+    if (d.type === "agent") {
+      const f = boxFaces();
+      g.append("polygon").attr("class", "box-right").attr("points", f.right);
+      g.append("polygon").attr("class", "box-top").attr("points", f.top);
+      g.append("polygon").attr("class", "box-front").attr("points", f.front);
+    } else if (d.type === "tool") {
       g.append("path").attr("class", "node-bg").attr("d", HEX_PATH);
-    } else if (d.type === "router") {
-      g.append("path").attr("class", "node-bg").attr("d", DIAMOND_PATH);
     } else {
-      // agent (default) — circle
-      g.append("circle").attr("class", "node-bg").attr("r", NODE_R);
+      g.append("path").attr("class", "node-bg").attr("d", DIAMOND_PATH);
     }
   });
 
   enter.append("text").attr("class", "node-label").attr("dy", 4)
-    .text(n => truncate(n.name, 12));
-  enter.append("text").attr("class", "node-sub").attr("dy", NODE_R + 14)
+    .text(n => truncate(n.name, n.type === "agent" ? 10 : 12));
+  enter.append("text").attr("class", "node-sub")
+    .attr("dy", d => d.type === "agent" ? BOX.h / 2 + BOX.d + 14 : NODE_R + 14)
     .text(n => sublabel(n));
 
   // Pin icon (hidden by default)
   enter.append("text").attr("class", "pin-icon")
-    .attr("dy", -NODE_R - 6).attr("text-anchor", "middle")
+    .attr("dy", d => d.type === "agent" ? -(BOX.h / 2 + BOX.d + 6) : -(NODE_R + 6))
+    .attr("text-anchor", "middle")
     .style("display", "none").text("📌");
 
-  enter.on("click", (_ev, d) => emit("nodeClick", d));
+  enter.on("click", (_ev, d) => {
+    state.selectedNode = d;
+    emit("nodeClick", d);
+  });
 
   nodeSel = enter.merge(nodeSel);
 
@@ -170,7 +213,7 @@ function sublabel(n) {
   return n.model ? truncate(n.model, 18) : (n.provider || "");
 }
 
-// ---- Animation API ---------------------------------------------------
+// ---- Animation API -------------------------------------------------------
 
 export function pulse(srcId, dstId, color) {
   const src = state.nodes.find(n => n.id === srcId);
