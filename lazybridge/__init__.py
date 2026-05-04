@@ -43,7 +43,8 @@ Tier 6 — full config::
     )
 """
 
-__version__ = "1.0.0"
+__version__ = "0.7.0"
+__stability__ = "alpha"
 
 # Core public API
 from lazybridge.agent import Agent

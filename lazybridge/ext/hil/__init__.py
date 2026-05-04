@@ -21,8 +21,6 @@ Usage::
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "stable"
-__lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.hil.human import HumanEngine
 from lazybridge.ext.hil.supervisor import SupervisorEngine

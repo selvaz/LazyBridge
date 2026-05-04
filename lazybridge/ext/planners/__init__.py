@@ -25,8 +25,6 @@ Pick by trade-off:
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "alpha"
-__lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.planners.blackboard import (
     BLACKBOARD_PLANNER_GUIDANCE,

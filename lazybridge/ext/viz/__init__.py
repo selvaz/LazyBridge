@@ -28,9 +28,6 @@ build step. Local-only by design — bound to ``127.0.0.1`` with an
 ephemeral port.
 """
 
-__stability__ = "alpha"
-__lazybridge_min__ = "1.0.0"
-
 from lazybridge.ext.viz.visualizer import Visualizer
 
 __all__ = ["Visualizer"]

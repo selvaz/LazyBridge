@@ -44,9 +44,6 @@ Install extras (additive over ``[report]``)::
     # macOS: brew install quarto / Linux: download .deb from quarto.org
 """
 
-__stability__ = "domain"
-__lazybridge_min__ = "1.0.0"
-
 from lazybridge.ext.report_builder.assemblers import (
     AssembledReport,
     Assembler,

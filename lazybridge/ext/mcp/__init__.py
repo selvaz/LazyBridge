@@ -38,8 +38,6 @@ Install with::
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "stable"
-__lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.mcp.server import MCP, MCPServer
 

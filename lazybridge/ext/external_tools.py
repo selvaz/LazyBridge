@@ -22,10 +22,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from lazybridge.tools import Tool
 
-__stability__ = "stable"
-__lazybridge_min__ = "1.0.0"
-
-
 _JSON_OBJECT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": True}
 
 

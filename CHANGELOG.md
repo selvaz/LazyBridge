@@ -6,6 +6,57 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] — pre-1.0 reset, simplified namespace layout
+
+**Major reorganization.** The framework is dropping back to pre-1.0 and
+reshaping its namespace boundaries before stabilizing. Everything is
+`alpha`.
+
+### Breaking
+- **Version downgrade**: `1.0.0 → 0.7.0`. The 1.0 release was premature
+  given the API churn since; 0.7.x is the honest baseline.
+- **Single stability tier**: every surface is `alpha`. The
+  `stable / beta / alpha / domain` 4-tier taxonomy is removed. Per-module
+  `__stability__` and `__lazybridge_min__` markers are removed; only
+  `lazybridge.__stability__ = "alpha"` remains.
+- **Namespace reorganization** — domain modules moved out of
+  `lazybridge.ext.*`:
+  - `lazybridge.ext.read_docs`        → `lazybridge.external_tools.read_docs`
+  - `lazybridge.ext.doc_skills`       → `lazybridge.external_tools.doc_skills`
+  - `lazybridge.ext.data_downloader`  → `lazybridge.external_tools.data_downloader`
+  - `lazybridge.ext.stat_runtime`     → `lazybridge.external_tools.stat_runtime`
+  - `lazybridge.ext.veo`              → `lazybridge.external_tools.veo`
+  - `lazybridge.ext.report_builder`   → `lazybridge.external_tools.report_builder`
+  - `lazybridge.ext.quant_agent`      → `lazybridge.external_pipelines.quant_agent`
+  - `lazybridge.ext.external_tools`   → `lazybridge.ext.gateway` (file rename to free the namespace)
+- `lazybridge.ext.*` is now reserved for **framework extensions** that
+  augment the agent runtime (`mcp`, `otel`, `hil`, `evals`, `gateway`,
+  `planners`, `viz`).
+- New namespaces:
+  - `lazybridge.external_tools.*` — domain tool packages (returns `list[Tool]`)
+  - `lazybridge.external_pipelines.*` — pre-wired agent compositions
+
+### Boundary
+- New CI check (`tools/check_ext_imports.py`): `ext/`,
+  `external_tools/`, and `external_pipelines/` may only import from
+  public `lazybridge.*`, never from internal `lazybridge.core.*` or
+  other private submodules.
+
+### Migration
+```python
+# before
+from lazybridge.ext.read_docs import read_docs_tools
+from lazybridge.ext.quant_agent import QuantAgent
+from lazybridge.ext.external_tools import ExternalToolGateway
+
+# after
+from lazybridge.external_tools.read_docs import read_docs_tools
+from lazybridge.external_pipelines.quant_agent import QuantAgent
+from lazybridge.ext.gateway import ExternalToolGateway
+```
+
+---
+
 ## [Unreleased] — short-term audit hardening
 
 Closes the high-severity findings from the deep architecture audit

@@ -86,39 +86,8 @@ def test_core_never_imports_from_lazybridge_ext() -> None:
         pytest.fail(msg)
 
 
-def test_every_ext_module_declares_stability() -> None:
-    """Each top-level ``lazybridge/ext/<name>/__init__.py`` must declare
-    ``__stability__`` and ``__lazybridge_min__`` so users can introspect
-    maturity programmatically (policy in ``docs/guides/core-vs-ext.md``)."""
-    ext_root = CORE_ROOT / "ext"
-    assert ext_root.is_dir(), "expected lazybridge/ext/ directory"
+def test_top_level_package_is_alpha() -> None:
+    """Pre-1.0: the package declares a single ``alpha`` stability marker."""
+    import lazybridge
 
-    missing: list[str] = []
-    valid_levels = {"alpha", "beta", "stable", "domain"}
-
-    for child in sorted(ext_root.iterdir()):
-        if not child.is_dir():
-            continue
-        if child.name.startswith("_"):
-            continue
-        init = child / "__init__.py"
-        if not init.exists():
-            missing.append(f"{child.name}: no __init__.py")
-            continue
-        text = init.read_text()
-        if "__stability__" not in text or "__lazybridge_min__" not in text:
-            missing.append(f"{child.name}: missing __stability__ or __lazybridge_min__ declaration")
-            continue
-        # Check the declared __stability__ value via import
-        import importlib
-
-        mod = importlib.import_module(f"lazybridge.ext.{child.name}")
-        stability = getattr(mod, "__stability__", None)
-        if stability not in valid_levels:
-            missing.append(f"{child.name}: __stability__={stability!r} not in {sorted(valid_levels)}")
-
-    if missing:
-        pytest.fail(
-            "Extensions must declare __stability__ and __lazybridge_min__ "
-            "(policy in docs/guides/core-vs-ext.md):\n" + "\n".join(f"  - {m}" for m in missing)
-        )
+    assert lazybridge.__stability__ == "alpha"

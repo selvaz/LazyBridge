@@ -18,8 +18,6 @@ child spans inside it.
 """
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "stable"
-__lazybridge_min__ = "1.0.0"
 
 from lazybridge.ext.otel.exporter import OTelExporter
 

@@ -12,9 +12,6 @@ plumbing rather than an evaluation feature.
 from __future__ import annotations
 
 #: Stability tag — see ``docs/guides/core-vs-ext.md``.
-__stability__ = "stable"
-__lazybridge_min__ = "1.0.0"
-
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
