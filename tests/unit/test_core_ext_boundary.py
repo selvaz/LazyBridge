@@ -1,15 +1,14 @@
-"""Architectural guard: core (``lazybridge/*``) never imports from ext.
+"""Architectural guard: core never imports from ext / external_tools /
+external_pipelines.
 
-Per the core-vs-ext policy (``docs/guides/core-vs-ext.md``), extensions
-depend on core but the reverse must never happen — otherwise core
-stability becomes hostage to ext velocity, and circular imports become
-possible.  This test enforces the rule with a static AST scan of every
-core module.
+Per the core-vs-ext policy (``docs/guides/core-vs-ext.md``), the three
+non-core subtrees depend on core but the reverse must never happen —
+otherwise core stability becomes hostage to extension velocity, and
+circular imports become possible.
 
-The guard is intentionally simple (no import-linter dependency): it
-walks the source tree, parses each ``.py`` file under ``lazybridge/``
-that does NOT live under ``lazybridge/ext/``, and asserts that no
-``import`` or ``from … import …`` statement targets ``lazybridge.ext``.
+The reverse rule (extensions never reaching into ``lazybridge.core.*``
+internals) is enforced separately by ``tools/check_ext_imports.py`` in
+CI.
 """
 
 from __future__ import annotations
@@ -20,29 +19,29 @@ import pathlib
 import pytest
 
 CORE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "lazybridge"
-EXT_PREFIX = "lazybridge.ext"
+NON_CORE_SUBTREES = ("ext", "external_tools", "external_pipelines")
+FORBIDDEN_PREFIXES = tuple(f"lazybridge.{name}" for name in NON_CORE_SUBTREES)
 
 
 def _core_python_files() -> list[pathlib.Path]:
-    """Every ``.py`` file in ``lazybridge/`` that is not under ``lazybridge/ext/``.
-
-    ``skill_docs`` is included on purpose — it builds reference pages
-    introspecting the public API; importing from ext from there would
-    let the build script accidentally pull in optional deps.
+    """Every ``.py`` file under ``lazybridge/`` except the three non-core
+    subtrees. ``skill_docs`` is included on purpose — it builds
+    reference pages introspecting the public API; importing from an
+    extension from there would let the build script accidentally pull
+    in optional deps.
     """
     files: list[pathlib.Path] = []
     for path in CORE_ROOT.rglob("*.py"):
-        # Skip any file under the ext sub-tree (those are allowed to
-        # import from each other or from core).
         rel = path.relative_to(CORE_ROOT)
-        if rel.parts and rel.parts[0] == "ext":
+        if rel.parts and rel.parts[0] in NON_CORE_SUBTREES:
             continue
         files.append(path)
     return files
 
 
-def _imports_from_ext(path: pathlib.Path) -> list[tuple[int, str]]:
-    """Return [(lineno, statement)] for any import targeting lazybridge.ext."""
+def _imports_from_extensions(path: pathlib.Path) -> list[tuple[int, str]]:
+    """Return [(lineno, statement)] for any import targeting one of the
+    non-core subtrees."""
     source = path.read_text()
     try:
         tree = ast.parse(source, filename=str(path))
@@ -54,34 +53,35 @@ def _imports_from_ext(path: pathlib.Path) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == EXT_PREFIX or alias.name.startswith(EXT_PREFIX + "."):
+                if any(alias.name == p or alias.name.startswith(p + ".") for p in FORBIDDEN_PREFIXES):
                     offences.append((node.lineno, f"import {alias.name}"))
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if module == EXT_PREFIX or module.startswith(EXT_PREFIX + "."):
+            if any(module == p or module.startswith(p + ".") for p in FORBIDDEN_PREFIXES):
                 names = ", ".join(a.name for a in node.names)
                 offences.append((node.lineno, f"from {module} import {names}"))
 
     return offences
 
 
-def test_core_never_imports_from_lazybridge_ext() -> None:
-    """Core (``lazybridge/*`` minus ``lazybridge/ext/*``) must not import
-    from ``lazybridge.ext.*`` anywhere — top-level, function-local, or
-    inside ``TYPE_CHECKING`` doesn't matter; we forbid the syntax.
+def test_core_never_imports_from_extension_subtrees() -> None:
+    """Core (``lazybridge/*`` minus ext/external_tools/external_pipelines)
+    must not import from any of those subtrees — top-level, function-local,
+    or inside ``TYPE_CHECKING`` doesn't matter; we forbid the syntax.
     """
     files = _core_python_files()
     assert files, "expected at least one core .py file to scan"
 
     failures: list[str] = []
     for path in files:
-        for lineno, statement in _imports_from_ext(path):
+        for lineno, statement in _imports_from_extensions(path):
             failures.append(f"  {path.relative_to(CORE_ROOT.parent)}:{lineno} → {statement}")
 
     if failures:
         msg = (
-            "Core modules must not import from lazybridge.ext (see "
-            "docs/guides/core-vs-ext.md, rule #1). Found:\n" + "\n".join(failures)
+            "Core modules must not import from lazybridge.ext / "
+            "lazybridge.external_tools / lazybridge.external_pipelines "
+            "(see docs/guides/core-vs-ext.md, rule #1). Found:\n" + "\n".join(failures)
         )
         pytest.fail(msg)
 

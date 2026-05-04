@@ -50,7 +50,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from lazybridge import Agent, Session, Tool
-from lazybridge.core.tool_schema import ToolSchemaMode  # noqa: F401 — re-exported for callers
 
 __all__ = [
     "build_skill",

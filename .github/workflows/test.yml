@@ -44,6 +44,9 @@ jobs:
       - name: Format check
         run: ruff format --check lazybridge/ tests/
 
+      - name: Import boundary (ext / external_tools / external_pipelines)
+        run: python tools/check_ext_imports.py
+
   typecheck:
     name: type check
     runs-on: ubuntu-latest
