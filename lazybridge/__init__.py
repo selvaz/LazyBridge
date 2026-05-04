@@ -96,7 +96,7 @@ from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, fr
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store, StoreEntry
 from lazybridge.testing import MockAgent
-from lazybridge.tools import Tool, build_tool_map, wrap_tool
+from lazybridge.tools import Tool, ToolProvider, build_tool_map, wrap_tool
 
 __all__ = [
     # Primary API
@@ -113,6 +113,7 @@ __all__ = [
     "from_parallel_all",
     # Tools
     "Tool",
+    "ToolProvider",
     "wrap_tool",
     "build_tool_map",
     # Predicates DSL (for Step.routes)

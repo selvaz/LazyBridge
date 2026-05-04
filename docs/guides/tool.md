@@ -78,6 +78,40 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
       drives them to completion so REPL callers (e.g. SupervisorEngine) never
       see a raw coroutine.
 
+## Tool providers
+
+`Agent(tools=[...])` accepts more than just callables and Tool instances.
+A **tool provider** is any object that exposes a list of Tools at
+construction time — `MCPServer`, `ExternalToolProvider`, and any
+custom implementation of the `ToolProvider` Protocol:
+
+```python
+from typing import Protocol, runtime_checkable
+from lazybridge import Tool, ToolProvider  # ToolProvider is a Protocol
+
+# Build your own — set the marker attribute and define as_tools().
+class MyToolset:
+    _is_lazy_tool_provider = True
+    def as_tools(self) -> list[Tool]:
+        return [Tool(fn) for fn in self._registered]
+```
+
+When `Agent(...)` runs `build_tool_map`, every entry with
+`_is_lazy_tool_provider = True` is expanded by calling `.as_tools()`;
+everything else is wrapped via `wrap_tool`. Drop your provider
+straight into the `tools=[]` list:
+
+```python
+from lazybridge import Agent
+from lazybridge.ext.mcp import MCP
+
+fs = MCP.stdio("fs", command="...", args=[...])
+agent = Agent("claude-opus-4-7", tools=[fs])    # MCPServer expands itself
+```
+
+Implement the protocol for OpenAPI imports, internal tool registries,
+or any collection of related Tools that ships as one unit.
+
 ## See also
 
 - [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).

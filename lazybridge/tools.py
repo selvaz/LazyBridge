@@ -5,13 +5,30 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from lazybridge.envelope import Envelope
 
 from lazybridge.core.tool_schema import ToolSchemaBuilder, ToolSchemaMode
 from lazybridge.core.types import ToolDefinition
+
+
+@runtime_checkable
+class ToolProvider(Protocol):
+    """A ``tools=[...]`` entry that expands itself into one or more Tools.
+
+    Implementors set ``_is_lazy_tool_provider = True`` and define
+    ``as_tools() -> list[Tool]``. ``MCPServer`` and
+    ``ExternalToolProvider`` both satisfy this protocol structurally;
+    custom providers (OpenAPI imports, internal tool registries, etc.)
+    can do the same — drop the instance into ``Agent(tools=[provider])``
+    and ``build_tool_map`` will expand it on construction.
+    """
+
+    _is_lazy_tool_provider: bool
+
+    def as_tools(self) -> list[Tool]: ...
 
 
 class Tool:
