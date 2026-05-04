@@ -163,7 +163,7 @@ self-corrects, instead of failing later with a misleading
 
 ## Next
 
-* Keep going with the [**Basic tier guide**](tiers/basic.md).
+* Keep going with the [**Getting started guide**](guides/getting-started.md).
 * Skim the [**decision trees**](decisions/index.md) if you're unsure
   which tool fits your use case.
 * Jump to [**Plan + Step**](guides/plan.md) if you're building a

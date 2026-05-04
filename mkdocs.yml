@@ -31,11 +31,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
 
-  - Tiers:
-    - Basic: tiers/basic.md
-    - Mid: tiers/mid.md
-    - Full: tiers/full.md
-    - Advanced: tiers/advanced.md
+  - Getting started: guides/getting-started.md
 
   - Guides:
     - Production:

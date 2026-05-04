@@ -2,7 +2,7 @@
 
 1. ``lazybridge/skill_docs/0X_<tier>.md`` — dense, signature-first,
    packaged with the library so it ships as a Claude Skill.
-2. ``docs/guides/*.md`` + ``docs/tiers/*.md`` + ``docs/decisions/*.md`` —
+2. ``docs/guides/*.md`` + ``docs/decisions/*.md`` —
    the human-facing MkDocs Material site.
 
 Each fragment is a markdown file with named level-2 sections:
