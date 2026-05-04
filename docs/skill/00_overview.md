@@ -1,4 +1,4 @@
-# LazyBridge v1.0 — Skill overview
+# LazyBridge — Skill overview
 
 Tier-organised reference. Load on demand. The whole framework is one `Agent` with swappable engines; tools can be plain functions, other Agents, or Agents-of-Agents — the composition is closed and uniform. Parallelism inside an engine is automatic (the LLM or the Plan decide); no separate "parallel mode" exists.
 

@@ -1,7 +1,3 @@
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-#: ``"domain"`` = worked example shipped with the framework; not part of
-#: the LazyBridge framework contract and may be moved or removed.
-
 """lazybridge.external_tools.read_docs — Multi-format document reader (domain example).
 
 Domain example shipped with LazyBridge — not part of the framework

@@ -1,4 +1,4 @@
-"""lazybridge v1.0 — zero-boilerplate multi-provider LLM agent framework.
+"""lazybridge — zero-boilerplate multi-provider LLM agent framework.
 
 Tier 1 — 2 lines::
 

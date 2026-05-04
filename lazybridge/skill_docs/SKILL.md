@@ -1,6 +1,6 @@
 {
   "name": "lazybridge",
-  "version": "1.0.0",
+  "version": "0.7.0",
   "description": "LazyBridge agent framework — zero-boilerplate, tool-is-tool composition, compile-time-validated Plans. Tier-organised reference: load 00_overview first, then the tier you need.",
   "trigger": "User mentions LazyBridge, Agent, Envelope, Plan, PlanCompileError, Tool, NativeTool, SupervisorEngine, HumanEngine, LLMEngine, Step, from_prev/from_step/from_parallel, OTelExporter, MCP/MCPServer, or is writing Python code that imports from lazybridge or lazybridge.ext.*.",
   "entry": "00_overview.md",

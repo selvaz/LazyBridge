@@ -35,14 +35,14 @@ types that flow across all these boundaries.
 ## Also see
 
 * [LiteLLM bridge](../guides/litellm.md) — 100+ extra providers via `litellm/<model>`
-* [Core vs Extension policy](../guides/core-vs-ext.md) — what's stable, what may break
+* [Core vs Extension policy](../guides/core-vs-ext.md) — pre-1.0 alpha posture and the import boundary
 
 ## Next steps
 
 * [Engine protocol guide →](../guides/engine-protocol.md)
 * [BaseProvider guide →](../guides/base-provider.md)
 * [LiteLLM bridge →](../guides/litellm.md) — unlock 100+ extra providers via the `litellm/` prefix
-* [Core vs Extension policy →](../guides/core-vs-ext.md) — what's stable, what may break, promotion path
+* [Core vs Extension policy →](../guides/core-vs-ext.md) — pre-1.0 alpha posture and the import boundary
 
 **By the end of Advanced you can:**
 

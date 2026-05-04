@@ -96,7 +96,7 @@ REGION_ARTICLE_PROVIDER = {
 REGION_ARTICLE_MODEL = {
     "United States": "cheap",
     "China":         "cheap",
-    "India":         "o4-mini",   # literal model name; cheaper than gpt-5.4-nano
+    "India":         "o4-mini",   # literal model name
 }
 
 # Semaphore: max concurrent Wikimedia API calls (Commons throttles aggressively)

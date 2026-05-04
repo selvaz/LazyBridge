@@ -24,8 +24,6 @@ Pick by trade-off:
 - Exploratory work where the shape emerges as you go → ``make_blackboard_planner``.
 """
 
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-
 from lazybridge.ext.planners.blackboard import (
     BLACKBOARD_PLANNER_GUIDANCE,
     make_blackboard_planner,

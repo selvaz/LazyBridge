@@ -20,8 +20,6 @@ Usage::
     agent = Agent(engine=HumanEngine(...))
 """
 
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-
 from lazybridge.ext.hil.human import HumanEngine
 from lazybridge.ext.hil.supervisor import SupervisorEngine
 

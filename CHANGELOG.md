@@ -125,6 +125,11 @@ producer.  Pass `on_full="drop"` to opt back into the legacy policy.
 
 ## [1.0.0] — 2026-04-26 — initial public release
 
+> **Historical**: this entry describes the deleted 4-tier stability
+> taxonomy (`stable / beta / alpha / domain`) and the original namespace
+> layout. Both were removed in 0.7.0; entries below are kept for
+> historical accuracy only.
+
 ### Core
 
 - `Agent` — universal façade with swappable engines (`LLMEngine`, `Plan`,

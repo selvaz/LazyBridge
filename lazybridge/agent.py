@@ -1,4 +1,4 @@
-"""Agent — the single public-facing abstraction for LazyBridge v1.0."""
+"""Agent — the single public-facing abstraction for LazyBridge."""
 
 from __future__ import annotations
 

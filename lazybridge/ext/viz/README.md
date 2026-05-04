@@ -96,10 +96,6 @@ Backend is stdlib only. Frontend loads `d3.v7.min.js` from a CDN.
 | `static/auth.js` | URL-hash token extraction + fetch helpers. |
 | `static/json-tree.js` | Collapsible JSON renderer. |
 
-## Stability
-
-`__stability__ = "alpha"` — interface may change between releases.
-
 ## Testing
 
 ```

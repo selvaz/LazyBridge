@@ -77,7 +77,7 @@ async with MCP.stdio("fs", command="...") as fs:
 
 !!! note "API reference"
 
-    # Status: alpha (lazybridge.ext.mcp).  Install: pip install lazybridge[mcp].
+    # Install: pip install lazybridge[mcp].
     
     from lazybridge.ext.mcp import MCP, MCPServer
     

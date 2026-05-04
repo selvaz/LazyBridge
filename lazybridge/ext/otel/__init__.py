@@ -17,8 +17,6 @@ Hierarchy: each agent run becomes a span; tool / model events become
 child spans inside it.
 """
 
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-
 from lazybridge.ext.otel.exporter import OTelExporter
 
 __all__ = ["OTelExporter"]

@@ -174,14 +174,6 @@ When it's missing, `bus.export(..., backend="auto")` falls back to the
 WeasyPrint pure-Python path automatically.  `report_tools()` doesn't need
 Quarto at all.
 
-## Stability
-
-`__stability__ = "domain"` — this extension follows the **domain tier**
-contract from [Core vs Extension policy](core-vs-ext.md): public API
-documented and tested, breaking changes called out in the changelog,
-faster iteration than core.  Pin `lazybridge[report-*]` extras together
-when reproducibility matters.
-
 ## Where to next
 
 - [FragmentBus](fragment-bus.md) — thread-safety, persistence, idempotency

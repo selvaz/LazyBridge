@@ -11,7 +11,6 @@ plumbing rather than an evaluation feature.
 
 from __future__ import annotations
 
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field

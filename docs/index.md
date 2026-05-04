@@ -1,4 +1,4 @@
-# LazyBridge v1.0
+# LazyBridge
 
 Zero-boilerplate Python agent framework. One `Agent`, one `Envelope`,
 one contract: **tool is tool**. Compose functions, Agents, and

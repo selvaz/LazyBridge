@@ -74,7 +74,7 @@ sess.flush()                               # drain the writer before exit
     JsonFileExporter(path: str)                       # JSONL append
     StructuredLogExporter(logger_name: str = "lazybridge")
     
-    # Built-in shipped from ``lazybridge.ext.otel`` (alpha extension).
+    # Built-in shipped from ``lazybridge.ext.otel``.
     from lazybridge.ext.otel import OTelExporter
     OTelExporter(endpoint: str | None = None, *, exporter: Any | None = None)
     

@@ -1,7 +1,3 @@
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-#: ``"domain"`` = worked example shipped with the framework; not part of
-#: the LazyBridge framework contract and may be moved or removed.
-
 """lazybridge.external_tools.doc_skills — BM25 local documentation skill runtime (domain example).
 
 Domain example shipped with LazyBridge — not part of the framework

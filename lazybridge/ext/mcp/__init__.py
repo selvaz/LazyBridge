@@ -37,8 +37,6 @@ Install with::
     pip install lazybridge[mcp]
 """
 
-#: Stability tag — see ``docs/guides/core-vs-ext.md``.
-
 from lazybridge.ext.mcp.server import MCP, MCPServer
 
 __all__ = ["MCP", "MCPServer"]
