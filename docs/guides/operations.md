@@ -21,7 +21,7 @@ sess = Session(
     db="events.sqlite",
     batched=True,                              # non-blocking emit
     exporters=[
-        JsonFileExporter("events.jsonl"),
+        JsonFileExporter(path="events.jsonl"),
         OTelExporter(endpoint="http://otelcol:4318"),
     ],
 )

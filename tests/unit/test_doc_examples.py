@@ -446,9 +446,9 @@ def test_exporters_guide_filtered_compose():
     try:
         sess = Session(
             exporters=[
-                JsonFileExporter(path),
+                JsonFileExporter(path=path),
                 FilteredExporter(
-                    CallbackExporter(on_event),
+                    inner=CallbackExporter(fn=on_event),
                     event_types={EventType.TOOL_ERROR, EventType.AGENT_FINISH},
                 ),
             ],

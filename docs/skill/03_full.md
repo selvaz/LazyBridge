@@ -726,7 +726,7 @@ OTelExporter(endpoint: str | None = None, *, exporter: Any | None = None)
 Usage:
   Session(exporters=[
       ConsoleExporter(),
-      JsonFileExporter("events.jsonl"),
+      JsonFileExporter(path="events.jsonl"),
       OTelExporter(endpoint="http://otelcol:4318"),
   ])
 
@@ -774,9 +774,9 @@ sess = Session(
     db="events.sqlite",
     batched=True,                          # non-blocking emit
     exporters=[
-        JsonFileExporter("run.jsonl"),
+        JsonFileExporter(path="run.jsonl"),
         FilteredExporter(
-            CallbackExporter(on_alert),
+            CallbackExporter(fn=on_alert),
             event_types={EventType.TOOL_ERROR, EventType.AGENT_FINISH},
         ),
         OTelExporter(endpoint="http://otelcol:4318"),
@@ -794,7 +794,7 @@ sess.flush()                               # drain the writer before exit
   I/O.
 - Exporter exceptions warn once per instance and are suppressed
   afterwards. If only the first failure shows up, wrap with
-  ``CallbackExporter(print)`` while debugging.
+  ``CallbackExporter(fn=print)`` while debugging.
 - ``OTelExporter`` keeps a per-instance tracer rooted in its own
   ``TracerProvider`` so multiple exporters in one process don't
   fight. The provider is also installed globally as a best-effort

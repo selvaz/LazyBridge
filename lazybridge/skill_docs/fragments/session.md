@@ -90,7 +90,7 @@ sess = Session(
     batched=True,
     on_full="hybrid",                 # default; explicit for clarity
     exporters=[
-        JsonFileExporter("events.jsonl"),
+        JsonFileExporter(path="events.jsonl"),
         OTelExporter(endpoint="http://otelcol:4318"),
     ],
     redact=lambda p: {**p, "task": _mask_pii(p.get("task", ""))},
@@ -115,7 +115,7 @@ print(sess.graph.to_json())
   Use a filename to persist.
 - Exporter failures warn ONCE per exporter instance. If a third
   failure mode shows up, you'll only see the first — wrap in
-  ``CallbackExporter(lambda e: print(e))`` while debugging.
+  ``CallbackExporter(fn=lambda e: print(e))`` while debugging.
 - ``Agent(verbose=True)`` creates a **new** Session for that agent.
   If you also pass ``session=another``, ``verbose`` is ignored.
 - With ``batched=True`` reads via ``session.events.query()`` may be

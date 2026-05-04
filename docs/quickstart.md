@@ -131,7 +131,7 @@ sess = Session(
     batched=True,                     # non-blocking
     on_full="hybrid",                 # default — block on AGENT_*/TOOL_*, drop telemetry
     exporters=[
-        JsonFileExporter("events.jsonl"),
+        JsonFileExporter(path="events.jsonl"),
         OTelExporter(endpoint="http://otelcol:4318"),
     ],
 )

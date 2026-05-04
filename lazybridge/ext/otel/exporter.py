@@ -83,7 +83,7 @@ class OTelExporter:
     work.
     """
 
-    def __init__(self, endpoint: str | None = None, *, exporter: Any | None = None) -> None:
+    def __init__(self, *, endpoint: str | None = None, exporter: Any | None = None) -> None:
         try:
             from opentelemetry import trace
             from opentelemetry.sdk.trace import TracerProvider

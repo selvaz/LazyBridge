@@ -229,26 +229,26 @@ class TestRenderFunctions:
 class TestExporters:
     def test_callback_exporter(self):
         received = []
-        exp = CallbackExporter(received.append)
+        exp = CallbackExporter(fn=received.append)
         exp.export({"event_type": "test", "value": 1})
         assert received == [{"event_type": "test", "value": 1}]
 
     def test_filtered_exporter_passes_matching(self):
         received = []
-        inner = CallbackExporter(received.append)
-        exp = FilteredExporter(inner, event_types={"agent_start"})
+        inner = CallbackExporter(fn=received.append)
+        exp = FilteredExporter(inner=inner, event_types={"agent_start"})
         exp.export({"event_type": "agent_start", "x": 1})
         assert len(received) == 1
 
     def test_filtered_exporter_blocks_non_matching(self):
         received = []
-        inner = CallbackExporter(received.append)
-        exp = FilteredExporter(inner, event_types={"agent_start"})
+        inner = CallbackExporter(fn=received.append)
+        exp = FilteredExporter(inner=inner, event_types={"agent_start"})
         exp.export({"event_type": "tool_call", "x": 1})
         assert len(received) == 0
 
     def test_structured_log_exporter(self, caplog):
-        exp = StructuredLogExporter("lazybridge.test")
+        exp = StructuredLogExporter(logger_name="lazybridge.test")
         with caplog.at_level(logging.INFO, logger="lazybridge.test"):
             exp.export({"event_type": "agent_start", "agent_name": "x"})
         assert any("agent_start" in r.message for r in caplog.records)
@@ -257,7 +257,7 @@ class TestExporters:
         with tempfile.NamedTemporaryFile(mode="r", suffix=".jsonl", delete=False) as f:
             path = f.name
         try:
-            exp = JsonFileExporter(path)
+            exp = JsonFileExporter(path=path)
             exp.export({"event_type": "test", "a": 1})
             exp.export({"event_type": "test2", "b": 2})
             exp.close()
@@ -271,7 +271,7 @@ class TestExporters:
         with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
             path = f.name
         try:
-            exp = JsonFileExporter(path)
+            exp = JsonFileExporter(path=path)
             exp.close()
             exp.close()  # second call should not raise
         finally:
@@ -309,7 +309,7 @@ class TestExporters:
 
     def test_session_uses_callback_exporter(self):
         events = []
-        sess = Session(exporters=[CallbackExporter(events.append)])
+        sess = Session(exporters=[CallbackExporter(fn=events.append)])
         from lazybridge.session import EventType
 
         sess.emit(EventType.AGENT_START, {"agent_name": "a"}, run_id="r1")
@@ -742,7 +742,7 @@ class TestLLMEngine:
     @pytest.mark.asyncio
     async def test_run_with_session_emits_events(self):
         events: list[dict] = []
-        sess = Session(exporters=[CallbackExporter(events.append)])
+        sess = Session(exporters=[CallbackExporter(fn=events.append)])
         engine = _make_llm_engine()
         env = Envelope.from_task("emit events")
         await engine.run(env, tools=[], output_type=str, memory=None, session=sess)
@@ -1498,7 +1498,7 @@ class TestExporterEdgeCases:
     def test_json_file_exporter_close_idempotent(self):
         with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
             path = f.name
-        exp = JsonFileExporter(path)
+        exp = JsonFileExporter(path=path)
         exp.export({"event_type": "test", "data": "hello"})
         exp.close()
         exp.close()  # second close must not raise
@@ -1506,7 +1506,7 @@ class TestExporterEdgeCases:
     def test_json_file_exporter_already_closed_file(self):
         with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
             path = f.name
-        exp = JsonFileExporter(path)
+        exp = JsonFileExporter(path=path)
         exp._fh.close()
         exp.close()  # should not raise
 

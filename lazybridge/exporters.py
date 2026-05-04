@@ -18,7 +18,7 @@ class EventExporter(Protocol):
 class CallbackExporter:
     """Forward every event to a user-supplied callable."""
 
-    def __init__(self, fn: Callable[[dict[str, Any]], None]) -> None:
+    def __init__(self, *, fn: Callable[[dict[str, Any]], None]) -> None:
         self._fn = fn
 
     def export(self, event: dict[str, Any]) -> None:
@@ -28,7 +28,7 @@ class CallbackExporter:
 class FilteredExporter:
     """Forward only events whose type is in ``event_types`` to ``inner``."""
 
-    def __init__(self, inner: Any, *, event_types: set[str]) -> None:
+    def __init__(self, *, inner: Any, event_types: set[str]) -> None:
         self._inner = inner
         self._types = event_types
 
@@ -47,7 +47,7 @@ class JsonFileExporter:
     iterates its exporter list.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, *, path: str) -> None:
         self._path = path
         self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115
 
@@ -71,7 +71,7 @@ class JsonFileExporter:
 class StructuredLogExporter:
     """Emit each event via Python's ``logging`` module."""
 
-    def __init__(self, logger_name: str = "lazybridge") -> None:
+    def __init__(self, *, logger_name: str = "lazybridge") -> None:
         self._log = logging.getLogger(logger_name)
 
     def export(self, event: dict[str, Any]) -> None:
