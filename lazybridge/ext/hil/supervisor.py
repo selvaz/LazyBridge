@@ -148,7 +148,7 @@ class SupervisorEngine:
             return Envelope.error_envelope(exc)
 
         latency_ms = (time.monotonic() - t_start) * 1000
-        result = Envelope(
+        result: Envelope[Any] = Envelope(
             task=env.task,
             context=env.context,
             payload=final,

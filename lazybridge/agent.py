@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
-from typing import Any
+from typing import Any, cast
 
 from lazybridge.core.types import AgentRuntimeConfig, ObservabilityConfig, ResilienceConfig
 from lazybridge.envelope import Envelope
@@ -239,9 +239,13 @@ class Agent:
                 # the ``_is_lazy_agent`` marker gets the outer session
                 # propagated when it has none of its own.
                 if getattr(raw, "_is_lazy_agent", False) and getattr(raw, "session", None) is None:
-                    raw.session = self.session
-                    _safe_register_agent(self.session, raw)
-                    _safe_register_tool_edge(self.session, self, raw, label="as_tool")
+                    # Duck-typed Agent (real Agent, MockAgent, user subclass).
+                    # The marker check above narrows the type at runtime; cast
+                    # so mypy accepts the attribute write + helper calls.
+                    agent_raw = cast("Agent", raw)
+                    agent_raw.session = self.session
+                    _safe_register_agent(self.session, agent_raw)
+                    _safe_register_tool_edge(self.session, self, agent_raw, label="as_tool")
             # ``fallback=`` and ``verify=`` Agents inherit the same
             # session + graph-registration the tools list gets, so any
             # events they produce (errors handled by the fallback, judge
@@ -329,7 +333,7 @@ class Agent:
             err = result.error
             note = f"Previous attempt failed with {err.type}: {err.message}"
             merged_context = f"{env.context}\n\n{note}" if env.context else note
-            fallback_env = Envelope(
+            fallback_env: Envelope[Any] = Envelope(
                 task=env.task,
                 context=merged_context,
                 payload=env.payload,

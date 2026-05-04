@@ -11,10 +11,10 @@ jobs:
     name: pre-commit hooks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -28,10 +28,10 @@ jobs:
     name: lint & format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -50,15 +50,11 @@ jobs:
   typecheck:
     name: type check
     runs-on: ubuntu-latest
-    # Pre-1.0 (alpha): mypy is informational only. The codebase has a
-    # backlog of legacy type errors; address them incrementally rather
-    # than blocking PRs on the snapshot.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -66,10 +62,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[anthropic,openai,google,test]"
-          pip install mypy
+          pip install mypy types-Markdown types-bleach
 
-      - name: Typecheck (report-only)
-        run: mypy lazybridge/ || true
+      - name: Typecheck
+        run: mypy lazybridge/
 
   unit:
     name: unit tests (Python ${{ matrix.python-version }})
@@ -80,10 +76,10 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 

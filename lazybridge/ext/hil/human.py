@@ -381,7 +381,7 @@ class HumanEngine:
                     # AND return an explicit error envelope so ``.ok``
                     # is False and the caller can react.
                     latency_ms = (time.monotonic() - t_start) * 1000
-                    err_env = Envelope(
+                    err_env: Envelope[Any] = Envelope(
                         task=env.task,
                         context=env.context,
                         payload=raw,  # still available via env.payload for debug
@@ -417,7 +417,7 @@ class HumanEngine:
             return error_env
 
         latency_ms = (time.monotonic() - t_start) * 1000
-        result = Envelope(
+        result: Envelope[Any] = Envelope(
             task=env.task,
             context=env.context,
             payload=payload,

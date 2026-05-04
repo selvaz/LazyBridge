@@ -42,14 +42,17 @@ def validate_payload_against_output_type(payload: Any, output_type: Any) -> Any:
 
     # Bare Pydantic model class.
     if isinstance(output_type, type) and issubclass(output_type, BaseModel):
-        if isinstance(payload, output_type):
+        # Re-bind to a local with the narrowed type so mypy picks up the
+        # ``model_validate*`` methods that ``BaseModel`` defines.
+        model_cls: type[BaseModel] = output_type
+        if isinstance(payload, model_cls):
             return payload
         if isinstance(payload, dict):
-            return output_type.model_validate(payload)
+            return model_cls.model_validate(payload)
         if isinstance(payload, str):
-            return output_type.model_validate_json(payload)
+            return model_cls.model_validate_json(payload)
         # Last resort: let Pydantic try to coerce.
-        return output_type.model_validate(payload)
+        return model_cls.model_validate(payload)
 
     # Generic type (``list[Model]``, ``dict[str, Model]``, ``Optional[X]``,
     # unions).  TypeAdapter handles everything Pydantic understands.

@@ -41,9 +41,9 @@ build_pipeline(n_stories, depth) constructs the full graph at call time:
 
 Depth presets
 -------------
-  brief    →  4–5 paragraphs, 1 image, table if obvious
-  standard →  6–8 paragraphs, 1 image, table if data exists
-  deep     →  10–14 paragraphs, 2 images, table always
+  brief    →  4-5 paragraphs, 1 image, table if obvious
+  standard →  6-8 paragraphs, 1 image, table if data exists
+  deep     →  10-14 paragraphs, 2 images, table always
 
 Requires: ANTHROPIC_API_KEY, OPENAI_API_KEY (discovery only), GOOGLE_API_KEY,
           DEEPSEEK_API_KEY
@@ -104,20 +104,20 @@ _WIKIMEDIA_SEM = threading.Semaphore(3)
 
 DEPTH_CONFIG = {
     "brief": {
-        "paragraphs": "4–5",
+        "paragraphs": "4-5",
         "searches": "2",
         "images": "1",
         "table": "only if the story is explicitly about numbers (economic data, election results, etc.)",
     },
     "standard": {
-        "paragraphs": "6–8",
+        "paragraphs": "6-8",
         "searches": "3",
         "images": "1",
         "table": "include whenever meaningful statistics or comparisons exist",
     },
     "deep": {
-        "paragraphs": "10–14",
-        "searches": "4–5",
+        "paragraphs": "10-14",
+        "searches": "4-5",
         "images": "2",
         "table": "always research and include — if no hard data, use a timeline or key-facts table",
     },
@@ -246,7 +246,7 @@ Search for today's ({today}) most important breaking and developing stories.
 Return a NUMBERED LIST of exactly {n_stories} stories — nothing else:
 
 1. <Headline>
-   Context: <2–3 sentences: what happened, who is involved, why it matters today>
+   Context: <2-3 sentences: what happened, who is involved, why it matters today>
    Source URL: <article URL if available>
    Image URL: <direct image URL from the article if visible in search results, else blank>
 
@@ -660,7 +660,7 @@ tables) but REMOVE every "Image: ..." line from the text:
     # 🌍 Daily Global News — {TODAY}
 
     ## Global Highlights
-    <Select 5–7 most significant stories across all regions.
+    <Select 5-7 most significant stories across all regions.
     One bullet: flag emoji + headline + one sentence summary.>
 
     ---
@@ -752,7 +752,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    print(f"Building pipeline: {args.stories} stories × 3 regions, depth={args.depth}")
+    print(f"Building pipeline: {args.stories} stories x 3 regions, depth={args.depth}")
     print(f"Article writers: {args.stories * 3} agents running in parallel\n")
 
     pipeline = build_pipeline(n_stories=args.stories, depth=args.depth)

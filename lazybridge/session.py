@@ -159,7 +159,9 @@ class EventLog:
         self._dropped_count = 0
         self._dropped_critical_count = 0
         self._writer_thread: threading.Thread | None = None
-        self._writer_queue: queue.Queue[tuple] | None = None
+        # The queue carries event tuples plus a singleton ``_FLUSH_SENTINEL``
+        # (``object()``) used to wake the writer thread on shutdown.
+        self._writer_queue: queue.Queue[tuple | object] | None = None
         self._writer_stop = threading.Event()
         if batched:
             self._writer_queue = queue.Queue(maxsize=max_queue_size)
@@ -409,6 +411,10 @@ class EventLog:
                         return
                     deadline = time.monotonic() + self._batch_interval
                     continue
+                # ``row`` is typed ``tuple | object`` (Queue carries both
+                # event tuples and the sentinel); the sentinel branch
+                # above already handled the non-tuple case.
+                assert isinstance(row, tuple)
                 batch.append(row)
                 if len(batch) >= self._batch_size:
                     self._flush_batch(batch)

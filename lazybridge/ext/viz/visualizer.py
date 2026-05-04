@@ -39,6 +39,11 @@ class Visualizer:
     boundary; the user is expected to close the tab themselves.
     """
 
+    # Class-level attribute hints so mypy sees fields populated only by
+    # the alternate ``replay()`` constructor (set via ``cls.__new__(cls)``).
+    _fixed_graph: dict[str, Any] | None = None
+    _fixed_session_id: str | None = None
+
     def __init__(
         self,
         session: Session,

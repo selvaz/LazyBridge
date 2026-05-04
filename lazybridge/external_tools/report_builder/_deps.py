@@ -16,7 +16,7 @@ _INSTALL_HINT = "pip install lazybridge[report]"
 def require_markdown():
     """Return the ``markdown`` module or raise with install instructions."""
     try:
-        import markdown
+        import markdown  # type: ignore[import-untyped]
 
         return markdown
     except ImportError:
@@ -26,7 +26,7 @@ def require_markdown():
 def require_bleach():
     """Return the ``bleach`` module or raise with install instructions."""
     try:
-        import bleach
+        import bleach  # type: ignore[import-untyped]
 
         return bleach
     except ImportError:

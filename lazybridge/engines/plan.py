@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_origin, get_type_hints
 
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
@@ -183,6 +183,8 @@ class PlanCompiler:
         seen: set[str] = set()
         duplicates: list[str] = []
         for s in steps:
+            # Step.__post_init__ guarantees s.name is not None.
+            assert s.name is not None
             if s.name in seen:
                 duplicates.append(s.name)
             seen.add(s.name)
@@ -197,9 +199,12 @@ class PlanCompiler:
         # ``from_step`` references — the runtime falls back to the
         # initial envelope when no history exists for the named step,
         # which silently masks misordered plans.
-        pos: dict[str, int] = {s.name: i for i, s in enumerate(steps)}
+        # Step.__post_init__ guarantees s.name is not None — the assertion
+        # above already established it for the iteration above; redo it
+        # for these comprehensions so mypy can narrow.
+        pos: dict[str, int] = {cast("str", s.name): i for i, s in enumerate(steps)}
         # Position-keyed parallel flag for from_parallel_all band-start checks.
-        is_parallel: dict[str, bool] = {s.name: bool(s.parallel) for s in steps}
+        is_parallel: dict[str, bool] = {cast("str", s.name): bool(s.parallel) for s in steps}
 
         for i, step in enumerate(steps):
             # Tool exists
@@ -666,7 +671,7 @@ class Plan:
         # ``_save_checkpoint`` after the first step will overwrite via
         # CAS that compares against this placeholder.
         first_step = self.steps[0].name if self.steps else None
-        claimed_snap = {
+        claimed_snap: dict[str, Any] = {
             "next_step": first_step,
             "kv": {},
             "completed_steps": [],
@@ -975,7 +980,7 @@ class Plan:
                 ),
                 retryable=False,
             )
-            err_env = Envelope(
+            err_env: Envelope[Any] = Envelope(
                 task=prev_env.task,
                 context=prev_env.context,
                 payload=prev_env.payload,
@@ -1043,7 +1048,7 @@ class Plan:
                 ctx_parts.append(src.text())
 
         merged_ctx = "\n\n".join(ctx_parts) if ctx_parts else None
-        step_env = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
+        step_env: Envelope[Any] = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
 
         result_env = await self._exec_step(
             step,
@@ -1218,7 +1223,7 @@ class Plan:
                 # Preserve the inner Envelope (agent-as-tool) so metadata
                 # survives the step boundary; otherwise wrap the raw value.
                 if isinstance(raw, Envelope):
-                    result_env = Envelope(
+                    result_env: Envelope[Any] = Envelope(
                         task=env.task,
                         context=raw.context or env.context,
                         payload=raw.payload,

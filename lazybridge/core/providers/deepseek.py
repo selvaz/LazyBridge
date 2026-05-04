@@ -94,7 +94,12 @@ class DeepSeekProvider(OpenAIProvider):
     }
     supported_native_tools: frozenset[NativeTool] = frozenset()  # No native server tools
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self, model: str, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+    ) -> float | None:
+        # Match the OpenAIProvider supertype signature (cached_input_tokens
+        # ignored — DeepSeek pricing is the same regardless of caching).
+        del cached_input_tokens  # unused; kept for signature compatibility
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:

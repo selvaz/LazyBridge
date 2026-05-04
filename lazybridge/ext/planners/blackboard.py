@@ -9,6 +9,8 @@ the LLM revises freely by calling ``set_plan`` again. Use it for exploratory
 work where the shape emerges as you go.
 """
 
+from typing import Any
+
 from lazybridge import Agent, LLMEngine, Tool
 
 BLACKBOARD_PLANNER_GUIDANCE = """\
@@ -62,7 +64,7 @@ def make_blackboard_planner(
     if len(set(names)) != len(names):
         raise ValueError(f"agents must have unique names; got {names}")
 
-    state = {"reasoning": "", "tasks": [], "done": [], "results": []}
+    state: dict[str, Any] = {"reasoning": "", "tasks": [], "done": [], "results": []}
 
     def _show() -> str:
         if not state["tasks"]:

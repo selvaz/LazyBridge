@@ -313,7 +313,14 @@ class VizServer:
         )
         self._server = _QuietThreadingHTTPServer((host, port), handler_cls)
         self._server.daemon_threads = True
-        self.host, self.port = self._server.server_address[:2]
+        # ``server_address[0]`` is typed ``str | bytes`` in the stdlib;
+        # narrow it to str (it is always str when we bind via str host).
+        addr_host, addr_port = self._server.server_address[:2]
+        if isinstance(addr_host, (bytes, bytearray)):
+            self.host: str = bytes(addr_host).decode()
+        else:
+            self.host = addr_host
+        self.port: int = addr_port
         self._thread: threading.Thread | None = None
 
     @property

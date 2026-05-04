@@ -191,6 +191,11 @@ class Executor:
             return True
         if verdict is False:
             return False
+        # ``_is_retryable`` only inspects ``Exception`` subclasses; non-Exception
+        # ``BaseException``s (KeyboardInterrupt, SystemExit) shouldn't be
+        # retried by definition.
+        if not isinstance(exc, Exception):
+            return False
         return _is_retryable(exc)
 
     # ------------------------------------------------------------------

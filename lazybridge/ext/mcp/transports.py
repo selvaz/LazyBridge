@@ -81,6 +81,7 @@ class StdioTransport(_Transport):
         )
         read, write = await self._stack.enter_async_context(stdio_client(params))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
+        assert self._session is not None  # narrow for mypy after enter_async_context
         await self._session.initialize()
 
     async def list_tools(self) -> list[dict[str, Any]]:
@@ -143,6 +144,7 @@ class HttpTransport(_Transport):
 
         read, write, _ = await self._stack.enter_async_context(streamablehttp_client(self._url, headers=self._headers))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
+        assert self._session is not None  # narrow for mypy after enter_async_context
         await self._session.initialize()
 
     async def list_tools(self) -> list[dict[str, Any]]:

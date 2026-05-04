@@ -734,7 +734,7 @@ def _emit_writer(sess: Session, run: str, facts: str) -> None:
         "in January, confirmed with 0.98 confidence from two independent sources. "
         "Among 47 tracked projects, 6 reached ignition threshold this year. "
         "Private investment surged +340% YoY: Helion raised $2.8B, Commonwealth Fusion "
-        "set a new magnet field record. Pilot commercial plants are projected for 2028–2035."
+        "set a new magnet field record. Pilot commercial plants are projected for 2028-2035."
     )
     sess.emit(
         EventType.MODEL_RESPONSE,

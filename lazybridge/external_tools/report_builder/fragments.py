@@ -69,9 +69,9 @@ class Citation(BaseModel):
         a minimal record from the structured fields.
         """
         if self.csl:
-            record = dict(self.csl)
-            record["id"] = self.key
-            return record
+            from_csl: dict = dict(self.csl)
+            from_csl["id"] = self.key
+            return from_csl
         record: dict = {
             "id": self.key,
             "type": "webpage" if self.url and not self.doi else "article",
