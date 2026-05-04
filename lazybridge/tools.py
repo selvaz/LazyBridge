@@ -177,22 +177,18 @@ def wrap_tool(obj: Any) -> Tool:
 
 
 def _agent_as_tool(agent: Any) -> Tool:
-    """Expose an Agent as a Tool with signature (task: str) -> Envelope.
+    """Expose an Agent as a Tool with signature ``(task: str) -> Envelope``.
 
-    The inner agent's full Envelope (payload + metadata + error) is
-    returned verbatim.  Engines that detect ``tool.returns_envelope``
-    unpack the metadata into the outer Envelope's nested-* buckets so
-    cost / tokens / errors propagate through the whole agent tree.
-
-    At the LLM content-block boundary the Envelope is stringified via
-    ``Envelope.__str__`` / ``.text()`` — the model sees the same text
-    it would have seen under the old "flatten to str" contract, but
-    the framework keeps the structured metadata.
+    Routes through ``agent.as_tool()`` (the verify-aware path with
+    ``verify=None``) so the two construction paths produce a structurally
+    identical Tool. ``MockAgent`` and other duck-typed agent doubles
+    (no ``as_tool`` method) fall back to the inline shim below.
     """
+    if hasattr(agent, "as_tool"):
+        return agent.as_tool()
 
     async def _run(task: str) -> Envelope:  # type: ignore[name-defined]
-        env = await agent.run(task)
-        return env
+        return await agent.run(task)
 
     _run.__name__ = agent.name or "agent"
     _run.__doc__ = agent.description or f"Run the {agent.name} agent on the given task."
