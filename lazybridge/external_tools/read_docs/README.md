@@ -35,14 +35,10 @@ for r in records:
 ### As a Tool in an agent
 
 ```python
-from lazybridge import Agent, Tool
-from lazybridge.external_tools.read_docs import read_folder_docs
+from lazybridge import Agent
+from lazybridge.external_tools.read_docs import read_docs_tools
 
-docs_tool = Tool(
-    read_folder_docs,
-    guidance="Call this tool to read files before summarising or analysing them.",
-)
-resp = Agent("anthropic", tools=[docs_tool])(
+resp = Agent("anthropic", tools=read_docs_tools())(
     "Read all PDFs in /reports/q4 and give me a one-page executive summary.",
 )
 print(resp.text())

@@ -645,7 +645,6 @@ def skill_tools(
     skill_dir: Annotated[str, "Path to a skill bundle created by build_skill()."],
     name: Annotated[str | None, "Tool name exposed to the agent."] = None,
     description: Annotated[str | None, "Tool description."] = None,
-    guidance: Annotated[str | None, "Guidance injected into the calling agent's system prompt."] = None,
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
 ) -> list[Tool]:
     """Return a single-element list containing a query_skill() Tool ready
@@ -659,7 +658,11 @@ def skill_tools(
         top_k: Annotated[int, "Number of chunks to retrieve."] = 8,
         include_quotes: Annotated[bool, "Include full excerpts."] = True,
     ) -> str:
-        """Query a local documentation skill and return a grounded context brief."""
+        """Query a local documentation skill and return a grounded context brief.
+
+        Use when the task is about the documentation indexed by this skill;
+        treat the result as grounded evidence and answer only from it.
+        """
         return query_skill(str(sdir), task, mode=mode, top_k=top_k, include_quotes=include_quotes)
 
     return [
@@ -667,11 +670,6 @@ def skill_tools(
             _run,
             name=name or _slugify(manifest.name),
             description=description or manifest.description,
-            guidance=guidance
-            or (
-                "Call this tool when the task is about the documentation indexed by this skill. "
-                "Treat the result as grounded evidence and answer only from it."
-            ),
             strict=strict,
         )
     ]
@@ -680,16 +678,14 @@ def skill_tools(
 def skill_builder_tools(
     *,
     name: Annotated[str, "Tool name."] = "build_doc_skill",
-    description: Annotated[
-        str, "Tool description."
-    ] = "Index documentation folders into a reusable local skill bundle.",
-    guidance: Annotated[str, "Guidance for the calling agent."] = (
-        "Use this tool to transform one or more documentation folders into a queryable local skill."
+    description: Annotated[str, "Tool description."] = (
+        "Index documentation folders into a reusable local skill bundle. "
+        "Call this to transform one or more documentation folders into a queryable local skill."
     ),
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
 ) -> list[Tool]:
     """Return a single-element list containing a Tool that builds skill bundles."""
-    return [Tool(build_skill, name=name, description=description, guidance=guidance, strict=strict)]
+    return [Tool(build_skill, name=name, description=description, strict=strict)]
 
 
 def skill_pipeline(
@@ -751,12 +747,11 @@ def skill_pipeline(
     )
 
     pipeline = Agent.chain(router, executor, name="doc_skill_pipeline", session=sess)
-    t = pipeline.as_tool(
+    return pipeline.as_tool(
         "doc_skill_pipeline",
-        description=f"Grounded local-docs pipeline: {manifest.description}",
+        description=(
+            f"Grounded local-docs pipeline: {manifest.description}. "
+            "Use for questions grounded in the indexed documentation. "
+            "The pipeline sharpens the query then retrieves and synthesises the answer."
+        ),
     )
-    t.guidance = (
-        "Use for questions grounded in the indexed documentation. "
-        "The pipeline sharpens the query then retrieves and synthesises the answer."
-    )
-    return t

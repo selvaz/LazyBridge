@@ -27,7 +27,6 @@ class Tool:
         *,
         name: str | None = None,
         description: str | None = None,
-        guidance: str | None = None,
         mode: Literal["signature", "llm", "hybrid"] = "signature",
         schema_llm: Any | None = None,
         strict: bool = False,
@@ -36,7 +35,6 @@ class Tool:
         self.func = func
         self.name = name or func.__name__
         self.description = description
-        self.guidance = guidance
         self.mode = mode
         self.schema_llm = schema_llm
         self.strict = strict
@@ -74,7 +72,6 @@ class Tool:
         tool.func = func
         tool.name = name
         tool.description = description
-        tool.guidance = None
         tool.mode = "signature"  # unused — we set ``_definition`` directly
         tool.schema_llm = None
         tool.strict = strict

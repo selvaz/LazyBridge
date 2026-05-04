@@ -244,9 +244,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
             description=(
                 "Assemble a self-contained HTML (and optionally PDF) report from typed content sections "
                 "or a Markdown file, with optional embedded chart PNG images. "
-                "4 layout templates x 4 CSS themes. Charts auto-placed or ordered via sections."
-            ),
-            guidance=(
+                "4 layout templates x 4 CSS themes. Charts auto-placed or ordered via sections.\n\n"
                 "Two input modes: (1) 'sections' — pass typed text/chart/table dicts directly, "
                 "charts embedded in order, no file needed; "
                 "(2) 'markdown_path' — path to existing .md file with 'charts' for auto-placement. "
@@ -465,8 +463,8 @@ def fragment_tools(
         Tool(
             append_text,
             name="append_text",
-            description="Append a Markdown text fragment to the shared report bus.",
-            guidance=(
+            description=(
+                "Append a Markdown text fragment to the shared report bus. "
                 "Use for narrative prose. Pandoc citations: [@key]. Pass citation "
                 "objects (returned by cite_url) in the citations argument so the "
                 "bibliography resolves. order_hint is a float — fragments sort "
@@ -476,8 +474,8 @@ def fragment_tools(
         Tool(
             append_chart,
             name="append_chart",
-            description="Append a chart fragment (Vega-Lite or Plotly).",
-            guidance=(
+            description=(
+                "Append a chart fragment (Vega-Lite or Plotly). "
                 "engine='vega-lite' is the safer default (pure-Rust rasterizer, "
                 "no Chrome). Pass spec as the raw JSON dict from the Vega-Lite v5 "
                 "schema, or a Plotly figure dict. data=[{x:..., y:...}, ...] is "
@@ -487,8 +485,8 @@ def fragment_tools(
         Tool(
             append_table,
             name="append_table",
-            description="Append a tabular fragment to the shared report bus.",
-            guidance=(
+            description=(
+                "Append a tabular fragment to the shared report bus. "
                 "headers and rows must agree in column count. caption shows above "
                 "the table. Stick to plain strings — leading-zero numerics, "
                 "currencies, etc. should be pre-formatted."
@@ -497,14 +495,16 @@ def fragment_tools(
         Tool(
             append_callout,
             name="append_callout",
-            description="Append a callout box (note/tip/important/warning/caution).",
-            guidance="style is one of: note, tip, important, warning, caution.",
+            description=(
+                "Append a callout box (note/tip/important/warning/caution). "
+                "style is one of: note, tip, important, warning, caution."
+            ),
         ),
         Tool(
             cite_url,
             name="cite_url",
-            description="Resolve a URL or DOI to a structured citation via Crossref/OpenAlex.",
-            guidance=(
+            description=(
+                "Resolve a URL or DOI to a structured citation via Crossref/OpenAlex. "
                 "Returns a citation dict; pass it as one of the items in the "
                 "citations=[...] argument of subsequent append_* calls. Results "
                 "are cached so calling repeatedly with the same URL is free."
@@ -513,8 +513,8 @@ def fragment_tools(
         Tool(
             list_fragments,
             name="list_fragments",
-            description="Read fragments currently in the report bus.  Optionally filter by section.",
-            guidance=(
+            description=(
+                "Read fragments currently in the report bus, optionally filtered by section. "
                 "Use this in synthesis steps that need to summarise upstream "
                 "contributions. Returns the full Fragment dict — including "
                 "kind, heading, body_md, chart, table, citations, provenance."

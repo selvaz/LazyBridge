@@ -74,7 +74,7 @@ from lazybridge.core.types import (
 # are extension surface — import them from ``lazybridge.ext.{hil,evals,otel}``.
 from lazybridge.engines.base import Engine
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
-from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
+from lazybridge.engines.plan import Plan, PlanCompileError, Step
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
@@ -95,7 +95,8 @@ from lazybridge.predicates import when
 from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store, StoreEntry
-from lazybridge.tools import Tool
+from lazybridge.testing import MockAgent
+from lazybridge.tools import Tool, build_tool_map, wrap_tool
 
 __all__ = [
     # Primary API
@@ -112,6 +113,8 @@ __all__ = [
     "from_parallel_all",
     # Tools
     "Tool",
+    "wrap_tool",
+    "build_tool_map",
     # Predicates DSL (for Step.routes)
     "when",
     # Memory & Store
@@ -134,8 +137,6 @@ __all__ = [
     "LLMEngine",
     "Plan",
     "Step",
-    "PlanState",
-    "StepResult",
     "PlanCompileError",
     "ToolTimeoutError",
     "StreamStallError",
@@ -168,4 +169,6 @@ __all__ = [
     "CacheConfig",
     "ObservabilityConfig",
     "ResilienceConfig",
+    # Testing
+    "MockAgent",
 ]
