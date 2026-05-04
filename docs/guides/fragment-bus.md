@@ -8,7 +8,7 @@ resumes cleanly.
 ## Construction
 
 ```python
-from lazybridge.ext.report_builder import FragmentBus, OutlineAssembler
+from lazybridge.external_tools.report_builder import FragmentBus, OutlineAssembler
 from lazybridge.store import Store
 
 # In-memory (default) — fragments live for the duration of the process.
@@ -99,7 +99,7 @@ data loss.
 
 ```python
 import threading
-from lazybridge.ext.report_builder import FragmentBus, Fragment
+from lazybridge.external_tools.report_builder import FragmentBus, Fragment
 
 bus = FragmentBus("concurrent-demo")
 
@@ -122,7 +122,7 @@ Crash + restart:
 
 ```python
 from lazybridge.store import Store
-from lazybridge.ext.report_builder import FragmentBus, Fragment
+from lazybridge.external_tools.report_builder import FragmentBus, Fragment
 
 # First run — partial.
 store = Store(db="./run.sqlite")

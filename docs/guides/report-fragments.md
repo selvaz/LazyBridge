@@ -7,7 +7,7 @@ table, callout) plus optional citations and a per-fragment audit stamp.
 ## Fragment
 
 ```python
-from lazybridge.ext.report_builder import Fragment
+from lazybridge.external_tools.report_builder import Fragment
 
 Fragment(
     kind: Literal["text", "chart", "table", "callout"],
@@ -104,7 +104,7 @@ synthesises a minimal record from the structured fields.
 ### Example
 
 ```python
-from lazybridge.ext.report_builder import Citation
+from lazybridge.external_tools.report_builder import Citation
 
 cite = Citation(
     key="smith2024",

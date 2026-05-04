@@ -1,6 +1,6 @@
 # Report builder
 
-`lazybridge.ext.report_builder` ships **two complementary report-authoring
+`lazybridge.external_tools.report_builder` ships **two complementary report-authoring
 APIs** — pick the one that matches the shape of your pipeline.
 
 | API                        | When to pick it                                      |
@@ -15,7 +15,7 @@ unchanged.
 
 ```python
 from lazybridge import Agent
-from lazybridge.ext.report_builder import report_tools
+from lazybridge.external_tools.report_builder import report_tools
 
 agent = Agent("anthropic", tools=report_tools("./out"))
 agent(
@@ -31,7 +31,7 @@ field reference.
 
 ```python
 from lazybridge import Agent, Plan, Step
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     FragmentBus, fragment_tools, OutlineAssembler,
 )
 
@@ -82,7 +82,7 @@ than any one agent**:
 ## Architecture map
 
 ```
-┌──────────────────────────── lazybridge.ext.report_builder ────────────────────────────┐
+┌──────────────────────────── lazybridge.external_tools.report_builder ────────────────────────────┐
 │                                                                                       │
 │  ┌─ Single-shot path ────────────────────────────────────────────────────────────┐    │
 │  │  report_tools(out_dir)  ─►  generate_report(...)  ─►  HTML / PDF              │    │
@@ -128,7 +128,7 @@ than any one agent**:
 ## Public surface at a glance
 
 ```python
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     # Single-shot path (unchanged from 1.0)
     report_tools,
     ChartRef,

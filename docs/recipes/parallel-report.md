@@ -31,7 +31,7 @@ sections that depend on what others produced).
 ```python
 from lazybridge import Agent, NativeTool, Plan, Step, from_parallel_all
 from lazybridge.envelope import Envelope
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     FragmentBus,
     OutlineAssembler,
     fragment_tools,

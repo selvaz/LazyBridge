@@ -30,7 +30,7 @@ typically `## References` or `## Sources`.
 ## Building citations by hand
 
 ```python
-from lazybridge.ext.report_builder import Citation
+from lazybridge.external_tools.report_builder import Citation
 
 cite = Citation(
     key="smith2024",
@@ -48,7 +48,7 @@ The `key` becomes the `[@key]` token agents use in prose.
 Attach citations to a fragment:
 
 ```python
-from lazybridge.ext.report_builder import Fragment
+from lazybridge.external_tools.report_builder import Fragment
 
 bus.append(Fragment(
     kind="text",
@@ -68,7 +68,7 @@ populated `Citation` whose `csl` field carries the canonical CSL-JSON
 record.
 
 ```python
-from lazybridge.ext.report_builder.citations import enrich_from_url
+from lazybridge.external_tools.report_builder.citations import enrich_from_url
 
 cite = enrich_from_url("https://doi.org/10.1234/widgets.2024.003")
 print(cite.title, cite.authors, cite.year)
@@ -121,8 +121,8 @@ verbatim.
 ## CSL-JSON output
 
 ```python
-from lazybridge.ext.report_builder.citations import to_csl_json
-from lazybridge.ext.report_builder import Citation
+from lazybridge.external_tools.report_builder.citations import to_csl_json
+from lazybridge.external_tools.report_builder import Citation
 
 cites = [
     Citation(key="k1", title="T1", year=2024, authors=["A"]),

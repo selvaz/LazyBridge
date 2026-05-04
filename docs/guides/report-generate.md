@@ -16,7 +16,7 @@ When to pick this over the [fragment workflow](report-builder.md#quick-start-par
 
 ```python
 from lazybridge import Agent
-from lazybridge.ext.report_builder import report_tools
+from lazybridge.external_tools.report_builder import report_tools
 
 agent = Agent(model="anthropic:claude-sonnet-4-6", tools=report_tools("./out"))
 ```

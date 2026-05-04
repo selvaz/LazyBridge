@@ -101,7 +101,7 @@ misspelling is debuggable rather than silent.
 
 ### How it works
 
-* HTML: re-uses the existing `lazybridge/ext/report_builder/renderer.py`
+* HTML: re-uses the existing `lazybridge/external_tools/report_builder/renderer.py`
   pipeline (Markdown → bleach → Jinja2 → one of 4 themes).  The
   fragment-side renderer assembles a Markdown document from the
   `AssembledReport` tree, then hands it to the existing renderer.
@@ -219,8 +219,8 @@ Pandoc formats (template corruption with embedded data-URL PNGs,
 `Exporter` is an ABC with a single method:
 
 ```python
-from lazybridge.ext.report_builder.exporters import Exporter
-from lazybridge.ext.report_builder.assemblers import AssembledReport
+from lazybridge.external_tools.report_builder.exporters import Exporter
+from lazybridge.external_tools.report_builder.assemblers import AssembledReport
 from pathlib import Path
 
 class MyExporter(Exporter):

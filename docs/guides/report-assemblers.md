@@ -5,7 +5,7 @@ An `Assembler` reduces the flat fragment list collected in a
 render.  Two strategies ship; you pick one when constructing the bus.
 
 ```python
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     BlackboardAssembler,
     OutlineAssembler,
     FragmentBus,
@@ -42,7 +42,7 @@ agents write.
 ### Example
 
 ```python
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     BlackboardAssembler, FragmentBus, Fragment,
 )
 
@@ -98,7 +98,7 @@ section ids; the assembler builds a tree.
 ### Example
 
 ```python
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     OutlineAssembler, FragmentBus, Fragment,
 )
 

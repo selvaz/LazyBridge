@@ -358,7 +358,7 @@ class TestAgentFallback:
 class TestDocSkillsImport:
     def test_imports_use_current_api(self):
         # Should not raise — no LazyAgent/LazySession/LazyTool used
-        from lazybridge.ext.doc_skills.doc_skills import (
+        from lazybridge.external_tools.doc_skills.doc_skills import (
             skill_builder_tool,
             skill_tool,
         )
@@ -367,14 +367,14 @@ class TestDocSkillsImport:
         assert callable(skill_tool)
 
     def test_skill_builder_tool_returns_tool(self):
-        from lazybridge.ext.doc_skills.doc_skills import skill_builder_tool
+        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tool
 
         t = skill_builder_tool()
         assert isinstance(t, Tool)
         assert t.name == "build_doc_skill"
 
     def test_skill_builder_tool_custom_name(self):
-        from lazybridge.ext.doc_skills.doc_skills import skill_builder_tool
+        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tool
 
         t = skill_builder_tool(name="my_builder")
         assert t.name == "my_builder"
@@ -389,12 +389,12 @@ class TestVeoImport:
     def test_veo_module_imports_without_genai(self):
         import importlib
 
-        mod = importlib.import_module("lazybridge.ext.veo.veo")
+        mod = importlib.import_module("lazybridge.external_tools.veo.veo")
         assert hasattr(mod, "veo_tool")
         assert hasattr(mod, "VeoError")
 
     def test_veo_tool_raises_import_error_without_genai(self):
-        from lazybridge.ext.veo.veo import _GENAI_AVAILABLE, _require_genai
+        from lazybridge.external_tools.veo.veo import _GENAI_AVAILABLE, _require_genai
 
         if not _GENAI_AVAILABLE:
             with pytest.raises(ImportError, match="google-genai"):

@@ -65,7 +65,7 @@ from pathlib import Path
 from typing import Annotated
 
 from lazybridge import Agent, LLMEngine, NativeTool, Plan, Session, Step, Store, Tool, from_parallel_all
-from lazybridge.ext.report_builder import report_tools
+from lazybridge.external_tools.report_builder import report_tools
 
 # ---------------------------------------------------------------------------
 # Config

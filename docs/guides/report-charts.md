@@ -18,7 +18,7 @@ seaborn, no LLM-emitted code that we'd have to `exec`.
 ### Spec shape
 
 ```python
-from lazybridge.ext.report_builder import ChartSpec
+from lazybridge.external_tools.report_builder import ChartSpec
 
 ChartSpec(
     engine="vega-lite",
@@ -181,8 +181,8 @@ pip install kaleido
 The render path is exposed for testing and custom exporters:
 
 ```python
-from lazybridge.ext.report_builder import ChartSpec
-from lazybridge.ext.report_builder.charts import render_chart
+from lazybridge.external_tools.report_builder import ChartSpec
+from lazybridge.external_tools.report_builder.charts import render_chart
 
 spec = ChartSpec(spec={"mark": "bar", "encoding": {}})
 rendered = render_chart(spec, raster=True)

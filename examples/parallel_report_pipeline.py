@@ -25,14 +25,14 @@ from pathlib import Path
 
 from lazybridge import Agent, Plan, Step
 from lazybridge.envelope import Envelope
-from lazybridge.ext.report_builder import (
+from lazybridge.external_tools.report_builder import (
     Citation,
     Fragment,
     FragmentBus,
     OutlineAssembler,
     Provenance,
 )
-from lazybridge.ext.report_builder.fragments import ChartSpec, TableSpec
+from lazybridge.external_tools.report_builder.fragments import ChartSpec, TableSpec
 
 
 OUTLINE = {
