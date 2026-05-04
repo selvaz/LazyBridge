@@ -67,6 +67,15 @@ nav:
       - Exporters: guides/exporters.md
       - GraphSchema: guides/graph-schema.md
       - "verify=": guides/verify.md
+    - Reporting (extension):
+      - Overview: guides/report-builder.md
+      - Single-shot generate_report: guides/report-generate.md
+      - FragmentBus: guides/fragment-bus.md
+      - Fragment schema: guides/report-fragments.md
+      - Assemblers: guides/report-assemblers.md
+      - Chart contract: guides/report-charts.md
+      - Citations: guides/report-citations.md
+      - Multi-format exporters: guides/report-exporters.md
     - Advanced:
       - Providers & model tiers: guides/providers.md
       - Engine protocol: guides/engine-protocol.md
@@ -85,6 +94,7 @@ nav:
     - Human-in-the-loop: recipes/human-in-the-loop.md
     - Orchestration tools: recipes/orchestration-tools.md
     - MCP integration: recipes/mcp.md
+    - Parallel report pipeline: recipes/parallel-report.md
 
   - Decision trees:
     - Index: decisions/index.md
@@ -96,6 +106,7 @@ nav:
     - HumanEngine vs SupervisorEngine: decisions/human-engine-vs-supervisor.md
     - "verify= placement": decisions/verify-placement.md
     - Checkpoint & resume: decisions/checkpoint.md
+    - Which report shape?: decisions/report-shape.md
     - Need Advanced?: decisions/need-advanced.md
 
   - Reference: reference.md

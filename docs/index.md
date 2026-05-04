@@ -89,6 +89,7 @@ site via `python -m lazybridge.skill_docs._build`.
 * [Tool calling end-to-end](recipes/tool-calling.md)
 * [Structured output with Pydantic](recipes/structured-output.md)
 * [Pipeline with typed steps and crash resume](recipes/plan-with-resume.md)
+* [Parallel report pipeline (multi-agent → HTML/PDF/Reveal.js)](recipes/parallel-report.md)
 * [Human-in-the-loop: approval gates and REPL](recipes/human-in-the-loop.md)
 * [MCP integration](recipes/mcp.md)
 * [Orchestration tools — chain / parallel / plan as tools](recipes/orchestration-tools.md)
