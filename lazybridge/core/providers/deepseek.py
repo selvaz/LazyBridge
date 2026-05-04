@@ -179,15 +179,26 @@ class DeepSeekProvider(OpenAIProvider):
         return request
 
     def _apply_thinking_params(self, params: dict, model: str, request: CompletionRequest) -> None:
-        """Mutate params in-place to activate thinking mode on V4 models."""
+        """Mutate params in-place to control thinking mode on V4 models.
+
+        deepseek-v4-flash and deepseek-v4-pro activate thinking by default
+        when the API decides to.  An explicit disable is required to prevent
+        the model from returning ``reasoning_content``, which would cause a
+        400 error on the next tool-call turn ("reasoning_content must be
+        passed back to the API").
+        """
         if model not in _THINKING_CAPABLE_MODELS:
             return
-        if not (request.thinking and request.thinking.enabled):
-            return
-        params.setdefault("extra_body", {})["thinking"] = {"type": "enabled"}
-        # Strip params the API silently ignores in thinking mode to avoid confusion.
-        for p in _THINKING_SUPPRESSED_PARAMS:
-            params.pop(p, None)
+        if request.thinking and request.thinking.enabled:
+            params.setdefault("extra_body", {})["thinking"] = {"type": "enabled"}
+            # Strip params the API silently ignores in thinking mode.
+            for p in _THINKING_SUPPRESSED_PARAMS:
+                params.pop(p, None)
+        else:
+            # Explicitly disable so the API never returns reasoning_content
+            # in non-thinking calls — avoids passback errors on multi-turn
+            # tool-calling loops.
+            params.setdefault("extra_body", {})["thinking"] = {"type": "disabled"}
 
     # ------------------------------------------------------------------
     # Override: extract reasoning_content from DeepSeek responses

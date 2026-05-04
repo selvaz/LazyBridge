@@ -455,11 +455,32 @@ class GoogleProvider(BaseProvider):
             )
 
         tools = self._build_tools_config(request)
+        func_decls = self._build_function_declarations(request)
+        has_native_search = google_search_active
+        has_custom_tools = bool(func_decls)
+
         if tools:
             kwargs["tools"] = tools
             kwargs["automatic_function_calling"] = _gtypes.AutomaticFunctionCallingConfig(
                 disable=True  # We handle tool calls ourselves for unified output
             )
+
+        # When both server-side (grounding) and client-side (function_declarations)
+        # tools are present, Google requires tool_config with
+        # include_server_side_tool_invocations=True — otherwise 400 INVALID_ARGUMENT.
+        if has_native_search and has_custom_tools:
+            try:
+                kwargs["tool_config"] = _gtypes.ToolConfig(
+                    function_calling_config=_gtypes.FunctionCallingConfig(
+                        include_server_side_tool_invocations=True,
+                    )
+                )
+            except (AttributeError, TypeError):
+                _logger.debug(
+                    "Google SDK does not support FunctionCallingConfig."
+                    "include_server_side_tool_invocations — mixed native+custom tools"
+                    " may fail with 400 INVALID_ARGUMENT on this SDK version."
+                )
 
         # Google Maps: lat/lng goes in ToolConfig.retrieval_config, not inside GoogleMaps()
         if google_maps_active:

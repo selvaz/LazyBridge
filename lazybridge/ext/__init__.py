@@ -38,4 +38,5 @@ Available modules::
     lazybridge.ext.doc_skills        BM25 local documentation skill runtime
     lazybridge.ext.read_docs         Multi-format document reader
     lazybridge.ext.veo               Google Veo video-generation utilities
+    lazybridge.ext.report_builder    Professional HTML report assembler (Markdown + chart PNGs → HTML)
 """

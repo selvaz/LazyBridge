@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title|e }}</title>
+  <style>{{ css }}</style>
+  <style>
+    .dd-layout {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 0 48px;
+      align-items: start;
+    }
+    .dd-toc {
+      position: sticky;
+      top: 32px;
+      padding: 20px 0;
+      border-right: 1px solid var(--border, #e0e0e0);
+      padding-right: 24px;
+    }
+    .dd-toc-title {
+      margin: 0 0 14px;
+      font-size: 0.72em;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted, #888);
+    }
+    .dd-toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .dd-toc-list li {
+      margin: 0;
+    }
+    .dd-toc-list li + li {
+      margin-top: 2px;
+    }
+    .dd-toc-list a {
+      display: block;
+      padding: 5px 8px;
+      font-size: 0.85em;
+      font-weight: 500;
+      color: var(--muted, #666);
+      text-decoration: none;
+      border-radius: 6px;
+      line-height: 1.3;
+      transition: background 0.15s, color 0.15s;
+    }
+    .dd-toc-list a:hover {
+      background: var(--accent-soft, #f0f4f8);
+      color: var(--accent, #1f4e79);
+    }
+    .dd-toc-list .toc-h3 a {
+      padding-left: 20px;
+      font-size: 0.80em;
+    }
+    .dd-content {
+      min-width: 0; /* prevent grid blowout */
+    }
+    @media (max-width: 900px) {
+      .dd-layout { grid-template-columns: 1fr; }
+      .dd-toc { display: none; }
+    }
+    @media print {
+      .dd-layout { grid-template-columns: 1fr; }
+      .dd-toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="report-shell">
+    <div class="dd-layout">
+      {% if toc_items %}
+      <aside class="dd-toc">
+        <p class="dd-toc-title">Contents</p>
+        <ul class="dd-toc-list">
+          {% for item in toc_items %}
+          <li class="toc-h{{ item.level }}">
+            <a href="#{{ item.id }}">{{ item.text }}</a>
+          </li>
+          {% endfor %}
+        </ul>
+      </aside>
+      {% endif %}
+      <div class="dd-content">
+        <article class="markdown-body">
+{{ body_html }}
+        </article>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
