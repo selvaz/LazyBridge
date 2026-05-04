@@ -158,9 +158,9 @@ omit = [
     "lazybridge/ext/quant_agent/*",
     "lazybridge/ext/read_docs/*",
     "lazybridge/ext/report_builder/*",
-    # external_tools.py has a dedicated test module under
+    # gateway.py has a dedicated test module under
     # tests/unit/ext/ that is also ignored in the default run.
-    "lazybridge/ext/external_tools.py",
+    "lazybridge/ext/gateway.py",
 ]
 
 [tool.coverage.report]

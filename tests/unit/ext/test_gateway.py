@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazybridge.ext.external_tools import ExternalToolProvider, ExternalToolSpec
+from lazybridge.ext.gateway import ExternalToolProvider, ExternalToolSpec
 from lazybridge.tools import build_tool_map
 
 
