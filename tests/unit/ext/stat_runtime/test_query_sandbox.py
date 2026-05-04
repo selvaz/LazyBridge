@@ -151,8 +151,15 @@ class TestMutationBlocking:
             engine._validate("INSTALL httpfs")
 
     def test_mutation_in_cte_blocked(self, engine):
-        """Mutation keyword inside a CTE must still be caught by the regex."""
-        with pytest.raises(ValueError, match="Forbidden SQL keyword"):
+        """Mutation inside a CTE must still be caught.
+
+        Post-Z2 the AST walker rejects this as "Forbidden SQL
+        construct: INSERT" before the regex layer ever runs; the
+        regex layer would catch the same query as "Forbidden SQL
+        keyword: INSERT" if the AST path were unavailable.  Match on
+        the shared "Forbidden SQL" prefix.
+        """
+        with pytest.raises(ValueError, match="Forbidden SQL"):
             engine._validate("WITH t AS (SELECT 1) INSERT INTO x SELECT * FROM t")
 
 

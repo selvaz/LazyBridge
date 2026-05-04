@@ -49,11 +49,12 @@ _FORCE_STREAM_MAX_TOKENS = 20_000
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-4-7": (5.0, 25.0),
-    "claude-opus-4-6": (15.0, 75.0),
-    "claude-opus-4-5": (15.0, 75.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-opus-4-5": (5.0, 25.0),
+    "claude-opus-4-1": (15.0, 75.0),  # legacy Opus 4.1 — higher price tier
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
-    "claude-haiku-4-5": (0.80, 4.0),
+    "claude-haiku-4-5": (1.0, 5.0),
     "claude-3-5-sonnet": (3.0, 15.0),
     "claude-3-5-haiku": (0.80, 4.0),
     "claude-3-opus": (15.0, 75.0),
@@ -88,12 +89,11 @@ class AnthropicProvider(BaseProvider):
 
     default_model = "claude-sonnet-4-6"
 
-    # Tier aliases — ``LazyAgent("anthropic", model="top")`` resolves here.
-    # Update this table when new models ship; the matrix in
-    # lazy_wiki/human/agents.md mirrors it (audit F2).
+    # Tier aliases — ``Agent("anthropic", model="top")`` resolves here.
+    # Update this table when new models ship.
     _TIER_ALIASES = {
         "top": "claude-opus-4-7",
-        "expensive": "claude-opus-4-6",
+        "expensive": "claude-opus-4-6",  # second tier, same quality family as top
         "medium": "claude-sonnet-4-6",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",
@@ -101,6 +101,7 @@ class AnthropicProvider(BaseProvider):
     _FALLBACKS = {
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
+        "claude-opus-4-1": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-sonnet-4-6": ["claude-sonnet-4-5", "claude-3-5-sonnet"],
         "claude-haiku-4-5": ["claude-3-5-haiku"],
     }
@@ -147,8 +148,12 @@ class AnthropicProvider(BaseProvider):
         if not key:
             raise ValueError(
                 "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
-                "variable, or pass api_key= to LazyAgent/AnthropicProvider."
+                "variable, or pass api_key= to AnthropicProvider."
             )
+        # Instance-level flag: warn once per provider instance, not once globally.
+        # A class-level bool would suppress the warning for ALL instances once any
+        # single instance fires it, masking temperature issues in multi-agent setups.
+        self._temperature_warned: bool = False
         # Allow callers to override beta header versions and the streaming threshold.
         self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
         self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
@@ -314,30 +319,58 @@ class AnthropicProvider(BaseProvider):
         model = self._resolve_model(request)
         params: dict[str, Any] = {
             "model": model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": request.max_tokens or self.get_default_max_tokens(model),
             "messages": self._messages_to_anthropic(request),
         }
+        # Prompt caching.  When the caller opts in via ``request.cache``,
+        # wrap the system prompt in a content block with
+        # ``cache_control: {type: "ephemeral", ttl: ...}``
+        # so Anthropic caches the static prefix.  Cache hits cost ~10%
+        # of input; writes cost ~25% more.
+        cache_enabled = request.cache is not None and request.cache.enabled
         system = self._get_system(request)
         if system:
-            params["system"] = system
-        # Opus 4.7 does not support temperature/top_p/top_k — but we now
-        # warn rather than drop silently so users aren't surprised when
-        # their temperature setting has no effect (audit M7).
+            if cache_enabled:
+                cache_block: dict[str, Any] = {"type": "ephemeral"}
+                if request.cache and request.cache.ttl and request.cache.ttl != "5m":
+                    cache_block["ttl"] = request.cache.ttl
+                params["system"] = [
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": cache_block,
+                    }
+                ]
+            else:
+                params["system"] = system
+        # Opus 4.7 does not support temperature/top_p/top_k — warn rather
+        # than drop silently so users aren't surprised when their
+        # temperature setting has no effect.
         no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
         if request.temperature is not None:
             if no_sampling:
-                warnings.warn(
-                    f"Anthropic model {model!r} does not support the temperature "
-                    "parameter; your temperature= value is being ignored. "
-                    "Drop it from the call or pick a different model to suppress "
-                    "this warning.",
-                    UserWarning,
-                    stacklevel=4,
-                )
+                if not self._temperature_warned:
+                    self._temperature_warned = True
+                    warnings.warn(
+                        f"Anthropic model {model!r} does not support the temperature "
+                        "parameter; your temperature= value is being ignored. "
+                        "Drop it from the call or pick a different model to suppress "
+                        "this warning.",
+                        UserWarning,
+                        stacklevel=4,
+                    )
             else:
                 params["temperature"] = request.temperature
         tools = self._build_tools(request)
         if tools:
+            if cache_enabled:
+                # Anthropic caches every tool up to and including the
+                # block marked with cache_control.  Marking the LAST
+                # tool therefore caches the entire tool list.
+                cache_block = {"type": "ephemeral"}
+                if request.cache and request.cache.ttl and request.cache.ttl != "5m":
+                    cache_block["ttl"] = request.cache.ttl
+                tools[-1] = {**tools[-1], "cache_control": cache_block}
             params["tools"] = tools
         if request.tool_choice:
             if request.tool_choice in ("auto", "none", "required"):
@@ -405,7 +438,9 @@ class AnthropicProvider(BaseProvider):
 
     def _should_force_streaming(self, request: CompletionRequest) -> bool:
         threshold = getattr(self, "_force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
-        if request.max_tokens and request.max_tokens > threshold:
+        resolved_model = self._resolve_model(request)
+        effective_max = request.max_tokens or self.get_default_max_tokens(resolved_model)
+        if effective_max > threshold:
             import logging as _logging
 
             _logging.getLogger(__name__).debug(
@@ -491,7 +526,12 @@ class AnthropicProvider(BaseProvider):
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
             else:
-                use_native_parse = not request.thinking and not request.native_tools and not betas
+                # F2 companion: exclude function-call tools from the parse()
+                # path.  messages.parse() is designed for pure structured
+                # output and may not reliably handle requests that also carry
+                # function-call tool definitions; fall through to output_config
+                # (the else branch) when tools are present.
+                use_native_parse = not request.thinking and not request.native_tools and not request.tools and not betas
                 if use_native_parse:
                     try:
                         response = self._client.messages.parse(
@@ -507,7 +547,7 @@ class AnthropicProvider(BaseProvider):
                     except (AttributeError, NotImplementedError) as _pe:
                         # messages.parse() not available on this SDK version — fall back.
                         # Log once at DEBUG so users diagnosing "why is validation
-                        # different?" can find the signal (audit L7).
+                        # different?" can find the signal.
                         import logging as _logging
 
                         _logging.getLogger(__name__).debug(
@@ -545,8 +585,21 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        # Mirror complete(): add output_config for structured output so the API
+        # enforces the schema server-side and the model emits valid JSON, not prose.
+        if request.structured_output and request.structured_output.schema:
+            from lazybridge.core.structured import normalize_json_schema
+
+            schema = request.structured_output.schema
+            json_schema = (
+                normalize_json_schema(schema)
+                if isinstance(schema, dict)
+                else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+            )
+            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+
         ctx: Any
-        if betas:
+        if betas or "output_config" in params:
             ctx = self._client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
             ctx = self._client.messages.stream(**params)
@@ -632,7 +685,12 @@ class AnthropicProvider(BaseProvider):
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
             else:
-                use_native_parse = not request.thinking and not request.native_tools and not betas
+                # F2 companion: exclude function-call tools from the parse()
+                # path.  messages.parse() is designed for pure structured
+                # output and may not reliably handle requests that also carry
+                # function-call tool definitions; fall through to output_config
+                # (the else branch) when tools are present.
+                use_native_parse = not request.thinking and not request.native_tools and not request.tools and not betas
                 if use_native_parse:
                     try:
                         response = await self._async_client.messages.parse(
@@ -651,7 +709,15 @@ class AnthropicProvider(BaseProvider):
                         resp = self._parse_response(response)
                         apply_structured_validation(resp, resp.content, schema)
                 else:
-                    response = await self._async_client.messages.create(**params)
+                    # Pydantic schema + thinking/native_tools/betas — must go through
+                    # output_config (same as sync path). Plain messages.create() without
+                    # output_config silently ignores the schema and returns free-form text.
+                    json_schema = normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+                    params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+                    if betas:
+                        response = await self._async_client.beta.messages.create(**params, **self._beta_kwargs(betas))
+                    else:
+                        response = await self._async_client.messages.create(**params)
                     resp = self._parse_response(response)
                     apply_structured_validation(resp, resp.content, schema)
             return resp
@@ -668,8 +734,21 @@ class AnthropicProvider(BaseProvider):
         betas = self._build_betas(request)
         params = self._build_params(request)
 
+        # Mirror acomplete(): add output_config so the API enforces the schema
+        # server-side when streaming (force-streamed requests need this too).
+        if request.structured_output and request.structured_output.schema:
+            from lazybridge.core.structured import normalize_json_schema
+
+            schema = request.structured_output.schema
+            json_schema = (
+                normalize_json_schema(schema)
+                if isinstance(schema, dict)
+                else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
+            )
+            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+
         ctx: Any
-        if betas:
+        if betas or "output_config" in params:
             ctx = self._async_client.beta.messages.stream(**params, **self._beta_kwargs(betas))
         else:
             ctx = self._async_client.messages.stream(**params)

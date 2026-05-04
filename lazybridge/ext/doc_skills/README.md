@@ -35,43 +35,38 @@ Add `generated_skills/` to your `.gitignore`.
 
 ```python
 from lazybridge.ext.doc_skills import skill_tool
-from lazybridge import LazyAgent
+from lazybridge import Agent
 
 tool = skill_tool("./generated_skills/my-project")
 
-resp = LazyAgent("anthropic").loop(
-    "How do I configure retry behaviour?",
-    tools=[tool],
-)
-print(resp.content)
+resp = Agent("anthropic", tools=[tool])("How do I configure retry behaviour?")
+print(resp.text())
 ```
 
 ### Two-step pipeline (router + executor)
 
 ```python
 from lazybridge.ext.doc_skills import skill_pipeline
-from lazybridge import LazyAgent
+from lazybridge import Agent
 
 pipeline = skill_pipeline(
     skill_dir="./generated_skills/my-project",
     provider="anthropic",
 )
-orchestrator = LazyAgent("anthropic")
-resp = orchestrator.loop(
-    "What is the canonical pattern for agents running in sequence?",
-    tools=[pipeline],
-)
+orchestrator = Agent("anthropic", tools=[pipeline])
+resp = orchestrator("What is the canonical pattern for agents running in sequence?")
+print(resp.text())
 ```
 
 ### Let an agent build skills on demand
 
 ```python
 from lazybridge.ext.doc_skills import skill_builder_tool
-from lazybridge import LazyAgent
+from lazybridge import Agent
 
 builder = skill_builder_tool()
-agent = LazyAgent("anthropic")
-agent.loop("Index the /company/docs folder as 'company-wiki'", tools=[builder])
+agent = Agent("anthropic", tools=[builder])
+agent("Index the /company/docs folder as 'company-wiki'")
 ```
 
 ### Query retrieval modes
@@ -80,7 +75,7 @@ agent.loop("Index the /company/docs folder as 'company-wiki'", tools=[builder])
 |---|---|---|
 | `answer` | default | "How does X work?" |
 | `extract` | need raw quotes | "Extract all examples of verify=" |
-| `locate` | need file paths | "Where is LazyStore documented?" |
+| `locate` | need file paths | "Where is Store documented?" |
 | `summarize` | overview | "Summarise the pattern hierarchy" |
 
 Mode is detected automatically from the query wording, or set it explicitly:
@@ -101,6 +96,6 @@ brief = query_skill(
 |---|---|
 | `build_skill(source_dirs, skill_name, ...)` | Index docs → skill bundle on disk |
 | `query_skill(skill_dir, task, ...)` | Retrieve + grounded context brief |
-| `skill_tool(skill_dir, ...)` | One-step LazyTool for an agent |
+| `skill_tool(skill_dir, ...)` | One-step `Tool` for an agent |
 | `skill_builder_tool(...)` | Tool that builds skill bundles |
 | `skill_pipeline(skill_dir, ...)` | Router + executor chain pipeline |

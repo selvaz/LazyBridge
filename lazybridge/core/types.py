@@ -29,6 +29,7 @@ class NativeTool(StrEnum):
     CODE_EXECUTION = "code_execution"
     FILE_SEARCH = "file_search"  # OpenAI
     COMPUTER_USE = "computer_use"
+    IMAGE_GENERATION = "image_generation"  # OpenAI Responses API (gpt-image-2 family)
     GOOGLE_SEARCH = "google_search"  # Gemini grounding
     GOOGLE_MAPS = "google_maps"  # Gemini grounding
 
@@ -170,22 +171,150 @@ class SkillsConfig:
 
 
 @dataclass
+class CacheConfig:
+    """Mark the static prefix of a request (system prompt + tool
+    definitions) as cacheable.
+
+    Providers with explicit prompt caching (Anthropic) need a
+    ``cache_control`` marker on the last block of each cached
+    segment; this makes it a one-flag opt-in instead of asking
+    callers to hand-craft provider-specific content lists.
+
+    Provider-specific behaviour:
+
+    * **Anthropic** — the system prompt is upgraded from a string to a
+      ``[{type: "text", text, cache_control}]`` block; a cache
+      breakpoint is also placed on the last tool definition if tools
+      are present.  Cache hits cost ~10% of input tokens; writes cost
+      ~25% more.  TTL options: ``"5m"`` (default) or ``"1h"``.
+    * **OpenAI** — automatic for system prompts >1024 tokens; no
+      user-visible opt-in is required.  This config is a no-op but
+      accepted for forward-compat.
+    * **Google Gemini** — explicit Context Caching uses a different
+      lifecycle (create a cache resource, reference by name).  Not
+      auto-wired from this config; pass via ``extra`` if needed.
+    * **DeepSeek** — automatic; no-op.
+    """
+
+    enabled: bool = True
+    #: Anthropic-only: ``"5m"`` (default) or ``"1h"``.  Other providers
+    #: ignore this field.
+    ttl: str = "5m"
+
+
+#: Sentinel used by config-object unpacking to detect "user passed a
+#: flat kwarg explicitly" vs "left it at the default".  Internal only —
+#: never exposed in public signatures.
+_UNSET: Any = object()
+
+
+@dataclass
+class ResilienceConfig:
+    """Bundle of reliability / performance knobs shareable across Agents.
+
+    Wraps the resilience kwargs on ``Agent`` so a fleet of agents in a
+    production pipeline can share a single retry / timeout / cache
+    policy instead of copy-pasting seven kwargs at every call site.
+
+    Flat ``Agent`` kwargs still win when both are passed — the config
+    is the default, an explicit kwarg is the override.
+    """
+
+    timeout: float | None = None
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    cache: bool | CacheConfig = False
+    max_output_retries: int = 2
+    output_validator: Any = None  # Callable[[Any], Any] | None
+    #: Forward-ref to ``Agent`` — typed ``Any`` to avoid a circular import.
+    #: Actual validation happens inside ``Agent.__init__``.
+    fallback: Any = None
+
+
+@dataclass
+class ObservabilityConfig:
+    """Bundle of identity / tracing knobs shareable across Agents.
+
+    ``session`` is the single biggest win: binding a fleet of agents to
+    the same ``Session`` in one object beats threading it through every
+    constructor call.
+    """
+
+    verbose: bool = False
+    session: Any = None  # Session | None
+    name: str | None = None
+    description: str | None = None
+
+
+@dataclass
+class AgentRuntimeConfig:
+    """Composite — carries both resilience and observability.
+
+    Convenience for configuration injection: one object passed to every
+    ``Agent`` in a factory instead of two.
+    """
+
+    resilience: ResilienceConfig | None = None
+    observability: ObservabilityConfig | None = None
+
+
+#: Provider-agnostic meta-keywords accepted as ``tool_choice``.  Anything
+#: outside this set is interpreted as a tool NAME and validated against
+#: the ``tools`` list on the request, so typos fail fast at request
+#: construction instead of being silently ignored by the provider API
+#: (or worse, triggering a cryptic server-side error several RTTs in).
+_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset({"auto", "required", "none", "any"})
+
+
+@dataclass
 class CompletionRequest:
     """Unified request object passed to any provider."""
 
     messages: list[Message]
     model: str | None = None
     system: str | None = None
-    max_tokens: int = 4096
+    max_tokens: int | None = None
     temperature: float | None = None
     tools: list[ToolDefinition] = field(default_factory=list)
-    tool_choice: str | None = None  # "auto" | "required" | "none" | tool_name
+    tool_choice: str | None = None  # "auto" | "required" | "none" | "any" | tool_name
     native_tools: list[NativeTool] = field(default_factory=list)
     structured_output: StructuredOutputConfig | None = None
     thinking: ThinkingConfig | None = None
     skills: SkillsConfig | None = None  # Anthropic only
+    #: Opt-in prompt caching for the static prefix (system + tools).
+    #: ``None`` = caching disabled; ``CacheConfig()`` = default enabled.
+    #: See :class:`CacheConfig` for per-provider semantics.
+    cache: CacheConfig | None = None
     stream: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Validate ``tool_choice`` up-front: non-keyword values must
+        # name an actual tool in ``self.tools``.  Without this check a
+        # typo would pass silently to the provider API, where it
+        # either errored cryptically or was ignored.
+        if self.tool_choice is None:
+            return
+        if self.tool_choice in _TOOL_CHOICE_KEYWORDS:
+            return
+        tool_names = {t.name for t in self.tools}
+        if self.tool_choice in tool_names:
+            return
+        # Either no tools at all, or the named tool isn't in the list.
+        if not tool_names:
+            raise ValueError(
+                f"CompletionRequest: tool_choice={self.tool_choice!r} names a "
+                f"specific tool, but this request has no tools.  Either pass "
+                f"tools=[...] or use one of "
+                f"{sorted(_TOOL_CHOICE_KEYWORDS)}."
+            )
+        raise ValueError(
+            f"CompletionRequest: tool_choice={self.tool_choice!r} does not "
+            f"match any tool in tools=.  Known tools: "
+            f"{sorted(tool_names)}.  Pick one of those names, or use one of "
+            f"{sorted(_TOOL_CHOICE_KEYWORDS)} for the provider's default "
+            f"behaviour."
+        )
 
 
 @dataclass
@@ -198,9 +327,30 @@ class ToolCall:
 
 @dataclass
 class UsageStats:
+    """Token-usage and cost telemetry for one request.
+
+    ``thinking_tokens`` reports the *reasoning* portion of the model's
+    output for providers that expose it.  It is informational and may
+    overlap with ``output_tokens`` depending on the provider:
+
+    * **OpenAI**: ``output_tokens`` (== API ``completion_tokens``) is
+      the *total* output INCLUDING reasoning, and ``thinking_tokens``
+      is the reasoning *subset* of that total.
+    * **Anthropic / DeepSeek**: ``thinking_tokens`` is reported as a
+      separate field; whether it is already inside ``output_tokens``
+      varies by model and SDK version.
+
+    ``cost_usd`` is computed off ``output_tokens`` (which the
+    provider-side billing always uses) plus ``input_tokens`` /
+    ``cached_input_tokens``, so cost is correct regardless of the
+    overlap.  Don't sum ``output_tokens + thinking_tokens`` for a
+    cost dashboard — it would double-count for OpenAI.
+    """
+
     input_tokens: int = 0
     output_tokens: int = 0
     thinking_tokens: int = 0
+    cached_input_tokens: int = 0
     cost_usd: float | None = None
 
 
@@ -290,8 +440,8 @@ class Verifier(Protocol):
     """Protocol for verify judges used in ``loop()`` / ``aloop()``.
 
     Any object with a ``text(messages) -> str`` method satisfies this
-    protocol — including ``LazyAgent`` itself.  Alternatively, pass a
-    plain ``Callable[[str, str], str]`` to loop()'s ``verify`` parameter.
+    protocol — including ``Agent`` itself.  Alternatively, pass a
+    plain ``Callable[[str, str], str]`` to the verify= parameter.
 
     Return a string starting with ``"approved"`` (case-insensitive) to
     accept the answer; anything else triggers a retry with the feedback.

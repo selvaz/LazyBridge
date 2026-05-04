@@ -1,0 +1,52 @@
+# Dependabot configuration — keep dependencies fresh without flooding
+# the queue.  Audit M-J.
+#
+# Two ecosystems matter for this repo:
+#   * GitHub Actions — workflow action versions
+#   * pip            — provider SDKs and dev dependencies pinned in
+#                      pyproject.toml
+#
+# Provider SDK updates land as separate PRs so each can be tested
+# against its provider integration suite independently.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      # Keep the noise down by bundling minor/patch action bumps into
+      # one PR per week; majors get their own PR so we review the
+      # breaking changes individually.
+      gha-minor:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+    # Provider SDK majors are intentionally pinned ``<next_major`` in
+    # pyproject.toml; Dependabot may not propose a major bump until
+    # we explicitly raise the cap.  That's deliberate (audit history).
+    ignore:
+      - dependency-name: "anthropic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "openai"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "google-genai"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "litellm"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]

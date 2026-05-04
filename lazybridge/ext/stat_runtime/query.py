@@ -17,6 +17,26 @@ Validation rules:
   - Direct file reader functions are blocked in user SQL
   - max_rows enforced via DB-level LIMIT (no full-result materialization)
   - Normalized SQL hashed for lineage tracking
+
+Validation pipeline:
+
+1. Parse via :mod:`sqlglot` with the DuckDB dialect.  Multi-statement
+   SQL, unparseable SQL, or SQL that sqlglot has to fall back to a
+   ``Command`` node for (e.g. ``LOAD httpfs``) are all rejected.
+2. Walk the AST for forbidden expression types (``Insert``, ``Update``,
+   ``Drop``, ``Pragma``, …).  This catches mutations regardless of
+   nesting (CTE bodies, subqueries) and is immune to comment-injection
+   bypasses that defeat regex scans.
+3. Walk every ``Func`` for forbidden names (``read_parquet``,
+   ``read_csv``, ``glob``, ``s3_*``, …).  Catches schema-qualified
+   variants (``main.read_parquet(...)``) and typed reader nodes
+   (``ReadParquet``) that sqlglot promotes from ``Anonymous``.
+4. Walk every ``Table`` for path-literal replacement scans
+   (``FROM '/etc/passwd'``).  AST gives us the literal contents
+   directly, with no false positives on identically-named columns
+   or in-string references.
+5. Regex layer kept as a last-line defence and as a graceful fallback
+   when ``sqlglot`` is missing (extension installed without ``[stats]``).
 """
 
 from __future__ import annotations
@@ -38,11 +58,38 @@ _DATASET_MACRO_RE = re.compile(
 
 # DuckDB file-reader functions that must be blocked in USER sql.
 # These are only allowed in the internally-generated expanded SQL.
+# Used both by the AST walker (exact name match) and by the regex
+# fallback when sqlglot is unavailable.
+_FORBIDDEN_FUNC_NAMES: frozenset[str] = frozenset(
+    {
+        "read_parquet",
+        "read_csv",
+        "read_csv_auto",
+        "read_json",
+        "read_json_auto",
+        "read_text",
+        "read_blob",
+        "st_read",
+        "iceberg_scan",
+        "delta_scan",
+        "parquet_scan",
+        "parquet_metadata",
+        "parquet_schema",
+        "glob",
+        "http_get",
+    }
+)
+
+# Function-name prefixes that should always be rejected (covers
+# httpfs_*, s3_*, gcs_* helper families that we don't want to
+# enumerate exhaustively).
+_FORBIDDEN_FUNC_PREFIXES: tuple[str, ...] = ("httpfs_", "s3_", "gcs_", "azure_")
+
 _FILE_READER_RE = re.compile(
-    r"""\b(read_parquet|read_csv|read_csv_auto|read_json|read_json_auto"""
-    r"""|read_text|read_blob|st_read|iceberg_scan|delta_scan"""
-    r"""|parquet_scan|parquet_metadata|parquet_schema"""
-    r"""|glob|httpfs_|http_get|s3_)\b""",
+    r"\b(read_parquet|read_csv|read_csv_auto|read_json|read_json_auto"
+    r"|read_text|read_blob|st_read|iceberg_scan|delta_scan"
+    r"|parquet_scan|parquet_metadata|parquet_schema"
+    r"|glob|httpfs_|http_get|s3_)\b",
     re.IGNORECASE,
 )
 
@@ -60,13 +107,70 @@ _PATH_LITERAL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Mutation / DDL keywords
+# Mutation / DDL keywords (regex fallback path only)
 _MUTATION_RE = re.compile(
     r"""\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH"""
     r"""|COPY|EXPORT|IMPORT|LOAD|VACUUM|PRAGMA|SET|RESET|CALL"""
     r"""|INSTALL|EXECUTE|PREPARE)\b""",
     re.IGNORECASE,
 )
+
+
+def _path_like(value: str) -> bool:
+    """Return True if ``value`` looks like a filesystem / URI path that
+    DuckDB would treat as a replacement-scan target.
+
+    Centralised so the AST walker and the regex fallback share the
+    same heuristic — the previous regex-only path missed a few edge
+    cases (no leading slash but explicit extension at the end of the
+    string with no other path separators).
+    """
+    if not value:
+        return False
+    # Absolute / relative POSIX paths, Windows drive letters, dot-prefix.
+    if value[0] in ("/", "\\") or value.startswith(("./", "../", ".\\", "..\\")):
+        return True
+    if len(value) >= 3 and value[1] == ":" and value[2] in ("/", "\\"):
+        return True
+    # URI schemes DuckDB knows about.
+    lowered = value.lower()
+    if any(
+        lowered.startswith(p)
+        for p in (
+            "http://",
+            "https://",
+            "s3://",
+            "gcs://",
+            "azure://",
+            "file://",
+            "hdfs://",
+            "abfs://",
+            "abfss://",
+            "r2://",
+        )
+    ):
+        return True
+    # Filename-with-extension heuristic — DuckDB auto-detects
+    # parquet/csv/json/etc. by suffix.
+    if "." in value and not value.startswith("'"):
+        suffix = value.rsplit(".", 1)[-1].lower()
+        if suffix in {
+            "parquet",
+            "csv",
+            "tsv",
+            "json",
+            "jsonl",
+            "ndjson",
+            "txt",
+            "log",
+            "gz",
+            "zst",
+            "bz2",
+            "arrow",
+            "ipc",
+        }:
+            return True
+    return False
 
 
 class QueryEngine:
@@ -141,10 +245,31 @@ class QueryEngine:
 
         This is an allowlist model: user SQL may only access data through
         the dataset('name') macro.  Direct file readers are blocked.
+
+        Pipeline: AST validation via sqlglot first; regex layer kept
+        for defence-in-depth and as a fallback when sqlglot isn't
+        installed.
         """
         stripped = sql.strip().rstrip(";").strip()
         if not stripped:
             raise ValueError("Empty SQL query")
+
+        # AST validation — primary line of defence.
+        if not _validate_with_sqlglot(stripped):
+            # sqlglot unavailable — fall back to regex-only mode and warn.
+            import warnings as _warnings
+
+            _warnings.warn(
+                "sqlglot is not installed — SQL validation degraded to "
+                "regex-only mode (less robust against bypass attempts). "
+                "Install with: pip install 'lazybridge[stats]'",
+                UserWarning,
+                stacklevel=3,
+            )
+
+        # Regex layer — defence in depth.  These checks are kept even
+        # after AST validation succeeds so a future sqlglot regression
+        # or unknown-dialect quirk still gets blocked.
 
         # Must start with SELECT or WITH (CTE)
         first_word = stripped.split()[0].upper()
@@ -229,6 +354,156 @@ class QueryEngine:
     def _hash(normalized_sql: str) -> str:
         """SHA-256 hash of normalized SQL for dedup and lineage."""
         return hashlib.sha256(normalized_sql.encode("utf-8")).hexdigest()[:16]
+
+
+def _validate_with_sqlglot(sql: str) -> bool:
+    """Run AST-based validation.  Returns True when sqlglot is
+    available and the SQL passed; raises :class:`ValueError` when the
+    SQL is rejected; returns False (no raise) when sqlglot isn't
+    installed so the caller can degrade to the regex-only path with
+    a warning.
+    """
+    try:
+        import sqlglot
+        from sqlglot import expressions as exp
+        from sqlglot.errors import ParseError, TokenError
+    except ImportError:
+        return False
+
+    # ── 1. Parse ──────────────────────────────────────────────────────
+    # Multi-statement SQL collapses to ``len(statements) > 1`` here, so
+    # the classic ``SELECT 1; DROP TABLE x`` smuggling vector dies up
+    # front.  Unparseable SQL is rejected outright instead of silently
+    # falling through to regex (which would miss novel syntax).
+    try:
+        statements = sqlglot.parse(sql, dialect="duckdb")
+    except (ParseError, TokenError) as exc:
+        raise ValueError(f"SQL parse error: {exc}") from exc
+    statements = [s for s in statements if s is not None]
+    if not statements:
+        raise ValueError("Empty SQL query")
+    if len(statements) > 1:
+        raise ValueError(
+            f"Multi-statement SQL is not allowed (got {len(statements)} statements). Submit one SELECT query at a time."
+        )
+    root = statements[0]
+
+    # ── 2. Forbidden statement types ──────────────────────────────────
+    # Walking the whole tree (not just the root) catches mutations
+    # nested inside CTE bodies — ``WITH t AS (SELECT 1) INSERT INTO ...``
+    # has a ``Select`` root in some dialects but the ``Insert`` lives
+    # one level down.
+    _check_forbidden_types(root, exp)
+
+    # ── 3. Allowed root shape ─────────────────────────────────────────
+    # SELECT / WITH / set-ops only.  Subquery wrappers are allowed so
+    # the validator survives sqlglot wrapping CTE roots in ``Subquery``
+    # in some dialect / version combinations.
+    allowed_roots = (exp.Select, exp.Subquery, exp.With, exp.Union, exp.Intersect, exp.Except)
+    if not isinstance(root, allowed_roots):
+        raise ValueError(
+            f"Only SELECT / WITH (CTE) / set-operation statements are allowed. Got: {type(root).__name__}."
+        )
+
+    # ── 4. Forbidden function calls ───────────────────────────────────
+    # Walks every Func node in the tree.  Catches:
+    #   - Anonymous calls:        ``read_csv_auto(...)``, ``glob(...)``
+    #   - Typed reader nodes:     ``ReadParquet(...)``, ``ReadCSV(...)``
+    #   - Schema-qualified calls: ``main.read_parquet(...)``
+    #     (sqlglot resolves these to the same node types as bare calls)
+    for func in root.find_all(exp.Func):
+        name = _func_name(func).lower()
+        if not name:
+            continue
+        if name in _FORBIDDEN_FUNC_NAMES or any(name.startswith(p) for p in _FORBIDDEN_FUNC_PREFIXES):
+            raise ValueError(
+                f"Direct file access function '{name}' is not allowed. "
+                "Use the dataset('name') macro to access registered datasets."
+            )
+
+    # ── 5. Path-literal replacement scans (FROM '/etc/passwd') ────────
+    # In sqlglot's AST these surface as a Table whose ``this`` is a
+    # quoted Identifier with the path as the literal text.  Fewer
+    # false positives than the regex approach because in-string
+    # references and column aliases never reach this branch.
+    for table in root.find_all(exp.Table):
+        ident = table.this
+        if isinstance(ident, exp.Identifier) and ident.quoted:
+            value = ident.name or ""
+            if _path_like(value):
+                raise ValueError(
+                    "Direct file path in FROM/JOIN clause is not allowed. "
+                    "Use the dataset('name') macro to access registered datasets."
+                )
+
+    return True
+
+
+def _check_forbidden_types(root, exp_module) -> None:
+    """Walk the AST raising ``ValueError`` on any forbidden node type.
+
+    Forbidden families (kept as a tuple of (class, label) pairs so
+    error messages name the offending construct, not just its parent):
+
+    * Mutations: Insert / Update / Delete / Merge / TruncateTable
+    * DDL:       Create / Drop / Alter / Detach / Attach
+    * Dangerous side-effecting: Copy / Pragma / Set / Install / Use /
+      Analyze / LoadData
+    * sqlglot fallback: Command (covers VACUUM / LOAD httpfs / any
+      syntax sqlglot couldn't parse into a typed node — these are
+      always rejected because their semantics are opaque to us)
+    """
+    forbidden: list[tuple[type, str]] = []
+    for cls_name, label in (
+        ("Insert", "INSERT"),
+        ("Update", "UPDATE"),
+        ("Delete", "DELETE"),
+        ("Merge", "MERGE"),
+        ("TruncateTable", "TRUNCATE"),
+        ("Create", "CREATE"),
+        ("Drop", "DROP"),
+        ("Alter", "ALTER"),
+        ("Attach", "ATTACH"),
+        ("Detach", "DETACH"),
+        ("Copy", "COPY"),
+        ("Pragma", "PRAGMA"),
+        ("Set", "SET"),
+        ("Install", "INSTALL"),
+        ("Use", "USE"),
+        ("Analyze", "ANALYZE"),
+        ("LoadData", "LOAD"),
+        ("Command", "unsupported / unparsed statement"),
+    ):
+        cls = getattr(exp_module, cls_name, None)
+        if cls is not None:
+            forbidden.append((cls, label))
+
+    forbidden_classes = tuple(c for c, _ in forbidden)
+    label_for = {c: lbl for c, lbl in forbidden}
+
+    for node in root.walk():
+        if isinstance(node, forbidden_classes):
+            label = label_for.get(type(node), type(node).__name__)
+            raise ValueError(f"Forbidden SQL construct: {label}. Only SELECT queries are allowed.")
+
+
+def _func_name(func) -> str:
+    """Best-effort name extraction for a sqlglot ``Func`` node.
+
+    ``Anonymous`` carries the name in ``.name``; typed functions
+    (``ReadParquet`` / ``ReadCSV`` / …) expose their canonical
+    name via ``sql_name()`` or fall back to the class name.
+    """
+    name = getattr(func, "name", "") or ""
+    if name:
+        return name
+    sql_name = getattr(func, "sql_name", None)
+    if callable(sql_name):
+        try:
+            return sql_name() or ""
+        except Exception:
+            pass
+    return type(func).__name__
 
 
 def _import_duckdb():

@@ -5,20 +5,19 @@ lazybridge.ext.read_docs  —  Multi-format document reader
 Reads .txt, .md, .pdf, .docx, .html files from a folder or a single file
 and returns their text content in a format ready for LLM consumption.
 
-Works as a plain Python function or as a LazyTool passed to any agent.
+Works as a plain Python function or as a Tool passed to any agent.
 
 Usage — plain function:
     from lazybridge.ext.read_docs import read_folder_docs
     text = read_folder_docs("/path/to/reports", extensions="pdf,docx")
 
-Usage — as a LazyTool:
-    from lazybridge import LazyAgent, LazyTool
+Usage — as a Tool:
+    from lazybridge import Agent, Tool
     from lazybridge.ext.read_docs import read_folder_docs
 
-    docs_tool = LazyTool.from_function(read_folder_docs)
-    resp = LazyAgent("anthropic").loop(
+    docs_tool = Tool(read_folder_docs)
+    resp = Agent("anthropic", tools=[docs_tool])(
         "Summarise all PDFs in /reports",
-        tools=[docs_tool],
     )
 
 Optional dependencies (graceful degradation if missing):
@@ -156,9 +155,8 @@ def read_folder_docs(
     target = Path(path).expanduser().resolve()
 
     # When exposed as an agent tool, `path` is LLM-controlled and therefore
-    # untrusted. If the caller supplies `base_dir`, refuse any path that
-    # resolves outside that sandbox — this closes the path-traversal hole
-    # flagged as audit M11.
+    # untrusted.  If the caller supplies `base_dir`, refuse any path that
+    # resolves outside that sandbox.
     if base_dir is not None:
         base = Path(base_dir).expanduser().resolve()
         try:
@@ -182,8 +180,8 @@ def read_folder_docs(
         if ".html" in exts:
             exts.add(".htm")
         glob_pattern = "**/*" if recursive else "*"
-        # Walk the tree without following symlinks (audit M12). Doing so
-        # closes symlink-loop hangs and prevents a symlink in the indexed
+        # Walk the tree without following symlinks.  Doing so closes
+        # symlink-loop hangs and prevents a symlink in the indexed
         # folder from silently widening the read surface to other
         # directories.
         files = sorted(

@@ -13,7 +13,7 @@ Sections
     1. Text-to-video (8s, 720p, with audio)
     2. Image-to-video (first frame)
     3. First + last frame interpolation
-    4. Via LazyAgent
+    4. Via Agent
 """
 
 import os
@@ -107,19 +107,18 @@ print(result)
 # print(f"Saved to: {result3['output_path']}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Via LazyAgent
+# 4. Via Agent
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Uncomment to run. Requires GOOGLE_API_KEY.
 
-# print("\n── Section 4: via LazyAgent ──")
+# print("\n── Section 4: via Agent ──")
 #
-# from lazybridge import LazyAgent
+# from lazybridge import Agent
 #
-# agent = LazyAgent("google", model="gemini-2.5-pro")
-# resp  = agent.loop(
+# agent = Agent("google/gemini-2.5-pro", tools=[tool])
+# resp  = agent(
 #     "Generate an 8-second cinematic video of a sunset over the ocean, "
 #     "wide angle, warm colors, with natural ambient audio.",
-#     tools=[tool],
 # )
-# print(resp)
+# print(resp.text())

@@ -1,0 +1,254 @@
+/* Graph nodes, links, and pulse animations */
+
+#canvas .link {
+  stroke: rgba(140, 170, 220, 0.25);
+  stroke-width: 1.4;
+  fill: none;
+  transition: stroke 0.3s ease;
+}
+#canvas .link.tool    { stroke-dasharray: 0; }
+#canvas .link.context { stroke-dasharray: 5 4; }
+#canvas .link.router  { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
+#canvas .link.flow    { stroke-dasharray: 3 6; stroke: rgba(140, 170, 220, 0.15); stroke-width: 1; }
+
+/* Store-type links */
+#canvas .link.store_write { stroke: rgba(80, 250, 123, 0.30); stroke-dasharray: 2 5; }
+#canvas .link.store_read  { stroke: rgba(80, 250, 123, 0.20); stroke-dasharray: 1 7; }
+
+/* Link flash animation */
+#canvas .link.link-flash {
+  animation: linkFlash 900ms ease-out forwards;
+}
+@keyframes linkFlash {
+  0%   { stroke-opacity: 0.9; stroke-width: 3; }
+  100% { stroke-opacity: 0.25; stroke-width: 1.4; }
+}
+
+/* ---- IO nodes (START / END) -------------------------------------------- */
+
+#canvas .node.io .io-bg {
+  fill: rgba(8, 18, 38, 0.88);
+  stroke-width: 2;
+  transition: stroke-width 0.2s ease;
+}
+#canvas .node.io[data-role="start"] .io-bg {
+  stroke: var(--accent-store);
+  filter: url(#flare);
+}
+#canvas .node.io[data-role="end"] .io-bg {
+  stroke: var(--accent-router);
+  filter: url(#flare);
+}
+#canvas .node.io[data-role="start"] .node-label { fill: var(--accent-store); font-weight: 700; }
+#canvas .node.io[data-role="end"]   .node-label { fill: var(--accent-router); font-weight: 700; }
+#canvas .node.io .io-hint { font-size: 7.5px; opacity: 0.4; }
+
+/* ---- Agent — 3-D parallelepiped ---------------------------------------- */
+
+/* Right side face: dark shadow */
+#canvas .node.agent .box-right {
+  fill: rgba(0, 40, 60, 0.70);
+  stroke: var(--accent-agent);
+  stroke-width: 0.8;
+  stroke-opacity: 0.5;
+}
+/* Top face: lighter, lit from above */
+#canvas .node.agent .box-top {
+  fill: rgba(0, 80, 110, 0.55);
+  stroke: var(--accent-agent);
+  stroke-width: 0.8;
+  stroke-opacity: 0.6;
+}
+/* Front face: main surface */
+#canvas .node.agent .box-front {
+  fill: rgba(8, 18, 38, 0.92);
+  stroke: var(--accent-agent);
+  stroke-width: 2;
+  filter: url(#glow);
+  transition: stroke-width 0.2s ease;
+}
+/* Pinned dashes on front face */
+#canvas .node.agent.pinned .box-front { stroke-dasharray: 6 3; }
+
+/* in-flight: front face pulses */
+#canvas .node.agent.in-flight .box-front {
+  animation: agentPulse 1.5s ease-in-out infinite;
+}
+@keyframes agentPulse {
+  0%, 100% { stroke-width: 2; }
+  50%      { stroke-width: 5; filter: url(#flare); }
+}
+
+/* ---- Tool — hexagon ---------------------------------------------------- */
+
+#canvas .node.tool .node-bg {
+  fill: rgba(28, 10, 38, 0.90);
+  stroke: var(--accent-tool);
+  stroke-width: 2;
+  filter: url(#glow);
+  transition: stroke-width 0.2s ease;
+}
+#canvas .node.tool.pinned .node-bg { stroke-dasharray: 5 3; }
+
+/* ---- Router — diamond --------------------------------------------------- */
+
+#canvas .node.router .node-bg {
+  fill: rgba(28, 22, 8, 0.90);
+  stroke: var(--accent-router);
+  stroke-width: 2;
+  filter: url(#glow);
+}
+
+/* ---- Shared label styles ----------------------------------------------- */
+
+#canvas .node-label {
+  fill: var(--text);
+  font-family: "Inter", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+#canvas .node-sub {
+  fill: var(--text-dim);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+/* Task line — truncated task text shown below sublabel */
+#canvas .node-task {
+  fill: var(--accent-agent);
+  font-family: "Inter", sans-serif;
+  font-size: 8.5px;
+  font-weight: 400;
+  font-style: italic;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.85;
+}
+/* Context sources line — "ctx: A, B" */
+#canvas .node-ctx {
+  fill: var(--accent-store);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 7.5px;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+#canvas .pin-icon {
+  font-size: 10px;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 0 3px rgba(255, 200, 100, 0.7));
+}
+
+/* ---- Hit ring (all node types) ------------------------------------------ */
+
+#canvas .hit-ring {
+  fill: none;
+  stroke-width: 2;
+  pointer-events: none;
+  opacity: 0;
+}
+#canvas .hit-ring.fire {
+  animation: ringFire 0.85s ease-out forwards;
+}
+@keyframes ringFire {
+  0%   { opacity: 0.9; r: 28; stroke-width: 3; }
+  100% { opacity: 0;   r: 62; stroke-width: 0.5; }
+}
+
+/* ---- Pulse packets ------------------------------------------------------- */
+
+#canvas .pulse { pointer-events: none; filter: url(#glow); }
+
+/* ---- START / END node emphasis ----------------------------------------- */
+
+#canvas .node-start .box-front {
+  stroke: var(--accent-store) !important;
+  stroke-width: 2.5;
+  filter: url(#flare);
+}
+#canvas .node-start .box-top,
+#canvas .node-start .box-right {
+  stroke: var(--accent-store) !important;
+  stroke-opacity: 0.7;
+}
+#canvas .node-start .node-bg {
+  stroke: var(--accent-store) !important;
+  filter: url(#flare);
+}
+
+#canvas .node-end .box-front {
+  stroke: var(--accent-router) !important;
+  stroke-width: 2.5;
+  filter: url(#flare);
+}
+#canvas .node-end .box-top,
+#canvas .node-end .box-right {
+  stroke: var(--accent-router) !important;
+  stroke-opacity: 0.7;
+}
+#canvas .node-end .node-bg {
+  stroke: var(--accent-router) !important;
+  filter: url(#flare);
+}
+
+/* ---- Role badges (START / END labels) ---------------------------------- */
+
+#canvas .role-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+#canvas .start-badge {
+  fill: var(--accent-store);
+  filter: drop-shadow(0 0 4px rgba(80, 250, 123, 0.7));
+}
+#canvas .end-badge {
+  fill: var(--accent-router);
+  filter: drop-shadow(0 0 4px rgba(255, 179, 64, 0.7));
+}
+
+/* ---- Layer filter: hide nodes/links not in selected layers -------------- */
+
+#canvas .layer-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ---- Store cylinder node ----------------------------------------------- */
+
+#canvas .node.store .store-body {
+  fill: rgba(8, 28, 18, 0.90);
+  stroke: var(--accent-store);
+  stroke-width: 2;
+  filter: url(#glow);
+}
+#canvas .node.store .store-cap {
+  stroke: var(--accent-store);
+  stroke-width: 1.5;
+}
+#canvas .node.store .store-cap-top { fill: rgba(40, 90, 55, 0.85); }
+#canvas .node.store .store-cap-bot { fill: rgba(20, 55, 35, 0.80); }
+#canvas .node.store .node-label { fill: var(--accent-store); font-weight: 700; font-size: 10px; }
+
+/* ---- Error flash -------------------------------------------------------- */
+
+#canvas .node.error .box-front,
+#canvas .node.error .node-bg {
+  stroke: var(--accent-error) !important;
+  animation: errorShake 0.4s ease-in-out;
+}
+@keyframes errorShake {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-3px, 1px); }
+  75%      { transform: translate(3px, -1px); }
+}

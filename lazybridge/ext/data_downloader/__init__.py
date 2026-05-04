@@ -1,4 +1,13 @@
-"""data_downloader — market data ingestion for LazyBridge stat_runtime.
+#: Stability tag — see ``docs/guides/core-vs-ext.md``.
+#: ``"domain"`` = worked example shipped with the framework; not part of
+#: the LazyBridge framework contract and may be moved or removed.
+__stability__ = "domain"
+__lazybridge_min__ = "1.0.0"
+
+"""data_downloader — market data ingestion (domain example).
+
+Domain example shipped with LazyBridge — not part of the framework
+contract. Pin to a specific lazybridge release if you depend on it.
 
 Supports Yahoo Finance, FRED, and ECB data sources across a 140-ticker
 universe organized in a 4-layer asset class taxonomy.
@@ -73,7 +82,7 @@ def build_downloader_skills(output_root: str = "./generated_skills"):
 
 
 def downloader_skill_tools(skill_dir_map: dict):
-    """Create LazyTool wrappers for downloader skill bundles."""
+    """Create Tool wrappers for downloader skill bundles."""
     from lazybridge.ext.doc_skills import skill_tool
 
     tools = []

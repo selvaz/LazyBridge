@@ -1,1 +1,0 @@
-../lazy_wiki/human/routing.md

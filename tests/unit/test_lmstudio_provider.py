@@ -1,0 +1,483 @@
+"""Unit tests for ``LMStudioProvider``.
+
+Mocks the ``openai`` SDK at the module boundary (``OpenAI`` /
+``AsyncOpenAI`` classes), so these tests run with no real LM Studio
+server and no network traffic.
+
+Coverage:
+  * ``_init_client`` builds the OpenAI SDK client with the local base URL,
+    honours ``LMSTUDIO_BASE_URL`` and explicit ``base_url=`` overrides,
+    and forwards an explicit / env-supplied API key.
+  * Routing: ``Agent("lmstudio")`` and ``Agent("lmstudio/<model>")``
+    resolve to the LMStudio provider via :func:`_resolve_provider` and
+    :meth:`LLMEngine._infer_provider`.
+  * ``_resolve_model`` strips the optional ``lmstudio/`` prefix.
+  * Tier aliases map to recommended ~16 GB-VRAM open-weight models.
+  * ``_use_responses_api`` follows the inherited OpenAIProvider routing
+    — LM Studio supports both Chat Completions and the Responses API
+    (LM Studio v0.3.29+).
+  * ``_compute_cost`` always reports ``0.0`` (local inference is free).
+  * Native tools requested by the caller emit a ``UserWarning`` and are
+    dropped (LM Studio has no server-side tools).
+  * ``complete`` round-trips a Chat Completions response through the
+    inherited OpenAI parser.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# These tests patch ``openai.OpenAI`` / ``openai.AsyncOpenAI`` via
+# ``unittest.mock.patch``, which resolves the dotted path by importing
+# the ``openai`` module — so we need the SDK to be importable.  CI
+# installs ``[openai]``; minimal local dev environments (just
+# ``[test]``) don't, and skipping cleanly is the expected behaviour for
+# optional-provider tests.  The ``LMStudioProvider`` module itself
+# imports openai lazily, so the import below only affects this file.
+pytest.importorskip("openai")
+
+from lazybridge.core.providers.lmstudio import (
+    _DEFAULT_BASE_URL,
+    _PLACEHOLDER_API_KEY,
+    LMStudioProvider,
+)
+from lazybridge.core.types import (
+    CompletionRequest,
+    Message,
+    NativeTool,
+    Role,
+)
+
+# ---------------------------------------------------------------------------
+# Fakes — minimal OpenAI Chat Completions response shape
+# ---------------------------------------------------------------------------
+
+
+class _FakeMessage:
+    def __init__(self, content="", tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls or []
+
+
+class _FakeChoice:
+    def __init__(self, message=None, finish_reason="stop"):
+        self.message = message
+        self.finish_reason = finish_reason
+
+
+class _FakeUsage:
+    def __init__(self, prompt_tokens=0, completion_tokens=0):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
+class _FakeResponse:
+    def __init__(self, choices, model="local-model", usage=None):
+        self.choices = choices
+        self.model = model
+        self.usage = usage
+
+
+def _basic_request(**overrides) -> CompletionRequest:
+    defaults = dict(
+        messages=[Message(role=Role.USER, content="hello")],
+        max_tokens=64,
+    )
+    defaults.update(overrides)
+    return CompletionRequest(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# _init_client — base URL / API key resolution
+# ---------------------------------------------------------------------------
+
+
+def _patch_openai():
+    """Patch the ``openai`` module's ``OpenAI`` and ``AsyncOpenAI`` classes."""
+    return patch("openai.OpenAI"), patch("openai.AsyncOpenAI")
+
+
+def test_init_client_uses_default_base_url(monkeypatch):
+    monkeypatch.delenv("LMSTUDIO_BASE_URL", raising=False)
+    monkeypatch.delenv("LMSTUDIO_API_KEY", raising=False)
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p as async_cls:
+        LMStudioProvider()
+    sync_cls.assert_called_once()
+    kwargs = sync_cls.call_args.kwargs
+    assert kwargs["base_url"] == _DEFAULT_BASE_URL
+    assert kwargs["api_key"] == _PLACEHOLDER_API_KEY
+    async_cls.assert_called_once()
+    assert async_cls.call_args.kwargs["base_url"] == _DEFAULT_BASE_URL
+
+
+def test_init_client_explicit_base_url_wins(monkeypatch):
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://from-env:9999/v1")
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        LMStudioProvider(base_url="http://explicit:1234/v1")
+    assert sync_cls.call_args.kwargs["base_url"] == "http://explicit:1234/v1"
+
+
+def test_init_client_env_base_url_overrides_default(monkeypatch):
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://lan-host:1234/v1")
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        LMStudioProvider()
+    assert sync_cls.call_args.kwargs["base_url"] == "http://lan-host:1234/v1"
+
+
+def test_init_client_explicit_api_key_wins(monkeypatch):
+    monkeypatch.setenv("LMSTUDIO_API_KEY", "from-env")
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        LMStudioProvider(api_key="explicit-key")
+    assert sync_cls.call_args.kwargs["api_key"] == "explicit-key"
+
+
+def test_init_client_env_api_key(monkeypatch):
+    monkeypatch.delenv("LMSTUDIO_API_KEY", raising=False)
+    monkeypatch.setenv("LMSTUDIO_API_KEY", "proxy-token")
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        LMStudioProvider()
+    assert sync_cls.call_args.kwargs["api_key"] == "proxy-token"
+
+
+# ---------------------------------------------------------------------------
+# Class-level invariants
+# ---------------------------------------------------------------------------
+
+
+def test_default_model_is_local_model():
+    assert LMStudioProvider.default_model == "local-model"
+
+
+def test_no_native_tools_supported():
+    assert LMStudioProvider.supported_native_tools == frozenset()
+
+
+def test_all_five_tiers_defined():
+    """Every standard tier maps to a non-empty model identifier the
+    user can load into LM Studio."""
+    expected = {"top", "expensive", "medium", "cheap", "super_cheap"}
+    assert set(LMStudioProvider._TIER_ALIASES) == expected
+    for tier in expected:
+        target = LMStudioProvider._TIER_ALIASES[tier]
+        assert isinstance(target, str)
+        assert target  # non-empty
+
+
+def test_tier_aliases_target_recognisable_open_weight_models():
+    """Sanity check: the tier targets are recognisable identifiers
+    (HuggingFace-style or LM Studio Local Server tab names) rather
+    than placeholder values.  This guards against accidental
+    regressions to ``local-model`` for every tier."""
+    aliases = LMStudioProvider._TIER_ALIASES
+    # ``top`` should be the largest reasonable 16 GB-VRAM target.
+    assert "20b" in aliases["top"].lower() or "oss" in aliases["top"].lower()
+    # The smaller tiers reference a smaller-suffix model.
+    assert any(c in aliases["cheap"].lower() for c in ("4b", "mini", "small"))
+
+
+# ---------------------------------------------------------------------------
+# _resolve_model — prefix stripping + tier passthrough
+# ---------------------------------------------------------------------------
+
+
+def _bare_provider() -> LMStudioProvider:
+    """A provider instance with no SDK client — just enough for resolver tests."""
+    p = LMStudioProvider.__new__(LMStudioProvider)
+    p.api_key = None
+    p.model = LMStudioProvider.default_model
+    return p
+
+
+def test_resolve_model_strips_lmstudio_prefix():
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        model="lmstudio/Qwen2.5-7B-Instruct",
+    )
+    assert p._resolve_model(req) == "Qwen2.5-7B-Instruct"
+
+
+def test_resolve_model_passes_bare_model_through():
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        model="my-finetune-v2",
+    )
+    assert p._resolve_model(req) == "my-finetune-v2"
+
+
+def test_resolve_model_resolves_tier_alias_to_recommended_model():
+    """Each tier alias resolves to its recommended LM Studio model
+    identifier (defined in ``_TIER_ALIASES``)."""
+    p = _bare_provider()
+    for tier in ("top", "expensive", "medium", "cheap", "super_cheap"):
+        req = CompletionRequest(
+            messages=[Message(role=Role.USER, content="hi")],
+            model=tier,
+        )
+        expected = LMStudioProvider._TIER_ALIASES[tier]
+        assert p._resolve_model(req) == expected
+
+
+# ---------------------------------------------------------------------------
+# _use_responses_api / _is_reasoning_model / _compute_cost / max_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_responses_api_used_for_plain_request():
+    """LM Studio v0.3.29+ supports ``/v1/responses``; the inherited
+    OpenAIProvider routing picks Responses for non-Pydantic requests."""
+    p = _bare_provider()
+    req = CompletionRequest(messages=[Message(role=Role.USER, content="hi")])
+    assert p._use_responses_api(req) is True
+
+
+def test_responses_api_used_for_dict_schema_structured_output():
+    """Dict-schema structured output flows through Responses with
+    ``text.format.json_schema``."""
+    from lazybridge.core.types import StructuredOutputConfig
+
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        structured_output=StructuredOutputConfig(
+            schema={"type": "object", "properties": {"x": {"type": "integer"}}},
+        ),
+    )
+    assert p._use_responses_api(req) is True
+
+
+def test_chat_completions_used_for_pydantic_schema():
+    """Pydantic-model schemas can't be encoded into ``text.format``
+    cleanly; the inherited router falls back to Chat Completions
+    + ``beta.parse``.  LM Studio supports both endpoints, so this
+    fallback works locally."""
+    from pydantic import BaseModel
+
+    from lazybridge.core.types import StructuredOutputConfig
+
+    class _Out(BaseModel):
+        x: int
+
+    p = _bare_provider()
+    req = CompletionRequest(
+        messages=[Message(role=Role.USER, content="hi")],
+        structured_output=StructuredOutputConfig(schema=_Out),
+    )
+    assert p._use_responses_api(req) is False
+
+
+def test_is_reasoning_model_always_false():
+    p = _bare_provider()
+    # Even names that LOOK like OpenAI reasoning models stay False locally.
+    assert p._is_reasoning_model("o3-mini") is False
+    assert p._is_reasoning_model("gpt-5.5-pro") is False
+    assert p._is_reasoning_model("local-model") is False
+
+
+def test_compute_cost_is_zero():
+    p = _bare_provider()
+    assert p._compute_cost("local-model", 1_000_000, 1_000_000) == 0.0
+    assert p._compute_cost("anything", 0, 0) == 0.0
+
+
+def test_default_max_tokens_for_recommended_catalogue():
+    """Per-model output budgets reflect the model's context window.
+    A safe middle ground (8 K) is returned for unknown / placeholder
+    model names so callers running an old fine-tune still get a
+    reasonable default."""
+    p = _bare_provider()
+    # Known recommended models — generous output budget.
+    assert p.get_default_max_tokens("gpt-oss-20b") >= 16_000
+    assert p.get_default_max_tokens("gemma-4-26b-a4b") >= 32_000
+    assert p.get_default_max_tokens("qwen3.5-14b") >= 32_000
+    # Edge / small models — modest budget.
+    assert p.get_default_max_tokens("gemma-4-e2b") == 8_192
+    assert p.get_default_max_tokens("gemma-4-e4b") == 8_192
+    # Placeholder / unknown — safe middle ground.
+    assert p.get_default_max_tokens() == 8_192
+    assert p.get_default_max_tokens("Qwen2.5-7B-Instruct") == 8_192
+
+
+# ---------------------------------------------------------------------------
+# Native tools — silently dropped with UserWarning
+# ---------------------------------------------------------------------------
+
+
+def test_native_tools_warn_and_are_filtered():
+    p = _bare_provider()
+    with pytest.warns(UserWarning, match="does not support native tool"):
+        kept = p._check_native_tools([NativeTool.WEB_SEARCH, NativeTool.CODE_EXECUTION])
+    assert kept == []
+
+
+# ---------------------------------------------------------------------------
+# Routing — registry + LLMEngine inference
+# ---------------------------------------------------------------------------
+
+
+def test_executor_resolves_lmstudio_alias_to_provider():
+    sync_p, async_p = _patch_openai()
+    with sync_p, async_p:
+        from lazybridge.core.executor import _resolve_provider
+
+        prov = _resolve_provider("lmstudio")
+    assert isinstance(prov, LMStudioProvider)
+
+
+@pytest.mark.parametrize("alias", ["lmstudio", "lm-studio", "lm_studio", "local"])
+def test_executor_accepts_all_lmstudio_aliases(alias):
+    sync_p, async_p = _patch_openai()
+    with sync_p, async_p:
+        from lazybridge.core.executor import _resolve_provider
+
+        prov = _resolve_provider(alias)
+    assert isinstance(prov, LMStudioProvider)
+
+
+def test_llmengine_routes_lmstudio_alias():
+    from lazybridge.engines.llm import LLMEngine
+
+    assert LLMEngine._infer_provider("lmstudio") == "lmstudio"
+    assert LLMEngine._infer_provider("lm-studio") == "lmstudio"
+    assert LLMEngine._infer_provider("local") == "lmstudio"
+    assert LLMEngine._infer_provider("local-model") == "lmstudio"
+
+
+def test_llmengine_routes_lmstudio_prefix():
+    from lazybridge.engines.llm import LLMEngine
+
+    assert LLMEngine._infer_provider("lmstudio/Qwen2.5-7B-Instruct") == "lmstudio"
+
+
+def test_llmengine_native_routing_unaffected():
+    """Adding the lmstudio routes must not steal any other provider's traffic."""
+    from lazybridge.engines.llm import LLMEngine
+
+    assert LLMEngine._infer_provider("claude-opus-4-7") == "anthropic"
+    assert LLMEngine._infer_provider("gpt-4o") == "openai"
+    assert LLMEngine._infer_provider("deepseek-v4-flash") == "deepseek"
+
+
+# ---------------------------------------------------------------------------
+# complete() round-trip — both endpoints supported (LM Studio v0.3.29+)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponsesUsage:
+    """Mimics OpenAI's Responses-API usage object (different field names
+    than Chat Completions: ``input_tokens`` / ``output_tokens`` instead
+    of ``prompt_tokens`` / ``completion_tokens``)."""
+
+    def __init__(self, input_tokens=0, output_tokens=0):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class _FakeOutputText:
+    def __init__(self, text=""):
+        self.type = "output_text"
+        self.text = text
+        self.annotations = []
+
+
+class _FakeOutputItem:
+    def __init__(self, content=None):
+        self.type = "message"
+        self.content = content or []
+
+
+class _FakeResponsesResp:
+    """Mimics OpenAI's Responses-API top-level response object."""
+
+    def __init__(self, output_text="", model="local-model", usage=None, status="completed"):
+        self.id = "resp_test"
+        self.model = model
+        self.usage = usage
+        self.status = status
+        self.output = [_FakeOutputItem(content=[_FakeOutputText(text=output_text)])]
+        # Convenience field the OpenAI SDK exposes — the parser may
+        # check either ``output_text`` directly or walk ``output``.
+        self.output_text = output_text
+
+
+def test_complete_uses_responses_endpoint_by_default():
+    """LM Studio v0.3.29+ supports /v1/responses; the inherited OpenAI
+    ``complete()`` takes the Responses branch for plain text requests."""
+    sync_client = MagicMock()
+    sync_client.responses.create.return_value = _FakeResponsesResp(
+        output_text="hi from local",
+        usage=_FakeResponsesUsage(input_tokens=4, output_tokens=3),
+    )
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        sync_cls.return_value = sync_client
+        prov = LMStudioProvider()
+        resp = prov.complete(_basic_request())
+
+    sync_client.responses.create.assert_called_once()
+    sync_client.chat.completions.create.assert_not_called()
+
+    assert resp.content == "hi from local"
+    assert resp.usage.input_tokens == 4
+    assert resp.usage.output_tokens == 3
+    # Local inference is free.
+    assert resp.usage.cost_usd == 0.0
+
+
+def test_complete_strips_prefix_before_call():
+    """The model name reaching the SDK must NOT carry the ``lmstudio/`` prefix."""
+    sync_client = MagicMock()
+    sync_client.responses.create.return_value = _FakeResponsesResp(
+        output_text="",
+        usage=_FakeResponsesUsage(),
+    )
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        sync_cls.return_value = sync_client
+        prov = LMStudioProvider(model="lmstudio/Qwen2.5-7B-Instruct")
+        prov.complete(_basic_request())
+
+    call_kwargs = sync_client.responses.create.call_args.kwargs
+    assert call_kwargs["model"] == "Qwen2.5-7B-Instruct"
+
+
+def test_complete_uses_chat_completions_endpoint_for_pydantic_schema():
+    """When ``output=`` is a Pydantic model, the inherited router falls
+    back to Chat Completions + ``beta.parse``.  LM Studio supports both
+    endpoints, so this still works locally."""
+    from pydantic import BaseModel
+
+    from lazybridge.core.types import StructuredOutputConfig
+
+    class _Out(BaseModel):
+        x: int
+
+    sync_client = MagicMock()
+    sync_client.beta.chat.completions.parse.return_value = _FakeResponse(
+        [_FakeChoice(message=_FakeMessage(content='{"x": 7}'))],
+        usage=_FakeUsage(prompt_tokens=4, completion_tokens=3),
+    )
+    # ``parsed`` field on the message — what beta.parse populates.
+    sync_client.beta.chat.completions.parse.return_value.choices[0].message.parsed = _Out(x=7)
+
+    sync_p, async_p = _patch_openai()
+    with sync_p as sync_cls, async_p:
+        sync_cls.return_value = sync_client
+        prov = LMStudioProvider()
+        req = CompletionRequest(
+            messages=[Message(role=Role.USER, content="give me an int")],
+            structured_output=StructuredOutputConfig(schema=_Out),
+        )
+        resp = prov.complete(req)
+
+    sync_client.beta.chat.completions.parse.assert_called_once()
+    sync_client.responses.create.assert_not_called()
+    assert resp.parsed == _Out(x=7)

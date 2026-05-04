@@ -1,17 +1,17 @@
-"""Tests for LazyTool wrappers — schema generation, no heavy deps needed."""
+"""Tests for Tool wrappers — schema generation, no heavy deps needed."""
 
+from lazybridge import Tool
 from lazybridge.ext.stat_runtime.tools import stat_tools
-from lazybridge.lazy_tool import LazyTool
 
 
 class TestStatToolsFactory:
-    def test_returns_list_of_lazy_tools(self):
+    def test_returns_list_of_tools(self):
         class MockRuntime:
             pass
 
         tools = stat_tools(MockRuntime())
         assert isinstance(tools, list)
-        assert all(isinstance(t, LazyTool) for t in tools)
+        assert all(isinstance(t, Tool) for t in tools)
         assert len(tools) == 15  # 4 high-level + 11 low-level
 
     def test_tool_names(self):

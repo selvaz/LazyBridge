@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.6.0"
+version = "1.0.0"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -21,26 +21,53 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["pydantic>=2.0.0"]
+dependencies = ["pydantic>=2.0.0,<3.0.0"]
 
+# Provider SDKs are capped at the next major to prevent silent breakage
+# from `pip install -U` when upstream ships an incompatible release.
+# Bump the upper bound intentionally after re-running the provider
+# integration tests against the new major.
 [project.optional-dependencies]
-anthropic = ["anthropic>=0.49.0"]
-openai    = ["openai>=1.70.0"]
-google    = ["google-genai>=1.10.0"]
-deepseek  = ["openai>=1.70.0"]
-yaml      = ["pyyaml>=6.0"]
-tools     = ["pypdf>=3.0", "python-docx>=1.0", "trafilatura>=1.6"]
-stats     = ["duckdb>=1.0", "polars>=1.0", "sqlglot>=20.0", "statsmodels>=0.14", "arch>=7.0", "matplotlib>=3.8"]
-downloader = ["pandas>=2.0", "requests>=2.28", "yfinance>=0.2"]
-otel      = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
-test      = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
+anthropic = ["anthropic>=0.49.0,<1.0.0"]
+openai    = ["openai>=1.70.0,<2.0.0"]
+google    = ["google-genai>=1.10.0,<2.0.0"]
+deepseek  = ["openai>=1.70.0,<2.0.0"]
+# LiteLLM bridge — unlocks 100+ extra providers (Mistral, Cohere, Groq,
+# Bedrock, Vertex, Ollama, etc.) behind the ``litellm/`` model-string
+# prefix. Native providers still handle their own models directly.
+litellm   = ["litellm>=1.40.0,<2.0.0"]
+yaml      = ["pyyaml>=6.0,<7.0"]
+tools     = ["pypdf>=3.0,<6.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0"]
+stats     = ["duckdb>=1.0,<2.0", "polars>=1.0,<2.0", "sqlglot>=20.0,<30.0", "statsmodels>=0.14,<0.16", "arch>=7.0,<8.0", "matplotlib>=3.8,<4.0"]
+downloader = ["pandas>=2.0,<3.0", "requests>=2.28,<3.0", "yfinance>=0.2,<1.0"]
+report    = ["markdown>=3.5,<4.0", "bleach>=6.0,<7.0", "jinja2>=3.0,<4.0"]
+pdf       = ["weasyprint>=62.0,<63.0"]
+# Fragment-based reporting subsystem (additive over [report]).
+# report-charts: vl-convert-python — pure-Rust Vega-Lite renderer (no Node, no
+# Chrome, no display server) + Plotly for opt-in interactive charts.  kaleido
+# is intentionally omitted — it pulls a system Chrome and is the sharp edge
+# of the Plotly raster path; users opt in explicitly when they need it.
+report-charts    = ["vl-convert-python>=1.0,<2.0", "plotly>=5.20,<7.0"]
+# report-citations: Crossref enrichment via habanero, pure-Python CSL renderer
+# fallback when Pandoc citeproc isn't reachable, httpx for OpenAlex.
+report-citations = ["habanero>=1.2,<2.0", "citeproc-py>=0.7,<1.0", "httpx>=0.25,<1.0"]
+# report-fallback: pure-Python rendering when the Quarto CLI isn't installed.
+# pypandoc shells out to `pandoc`; python-docx handles surgical post-process.
+report-fallback  = ["weasyprint>=62.0,<63.0", "pypandoc>=1.13,<2.0", "python-docx>=1.0,<2.0"]
+otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
+mcp       = ["mcp>=1.0,<2.0"]
+# ``pydantic`` is a runtime dependency but tests import it directly
+# (fixtures, dataclass coercion, schema validation).  Including it in
+# the [test] extra makes ``pip install -e '.[test]'`` a one-step
+# bootstrap for newcomers.
+test      = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pydantic>=2.0.0,<3.0.0"]
 docs      = ["mkdocs-material>=9.0", "mkdocstrings[python]>=0.24"]
-all       = ["anthropic>=0.49.0", "openai>=1.70.0", "google-genai>=1.10.0", "pyyaml>=6.0", "pypdf>=3.0", "python-docx>=1.0", "trafilatura>=1.6", "duckdb>=1.0", "polars>=1.0", "sqlglot>=20.0", "statsmodels>=0.14", "arch>=7.0", "matplotlib>=3.8", "pandas>=2.0", "requests>=2.28", "yfinance>=0.2"]
+all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<2.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "pypdf>=3.0,<6.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0", "duckdb>=1.0,<2.0", "polars>=1.0,<2.0", "sqlglot>=20.0,<30.0", "statsmodels>=0.14,<0.16", "arch>=7.0,<8.0", "matplotlib>=3.8,<4.0", "pandas>=2.0,<3.0", "requests>=2.28,<3.0", "yfinance>=0.2,<1.0", "markdown>=3.5,<4.0", "bleach>=6.0,<7.0", "jinja2>=3.0,<4.0", "weasyprint>=62.0,<63.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "mcp>=1.0,<2.0"]
 
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
 Repository    = "https://github.com/selvaz/LazyBridge"
-Documentation = "https://github.com/selvaz/LazyBridge/tree/main/lazy_wiki"
+Documentation = "https://github.com/selvaz/LazyBridge/tree/main/docs"
 Changelog     = "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/selvaz/LazyBridge/issues"
 
@@ -62,7 +89,7 @@ exclude = [
 pythonpath = ["lazybridge"]
 testpaths  = ["tests"]
 asyncio_mode = "auto"
-addopts = "-m 'not live'"
+addopts = "-m 'not live' --ignore=tests/unit/ext"
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten; anyio:pytest.PytestAssertRewriteWarning",
 ]
@@ -115,28 +142,35 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["lazybridge"]
-# Extensions stay omitted because they carry optional-dependency code that
-# the default test environment doesn't install. Provider adapters are now
-# INCLUDED (audit M10): the fail_under gate was previously hiding ~2800
-# lines of core surface by omitting them. As the provider unit tests grow
-# this will become a meaningful signal; until then the gate is set to a
-# realistic floor (see fail_under below).
+# Coverage scope (audit M-I).  The previous policy omitted *all* of
+# ``lazybridge/ext/*`` which meant cross-cutting extensions
+# (``ext.otel``, ``ext.mcp``, ``ext.hil``, ``ext.planners``,
+# ``ext.evals``) were invisible to the gate even though they ship in
+# the default test suite.  Now we omit only the domain-specific
+# extensions whose tests live under ``tests/unit/ext`` (ignored by
+# default to avoid pulling in optional deps like duckdb / yfinance) —
+# the remaining ``ext`` modules are gated as first-class surface.
 omit = [
-    "lazybridge/ext/*",
+    "lazybridge/ext/stat_runtime/*",
+    "lazybridge/ext/data_downloader/*",
+    "lazybridge/ext/doc_skills/*",
+    "lazybridge/ext/veo/*",
+    "lazybridge/ext/quant_agent/*",
+    "lazybridge/ext/read_docs/*",
+    "lazybridge/ext/report_builder/*",
+    # external_tools.py has a dedicated test module under
+    # tests/unit/ext/ that is also ignored in the default run.
+    "lazybridge/ext/external_tools.py",
 ]
 
 [tool.coverage.report]
-# Realistic floor given that the four provider adapters are only exercised
-# via focused unit tests (tests/unit/gui/test_audit_wave*.py) and live
-# tests (opt-in, skipped in CI).
-#
-# Ratchet strategy (ChatGPT audit F1): raise this gate whenever a block
-# of provider-dedicated unit tests lands.  Target waypoints:
-#   50 — after one round of fake-response fixtures per provider
-#   60 — after tool-loop + structured-output coverage per provider
-#   70 — after streaming + native-tool coverage per provider
-# Don't raise the gate without the tests — it just breaks CI.
-fail_under = 40
+# Coverage gate (audit M-I).  ``fail_under`` now covers a strictly
+# larger surface than the prior policy — cross-cutting ``ext.*``
+# modules (otel / mcp / hil / planners / evals) are gated as
+# first-class.  Target for 1.1.0 is 80; raising in increments avoids
+# flap-cycling the gate while we backfill provider streaming + ext.hil
+# web-UI tests.
+fail_under = 70
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

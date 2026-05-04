@@ -1,17 +1,17 @@
 """GraphSchema — serialisable representation of an agent pipeline.
 
 A GraphSchema is a directed graph where:
-  - Nodes are LazyAgents or LazyRouters
-  - Edges are LazyTools (agent → agent delegation) or LazyContext reads
+  - Nodes are Agents or routers
+  - Edges are Tools (agent → agent delegation) or context reads
 
-The schema is auto-built as agents and tools are created, and can be:
+The schema is auto-built as agents are created inside a Session and can be:
   - Serialised to JSON/YAML for storage or GUI loading
   - Deserialised back into a descriptor via from_json() / from_file()
   - Inspected programmatically (for debugging or visualisation)
 
-Note: deserialisation reconstructs the graph descriptor (nodes, edges, metadata)
-but not live agent instances. Recreating runnable LazyAgent objects from the
-schema is the caller's responsibility.
+Note: deserialisation reconstructs the graph descriptor (nodes, edges,
+metadata) but not live Agent instances. Recreating runnable Agent objects
+from the schema is the caller's responsibility.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ class NodeType(StrEnum):
 
 class EdgeType(StrEnum):
     TOOL = "tool"  # agent A calls agent B as a tool
-    CONTEXT = "context"  # agent A reads agent B's output via LazyContext
-    ROUTER = "router"  # conditional branch from a LazyRouter
+    CONTEXT = "context"  # agent A reads agent B's output via sources/context
+    ROUTER = "router"  # conditional branch from a router
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +56,37 @@ def _require_yaml() -> Any:
         raise ImportError("PyYAML required: pip install pyyaml") from None
 
 
+def _derive_provider_model(agent: Any) -> tuple[str, str]:
+    """Infer provider + model strings from a v1 Agent or duck-typed object.
+
+    Preference order:
+      1. Explicit ``_provider_name`` / ``_model_name`` attributes (legacy
+         duck-type and tests).
+      2. ``agent.engine.provider`` / ``agent.engine.model`` on v1 Agent
+         backed by LLMEngine.
+      3. Engine class name as fallback (``HumanEngine``,
+         ``SupervisorEngine``, ``Plan``, ``_RelayEngine``, …) so nodes
+         for non-LLM agents don't render as empty strings in dumps.
+      4. Empty strings if the agent truly exposes nothing useful.
+    """
+    provider = getattr(agent, "_provider_name", None)
+    model = getattr(agent, "_model_name", None)
+    engine = getattr(agent, "engine", None)
+    if provider is None:
+        provider = getattr(engine, "provider", None)
+    if model is None:
+        model = getattr(engine, "model", None)
+
+    # Fallback: name the engine class so HumanEngine / SupervisorEngine /
+    # Plan nodes aren't visually indistinguishable from "no engine".
+    if not provider and engine is not None:
+        provider = engine.__class__.__name__
+    if not model and engine is not None:
+        model = engine.__class__.__name__
+
+    return str(provider or ""), str(model or "")
+
+
 # ---------------------------------------------------------------------------
 # Node / Edge descriptors
 # ---------------------------------------------------------------------------
@@ -71,8 +102,19 @@ class _BaseNode:
         self.name = name
 
 
+class _ToolNode(_BaseNode):
+    """Lightweight stub for a Python-callable tool function."""
+
+    def __init__(self, id: str, name: str) -> None:
+        super().__init__(id, name)
+        self.type = "tool"
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "type": self.type}
+
+
 class AgentNode(_BaseNode):
-    """Serialisable descriptor for a LazyAgent node."""
+    """Serialisable descriptor for an Agent node."""
 
     __slots__ = ("model", "provider", "system")
 
@@ -112,7 +154,7 @@ class AgentNode(_BaseNode):
 
 
 class RouterNode(_BaseNode):
-    """Serialisable descriptor for a LazyRouter node."""
+    """Serialisable descriptor for a router node (Plan branch)."""
 
     __slots__ = ("default", "routes")
 
@@ -184,8 +226,9 @@ class Edge:
 class GraphSchema:
     """Directed graph of agents, routers, and their connections.
 
-    Auto-populated by LazySession._register_agent() as agents are created.
-    Can also be built manually for GUI-driven pipeline construction.
+    Auto-populated by :class:`lazybridge.Session` as Agents register
+    themselves via ``session=``. Can also be built manually for GUI-driven
+    pipeline construction.
     """
 
     def __init__(self, session_id: str = "") -> None:
@@ -198,18 +241,43 @@ class GraphSchema:
     # ------------------------------------------------------------------
 
     def add_agent(self, agent: Any) -> None:
-        """Register a LazyAgent as a graph node."""
+        """Register an Agent (or duck-typed equivalent) as a graph node.
+
+        Reads ``id`` / ``name`` off the agent, and infers provider + model
+        from either legacy ``_provider_name`` / ``_model_name`` attributes
+        or from ``agent.engine`` on the v1 :class:`~lazybridge.Agent`.
+
+        Also registers any Python-callable tools the agent exposes as
+        ``ToolNode`` stubs so the graph is fully visible before any
+        events are emitted (static inspection / demo mode).
+        """
+        provider, model = _derive_provider_model(agent)
+        node_id = str(getattr(agent, "id", None) or getattr(agent, "name", "agent"))
         node = AgentNode(
-            id=agent.id,
-            name=getattr(agent, "name", agent.id),
-            provider=getattr(agent, "_provider_name", ""),
-            model=getattr(agent, "_model_name", ""),
+            id=node_id,
+            name=getattr(agent, "name", node_id),
+            provider=provider,
+            model=model,
             system=getattr(agent, "system", None),
         )
         self._nodes[node.id] = node
 
+        # Register Python-callable tool functions as ToolNode stubs so the
+        # full pipeline topology is visible before execution starts.
+        # Skips Agent-as-tool entries (those register themselves separately).
+        tool_map = getattr(agent, "_tool_map", None) or {}
+        for tool_name in tool_map:
+            tool_id = f"tool:{tool_name}"
+            if tool_id not in self._nodes:
+                self._nodes[tool_id] = _ToolNode(id=tool_id, name=tool_name)
+            self.add_edge(node_id, tool_id, label=tool_name, kind=EdgeType.TOOL)
+
     def add_router(self, router: Any) -> None:
-        """Register a LazyRouter as a graph node."""
+        """Register a router (e.g. a Plan) as a graph node.
+
+        The router object is expected to expose ``to_graph_node()`` that
+        returns ``{id, name, routes, default}``.
+        """
         node_dict = router.to_graph_node()
         node = RouterNode(
             id=node_dict.get("id", node_dict.get("name", "")),
@@ -227,14 +295,25 @@ class GraphSchema:
         label: str = "",
         kind: EdgeType | str = EdgeType.TOOL,
     ) -> None:
-        self._edges.append(
-            Edge(
-                from_id=from_id,
-                to_id=to_id,
-                label=label,
-                kind=EdgeType(kind) if isinstance(kind, str) else kind,
-            )
+        edge = Edge(
+            from_id=from_id,
+            to_id=to_id,
+            label=label,
+            kind=EdgeType(kind) if isinstance(kind, str) else kind,
         )
+        # Idempotent insert — repeated registration of the same
+        # ``(from, to, kind, label)`` is a no-op.  Without this the
+        # edge list grows unbounded when a tool-call fires N times
+        # in a single run, distorting every downstream query.
+        for existing in self._edges:
+            if (
+                existing.from_id == edge.from_id
+                and existing.to_id == edge.to_id
+                and existing.kind == edge.kind
+                and existing.label == edge.label
+            ):
+                return
+        self._edges.append(edge)
 
     # ------------------------------------------------------------------
     # Queries
@@ -254,6 +333,16 @@ class GraphSchema:
 
     def edges_to(self, node_id: str) -> list[Edge]:
         return [e for e in self._edges if e.to_id == node_id]
+
+    def clear(self) -> None:
+        """Drop all nodes and edges.
+
+        Useful when re-using one ``Session`` across multiple pipeline
+        runs and you want each run's graph to start empty.  Session's
+        ``session_id`` is preserved so event correlation still works.
+        """
+        self._nodes.clear()
+        self._edges.clear()
 
     # ------------------------------------------------------------------
     # Serialisation

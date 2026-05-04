@@ -3,7 +3,7 @@
 Routes all requests through the Responses API (OpenAI's recommended path since 2025).
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
 
-Default model: gpt-5.4. Pass model= to override.
+Default model: gpt-5.5. Pass model= to override.
 """
 
 from __future__ import annotations
@@ -46,16 +46,29 @@ _REASONING_MODELS = frozenset(
     }
 )
 
-# Responses API native tool type strings
+# Responses API native tool type strings.
+#
+# Tools that need only a ``type`` string fit this simple map.  The newer
+# Responses-API tools that take server-side configuration — ``mcp``
+# (needs ``server_url`` + ``server_label``), ``skills`` (needs skill
+# identifiers), ``hosted_shell``, ``apply_patch``, and ``tool_search`` —
+# are NOT mapped here because the current ``NativeTool`` enum can't
+# carry per-tool config.  Use ``CompletionRequest.tools`` with raw
+# Responses-API shapes if you need them today; first-class wiring is a
+# separate task that has to introduce a richer ``NativeToolConfig``
+# type.
 _RESPONSES_NATIVE_MAP: dict[NativeTool, dict] = {
     NativeTool.WEB_SEARCH: {"type": "web_search_preview"},
     NativeTool.CODE_EXECUTION: {"type": "code_interpreter"},
     NativeTool.FILE_SEARCH: {"type": "file_search"},
     NativeTool.COMPUTER_USE: {"type": "computer_use_preview"},
+    NativeTool.IMAGE_GENERATION: {"type": "image_generation"},
 }
 
-# Effort level mapping: unified → OpenAI reasoning_effort
+# Effort level mapping: unified → OpenAI reasoning_effort.
+# "none" was added in GPT-5.5; passing it skips reasoning entirely.
 _EFFORT_MAP = {
+    "none": "none",
     "low": "low",
     "medium": "medium",
     "high": "high",
@@ -63,26 +76,53 @@ _EFFORT_MAP = {
     "max": "xhigh",
 }
 
-# Price per 1M tokens (input, output). Approximate; verify at platform.openai.com/docs/pricing.
-_PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "gpt-5": (2.50, 10.0),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
-    "gpt-4-turbo": (10.0, 30.0),
-    "gpt-4": (30.0, 60.0),
-    "gpt-3.5": (0.50, 1.50),
-    "o4-mini": (1.10, 4.40),
-    "o3-mini": (1.10, 4.40),
-    "o3": (10.0, 40.0),
-    "o1-mini": (3.0, 12.0),
-    "o1-pro": (150.0, 600.0),
-    "o1": (15.0, 60.0),
+# Price per 1M tokens: (input, cached_input, output). cached_input is None when
+# the model has no published cache-hit rate (or doesn't support input caching),
+# in which case cached tokens are billed at the full input rate.
+# Ordering matters: more-specific keys MUST appear before less-specific ones.
+# Long-context tier (>272K input on gpt-5.x) is NOT modeled here — those prompts
+# are billed at 2x input / 1.5x output for the session; cost values returned by
+# this table will under-count in that regime.
+_PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
+    "gpt-5.5-pro": (30.0, None, 180.0),
+    "gpt-5.5": (5.0, 0.50, 30.0),
+    "gpt-5.4-pro": (30.0, None, 180.0),
+    "gpt-5.4-nano": (0.20, 0.02, 1.25),
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-5.4": (2.50, 0.25, 15.0),
+    "gpt-5": (1.25, None, 10.0),
+    "gpt-4.1-nano": (0.10, None, 0.40),
+    "gpt-4.1-mini": (0.40, None, 1.60),
+    "gpt-4.1": (2.00, None, 8.00),
+    "gpt-4o-mini": (0.15, None, 0.60),
+    "gpt-4o": (2.50, None, 10.0),
+    "gpt-4-turbo": (10.0, None, 30.0),
+    "gpt-4": (30.0, None, 60.0),
+    "gpt-3.5": (0.50, None, 1.50),
+    "o4-mini": (1.10, None, 4.40),
+    "o3-mini": (1.10, None, 4.40),
+    "o3": (2.00, None, 8.00),
+    "o1-mini": (3.0, None, 12.0),
+    "o1-pro": (150.0, None, 600.0),
+    "o1": (15.0, None, 60.0),
 }
 
 
 def _safe_json_loads(raw: str) -> dict[str, Any]:
+    """Parse tool-call arguments JSON.  Return a tagged dict on failure
+    so the engine can surface a clear TOOL_ERROR rather than letting
+    the tool fail with a misleading "missing required field" message.
+
+    The shape on parse failure is::
+
+        {"_raw_arguments": "<original string>",
+         "_parse_error":   "<JSONDecodeError message>"}
+
+    ``LLMEngine._exec_tool`` detects ``_parse_error`` and short-circuits
+    to a structured error before the tool runs (audit M-A).
+    """
     try:
-        return json.loads(raw) if raw else {}
+        result = json.loads(raw) if raw else {}
     except json.JSONDecodeError as exc:
         _logger.warning(
             "Failed to parse tool-call arguments as JSON (%s). "
@@ -90,7 +130,16 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
             exc,
             raw,
         )
-        return {"_raw_arguments": raw}
+        return {"_raw_arguments": raw, "_parse_error": str(exc)}
+    if not isinstance(result, dict):
+        # Tool calls must take an object — anything else (list, scalar,
+        # null) is a malformed argument blob.  Tag it so the engine
+        # can surface the model's actual output.
+        return {
+            "_raw_arguments": raw,
+            "_parse_error": (f"tool-call arguments parsed as {type(result).__name__}, expected object"),
+        }
+    return result
 
 
 class OpenAIProvider(BaseProvider):
@@ -103,21 +152,29 @@ class OpenAIProvider(BaseProvider):
     - Streaming
     """
 
-    default_model = "gpt-5.4"
+    default_model = "gpt-5.5"
 
-    # Tier aliases (audit F2) — see the matrix in lazy_wiki/human/agents.md.
+    # Tier aliases.  GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
+    # so medium/cheap continue to point at the GPT-5.4 family.
     _TIER_ALIASES = {
-        "top": "gpt-5.4",
-        "expensive": "gpt-5",
-        "medium": "gpt-4o",
-        "cheap": "gpt-4o-mini",
-        "super_cheap": "gpt-3.5-turbo",
+        "top": "gpt-5.5-pro",  # extended reasoning flagship
+        "expensive": "gpt-5.5",  # general flagship (released 2026-04-23)
+        "medium": "gpt-5.4-mini",  # fast mid-range; no 5.5-mini yet
+        "cheap": "gpt-5.4-nano",  # best value; no 5.5-nano yet
+        "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
+        "gpt-5.5-pro": ["gpt-5.5", "gpt-5.4-pro", "gpt-5.4"],
+        "gpt-5.5": ["gpt-5.4", "gpt-5"],
+        "gpt-5.4-pro": ["gpt-5.5", "gpt-5.4", "gpt-5"],
         "gpt-5.4": ["gpt-5", "gpt-4o"],
-        "gpt-5": ["gpt-4o", "gpt-4-turbo"],
-        "gpt-4o": ["gpt-4-turbo", "gpt-3.5-turbo"],
-        "gpt-4o-mini": ["gpt-3.5-turbo"],
+        "gpt-5.4-mini": ["gpt-5", "gpt-4o-mini"],
+        "gpt-5.4-nano": ["gpt-4.1-mini", "gpt-4.1-nano"],
+        "gpt-5": ["gpt-4.1", "gpt-4o"],
+        "gpt-4o": ["gpt-4.1", "gpt-4-turbo"],
+        "gpt-4.1": ["gpt-4o"],
+        "gpt-4.1-mini": ["gpt-4o-mini"],
+        "gpt-4o-mini": ["gpt-4.1-nano"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {
@@ -125,14 +182,24 @@ class OpenAIProvider(BaseProvider):
             NativeTool.CODE_EXECUTION,
             NativeTool.FILE_SEARCH,
             NativeTool.COMPUTER_USE,
+            NativeTool.IMAGE_GENERATION,
         }
     )
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float | None:
         model_l = model.lower()
-        for key, (in_price, out_price) in _PRICE_TABLE.items():
+        for key, (in_price, cached_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
-                return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+                cached = max(0, min(cached_input_tokens, input_tokens))
+                uncached = input_tokens - cached
+                cached_rate = cached_price if cached_price is not None else in_price
+                return (uncached * in_price + cached * cached_rate + output_tokens * out_price) / 1_000_000
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
@@ -157,7 +224,7 @@ class OpenAIProvider(BaseProvider):
         if not key:
             raise ValueError(
                 "OpenAI API key not found. Set the OPENAI_API_KEY environment "
-                "variable, or pass api_key= to LazyAgent/OpenAIProvider."
+                "variable, or pass api_key= to OpenAIProvider."
             )
         base_url = kwargs.pop("base_url", None)
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
@@ -178,6 +245,25 @@ class OpenAIProvider(BaseProvider):
                 usage.thinking_tokens = details.reasoning_tokens or 0
         return usage
 
+    @staticmethod
+    def _populate_cached_input_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
+        """Extract cached prompt tokens.
+
+        Chat Completions exposes them on `prompt_tokens_details.cached_tokens`;
+        the Responses API uses `input_tokens_details.cached_tokens`.
+        """
+        if not raw_usage:
+            return usage
+        for attr in ("prompt_tokens_details", "input_tokens_details"):
+            details = getattr(raw_usage, attr, None)
+            if details is None:
+                continue
+            cached = getattr(details, "cached_tokens", None)
+            if cached:
+                usage.cached_input_tokens = int(cached)
+                return usage
+        return usage
+
     def _messages_to_openai(self, request: CompletionRequest) -> list[dict]:
         messages: list[dict[str, Any]] = []
         # Prepend system prompt as system message if provided
@@ -190,7 +276,15 @@ class OpenAIProvider(BaseProvider):
                     messages.append({"role": "system", "content": msg.to_text()})
                 continue
             if isinstance(msg.content, str):
-                messages.append({"role": msg.role.value, "content": msg.content})
+                # ``Role.TOOL`` with string content has no ``tool_call_id``
+                # to wire to — OpenAI would reject the message as missing
+                # required fields.  Mirror Anthropic / Google and demote
+                # the message to ``user`` so the model at least sees the
+                # text rather than failing the whole request.
+                if msg.role == Role.TOOL:
+                    messages.append({"role": "user", "content": msg.content})
+                else:
+                    messages.append({"role": msg.role.value, "content": msg.content})
             else:
                 from lazybridge.core.types import (
                     ImageContent,
@@ -288,11 +382,13 @@ class OpenAIProvider(BaseProvider):
             "model": model,
             "messages": self._messages_to_openai(request),
         }
-        # max_tokens vs max_completion_tokens
+        # max_tokens vs max_completion_tokens — omit when None so the API uses its own default
         if self._is_reasoning_model(model):
-            params["max_completion_tokens"] = request.max_tokens
+            if request.max_tokens is not None:
+                params["max_completion_tokens"] = request.max_tokens
         else:
-            params["max_tokens"] = request.max_tokens
+            if request.max_tokens is not None:
+                params["max_tokens"] = request.max_tokens
             if request.temperature is not None:
                 params["temperature"] = request.temperature
 
@@ -461,7 +557,10 @@ class OpenAIProvider(BaseProvider):
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
             )
-            usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+            usage = self._populate_cached_input_tokens(usage, response.usage)
+            usage.cost_usd = self._compute_cost(
+                model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+            )
             return CompletionResponse(
                 content="",
                 tool_calls=[],
@@ -488,7 +587,10 @@ class OpenAIProvider(BaseProvider):
             output_tokens=response.usage.completion_tokens if response.usage else 0,
         )
         usage = self._populate_reasoning_tokens(usage, response.usage)
-        usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+        usage = self._populate_cached_input_tokens(usage, response.usage)
+        usage.cost_usd = self._compute_cost(
+            model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+        )
         return CompletionResponse(
             content=content,
             tool_calls=tool_calls,
@@ -520,8 +622,11 @@ class OpenAIProvider(BaseProvider):
             output_tokens=getattr(response.usage, "output_tokens", 0),
         )
         usage = self._populate_reasoning_tokens(usage, response.usage)
+        usage = self._populate_cached_input_tokens(usage, response.usage)
         model_name = getattr(response, "model", "") or ""
-        usage.cost_usd = self._compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+        usage.cost_usd = self._compute_cost(
+            model_name, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+        )
         return CompletionResponse(
             content=content,
             tool_calls=tool_calls,
@@ -613,10 +718,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=getattr(u, "output_tokens", 0) or 0,
                 )
                 usage = self._populate_reasoning_tokens(usage, u)
+                usage = self._populate_cached_input_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens,
                     usage.output_tokens,
+                    usage.cached_input_tokens,
                 )
             grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
@@ -676,10 +783,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=getattr(u, "output_tokens", 0) or 0,
                 )
                 usage = self._populate_reasoning_tokens(usage, u)
+                usage = self._populate_cached_input_tokens(usage, u)
                 usage.cost_usd = self._compute_cost(
                     getattr(completed_response, "model", "") or "",
                     usage.input_tokens,
                     usage.output_tokens,
+                    usage.cached_input_tokens,
                 )
             grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
@@ -761,8 +870,7 @@ class OpenAIProvider(BaseProvider):
         # The advertised schema is lost on this path — the model emits some
         # JSON, and structured.apply_structured_validation re-validates
         # against our subset validator on the final chunk.  Warn the
-        # caller so this "best-effort" behaviour isn't a surprise
-        # (audit M13).
+        # caller so this "best-effort" behaviour isn't a surprise.
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
             import warnings as _warnings
 
@@ -780,6 +888,26 @@ class OpenAIProvider(BaseProvider):
         tool_call_accum: dict[int, dict] = {}
         final_chunk: StreamChunk | None = None
         final_usage: UsageStats | None = None
+
+        def _finalise_tool_calls() -> list[ToolCall]:
+            # Dedupe on tool-call id.  Most streams index each tool call
+            # by a stable ``tc.index`` and the id arrives in the first
+            # delta, but reconnect / multi-choice responses can emit the
+            # same id under different indices — merge the ``args`` in
+            # that case so we don't invent phantom duplicate calls.
+            by_id: dict[str, dict] = {}
+            ordered: list[dict] = []
+            for v in tool_call_accum.values():
+                key = v["id"] or f"__idx_{id(v)}"
+                if key in by_id:
+                    by_id[key]["args"] += v["args"]
+                    if v["name"] and not by_id[key]["name"]:
+                        by_id[key]["name"] = v["name"]
+                else:
+                    by_id[key] = dict(v)
+                    ordered.append(by_id[key])
+            return [ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"])) for v in ordered]
+
         for chunk in self._client.chat.completions.create(**params):
             if chunk.usage:
                 final_usage = UsageStats(
@@ -787,8 +915,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=chunk.usage.completion_tokens,
                 )
                 final_usage = self._populate_reasoning_tokens(final_usage, chunk.usage)
+                final_usage = self._populate_cached_input_tokens(final_usage, chunk.usage)
                 final_usage.cost_usd = self._compute_cost(
-                    getattr(chunk, "model", "") or "", final_usage.input_tokens, final_usage.output_tokens
+                    getattr(chunk, "model", "") or "",
+                    final_usage.input_tokens,
+                    final_usage.output_tokens,
+                    final_usage.cached_input_tokens,
                 )
             choice = chunk.choices[0] if chunk.choices else None
             if choice and choice.delta.content:
@@ -806,13 +938,9 @@ class OpenAIProvider(BaseProvider):
                     if tc.function.arguments:
                         tool_call_accum[idx]["args"] += tc.function.arguments
             if choice and choice.finish_reason:
-                tool_calls = [
-                    ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                    for v in tool_call_accum.values()
-                ]
                 final_chunk = StreamChunk(
                     stop_reason=choice.finish_reason,
-                    tool_calls=tool_calls,
+                    tool_calls=_finalise_tool_calls(),
                     usage=final_usage,
                     is_final=True,
                 )
@@ -825,13 +953,9 @@ class OpenAIProvider(BaseProvider):
             # Emit a best-effort final chunk so consumers that depend on the
             # is_final marker (usage, tool_calls, structured-output validation)
             # don't hang forever waiting for it.
-            tool_calls = [
-                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                for v in tool_call_accum.values()
-            ]
             final_chunk = StreamChunk(
                 stop_reason="incomplete",
-                tool_calls=tool_calls,
+                tool_calls=_finalise_tool_calls(),
                 usage=final_usage,
                 is_final=True,
             )
@@ -915,8 +1039,12 @@ class OpenAIProvider(BaseProvider):
                     output_tokens=chunk.usage.completion_tokens,
                 )
                 final_usage = self._populate_reasoning_tokens(final_usage, chunk.usage)
+                final_usage = self._populate_cached_input_tokens(final_usage, chunk.usage)
                 final_usage.cost_usd = self._compute_cost(
-                    getattr(chunk, "model", "") or "", final_usage.input_tokens, final_usage.output_tokens
+                    getattr(chunk, "model", "") or "",
+                    final_usage.input_tokens,
+                    final_usage.output_tokens,
+                    final_usage.cached_input_tokens,
                 )
             choice = chunk.choices[0] if chunk.choices else None
             if choice and choice.delta.content:

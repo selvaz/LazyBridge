@@ -8,21 +8,18 @@ downloading the result, and saving it to disk.
 
 Public API
 ----------
-    veo_tool(...)                           → LazyTool    wrap Veo as a LazyBridge tool
-    VeoError                                              base exception for Veo failures
+    veo_tool(...)                           → Tool    wrap Veo as a LazyBridge tool
+    VeoError                                          base exception for Veo failures
 
 Quick start
 -----------
     from lazybridge.ext.veo import veo_tool
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
 
     tool  = veo_tool()
-    agent = LazyAgent("google", model="gemini-2.5-pro")
-    resp  = agent.loop(
-        "Generate an 8-second cinematic video of a sunset over the ocean.",
-        tools=[tool],
-    )
-    print(resp)
+    agent = Agent("google/gemini-2.5-pro", tools=[tool])
+    resp  = agent("Generate an 8-second cinematic video of a sunset over the ocean.")
+    print(resp.text())
 
     # Or invoke the tool directly (no agent):
     tool.invoke(
@@ -89,7 +86,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal
 
 if TYPE_CHECKING:
-    from lazybridge.lazy_tool import LazyTool
+    from lazybridge.tools import Tool
 
 __all__ = ["veo_tool", "VeoError"]
 
@@ -169,9 +166,9 @@ def veo_tool(
     output_dir: Annotated[str, "Directory for generated .mp4 files."] = "generated_videos",
     poll_interval_seconds: Annotated[int, "Seconds between operation status polls."] = 10,
     timeout_seconds: Annotated[int, "Maximum total wait time in seconds."] = 900,
-) -> LazyTool:
+) -> Tool:
     """
-    Create a LazyTool that generates videos with Google Veo.
+    Create a Tool that generates videos with Google Veo.
 
     Parameters
     ----------
@@ -190,11 +187,11 @@ def veo_tool(
 
     Returns
     -------
-    LazyTool
+    Tool
         A tool named "generate_veo_video" ready to be passed to any agent or pipeline.
     """
     _require_genai()
-    from lazybridge import LazyTool  # imported here to avoid circular imports at module load
+    from lazybridge import Tool  # imported here to avoid circular imports at module load
 
     key = api_key or os.getenv("GOOGLE_API_KEY")
     if not key:
@@ -361,7 +358,7 @@ def veo_tool(
             "output_filename": filename.name,
         }
 
-    return LazyTool.from_function(
+    return Tool(
         generate_veo_video,
         name="generate_veo_video",
         guidance=(

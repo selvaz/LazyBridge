@@ -1,11 +1,13 @@
-"""Unit tests for the evals framework."""
+"""Tests for the v1.0 evals framework."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import asyncio
 
-from lazybridge.evals import (
+from lazybridge.envelope import Envelope
+from lazybridge.ext.evals import (
     EvalCase,
+    EvalReport,
     EvalSuite,
     contains,
     exact_match,
@@ -15,165 +17,127 @@ from lazybridge.evals import (
 )
 
 
-def _mock_agent(responses: dict[str, str]):
-    """Mock agent that returns predefined responses based on prompt."""
-    agent = MagicMock()
+def _sync_agent(response: str):
+    class _A:
+        def __call__(self, task):
+            return Envelope(payload=response)
 
-    def _text(prompt, **kw):
-        for key, val in responses.items():
-            if key in prompt:
-                return val
-        return "default response"
-
-    agent.text = MagicMock(side_effect=_text)
-    return agent
+    return _A()
 
 
-# ---------------------------------------------------------------------------
-# Built-in check functions
-# ---------------------------------------------------------------------------
+# ── check helpers ─────────────────────────────────────────────────────────────
 
 
-def test_exact_match():
-    check = exact_match("hello")
-    assert check("hello") is True
-    assert check("Hello") is True
-    assert check("  hello  ") is True
-    assert check("hello world") is False
+def test_exact_match_pass():
+    assert exact_match("hi")("hi", "hi") is True
 
 
-def test_exact_match_case_sensitive():
-    check = exact_match("Hello", case_sensitive=True)
-    assert check("Hello") is True
-    assert check("hello") is False
+def test_exact_match_fail():
+    assert exact_match("hi")("bye", "hi") is False
 
 
-def test_contains():
-    check = contains("cat", "dog")
-    assert check("I have a cat") is True
-    assert check("I have a dog") is True
-    assert check("I have a fish") is False
+def test_exact_match_strips_whitespace():
+    assert exact_match("hi")("  hi  ", "hi") is True
 
 
-def test_not_contains():
-    check = not_contains("error", "fail")
-    assert check("all good") is True
-    assert check("there was an error") is False
+def test_contains_pass():
+    assert contains("foo")("foobar") is True
 
 
-def test_min_length():
-    check = min_length(10)
-    assert check("short") is False
-    assert check("this is long enough") is True
+def test_contains_case_insensitive():
+    assert contains("FOO")("foobar") is True
 
 
-def test_max_length():
-    check = max_length(10)
-    assert check("short") is True
-    assert check("this is way too long") is False
+def test_contains_fail():
+    assert contains("xyz")("foobar") is False
 
 
-# ---------------------------------------------------------------------------
-# EvalCase
-# ---------------------------------------------------------------------------
+def test_not_contains_pass():
+    assert not_contains("error")("all good") is True
 
 
-def test_eval_case_auto_name():
-    case = EvalCase("What is the capital of France?", check=exact_match("Paris"))
-    assert case.name == "What is the capital of France?"
+def test_not_contains_fail():
+    assert not_contains("error")("there was an error") is False
 
 
-def test_eval_case_custom_name():
-    case = EvalCase("prompt", check=exact_match("x"), name="my test")
-    assert case.name == "my test"
+def test_max_length_pass():
+    assert max_length(100)("short") is True
 
 
-# ---------------------------------------------------------------------------
-# EvalSuite.run()
-# ---------------------------------------------------------------------------
+def test_max_length_fail():
+    assert max_length(3)("toolong") is False
+
+
+def test_min_length_pass():
+    assert min_length(3)("long enough") is True
+
+
+def test_min_length_fail():
+    assert min_length(100)("short") is False
+
+
+# ── EvalSuite.run ─────────────────────────────────────────────────────────────
 
 
 def test_suite_all_pass():
-    agent = _mock_agent({"2+2": "4", "capital": "Paris"})
+    agent = _sync_agent("hello world")
     suite = EvalSuite(
-        cases=[
-            EvalCase("What is 2+2?", check=exact_match("4")),
-            EvalCase("capital of France?", check=contains("Paris")),
-        ]
+        EvalCase(input="q", check=contains("hello")),
+        EvalCase(input="q", check=contains("world")),
     )
     report = suite.run(agent)
     assert report.total == 2
     assert report.passed == 2
     assert report.failed == 0
-    assert report.pass_rate == 100.0
+    assert "2/2" in str(report)
 
 
 def test_suite_partial_fail():
-    agent = _mock_agent({"2+2": "5", "capital": "Paris"})
+    agent = _sync_agent("hello")
     suite = EvalSuite(
-        cases=[
-            EvalCase("What is 2+2?", check=exact_match("4")),
-            EvalCase("capital of France?", check=contains("Paris")),
-        ]
+        EvalCase(input="q", check=contains("hello")),
+        EvalCase(input="q", check=contains("world")),
     )
     report = suite.run(agent)
-    assert report.total == 2
     assert report.passed == 1
     assert report.failed == 1
-    assert len(report.failures) == 1
-    assert "2+2" in report.failures[0].case.name
 
 
-def test_suite_agent_error():
-    agent = MagicMock()
-    agent.text.side_effect = RuntimeError("API down")
-    suite = EvalSuite(cases=[EvalCase("test", check=exact_match("x"))])
-    report = suite.run(agent)
-    assert report.total == 1
+def test_suite_agent_exception():
+    class _Boom:
+        def __call__(self, task):
+            raise RuntimeError("API down")
+
+    suite = EvalSuite(EvalCase(input="q", check=contains("x")))
+    report = suite.run(_Boom())
+    assert report.errors == 1
     assert report.passed == 0
-    assert report.results[0].error == "API down"
 
 
-def test_suite_by_tag():
-    agent = _mock_agent({"safe": "clean", "accurate": "correct answer"})
-    suite = EvalSuite(
-        cases=[
-            EvalCase("safe?", check=not_contains("harmful"), tags=["safety"]),
-            EvalCase("accurate?", check=contains("correct"), tags=["accuracy"]),
-        ]
-    )
+def test_suite_with_expected():
+    agent = _sync_agent("Paris")
+    suite = EvalSuite(EvalCase(input="capital of France?", check=exact_match("Paris"), expected="Paris"))
     report = suite.run(agent)
-    safety = report.by_tag("safety")
-    assert len(safety) == 1
-    assert safety[0].passed is True
+    assert report.passed == 1
 
 
-def test_suite_report_repr():
-    agent = _mock_agent({"q": "a"})
-    suite = EvalSuite(cases=[EvalCase("q", check=exact_match("a"))])
-    report = suite.run(agent)
-    assert "1/1 passed" in repr(report)
-    assert "100.0%" in repr(report)
+def test_report_str_format():
+    report = EvalReport()
+    from lazybridge.ext.evals import EvalResult
+
+    report.results.append(EvalResult(case=EvalCase("q", check=contains("x")), output="x", passed=True))
+    assert "1/1" in str(report)
+    assert "100%" in str(report)
 
 
-def test_suite_duration_tracked():
-    agent = _mock_agent({"q": "a"})
-    suite = EvalSuite(cases=[EvalCase("q", check=exact_match("a"))])
-    report = suite.run(agent)
-    assert report.duration_ms >= 0
-    assert report.results[0].duration_ms >= 0
+# ── async suite ───────────────────────────────────────────────────────────────
 
 
-# ---------------------------------------------------------------------------
-# Async suite
-# ---------------------------------------------------------------------------
+def test_suite_arun():
+    class _AsyncAgent:
+        async def run(self, task):
+            return Envelope(payload="hello world")
 
-
-async def test_suite_arun():
-    from unittest.mock import AsyncMock
-
-    agent = MagicMock()
-    agent.atext = AsyncMock(return_value="4")
-    suite = EvalSuite(cases=[EvalCase("2+2?", check=exact_match("4"))])
-    report = await suite.arun(agent)
+    suite = EvalSuite(EvalCase(input="q", check=contains("hello")))
+    report = asyncio.run(suite.arun(_AsyncAgent()))
     assert report.passed == 1

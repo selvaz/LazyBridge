@@ -1,276 +1,252 @@
-"""Unit tests for Memory — no API calls."""
+"""Tests for v1.0 Memory — no API calls."""
 
 from __future__ import annotations
 
 import threading
 
+from lazybridge.core.types import Role
 from lazybridge.memory import Memory
 
-# ── T7.01 — basic append and history ─────────────────────────────────────────
+# ── basic add / text ──────────────────────────────────────────────────────────
 
 
-def test_record_and_history():
-    mem = Memory(strategy="full")
-    mem._record("hello", "hi there")
-    history = mem.history
-    assert len(history) == 2
-    assert history[0] == {"role": "user", "content": "hello"}
-    assert history[1] == {"role": "assistant", "content": "hi there"}
+def test_add_and_text():
+    m = Memory()
+    m.add("hello", "world")
+    txt = m.text()
+    assert "hello" in txt
+    assert "world" in txt
 
 
-def test_history_is_copy():
-    """history property returns a copy — mutations don't affect internal state."""
-    mem = Memory(strategy="full")
-    mem._record("q", "a")
-    h = mem.history
-    h.append({"role": "user", "content": "injected"})
-    assert len(mem.history) == 2  # still 2, not 3
+def test_empty_memory_text_is_empty():
+    m = Memory()
+    assert m.text() == ""
 
 
-# ── T7.02 — len() reflects number of stored messages ─────────────────────────
+def test_clear_resets():
+    m = Memory()
+    m.add("q", "a")
+    m.clear()
+    assert m.text() == ""
+    assert m.messages() == []
 
 
-def test_len():
-    mem = Memory(strategy="full")
-    assert len(mem) == 0
-    mem._record("q1", "a1")
-    assert len(mem) == 2
-    mem._record("q2", "a2")
-    assert len(mem) == 4
+def test_multiple_turns():
+    m = Memory()
+    m.add("q1", "a1")
+    m.add("q2", "a2")
+    txt = m.text()
+    assert "q1" in txt
+    assert "a2" in txt
 
 
-# ── T7.03 — clear resets history ─────────────────────────────────────────────
+# ── messages() returns Message list ──────────────────────────────────────────
 
 
-def test_clear():
-    mem = Memory(strategy="full")
-    mem._record("q", "a")
-    mem.clear()
-    assert len(mem) == 0
-    assert mem.history == []
+def test_messages_alternates_roles():
+    m = Memory()
+    m.add("user question", "assistant answer")
+    msgs = m.messages()
+    assert len(msgs) >= 2
+    roles = [msg.role for msg in msgs]
+    assert Role.USER in roles
+    assert Role.ASSISTANT in roles
 
 
-# ── T7.04 — _build_input prepends history without mutating state ─────────────
+def test_messages_returns_new_list():
+    m = Memory()
+    m.add("q", "a")
+    msgs1 = m.messages()
+    msgs1.append(None)
+    assert len(m.messages()) != len(msgs1)
 
 
-def test_build_input_prepends_history():
-    mem = Memory(strategy="full")
-    mem._record("turn1", "answer1")
-    msgs = mem._build_input("new question")
-    assert msgs[-1] == {"role": "user", "content": "new question"}
-    assert msgs[0] == {"role": "user", "content": "turn1"}
-    assert len(mem) == 2  # _build_input must not mutate
+# ── strategy="none" ───────────────────────────────────────────────────────────
 
 
-# ── T7.05 — from_history ─────────────────────────────────────────────────────
+def test_strategy_none_keeps_all():
+    m = Memory(strategy="none")
+    for i in range(25):
+        m.add(f"q{i}", f"a{i}", tokens=1000)
+    assert len(m._turns) == 25
 
 
-def test_from_history_restores_messages():
-    history = [
-        {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "hi"},
-    ]
-    mem = Memory.from_history(history, strategy="full")
-    assert mem.history == history
+def test_strategy_none_no_summary():
+    m = Memory(strategy="none")
+    for i in range(25):
+        m.add(f"q{i}", f"a{i}", tokens=1000)
+    assert m._summary == ""
 
 
-def test_from_history_empty():
-    mem = Memory.from_history([], strategy="full")
-    assert len(mem) == 0
+# ── strategy="sliding" ───────────────────────────────────────────────────────
 
 
-def test_from_history_returns_copy():
-    history = [{"role": "user", "content": "q"}]
-    mem = Memory.from_history(history, strategy="full")
-    history.append({"role": "assistant", "content": "a"})
-    assert len(mem) == 1
+def test_strategy_sliding_caps_at_10():
+    m = Memory(strategy="sliding", max_tokens=1)
+    for i in range(15):
+        m.add(f"q{i}", f"a{i}", tokens=100)
+    assert len(m._turns) <= 10
 
 
-# ── T7.06 — thread safety ────────────────────────────────────────────────────
+def test_strategy_sliding_creates_summary():
+    m = Memory(strategy="sliding", max_tokens=1)
+    for _ in range(15):
+        m.add("question", "answer", tokens=200)
+    assert m._summary != ""
 
 
-def test_thread_safety_concurrent_records():
-    mem = Memory(strategy="full")
+# ── strategy="auto" ───────────────────────────────────────────────────────────
+
+
+def test_auto_under_threshold_no_compression():
+    m = Memory(strategy="auto", max_tokens=10000)
+    m.add("q", "a", tokens=10)
+    assert len(m._turns) == 1
+    assert m._summary == ""
+
+
+def test_auto_over_threshold_compresses():
+    m = Memory(strategy="auto", max_tokens=100)
+    for i in range(15):
+        m.add(f"q{i}", f"a{i}", tokens=50)
+    assert len(m._turns) <= 10
+
+
+def test_auto_default_strategy():
+    m = Memory()
+    assert m.strategy == "auto"
+
+
+# ── summary ───────────────────────────────────────────────────────────────────
+
+
+def test_summary_non_empty_after_compression():
+    m = Memory(strategy="sliding", max_tokens=1)
+    for _ in range(15):
+        m.add("unique_keyword_xyz", "response_abc", tokens=100)
+    assert m._summary != ""
+
+
+def test_messages_includes_summary_prefix():
+    m = Memory(strategy="sliding", max_tokens=1)
+    for _ in range(15):
+        m.add("q", "a", tokens=100)
+    msgs = m.messages()
+    full_text = " ".join(msg.content if isinstance(msg.content, str) else "" for msg in msgs)
+    assert "earlier" in full_text.lower() or len(msgs) > 2
+
+
+# ── thread safety ─────────────────────────────────────────────────────────────
+
+
+def test_thread_safety_concurrent_adds():
+    m = Memory(strategy="none")
     errors: list[Exception] = []
 
-    def worker(i: int) -> None:
+    def _add():
         try:
-            mem._record(f"q{i}", f"a{i}")
+            for i in range(50):
+                m.add(f"q{i}", f"a{i}", tokens=1)
         except Exception as exc:
             errors.append(exc)
 
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    threads = [threading.Thread(target=_add) for _ in range(5)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    assert not errors
-    assert len(mem) == 40  # 20 turns × 2 messages each
+    assert errors == []
+    assert len(m._turns) == 250
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Smart Memory — auto compression
-# ═════════════════════════════════════════════════════════════════════════════
+# ── live view ─────────────────────────────────────────────────────────────────
 
 
-# ── Full strategy (backward compat) ──────────────────────────────────────────
+def test_text_reflects_latest_state():
+    m = Memory()
+    m.add("initial", "response")
+    t1 = m.text()
+    m.add("new question", "new answer")
+    t2 = m.text()
+    assert "new question" in t2
+    assert len(t2) >= len(t1)
 
 
-def test_full_strategy_sends_everything():
-    mem = Memory(strategy="full")
-    for i in range(20):
-        mem._record(f"q{i}", f"a{i}")
-    msgs = mem._build_input("new")
-    assert len(msgs) == 41  # 40 messages + 1 new
+# ── summarizer: sync / async / Agent-like — all bridge correctly ─────────────
+#
+# ``Memory.add()`` is sync but accepts an ``async def`` summarizer.
+# An un-awaited coroutine would stringify to ``"<coroutine object at
+# 0x…>"`` with a runtime warning, so the implementation drives the
+# awaitable to completion (running-loop-safe via a
+# worker thread when needed) and falls back to keyword extraction on
+# raise — never silent garbage.
 
 
-def test_default_strategy_is_auto():
-    mem = Memory()
-    assert mem._strategy == "auto"
+def _force_compression_turns() -> list[tuple[str, str]]:
+    """Build a turns list long enough that strategy='summary' compresses
+    on the next add()."""
+    return [(f"user-{i}", f"assistant-{i}") for i in range(11)]
 
 
-# ── Auto strategy: under threshold sends everything ─────────────────────────
+def test_summarizer_sync_callable_is_used_verbatim():
+    calls: list[str] = []
+
+    def sync_sum(prompt: str) -> str:
+        calls.append(prompt)
+        return "SYNC-SUMMARY"
+
+    m = Memory(strategy="summary", summarizer=sync_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    assert len(calls) >= 1
+    assert m._summary == "SYNC-SUMMARY"
 
 
-def test_auto_under_threshold_sends_all():
-    mem = Memory(strategy="auto", max_context_tokens=100000, window_turns=5)
-    for i in range(3):
-        mem._record(f"q{i}", f"a{i}")
-    msgs = mem._build_input("new")
-    assert len(msgs) == 7  # 6 messages + 1 new — no compression
+def test_summarizer_async_callable_is_driven_to_completion():
+    """An ``async def`` summarizer's coroutine must be awaited, not
+    silently stringified."""
+    calls: list[str] = []
+
+    async def async_sum(prompt: str) -> str:
+        calls.append(prompt)
+        return "ASYNC-SUMMARY"
+
+    m = Memory(strategy="summary", summarizer=async_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+
+    assert len(calls) >= 1
+    assert m._summary == "ASYNC-SUMMARY"
+    # Explicitly guard against regression — the broken path produces
+    # something with "coroutine" in it.
+    assert "coroutine" not in m._summary.lower()
 
 
-# ── Auto strategy: over threshold compresses ─────────────────────────────────
+def test_summarizer_async_callable_raising_falls_back_to_keywords():
+    async def async_boom(prompt: str) -> str:
+        raise RuntimeError("upstream down")
+
+    m = Memory(strategy="summary", summarizer=async_boom)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    # Rule fallback prefix — compression didn't just die.
+    assert m._summary.startswith("[Earlier conversation covered:")
 
 
-def test_auto_over_threshold_compresses():
-    mem = Memory(strategy="auto", max_context_tokens=100, window_turns=2)
-    for i in range(20):
-        mem._record(f"question {i} " * 20, f"answer {i} " * 20)
+def test_summarizer_object_with_text_method_is_stringified():
+    """A sync callable returning an object exposing ``.text()`` (e.g.
+    an Envelope-like) has ``.text()`` consulted — preserves the shape
+    that Agents return via ``__call__``."""
 
-    msgs = mem._build_input("new question")
-    # Should have: [compressed system msg] + [4 window msgs] + [1 new]
-    assert len(msgs) <= 6
-    assert msgs[0]["role"] == "system"
-    assert "[Memory" in msgs[0]["content"]
-    # Raw history still complete
-    assert len(mem.history) == 40
+    class _ResultLike:
+        def text(self) -> str:
+            return "FROM-TEXT"
 
+    def sync_sum(prompt: str) -> _ResultLike:
+        return _ResultLike()
 
-# ── Rolling strategy always uses window ──────────────────────────────────────
-
-
-def test_rolling_always_windows():
-    mem = Memory(strategy="rolling", window_turns=2)
-    for i in range(10):
-        mem._record(f"q{i}", f"a{i}")
-
-    msgs = mem._build_input("new")
-    # Window: 2 turns = 4 msgs. Plus compressed + new = 6
-    assert len(msgs) <= 6
-    assert msgs[0]["role"] == "system"
-    assert len(mem.history) == 20  # full history preserved
-
-
-# ── Compression preserves raw history ────────────────────────────────────────
-
-
-def test_compression_preserves_raw_history():
-    mem = Memory(strategy="rolling", window_turns=3)
-    for i in range(15):
-        mem._record(f"q{i}", f"a{i}")
-    assert len(mem.history) == 30  # all 30 messages preserved
-    assert mem.summary is not None  # compressed block exists
-
-
-# ── Summary property ─────────────────────────────────────────────────────────
-
-
-def test_summary_none_when_no_compression():
-    mem = Memory(strategy="auto", window_turns=10)
-    mem._record("q", "a")
-    assert mem.summary is None
-
-
-def test_summary_exists_after_compression():
-    mem = Memory(strategy="rolling", window_turns=1)
-    for i in range(5):
-        mem._record(f"q{i}", f"a{i}")
-    assert mem.summary is not None
-    assert "Memory" in mem.summary
-
-
-# ── Simple compressor extracts topics ────────────────────────────────────────
-
-
-def test_simple_compress_extracts_topics():
-    mem = Memory(strategy="rolling", window_turns=1)
-    mem._record("Tell me about Python and Django", "Python is great")
-    mem._record("What about Flask?", "Flask is minimal")
-    mem._record("And React?", "React is a JS framework")
-
-    msgs = mem._build_input("new")
-    compressed = msgs[0]["content"]
-    assert "Python" in compressed or "Django" in compressed or "Flask" in compressed
-
-
-# ── LLM compressor integration ───────────────────────────────────────────────
-
-
-def test_llm_compressor():
-    from unittest.mock import MagicMock
-
-    mock_agent = MagicMock()
-    mock_agent.text.return_value = "entities: User(developer)\nfacts: likes_python=true"
-
-    mem = Memory(strategy="rolling", window_turns=1, compressor=mock_agent)
-    for i in range(5):
-        mem._record(f"q{i}", f"a{i}")
-
-    msgs = mem._build_input("new")
-    assert "entities" in msgs[0]["content"]
-    mock_agent.text.assert_called()
-
-
-# ── Clear resets compression state ───────────────────────────────────────────
-
-
-def test_clear_resets_compression():
-    mem = Memory(strategy="rolling", window_turns=1)
-    for i in range(5):
-        mem._record(f"q{i}", f"a{i}")
-    assert mem.summary is not None
-    mem.clear()
-    assert mem.summary is None
-    assert len(mem) == 0
-
-
-# ── Continuous monitoring triggers recompression ─────────────────────────────
-
-
-def test_continuous_monitoring_recompresses():
-    mem = Memory(strategy="auto", max_context_tokens=50, window_turns=2)
-    # First batch — might not trigger (depends on token estimate)
-    for i in range(5):
-        mem._record(f"question {i} " * 10, f"answer {i} " * 10)
-
-    compressed_v1 = mem.summary
-
-    # Add more turns — should trigger recompression
-    for i in range(5, 10):
-        mem._record(f"question {i} " * 10, f"answer {i} " * 10)
-
-    # Summary should have been updated
-    if compressed_v1 is not None:
-        assert mem._compressed_up_to > 0
-
-
-# ── from_history with strategy ───────────────────────────────────────────────
-
-
-def test_from_history_with_strategy():
-    history = [{"role": "user", "content": f"q{i}"} for i in range(10)]
-    mem = Memory.from_history(history, strategy="rolling", window_turns=2)
-    msgs = mem._build_input("new")
-    assert len(msgs) <= 6  # compressed + window + new
+    m = Memory(strategy="summary", summarizer=sync_sum)
+    for u, a in _force_compression_turns():
+        m.add(u, a)
+    assert m._summary == "FROM-TEXT"

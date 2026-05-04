@@ -1,0 +1,38 @@
+# LazyBridge
+
+Zero-boilerplate Python agent framework. One `Agent`, swappable engines
+(LLM / Plan / Human / Supervisor). Tools can be plain functions, other
+Agents, Agents-of-Agents, or tool providers (e.g. an MCP server) — the
+contract is uniform. Parallelism is automatic when the engine decides;
+declared when you do. Pipelines are validated at construction time
+(`PlanCompileError` before any LLM call).
+
+## Documentation tracks
+
+LazyBridge ships docs for two audiences. Same source of truth — fragments
+under `lazybridge/skill_docs/fragments/` render into both surfaces via
+`python -m lazybridge.skill_docs._build`.
+
+### LLM track — preferred for assistants
+
+Tier-organised reference, signature-first, dense. Load on demand
+instead of ingesting the whole site.
+
+- [SKILL manifest](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/SKILL.md) — entry point + file index
+- [Overview](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/00_overview.md) — pick a tier
+- [Basic tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/01_basic.md) — `Agent`, `Tool`, `NativeTool`, `Envelope`
+- [Mid tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/02_mid.md) — `Memory`, `Store`, `Session`, `Guard*`, `chain`, `parallel`, `as_tool`, `MCP` (alpha — `lazybridge.ext.mcp`), `HumanEngine` (`lazybridge.ext.hil`), `EvalSuite` (`lazybridge.ext.evals`)
+- [Full tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/03_full.md) — `Plan`, `Step`, sentinels, `SupervisorEngine` (`lazybridge.ext.hil`), checkpoint/resume, exporters, `verify=`
+- [Advanced tier](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/04_advanced.md) — `Engine` protocol, `BaseProvider`, `Plan.to_dict`, `register_provider_*`, `core.types`
+- [Decision trees](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/05_decision_trees.md) — "when to use which"
+- [API reference](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/06_reference.md) — flat signature index
+- [Errors](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill_docs/99_errors.md) — cause → fix table
+
+### Human track — narrative-first site
+
+- [Quickstart](https://github.com/selvaz/LazyBridge/blob/main/docs/quickstart.md) — 5 min walkthrough
+- [Tier pages](https://github.com/selvaz/LazyBridge/tree/main/docs/tiers) — Basic / Mid / Full / Advanced
+- [Per-topic guides](https://github.com/selvaz/LazyBridge/tree/main/docs/guides)
+- [Decision trees (mermaid)](https://github.com/selvaz/LazyBridge/tree/main/docs/decisions)
+- [Recipes](https://github.com/selvaz/LazyBridge/tree/main/docs/recipes) — tool-calling, structured-output, plan-with-resume, HIL, MCP, orchestration
+- [Examples](https://github.com/selvaz/LazyBridge/tree/main/examples) — LangGraph / CrewAI ports + pattern walkthroughs

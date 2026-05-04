@@ -1,64 +1,65 @@
-"""lazybridge — zero-boilerplate multi-provider LLM agent framework.
+"""lazybridge v1.0 — zero-boilerplate multi-provider LLM agent framework.
 
-Quick start::
+Tier 1 — 2 lines::
 
-    from lazybridge import LazyAgent
+    from lazybridge import Agent
+    Agent("claude-opus-4-7")("hello").text()
 
-    ai = LazyAgent("anthropic")
-    print(ai.chat("hello").content)
+Tier 2 — with tools::
 
-With tools::
+    Agent("claude-opus-4-7", tools=[search, calculator])("find AI news").text()
 
-    from lazybridge import LazyAgent, LazyTool
+Tier 3 — structured output::
 
-    def search(query: str) -> str:
-        \"\"\"Search the web.\"\"\"
-        ...
+    class Summary(BaseModel):
+        title: str
+        bullets: list[str]
 
-    tool = LazyTool.from_function(search)
-    ai = LazyAgent("anthropic")
-    resp = ai.loop("find the latest AI news", tools=[tool])
+    Agent("claude-opus-4-7", output=Summary)("summarize...").payload.title
 
-Multi-agent session::
+Tier 4 — multi-agent chain / parallel::
 
-    from lazybridge import LazyAgent, LazySession, LazyContext
+    researcher = Agent("claude-opus-4-7", tools=[search])
+    writer     = Agent("claude-opus-4-7")
+    Agent.chain(researcher, writer)("AI trends").text()
 
-    sess = LazySession(tracking="basic")
+    Agent.parallel(fact_checker, sentiment_analyzer, summarizer)("article text")
 
-    researcher = LazyAgent("anthropic", name="researcher", session=sess)
-    writer     = LazyAgent("openai",    name="writer",     session=sess)
+Tier 5 — structured plan with routing::
 
-    researcher.loop("find top 3 AI papers this week", tools=[search])
-    writer.chat(
-        "write a blog post",
-        context=LazyContext.from_agent(researcher),
+    from lazybridge import Agent, Plan, Step
+    Agent(engine=Plan(Step("search", output=SearchResult), Step("rank")))
+
+Tier 6 — full config::
+
+    from lazybridge import Agent, LLMEngine, Memory, Session
+    from lazybridge.ext.otel import OTelExporter
+    Agent(
+        engine=LLMEngine("claude-opus-4-7", thinking=True, max_turns=20),
+        tools=[search],
+        output=Report,
+        memory=Memory(strategy="auto"),
+        session=Session(exporters=[OTelExporter(endpoint="http://jaeger:4318")]),
     )
-
-    print(sess.store.read_all())
-    print(sess.graph.to_json())
-
-Pipeline as tool (expose a session to an orchestrator)::
-
-    from lazybridge import LazyAgent, LazySession
-
-    sess = LazySession()
-    researcher = LazyAgent("anthropic", name="researcher", session=sess)
-    writer     = LazyAgent("openai",    name="writer",     session=sess)
-
-    pipeline = sess.as_tool("research_pipeline", "Run the pipeline", mode="chain")
-    orchestrator = LazyAgent("anthropic")
-    orchestrator.loop("coordinate the work", tools=[pipeline])
 """
 
-__version__ = "0.6.0"
+__version__ = "1.0.0"
 
+# Core public API
+from lazybridge.agent import Agent
+from lazybridge.agent import _ParallelAgent as _ParallelAgent
+
+# Core types (re-exported for convenience)
 from lazybridge.core.providers import BaseProvider
-from lazybridge.core.structured import StructuredOutputError
 from lazybridge.core.types import (
+    AgentRuntimeConfig,
+    CacheConfig,
     CompletionRequest,
     CompletionResponse,
     Message,
     NativeTool,
+    ObservabilityConfig,
+    ResilienceConfig,
     Role,
     StreamChunk,
     StructuredOutputConfig,
@@ -66,83 +67,90 @@ from lazybridge.core.types import (
     ToolCall,
     ToolDefinition,
     UsageStats,
-    Verifier,
 )
-from lazybridge.evals import EvalCase, EvalReport, EvalSuite
+
+# Engines.  HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
+# are extension surface — import them from ``lazybridge.ext.{hil,evals,otel}``.
+from lazybridge.engines.base import Engine
+from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
+from lazybridge.engines.plan import Plan, PlanCompileError, PlanState, Step, StepResult
+from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+
+# Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
 from lazybridge.exporters import (
     CallbackExporter,
+    ConsoleExporter,
     EventExporter,
     FilteredExporter,
     JsonFileExporter,
-    OTelExporter,
     StructuredLogExporter,
 )
-from lazybridge.graph.schema import EdgeType, GraphSchema, NodeType
+
+# Graph
+from lazybridge.graph import EdgeType, GraphSchema, NodeType
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
-from lazybridge.human import HumanAgent
-from lazybridge.lazy_agent import LazyAgent
-from lazybridge.lazy_context import LazyContext
-from lazybridge.lazy_router import LazyRouter
-from lazybridge.lazy_run import run_async
-from lazybridge.lazy_session import Event, LazySession, TrackLevel
-from lazybridge.lazy_store import LazyStore, StoreEntry
-from lazybridge.lazy_tool import (
-    LazyTool,
-    NormalizedToolSet,
-    ToolArgumentValidationError,
-    ToolSchemaBuilder,
-    ToolSchemaBuildError,
-    ToolSchemaMode,
-)
 from lazybridge.memory import Memory
-from lazybridge.supervisor import SupervisorAgent
+from lazybridge.predicates import when
+from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
+from lazybridge.session import EventLog, EventType, Session
+from lazybridge.store import Store, StoreEntry
+from lazybridge.tools import Tool
 
 __all__ = [
-    # Main classes
-    "LazyAgent",
-    "HumanAgent",
-    "SupervisorAgent",
+    # Primary API
+    "Agent",
+    # Envelope
+    "Envelope",
+    "EnvelopeMetadata",
+    "ErrorInfo",
+    # Sentinels
+    "from_prev",
+    "from_start",
+    "from_step",
+    "from_parallel",
+    "from_parallel_all",
+    # Tools
+    "Tool",
+    # Predicates DSL (for Step.routes)
+    "when",
+    # Memory & Store
     "Memory",
-    "LazySession",
-    "LazyContext",
-    "LazyStore",
+    "Store",
     "StoreEntry",
-    "LazyTool",
-    "LazyRouter",
-    "run_async",
+    # Session / Observability
+    "Session",
+    "EventLog",
+    "EventType",
     # Guardrails
     "Guard",
     "GuardAction",
     "GuardError",
     "ContentGuard",
     "GuardChain",
-    # Evals
-    "EvalSuite",
-    "EvalCase",
-    "EvalReport",
     "LLMGuard",
-    # Tool schema
-    "ToolSchemaMode",
-    "ToolSchemaBuilder",
-    "ToolArgumentValidationError",
-    "ToolSchemaBuildError",
-    "StructuredOutputError",
-    "NormalizedToolSet",
-    # Session / tracking
-    "TrackLevel",
-    "Event",
-    # Exporters
-    "EventExporter",
-    "CallbackExporter",
-    "FilteredExporter",
-    "JsonFileExporter",
-    "StructuredLogExporter",
-    "OTelExporter",
+    # Engines
+    "Engine",
+    "LLMEngine",
+    "Plan",
+    "Step",
+    "PlanState",
+    "StepResult",
+    "PlanCompileError",
+    "ToolTimeoutError",
+    "StreamStallError",
     # Graph
     "GraphSchema",
     "NodeType",
     "EdgeType",
-    # Core types (re-exported for convenience)
+    # Exporters
+    "EventExporter",
+    "CallbackExporter",
+    "ConsoleExporter",
+    "FilteredExporter",
+    "JsonFileExporter",
+    "StructuredLogExporter",
+    # Core types
+    "BaseProvider",
     "CompletionRequest",
     "CompletionResponse",
     "Message",
@@ -152,8 +160,11 @@ __all__ = [
     "StructuredOutputConfig",
     "ThinkingConfig",
     "ToolCall",
-    "Verifier",
     "ToolDefinition",
     "UsageStats",
-    "BaseProvider",
+    # Config objects
+    "AgentRuntimeConfig",
+    "CacheConfig",
+    "ObservabilityConfig",
+    "ResilienceConfig",
 ]

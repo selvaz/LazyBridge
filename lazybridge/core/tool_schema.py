@@ -9,7 +9,7 @@ Owns everything between a raw Python callable and a provider-ready ToolDefinitio
   - Compiled artifact structure (ToolCompileArtifact)
   - Artifact caching (ArtifactStore / InMemoryArtifactStore)
 
-LazyTool (in lazy_tool.py) is the only consumer of this module's public API.
+Tool (in lazybridge/tools.py) is the only consumer of this module's public API.
 """
 
 from __future__ import annotations
@@ -353,19 +353,23 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # $defs produced by nested models are preserved as-is: Anthropic and
     # OpenAI both support JSON Schema draft 7+ $ref resolution natively.
     #
-    # We use ``mode="validation"`` so the advertised schema matches the
-    # rules Pydantic will apply when the tool result is validated on the
-    # way back (audit M5).  ``mode="serialization"`` can report
-    # computed fields / alias-renamed fields that the validator would
-    # reject, leading to "the LLM generated against this schema but
-    # Pydantic rejected it" surprises.
+    # ``mode="validation"`` makes the advertised schema match the rules
+    # Pydantic will apply when the tool result is validated on the way
+    # back.  ``mode="serialization"`` can report computed / alias-renamed
+    # fields that the validator would reject, leading to "the LLM
+    # generated against this schema but Pydantic rejected it" surprises.
     if inspect.isclass(annotation) and issubclass(annotation, _BaseModel):
         schema = annotation.model_json_schema(mode="validation")
         schema.pop("title", None)
         return schema
 
-    # inspect.Parameter.empty, typing.Any, unknown -> {}
-    return {}
+    # inspect.Parameter.empty, typing.Any, unknown → permissive string
+    # fallback.  An empty ``{}`` is rejected by strict-mode schemas on
+    # OpenAI and Gemini: the parameter silently disappears from the
+    # tool signature and the LLM never fills it, which shows up as a
+    # confusing ``ToolArgumentValidationError`` at call time.  Defaulting
+    # to string keeps unannotated parameters visible and round-trippable.
+    return {"type": "string"}
 
 
 def _parse_docstring_params(doc: str) -> dict[str, str]:
@@ -533,8 +537,8 @@ def _call_schema_llm(schema_llm: Any, prompt: str, schema: type) -> Any:
 
 #: Bounded FIFO cache for :func:`_flatten_refs`.  Keeps the most recent
 #: ~128 flattened results keyed by a SHA-256 digest of the input schema
-#: (canonical JSON).  Audit L1: without this, nested Pydantic schemas
-#: that $defs-reference each other were deep-copied on every flatten pass.
+#: (canonical JSON).  Without this, nested Pydantic schemas that
+#: $defs-reference each other are deep-copied on every flatten pass.
 _FLATTEN_CACHE_MAX = 128
 _flatten_cache: dict[str, dict] = {}
 _flatten_cache_order: list[str] = []

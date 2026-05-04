@@ -1,0 +1,251 @@
+# Topic → tier assignment.  Order inside each list is preserved in the
+# rendered skill / site pages, so order topics didactically.
+tiers:
+  basic:
+    - agent
+    - tool
+    - native_tools
+    - tool_schema
+    - envelope
+  mid:
+    - memory
+    - store
+    - session
+    - guards
+    - chain
+    - as_tool
+    - agent_parallel
+    - human_engine
+    - evals
+    - mcp
+  full:
+    - plan
+    - sentinels
+    - parallel_steps
+    - supervisor
+    - checkpoint
+    - exporters
+    - graph_schema
+    - verify
+  advanced:
+    - engine_protocol
+    - base_provider
+    - plan_serialize
+    - register_provider
+    - core_types
+
+# Decision tree fragments.  Each lives in fragments/decision_<name>.md.
+decisions:
+  - pick_tier
+  - return_type
+  - state_layer
+  - composition
+  - parallelism
+  - human_engine_vs_supervisor
+  - verify_placement
+  - checkpoint
+  - need_advanced
+
+# Pretty titles for tier landing pages + decision tree pages.
+# Topics that live in ``lazybridge.ext.*`` carry their stability tag so
+# users discover the boundary on the tier page itself, not only after
+# reading the core-vs-ext policy guide.
+titles:
+  agent: Agent
+  tool: Tool
+  native_tools: Native tools (web search, code execution, …)
+  tool_schema: Function → Tool (schema modes)
+  envelope: Envelope
+  memory: Memory
+  store: Store
+  session: Session & tracing
+  guards: Guards
+  chain: Agent.chain
+  as_tool: Agent.as_tool
+  agent_parallel: Agent.parallel
+  human_engine: HumanEngine (ext.hil)
+  evals: EvalSuite (ext.evals)
+  mcp: MCP integration (ext.mcp)
+  plan: Plan
+  sentinels: Sentinels (from_prev / from_start / from_step / from_parallel)
+  parallel_steps: Parallel plan steps
+  supervisor: SupervisorEngine (ext.hil)
+  checkpoint: Checkpoint & resume
+  exporters: Exporters
+  graph_schema: GraphSchema
+  verify: "verify="
+  engine_protocol: Engine protocol
+  base_provider: BaseProvider
+  plan_serialize: Plan serialization
+  register_provider: Provider registry
+  core_types: core.types
+
+tier_intros:
+  basic: |
+    **Use this when** you need a single LLM call — with or without tools, with or without structured output. No setup beyond an API key.
+
+    **Move to Mid when** you need memory across calls, shared state, tracing, guardrails, or more than one agent in sequence.
+  mid: |
+    **Use this when** you need conversation memory, shared key-value state, request/response tracing, guardrails, linear multi-agent chains, a simple human approval gate, or to wire in an MCP server as a tool catalogue.
+
+    **Move to Full when** your pipeline has conditional branching, typed hand-offs between steps, or crash-resume requirements.
+  full: |
+    **Use this when** you need a declared, multi-step pipeline: typed hand-offs, conditional routing, crash recovery via checkpoint/resume, or OTel/JSON observability.
+
+    **Stay at Mid** if your pipeline is a straight line with no typed models between steps and you don't need resume semantics.
+  advanced: |
+    **Use this when** you are extending the framework itself: adding a new LLM provider, writing a custom execution engine, or serialising Plans across processes.
+
+    **Skip this tier** if you're building apps — Basic/Mid/Full cover everything user-facing.
+
+tier_next:
+  basic: |
+    * Recipes: [Tool calling](../recipes/tool-calling.md) · [Structured output](../recipes/structured-output.md)
+    * [Mid tier →](mid.md) when you need state, tracing, or composition
+
+    **By the end of Basic you can:**
+
+    - call any LLM with `Agent("model")(task)`
+    - turn any typed Python function into a tool with auto-schema
+    - opt into provider-hosted native tools (web search, code execution)
+    - get a typed Pydantic payload back instead of plain text
+  mid: |
+    * Recipe: [Human-in-the-loop](../recipes/human-in-the-loop.md) · [MCP integration](../recipes/mcp.md) · [Orchestration tools](../recipes/orchestration-tools.md)
+    * [Full tier →](full.md) when you need typed pipelines or crash recovery
+
+    **By the end of Mid you can:**
+
+    - keep multi-turn conversation context with `Memory`
+    - persist cross-run state with `Store`
+    - emit structured events to console / JSON / OTel via `Session`
+    - filter input + output with `Guard*` (regex or LLM-as-judge)
+    - compose agents linearly (`Agent.chain`) or in fan-out (`Agent.parallel`)
+    - wire any MCP server in as a tool catalogue
+    - drop a human approval gate into any pipeline
+  full: |
+    * Recipe: [Plan with typed steps and crash resume](../recipes/plan-with-resume.md)
+    * **Production**: [Operations checklist](../guides/operations.md) — back-pressure, OTel GenAI, resume, reliability knobs
+    * [Advanced tier →](advanced.md) if you need a custom provider or engine
+
+    **By the end of Full you can:**
+
+    - declare a typed multi-step pipeline that fails-fast at construction (`PlanCompileError`)
+    - route conditionally via `Step(routes={...})` predicates or `Step(routes_by="field")`
+    - run parallel bands and aggregate them via `from_parallel_all` or `context=[...]`
+    - resume from the failed step with CAS-protected checkpoints
+    - run N copies of the same pipeline concurrently with `on_concurrent="fork"`
+    - swap in a `SupervisorEngine` to give a human a tool-calling REPL mid-pipeline
+    - add a `verify=` judge at agent-level or tool-level
+  advanced: |
+    * [Engine protocol guide →](../guides/engine-protocol.md)
+    * [BaseProvider guide →](../guides/base-provider.md)
+    * [LiteLLM bridge →](../guides/litellm.md) — unlock 100+ extra providers via the `litellm/` prefix
+    * [Core vs Extension policy →](../guides/core-vs-ext.md) — what's stable, what may break, promotion path
+
+    **By the end of Advanced you can:**
+
+    - implement a brand-new LLM provider against `BaseProvider`
+    - implement a brand-new execution engine against the `Engine` protocol
+    - serialise a `Plan` to JSON for cross-process re-use
+    - register custom model-string aliases at runtime
+
+# Pedagogical narrative inserted between the tier intro and the Topics
+# list.  Each one walks the reader through how the tier's topics fit
+# together so the page reads as a mini-tutorial, not a bare TOC.
+tier_walkthroughs:
+  basic: |
+    Start at the top: an `Agent` is a thin wrapper that delegates to an
+    `Engine`.  The default engine is `LLMEngine`, so
+    `Agent("claude-opus-4-7")` is everything you need for a one-shot call.
+
+    **Tools** are the next concept.  Pass any Python function with type
+    hints and a docstring as `tools=[...]` and the framework builds the
+    JSON schema automatically — see [Function → Tool](../guides/tool-schema.md)
+    for when the signature path isn't enough.  **Native tools** are
+    provider-hosted alternatives (web search, code execution): pass an
+    enum, no code.
+
+    Every call returns an **`Envelope`** — a typed wrapper carrying
+    `payload` (the result), `metadata` (token / cost / latency), and
+    `error`.  Use `.text()` for "give me a string"; `.payload` for the
+    typed Pydantic model when `output=` is set; `.ok` to check error state.
+  mid: |
+    Mid is where stateful, observable, multi-agent applications live.
+    Three concepts cover state:
+
+    * **`Memory`** — in-prompt conversation context.  What the model
+      sees in the next turn.
+    * **`Store`** — durable cross-run state.  What survives a crash.
+    * **`Session`** — observability container.  Events, exporters,
+      cost roll-up.
+
+    `Guards` filter input and output (cheap regex or LLM-as-judge).
+    Three composition primitives stack on top: `Agent.chain` for linear
+    pipelines, `Agent.parallel` for deterministic fan-out, and
+    `Agent.as_tool` (implicit when you pass an Agent as a tool) for
+    Agent-of-Agents trees.
+
+    The tier closes with the stable extensions you'll likely reach for:
+    `MCP` to consume an external tool catalogue, `HumanEngine` for an
+    approval gate, `EvalSuite` for behaviour testing.  See
+    [core-vs-ext](../guides/core-vs-ext.md) for the stability promises.
+  full: |
+    Full introduces **declared pipelines**.  A `Plan` is a list of
+    `Step`s validated at construction time — `PlanCompileError` fires
+    before any LLM call on a misspelled step name, a forward
+    `from_step`, or a parallel-band misuse.
+
+    **Sentinels** (`from_prev`, `from_start`, `from_step("name")`,
+    `from_parallel`, `from_parallel_all`) are how each step declares
+    where its input and context come from — `task=` for the prompt
+    instruction, `context=` for the data (which can be a list of
+    sentinels for multi-source synthesis without a combiner step).
+
+    `parallel=True` marks a step as a member of a concurrent band.
+    `writes="key"` persists the step's payload to the `Store` so a
+    downstream agent (or a future resume) can read it.  Pair `Plan`
+    with `Store` + `checkpoint_key=` + `resume=True` to get
+    CAS-protected crash-resume; pair with `on_concurrent="fork"` for
+    fan-out workflows.
+
+    `SupervisorEngine` is the HIL counterpart: a step that hands
+    control to a human REPL.  `verify=` adds a judge/retry loop at
+    either agent-level or tool-level.  `Exporters` and `GraphSchema`
+    surface the run as OTel spans + a topology graph for dashboards.
+
+    Before shipping, read the
+    [Operations checklist](../guides/operations.md): back-pressure,
+    OTel GenAI conventions, ``Memory.summarizer_timeout``, MCP cache
+    TTL, and the production knobs on `Agent` (`timeout`, `cache`,
+    `fallback`).
+  advanced: |
+    Advanced is for framework extension.  The `Engine` protocol is
+    one method (`run`) and one optional one (`stream`); implement it
+    to add a new execution model alongside `LLMEngine` /
+    `Plan` / `HumanEngine` / `SupervisorEngine`.
+
+    `BaseProvider` is the contract every LLM provider satisfies —
+    four methods, full retry/backoff handled for you by `Executor`.
+    The `Provider registry` is the runtime entry point: register
+    aliases / rules so `Agent("my-model")` routes to the new
+    provider without forking the framework.  The `LiteLLM bridge`
+    is the catch-all alternative — unlock 100+ extra providers via
+    the `litellm/<model>` prefix without writing a provider class.
+
+    `Plan.to_dict` / `from_dict` round-trip a Plan's topology
+    through JSON for cross-process re-use; callables and Agents are
+    rebound via `registry={name: target}`.  `core.types` carries the
+    types that flow across all these boundaries.
+
+# Hand-maintained guides that don't have a fragment but belong to a
+# tier's logical surface.  Rendered into a "## Also see" section after
+# Topics so a reader navigating the tier-by-tier course discovers them.
+tier_extras:
+  mid: |
+    * [Testing (MockAgent)](../guides/testing.md) — deterministic agent doubles for unit tests
+    * [Core vs Extension policy](../guides/core-vs-ext.md) — stability tiers (`stable` / `alpha` / `domain`) and the promotion path
+  full: |
+    * [Operations checklist](../guides/operations.md) — production deployment knobs
+  advanced: |
+    * [LiteLLM bridge](../guides/litellm.md) — 100+ extra providers via `litellm/<model>`
+    * [Core vs Extension policy](../guides/core-vs-ext.md) — what's stable, what may break

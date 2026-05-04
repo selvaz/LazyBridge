@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title|e }}</title>
+  <style>{{ css }}</style>
+  <style>
+    /* data_snapshot: charts are first-class, text is secondary */
+    .snapshot-header {
+      margin-bottom: 32px;
+      padding-bottom: 18px;
+      border-bottom: 2px solid var(--accent, #1f4e79);
+      display: flex;
+      align-items: baseline;
+      gap: 20px;
+    }
+    .snapshot-header h1 {
+      margin: 0;
+      padding: 0;
+      border: none;
+      font-size: 1.9em;
+    }
+    .snapshot-date {
+      font-size: 0.82em;
+      color: var(--muted, #888);
+      white-space: nowrap;
+    }
+    /* Make figures full-width and prominent */
+    .markdown-body figure {
+      margin: 28px -8px 36px !important;
+      background: var(--surface, #fff);
+      border: 1px solid var(--border, #ddd);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+    }
+    .markdown-body figure img {
+      margin: 0 !important;
+      border: none !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+    .markdown-body figcaption {
+      padding: 10px 16px;
+      font-size: 0.86em;
+      font-weight: 600;
+      background: var(--accent-soft, #f0f4f8);
+      color: var(--accent, #1f4e79);
+      border-top: 1px solid var(--border, #ddd);
+      font-style: normal !important;
+    }
+    /* Compact narrative text */
+    .markdown-body p {
+      font-size: 0.94em;
+      color: var(--muted, #666);
+      margin-bottom: 12px !important;
+    }
+    .markdown-body h2 {
+      margin-top: 32px !important;
+      font-size: 1.25em !important;
+    }
+    .markdown-body h3 {
+      font-size: 1.05em !important;
+    }
+    /* Stats grid for tables */
+    .markdown-body table {
+      font-size: 0.9em;
+    }
+    .markdown-body th {
+      font-size: 0.8em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    @media print {
+      .snapshot-header { border-bottom-color: #000; }
+    }
+  </style>
+</head>
+<body>
+  <main class="report-shell">
+    <div class="snapshot-header">
+      <h1>{{ title|e }}</h1>
+      <span class="snapshot-date">{{ meta.generated_at }}</span>
+    </div>
+    <article class="markdown-body">
+{{ body_html }}
+    </article>
+  </main>
+</body>
+</html>

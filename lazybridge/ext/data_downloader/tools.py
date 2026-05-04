@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from lazybridge import Tool
 from lazybridge.ext.data_downloader.downloader import DataDownloader
 from lazybridge.ext.data_downloader.ticker_db import TickerDatabase
-from lazybridge.lazy_tool import LazyTool
 
 
 def _error(exc: Exception) -> dict:
@@ -23,7 +23,7 @@ def downloader_tools(
     runtime: Any,
     ticker_db: TickerDatabase,
     downloader: DataDownloader,
-) -> list[LazyTool]:
+) -> list[Tool]:
     """Create LLM-callable tools for data download and universe browsing."""
 
     db = ticker_db
@@ -176,7 +176,7 @@ def downloader_tools(
     # -- Assemble --------------------------------------------------------
 
     return [
-        LazyTool.from_function(
+        Tool(
             list_universe,
             name="list_universe",
             description="Browse the 140-ticker universe by asset class",
@@ -184,14 +184,14 @@ def downloader_tools(
             "Filter by asset_class (EQUITY, FIXED_INCOME, COMMODITIES, "
             "REAL_ESTATE, ALTERNATIVES, MACRO, FX) or sub_asset_class.",
         ),
-        LazyTool.from_function(
+        Tool(
             search_tickers,
             name="search_tickers",
             description="Search tickers by name, symbol, sector, or country",
             guidance="Use to find specific tickers. Supports partial matches: "
             "'gold', 'treasury', 'emerging', 'technology', etc.",
         ),
-        LazyTool.from_function(
+        Tool(
             download_tickers,
             name="download_tickers",
             description="Download market data and register in stat_runtime for analysis",

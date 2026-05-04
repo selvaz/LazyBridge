@@ -16,8 +16,8 @@ pip install lazybridge[stats,downloader]
 from lazybridge.ext.quant_agent import quant_agent
 
 agent, rt = quant_agent("anthropic")
-resp = agent.loop("Download SPY, AAPL, and MSFT. Analyze their volatility.")
-print(resp.content)
+resp = agent("Download SPY, AAPL, and MSFT. Analyze their volatility.")
+print(resp.text())
 rt.close()
 ```
 
@@ -62,7 +62,7 @@ quant_agent (skills: methodology, tool guide, downloader guide)
 ## Returns
 
 `(agent, runtime)` tuple:
-- `agent` — a `LazyAgent` with all tools pre-bound
+- `agent` — an `Agent` with all tools pre-bound
 - `runtime` — a `StatRuntime` instance. Call `rt.close()` when done.
 
 ## Dependencies

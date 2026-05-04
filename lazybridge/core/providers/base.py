@@ -36,9 +36,9 @@ Minimal implementation::
 
 Usage::
 
-    from lazybridge import LazyAgent
-    agent = LazyAgent(MyProvider(api_key="..."))
-    print(agent.chat("hello").content)
+    from lazybridge import Agent, LLMEngine
+    agent = Agent(engine=LLMEngine("my-model"))
+    print(agent("hello").text())
 """
 
 from __future__ import annotations
@@ -58,10 +58,11 @@ from lazybridge.core.types import (
 class BaseProvider(ABC):
     """Stable abstract base class for all LLM providers.
 
-    Subclass this to integrate any LLM backend with LazyBridge.
-    Pass an instance directly as the first argument of ``LazyAgent``::
+    Subclass this to integrate any LLM backend with LazyBridge. Plug a
+    custom provider in by constructing an ``LLMEngine`` that routes to it
+    (see ``lazybridge/core/executor.py`` for resolution)::
 
-        agent = LazyAgent(MyProvider(api_key="..."))
+        agent = Agent(engine=LLMEngine("my-model"))
 
     **Stability contract**
     The following are guaranteed stable across minor versions:
@@ -131,6 +132,28 @@ class BaseProvider(ABC):
         Called once at construction time.  Default implementation is a no-op.
         """
         pass
+
+    def is_retryable(self, exc: BaseException) -> bool | None:
+        """Classify a provider exception as retryable, non-retryable, or defer.
+
+        The :class:`~lazybridge.core.executor.Executor` consults this hook
+        before falling back to its generic status/string heuristic.  Override
+        when the provider SDK raises structured exception types that encode
+        retry semantics more precisely than HTTP status codes alone — for
+        example a rate-limit exception that carries a ``retry_after`` attribute
+        distinguishing "back off" (retryable) from "quota exhausted" (not).
+
+        Return values:
+          * ``True`` — retry with backoff.
+          * ``False`` — do not retry; surface the exception.
+          * ``None`` — no opinion; Executor falls back to its generic
+            classifier (``core.executor._is_retryable``) that matches
+            ``status_code in {429, 5xx}`` and common transient-error strings.
+
+        Default implementation returns ``None`` so built-in providers fall
+        through to the generic path with no behaviour change.
+        """
+        return None
 
     @abstractmethod
     def complete(self, request: CompletionRequest) -> CompletionResponse:
@@ -217,9 +240,9 @@ class BaseProvider(ABC):
     # Helpers — stable, callable from subclasses
     # ------------------------------------------------------------------
 
-    #: Tier aliases (audit F2).  Each provider populates this with the
-    #: concrete model it considers "top"/"expensive"/"medium"/"cheap"/
-    #: "super_cheap" so users can write ``LazyAgent("anthropic",
+    #: Tier aliases.  Each provider populates this with the concrete
+    #: model it considers "top"/"expensive"/"medium"/"cheap"/
+    #: "super_cheap" so users can write ``Agent("anthropic",
     #: model="cheap")`` without hard-coding preview / date-pinned names.
     #: A string not in this dict is treated as a literal model name
     #: (passthrough).

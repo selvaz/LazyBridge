@@ -1,297 +1,234 @@
 # LazyBridge
 
-Zero-boilerplate multi-provider LLM agent framework. One class for every LLM interaction, automatic tool schema generation, composable context injection, and serializable multi-agent pipelines.
+**Zero-boilerplate Python agent framework.** One `Agent`, swappable
+engines (LLM / Plan / Human / Supervisor), and one tool contract —
+plain functions, other Agents, and Agents-of-Agents all compose the
+same way. Parallelism is automatic when the engine decides;
+deterministic when you declare it.
 
-## Quick start
-
-```python
-from lazybridge import LazyAgent
-
-ai = LazyAgent("anthropic")
-print(ai.text("What is the capital of France?"))
-```
-
-Same code on any provider — change one string:
+Pipelines are validated at construction time: a misspelled step name,
+a forward-reference in `from_step`, or a parallel-band misuse surfaces
+as `PlanCompileError` **before any LLM call** — not at the first
+production failure.
 
 ```python
-LazyAgent("openai")
-LazyAgent("google")
-LazyAgent("deepseek")
+from lazybridge import Agent
+print(Agent("claude-opus-4-7")("hello").text())
 ```
 
-## Tool loop
+## Documentation — two tracks
 
-```python
-from lazybridge import LazyAgent, LazyTool
+LazyBridge ships docs for two audiences. **Same source of truth** —
+fragment files under `lazybridge/skill_docs/fragments/` render into
+both surfaces via `python -m lazybridge.skill_docs._build` (CI enforces
+no drift).
 
-def get_weather(city: str) -> str:
-    """Get current weather for a city."""
-    return f"{city}: 22°C, sunny"
-
-result = LazyAgent("anthropic").loop(
-    "What's the weather in Rome and Paris?",
-    tools=[LazyTool.from_function(get_weather)],
-)
-print(result.content)
-```
-
-Schema generated automatically from type hints and docstring. No JSON dict, no decorator boilerplate.
-
-## Conversational memory
-
-```python
-from lazybridge import LazyAgent, Memory
-
-ai  = LazyAgent("anthropic")
-mem = Memory()  # auto-compresses when context gets large
-
-ai.chat("My name is Marco", memory=mem)
-resp = ai.chat("What's my name?", memory=mem)
-print(resp.content)   # "Marco"
-
-# After many turns, older messages are compressed automatically.
-# Recent turns stay raw. Full history always in mem.history.
-```
-
-## Structured output
-
-```python
-from pydantic import BaseModel
-
-class Article(BaseModel):
-    title: str
-    summary: str
-    tags: list[str]
-
-article = LazyAgent("openai").json("Summarise AI in 2025", Article)
-print(article.title)
-```
-
-## Multi-agent pipeline
-
-```python
-from lazybridge import LazyAgent, LazySession, LazyContext, LazyTool
-
-sess       = LazySession()
-researcher = LazyAgent("anthropic", name="researcher", session=sess)
-writer     = LazyAgent("openai",    name="writer",     session=sess)
-
-def search(query: str) -> str:
-    """Search for papers."""
-    return f"Papers about {query}"
-
-search_tool = LazyTool.from_function(search)
-researcher.loop("Find top 3 AI papers this week", tools=[search_tool])
-result = writer.chat(
-    "Write a blog post",
-    context=LazyContext.from_agent(researcher),
-)
-print(result.content)
-print(sess.graph.to_json())   # serializable pipeline topology for GUI
-```
-
-For concurrent or sequential pipelines without a session, use `LazyTool.parallel()` / `LazyTool.chain()`:
-
-```python
-from lazybridge import LazyAgent, LazyTool
-
-# Fan-out: all agents run in parallel; concurrency_limit prevents rate-limit storms
-gather = LazyTool.parallel(
-    LazyAgent("anthropic", name="us"),
-    LazyAgent("openai",    name="eu"),
-    LazyAgent("google",    name="asia"),
-    name="gather_news",
-    description="Gather AI news from US, EU, and Asia simultaneously",
-    concurrency_limit=3,   # max 3 simultaneous API calls
-    step_timeout=30.0,     # per-agent timeout in seconds
-)
-
-# Sequential: async-under-the-hood — never blocks the event loop
-pipeline = LazyTool.chain(
-    LazyAgent("anthropic", name="researcher"),
-    LazyAgent("openai",    name="summariser"),
-    name="research_pipeline",
-    description="Research a topic and return a concise summary.",
-    step_timeout=60.0,     # per-step timeout in seconds
-)
-orchestrator = LazyAgent("anthropic")
-orchestrator.loop("Summarise AI advances in 2024.", tools=[pipeline])
-```
-
-## Native provider tools (web search, code execution, …)
-
-```python
-from lazybridge.core.types import NativeTool
-
-resp = ai.chat(
-    "What happened in AI this week?",
-    native_tools=[NativeTool.WEB_SEARCH],
-)
-for src in resp.grounding_sources:
-    print(src.url, src.title)
-```
-
-## Human-in-the-loop
-
-Humans participate as first-class agents — no callbacks, no hooks. `HumanAgent` is a simple approval/review gate; `SupervisorAgent` is a REPL that lets the human call tools, retry upstream agents with feedback, and inspect the session store before deciding to continue.
-
-```python
-from lazybridge import LazyAgent, LazyTool, LazySession, SupervisorAgent
-
-sess = LazySession()
-
-def search(query: str) -> str:
-    """Search the web."""
-    return f"results for {query}"
-
-search_tool = LazyTool.from_function(search)
-researcher  = LazyAgent("anthropic", name="researcher", tools=[search_tool], session=sess)
-writer      = LazyAgent("openai",    name="writer",     session=sess)
-
-supervisor = SupervisorAgent(
-    name="supervisor",
-    tools=[search_tool],     # human can call tools
-    agents=[researcher],     # human can retry upstream agents with feedback
-    session=sess,            # human can read the shared store
-)
-
-pipeline = LazyTool.chain(
-    researcher, supervisor, writer,
-    name="supervised_pipeline",
-    description="Research, supervise, write",
-)
-pipeline.run({"task": "AI safety report"})
-# REPL commands: continue | retry <agent>: <feedback> | store <key> | <tool>(<args>)
-```
-
-Full walkthrough in [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) and [`lazy_wiki/human/agents.md`](lazy_wiki/human/agents.md#human-agents).
-
-Prefer a browser to stdin? Stdlib-only, opt-in:
-
-```python
-from lazybridge.gui import panel_input_fn
-
-fn = panel_input_fn(name="reviewer")   # shared-server panel
-supervisor = SupervisorAgent(name="supervisor", input_fn=fn, ...)
-```
-
-The same browser tab hosts panels for every LazyBridge object —
-`import lazybridge.gui` and any `agent.gui()` / `tool.gui()` /
-`session.gui()` call registers a new panel on the shared server. See
-[`lazybridge/gui/README.md`](lazybridge/gui/README.md).
-
-## Supported providers
-
-| Provider | String | Default model |
+| Audience | Where | Style |
 |---|---|---|
-| Anthropic | `"anthropic"` / `"claude"` | claude-sonnet-4-6 |
-| OpenAI | `"openai"` / `"gpt"` | gpt-5.4 |
-| Google | `"google"` / `"gemini"` | gemini-3.1-pro-preview |
-| DeepSeek | `"deepseek"` | deepseek-chat |
+| **Humans** | [MkDocs site](https://selvaz.github.io/LazyBridge/) — [Quickstart](docs/quickstart.md) → [tier pages](docs/tiers/) → [guides](docs/guides/) → [decision trees](docs/decisions/) → [recipes](docs/recipes/) → [API reference](docs/reference.md) | Narrative-first; mermaid diagrams; copy-paste recipes |
+| **LLM assistants** | [Claude Skill](lazybridge/skill_docs/SKILL.md) packaged with the wheel; mirrored at [`docs/skill/`](docs/skill/); [`llms.txt`](llms.txt) entry-point | Signature-first; rules block; dense; predictable section structure (`signature` / `rules` / `example` / `pitfalls`) |
 
-### Model tiers
+Both tracks cover the same surface — Basic / Mid / Full / Advanced
+tiers, decision trees ("when to use which"), and the errors table.
 
-Pass a tier string as `model=` instead of a literal model name and let
-the provider pick the right concrete model:
+## Pick your tier
 
-| tier | `anthropic` / `claude` | `openai` / `chatgpt` / `gpt` | `google` / `gemini` | `deepseek` |
-| --- | --- | --- | --- | --- |
-| `top` | claude-opus-4-7 | gpt-5.4 | gemini-3.1-pro-preview | deepseek-reasoner *(same as expensive)* |
-| `expensive` | claude-opus-4-6 | gpt-5 | gemini-3.1-pro | deepseek-reasoner *(same as top)* |
-| `medium` | claude-sonnet-4-6 | gpt-4o | gemini-3.1-flash | deepseek-chat *(same as cheap, super_cheap)* |
-| `cheap` | claude-haiku-4-5 | gpt-4o-mini | gemini-1.5-flash | deepseek-chat *(same as medium, super_cheap)* |
-| `super_cheap` | claude-3-haiku | gpt-3.5-turbo | gemini-1.5-flash-8b | deepseek-chat *(same as medium, cheap)* |
+LazyBridge grows with you — every tier is additive.
 
-Tiers are **provider-relative** — `"medium"` on Anthropic is not the
-same price/capability as `"medium"` on OpenAI. Literal model names
-still work unchanged. Full documentation:
-[`lazy_wiki/human/agents.md` → Model tiers](lazy_wiki/human/agents.md#model-tiers).
+| Tier | For | Key imports |
+|---|---|---|
+| [**Basic**](docs/tiers/basic.md) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
+| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite` |
+| [**Full**](docs/tiers/full.md) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
+| [**Advanced**](docs/tiers/advanced.md) | extending the framework | `Engine` · `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
 
-## Installation
+## Install
 
 ```bash
-pip install lazybridge
-
-# Provider extras (choose what you need)
-pip install lazybridge[anthropic]   # Anthropic / Claude
-pip install lazybridge[openai]      # OpenAI / GPT
-pip install lazybridge[google]      # Google / Gemini
-pip install lazybridge[all]         # all providers
+pip install lazybridge[anthropic]   # or [openai], [google], [deepseek], [litellm], [mcp], [otel], [all]
 ```
 
-## Ready-made tools
+Set an API key for your provider of choice (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`).
 
-Drop-in tools for common agent tasks — each in its own folder with a README and tests.
+## Worked examples
 
-| Module | What it does |
-|---|---|
-| `lazybridge.ext.doc_skills` | Index local docs with BM25, query from any agent. No vector DB, no embeddings API. |
-| `lazybridge.ext.read_docs` | Read `.txt .md .pdf .docx .html` from a folder or single file. `pip install lazybridge[tools]` |
-| `lazybridge.gui.human` | Optional browser UI for `HumanAgent` / `SupervisorAgent`. Stdlib-only, no extra install. |
-
-### doc_skills — example
+### 1 · Function becomes a tool, auto-schema
 
 ```python
-from lazybridge.ext.doc_skills import build_skill, skill_tool
-from lazybridge import LazyAgent
+from lazybridge import Agent
 
-# Index your docs once — bundle persists to disk
-meta = build_skill(["./docs"], "my-project")
+def get_weather(city: str) -> str:
+    """Return current temperature and conditions for ``city``."""
+    return f"{city}: 22°C, sunny"
 
-# Load and use — works across restarts, no re-indexing
-tool = skill_tool(meta["skill_dir"])
-resp = LazyAgent("anthropic").loop("How does X work?", tools=[tool])
-print(resp.content)
+print(Agent("claude-opus-4-7", tools=[get_weather])(
+    "what's the weather in Rome and Paris?"
+).text())
 ```
 
-### read_docs — example
+No decorators, no JSON schemas. If your function lacks type hints,
+pass `mode="llm"` to have a cheap agent infer the schema — see
+[Function → Tool](docs/guides/tool-schema.md).
+
+### 2 · Native tools (no code at all)
 
 ```python
-from lazybridge.ext.read_docs import read_folder_docs
-from lazybridge import LazyAgent, LazyTool
+from lazybridge import Agent, NativeTool
 
-docs_tool = LazyTool.from_function(read_folder_docs)
-resp = LazyAgent("anthropic").loop(
-    "Summarise all PDFs in /reports",
-    tools=[docs_tool],
+Agent("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH])("AI news this week")
+```
+
+`WEB_SEARCH` · `CODE_EXECUTION` · `FILE_SEARCH` · `COMPUTER_USE` ·
+`GOOGLE_SEARCH` · `GOOGLE_MAPS` (each supported by a subset of
+providers).
+
+### 3 · Tool is tool — agents wrap agents
+
+```python
+researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
+editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
+print(editor("summarise AI trends April 2026").text())
+```
+
+Parallelism is emergent: when `editor` decides to call two tools in
+the same turn, they run concurrently via `asyncio.gather`. No flag,
+no config, no "parallel mode".
+
+### 4 · MCP servers as tool catalogues
+
+```python
+from lazybridge import Agent
+from lazybridge.ext.mcp import MCP
+
+fs = MCP.stdio(
+    "fs",
+    command="npx",
+    args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+    cache_tools_ttl=60.0,            # refresh tool list every 60s
 )
-print(resp.content)
+agent = Agent("claude-opus-4-7", tools=[fs])
+agent("Read README.md and summarise the install steps")
 ```
 
----
+The MCP server expands into one LazyBridge `Tool` per MCP tool — no
+separate engine, no graph wrappers. See [the MCP recipe](docs/recipes/mcp.md).
 
-## Project structure
+### 5 · Declared typed pipeline with resume
 
+```python
+from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
+
+store = Store(db="pipeline.sqlite")
+
+# Idiomatic shape: each step has an explicit task instruction; upstream
+# data flows through `context=`.  `context=[from_step("a"), from_step("b")]`
+# also works to pull from multiple upstream steps without a combiner.
+plan = Plan(
+    Step(researcher, name="search",
+         writes="hits", output=Hits),
+    Step(ranker,     name="rank",
+         task="Rank these search hits by relevance; return the top 5.",
+         context=from_prev,
+         output=Ranked),
+    Step(writer,     name="write",
+         task="Write a 200-word brief from the ranked items.",
+         context=from_step("rank")),
+    store=store, checkpoint_key="research", resume=True,
+)
+
+Agent.from_engine(plan)("AI trends April 2026")
 ```
-LazyBridge/
-├── lazybridge/      # Installable package (pip install lazybridge)
-│   ├── lazy_agent.py         # LazyAgent — single entry point for LLM calls
-│   ├── lazy_session.py       # LazySession — shared store, events, graph
-│   ├── lazy_tool.py          # LazyTool — tool schema + execution
-│   ├── lazy_context.py       # LazyContext — composable system prompt injection
-│   ├── lazy_store.py         # LazyStore — flat key-value blackboard (SQLite or in-memory)
-│   ├── lazy_router.py        # LazyRouter — conditional branching node
-│   ├── memory.py             # Memory — stateful conversation history
-│   ├── graph/                # GraphSchema — serializable pipeline topology
-│   └── core/                 # Provider adapters, executor, tool schema builder
-├── tests/           # Tests for lazybridge.ext modules
-│   ├── doc_skills/           # test_doc_skills.py
-│   └── read_docs/            # test_read_docs.py
-└── lazy_wiki/
-    ├── bot/                  # LLM-optimised reference (exhaustive, structured)
-    └── human/                # Human-readable guides and SDK comparison
+
+If a step fails mid-plan, the next run with `resume=True` retries
+from the failing step only. If the plan is already done, it
+short-circuits to the cached `writes` bucket. Concurrent runs on the
+same `checkpoint_key` are serialised via CAS — pass
+`on_concurrent="fork"` for fan-out workflows.
+
+### 6 · Production observability (OTel GenAI conventions)
+
+```python
+from lazybridge import Agent, Session, JsonFileExporter
+from lazybridge.ext.otel import OTelExporter
+
+sess = Session(
+    db="events.sqlite",
+    batched=True,                     # non-blocking emit
+    on_full="hybrid",                 # default — block on AGENT_*/TOOL_*, drop telemetry
+    exporters=[
+        JsonFileExporter("run.jsonl"),
+        OTelExporter(endpoint="http://otelcol:4318"),
+    ],
+)
+
+researcher = Agent("claude-opus-4-7", tools=[search], name="researcher", session=sess)
+print(researcher("summarise this week's AI news").text())
+
+# Cost / tokens / latency breakdown across nested agents.
+print(sess.usage_summary())
+sess.flush()                          # drain the writer before exit
 ```
 
-## Documentation
+`OTelExporter` emits `gen_ai.system` / `gen_ai.usage.input_tokens` /
+`gen_ai.tool.call.id` and the rest of the OpenTelemetry GenAI Semantic
+Conventions, with proper parent-child span hierarchy
+(`invoke_agent → chat / execute_tool`).
 
-| Audience | Entry point |
-|---|---|
-| Developer | [`lazy_wiki/human/quickstart.md`](lazy_wiki/human/quickstart.md) |
-| SDK comparison | [`lazy_wiki/human/comparison.md`](lazy_wiki/human/comparison.md) |
-| LLM / AI assistant | [`lazy_wiki/bot/INDEX.md`](lazy_wiki/bot/INDEX.md) |
-| Full API reference | [`lazy_wiki/bot/00_quickref.md`](lazy_wiki/bot/00_quickref.md) |
-| Human-in-the-loop (`HumanAgent` / `SupervisorAgent`) | [`docs/course/13-human-in-the-loop.md`](docs/course/13-human-in-the-loop.md) |
+### 7 · Human-in-the-loop with a full REPL
 
-## License
+```python
+from lazybridge import Agent
+from lazybridge.ext.hil import SupervisorEngine
 
-[Apache 2.0](LICENSE)
+sup = Agent(engine=SupervisorEngine(
+    tools=[search],
+    agents=[researcher],   # human can `retry researcher: <feedback>`
+))
+agents = [researcher, sup, writer]
+Agent.chain(*agents)("publish a policy brief")
+```
+
+Commands in the REPL: `continue`, `retry <agent>: <feedback>`,
+`store <key>`, `<tool>(<args>)`. For approval-only flows use the
+lighter [`HumanEngine`](docs/guides/human-engine.md) instead.
+
+## Top tasks
+
+* [Tool calling end-to-end](https://selvaz.github.io/LazyBridge/recipes/tool-calling/)
+* [Structured output with Pydantic](https://selvaz.github.io/LazyBridge/recipes/structured-output/)
+* [Pipeline with typed steps and crash resume](https://selvaz.github.io/LazyBridge/recipes/plan-with-resume/)
+* [Human-in-the-loop: approval gates and REPL](https://selvaz.github.io/LazyBridge/recipes/human-in-the-loop/)
+* [MCP integration](https://selvaz.github.io/LazyBridge/recipes/mcp/)
+* [Decision trees — "when to use which"](https://selvaz.github.io/LazyBridge/decisions/)
+
+## What makes LazyBridge different
+
+1. **Tool-is-Tool.** Functions, Agents, Agents-of-Agents, and tool
+   providers (e.g. an MCP server) all plug into `tools=[...]` with
+   the same contract. `SupervisorEngine`, `LLMEngine`, and `Plan` all
+   accept the same list.
+2. **Compile-time plan validation.** `PlanCompileError` at
+   construction catches broken DAGs — duplicate names, forward
+   references, broken `from_step` / `from_parallel` sentinels,
+   parallel-band misuse — before any LLM call.
+3. **CAS-protected crash resume.** `Plan` checkpoints to `Store` via
+   `compare_and_swap`. Two concurrent runs on the same
+   `checkpoint_key` deterministically converge — first writer wins,
+   second raises `ConcurrentPlanRunError` instead of silently
+   overwriting. `on_concurrent="fork"` isolates parallel runs.
+4. **Parallelism as capability.** When the engine emits N tool calls
+   in one turn, they run concurrently via `asyncio.gather`. No flag,
+   no `tool_choice="parallel"` knob.
+5. **Transitive cost roll-up.** `Envelope.metadata.nested_*` aggregates
+   token / cost telemetry across an Agent-of-Agents tree — the outer
+   envelope reports total pipeline spend without double-counting.
+6. **OTel GenAI conventions out of the box.** `OTelExporter` ships
+   `gen_ai.*` attributes and proper parent-child spans; existing
+   GenAI dashboards render LazyBridge traces unchanged.
+7. **LLM-assistant skill as first-class artifact.** A signature-first
+   `SKILL.md` ships with the library, loadable by any LLM assistant.
+
+## Licence
+
+Apache 2.0.

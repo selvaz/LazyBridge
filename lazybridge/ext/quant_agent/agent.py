@@ -2,7 +2,7 @@
 
 Hybrid architecture: complex tools get dedicated sub-agent pipelines
 (agent_tool) for intelligent parameter construction; simple tools use
-direct tool calling (plain LazyTool) for efficiency.
+direct tool calling (plain Tool) for efficiency.
 
 Architecture::
 
@@ -34,8 +34,8 @@ Usage::
     from lazybridge.ext.quant_agent import quant_agent
 
     agent, rt = quant_agent("anthropic")
-    resp = agent.loop("Download SPY, AAPL, and MSFT. Analyze their volatility.")
-    print(resp.content)
+    resp = agent("Download SPY, AAPL, and MSFT. Analyze their volatility.")
+    print(resp.text())
     rt.close()
 """
 
@@ -138,10 +138,12 @@ def quant_agent(
     Usage::
 
         agent, rt = quant_agent("anthropic")
-        resp = agent.loop("Download SPY and analyze its volatility")
-        print(resp.content)
+        resp = agent("Download SPY and analyze its volatility")
+        print(resp.text())
         rt.close()
     """
+    from lazybridge import Agent, Tool
+    from lazybridge.engines.llm import LLMEngine
     from lazybridge.ext.data_downloader import (
         DataDownloader,
         TickerDatabase,
@@ -161,8 +163,6 @@ def quant_agent(
         stat_skill_tools,
         stat_tools,
     )
-    from lazybridge.lazy_agent import LazyAgent
-    from lazybridge.lazy_tool import LazyTool
 
     # Runtime
     rt = StatRuntime(artifacts_dir=artifacts_dir)
@@ -176,76 +176,77 @@ def quant_agent(
     all_stat = stat_tools(rt, level="all")
     dl_tools_list = downloader_tools(rt, db, dl)
 
-    # Build name→LazyTool lookup
+    model_str = model or (provider if isinstance(provider, str) else "anthropic")
+
+    # Build name→Tool lookup
     raw_tools = {t.name: t for t in all_stat + dl_tools_list}
 
     # Common sub-agent kwargs
-    sub_kwargs = {k: v for k, v in agent_kwargs.items() if k not in ("tools",)}
-
     # ---------------------------------------------------------------
     # COMPLEX TOOLS — agent_tool pipelines (NL → structured → function)
     # These benefit from a dedicated LLM step for parameter construction.
     # ---------------------------------------------------------------
 
-    agent_tools: list[LazyTool] = []
+    agent_tools: list[Tool] = []
+
+    def _agent_tool(func, *, input_schema, name, description, guidance):
+        """Wrap func in an LLM-powered structured-input pipeline (NL → schema → func)."""
+        sub = Agent(engine=LLMEngine(model_str, output=input_schema), name=f"{name}_parser")
+
+        async def _invoke(task: str) -> dict:
+            env = await sub.run(task)
+            if not env.ok:
+                return {"error": str(env.error.message)}
+            return func(**env.payload.model_dump())
+
+        t = Tool(_invoke, name=name, description=description, guidance=guidance)
+        return t
 
     agent_tools.append(
-        LazyTool.agent_tool(
+        _agent_tool(
             raw_tools["analyze"].func,
             input_schema=AnalyzeInput,
-            provider=provider,
-            model=model,
             name="analyze",
             description="Run a goal-oriented analysis with automatic model selection. "
             "Describe your analysis goal — mode, target, and params are inferred.",
             guidance="Primary analysis tool. Just describe what you want to analyze and how. "
             "The sub-agent resolves mode, target column, and parameters from your description.",
-            **sub_kwargs,
         )
     )
 
     agent_tools.append(
-        LazyTool.agent_tool(
+        _agent_tool(
             raw_tools["fit_model"].func,
             input_schema=FitModelInput,
-            provider=provider,
-            model=model,
             name="fit_model",
             description="Fit a specific statistical model to data. "
             "Describe the model — family, parameters, and data source are inferred.",
             guidance="For custom model fits. Describe the model family (OLS/ARIMA/GARCH/Markov), "
             "target data, and any specific parameters you want.",
-            **sub_kwargs,
         )
     )
 
     agent_tools.append(
-        LazyTool.agent_tool(
+        _agent_tool(
             raw_tools["download_tickers"].func,
             input_schema=DownloadTickersInput,
-            provider=provider,
-            model=model,
             name="download_tickers",
             description="Download market data and register for analysis. "
             "Describe what data you need — ticker symbols and date range are extracted.",
             guidance="Describe the data you want. The sub-agent identifies ticker symbols, "
             "date range, and registration preferences from your description.",
-            **sub_kwargs,
         )
     )
 
     agent_tools.append(
-        LazyTool.agent_tool(
+        _agent_tool(
             raw_tools["query_data"].func,
             input_schema=QueryDataInput,
-            provider=provider,
-            model=model,
             name="query_data",
             description="Query registered datasets with SQL. "
             "Describe what data you need — the SQL is generated automatically.",
             guidance="Describe the data query in natural language. The sub-agent translates "
             "to SQL using dataset('name') macro. Only SELECT is allowed.",
-            **sub_kwargs,
         )
     )
 
@@ -277,7 +278,7 @@ def quant_agent(
     # Combine: agent_tools + simple_tools + skills
     # ---------------------------------------------------------------
 
-    all_tools: list[LazyTool] = agent_tools + simple_tools
+    all_tools: list[Tool] = agent_tools + simple_tools
 
     # Skills
     try:
@@ -297,14 +298,13 @@ def quant_agent(
         _logger.debug("Stat skills not loaded", exc_info=True)
 
     # Router agent
-    agent = LazyAgent(
-        provider,
-        model=model,
+    _agent_kwargs = {k: v for k, v in agent_kwargs.items() if k not in ("system",)}
+    agent = Agent(
+        engine=LLMEngine(model_str, system=system or QUANT_SYSTEM_PROMPT),
         name=name,
         description="Quantitative analyst with data download and statistical analysis capabilities",
-        system=system or QUANT_SYSTEM_PROMPT,
         tools=all_tools,  # type: ignore[arg-type]
-        **agent_kwargs,
+        **_agent_kwargs,
     )
 
     n_agent = len(agent_tools)

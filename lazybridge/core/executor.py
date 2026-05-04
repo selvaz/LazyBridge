@@ -5,7 +5,7 @@ Handles:
   - Retry with exponential backoff on transient errors
   - Sync and async execution + streaming
 
-No memory, no tracking, no context injection — those live in LazyAgent/LazySession.
+No memory, no tracking, no context injection — those live in Agent/Session.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ def _resolve_provider(
     from lazybridge.core.providers.anthropic import AnthropicProvider
     from lazybridge.core.providers.deepseek import DeepSeekProvider
     from lazybridge.core.providers.google import GoogleProvider
+    from lazybridge.core.providers.lmstudio import LMStudioProvider
     from lazybridge.core.providers.openai import OpenAIProvider
 
     registry: dict[str, type[BaseProvider]] = {
@@ -51,8 +52,21 @@ def _resolve_provider(
         "google": GoogleProvider,
         "gemini": GoogleProvider,
         "deepseek": DeepSeekProvider,
+        "lmstudio": LMStudioProvider,
+        "lm-studio": LMStudioProvider,
+        "lm_studio": LMStudioProvider,
+        "local": LMStudioProvider,
     }
     key = provider.lower().strip()
+
+    # LiteLLM is optional; import lazily so the provider module isn't a
+    # hard dependency for every Agent() construction. Only paid with
+    # ``pip install lazybridge[litellm]``.
+    if key == "litellm":
+        from lazybridge.core.providers.litellm import LiteLLMProvider
+
+        return LiteLLMProvider(api_key=api_key, model=model, **kwargs)
+
     if key not in registry:
         raise ValueError(f"Unknown provider '{provider}'. Supported: {', '.join(sorted(set(registry.keys())))}.")
     return registry[key](api_key=api_key, model=model, **kwargs)
@@ -63,11 +77,51 @@ def _resolve_provider(
 # ---------------------------------------------------------------------------
 
 
+# Provider SDKs converge on a small set of class names for transient
+# errors.  Matching by ``__class__.__name__`` avoids importing every
+# SDK (no runtime dep added) and survives string-message drift /
+# non-EN locales.  Cross-checked against openai, anthropic,
+# google.genai, deepseek (openai-clone), litellm.
+_RETRYABLE_EXC_CLASSES = frozenset(
+    {
+        "RateLimitError",
+        "APITimeoutError",
+        "APIConnectionError",
+        "APIStatusError",  # SDK-generic 5xx wrapper
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "BadGatewayError",
+        "GatewayTimeoutError",
+        "TimeoutError",  # builtins.TimeoutError, asyncio.TimeoutError
+        "ConnectionError",  # builtins.ConnectionError + subclasses
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "ConnectionRefusedError",
+        "ReadTimeout",  # httpx
+        "ConnectTimeout",
+        "ConnectError",
+        "RemoteProtocolError",
+        "ProtocolError",
+    }
+)
+
+
 def _is_retryable(exc: Exception) -> bool:
+    # 1. Structured: HTTP-status-bearing exceptions.  Cheapest and most
+    #    reliable signal across SDKs.
     for attr in ("status_code", "status", "http_status", "code"):
         code = getattr(exc, attr, None)
         if isinstance(code, int) and (code == 429 or 500 <= code < 600):
             return True
+    # 2. Structured: known transient class names (provider-SDK agnostic).
+    #    Walk the MRO so subclasses (``ConnectionResetError`` →
+    #    ``ConnectionError``) match without per-class enumeration.
+    for cls in type(exc).__mro__:
+        if cls.__name__ in _RETRYABLE_EXC_CLASSES:
+            return True
+    # 3. Last-resort string scan.  Kept for SDKs that wrap upstream
+    #    errors as plain ``Exception`` / ``RuntimeError`` with the
+    #    transient signal only in the message.
     s = str(exc).lower()
     patterns = (
         "rate limit",
@@ -97,7 +151,7 @@ _RETRY_WARN = "Executor: transient error on attempt {attempt}/{total} ({exc_type
 class Executor:
     """Thin, stateless execution layer over a provider.
 
-    LazyAgent builds on top of this — don't use directly unless you need
+    Agent / LLMEngine build on top of this — don't use directly unless you need
     raw provider access.
     """
 
@@ -123,6 +177,22 @@ class Executor:
     def model(self) -> str:
         return self._provider.model
 
+    def _should_retry(self, exc: BaseException) -> bool:
+        """Consult the provider's ``is_retryable`` hook, then fall back.
+
+        The provider's classifier wins when it returns a bool; ``None`` means
+        "no opinion" and hands control to the generic heuristic.  This lets
+        provider adapters (e.g. a Bedrock subclass that inspects structured
+        throttling codes) express retry policy without having to patch the
+        Executor.
+        """
+        verdict = self._provider.is_retryable(exc)
+        if verdict is True:
+            return True
+        if verdict is False:
+            return False
+        return _is_retryable(exc)
+
     # ------------------------------------------------------------------
     # Sync
     # ------------------------------------------------------------------
@@ -133,7 +203,7 @@ class Executor:
             try:
                 return self._provider.complete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not _is_retryable(exc):
+                if attempt >= self._max_retries or not self._should_retry(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
                 delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
@@ -165,7 +235,7 @@ class Executor:
             try:
                 return await self._provider.acomplete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not _is_retryable(exc):
+                if attempt >= self._max_retries or not self._should_retry(exc):
                     raise
                 # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
                 delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)

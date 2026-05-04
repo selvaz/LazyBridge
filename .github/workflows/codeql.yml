@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Static analysis on every push and PR plus a weekly scheduled scan
+# so a vulnerability published in a transitive dep after the last PR
+# still surfaces.  Audit M-J.
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Mondays 03:17 UTC — chosen off the hour so it doesn't pile up
+    # with everyone else's "midnight" cron jobs on the GitHub runners.
+    - cron: "17 3 * * 1"
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # ``security-and-quality`` is the broadest GitHub-curated
+          # query suite for SAST.  Override to ``security-extended``
+          # if quality false-positives become noisy.
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

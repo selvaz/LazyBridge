@@ -1,0 +1,203 @@
+:root {
+  --bg: #f7f8f5;
+  --surface: #ffffff;
+  --text: #111827;
+  --muted: #5f6b5f;
+  --border: #d7dccf;
+  --soft-border: #e7eadf;
+  --code-bg: #eef1e8;
+  --pre-bg: #111827;
+  --pre-text: #f9fafb;
+  --accent: #0f766e;
+  --accent-dark: #134e4a;
+  --accent-soft: #e6f4f1;
+  --shadow: 0 22px 62px rgba(17, 24, 39, 0.10);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.09), transparent 38%),
+    var(--bg);
+  color: var(--text);
+  font-family: "Aptos", "Segoe UI", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+  line-height: 1.62;
+}
+
+.report-shell {
+  max-width: 1120px;
+  margin: 38px auto;
+  padding: 58px 66px 74px;
+  background: var(--surface);
+  border: 1px solid var(--soft-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.markdown-body { font-size: 16px; }
+.markdown-body > :first-child { margin-top: 0; }
+
+.markdown-body h1 {
+  margin: 0 0 28px;
+  padding: 0 0 18px;
+  color: #0f172a;
+  font-size: 2.35em;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  border-bottom: 3px solid var(--accent);
+}
+
+.markdown-body h2 {
+  margin-top: 42px;
+  margin-bottom: 18px;
+  padding-left: 14px;
+  color: #16201f;
+  font-size: 1.45em;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+  border-left: 5px solid var(--accent);
+}
+
+.markdown-body h3 {
+  margin-top: 28px;
+  margin-bottom: 10px;
+  color: var(--accent-dark);
+  font-size: 1.12em;
+  font-weight: 760;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body table,
+.markdown-body pre,
+.markdown-body blockquote {
+  margin-top: 0;
+  margin-bottom: 17px;
+}
+
+.markdown-body p,
+.markdown-body li { color: #26312f; }
+
+.markdown-body a {
+  color: var(--accent);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body strong { color: #0f172a; font-weight: 760; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.65em; }
+
+.markdown-body blockquote {
+  padding: 16px 18px;
+  color: #24423e;
+  background: var(--accent-soft);
+  border: 1px solid #b8ddd5;
+  border-left: 5px solid var(--accent);
+  border-radius: 12px;
+}
+
+.markdown-body code {
+  padding: 0.2em 0.42em;
+  font-size: 85%;
+  color: var(--accent-dark);
+  background: var(--code-bg);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown-body pre {
+  padding: 18px;
+  overflow: auto;
+  color: var(--pre-text);
+  background: var(--pre-bg);
+  border-radius: 12px;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  white-space: pre;
+}
+
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 9px 14px;
+  text-align: right;
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body th:first-child,
+.markdown-body td:first-child { text-align: left; }
+
+.markdown-body th {
+  color: #0f172a;
+  font-weight: 780;
+  background: #edf4ef;
+}
+
+.markdown-body tr:nth-child(even) td { background: #fbfcf8; }
+
+.markdown-body img {
+  display: block;
+  max-width: 100%;
+  margin: 24px auto 32px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(17, 24, 39, 0.08);
+}
+
+.markdown-body figure {
+  margin: 24px 0 32px;
+  text-align: center;
+}
+
+.markdown-body figcaption {
+  margin-top: 10px;
+  font-size: 0.87em;
+  color: var(--muted);
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body hr {
+  height: 1px;
+  margin: 32px 0;
+  background: var(--border);
+  border: 0;
+}
+
+@media print {
+  body { background: #ffffff; }
+  .report-shell {
+    margin: 0;
+    max-width: none;
+    border: 0;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .report-shell {
+    margin: 0;
+    padding: 32px 20px 48px;
+    border-radius: 0;
+  }
+  .markdown-body h1 { font-size: 1.95em; }
+}

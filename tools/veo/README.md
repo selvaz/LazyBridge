@@ -33,15 +33,12 @@ prompt / image(s)
 
 ```python
 from lazybridge.tools.veo import veo_tool
-from lazybridge import LazyAgent
+from lazybridge import Agent
 
 tool  = veo_tool()
-agent = LazyAgent("google", model="gemini-2.5-pro")
-resp  = agent.loop(
-    "Generate an 8-second cinematic drone shot of the Grand Canyon at sunset.",
-    tools=[tool],
-)
-print(resp)
+agent = Agent("google/gemini-2.5-pro", tools=[tool])
+resp  = agent("Generate an 8-second cinematic drone shot of the Grand Canyon at sunset.")
+print(resp.text())
 ```
 
 Direct invocation (no agent):
@@ -63,7 +60,7 @@ print(result["output_path"])
 
 ### `veo_tool(...)`
 
-Factory that creates a `LazyTool` wrapping the Veo API.
+Factory that creates a `Tool` wrapping the Veo API.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -73,7 +70,7 @@ Factory that creates a `LazyTool` wrapping the Veo API.
 | `poll_interval_seconds` | `int` | `10` | Seconds between operation polls |
 | `timeout_seconds` | `int` | `900` | Max wait time (default 15 min) |
 
-Returns a `LazyTool` named `generate_veo_video`.
+Returns a `Tool` named `generate_veo_video`.
 
 ---
 

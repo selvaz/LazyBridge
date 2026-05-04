@@ -1,45 +1,20 @@
-"""Unit tests for guardrails — input/output validation."""
+"""Tests for the v1.0 guardrails."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import asyncio
 
 import pytest
 
-from lazybridge.core.types import CompletionResponse, UsageStats
-from lazybridge.guardrails import ContentGuard, GuardAction, GuardChain, GuardError
+from lazybridge.guardrails import (
+    ContentGuard,
+    Guard,
+    GuardAction,
+    GuardChain,
+    GuardError,
+)
 
-
-def _make_agent():
-    from lazybridge.lazy_agent import LazyAgent
-
-    with patch("lazybridge.core.executor.Executor.__init__", return_value=None):
-        agent = LazyAgent.__new__(LazyAgent)
-    mock_exec = MagicMock()
-    mock_exec.provider.get_default_max_tokens.return_value = 4096
-    mock_exec.model = "test-model"
-    agent._executor = mock_exec
-    import uuid
-
-    agent.id = str(uuid.uuid4())
-    agent.name = "test"
-    agent.description = None
-    agent.system = None
-    agent.context = None
-    agent.tools = []
-    agent.native_tools = []
-    agent.output_schema = None
-    agent._last_output = None
-    agent._last_response = None
-    agent.session = None
-    agent.memory = None
-    agent._log = None
-    return agent
-
-
-# ---------------------------------------------------------------------------
-# GuardAction
-# ---------------------------------------------------------------------------
+# ── GuardAction factories ─────────────────────────────────────────────────────
 
 
 def test_guard_action_allow():
@@ -49,197 +24,113 @@ def test_guard_action_allow():
 
 
 def test_guard_action_block():
-    a = GuardAction.block("bad content")
+    a = GuardAction.block("blocked")
     assert a.allowed is False
-    assert a.message == "bad content"
+    assert a.message == "blocked"
 
 
 def test_guard_action_modify():
-    a = GuardAction.modify("cleaned text", message="PII removed")
+    a = GuardAction.modify("clean text", message="sanitized")
     assert a.allowed is True
-    assert a.modified_text == "cleaned text"
+    assert a.modified_text == "clean text"
+    assert a.message == "sanitized"
 
 
-# ---------------------------------------------------------------------------
-# ContentGuard
-# ---------------------------------------------------------------------------
+def test_guard_action_metadata():
+    a = GuardAction.allow(score=0.9)
+    assert a.metadata["score"] == 0.9
 
 
-def test_content_guard_input_blocks():
-    def block_bad(text: str) -> GuardAction:
-        if "blocked" in text:
-            return GuardAction.block("contains blocked word")
-        return GuardAction.allow()
-
-    guard = ContentGuard(input_fn=block_bad)
-    agent = _make_agent()
-    agent._executor.execute.return_value = CompletionResponse(content="ok", usage=UsageStats())
-
-    with pytest.raises(GuardError, match="blocked word"):
-        agent.chat("this is blocked content", guard=guard)
+# ── Guard base (default allows everything) ────────────────────────────────────
 
 
-def test_content_guard_output_blocks():
-    def block_toxic(text: str) -> GuardAction:
-        if "toxic" in text:
-            return GuardAction.block("toxic output detected")
-        return GuardAction.allow()
-
-    guard = ContentGuard(output_fn=block_toxic)
-    agent = _make_agent()
-    agent._executor.execute.return_value = CompletionResponse(content="this is toxic output", usage=UsageStats())
-
-    with pytest.raises(GuardError, match="toxic output"):
-        agent.chat("hello", guard=guard)
+def test_base_guard_allows_by_default():
+    g = Guard()
+    assert g.check_input("anything").allowed is True
+    assert g.check_output("anything").allowed is True
 
 
-def test_content_guard_allows_clean_content():
-    def check(text: str) -> GuardAction:
-        if "bad" in text:
-            return GuardAction.block("bad")
-        return GuardAction.allow()
-
-    guard = ContentGuard(input_fn=check, output_fn=check)
-    agent = _make_agent()
-    agent._executor.execute.return_value = CompletionResponse(content="clean response", usage=UsageStats())
-
-    resp = agent.chat("clean input", guard=guard)
-    assert resp.content == "clean response"
+def test_base_guard_async():
+    g = Guard()
+    assert asyncio.run(g.acheck_input("x")).allowed is True
+    assert asyncio.run(g.acheck_output("x")).allowed is True
 
 
-def test_content_guard_modifies_input():
-    def redact(text: str) -> GuardAction:
-        if "secret" in text:
-            return GuardAction.modify(text.replace("secret", "[REDACTED]"))
-        return GuardAction.allow()
-
-    guard = ContentGuard(input_fn=redact)
-    agent = _make_agent()
-    agent._executor.execute.return_value = CompletionResponse(content="ok", usage=UsageStats())
-
-    agent.chat("my secret password", guard=guard)
-    call_args = agent._executor.execute.call_args[0][0]
-    assert "[REDACTED]" in call_args.messages[0].content
+# ── ContentGuard ──────────────────────────────────────────────────────────────
 
 
-# ---------------------------------------------------------------------------
-# GuardChain
-# ---------------------------------------------------------------------------
+def test_content_guard_input_allow():
+    g = ContentGuard(input_fn=lambda t: GuardAction.allow())
+    assert g.check_input("hello").allowed is True
 
 
-def test_guard_chain_first_block_wins():
-    g1 = ContentGuard(input_fn=lambda t: GuardAction.allow())
-    g2 = ContentGuard(input_fn=lambda t: GuardAction.block("g2 blocked"))
-    g3 = ContentGuard(input_fn=lambda t: GuardAction.block("g3 blocked"))
-
-    chain = GuardChain([g1, g2, g3])
-    action = chain.check_input("test")
+def test_content_guard_input_block():
+    g = ContentGuard(input_fn=lambda t: GuardAction.block("no"))
+    action = g.check_input("bad")
     assert not action.allowed
-    assert action.message == "g2 blocked"
+    assert action.message == "no"
 
 
-def test_guard_chain_all_allow():
-    g1 = ContentGuard(input_fn=lambda t: GuardAction.allow())
-    g2 = ContentGuard(input_fn=lambda t: GuardAction.allow())
+def test_content_guard_output_modify():
+    g = ContentGuard(output_fn=lambda t: GuardAction.modify(t.replace("bad", "***")))
+    action = g.check_output("bad word")
+    assert action.allowed
+    assert action.modified_text == "*** word"
 
-    chain = GuardChain([g1, g2])
-    action = chain.check_input("test")
+
+def test_content_guard_no_fn_allows():
+    g = ContentGuard()
+    assert g.check_input("x").allowed is True
+    assert g.check_output("x").allowed is True
+
+
+# ── GuardChain ────────────────────────────────────────────────────────────────
+
+
+def test_chain_first_block_wins():
+    chain = GuardChain(
+        ContentGuard(input_fn=lambda t: GuardAction.block("first")),
+        ContentGuard(input_fn=lambda t: GuardAction.block("second")),
+    )
+    action = chain.check_input("x")
+    assert not action.allowed
+    assert action.message == "first"
+
+
+def test_chain_all_allow():
+    chain = GuardChain(
+        ContentGuard(input_fn=lambda t: GuardAction.allow()),
+        ContentGuard(input_fn=lambda t: GuardAction.allow()),
+    )
+    assert chain.check_input("x").allowed is True
+
+
+def test_chain_modification_propagates():
+    chain = GuardChain(
+        ContentGuard(input_fn=lambda t: GuardAction.modify(t.upper())),
+        ContentGuard(input_fn=lambda t: GuardAction.allow()),
+    )
+    # Modified text propagates to next guard but final result is allow
+    action = chain.check_input("hello")
     assert action.allowed
 
 
-# ---------------------------------------------------------------------------
-# Guard on loop()
-# ---------------------------------------------------------------------------
-
-
-def test_guard_blocks_loop_input():
-    guard = ContentGuard(input_fn=lambda t: GuardAction.block("nope"))
-    agent = _make_agent()
-
-    with pytest.raises(GuardError, match="nope"):
-        agent.loop("bad task", guard=guard)
-
-
-def test_guard_blocks_loop_output():
-    def block_output(text: str) -> GuardAction:
-        if "unsafe" in text:
-            return GuardAction.block("unsafe output")
-        return GuardAction.allow()
-
-    guard = ContentGuard(output_fn=block_output)
-    agent = _make_agent()
-    agent._executor.execute.return_value = CompletionResponse(content="unsafe result", usage=UsageStats())
-
-    with pytest.raises(GuardError, match="unsafe output"):
-        agent.loop("task", guard=guard)
-
-
-# ---------------------------------------------------------------------------
-# GuardError
-# ---------------------------------------------------------------------------
-
-
-def test_guard_error_has_action():
-    action = GuardAction.block("test reason", score=0.95)
-    err = GuardError(action)
-    assert err.action is action
-    assert "test reason" in str(err)
-    assert err.action.metadata["score"] == 0.95
-
-
-# ---------------------------------------------------------------------------
-# Async guards
-# ---------------------------------------------------------------------------
-
-
-async def test_async_guard_input_blocks():
-    from unittest.mock import AsyncMock
-
-    guard = ContentGuard(input_fn=lambda t: GuardAction.block("nope") if "bad" in t else GuardAction.allow())
-    agent = _make_agent()
-    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="ok", usage=UsageStats()))
-
-    with pytest.raises(GuardError, match="nope"):
-        await agent.achat("bad input", guard=guard)
-
-
-async def test_async_guard_output_blocks():
-    from unittest.mock import AsyncMock
-
-    guard = ContentGuard(output_fn=lambda t: GuardAction.block("toxic") if "toxic" in t else GuardAction.allow())
-    agent = _make_agent()
-    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="toxic output", usage=UsageStats()))
-
-    with pytest.raises(GuardError, match="toxic"):
-        await agent.achat("hello", guard=guard)
-
-
-async def test_async_guard_allows_clean():
-    from unittest.mock import AsyncMock
-
-    guard = ContentGuard(
-        input_fn=lambda t: GuardAction.allow(),
-        output_fn=lambda t: GuardAction.allow(),
+def test_chain_async():
+    chain = GuardChain(
+        ContentGuard(input_fn=lambda t: GuardAction.allow()),
     )
-    agent = _make_agent()
-    agent._executor.aexecute = AsyncMock(return_value=CompletionResponse(content="clean", usage=UsageStats()))
-
-    resp = await agent.achat("hello", guard=guard)
-    assert resp.content == "clean"
+    action = asyncio.run(chain.acheck_input("x"))
+    assert action.allowed
 
 
-async def test_async_content_guard_with_async_fn():
-    """ContentGuard supports async check functions via acheck_input."""
+def test_chain_empty():
+    chain = GuardChain()
+    assert chain.check_input("x").allowed is True
 
-    async def async_check(text: str) -> GuardAction:
-        if "secret" in text:
-            return GuardAction.block("async blocked")
-        return GuardAction.allow()
 
-    guard = ContentGuard(input_fn=async_check)
-    action = await guard.acheck_input("this has a secret")
-    assert not action.allowed
-    assert action.message == "async blocked"
+# ── GuardError ────────────────────────────────────────────────────────────────
 
-    action2 = await guard.acheck_input("clean text")
-    assert action2.allowed
+
+def test_guard_error_is_exception():
+    with pytest.raises(GuardError):
+        raise GuardError("test guard error")

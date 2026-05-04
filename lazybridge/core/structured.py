@@ -11,11 +11,63 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, get_origin
 
 from lazybridge.core.types import Message
 
 _logger = logging.getLogger(__name__)
+
+
+def validate_payload_against_output_type(payload: Any, output_type: Any) -> Any:
+    """Validate / coerce ``payload`` to match ``output_type``.
+
+    Supports three cases that ``LLMEngine._loop``'s naive
+    ``isinstance(output_type, type)`` check missed:
+
+    * plain Pydantic model classes (existing behaviour) — passed through
+      if already an instance, otherwise validated via ``model_validate``;
+    * generic collection types like ``list[MyModel]`` /
+      ``dict[str, MyModel]`` — validated via
+      ``pydantic.TypeAdapter(output_type).validate_python(...)``;
+    * ``str`` output type — returned as-is (no validation).
+
+    Raises on mismatch so ``Agent._validate_and_retry`` can feed the
+    error back to the model as retry context.
+    """
+    if output_type is str or output_type is Any:
+        return payload
+
+    # Lazy import — keeps this module light when Pydantic is not present.
+    from pydantic import BaseModel, TypeAdapter
+
+    # Bare Pydantic model class.
+    if isinstance(output_type, type) and issubclass(output_type, BaseModel):
+        if isinstance(payload, output_type):
+            return payload
+        if isinstance(payload, dict):
+            return output_type.model_validate(payload)
+        if isinstance(payload, str):
+            return output_type.model_validate_json(payload)
+        # Last resort: let Pydantic try to coerce.
+        return output_type.model_validate(payload)
+
+    # Generic type (``list[Model]``, ``dict[str, Model]``, ``Optional[X]``,
+    # unions).  TypeAdapter handles everything Pydantic understands.
+    origin = get_origin(output_type)
+    if origin is not None or isinstance(output_type, type):
+        try:
+            adapter = TypeAdapter(output_type)
+        except Exception:
+            # Couldn't build an adapter (weirdly shaped output_type) —
+            # return the payload verbatim rather than raise here; the
+            # caller's validator can still reject it.
+            return payload
+        if isinstance(payload, str):
+            return adapter.validate_json(payload)
+        return adapter.validate_python(payload)
+
+    # Fallthrough: unknown output shape, leave payload alone.
+    return payload
 
 
 class StructuredOutputError(ValueError):
@@ -38,8 +90,12 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
     Recursively sets ``additionalProperties: false`` on every object node,
     including those inside ``$defs`` / ``definitions`` (Pydantic nested models),
-    ``properties`` values, ``items``, and ``anyOf`` / ``allOf`` / ``oneOf``
-    sub-schemas.
+    ``properties`` values, ``items``, ``additionalProperties`` (when a schema
+    dict, not a bool), ``prefixItems`` (JSON Schema 2020-12 tuple arrays), and
+    ``anyOf`` / ``allOf`` / ``oneOf`` sub-schemas.
+
+    ``$ref`` nodes are not resolved inline — the definitions they point to in
+    ``$defs`` are already recursively normalized when that key is encountered.
     """
     if not isinstance(schema, dict):
         return schema
@@ -57,13 +113,12 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 def_name: normalize_json_schema(def_schema) if isinstance(def_schema, dict) else def_schema
                 for def_name, def_schema in value.items()
             }
-        elif key == "items" and isinstance(value, dict):
+        elif key in ("items", "additionalProperties") and isinstance(value, dict):
             normalized[key] = normalize_json_schema(value)
-        elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
-            normalized[key] = [
-                normalize_json_schema(sub) if isinstance(sub, dict) else sub
-                for sub in value
-            ]
+        elif (key == "prefixItems" and isinstance(value, list)) or (
+            key in ("anyOf", "allOf", "oneOf") and isinstance(value, list)
+        ):
+            normalized[key] = [normalize_json_schema(sub) if isinstance(sub, dict) else sub for sub in value]
         else:
             normalized[key] = value
 
@@ -86,7 +141,7 @@ def _validate_schema(data: Any, schema: dict[str, Any]) -> str | None:
     If the optional ``jsonschema`` library is installed, delegate to it
     for full Draft-2020 coverage — ``pattern``, ``minLength``, ``maximum``,
     ``format``, etc. are all enforced.  Otherwise we fall back to a
-    minimal subset validator (audit M9).
+    minimal subset validator.
 
     Fallback-validator supported keywords: ``type``, ``required``,
     ``enum``, ``additionalProperties``, ``properties`` (recursive),
@@ -251,11 +306,11 @@ def apply_structured_validation(
 
 
 def build_repair_messages(
-    original_messages: list[Message],
+    original_messages: list[Message | dict],
     invalid_content: str,
     schema: type | dict[str, Any],
     error: str,
-) -> list[Message]:
+) -> list[Message | dict]:
     """Build a message list that asks the model to fix its invalid output.
 
     Appends a user message containing:

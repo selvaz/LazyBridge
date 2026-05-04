@@ -68,14 +68,14 @@ _logger = logging.getLogger(__name__)
 # Ordered longest-prefix first so substring matching in _compute_cost is unambiguous.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     # Gemini 3 series (all preview as of 2026-04)
-    "gemini-3.1-flash-lite": (0.10, 0.40),   # gemini-3.1-flash-lite-preview
-    "gemini-3.1-pro": (2.00, 12.0),           # gemini-3.1-pro-preview ($2/$12 >200k tiered; use upper bound)
-    "gemini-3-flash": (0.50, 3.00),           # gemini-3-flash-preview
+    "gemini-3.1-flash-lite": (0.25, 1.50),  # gemini-3.1-flash-lite-preview
+    "gemini-3.1-pro": (2.00, 12.0),  # gemini-3.1-pro-preview; ≤200K tier — >200K billed at $4/$18
+    "gemini-3-flash": (0.50, 3.00),  # gemini-3-flash-preview
     # Gemini 2.5 series (GA)
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-2.5-pro": (2.00, 12.0),
-    # Gemini 2.0 series (GA)
+    "gemini-2.5-pro": (1.25, 10.0),  # ≤200K tier — >200K billed at $2.50/$15
+    # Gemini 2.0 series (deprecated June 1 2026 — kept for compatibility)
     "gemini-2.0-flash": (0.075, 0.30),
     # Gemini 1.5 series (legacy)
     "gemini-1.5-pro": (1.25, 5.0),
@@ -111,21 +111,21 @@ class GoogleProvider(BaseProvider):
 
     default_model = "gemini-3.1-pro-preview"
 
-    # Tier aliases (audit F2). Gemini 3 preview series used where available.
+    # Tier aliases.  Gemini 3 preview series used where available.
     _TIER_ALIASES = {
         "top": "gemini-3.1-pro-preview",
-        "expensive": "gemini-3.1-pro-preview",
+        "expensive": "gemini-2.5-pro",  # stable GA, distinct from preview top
         "medium": "gemini-3-flash-preview",
         "cheap": "gemini-3.1-flash-lite-preview",
-        "super_cheap": "gemini-2.0-flash",
+        "super_cheap": "gemini-2.5-flash-lite",  # gemini-2.0-flash deprecated June 1 2026
     }
     _FALLBACKS = {
-        "gemini-3.1-pro-preview": ["gemini-3-flash-preview", "gemini-2.5-pro"],
-        "gemini-3-flash-preview": ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"],
-        "gemini-3.1-flash-lite-preview": ["gemini-2.0-flash"],
+        "gemini-3.1-pro-preview": ["gemini-2.5-pro", "gemini-3-flash-preview"],
         "gemini-2.5-pro": ["gemini-2.5-flash"],
-        "gemini-2.5-flash": ["gemini-2.0-flash"],
-        "gemini-2.0-flash": ["gemini-1.5-flash"],
+        "gemini-3-flash-preview": ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"],
+        "gemini-3.1-flash-lite-preview": ["gemini-2.5-flash-lite"],
+        "gemini-2.5-flash": ["gemini-2.5-flash-lite"],
+        "gemini-2.0-flash": ["gemini-1.5-flash"],  # deprecated fallback chain
     }
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
@@ -443,9 +443,9 @@ class GoogleProvider(BaseProvider):
         google_maps_active = NativeTool.GOOGLE_MAPS in native
 
         # Fail fast on the grounding+structured-output conflict BEFORE we
-        # build tools / call into the SDK (audit M6).  The Gemini API
-        # rejects this combination with 400 INVALID_ARGUMENT, and the
-        # user-facing error is clearer raised here.
+        # build tools / call into the SDK.  The Gemini API rejects this
+        # combination with 400 INVALID_ARGUMENT; the user-facing error
+        # is clearer raised here.
         if request.structured_output and google_search_active:
             raise ValueError(
                 "Gemini cannot combine google_search grounding with structured "
@@ -455,11 +455,32 @@ class GoogleProvider(BaseProvider):
             )
 
         tools = self._build_tools_config(request)
+        func_decls = self._build_function_declarations(request)
+        has_native_search = google_search_active
+        has_custom_tools = bool(func_decls)
+
         if tools:
             kwargs["tools"] = tools
             kwargs["automatic_function_calling"] = _gtypes.AutomaticFunctionCallingConfig(
                 disable=True  # We handle tool calls ourselves for unified output
             )
+
+        # When both server-side (grounding) and client-side (function_declarations)
+        # tools are present, Google requires tool_config with
+        # include_server_side_tool_invocations=True — otherwise 400 INVALID_ARGUMENT.
+        if has_native_search and has_custom_tools:
+            try:
+                kwargs["tool_config"] = _gtypes.ToolConfig(
+                    function_calling_config=_gtypes.FunctionCallingConfig(
+                        include_server_side_tool_invocations=True,
+                    )
+                )
+            except Exception:
+                _logger.warning(
+                    "Google SDK does not support FunctionCallingConfig"
+                    ".include_server_side_tool_invocations — skipping tool_config."
+                    " Mixed native+custom tools may fail with 400 INVALID_ARGUMENT."
+                )
 
         # Google Maps: lat/lng goes in ToolConfig.retrieval_config, not inside GoogleMaps()
         if google_maps_active:

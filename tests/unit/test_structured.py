@@ -110,7 +110,11 @@ def test_parse_missing_required_raises():
         "properties": {"name": {"type": "string"}},
         "required": ["name"],
     }
-    with pytest.raises(StructuredOutputError, match="missing required"):
+    # Match either format: the in-tree subset validator says "missing
+    # required fields: ..."; jsonschema says "'name' is a required
+    # property".  Both indicate the same failure; the test must not
+    # break depending on whether jsonschema happens to be installed.
+    with pytest.raises(StructuredOutputError, match=r"missing required|is a required property"):
         parse_structured_output('{"other": "value"}', schema)
 
 
