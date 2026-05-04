@@ -1,7 +1,6 @@
-"""Architectural guard: core never imports from ext / external_tools /
-external_pipelines.
+"""Architectural guard: core never imports from ext / external_tools.
 
-Per the core-vs-ext policy (``docs/guides/core-vs-ext.md``), the three
+Per the core-vs-ext policy (``docs/guides/core-vs-ext.md``), the
 non-core subtrees depend on core but the reverse must never happen —
 otherwise core stability becomes hostage to extension velocity, and
 circular imports become possible.
@@ -19,7 +18,7 @@ import pathlib
 import pytest
 
 CORE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "lazybridge"
-NON_CORE_SUBTREES = ("ext", "external_tools", "external_pipelines")
+NON_CORE_SUBTREES = ("ext", "external_tools")
 FORBIDDEN_PREFIXES = tuple(f"lazybridge.{name}" for name in NON_CORE_SUBTREES)
 
 
@@ -65,9 +64,9 @@ def _imports_from_extensions(path: pathlib.Path) -> list[tuple[int, str]]:
 
 
 def test_core_never_imports_from_extension_subtrees() -> None:
-    """Core (``lazybridge/*`` minus ext/external_tools/external_pipelines)
-    must not import from any of those subtrees — top-level, function-local,
-    or inside ``TYPE_CHECKING`` doesn't matter; we forbid the syntax.
+    """Core (``lazybridge/*`` minus ext/external_tools) must not import
+    from any of those subtrees — top-level, function-local, or inside
+    ``TYPE_CHECKING`` doesn't matter; we forbid the syntax.
     """
     files = _core_python_files()
     assert files, "expected at least one core .py file to scan"
@@ -80,8 +79,8 @@ def test_core_never_imports_from_extension_subtrees() -> None:
     if failures:
         msg = (
             "Core modules must not import from lazybridge.ext / "
-            "lazybridge.external_tools / lazybridge.external_pipelines "
-            "(see docs/guides/core-vs-ext.md, rule #1). Found:\n" + "\n".join(failures)
+            "lazybridge.external_tools (see docs/guides/core-vs-ext.md, "
+            "rule #1). Found:\n" + "\n".join(failures)
         )
         pytest.fail(msg)
 

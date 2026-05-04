@@ -12,8 +12,7 @@ is*, not by stability:
 |------------------------------------|----------------------------------------------------------|
 | `lazybridge.*` (top-level)         | Core runtime — `Agent`, `Plan`, `Tool`, engines, providers, memory, store, session, exporters, guardrails |
 | `lazybridge.ext.*`                 | Framework extensions — `mcp`, `otel`, `hil`, `evals`, `gateway`, `planners`, `viz` |
-| `lazybridge.external_tools.*`      | Domain tool packages — `read_docs`, `doc_skills`, `data_downloader`, `stat_runtime`, `veo`, `report_builder` |
-| `lazybridge.external_pipelines.*`  | Pre-wired agent compositions — `quant_agent` |
+| `lazybridge.external_tools.*`      | Domain tool packages — `read_docs`, `doc_skills`, `data_downloader`, `stat_runtime`, `report_builder` |
 
 The single stability marker lives on the top-level package:
 
@@ -58,27 +57,20 @@ returns `list[Tool]`.
 - `doc_skills` — BM25 local doc skill runtime
 - `data_downloader` — Yahoo / FRED / ECB ingestion
 - `stat_runtime` — econometrics & time-series sandbox
-- `veo` — Google Veo video generation
 - `report_builder` — HTML/PDF report assembler
-
-### Domain pipelines (`lazybridge.external_pipelines.*`)
-Pre-wired agent compositions that consume the core runtime + a few
-domain tool packages.
-
-- `quant_agent` — quant analysis agent over `data_downloader` + `stat_runtime`
 
 ## Architectural rules
 
-1. **Core never imports from `ext/`, `external_tools/`, or
-   `external_pipelines/`.** The reverse direction is fine.
-2. **`ext/`, `external_tools/`, `external_pipelines/` only import from
-   public `lazybridge.*`** — never from `lazybridge.core.*` or other
-   private submodules. This is what keeps the boundary inspectable.
+1. **Core never imports from `ext/` or `external_tools/`.** The reverse
+   direction is fine.
+2. **`ext/` and `external_tools/` only import from public
+   `lazybridge.*`** — never from `lazybridge.core.*` or other private
+   submodules. This is what keeps the boundary inspectable.
 3. **Top-level `lazybridge` `__init__.py` is the public API surface.**
    Anything not re-exported there is private.
 4. **Extensions never appear in the top-level `lazybridge` namespace.**
    Always accessed as `from lazybridge.ext.X import …` (or
-   `lazybridge.external_tools.X`, `lazybridge.external_pipelines.X`).
+   `lazybridge.external_tools.X`).
 
 The boundary check (`tools/check_ext_imports.py`, run in CI) enforces
 rules 1–2 with a static AST scan.

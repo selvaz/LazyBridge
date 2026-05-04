@@ -4,9 +4,9 @@ import from public lazybridge.* — never from lazybridge.core.*.
 The rule is one half of the core-vs-ext policy
 (``docs/guides/core-vs-ext.md``):
 
-1. **Core never imports from ext / external_tools / external_pipelines.**
+1. **Core never imports from ext / external_tools.**
    Enforced by ``tests/unit/test_core_ext_boundary.py``.
-2. **ext / external_tools / external_pipelines never import from
+2. **ext / external_tools never import from
    internal core submodules** (``lazybridge.core.*``).
    Enforced here.
 
@@ -27,7 +27,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 PKG = REPO / "lazybridge"
 
 # Subtrees subject to the "no internal imports" rule.
-GUARDED_SUBTREES = ("ext", "external_tools", "external_pipelines")
+GUARDED_SUBTREES = ("ext", "external_tools")
 
 # Forbidden import prefixes when reaching from a guarded subtree.
 FORBIDDEN_PREFIXES = ("lazybridge.core",)
@@ -74,7 +74,7 @@ def main() -> int:
 
     if failures:
         print(
-            "Import boundary violation: ext / external_tools / external_pipelines\n"
+            "Import boundary violation: ext / external_tools\n"
             "may not import from internal lazybridge.core.* submodules.\n"
             "Use the public API (``from lazybridge import X``) instead.\n"
             "See docs/guides/core-vs-ext.md, rule #2.\n\n"
@@ -84,7 +84,7 @@ def main() -> int:
         print("\n".join(failures), file=sys.stderr)
         return 1
 
-    print("OK: ext / external_tools / external_pipelines respect the import boundary.")
+    print("OK: ext / external_tools respect the import boundary.")
     return 0
 
 

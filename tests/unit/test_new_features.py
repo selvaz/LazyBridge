@@ -378,24 +378,3 @@ class TestDocSkillsImport:
 
         t = skill_builder_tool(name="my_builder")
         assert t.name == "my_builder"
-
-
-# =============================================================================
-# ext/ veo API migration (import smoke test — no google-genai needed)
-# =============================================================================
-
-
-class TestVeoImport:
-    def test_veo_module_imports_without_genai(self):
-        import importlib
-
-        mod = importlib.import_module("lazybridge.external_tools.veo.veo")
-        assert hasattr(mod, "veo_tool")
-        assert hasattr(mod, "VeoError")
-
-    def test_veo_tool_raises_import_error_without_genai(self):
-        from lazybridge.external_tools.veo.veo import _GENAI_AVAILABLE, _require_genai
-
-        if not _GENAI_AVAILABLE:
-            with pytest.raises(ImportError, match="google-genai"):
-                _require_genai()

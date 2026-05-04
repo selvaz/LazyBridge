@@ -4,13 +4,9 @@ Pre-1.0 (0.7.x): everything in lazybridge is ``alpha``. Interfaces may
 change between any two releases. Pin exact versions in production.
 
 This sub-package holds **framework-level** extensions — code that
-augments the agent runtime itself. Domain tool kits and pre-wired agent
-pipelines live elsewhere:
-
-- ``lazybridge.external_tools``     — domain tool packages (read_docs,
-  doc_skills, data_downloader, stat_runtime, veo, report_builder)
-- ``lazybridge.external_pipelines`` — pre-wired agent compositions
-  (quant_agent)
+augments the agent runtime itself. Domain tool kits live alongside in
+``lazybridge.external_tools``: read_docs, doc_skills, data_downloader,
+stat_runtime, report_builder.
 
 Available framework extensions::
 
