@@ -113,6 +113,7 @@ ignore = [
     "SIM108",  # ternary instead of if-else (readability)
     "B008",    # function call in default arg (Pydantic uses this pattern)
     "B905",    # zip() strict= (not always needed)
+    "RUF001",  # ambiguous unicode in string literals (en-dash is intentional)
     "RUF002",  # ambiguous unicode in docstrings (en-dash is intentional)
     "RUF003",  # ambiguous unicode in comments
     "RUF005",  # iterable unpacking vs concatenation (readability)

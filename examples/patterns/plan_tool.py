@@ -47,10 +47,10 @@ def main() -> None:
     planner = make_planner([research, math, writer], verbose=True)
 
     queries = [
-        "What does FAANG stand for?",                                    # trivial
-        "What is 17 * 23 + 5?",                                          # one agent
+        "What does FAANG stand for?",  # trivial
+        "What is 17 * 23 + 5?",  # one agent
         "Research quantum networking and write a one-paragraph brief.",  # multi-step plan
-        "Look up the FAANG headcounts in parallel and write a summary.", # parallel band + N-branch synth
+        "Look up the FAANG headcounts in parallel and write a summary.",  # parallel band + N-branch synth
     ]
     for q in queries:
         print(f"\n>>> {q}")

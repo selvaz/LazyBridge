@@ -73,16 +73,16 @@ tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
 !!! note "API reference"
 
     # Three ways to turn a Python function into an LLM-callable Tool.
-    
+
     Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
          schema_llm: Any | None = None, strict: bool = False)
-    
+
     # Mode recap:
     #   "signature" — parse type hints + docstring (default). No LLM cost.
     #   "llm"       — call an LLM to infer schema from the function body
     #                 and docstring.  Needs schema_llm= (an Agent).
     #   "hybrid"    — signature first; LLM fills gaps for missing hints.
-    
+
     # Convenience APIs (no explicit Tool() call needed):
     wrap_tool(func_or_agent) -> Tool          # uniform wrapper
     build_tool_map(list_of_things) -> dict    # batch wrapping

@@ -1,6 +1,6 @@
 # Recipe: Human-in-the-loop
 
-**Tier:** Mid / Full  
+**Tier:** Mid / Full
 **Goal:** Pause the pipeline and ask a human to approve, redirect, or inspect before continuing.
 
 Two levels of involvement:

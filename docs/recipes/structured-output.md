@@ -1,6 +1,6 @@
 # Recipe: Structured output
 
-**Tier:** Basic  
+**Tier:** Basic
 **Goal:** Get a typed Pydantic model instance back instead of plain text.
 
 Pass `output=YourModel` to `Agent`. The returned `Envelope.payload` is a validated instance

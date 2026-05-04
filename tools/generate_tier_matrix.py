@@ -33,10 +33,10 @@ _TIER_ORDER = ["top", "expensive", "medium", "cheap", "super_cheap"]
 
 # Provider column order and header label.
 _PROVIDER_COLUMNS: list[tuple[str, type]] = [
-    ("`anthropic` / `claude`",    AnthropicProvider),
+    ("`anthropic` / `claude`", AnthropicProvider),
     ("`openai` / `chatgpt` / `gpt`", OpenAIProvider),
-    ("`google` / `gemini`",       GoogleProvider),
-    ("`deepseek`",                DeepSeekProvider),
+    ("`google` / `gemini`", GoogleProvider),
+    ("`deepseek`", DeepSeekProvider),
 ]
 
 
@@ -49,10 +49,7 @@ def render() -> str:
         for _label, cls in _PROVIDER_COLUMNS:
             model = cls._TIER_ALIASES.get(tier, "?")
             # Note cases where a tier shares a model with another tier.
-            duplicate_with = [
-                t for t in _TIER_ORDER
-                if t != tier and cls._TIER_ALIASES.get(t) == model
-            ]
+            duplicate_with = [t for t in _TIER_ORDER if t != tier and cls._TIER_ALIASES.get(t) == model]
             if duplicate_with:
                 cells.append(f"{model} *(same as {', '.join(duplicate_with)})*")
             else:

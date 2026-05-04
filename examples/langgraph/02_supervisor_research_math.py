@@ -73,10 +73,7 @@ def main() -> None:
     research_agent = Agent(
         engine=LLMEngine(
             "gpt-4o",
-            system=(
-                "You are a world class researcher with access to web search. "
-                "Do not do any math."
-            ),
+            system=("You are a world class researcher with access to web search. Do not do any math."),
         ),
         tools=[web_search],
         name="research_expert",
@@ -97,9 +94,7 @@ def main() -> None:
         verbose=True,
     )
 
-    result = supervisor(
-        "what's the combined headcount of the FAANG companies in 2024?"
-    )
+    result = supervisor("what's the combined headcount of the FAANG companies in 2024?")
     print("\nFinal answer:", result.text())
 
 

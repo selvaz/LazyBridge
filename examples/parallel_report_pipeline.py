@@ -20,7 +20,7 @@ because the framework now owns the bus / assembler / exporter machinery.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from lazybridge import Agent, Plan, Step
@@ -33,7 +33,6 @@ from lazybridge.external_tools.report_builder import (
     Provenance,
 )
 from lazybridge.external_tools.report_builder.fragments import ChartSpec, TableSpec
-
 
 OUTLINE = {
     "1.exec": "Executive Summary",
@@ -174,9 +173,7 @@ def _exec_summary(env: Envelope, *, bus: FragmentBus) -> Envelope:
                 "theme this quarter.  US hyperscalers accelerated; China's "
                 "industrial base extended its export lead in EVs despite "
                 "tariff headwinds; India's services sector benefited from "
-                "AI implementation work.  Coverage included: "
-                + ", ".join(headings or ["—"])
-                + "."
+                "AI implementation work.  Coverage included: " + ", ".join(headings or ["—"]) + "."
             ),
             provenance=Provenance(step_name="exec", agent_name="synthesiser", model="claude-sonnet-4-6"),
         )
@@ -199,7 +196,7 @@ def _export(env: Envelope, *, bus: FragmentBus, out_dir: Path, formats: list[str
     produced = bus.export(
         formats,  # type: ignore[arg-type]
         out_dir,
-        title="Daily Global Briefing — {}".format(datetime.now(timezone.utc).date().isoformat()),
+        title=f"Daily Global Briefing — {datetime.now(UTC).date().isoformat()}",
         theme="cosmo",
         backend=backend,  # type: ignore[arg-type]
     )

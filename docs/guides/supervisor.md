@@ -64,9 +64,9 @@ pipeline("AI policy brief")
         timeout: float | None = None,
         default: str | None = None,
     ) -> Engine
-    
+
     Usage: Agent(engine=SupervisorEngine(tools=[...], agents=[researcher]))
-    
+
     REPL commands:
       continue [optional text]        accept; return to caller
       retry <agent>: <feedback>       re-run a registered agent with feedback

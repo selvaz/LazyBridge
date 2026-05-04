@@ -57,11 +57,11 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
         schema_llm: Any | None = None,
         strict: bool = False,
     ) -> Tool
-    
+
     Tool.definition() -> ToolDefinition
     await Tool.run(**kwargs) -> Any
     Tool.run_sync(**kwargs) -> Any   # handles async ``func`` transparently
-    
+
     wrap_tool(obj) -> Tool   # converts functions / Agents / Tools uniformly
     build_tool_map(tools: list) -> dict[str, Tool]
 

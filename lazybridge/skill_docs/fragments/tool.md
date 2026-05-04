@@ -77,4 +77,3 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
 - [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).
 - [Native tools](native-tools.md) — provider-hosted alternatives.
 - [Agent](agent.md) — the surface that consumes tools.
-

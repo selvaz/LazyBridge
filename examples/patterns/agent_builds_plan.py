@@ -18,7 +18,7 @@ when you need to feed *partial* results back mid-round (the planner inspects
 results before the round finishes). Plan-based execution is round-atomic.
 """
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -73,9 +73,7 @@ REGISTRY: dict[str, Agent] = {
 
 class StepSpec(BaseModel):
     name: str = Field(..., description="Unique step name; used by from_step references.")
-    agent: Literal["research", "math", "writer"] = Field(
-        ..., description="Which sub-agent runs this step."
-    )
+    agent: Literal["research", "math", "writer"] = Field(..., description="Which sub-agent runs this step.")
     task_kind: Literal["literal", "from_prev", "from_step", "from_parallel"] = Field(
         default="from_prev",
         description=(
@@ -84,25 +82,19 @@ class StepSpec(BaseModel):
             "from_parallel=list of envelopes from a parallel sibling group."
         ),
     )
-    task_text: Optional[str] = Field(
-        default=None, description="Required when task_kind='literal'."
-    )
-    task_step: Optional[str] = Field(
+    task_text: str | None = Field(default=None, description="Required when task_kind='literal'.")
+    task_step: str | None = Field(
         default=None,
         description="Required when task_kind='from_step' or 'from_parallel'.",
     )
-    parallel: bool = Field(
-        default=False, description="If True, run concurrently with adjacent parallel siblings."
-    )
+    parallel: bool = Field(default=False, description="If True, run concurrently with adjacent parallel siblings.")
 
 
 class PlanSpec(BaseModel):
     reasoning: str = Field(..., description="Why this DAG was chosen.")
     steps: list[StepSpec] = Field(default_factory=list, description="DAG steps in order.")
     done: bool = Field(default=False, description="Set True with no steps to short-circuit.")
-    final_answer: Optional[str] = Field(
-        default=None, description="If done=True, the user-facing answer."
-    )
+    final_answer: str | None = Field(default=None, description="If done=True, the user-facing answer.")
 
 
 PLANNER_SYSTEM = f"""\
@@ -201,7 +193,7 @@ def solve(query: str, *, replan: bool = False, max_rounds: int = 5) -> str:
         if not spec.steps:
             return spec.final_answer or "planner emitted empty plan; aborting"
 
-        plan = materialize(spec)              # ← compile-time validated
+        plan = materialize(spec)  # ← compile-time validated
         print(f"materialised plan with {len(spec.steps)} step(s); running…")
 
         result = Agent.from_engine(plan)(query).text()

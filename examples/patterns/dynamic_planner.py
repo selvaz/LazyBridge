@@ -110,9 +110,7 @@ class PlanRound(BaseModel):
     reasoning: str = Field(..., description="Why this round of tasks was chosen.")
     tasks: list[Task] = Field(default_factory=list, description="Tasks for this round.")
     done: bool = Field(default=False, description="True when no further rounds are needed.")
-    final_answer: str | None = Field(
-        default=None, description="Required when done=True; the user-facing answer."
-    )
+    final_answer: str | None = Field(default=None, description="Required when done=True; the user-facing answer.")
 
 
 PLANNER_SYSTEM = """\
@@ -165,9 +163,7 @@ async def _run_round(tasks: list[Task]) -> list[str]:
 
     par_results: list[str] = []
     if parallel:
-        envs = await asyncio.gather(
-            *(AGENTS[t.agent].run(t.instruction) for t in parallel)
-        )
+        envs = await asyncio.gather(*(AGENTS[t.agent].run(t.instruction) for t in parallel))
         par_results = [e.text() for e in envs]
 
     seq_results: list[str] = []
@@ -206,9 +202,7 @@ async def solve(query: str, max_rounds: int = 5) -> str:
         outputs = await _run_round(plan.tasks)
         history.extend(zip(plan.tasks, outputs))
 
-    return "max_rounds reached without done=True; partial: " + (
-        history[-1][1] if history else ""
-    )
+    return "max_rounds reached without done=True; partial: " + (history[-1][1] if history else "")
 
 
 # ---------------------------------------------------------------------------

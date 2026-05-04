@@ -1,6 +1,6 @@
 # Recipe: Plan with typed steps and crash resume
 
-**Tier:** Full  
+**Tier:** Full
 **Goal:** Run a multi-step pipeline where each step has a declared output type, steps can
 conditionally route to each other, and the whole thing resumes from the failing step after a crash.
 

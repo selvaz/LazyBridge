@@ -108,16 +108,16 @@ prod("draft a one-pager on the LazyBridge audit findings")
         fallback: Agent | None = None,
         cache: bool | CacheConfig = False,    # prompt caching
     ) -> Agent
-    
+
     Sync:    agent(task) -> Envelope
     Async:   await agent.run(task) -> Envelope
     Stream:  async for chunk in agent.stream(task): ...
-    
+
     Factories:
       Agent.from_model(model: str, **kw) -> Agent           # explicit LLM
       Agent.from_engine(engine: Engine, **kw) -> Agent      # explicit Plan / Supervisor / custom
       Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
-    
+
     Composition sugar (NOT new paradigms):
       Agent.chain(*agents, **kw)    -> Agent                 # sequential
       Agent.parallel(*agents, **kw) -> _ParallelAgent        # deterministic fan-out → list[Envelope]

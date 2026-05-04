@@ -71,7 +71,7 @@ from lazybridge.external_tools.report_builder import report_tools
 # Config
 # ---------------------------------------------------------------------------
 
-TODAY      = date.today().isoformat()
+TODAY = date.today().isoformat()
 OUTPUT_DIR = Path("./news_reports")
 IMAGES_DIR = OUTPUT_DIR / "images"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,7 +79,7 @@ IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 session = Session(console=True)
-store   = Store(db=str(OUTPUT_DIR / "pipeline.sqlite"))
+store = Store(db=str(OUTPUT_DIR / "pipeline.sqlite"))
 
 # Each region uses a different provider + model for article writers to spread
 # token-per-minute rate limits across multiple orgs.
@@ -89,14 +89,14 @@ store   = Store(db=str(OUTPUT_DIR / "pipeline.sqlite"))
 # tools) can still use Google.
 REGION_ARTICLE_PROVIDER = {
     "United States": "anthropic",
-    "China":         "openai",
-    "India":         "openai",    # was "google" — Google can't mix tools
+    "China": "openai",
+    "India": "openai",  # was "google" — Google can't mix tools
 }
 
 REGION_ARTICLE_MODEL = {
     "United States": "cheap",
-    "China":         "cheap",
-    "India":         "o4-mini",   # literal model name
+    "China": "cheap",
+    "India": "o4-mini",  # literal model name
 }
 
 # Semaphore: max concurrent Wikimedia API calls (Commons throttles aggressively)
@@ -105,28 +105,28 @@ _WIKIMEDIA_SEM = threading.Semaphore(3)
 DEPTH_CONFIG = {
     "brief": {
         "paragraphs": "4–5",
-        "searches":   "2",
-        "images":     "1",
-        "table":      "only if the story is explicitly about numbers (economic data, election results, etc.)",
+        "searches": "2",
+        "images": "1",
+        "table": "only if the story is explicitly about numbers (economic data, election results, etc.)",
     },
     "standard": {
         "paragraphs": "6–8",
-        "searches":   "3",
-        "images":     "1",
-        "table":      "include whenever meaningful statistics or comparisons exist",
+        "searches": "3",
+        "images": "1",
+        "table": "include whenever meaningful statistics or comparisons exist",
     },
     "deep": {
         "paragraphs": "10–14",
-        "searches":   "4–5",
-        "images":     "2",
-        "table":      "always research and include — if no hard data, use a timeline or key-facts table",
+        "searches": "4–5",
+        "images": "2",
+        "table": "always research and include — if no hard data, use a timeline or key-facts table",
     },
 }
 
 REGIONS = [
     ("United States", "🇺🇸", "us"),
-    ("China",         "🇨🇳", "cn"),
-    ("India",         "🇮🇳", "in"),
+    ("China", "🇨🇳", "cn"),
+    ("India", "🇮🇳", "in"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -141,9 +141,7 @@ def fetch_image(
     """Download an image from a URL, save to images dir, return the local path."""
     dest = (IMAGES_DIR / Path(filename).name).resolve()
     try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 (compatible; LazyBridge-NewsBot/1.0)"}
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; LazyBridge-NewsBot/1.0)"})
         with urllib.request.urlopen(req, timeout=12) as resp:
             dest.write_bytes(resp.read())
         return {"saved": True, "path": str(dest)}
@@ -173,14 +171,12 @@ def search_wikimedia_image(
 
         for attempt in range(4):
             try:
-                with urllib.request.urlopen(
-                    urllib.request.Request(search_url, headers=headers), timeout=12
-                ) as r:
+                with urllib.request.urlopen(urllib.request.Request(search_url, headers=headers), timeout=12) as r:
                     pages = json.loads(r.read()).get("query", {}).get("pages", {})
                 break
             except urllib.error.HTTPError as exc:
                 if exc.code == 429 and attempt < 3:
-                    time.sleep(2 ** attempt + random.uniform(0, 1))
+                    time.sleep(2**attempt + random.uniform(0, 1))
                     continue
                 return {"error": True, "message": str(exc)}
             except (urllib.error.URLError, OSError) as exc:
@@ -192,8 +188,7 @@ def search_wikimedia_image(
             (
                 p["imageinfo"][0]["url"]
                 for p in pages.values()
-                if p.get("imageinfo")
-                and p["imageinfo"][0].get("mime") in ("image/jpeg", "image/png")
+                if p.get("imageinfo") and p["imageinfo"][0].get("mime") in ("image/jpeg", "image/png")
             ),
             None,
         )
@@ -202,14 +197,12 @@ def search_wikimedia_image(
 
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(
-                    urllib.request.Request(image_url, headers=headers), timeout=14
-                ) as r:
+                with urllib.request.urlopen(urllib.request.Request(image_url, headers=headers), timeout=14) as r:
                     dest.write_bytes(r.read())
                 return {"saved": True, "path": str(dest), "source": "wikimedia"}
             except urllib.error.HTTPError as exc:
                 if exc.code == 429 and attempt < 2:
-                    time.sleep(2 ** attempt + random.uniform(0, 1))
+                    time.sleep(2**attempt + random.uniform(0, 1))
                     continue
                 return {"error": True, "message": str(exc)}
             except (urllib.error.URLError, OSError) as exc:
@@ -218,7 +211,7 @@ def search_wikimedia_image(
         return {"error": True, "message": "Image download: too many retries"}
 
 
-fetch_image_tool     = Tool(fetch_image,            name="fetch_image")
+fetch_image_tool = Tool(fetch_image, name="fetch_image")
 wikimedia_image_tool = Tool(search_wikimedia_image, name="search_wikimedia_image")
 
 # ---------------------------------------------------------------------------
@@ -232,6 +225,7 @@ def save_markdown(
 ) -> dict:
     """Write a Markdown string to the reports directory and return the path."""
     import re as _re
+
     # Strip markdown link syntax that models sometimes inject: [text](url) → text
     filename = _re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", filename)
     path = (OUTPUT_DIR / Path(filename).name).resolve()
@@ -265,8 +259,8 @@ Order by newsworthiness. No preamble, no sign-off.
 
 _DISCOVERY_PROVIDER = {
     "United States": "anthropic",
-    "China":         "google",     # Google search quality for CN news
-    "India":         "openai",     # spreads discovery load off anthropic
+    "China": "google",  # Google search quality for CN news
+    "India": "openai",  # spreads discovery load off anthropic
 }
 
 
@@ -336,16 +330,16 @@ Image: <local path returned by fetch_image or search_wikimedia_image>
 """
 
 _TABLE_INSTRUCTIONS = {
-    "brief":    "Table: only if the story is explicitly about numbers (economic data, elections, casualties). Format:\n| Metric | Value |\n|--------|-------|",
+    "brief": "Table: only if the story is explicitly about numbers (economic data, elections, casualties). Format:\n| Metric | Value |\n|--------|-------|",
     "standard": "Table (if meaningful data exists — search for it):\n| Metric | Value |\n|--------|-------|\nSkip if no concrete statistics found.",
-    "deep":     "Table (always include — if no hard data, use a key-facts or timeline table):\n| Date / Metric | Event / Value |\n|---------------|---------------|",
+    "deep": "Table (always include — if no hard data, use a key-facts or timeline table):\n| Date / Metric | Event / Value |\n|---------------|---------------|",
 }
 
 
 def _article_writer(index: int, region: str, depth: str) -> Agent:
     cfg = DEPTH_CONFIG[depth]
     provider = REGION_ARTICLE_PROVIDER.get(region, "anthropic")
-    model    = REGION_ARTICLE_MODEL.get(region, "cheap")
+    model = REGION_ARTICLE_MODEL.get(region, "cheap")
     return Agent(
         engine=LLMEngine(
             model,
@@ -459,12 +453,12 @@ _DESIGNER_CSS = """
 
 # Regex that matches <figure>...</figure> blocks and bare self-closing <img> tags.
 # Used to strip image payloads from designer context to prevent base64 garbling.
-_FIG_RE = re.compile(r'<figure\b[^>]*>.*?</figure>|<img\b[^>]*/>', re.DOTALL)
+_FIG_RE = re.compile(r"<figure\b[^>]*>.*?</figure>|<img\b[^>]*/>", re.DOTALL)
 
 
 def _strip_figs(html: str) -> str:
     """Remove figure blocks and bare img tags from an HTML string."""
-    return _FIG_RE.sub('', html)
+    return _FIG_RE.sub("", html)
 
 
 def _raw_at_stripped(raw: str, n: int) -> int:
@@ -507,6 +501,7 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
 
         # Tag every <h2> with a sequential data-designer-section index
         counter = 0
+
         def _tag_h2(m: re.Match) -> str:
             nonlocal counter
             result = m.group(0).replace("<h2", f'<h2 {_SECTION_SENTINEL}="{counter}"', 1)
@@ -556,12 +551,14 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
                 # when they're split mid-string by the 4000-char limit.
                 body_no_figs = _strip_figs(body_chunk)
                 preview = body_no_figs[:4000]
-                sections.append({
-                    "index": idx,
-                    "headline": headline_text,
-                    "html": heading_html + preview,
-                    "truncated": len(body_no_figs) > 4000,
-                })
+                sections.append(
+                    {
+                        "index": idx,
+                        "headline": headline_text,
+                        "html": heading_html + preview,
+                        "truncated": len(body_no_figs) > 4000,
+                    }
+                )
                 i += 3
             else:
                 i += 1
@@ -592,17 +589,17 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
         # Find where the next tagged h2 starts (or article end)
         next_h2 = re.search(
             rf'<h2[^>]*{re.escape(_SECTION_SENTINEL)}="{index + 1}"',
-            html[m.end():],
+            html[m.end() :],
         )
-        section_end = m.end() + (next_h2.start() if next_h2 else len(html[m.end():]))
-        original_section = html[m.start():section_end]
+        section_end = m.end() + (next_h2.start() if next_h2 else len(html[m.end() :]))
+        original_section = html[m.start() : section_end]
 
         # Re-inject figure/img blocks that were stripped before sending to the designer.
         # Images are placed immediately after the closing </h2> tag.
-        orig_figs = ''.join(_FIG_RE.findall(original_section))
+        orig_figs = "".join(_FIG_RE.findall(original_section))
         if orig_figs:
             styled_html = re.sub(
-                r'</h2>',
+                r"</h2>",
                 lambda _m: _m.group(0) + orig_figs,
                 styled_html,
                 count=1,
@@ -611,13 +608,13 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
         # Tail: original body content beyond the 4000 figure-stripped-char boundary.
         # We must map that boundary back to a position in the raw (un-stripped) body
         # because figure blocks occupy zero stripped chars but many raw chars.
-        h2_end = re.search(r'</h2>', original_section)
+        h2_end = re.search(r"</h2>", original_section)
         body_start = h2_end.end() if h2_end else 0
         body_raw = original_section[body_start:]
         tail_offset = _raw_at_stripped(body_raw, 4000)
         tail = body_raw[tail_offset:]
 
-        html = html[:m.start()] + styled_html + tail + html[section_end:]
+        html = html[: m.start()] + styled_html + tail + html[section_end:]
         p.write_text(html, encoding="utf-8")
         return {"patched": True, "index": index, "path": str(p)}
 
@@ -703,8 +700,7 @@ final_orchestrator = Agent(
 def _region_pipeline(region: str, flag: str, key: str, n_stories: int, depth: str) -> tuple[Agent, str]:
     """Build one region pipeline and return (agent, store_key)."""
     writer_steps = [
-        Step(_article_writer(i + 1, region, depth), parallel=True, name=f"art{i + 1}")
-        for i in range(n_stories)
+        Step(_article_writer(i + 1, region, depth), parallel=True, name=f"art{i + 1}") for i in range(n_stories)
     ]
     return (
         Agent(
@@ -727,9 +723,7 @@ def build_pipeline(n_stories: int = 5, depth: str = "standard") -> Agent:
     region_steps = []
     for region, flag, key in REGIONS:
         agent, store_key = _region_pipeline(region, flag, key, n_stories, depth)
-        region_steps.append(
-            Step(agent, parallel=True, name=f"{key}_report", writes=store_key)
-        )
+        region_steps.append(Step(agent, parallel=True, name=f"{key}_report", writes=store_key))
 
     return Agent(
         engine=Plan(
@@ -766,6 +760,7 @@ if __name__ == "__main__":
 
     # Locate the HTML file — deterministic path produced by final_orchestrator
     import re as _re
+
     html_file = OUTPUT_DIR / f"daily_news_{TODAY}.html"
     raw = result.text() or ""
     if html_file.exists():
@@ -783,8 +778,10 @@ if __name__ == "__main__":
     print(f"Store keys: {store.keys()}")
 
     usage = session.usage_summary()
-    print(f"\n── Usage ──────────────────────────────────────────────────────")
-    print(f"  Total  in={usage['total']['input_tokens']:,}  out={usage['total']['output_tokens']:,}  cost=${usage['total']['cost_usd']:.4f}")
-    print(f"\n  By agent:")
+    print("\n── Usage ──────────────────────────────────────────────────────")
+    print(
+        f"  Total  in={usage['total']['input_tokens']:,}  out={usage['total']['output_tokens']:,}  cost=${usage['total']['cost_usd']:.4f}"
+    )
+    print("\n  By agent:")
     for agent_name, u in sorted(usage["by_agent"].items(), key=lambda x: -x[1]["cost_usd"]):
         print(f"    {agent_name:<40} in={u['input_tokens']:>8,}  out={u['output_tokens']:>7,}  ${u['cost_usd']:.4f}")

@@ -19,9 +19,12 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from lazybridge import Tool
+
+if TYPE_CHECKING:
+    from lazybridge.external_tools.report_builder.bus import FragmentBus
 
 
 def report_tools(*, output_dir: str | Path) -> list[Tool]:
@@ -178,6 +181,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
 
         else:
             # --- markdown_path flow ---
+            assert markdown_path is not None  # Narrowed by the if above; appease mypy.
             md_path = Path(markdown_path)
             if not md_path.exists():
                 raise FileNotFoundError(f"Markdown file not found: {markdown_path}")
@@ -265,7 +269,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
 
 def fragment_tools(
     *,
-    bus,  # type: ignore[no-untyped-def]  — circular at import time, see below
+    bus: FragmentBus,
     default_section: str | None = None,
     step_name: str | None = None,
 ) -> list[Tool]:

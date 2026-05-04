@@ -72,7 +72,7 @@ plan2 = Plan(
     from_start               # singleton — original user task
     from_step(name: str)     # named prior step's output
     from_parallel(name: str) # named parallel branch's output
-    
+
     # Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
 
 !!! warning "Rules & invariants"

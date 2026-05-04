@@ -1,6 +1,6 @@
 # Recipe: Tool calling
 
-**Tier:** Basic  
+**Tier:** Basic
 **Goal:** Give an agent one or more Python functions as tools and get a response that uses them.
 
 No decorators, no JSON schemas — LazyBridge builds the tool schema from type hints and the docstring.
