@@ -192,9 +192,9 @@ The repo ships with:
 * **`test.yml`** — pre-commit job + lint + typecheck + unit tests on
   Python 3.11 / 3.12 / 3.13.
 * **Coverage gate** — `fail_under = 70` covering core + cross-cutting
-  `ext.{otel,mcp,hil,planners,evals}`. Domain-specific extensions
-  (`stat_runtime`, `data_downloader`, …) are tested separately under
-  `tests/unit/ext/`.
+  `ext.{otel,mcp,hil,planners,evals,gateway,viz}`. Domain tool packages
+  under `external_tools/` are tested separately under
+  `tests/unit/external_tools/`.
 
 ## See also
 

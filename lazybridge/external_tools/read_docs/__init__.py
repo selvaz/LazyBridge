@@ -8,15 +8,17 @@ and returns their text content in a format ready for LLM consumption.
 
 Quick start::
 
-    from lazybridge.external_tools.read_docs import read_folder_docs
+    from lazybridge.external_tools.read_docs import read_docs_tools
+    from lazybridge import Agent
 
-    text = read_folder_docs("/path/to/reports", extensions="pdf,docx")
+    agent = Agent("anthropic", tools=read_docs_tools())
+    resp = agent("Read /path/to/reports and summarise the Q4 outlook.")
 
 Optional dependencies::
 
     pip install lazybridge[tools]   # installs pypdf, python-docx, trafilatura
 """
 
-from lazybridge.external_tools.read_docs.read_docs import read_folder_docs
+from lazybridge.external_tools.read_docs.read_docs import read_docs_tools, read_folder_docs
 
-__all__ = ["read_folder_docs"]
+__all__ = ["read_docs_tools", "read_folder_docs"]

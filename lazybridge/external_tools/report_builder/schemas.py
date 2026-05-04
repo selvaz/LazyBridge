@@ -43,7 +43,7 @@ ReportSection = Annotated[Union[TextSection, ChartSection, TableSection], Field(
 class ChartRef(BaseModel):
     """Reference to an existing chart image file.
 
-    The PNG file is produced by an upstream tool (e.g. stat_runtime) and
+    The PNG file is produced by an upstream charting tool and
     passed to generate_report as a file path.  The report_builder reads the
     file, base64-encodes it, and embeds it inline in the HTML.
 

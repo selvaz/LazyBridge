@@ -359,22 +359,24 @@ class TestDocSkillsImport:
     def test_imports_use_current_api(self):
         # Should not raise — no LazyAgent/LazySession/LazyTool used
         from lazybridge.external_tools.doc_skills.doc_skills import (
-            skill_builder_tool,
-            skill_tool,
+            skill_builder_tools,
+            skill_tools,
         )
 
-        assert callable(skill_builder_tool)
-        assert callable(skill_tool)
+        assert callable(skill_builder_tools)
+        assert callable(skill_tools)
 
-    def test_skill_builder_tool_returns_tool(self):
-        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tool
+    def test_skill_builder_tools_returns_list_of_tool(self):
+        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tools
 
-        t = skill_builder_tool()
-        assert isinstance(t, Tool)
-        assert t.name == "build_doc_skill"
+        out = skill_builder_tools()
+        assert isinstance(out, list)
+        assert len(out) == 1
+        assert isinstance(out[0], Tool)
+        assert out[0].name == "build_doc_skill"
 
-    def test_skill_builder_tool_custom_name(self):
-        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tool
+    def test_skill_builder_tools_custom_name(self):
+        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tools
 
-        t = skill_builder_tool(name="my_builder")
-        assert t.name == "my_builder"
+        out = skill_builder_tools(name="my_builder")
+        assert out[0].name == "my_builder"

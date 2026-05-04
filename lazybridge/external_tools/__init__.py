@@ -8,8 +8,6 @@ Available packages::
 
     lazybridge.external_tools.read_docs        Multi-format document reader
     lazybridge.external_tools.doc_skills       BM25 local doc skill runtime
-    lazybridge.external_tools.data_downloader  Yahoo / FRED / ECB ingestion
-    lazybridge.external_tools.stat_runtime     Econometrics & time-series sandbox
     lazybridge.external_tools.report_builder   HTML/PDF report assembler
 
 Each package ships its own optional-deps extra in ``pyproject.toml``.

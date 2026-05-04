@@ -19,18 +19,18 @@ Public API
 ----------
     build_skill(source_dirs, skill_name, ...)  → dict        index docs → skill bundle on disk
     query_skill(skill_dir, task, ...)          → str         retrieve + grounded context brief
-    skill_tool(skill_dir, ...)                 → Tool    one-step tool for an agent
-    skill_builder_tool(...)                    → Tool    tool that builds skill bundles
-    skill_pipeline(skill_dir, ...)             → Tool    router + executor chain pipeline
+    skill_tools(*, skill_dir, ...)             → list[Tool]  one-step tool for an agent
+    skill_builder_tools(*, ...)                → list[Tool]  tool that builds skill bundles
+    skill_pipeline(*, skill_dir, ...)          → Tool        router + executor chain pipeline
 
 Quick start
 -----------
-    from lazybridge.external_tools.doc_skills import build_skill, skill_tool
+    from lazybridge.external_tools.doc_skills import build_skill, skill_tools
     from lazybridge import Agent
 
     meta = build_skill(["./docs", "./reference"], "my-project")
-    tool = skill_tool(meta["skill_dir"])
-    resp = Agent("anthropic", tools=[tool])("How does X work?")
+    tools = skill_tools(skill_dir=meta["skill_dir"])
+    resp = Agent("anthropic", tools=tools)("How does X work?")
     print(resp.text())
 
 Add  generated_skills/  to your .gitignore — build_skill() writes there by default.
@@ -54,9 +54,9 @@ from lazybridge import Agent, Session, Tool
 __all__ = [
     "build_skill",
     "query_skill",
-    "skill_builder_tool",
+    "skill_builder_tools",
     "skill_pipeline",
-    "skill_tool",
+    "skill_tools",
 ]
 
 
@@ -640,14 +640,16 @@ def query_skill(
     return (brief + "\n\n[result]\n" + "\n".join(result_lines))[:max_chars]
 
 
-def skill_tool(
+def skill_tools(
+    *,
     skill_dir: Annotated[str, "Path to a skill bundle created by build_skill()."],
     name: Annotated[str | None, "Tool name exposed to the agent."] = None,
     description: Annotated[str | None, "Tool description."] = None,
     guidance: Annotated[str | None, "Guidance injected into the calling agent's system prompt."] = None,
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
-) -> Tool:
-    """Wrap query_skill() as a Tool ready to be passed to any agent or pipeline."""
+) -> list[Tool]:
+    """Return a single-element list containing a query_skill() Tool ready
+    to be passed to any agent or pipeline."""
     sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
 
@@ -660,20 +662,23 @@ def skill_tool(
         """Query a local documentation skill and return a grounded context brief."""
         return query_skill(str(sdir), task, mode=mode, top_k=top_k, include_quotes=include_quotes)
 
-    return Tool(
-        _run,
-        name=name or _slugify(manifest.name),
-        description=description or manifest.description,
-        guidance=guidance
-        or (
-            "Call this tool when the task is about the documentation indexed by this skill. "
-            "Treat the result as grounded evidence and answer only from it."
-        ),
-        strict=strict,
-    )
+    return [
+        Tool(
+            _run,
+            name=name or _slugify(manifest.name),
+            description=description or manifest.description,
+            guidance=guidance
+            or (
+                "Call this tool when the task is about the documentation indexed by this skill. "
+                "Treat the result as grounded evidence and answer only from it."
+            ),
+            strict=strict,
+        )
+    ]
 
 
-def skill_builder_tool(
+def skill_builder_tools(
+    *,
     name: Annotated[str, "Tool name."] = "build_doc_skill",
     description: Annotated[
         str, "Tool description."
@@ -682,9 +687,9 @@ def skill_builder_tool(
         "Use this tool to transform one or more documentation folders into a queryable local skill."
     ),
     strict: Annotated[bool, "Strict JSON schema validation."] = False,
-) -> Tool:
-    """Create a Tool that builds skill bundles from documentation folders."""
-    return Tool(build_skill, name=name, description=description, guidance=guidance, strict=strict)
+) -> list[Tool]:
+    """Return a single-element list containing a Tool that builds skill bundles."""
+    return [Tool(build_skill, name=name, description=description, guidance=guidance, strict=strict)]
 
 
 def skill_pipeline(
@@ -700,7 +705,7 @@ def skill_pipeline(
     Two-step pipeline exposed as a single Tool.
 
       1. Router   — rewrites the user task into a retrieval-optimised query.
-      2. Executor — calls skill_tool() and synthesises a grounded answer.
+      2. Executor — calls skill_tools() and synthesises a grounded answer.
 
     Returns an Agent.chain(router, executor).as_tool().
     """
@@ -709,7 +714,7 @@ def skill_pipeline(
     sdir = Path(skill_dir).expanduser().resolve()
     manifest = _load_manifest(sdir)
     sess = session or Session()
-    s_tool = skill_tool(skill_dir=str(sdir))
+    s_tool = skill_tools(skill_dir=str(sdir))[0]
 
     # Resolve model strings: use the explicit model override if given, else the provider alias.
     router_model_str = router_model or (provider if isinstance(provider, str) else "anthropic")

@@ -28,6 +28,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lazybridge import Tool
 
 # ── Per-format readers ─────────────────────────────────────────────────────────
 
@@ -233,6 +237,38 @@ def read_folder_docs(
         f"{'─' * 72}\n\n"
     )
     return summary + "\n\n".join(parts)
+
+
+def read_docs_tools(*, base_dir: str | None = None) -> list[Tool]:
+    """Return a single-element list with ``read_folder_docs`` wrapped as a Tool.
+
+    Args:
+        base_dir: When set, ``read_folder_docs`` rejects paths outside this
+            directory at runtime. ``None`` (default) allows any path.
+    """
+    from lazybridge import Tool
+
+    if base_dir is None:
+        return [Tool(read_folder_docs)]
+
+    def _bound(
+        path: str,
+        extensions: str = "txt,md,pdf,docx,html",
+        html_mode: str = "parsed",
+        recursive: bool = False,
+        output_format: str = "text",
+    ) -> str:
+        """Read documents from a file or folder, restricted to base_dir."""
+        return read_folder_docs(
+            path,
+            extensions=extensions,
+            html_mode=html_mode,
+            recursive=recursive,
+            output_format=output_format,
+            base_dir=base_dir,
+        )
+
+    return [Tool(_bound, name="read_folder_docs", description=read_folder_docs.__doc__)]
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────

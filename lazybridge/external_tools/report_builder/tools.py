@@ -28,7 +28,7 @@ def _error(exc: Exception) -> dict[str, Any]:
     return {"error": True, "type": type(exc).__name__, "message": str(exc)}
 
 
-def report_tools(output_dir: str | Path) -> list[Tool]:
+def report_tools(*, output_dir: str | Path) -> list[Tool]:
     """Return a list containing the ``generate_report`` tool bound to *output_dir*.
 
     Args:
@@ -277,8 +277,8 @@ def report_tools(output_dir: str | Path) -> list[Tool]:
 
 
 def fragment_tools(
-    bus,  # type: ignore[no-untyped-def]  — circular at import time, see below
     *,
+    bus,  # type: ignore[no-untyped-def]  — circular at import time, see below
     default_section: str | None = None,
     step_name: str | None = None,
 ) -> list[Tool]:

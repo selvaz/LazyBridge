@@ -12,7 +12,7 @@ is*, not by stability:
 |------------------------------------|----------------------------------------------------------|
 | `lazybridge.*` (top-level)         | Core runtime — `Agent`, `Plan`, `Tool`, engines, providers, memory, store, session, exporters, guardrails |
 | `lazybridge.ext.*`                 | Framework extensions — `mcp`, `otel`, `hil`, `evals`, `gateway`, `planners`, `viz` |
-| `lazybridge.external_tools.*`      | Domain tool packages — `read_docs`, `doc_skills`, `data_downloader`, `stat_runtime`, `report_builder` |
+| `lazybridge.external_tools.*`      | Domain tool packages — `read_docs`, `doc_skills`, `report_builder` |
 
 The single stability marker lives on the top-level package:
 
@@ -55,8 +55,6 @@ returns `list[Tool]`.
 
 - `read_docs` — multi-format document reader
 - `doc_skills` — BM25 local doc skill runtime
-- `data_downloader` — Yahoo / FRED / ECB ingestion
-- `stat_runtime` — econometrics & time-series sandbox
 - `report_builder` — HTML/PDF report assembler
 
 ## Architectural rules

@@ -37,6 +37,23 @@ reshaping its namespace boundaries before stabilizing. Everything is
 - `lazybridge.ext.veo` and `lazybridge.ext.quant_agent` — neither was
   ready for use and they only created confusion. Re-introduce later if
   the underlying integrations stabilize.
+- `lazybridge.external_tools.stat_runtime` (statistical / econometrics
+  sandbox) and `lazybridge.external_tools.data_downloader` (Yahoo /
+  FRED / ECB market-data ingestion) — same rationale: scope-creep
+  domain examples that distract from the framework's actual surface.
+  The matching `[stats]` and `[downloader]` optional-deps extras are
+  also removed from `pyproject.toml`.
+
+### Tool factory shape (breaking)
+- All surviving `external_tools/*` factories standardize on
+  `def X_tools(*, ...) -> list[Tool]` — keyword-only arguments, always
+  returning a list. Single-tool cases return a 1-element list.
+  - `report_tools(*, output_dir=...)`
+  - `fragment_tools(*, bus, default_section=None, step_name=None)`
+  - `skill_tools(*, skill_dir, ...)` (was `skill_tool(skill_dir, ...) -> Tool`)
+  - `skill_builder_tools(*, ...)` (was `skill_builder_tool(...) -> Tool`)
+  - `read_docs_tools(*, base_dir=None)` — new factory wrapping
+    `read_folder_docs` as a Tool.
 
 ### Boundary
 - New CI check (`tools/check_ext_imports.py`): `ext/` and
