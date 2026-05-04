@@ -1,8 +1,8 @@
 // Translates raw events from the SSE stream into graph animations
-// and store updates. The mapping from event_type -> visual gesture
-// lives here so the rest of the UI stays presentation-only.
+// and store updates. Also subscribes to "select" so that stepping
+// through the timeline re-fires the visual gesture for that event.
 
-import { state, pushEvent, emit } from "/static/state.js";
+import { state, on, pushEvent, emit } from "/static/state.js";
 import { pulse, fireHitRing, setInFlight, flashError, ensureToolNode } from "/static/graph.js";
 import { getJSON } from "/static/auth.js";
 
@@ -15,31 +15,51 @@ const COLOR = {
   think:  "#b388ff",
 };
 
+// Called by the SSE stream for every incoming event
 export function dispatch(ev) {
   pushEvent(ev);
   emit("eventArrived", ev);
-  const t = ev.event_type;
+  _gesture(ev);
+}
+
+// Called when the user navigates the timeline (play / step / click)
+on("select", (seq) => {
+  const ev = state.byId.get(seq);
+  if (ev) _gesture(ev, { replay: true });
+});
+
+// Visual gesture for a single event. In replay mode we still fire
+// setInFlight(false) on model_request so we don't leave ghosts.
+function _gesture(ev, { replay = false } = {}) {
+  const t     = ev.event_type;
   const agent = ev.agent_name;
+
   switch (t) {
     case "agent_start":
       if (agent) fireHitRing(agent, COLOR.store);
       break;
+
     case "agent_finish":
       if (agent) fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
       if (ev.error && agent) flashError(agent);
       break;
+
     case "model_request":
-      if (agent) setInFlight(agent, true);
+      if (agent) setInFlight(agent, !replay); // don't leave in-flight on replay
+      if (agent && replay) fireHitRing(agent, COLOR.think);
       break;
+
     case "model_response":
       if (agent) {
         setInFlight(agent, false);
         fireHitRing(agent, COLOR.agent);
       }
       break;
+
     case "loop_step":
       if (agent) fireHitRing(agent, COLOR.think);
       break;
+
     case "tool_call": {
       const name = ev.name;
       if (!name || !agent) break;
@@ -47,21 +67,23 @@ export function dispatch(ev) {
       pulse(agent, toolId, COLOR.tool);
       break;
     }
+
     case "tool_result": {
       const name = ev.name;
       if (!name || !agent) break;
       const toolId = `tool:${name}`;
       pulse(toolId, agent, COLOR.tool);
-      // Refresh store — tool calls often write to it
       refreshStore();
       break;
     }
+
     case "tool_error": {
       const name = ev.name;
       if (name) flashError(`tool:${name}`);
       if (agent) flashError(agent);
       break;
     }
+
     case "hil_decision":
       if (agent) fireHitRing(agent, COLOR.router);
       break;
@@ -69,22 +91,20 @@ export function dispatch(ev) {
 }
 
 let storePending = false;
-async function refreshStore() {
+export async function refreshStore() {
   if (storePending) return;
   storePending = true;
   try {
-    const data = await getJSON("/api/store");
-    storePending = false;
-    const prev = state.store || {};
-    state.store = data || {};
+    const data   = await getJSON("/api/store");
+    const prev   = state.store || {};
+    state.store  = data || {};
     for (const k of Object.keys(state.store)) {
       if (JSON.stringify(prev[k]) !== JSON.stringify(state.store[k])) {
         state.storeFresh.set(k, performance.now());
       }
     }
     emit("storeChanged");
-  } catch (e) {
+  } finally {
     storePending = false;
   }
 }
-export { refreshStore };

@@ -11,19 +11,38 @@
   stroke-width: 2;
   filter: url(#glow);
 }
-#canvas .link.tool { stroke-dasharray: 0; }
-#canvas .link.context { stroke-dasharray: 4 4; }
-#canvas .link.router { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
+#canvas .link.tool    { stroke-dasharray: 0; }
+#canvas .link.context { stroke-dasharray: 5 4; }
+#canvas .link.router  { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
 
-#canvas .node-bg {
+/* ---- Node shapes ---- */
+
+/* Agent = circle */
+#canvas .node.agent .node-bg {
   fill: rgba(20, 30, 50, 0.85);
+  stroke: var(--accent-agent);
+  stroke-width: 2;
+  filter: url(#glow);
+  transition: stroke 0.25s ease, stroke-width 0.2s ease;
+}
+
+/* Tool = hexagon */
+#canvas .node.tool .node-bg {
+  fill: rgba(30, 15, 40, 0.88);
+  stroke: var(--accent-tool);
   stroke-width: 2;
   filter: url(#glow);
   transition: stroke 0.25s ease;
 }
-#canvas .node.agent .node-bg { stroke: var(--accent-agent); }
-#canvas .node.tool  .node-bg { stroke: var(--accent-tool); }
-#canvas .node.router .node-bg { stroke: var(--accent-router); }
+
+/* Router = diamond */
+#canvas .node.router .node-bg {
+  fill: rgba(30, 25, 10, 0.88);
+  stroke: var(--accent-router);
+  stroke-width: 2;
+  filter: url(#glow);
+  transition: stroke 0.25s ease;
+}
 
 #canvas .node-label {
   fill: var(--text);
@@ -42,16 +61,27 @@
   pointer-events: none;
 }
 
-/* Active state — node currently in flight (between MODEL_REQUEST and MODEL_RESPONSE) */
+/* Pin icon — shown when node is pinned */
+#canvas .pin-icon {
+  font-size: 10px;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 0 3px rgba(255,200,100,0.6));
+}
+#canvas .node.pinned .node-bg {
+  stroke-dasharray: 5 3;
+}
+
+/* Active state — in-flight between MODEL_REQUEST and MODEL_RESPONSE */
 #canvas .node.in-flight .node-bg {
   animation: nodePulse 1.6s ease-in-out infinite;
 }
 @keyframes nodePulse {
   0%, 100% { stroke-width: 2; }
-  50%      { stroke-width: 4; }
+  50%      { stroke-width: 5; filter: url(#flare); }
 }
 
-/* Hit ring — appears briefly when a node receives an event */
+/* Hit ring — briefly appears when a node receives an event */
 #canvas .hit-ring {
   fill: none;
   stroke-width: 2;
@@ -63,7 +93,7 @@
 }
 @keyframes ringFire {
   0%   { opacity: 0.9; r: 26; stroke-width: 3; }
-  100% { opacity: 0;   r: 56; stroke-width: 0.5; }
+  100% { opacity: 0;   r: 58; stroke-width: 0.5; }
 }
 
 #canvas .pulse {
@@ -78,6 +108,6 @@
 }
 @keyframes errorShake {
   0%, 100% { transform: translate(0, 0); }
-  25%      { transform: translate(-2px, 1px); }
-  75%      { transform: translate(2px, -1px); }
+  25%      { transform: translate(-3px, 1px); }
+  75%      { transform: translate(3px, -1px); }
 }

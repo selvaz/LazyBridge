@@ -1,12 +1,30 @@
 // D3 force-directed graph with live mutation: nodes and edges
 // can appear at runtime (tool nodes are discovered from events).
-// The module exposes a small imperative API used by app.js.
+//
+// Visual encoding per node type:
+//   agent  → circle
+//   tool   → hexagon
+//   router → diamond
+//
+// Nodes are pinnable: end of drag → pinned (fx/fy fixed).
+// Double-click to unpin. A pin icon appears on pinned nodes.
 
 import { state, emit } from "/static/state.js";
 import { installDefs } from "/static/graph-defs.js";
 import { spawnPulse } from "/static/graph-pulse.js";
 
 const NODE_R = 22;
+// Precomputed hexagon path (flat-top, r=NODE_R)
+const HEX_PATH = (() => {
+  const pts = Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (60 * i + 30);
+    return [NODE_R * Math.cos(a), NODE_R * Math.sin(a)];
+  });
+  return "M" + pts.map(p => p.join(",")).join("L") + "Z";
+})();
+// Diamond path for routers
+const DIAMOND_PATH =
+  `M0,${-NODE_R - 4} L${NODE_R + 4},0 L0,${NODE_R + 4} L${-NODE_R - 4},0 Z`;
 
 let svg, gLinks, gNodes, gPulses, sim, nodeSel, linkSel;
 
@@ -21,15 +39,15 @@ export function initGraph() {
   gNodes = root.append("g").attr("class", "nodes");
   gPulses = root.append("g").attr("class", "pulses");
 
-  svg.call(d3.zoom().scaleExtent([0.4, 3]).on("zoom", (ev) => {
+  svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", (ev) => {
     root.attr("transform", ev.transform);
   }));
 
   sim = d3.forceSimulation()
-    .force("link", d3.forceLink().id(d => d.id).distance(140).strength(0.5))
-    .force("charge", d3.forceManyBody().strength(-380))
+    .force("link", d3.forceLink().id(d => d.id).distance(160).strength(0.5))
+    .force("charge", d3.forceManyBody().strength(-420))
     .force("center", d3.forceCenter(rect.width / 2, rect.height / 2))
-    .force("collide", d3.forceCollide(NODE_R + 8))
+    .force("collide", d3.forceCollide(NODE_R + 12))
     .on("tick", onTick);
 }
 
@@ -61,18 +79,57 @@ function redraw() {
 
   nodeSel = gNodes.selectAll(".node").data(state.nodes, n => n.id);
   nodeSel.exit().remove();
+
   const enter = nodeSel.enter().append("g")
     .attr("class", n => `node ${n.type}`)
     .attr("data-id", n => n.id)
     .call(d3.drag()
-      .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
-      .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+      .on("start", (ev, d) => {
+        if (!ev.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+      .on("end", (ev, d) => {
+        if (!ev.active) sim.alphaTarget(0);
+        // Pin node in place — keep fx/fy set
+        d._pinned = true;
+        updatePinIcon(d);
+      }));
 
+  // Double-click unpins
+  enter.on("dblclick", (ev, d) => {
+    ev.stopPropagation();
+    d.fx = null; d.fy = null; d._pinned = false;
+    updatePinIcon(d);
+    sim.alpha(0.3).restart();
+  });
+
+  // Hit ring (animation layer)
   enter.append("circle").attr("class", "hit-ring");
-  enter.append("circle").attr("class", "node-bg").attr("r", NODE_R).attr("fill", "url(#node-grad)");
-  enter.append("text").attr("class", "node-label").attr("dy", 4).text(n => truncate(n.name, 14));
-  enter.append("text").attr("class", "node-sub").attr("dy", NODE_R + 14).text(n => sublabel(n));
+
+  // Shape per type
+  enter.each(function(d) {
+    const g = d3.select(this);
+    if (d.type === "tool") {
+      g.append("path").attr("class", "node-bg").attr("d", HEX_PATH);
+    } else if (d.type === "router") {
+      g.append("path").attr("class", "node-bg").attr("d", DIAMOND_PATH);
+    } else {
+      // agent (default) — circle
+      g.append("circle").attr("class", "node-bg").attr("r", NODE_R);
+    }
+  });
+
+  enter.append("text").attr("class", "node-label").attr("dy", 4)
+    .text(n => truncate(n.name, 12));
+  enter.append("text").attr("class", "node-sub").attr("dy", NODE_R + 14)
+    .text(n => sublabel(n));
+
+  // Pin icon (hidden by default)
+  enter.append("text").attr("class", "pin-icon")
+    .attr("dy", -NODE_R - 6).attr("text-anchor", "middle")
+    .style("display", "none").text("📌");
+
   enter.on("click", (_ev, d) => emit("nodeClick", d));
 
   nodeSel = enter.merge(nodeSel);
@@ -82,12 +139,18 @@ function redraw() {
   sim.alpha(0.6).restart();
 }
 
+function updatePinIcon(d) {
+  const node = gNodes.select(`.node[data-id="${cssEscape(d.id)}"]`);
+  node.classed("pinned", !!d._pinned);
+  node.select(".pin-icon").style("display", d._pinned ? "" : "none");
+}
+
 function onTick() {
   if (!linkSel || !nodeSel) return;
   linkSel
     .attr("x1", l => l.source.x).attr("y1", l => l.source.y)
     .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
-  nodeSel.attr("transform", n => `translate(${n.x},${n.y})`);
+  nodeSel.attr("transform", n => `translate(${n.x ?? 0},${n.y ?? 0})`);
 }
 
 function keyLink(l) {
@@ -122,7 +185,6 @@ export function fireHitRing(nodeId, color) {
   if (node.empty()) return;
   const ring = node.select(".hit-ring");
   ring.attr("stroke", color || "#00d4ff").classed("fire", false);
-  // restart animation
   void ring.node().getBoundingClientRect();
   ring.classed("fire", true);
 }

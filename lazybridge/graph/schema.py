@@ -102,6 +102,17 @@ class _BaseNode:
         self.name = name
 
 
+class _ToolNode(_BaseNode):
+    """Lightweight stub for a Python-callable tool function."""
+
+    def __init__(self, id: str, name: str) -> None:
+        super().__init__(id, name)
+        self.type = "tool"
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "type": self.type}
+
+
 class AgentNode(_BaseNode):
     """Serialisable descriptor for an Agent node."""
 
@@ -235,6 +246,10 @@ class GraphSchema:
         Reads ``id`` / ``name`` off the agent, and infers provider + model
         from either legacy ``_provider_name`` / ``_model_name`` attributes
         or from ``agent.engine`` on the v1 :class:`~lazybridge.Agent`.
+
+        Also registers any Python-callable tools the agent exposes as
+        ``ToolNode`` stubs so the graph is fully visible before any
+        events are emitted (static inspection / demo mode).
         """
         provider, model = _derive_provider_model(agent)
         node_id = str(getattr(agent, "id", None) or getattr(agent, "name", "agent"))
@@ -246,6 +261,16 @@ class GraphSchema:
             system=getattr(agent, "system", None),
         )
         self._nodes[node.id] = node
+
+        # Register Python-callable tool functions as ToolNode stubs so the
+        # full pipeline topology is visible before execution starts.
+        # Skips Agent-as-tool entries (those register themselves separately).
+        tool_map = getattr(agent, "_tool_map", None) or {}
+        for tool_name in tool_map:
+            tool_id = f"tool:{tool_name}"
+            if tool_id not in self._nodes:
+                self._nodes[tool_id] = _ToolNode(id=tool_id, name=tool_name)
+            self.add_edge(node_id, tool_id, label=tool_name, kind=EdgeType.TOOL)
 
     def add_router(self, router: Any) -> None:
         """Register a router (e.g. a Plan) as a graph node.

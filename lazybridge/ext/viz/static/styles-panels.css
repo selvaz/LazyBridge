@@ -105,6 +105,17 @@
 .store-entry .val { color: var(--text); margin-top: 6px; word-break: break-word; max-height: 200px; overflow: auto; }
 
 /* Timeline */
+.mode-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.mode-badge.live   { color: var(--accent-store); border-color: var(--accent-store); }
+.mode-badge.replay { color: var(--accent-router); border-color: var(--accent-router); }
+
 .tl-controls { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
 .tl-controls button, .tl-controls select {
   background: rgba(255,255,255,0.05);
