@@ -1,0 +1,83 @@
+/* Graph nodes, links, and pulse animations */
+
+#canvas .link {
+  stroke: rgba(140, 170, 220, 0.28);
+  stroke-width: 1.4;
+  fill: none;
+  transition: stroke 0.3s ease, stroke-width 0.3s ease;
+}
+#canvas .link.active {
+  stroke: rgba(0, 212, 255, 0.7);
+  stroke-width: 2;
+  filter: url(#glow);
+}
+#canvas .link.tool { stroke-dasharray: 0; }
+#canvas .link.context { stroke-dasharray: 4 4; }
+#canvas .link.router { stroke-dasharray: 1 6; stroke: rgba(255, 179, 64, 0.5); }
+
+#canvas .node-bg {
+  fill: rgba(20, 30, 50, 0.85);
+  stroke-width: 2;
+  filter: url(#glow);
+  transition: stroke 0.25s ease;
+}
+#canvas .node.agent .node-bg { stroke: var(--accent-agent); }
+#canvas .node.tool  .node-bg { stroke: var(--accent-tool); }
+#canvas .node.router .node-bg { stroke: var(--accent-router); }
+
+#canvas .node-label {
+  fill: var(--text);
+  font-family: "Inter", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+#canvas .node-sub {
+  fill: var(--text-dim);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* Active state — node currently in flight (between MODEL_REQUEST and MODEL_RESPONSE) */
+#canvas .node.in-flight .node-bg {
+  animation: nodePulse 1.6s ease-in-out infinite;
+}
+@keyframes nodePulse {
+  0%, 100% { stroke-width: 2; }
+  50%      { stroke-width: 4; }
+}
+
+/* Hit ring — appears briefly when a node receives an event */
+#canvas .hit-ring {
+  fill: none;
+  stroke-width: 2;
+  pointer-events: none;
+  opacity: 0;
+}
+#canvas .hit-ring.fire {
+  animation: ringFire 0.8s ease-out forwards;
+}
+@keyframes ringFire {
+  0%   { opacity: 0.9; r: 26; stroke-width: 3; }
+  100% { opacity: 0;   r: 56; stroke-width: 0.5; }
+}
+
+#canvas .pulse {
+  pointer-events: none;
+  filter: url(#glow);
+}
+
+/* Error flash */
+#canvas .node.error .node-bg {
+  stroke: var(--accent-error) !important;
+  animation: errorShake 0.4s ease-in-out;
+}
+@keyframes errorShake {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-2px, 1px); }
+  75%      { transform: translate(2px, -1px); }
+}
