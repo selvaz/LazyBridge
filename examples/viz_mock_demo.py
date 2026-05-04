@@ -1,16 +1,20 @@
 """Pipeline Visualizer — mock demo (no LLM calls).
 
 Pipeline topology:
-  researcher_a (web_search, news_api)  ──┐
-                                          ├──► merger (combine, deduplicate) ──► writer (format_text)
-  researcher_b (database_query)         ──┘
-       └── nested: sub_researcher (fact_check, verify_url)
+
+  planner (plan_task, allocate_work)
+      ├──► researcher_a (web_search, news_api)  ──┐
+      │                                            ├──► merger (combine, deduplicate) ──► writer (format_text)
+      └──► researcher_b (database_query)          ──┘
+                └── nested: sub_researcher (fact_check, verify_url)
 
 Features demonstrated:
-  • Parallel agents (researcher_a and researcher_b run concurrently)
+  • Planner agent that produces a structured plan before the pipeline runs
+  • Parallel agents (researcher_a and researcher_b share planner context)
   • Nested agent (sub_researcher called as tool by researcher_b)
   • Multiple tools per agent
   • Live store writes (visible in Store tab + Node card)
+  • Click START → see pipeline task; click END → see final output
   • Click any node → D&D character sheet with tools, stats, store entries
   • Drag to pin nodes, double-click to unpin
   • Play/step through events (Space / J / K)
@@ -52,6 +56,9 @@ def _write(key: str, value, agent: str) -> None:
 # ---------------------------------------------------------------------------
 
 AGENTS = [
+    {"name": "planner", "provider": "anthropic", "model": "claude-opus-4-7",
+     "system": "Decompose the user request into a structured research plan. Assign tasks to agents.",
+     "tools": ["plan_task", "allocate_work"]},
     {"name": "researcher_a", "provider": "anthropic", "model": "claude-haiku-4-5",
      "system": "Search the web for recent news. Cite sources precisely.",
      "tools": ["web_search", "news_api"]},
@@ -73,16 +80,97 @@ AGENTS = [
 # Mock pipeline event sequence
 # ---------------------------------------------------------------------------
 
-def _emit_parallel_research(sess: Session, run: str) -> None:
+def _emit_planner(sess: Session, run: str, query: str) -> str:
+    """Planner: receives user query, produces a structured research plan."""
+    p = lambda s: time.sleep(s)
+    sess.emit(EventType.AGENT_START, {"agent_name": "planner", "task": query}, run_id=run)
+    p(0.3)
+
+    # Step 1 — think about approach
+    sess.emit(EventType.MODEL_REQUEST, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 1,
+        "messages": [{"role": "user", "content": query}],
+    }, run_id=run)
+    p(0.9)
+    sess.emit(EventType.MODEL_RESPONSE, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 1,
+        "content": "Breaking query into sub-tasks and preparing research plan...",
+        "usage": {"input_tokens": 98, "output_tokens": 31},
+    }, run_id=run)
+
+    # Step 2 — call plan_task tool
+    sess.emit(EventType.TOOL_CALL, {
+        "agent_name": "planner", "name": "plan_task",
+        "arguments": {"query": query, "depth": "comprehensive"},
+    }, run_id=run)
+    p(0.5)
+    sess.emit(EventType.TOOL_RESULT, {
+        "agent_name": "planner", "name": "plan_task",
+        "result": (
+            "Plan: (1) Web + news search for recent breakthroughs. "
+            "(2) DB query for project counts and funding data. "
+            "(3) Fact-check key claims. (4) Merge findings. (5) Write brief."
+        ),
+    }, run_id=run)
+    p(0.3)
+
+    # Step 3 — allocate work to agents
+    sess.emit(EventType.MODEL_REQUEST, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 2,
+        "messages": [{"role": "user", "content": query}],
+    }, run_id=run)
+    p(0.7)
+    sess.emit(EventType.MODEL_RESPONSE, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 2,
+        "content": "Allocating sub-tasks to researcher_a and researcher_b...",
+        "usage": {"input_tokens": 175, "output_tokens": 44},
+    }, run_id=run)
+    sess.emit(EventType.TOOL_CALL, {
+        "agent_name": "planner", "name": "allocate_work",
+        "arguments": {
+            "researcher_a": "Web search + news headlines (last 30 days)",
+            "researcher_b": "Internal DB query + fact verification via sub-agent",
+        },
+    }, run_id=run)
+    p(0.35)
+    sess.emit(EventType.TOOL_RESULT, {
+        "agent_name": "planner", "name": "allocate_work",
+        "result": "Work allocated. researcher_a and researcher_b notified.",
+    }, run_id=run)
+    p(0.4)
+
+    # Final plan output
+    sess.emit(EventType.MODEL_REQUEST, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 3,
+    }, run_id=run)
+    p(0.65)
+    plan_out = (
+        "PLAN: 5-step research pipeline on fusion energy 2026. "
+        "researcher_a: web + news. researcher_b: DB + verification. "
+        "merger: consolidate. writer: executive brief."
+    )
+    sess.emit(EventType.MODEL_RESPONSE, {
+        "agent_name": "planner", "model": "claude-opus-4-7", "step": 3,
+        "content": plan_out, "usage": {"input_tokens": 220, "output_tokens": 52},
+    }, run_id=run)
+    _write("research_plan", plan_out, "planner")
+    sess.emit(EventType.AGENT_FINISH, {"agent_name": "planner", "result": plan_out}, run_id=run)
+    return plan_out
+
+
+def _emit_parallel_research(sess: Session, run: str, plan: str) -> None:
     """Parallel researcher_a and researcher_b (interleaved events)."""
-    task = "Brief me on fusion energy breakthroughs in 2026."
+    task = f"Web search + news headlines (last 30 days). Context: {plan[:120]}"
 
     def p(s): time.sleep(s)
 
-    # Both agents start roughly simultaneously
+    # Both agents start roughly simultaneously, sharing the planner's context
     sess.emit(EventType.AGENT_START, {"agent_name": "researcher_a", "task": task}, run_id=run)
     p(0.15)
-    sess.emit(EventType.AGENT_START, {"agent_name": "researcher_b", "task": task}, run_id=run)
+    sess.emit(EventType.AGENT_START, {
+        "agent_name": "researcher_b",
+        "task": f"Internal DB query + fact verification via sub-agent. Context: {plan[:120]}",
+    }, run_id=run)
     p(0.3)
 
     # Both send MODEL_REQUEST
@@ -353,12 +441,15 @@ def _emit_writer(sess: Session, run: str, facts: str) -> None:
 
 def _run_pipeline(sess: Session) -> None:
     run = "mock-run-001"
+    query = "Brief me on fusion energy breakthroughs in 2026."
     print("[mock] pipeline starting...")
-    ra, rb = _emit_parallel_research(sess, run)
+    plan = _emit_planner(sess, run, query)
+    ra, rb = _emit_parallel_research(sess, run, plan)
     merged = _emit_merger(sess, run, ra, rb)
     _emit_writer(sess, run, merged)
     print(f"[mock] pipeline complete — store has {len(_store)} entries")
     print("[viz]  step through events with Space / J / K")
+    print("[viz]  click START or END node to see task and output")
     print("[viz]  click any node to see its character sheet")
     print("[viz]  press Ctrl+C to stop")
 
@@ -384,10 +475,12 @@ def _build_graph(sess):
     for meta in AGENTS:
         g.add_agent(_M(meta))
 
-    # Pipeline edges (parallel merge pattern + nested call)
+    # Pipeline edges: planner fans out to parallel researchers, then merge → write
+    g.add_edge("planner",       "researcher_a", label="plan",        kind=EdgeType.CONTEXT)
+    g.add_edge("planner",       "researcher_b", label="plan",        kind=EdgeType.CONTEXT)
     g.add_edge("researcher_a",  "merger",       label="findings_a",  kind=EdgeType.CONTEXT)
     g.add_edge("researcher_b",  "merger",       label="findings_b",  kind=EdgeType.CONTEXT)
-    g.add_edge("researcher_b",  "sub_researcher", label="verify",     kind=EdgeType.TOOL)
+    g.add_edge("researcher_b",  "sub_researcher", label="verify",    kind=EdgeType.TOOL)
     g.add_edge("merger",        "writer",       label="merged_facts", kind=EdgeType.CONTEXT)
 
 
