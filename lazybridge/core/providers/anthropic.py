@@ -228,6 +228,7 @@ class AnthropicProvider(BaseProvider):
                 blocks: list[dict[str, Any]] = []
                 for block in msg.content:
                     from lazybridge.core.types import (
+                        AudioContent,
                         ImageContent,
                         TextContent,
                         ThinkingContent,
@@ -251,6 +252,25 @@ class AnthropicProvider(BaseProvider):
                             blocks.append(
                                 {
                                     "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": block.media_type,
+                                        "data": block.base64_data,
+                                    },
+                                }
+                            )
+                    elif isinstance(block, AudioContent):
+                        # Anthropic audio input: claude-3-7-sonnet+ and
+                        # claude-4.x.  Wire format mirrors the image
+                        # block — base64-only on Anthropic; URL audio
+                        # is rejected by the API so we re-fetch nothing
+                        # and skip the URL branch.  Capability gating
+                        # in LLMEngine has already filtered to a
+                        # supported model by this point.
+                        if block.base64_data:
+                            blocks.append(
+                                {
+                                    "type": "audio",
                                     "source": {
                                         "type": "base64",
                                         "media_type": block.media_type,

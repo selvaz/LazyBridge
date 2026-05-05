@@ -37,6 +37,7 @@ from typing import Any
 
 from lazybridge.core.providers.base import BaseProvider
 from lazybridge.core.types import (
+    AudioContent,
     CompletionRequest,
     CompletionResponse,
     ContentBlock,
@@ -53,6 +54,20 @@ from lazybridge.core.types import (
 )
 
 _logger = logging.getLogger(__name__)
+
+# MIME → short format string expected by OpenAI-shape audio input blocks.
+_AUDIO_FORMAT: dict[str, str] = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "audio/opus": "opus",
+    "audio/webm": "webm",
+    "audio/aac": "aac",
+}
 
 #: Model-string prefix users type to route a request through this bridge.
 #: Stripped before the model name reaches ``litellm.completion``.
@@ -123,6 +138,23 @@ def _content_blocks_to_openai_parts(
                         "type": "image_url",
                         "image_url": {"url": f"data:{block.media_type};base64,{block.base64_data}"},
                     }
+                )
+        elif isinstance(block, AudioContent):
+            if block.base64_data:
+                fmt = _AUDIO_FORMAT.get((block.media_type or "").lower(), "mp3")
+                parts.append(
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": block.base64_data, "format": fmt},
+                    }
+                )
+            elif block.url:
+                warnings.warn(
+                    "LiteLLM (OpenAI wire format) audio requires base64 — URL "
+                    f"audio ({block.url!r}) is not supported and was skipped. "
+                    "Pass AudioContent.from_path() / from_bytes() instead.",
+                    UserWarning,
+                    stacklevel=3,
                 )
         elif isinstance(block, ToolUseContent):
             tool_calls.append(

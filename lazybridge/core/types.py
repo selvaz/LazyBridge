@@ -175,6 +175,20 @@ class AudioContent:
         guessed = media_type or _detect_audio_mime(data) or "audio/wav"
         return cls(base64_data=base64.b64encode(data).decode("ascii"), media_type=guessed)
 
+    @classmethod
+    def from_data_uri(cls, data_uri: str) -> AudioContent:
+        """Parse ``data:audio/flac;base64,<...>`` style URIs."""
+        if not data_uri.startswith("data:"):
+            raise ValueError("expected a data: URI")
+        header, _, body = data_uri[5:].partition(",")
+        if not body:
+            raise ValueError("malformed data URI: missing payload")
+        media_type, _, encoding = header.partition(";")
+        media_type = media_type or "audio/wav"
+        if encoding == "base64":
+            return cls(base64_data=body, media_type=media_type)
+        return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
+
 
 @dataclass
 class ToolUseContent:

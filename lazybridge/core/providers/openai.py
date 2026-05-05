@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import warnings
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -140,6 +141,29 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
             "_parse_error": (f"tool-call arguments parsed as {type(result).__name__}, expected object"),
         }
     return result
+
+
+# OpenAI's input_audio block expects a short ``format`` string —
+# ``"wav"`` / ``"mp3"`` / ``"flac"`` etc., NOT a full media-type.  Map
+# the standard mime values that ``AudioContent.from_path`` produces.
+# Unknown types fall back to ``"wav"`` because that's the lowest-friction
+# default the API accepts; mismatched formats produce a clear server-side
+# error rather than a silent decode failure.
+_AUDIO_FORMAT_BY_MEDIA_TYPE: dict[str, str] = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+}
+
+
+def _audio_format_from_media_type(media_type: str) -> str:
+    return _AUDIO_FORMAT_BY_MEDIA_TYPE.get(media_type.lower(), "wav")
 
 
 class OpenAIProvider(BaseProvider):
@@ -317,6 +341,7 @@ class OpenAIProvider(BaseProvider):
                     messages.append({"role": msg.role.value, "content": msg.content})
             else:
                 from lazybridge.core.types import (
+                    AudioContent,
                     ImageContent,
                     TextContent,
                     ThinkingContent,
@@ -347,6 +372,29 @@ class OpenAIProvider(BaseProvider):
                                     "type": "image_url",
                                     "image_url": {"url": f"data:{block.media_type};base64,{block.base64_data}"},
                                 }
+                            )
+                    elif isinstance(block, AudioContent):
+                        # OpenAI audio: gpt-4o-audio-preview /
+                        # gpt-4o-mini-audio-preview accept base64 only
+                        # via ``input_audio``.  URL audio is rejected
+                        # by the API; warn-and-skip so the request
+                        # still goes through with the text part rather
+                        # than failing whole-cloth.
+                        if block.base64_data:
+                            fmt = _audio_format_from_media_type(block.media_type)
+                            parts.append(
+                                {
+                                    "type": "input_audio",
+                                    "input_audio": {"data": block.base64_data, "format": fmt},
+                                }
+                            )
+                        elif block.url:
+                            warnings.warn(
+                                "OpenAI audio input requires base64 — URL audio "
+                                f"({block.url}) is not supported and was skipped. "
+                                "Pass AudioContent.from_path()/from_bytes() instead.",
+                                UserWarning,
+                                stacklevel=3,
                             )
                     elif isinstance(block, ToolUseContent):
                         tool_calls_in_msg.append(
@@ -451,6 +499,7 @@ class OpenAIProvider(BaseProvider):
           - text messages: {"role": "user|assistant|system", "content": ...}
         """
         from lazybridge.core.types import (
+            AudioContent,
             ImageContent,
             TextContent,
             ThinkingContent,
@@ -485,6 +534,26 @@ class OpenAIProvider(BaseProvider):
                                 "type": "input_image",
                                 "image_url": f"data:{block.media_type};base64,{block.base64_data}",
                             }
+                        )
+                elif isinstance(block, AudioContent):
+                    # Responses API audio: same wire shape as Chat
+                    # Completions ``input_audio``.  Base64 only.
+                    if block.base64_data:
+                        fmt = _audio_format_from_media_type(block.media_type)
+                        text_parts.append(
+                            {
+                                "type": "input_audio",
+                                "input_audio": {"data": block.base64_data, "format": fmt},
+                            }
+                        )
+                    elif block.url:
+                        warnings.warn(
+                            "OpenAI Responses API audio requires base64 — URL "
+                            f"audio ({block.url}) is not supported and was "
+                            "skipped.  Pass AudioContent.from_path() / "
+                            "from_bytes() instead.",
+                            UserWarning,
+                            stacklevel=3,
                         )
                 elif isinstance(block, ToolUseContent):
                     # Model decided to call a function — emit any preceding text first

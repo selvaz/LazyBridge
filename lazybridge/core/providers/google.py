@@ -201,6 +201,7 @@ class GoogleProvider(BaseProvider):
         they are split into consecutive Content objects.
         """
         from lazybridge.core.types import (
+            AudioContent,
             ImageContent,
             TextContent,
             ThinkingContent,
@@ -262,6 +263,26 @@ class GoogleProvider(BaseProvider):
 
                 elif isinstance(block, ImageContent):
                     if msg.role != Role.TOOL:  # same
+                        if block.url:
+                            normal_parts.append(
+                                _gtypes.Part.from_uri(
+                                    file_uri=block.url,
+                                    mime_type=block.media_type,
+                                )
+                            )
+                        elif block.base64_data:
+                            import base64
+
+                            data = base64.b64decode(block.base64_data)
+                            normal_parts.append(
+                                _gtypes.Part.from_bytes(
+                                    data=data,
+                                    mime_type=block.media_type,
+                                )
+                            )
+
+                elif isinstance(block, AudioContent):
+                    if msg.role != Role.TOOL:
                         if block.url:
                             normal_parts.append(
                                 _gtypes.Part.from_uri(
