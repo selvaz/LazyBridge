@@ -9,7 +9,50 @@ The module is private (leading underscore): no external imports.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# Verdict normalization.  A judge — whether a plain callable returning
+# free-form text or an ``Agent`` whose final ``.text()`` we read — must
+# decide ``approved`` / ``rejected``.  Historic behaviour gated on
+# ``startswith("approved")`` only; that silently rejected reasonable
+# verdicts ("yes", "ok", "looks good", "allow") and made the loop fragile.
+#
+# We now match a small, well-defined set of synonyms anchored at the
+# start of the (lower-cased, stripped) verdict.  Everything else falls
+# through to ``rejected`` — including silence, errors, and anything the
+# judge couldn't classify.  This is intentionally allowlist-style: a
+# judge that fails to produce a recognisable approval is treated as a
+# rejection (fail-safe).
+
+_APPROVE_PATTERN = re.compile(
+    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\b",
+    re.IGNORECASE,
+)
+_REJECT_PATTERN = re.compile(
+    r"^(reject(ed)?|denied|deny|block(ed)?|fail(ed)?|no|bad|invalid)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_approved(verdict: Any) -> bool:
+    """Normalise a judge verdict to a boolean approval.
+
+    Recognises common synonyms for approve/reject anchored at the start
+    of the verdict text (case-insensitive).  Unrecognised verdicts are
+    treated as ``rejected`` — fail-safe.
+    """
+    if verdict is None:
+        return False
+    if isinstance(verdict, bool):
+        return verdict
+    text = str(verdict).strip()
+    if not text:
+        return False
+    # Explicit reject pattern wins over ambiguous starts.
+    if _REJECT_PATTERN.match(text):
+        return False
+    return bool(_APPROVE_PATTERN.match(text))
 
 
 async def verify_with_retry(
@@ -28,6 +71,13 @@ async def verify_with_retry(
     The pristine task / context are cached outside the loop and a
     clean envelope is rebuilt every attempt — so feedback flows via
     ``context``, never accumulating onto ``env.task``.
+
+    Verdict recognition: the judge may return any of
+    ``approved`` / ``accept`` / ``allow`` / ``pass`` / ``ok`` / ``yes`` /
+    ``good`` / ``valid`` (synonyms, case-insensitive, prefix-anchored)
+    to approve.  Explicit reject prefixes (``rejected`` / ``deny`` /
+    ``block`` / ``fail`` / ``no`` / ``bad`` / ``invalid``) and any
+    unrecognised verdict are treated as rejection (fail-safe).
     """
     from lazybridge.envelope import Envelope
 
@@ -42,7 +92,6 @@ async def verify_with_retry(
         if not hasattr(verify_agent, "run"):
             # Plain callable judge.
             verdict = verify_agent(result.text())
-            approved = str(verdict).lower().startswith("approved")
         else:
             verdict_env = await verify_agent.run(
                 f"Evaluate this output:\n{result.text()}\n\n"
@@ -50,7 +99,8 @@ async def verify_with_retry(
                 f"Approved or rejected (with reason)?"
             )
             verdict = verdict_env.text()
-            approved = verdict.strip().lower().startswith("approved")
+
+        approved = _is_approved(verdict)
 
         if approved or attempt == max_verify - 1:
             return result
