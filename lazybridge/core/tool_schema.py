@@ -394,6 +394,9 @@ def _parse_docstring_params(doc: str) -> dict[str, str]:
 
 
 _arg_model_cache: _weakref.WeakKeyDictionary = _weakref.WeakKeyDictionary()
+# Serialises the check-then-set on _arg_model_cache so two concurrent
+# threads building the same tool's arg model don't race on the dict update.
+_arg_model_lock = threading.Lock()
 
 
 def _make_arg_model(func: Callable) -> type | None:
@@ -406,55 +409,55 @@ def _make_arg_model(func: Callable) -> type | None:
     - Entries are removed automatically when functions are garbage-collected.
     - Stale models are not returned when a function's annotations are mutated
       (dynamic tool factories, hot-reload in development).
+
+    Thread safety: the cache check + build is serialised by ``_arg_model_lock``
+    so concurrent threads always see a fully-constructed model, never a partial
+    write.  The lock is short-lived (held only during build, not during the
+    actual validation later).
     """
-    # Cache lookup strategy:
-    # _arg_model_cache is a WeakKeyDictionary keyed on the function object itself.
-    # Each cached value is a (annotations_id, model) tuple.  annotations_id is
-    # id(func.__annotations__) at store time.  If the annotations dict is later
-    # replaced (e.g. by a hot-reload or dynamic decorator), its id changes and
-    # cached[0] != current_annotations_id, so the cache is considered stale and
-    # the model is rebuilt.  cache_key[1] is pre-computed once to avoid two
-    # getattr calls.
-    cache_key = (func, id(getattr(func, "__annotations__", None)))
-    cached = _arg_model_cache.get(func)
-    if cached is not None and cached[0] == cache_key[1]:
-        return cached[1]
-    try:
-        sig = inspect.signature(func)
-        hints = typing.get_type_hints(func, include_extras=True)
-    except (TypeError, ValueError, AttributeError) as exc:
-        _logger.debug("Cannot inspect signature for %r: %s", getattr(func, "__qualname__", func), exc)
-        return None
+    annotations_id = id(getattr(func, "__annotations__", None))
 
-    accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    fields: dict[str, Any] = {}
-    for name, param in sig.parameters.items():
-        if name in ("self", "cls"):
-            continue
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            continue
-        annotation = hints.get(name, Any)
-        fields[name] = (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
+    with _arg_model_lock:
+        cached = _arg_model_cache.get(func)
+        if cached is not None and cached[0] == annotations_id:
+            return cached[1]
 
-    if not fields:
-        return None  # zero-arg or pure **kwargs — nothing to validate
+        try:
+            sig = inspect.signature(func)
+            hints = typing.get_type_hints(func, include_extras=True)
+        except (TypeError, ValueError, AttributeError) as exc:
+            _logger.debug("Cannot inspect signature for %r: %s", getattr(func, "__qualname__", func), exc)
+            return None
 
-    try:
-        from pydantic import ConfigDict
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        fields: dict[str, Any] = {}
+        for name, param in sig.parameters.items():
+            if name in ("self", "cls"):
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            annotation = hints.get(name, Any)
+            fields[name] = (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
 
-        model = _create_model(
-            f"_{func.__name__}_args",
-            __config__=ConfigDict(
-                extra="allow" if accepts_kwargs else "forbid",
-                arbitrary_types_allowed=True,
-            ),
-            **fields,
-        )
-        _arg_model_cache[func] = (id(getattr(func, "__annotations__", None)), model)
-        return model
-    except (TypeError, ValueError) as exc:
-        _logger.debug("Cannot build arg model for %r: %s", getattr(func, "__qualname__", func), exc)
-        return None
+        if not fields:
+            return None  # zero-arg or pure **kwargs — nothing to validate
+
+        try:
+            from pydantic import ConfigDict
+
+            model = _create_model(
+                f"_{func.__name__}_args",
+                __config__=ConfigDict(
+                    extra="allow" if accepts_kwargs else "forbid",
+                    arbitrary_types_allowed=True,
+                ),
+                **fields,
+            )
+            _arg_model_cache[func] = (id(getattr(func, "__annotations__", None)), model)
+            return model
+        except (TypeError, ValueError) as exc:
+            _logger.debug("Cannot build arg model for %r: %s", getattr(func, "__qualname__", func), exc)
+            return None
 
 
 def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) -> dict[str, Any]:

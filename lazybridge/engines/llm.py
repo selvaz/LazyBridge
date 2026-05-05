@@ -108,7 +108,7 @@ class LLMEngine:
 
     # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
     # (and any subclass that forgets to call super) still see safe values.
-    max_parallel_tools: int | None = None
+    max_parallel_tools: int | None = 8
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = None
     stream_buffer: int = 64
@@ -127,7 +127,7 @@ class LLMEngine:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         request_timeout: float | None = 120.0,
-        max_parallel_tools: int | None = None,
+        max_parallel_tools: int | None = 8,
         tool_timeout: float | None = None,
         stream_idle_timeout: float | None = None,
         stream_buffer: int = 64,
@@ -585,6 +585,12 @@ class LLMEngine:
 
         tool_defs = [t.definition() for t in tools]
         tool_map = {t.name: t for t in tools}
+
+        if self.tool_choice == "any" and not tool_defs:
+            raise ValueError(
+                "LLMEngine: tool_choice='any' requires at least one tool, "
+                "but tools=[] was passed. Either add tools or use tool_choice='auto'."
+            )
 
         structured_cfg: StructuredOutputConfig | None = None
         # Activate structured output when the caller declared a non-str

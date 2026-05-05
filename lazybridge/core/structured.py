@@ -60,10 +60,16 @@ def validate_payload_against_output_type(payload: Any, output_type: Any) -> Any:
     if origin is not None or isinstance(output_type, type):
         try:
             adapter = TypeAdapter(output_type)
-        except Exception:
-            # Couldn't build an adapter (weirdly shaped output_type) —
-            # return the payload verbatim rather than raise here; the
-            # caller's validator can still reject it.
+        except (TypeError, ValueError) as exc:
+            # Couldn't build an adapter (unsupported or malformed output_type) —
+            # log at WARNING so the caller can diagnose the issue, then return
+            # the payload verbatim so the caller's own validator can still reject it.
+            _logger.warning(
+                "TypeAdapter(%r) failed — output_type may be unsupported by Pydantic. "
+                "Returning unvalidated payload. Error: %s",
+                output_type,
+                exc,
+            )
             return payload
         if isinstance(payload, str):
             return adapter.validate_json(payload)

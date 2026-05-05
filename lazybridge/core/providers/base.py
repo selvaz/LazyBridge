@@ -205,6 +205,12 @@ class BaseProvider(ABC):
         **kwargs:
             Forwarded verbatim to :meth:`_init_client`.
         """
+        if api_key is not None and not api_key.strip():
+            raise ValueError(
+                f"{self.__class__.__name__}: api_key must not be an empty or "
+                "whitespace-only string. Pass None to read from the environment "
+                "variable, or provide a valid key."
+            )
         self.api_key = api_key
         self.model = model or self.default_model
         if strict_native_tools is not None:

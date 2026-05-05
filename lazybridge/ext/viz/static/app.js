@@ -126,10 +126,39 @@ function applyMeta(m) {
   const root = document.getElementById("meta");
   if (!m) return;
   const sid = (m.session_id || "").slice(0, 8);
-  root.innerHTML = `
-    <span class="pill">mode<span class="v">${m.mode || "?"}</span></span>
-    <span class="pill">session<span class="v">${sid}</span></span>
-    <span class="pill" id="meta-evt">events<span class="v">0</span></span>`;
+
+  // Build DOM safely — never use innerHTML with server-supplied values
+  // to prevent XSS if the backend is compromised or returns crafted data.
+  root.textContent = "";
+
+  const pillMode = document.createElement("span");
+  pillMode.className = "pill";
+  pillMode.appendChild(document.createTextNode("mode"));
+  const vMode = document.createElement("span");
+  vMode.className = "v";
+  vMode.textContent = m.mode || "?";
+  pillMode.appendChild(vMode);
+  root.appendChild(pillMode);
+
+  const pillSid = document.createElement("span");
+  pillSid.className = "pill";
+  pillSid.appendChild(document.createTextNode("session"));
+  const vSid = document.createElement("span");
+  vSid.className = "v";
+  vSid.textContent = sid;
+  pillSid.appendChild(vSid);
+  root.appendChild(pillSid);
+
+  const pillEvt = document.createElement("span");
+  pillEvt.className = "pill";
+  pillEvt.id = "meta-evt";
+  pillEvt.appendChild(document.createTextNode("events"));
+  const vEvt = document.createElement("span");
+  vEvt.className = "v";
+  vEvt.textContent = "0";
+  pillEvt.appendChild(vEvt);
+  root.appendChild(pillEvt);
+
   on("eventArrived", () => {
     const span = document.querySelector("#meta-evt .v");
     if (span) span.textContent = state.events.length;

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import mimetypes
+import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -37,6 +38,29 @@ _IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
 )
+
+
+_VALID_IMAGE_MIMES: frozenset[str] = frozenset({
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+})
+
+_VALID_AUDIO_MIMES: frozenset[str] = frozenset({
+    "audio/wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/flac",
+    "audio/ogg",
+    "audio/webm",
+    "audio/aac",
+    "audio/mp4",
+    "audio/x-wav",
+    "audio/x-mpeg",
+})
 
 
 def _detect_image_mime(data: bytes) -> str | None:
@@ -98,6 +122,16 @@ class ImageContent:
     media_type: str = "image/jpeg"
     type: ContentType = ContentType.IMAGE
 
+    def __post_init__(self) -> None:
+        if self.media_type not in _VALID_IMAGE_MIMES:
+            warnings.warn(
+                f"ImageContent: unrecognised media_type {self.media_type!r}. "
+                f"Known types: {sorted(_VALID_IMAGE_MIMES)}. "
+                "The request may be rejected by some providers.",
+                UserWarning,
+                stacklevel=3,
+            )
+
     @classmethod
     def from_url(cls, url: str, *, media_type: str | None = None) -> ImageContent:
         # ``mimetypes.guess_type`` doesn't strip URL schemes — parse the
@@ -152,6 +186,16 @@ class AudioContent:
     base64_data: str | None = None
     media_type: str = "audio/wav"
     type: ContentType = ContentType.AUDIO
+
+    def __post_init__(self) -> None:
+        if self.media_type not in _VALID_AUDIO_MIMES:
+            warnings.warn(
+                f"AudioContent: unrecognised media_type {self.media_type!r}. "
+                f"Known types: {sorted(_VALID_AUDIO_MIMES)}. "
+                "The request may be rejected by some providers.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     @classmethod
     def from_url(cls, url: str, *, media_type: str | None = None) -> AudioContent:

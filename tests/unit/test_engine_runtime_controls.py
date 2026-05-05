@@ -58,7 +58,8 @@ def test_stream_idle_timeout_rejects_zero_and_negative() -> None:
 
 def test_runtime_knobs_default_to_none() -> None:
     e = LLMEngine("gpt-5.5")
-    assert e.max_parallel_tools is None
+    # max_parallel_tools defaults to 8 (safe cap against resource exhaustion)
+    assert e.max_parallel_tools == 8
     assert e.tool_timeout is None
     assert e.stream_idle_timeout is None
 
@@ -66,7 +67,8 @@ def test_runtime_knobs_default_to_none() -> None:
 def test_engine_constructed_via_new_inherits_class_defaults() -> None:
     """Tests that bypass ``__init__`` via ``__new__`` still see safe defaults."""
     e = LLMEngine.__new__(LLMEngine)
-    assert e.max_parallel_tools is None
+    # max_parallel_tools class-level default is 8 (safe cap).
+    assert e.max_parallel_tools == 8
     assert e.tool_timeout is None
     assert e.stream_idle_timeout is None
 

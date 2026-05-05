@@ -27,6 +27,7 @@ Optional dependencies (graceful degradation if missing):
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -243,12 +244,24 @@ def read_docs_tools(*, base_dir: str | None = None) -> list[Tool]:
     """Return a single-element list with ``read_folder_docs`` wrapped as a Tool.
 
     Args:
-        base_dir: When set, ``read_folder_docs`` rejects paths outside this
-            directory at runtime. ``None`` (default) allows any path.
+        base_dir: Sandbox directory — ``read_folder_docs`` will reject any path
+            that resolves outside this directory at runtime.  **Strongly
+            recommended** whenever the tool is exposed to an LLM agent, because
+            without a sandbox an agent can read arbitrary files on the host
+            (``/etc/passwd``, SSH keys, ``.env`` files, etc.).
+            ``None`` (default) allows any path — only safe when the caller
+            fully controls the ``path`` argument (i.e. non-LLM usage).
     """
     from lazybridge import Tool
 
     if base_dir is None:
+        warnings.warn(
+            "read_docs_tools() called without base_dir=. "
+            "When exposed to an LLM agent this allows reading ANY file on the "
+            "host filesystem.  Pass base_dir='/safe/directory' to sandbox access.",
+            UserWarning,
+            stacklevel=2,
+        )
         return [Tool(read_folder_docs)]
 
     def _bound(

@@ -220,33 +220,47 @@ class LLMGuard(Guard):
         # tests where the judge is a deterministic stub).
         self._timeout = timeout
 
+    # Matches the verdict word as a COMPLETE token on the line.
+    # Leading decoration: markdown bold (**), blockquote (>), list markers
+    # (-, 1.), whitespace, colons are all stripped.
+    # Trailing decoration: same set — colon, period, markdown bold (**) or
+    # end-of-string are all acceptable delimiters.
+    # Anything else after the verdict word (e.g. "allow: please proceed")
+    # does NOT match, preventing false positives from multi-word lines.
+    _VERDICT_RE = re.compile(
+        r"^[*>#\-0-9. \t:]*(?P<verdict>allow|approve|block|deny)[*\s.:]*$",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _verdict(text: str) -> GuardAction:
-        """Parse a judge response.
+        """Parse a judge response — fail-closed on any ambiguity.
 
-        Scan lines for the first one whose leading token (after
-        whitespace / punctuation) is a recognised verdict word —
-        ``allow`` / ``block`` / ``deny``.  Anything ambiguous or
-        unrecognised is treated as ``block`` (fail-safe): if the
-        judge couldn't produce a clean verdict, refuse the content
-        rather than letting it through.
+        Only the first non-empty line is inspected.  The verdict word
+        must be the *sole* meaningful token on that line (preceded only
+        by common decoration such as ``**``, ``>``, ``1.``).  Any word
+        other than the four recognised verdicts, or trailing content
+        after the verdict word, causes a fail-closed block so an
+        adversary cannot inject text like ``"allow: but actually harmful"``
+        to flip the verdict.
         """
         for raw in text.splitlines():
-            line = raw.strip().lower()
+            line = raw.strip()
             if not line:
                 continue
-            # Trim leading punctuation / markers — judges sometimes
-            # prefix verdicts with "**", ">", "1.", etc.  We only need
-            # the first alphabetical token.
-            stripped = line.lstrip("*>#-1234567890. \t:")
-            if stripped.startswith("block") or stripped.startswith("deny"):
-                return GuardAction.block(f"LLMGuard blocked: {text}")
-            if stripped.startswith("allow") or stripped.startswith("approve"):
+            m = LLMGuard._VERDICT_RE.match(line)
+            if m:
+                verdict = m.group("verdict").lower()
+                if verdict in ("block", "deny"):
+                    return GuardAction.block(f"LLMGuard blocked: {text}")
                 return GuardAction.allow()
-            # Unrecognised first non-empty line — fall through to
-            # fail-safe block below.
+            # First non-empty line did not match a clean verdict word —
+            # fail closed rather than scanning further lines.
             break
-        return GuardAction.block(f"LLMGuard could not parse a verdict from judge response — failing closed: {text!r}")
+        return GuardAction.block(
+            f"LLMGuard could not parse a verdict from judge response — "
+            f"failing closed: {text!r}"
+        )
 
     def _prompt(self, text: str) -> str:
         # Scrub structural tags from the caller-supplied content.  Both

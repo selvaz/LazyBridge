@@ -13,6 +13,7 @@ re-export them for backward compatibility (test suites import
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,10 @@ from lazybridge.sentinels import (
 
 if TYPE_CHECKING:
     from lazybridge.tools import Tool
+
+# Valid step name: alphanumeric, underscores, hyphens — no path separators
+# or shell-special characters that could indicate injection attempts.
+_STEP_NAME_RE = re.compile(r'^[\w][\w\-]*$')
 
 
 def _first_arg_kwargs(tool: Tool, value: str) -> dict[str, str]:
@@ -98,14 +103,89 @@ def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
     if kind == "from_start":
         return from_start
     if kind == "from_step":
-        return from_step(ref["name"])
+        name = ref.get("name", "")
+        _validate_step_name(name, context="from_step sentinel")
+        return from_step(name)
     if kind == "from_parallel":
-        return from_parallel(ref["name"])
+        name = ref.get("name", "")
+        _validate_step_name(name, context="from_parallel sentinel")
+        return from_parallel(name)
     if kind == "from_parallel_all":
-        return from_parallel_all(ref["name"])
+        name = ref.get("name", "")
+        _validate_step_name(name, context="from_parallel_all sentinel")
+        return from_parallel_all(name)
     if kind == "literal":
         return ref["value"]
     return from_prev
+
+
+def _validate_step_name(name: str, *, context: str = "") -> None:
+    """Raise ValueError if *name* is not a safe step identifier.
+
+    Guards against empty strings or names with path separators / shell
+    metacharacters that could indicate a tampered checkpoint payload.
+    """
+    if not name or not isinstance(name, str):
+        raise ValueError(
+            f"Plan.from_dict: invalid step name {name!r}"
+            + (f" in {context}" if context else "")
+            + " — must be a non-empty string."
+        )
+    if not _STEP_NAME_RE.match(name):
+        raise ValueError(
+            f"Plan.from_dict: step name {name!r}"
+            + (f" in {context}" if context else "")
+            + " contains disallowed characters (only \\w and - are permitted)."
+        )
+
+
+def validate_plan_refs(
+    steps: list[dict[str, Any]],
+) -> list[str]:
+    """Validate that all sentinel step references resolve to declared step names.
+
+    Call this after :func:`_step_from_dict` if you want to catch dangling
+    sentinel references before running the plan.  Returns a list of error
+    strings (empty list = no issues).
+
+    Parameters
+    ----------
+    steps:
+        The raw list of step dicts as produced by :func:`_step_to_dict`
+        (i.e. the ``"steps"`` key from ``Plan.to_dict()``).
+    """
+    known_names: set[str] = {s.get("name", "") for s in steps}
+    errors: list[str] = []
+
+    def _check_sentinel(ref: Any, ctx: str) -> None:
+        if not isinstance(ref, dict):
+            return
+        kind = ref.get("kind", "")
+        if kind in ("from_step", "from_parallel", "from_parallel_all"):
+            name = ref.get("name", "")
+            if name not in known_names:
+                errors.append(
+                    f"{ctx}: sentinel kind={kind!r} references unknown step {name!r}"
+                    f" (known: {sorted(known_names)})"
+                )
+
+    for step in steps:
+        step_name = step.get("name", "<unnamed>")
+        _check_sentinel(step.get("task"), f"step {step_name!r} task")
+        ctx_raw = step.get("context")
+        if isinstance(ctx_raw, list):
+            for item in ctx_raw:
+                _check_sentinel(item, f"step {step_name!r} context[]")
+        else:
+            _check_sentinel(ctx_raw, f"step {step_name!r} context")
+        for route_target in step.get("routes", []):
+            if isinstance(route_target, str) and route_target not in known_names:
+                errors.append(
+                    f"step {step_name!r} routes: target {route_target!r} not in known steps"
+                    f" (known: {sorted(known_names)})"
+                )
+
+    return errors
 
 
 def _step_to_dict(step: Step) -> dict[str, Any]:
