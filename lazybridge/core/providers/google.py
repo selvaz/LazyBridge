@@ -472,7 +472,7 @@ class GoogleProvider(BaseProvider):
             try:
                 kwargs["tool_config"] = _gtypes.ToolConfig(
                     function_calling_config=_gtypes.FunctionCallingConfig(
-                        include_server_side_tool_invocations=True,
+                        include_server_side_tool_invocations=True,  # type: ignore[call-arg]
                     )
                 )
             except Exception:

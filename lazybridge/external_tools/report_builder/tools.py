@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from lazybridge import Tool
 
@@ -160,7 +160,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
 
         if sections is not None:
             # --- typed sections flow ---
-            parsed_sections = []
+            parsed_sections: list[TextSection | ChartSection | TableSection] = []
             for i, s in enumerate(sections):
                 t = s.get("type", "")
                 try:
@@ -372,7 +372,14 @@ def fragment_tools(
         data: optional inline rows that override spec.data.values for Vega-Lite,
               or splice into the first Plotly trace's x/y.
         """
-        chart = ChartSpec(engine=engine, spec=spec, data=data, title=title)
+        if engine not in ("vega-lite", "plotly"):
+            raise ValueError(f"engine must be 'vega-lite' or 'plotly', got {engine!r}")
+        chart = ChartSpec(
+            engine=cast('Literal["vega-lite", "plotly"]', engine),
+            spec=spec,
+            data=data,
+            title=title,
+        )
         f = Fragment(
             kind="chart",
             heading=heading,
