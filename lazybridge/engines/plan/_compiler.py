@@ -289,3 +289,29 @@ class PlanCompiler:
                             f"a known step name.  Known steps: "
                             f"{sorted(pos)}."
                         )
+
+            # after_branches= — exclusive-branch rejoin point.
+            # Requires routes= or routes_by= to be set (otherwise there
+            # is no branching and the field is meaningless).  The target
+            # step must exist and must come AFTER this step so that skipping
+            # intermediate steps is unambiguous.
+            if step.after_branches is not None:
+                if step.routes is None and step.routes_by is None:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: after_branches={step.after_branches!r} "
+                        f"requires routes= or routes_by= to also be set — "
+                        f"after_branches only applies to exclusive routing."
+                    )
+                if step.after_branches not in pos:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: after_branches={step.after_branches!r} "
+                        f"references unknown step.  Known steps: {sorted(pos)}."
+                    )
+                if pos[step.after_branches] <= i:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: after_branches={step.after_branches!r} "
+                        f"must come after the routing step in the declared order "
+                        f"(step {step.name!r} is at position {i}, "
+                        f"{step.after_branches!r} is at position "
+                        f"{pos[step.after_branches]})."
+                    )

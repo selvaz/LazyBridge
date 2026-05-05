@@ -62,14 +62,36 @@ class Step:
                  ``Literal[...] | None``); compile-time validation
                  rejects values that don't match a step name.
                  Mutually exclusive with ``routes``.
+        after_branches: **Exclusive-branch rejoin point**.  Only valid
+                 alongside ``routes`` or ``routes_by``.  When set,
+                 exactly one branch runs (the routed-to step), all
+                 other declared steps between the routing step and the
+                 rejoin point are skipped, and execution continues at
+                 the named step after the branch completes.
 
-    Routing is a **detour**.  After the routed-to step runs, linear
-    progression resumes from its position in the declared order — no
-    "no fall-through after routing" trap.  To make a step terminal,
-    place it at the end of the declared step list (linear progression
-    past the last step ends the Plan).  Loops are simply routes back
-    to an earlier step; ``Plan(max_iterations=...)`` is the safety
-    net.
+                 Example::
+
+                     Step("triage", agent, routes_by="severity",
+                          after_branches="archive"),
+                     Step("urgent", urgent_agent),
+                     Step("normal", normal_agent),
+                     Step("spam",   spam_agent),
+                     Step("archive", archive_agent),   # always runs
+
+                 Without ``after_branches``, routing is a *detour*:
+                 after the routed-to step, linear progression resumes
+                 from its declared position, so all subsequent steps
+                 also execute.  ``after_branches`` replaces that
+                 fall-through with a guaranteed jump to the rejoin
+                 point.  For multi-step branches, pass an
+                 ``Agent(engine=Plan(...))`` as the branch step's
+                 target.
+
+    Without ``after_branches``, routing is a **detour**: after the
+    routed-to step runs, linear progression resumes from its declared
+    position.  To make a step terminal, place it at the end of the
+    declared step list.  Loops are simply routes back to an earlier
+    step; ``Plan(max_iterations=...)`` is the safety net.
     """
 
     target: Any
@@ -81,10 +103,12 @@ class Step:
     output: type = str
     parallel: bool = False
     name: str | None = None
-    # Routing — exactly one (or neither) of these may be set.  See
-    # the Step docstring for semantics.
+    # Routing — exactly one (or neither) of routes/routes_by may be set.
+    # after_branches= is optional and only valid alongside routes/routes_by.
+    # See the Step docstring for semantics.
     routes: dict[str, Callable[[Any], bool]] | None = None
     routes_by: str | None = None
+    after_branches: str | None = None
 
     def __post_init__(self) -> None:
         if self.name is None:

@@ -114,7 +114,7 @@ async def test_plan_max_iterations_returns_error_envelope() -> None:
 
     # Patch _routing so step "a" always routes back to itself —
     # guaranteed iteration-cap exhaustion.
-    plan._routing = lambda result_env, step, step_map: "a"  # type: ignore[assignment]
+    plan._routing = lambda result_env, step, step_map, branch_return: "a"  # type: ignore[assignment]
 
     # Patch _exec_step to return a simple envelope unchanged.
     async def _fake_exec(step, step_env, **kw):  # type: ignore[no-untyped-def]

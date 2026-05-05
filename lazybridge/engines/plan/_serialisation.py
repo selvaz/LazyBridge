@@ -184,6 +184,12 @@ def validate_plan_refs(
                     f"step {step_name!r} routes: target {route_target!r} not in known steps"
                     f" (known: {sorted(known_names)})"
                 )
+        after = step.get("after_branches")
+        if isinstance(after, str) and after not in known_names:
+            errors.append(
+                f"step {step_name!r} after_branches: target {after!r} not in known steps"
+                f" (known: {sorted(known_names)})"
+            )
 
     return errors
 
@@ -212,6 +218,8 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
         d["routes"] = sorted(step.routes.keys())
     if step.routes_by is not None:
         d["routes_by"] = step.routes_by
+    if step.after_branches is not None:
+        d["after_branches"] = step.after_branches
     return d
 
 
@@ -252,4 +260,5 @@ def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
         name=data.get("name"),
         routes=routes,
         routes_by=data.get("routes_by"),
+        after_branches=data.get("after_branches"),
     )

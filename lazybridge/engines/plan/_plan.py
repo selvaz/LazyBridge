@@ -516,6 +516,10 @@ class Plan:
         start_env = env
         iterations = 0
         effective_store = store or self.store
+        # Maps branch-step name → after_branches rejoin target.  Populated
+        # when a routing step with after_branches fires; consumed when the
+        # branch step completes so _routing() can jump to the rejoin point.
+        branch_return: dict[str, str] = {}
 
         all_step_names = [s.name for s in self.steps]
 
@@ -678,7 +682,7 @@ class Plan:
             prev_env = result_env
 
             # Determine next step via routes / routes_by or linear progression.
-            current_name = self._routing(result_env, step, step_map)
+            current_name = self._routing(result_env, step, step_map, branch_return)
 
             # Save checkpoint after each step so a crash mid-plan can resume
             last_snap = self._save_checkpoint(
@@ -1017,6 +1021,7 @@ class Plan:
         result_env: Envelope,
         step: Step,
         step_map: dict[str, Step],
+        branch_return: dict[str, str],
     ) -> str | None:
         """Determine the next step's name, or ``None`` to end the Plan.
 
@@ -1025,16 +1030,22 @@ class Plan:
         output) declares the branches.  Falls through to linear
         progression when no branch matches.
 
-        After a routed-to step runs, linear progression resumes from
-        its declared position — routing is a *detour*, not a "no
-        fall-through" mode.  To make a step terminal, place it last in
-        the declared step list.
+        When ``step.after_branches`` is set and a branch fires, the
+        branch step's name is registered in ``branch_return`` so that
+        when that branch step completes, execution jumps to the rejoin
+        point instead of continuing linearly through sibling branches.
+
+        Without ``after_branches``, routing is a *detour*: after the
+        routed-to step, linear progression resumes from its declared
+        position (legacy behaviour, preserved for backward compat).
         """
         # 1. Predicate-based routing.  First matching predicate wins.
         if step.routes:
             for target_name, predicate in step.routes.items():
                 try:
                     if predicate(result_env):
+                        if step.after_branches:
+                            branch_return[target_name] = step.after_branches
                         return target_name
                 except Exception as exc:
                     # A misbehaving predicate is a bug, not a runtime
@@ -1052,14 +1063,23 @@ class Plan:
             if payload is not None and hasattr(payload, step.routes_by):
                 value = getattr(payload, step.routes_by)
                 if isinstance(value, str) and value in step_map:
+                    if step.after_branches:
+                        branch_return[value] = step.after_branches
                     return value
                 # ``None`` and any other non-matching value fall through
                 # to linear — the model "decided not to route".
 
-        # 3. Linear progression — next declared step, or end of plan.
+        # 3. Exclusive-branch return: this step was entered via a routing
+        #    step that declared after_branches.  Jump to the rejoin point
+        #    instead of continuing linearly through sibling branches.
+        name = step.name or ""
+        if name in branch_return:
+            return branch_return.pop(name)
+
+        # 4. Linear progression — next declared step, or end of plan.
         steps_list = list(step_map.keys())
         try:
-            idx = steps_list.index(step.name or "")
+            idx = steps_list.index(name)
             if idx + 1 < len(steps_list):
                 return steps_list[idx + 1]
         except ValueError:
