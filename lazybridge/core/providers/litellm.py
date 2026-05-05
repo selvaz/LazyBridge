@@ -72,7 +72,7 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
     On JSON-decode failure (or a non-object payload) we tag the result
     with ``_parse_error`` so :meth:`LLMEngine._exec_tool` surfaces a
     structured ``TOOL_ERROR`` instead of letting the tool fail later
-    with a misleading "missing required field" message (audit M-A).
+    with a misleading "missing required field" message.
     """
     if not raw:
         return {}

@@ -50,9 +50,9 @@ orchestrator = Agent("claude-opus-4-7",
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
     ) -> Tool
-    
+
     # Tool schema: (task: str) -> str
-    
+
     Usage: Agent("model", tools=[researcher.as_tool()])
            Agent("model", tools=[researcher])   # implicit — Agent auto-wraps via as_tool()
 

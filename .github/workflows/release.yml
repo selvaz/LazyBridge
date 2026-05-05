@@ -11,7 +11,7 @@ name: release
 #     - Environment: pypi
 #
 # Until that link exists in PyPI the publish step is a no-op (the
-# action exits cleanly without an OIDC token).  Audit M-J.
+# action exits cleanly without an OIDC token).
 
 on:
   push:

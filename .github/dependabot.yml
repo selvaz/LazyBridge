@@ -1,5 +1,5 @@
 # Dependabot configuration — keep dependencies fresh without flooding
-# the queue.  Audit M-J.
+# the queue.
 #
 # Two ecosystems matter for this repo:
 #   * GitHub Actions — workflow action versions

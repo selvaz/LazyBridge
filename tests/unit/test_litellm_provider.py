@@ -402,7 +402,7 @@ def test_tool_calls_parsed():
 def test_malformed_tool_call_arguments_fall_back_gracefully():
     """Bad JSON in arguments lands in ``_raw_arguments`` AND is tagged
     with ``_parse_error`` so the engine surfaces a structured TOOL_ERROR
-    rather than letting the tool fail later (audit M-A)."""
+    rather than letting the tool fail later."""
 
     def fake_completion(**kwargs):
         msg = _FakeMessage(

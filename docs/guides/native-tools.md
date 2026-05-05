@@ -47,9 +47,9 @@ Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
 !!! note "API reference"
 
     from lazybridge import Agent, NativeTool
-    
+
     Agent("model", native_tools=[NativeTool.WEB_SEARCH, ...]) -> Agent
-    
+
     # Accepted values (NativeTool enum):
     #   WEB_SEARCH       — web search (Anthropic, OpenAI, Google)
     #   CODE_EXECUTION   — sandboxed Python/JS (Anthropic, OpenAI)
@@ -57,7 +57,7 @@ Agent("gpt-4o", native_tools=["web_search"])("latest Python release?")
     #   COMPUTER_USE     — screen control (Anthropic)
     #   GOOGLE_SEARCH    — Google grounded search (Google)
     #   GOOGLE_MAPS      — Google Maps grounding (Google)
-    
+
     # String aliases also accepted:  native_tools=["web_search", "code_execution"]
 
 !!! warning "Rules & invariants"

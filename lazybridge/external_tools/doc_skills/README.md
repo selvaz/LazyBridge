@@ -34,12 +34,11 @@ Add `generated_skills/` to your `.gitignore`.
 ### Load and use a saved skill
 
 ```python
-from lazybridge.external_tools.doc_skills import skill_tool
+from lazybridge.external_tools.doc_skills import skill_tools
 from lazybridge import Agent
 
-tool = skill_tool("./generated_skills/my-project")
-
-resp = Agent("anthropic", tools=[tool])("How do I configure retry behaviour?")
+agent = Agent("anthropic", tools=skill_tools(skill_dir="./generated_skills/my-project"))
+resp = agent("How do I configure retry behaviour?")
 print(resp.text())
 ```
 
@@ -61,11 +60,10 @@ print(resp.text())
 ### Let an agent build skills on demand
 
 ```python
-from lazybridge.external_tools.doc_skills import skill_builder_tool
+from lazybridge.external_tools.doc_skills import skill_builder_tools
 from lazybridge import Agent
 
-builder = skill_builder_tool()
-agent = Agent("anthropic", tools=[builder])
+agent = Agent("anthropic", tools=skill_builder_tools())
 agent("Index the /company/docs folder as 'company-wiki'")
 ```
 
@@ -96,6 +94,6 @@ brief = query_skill(
 |---|---|
 | `build_skill(source_dirs, skill_name, ...)` | Index docs → skill bundle on disk |
 | `query_skill(skill_dir, task, ...)` | Retrieve + grounded context brief |
-| `skill_tool(skill_dir, ...)` | One-step `Tool` for an agent |
-| `skill_builder_tool(...)` | Tool that builds skill bundles |
-| `skill_pipeline(skill_dir, ...)` | Router + executor chain pipeline |
+| `skill_tools(*, skill_dir, ...)` | One-element `list[Tool]` ready to drop into `Agent(tools=...)` |
+| `skill_builder_tools(*, ...)` | One-element `list[Tool]` that lets an agent build skill bundles |
+| `skill_pipeline(*, skill_dir, ...)` | Router + executor chain wrapped as a single `Tool` |

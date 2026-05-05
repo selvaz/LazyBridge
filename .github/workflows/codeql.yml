@@ -2,7 +2,7 @@ name: CodeQL
 
 # Static analysis on every push and PR plus a weekly scheduled scan
 # so a vulnerability published in a transitive dep after the last PR
-# still surfaces.  Audit M-J.
+# still surfaces.
 
 on:
   push:

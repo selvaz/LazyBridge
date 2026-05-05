@@ -724,7 +724,7 @@ class LLMEngine:
                 run_id=run_id,
             )
 
-        # Loud surfacing of malformed tool-call arguments (audit M-A).
+        # Loud surfacing of malformed tool-call arguments.
         # Provider ``_safe_json_loads`` tags un-parseable arg blobs with
         # ``_parse_error`` so we can short-circuit here with a structured
         # error instead of letting the tool fail later with a misleading

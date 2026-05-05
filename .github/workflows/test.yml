@@ -20,7 +20,7 @@ jobs:
 
       - name: Run pre-commit
         # Enforce the hooks declared in .pre-commit-config.yaml so the
-        # local hooks contributors run match what CI runs (audit M-J).
+        # local hooks contributors run match what CI runs.
         # The action handles caching + installing pre-commit itself.
         uses: pre-commit/action@v3.0.1
 

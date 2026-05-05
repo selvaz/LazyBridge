@@ -119,7 +119,7 @@ def _safe_json_loads(raw: str) -> dict[str, Any]:
          "_parse_error":   "<JSONDecodeError message>"}
 
     ``LLMEngine._exec_tool`` detects ``_parse_error`` and short-circuits
-    to a structured error before the tool runs (audit M-A).
+    to a structured error before the tool runs.
     """
     try:
         result = json.loads(raw) if raw else {}

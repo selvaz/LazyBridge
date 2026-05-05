@@ -66,18 +66,18 @@ sess.flush()                               # drain the writer before exit
     class EventExporter(Protocol):
         def export(self, event: dict) -> None: ...
         # Optional: close() is called by Session.close() when present.
-    
+
     # Built-ins shipped from ``lazybridge`` (core).
     CallbackExporter(fn: Callable[[dict], None])
     ConsoleExporter(*, stream=sys.stdout)            # pretty stdout
     FilteredExporter(inner: EventExporter, *, event_types: set[str])
     JsonFileExporter(path: str)                       # JSONL append
     StructuredLogExporter(logger_name: str = "lazybridge")
-    
+
     # Built-in shipped from ``lazybridge.ext.otel`` (alpha extension).
     from lazybridge.ext.otel import OTelExporter
     OTelExporter(endpoint: str | None = None, *, exporter: Any | None = None)
-    
+
     Usage:
       Session(exporters=[
           ConsoleExporter(),
