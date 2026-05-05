@@ -17,6 +17,67 @@ from lazybridge.tools import Tool, build_tool_map
 _UNSET: Any = object()
 
 
+#: Documented default + source-config attribute for every runtime knob
+#: routed through ``_resolve_runtime_kwargs``.  Each entry is
+#: ``(default, source)`` where ``source`` is ``"resilience"`` or
+#: ``"observability"``.  Centralising this table avoids the eleven
+#: hand-written ``if x is _UNSET:`` blocks we used to have inline in
+#: ``Agent.__init__`` and gives us one place to register a new knob.
+_RUNTIME_KNOB_DEFAULTS: dict[str, tuple[Any, str]] = {
+    # Resilience — wraps retries / timeout / cache / fallback / output
+    # retry knobs into a single shareable object across an agent fleet.
+    "timeout": (None, "resilience"),
+    "max_retries": (3, "resilience"),
+    "retry_delay": (1.0, "resilience"),
+    "cache": (False, "resilience"),
+    "max_output_retries": (2, "resilience"),
+    "output_validator": (None, "resilience"),
+    "fallback": (None, "resilience"),
+    # Observability — session / verbose / identity.
+    "verbose": (False, "observability"),
+    "session": (None, "observability"),
+    "name": (None, "observability"),
+    "description": (None, "observability"),
+}
+
+
+def _resolve_runtime_kwargs(
+    *,
+    runtime: AgentRuntimeConfig | None,
+    resilience: ResilienceConfig | None,
+    observability: ObservabilityConfig | None,
+    flat: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge precedence ``flat kwarg > config object > default``.
+
+    Each ``flat`` value is either a real user-supplied value or the
+    private :data:`_UNSET` sentinel.  When sentinel, the value falls
+    through to ``resilience``/``observability`` (taken from the
+    explicit kwarg if provided, otherwise from ``runtime``), and from
+    there to the documented default in :data:`_RUNTIME_KNOB_DEFAULTS`.
+
+    Pure function — no side effects, no logging, no warnings — so it's
+    trivially testable in isolation from ``Agent.__init__``.
+
+    Returns
+    -------
+    dict[str, Any]
+        Same keys as :data:`_RUNTIME_KNOB_DEFAULTS`; values resolved.
+    """
+    res = resilience if resilience is not None else (runtime.resilience if runtime else None)
+    obs = observability if observability is not None else (runtime.observability if runtime else None)
+    sources = {"resilience": res, "observability": obs}
+
+    resolved: dict[str, Any] = {}
+    for key, (default, src_name) in _RUNTIME_KNOB_DEFAULTS.items():
+        v = flat.get(key, _UNSET)
+        if v is _UNSET:
+            src_obj = sources[src_name]
+            v = getattr(src_obj, key, default) if src_obj is not None else default
+        resolved[key] = v
+    return resolved
+
+
 class Agent:
     """Universal agent — delegates execution to a swappable Engine.
 
@@ -135,34 +196,39 @@ class Agent:
         # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
         cache: bool | Any = _UNSET,
     ) -> None:
-        # Merge config objects into flat kwargs.  Precedence: an explicit
-        # flat value (anything that isn't the private ``_UNSET`` sentinel)
-        # wins; otherwise the config object fills in; otherwise the
-        # documented default applies.
-        _res = resilience if resilience is not None else (runtime.resilience if runtime else None)
-        _obs = observability if observability is not None else (runtime.observability if runtime else None)
-        if timeout is _UNSET:
-            timeout = _res.timeout if _res else None
-        if max_retries is _UNSET:
-            max_retries = _res.max_retries if _res else 3
-        if retry_delay is _UNSET:
-            retry_delay = _res.retry_delay if _res else 1.0
-        if cache is _UNSET:
-            cache = _res.cache if _res else False
-        if max_output_retries is _UNSET:
-            max_output_retries = _res.max_output_retries if _res else 2
-        if output_validator is _UNSET:
-            output_validator = _res.output_validator if _res else None
-        if fallback is _UNSET:
-            fallback = _res.fallback if _res else None
-        if verbose is _UNSET:
-            verbose = _obs.verbose if _obs else False
-        if session is _UNSET:
-            session = _obs.session if _obs else None
-        if name is _UNSET:
-            name = _obs.name if _obs else None
-        if description is _UNSET:
-            description = _obs.description if _obs else None
+        # Merge config objects into flat kwargs via the centralised
+        # precedence helper.  See ``_resolve_runtime_kwargs`` for the
+        # contract; the table-driven approach keeps this block
+        # constant-size as we add new shareable knobs.
+        _resolved = _resolve_runtime_kwargs(
+            runtime=runtime,
+            resilience=resilience,
+            observability=observability,
+            flat={
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "retry_delay": retry_delay,
+                "cache": cache,
+                "max_output_retries": max_output_retries,
+                "output_validator": output_validator,
+                "fallback": fallback,
+                "verbose": verbose,
+                "session": session,
+                "name": name,
+                "description": description,
+            },
+        )
+        timeout = _resolved["timeout"]
+        max_retries = _resolved["max_retries"]
+        retry_delay = _resolved["retry_delay"]
+        cache = _resolved["cache"]
+        max_output_retries = _resolved["max_output_retries"]
+        output_validator = _resolved["output_validator"]
+        fallback = _resolved["fallback"]
+        verbose = _resolved["verbose"]
+        session = _resolved["session"]
+        name = _resolved["name"]
+        description = _resolved["description"]
         from lazybridge.engines.llm import LLMEngine
 
         if engine is not None:
