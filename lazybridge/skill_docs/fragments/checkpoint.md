@@ -19,9 +19,11 @@ Plan(
 - Success path: ``status="running"`` (next step pending) →
   ``status="done"`` when ``next_step is None``.
 - Fail path: the failing step is NOT added to ``completed_steps``;
-  the checkpoint saves ``next_step=<failing step name>`` +
-  ``status="failed"``. A subsequent run with ``resume=True`` restarts
-  from that step.
+  ``status="failed"`` is written.  For a sequential step, ``next_step``
+  points to the failing step itself so resume retries it.  For a
+  parallel band, ``next_step`` points to the **band's first step** —
+  the whole band must re-run cleanly so all sibling ``writes`` are
+  produced; resuming mid-band would leave earlier siblings' kv stale.
 - Success + ``resume=True`` + ``status="done"`` → short-circuit: Plan
   returns an Envelope with payload = cached ``kv``, without re-running.
 - Checkpoint is JSON-encoded via ``Store.write``; ``writes=`` payloads

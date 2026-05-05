@@ -1,8 +1,10 @@
 ## signature
-from_prev                # singleton — previous step's output (default)
-from_start               # singleton — original user task
-from_step(name: str)     # named prior step's output
-from_parallel(name: str) # named parallel branch's output
+from_prev                    # singleton — previous step's output (default)
+from_start                   # singleton — original user task
+from_step(name: str)         # named prior step's output
+from_parallel(name: str)     # named parallel branch's output
+from_parallel_all(name: str) # aggregate every branch in a parallel band;
+                             # payload is a labelled-text string, same as task
 
 # Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
 
@@ -18,6 +20,11 @@ from_parallel(name: str) # named parallel branch's output
 - ``from_parallel("n")``: alias for ``from_step`` intended for parallel
   branch joins. Indicates to readers that the step being referred to
   ran concurrently with siblings.
+- ``from_parallel_all("n")``: aggregates every consecutive parallel step
+  starting at ``"n"`` into one Envelope whose ``task`` and ``payload``
+  are both a labelled-text join (``"[name]\\n<text>\\n\\n..."``).
+  ``"n"`` must be the FIRST step of the band; the compile-time check
+  rejects mid-band references.
 - A plain string passed as ``task=`` is used verbatim — useful for
   hard-coded prompts at intermediate steps.
 - ``context=`` accepts a single sentinel/string OR a **list** of them.

@@ -75,11 +75,16 @@ judge("grade the last turn")
 
     - ``auto`` — sliding window plus summary of older turns once
       ``max_tokens`` is exceeded; default. Good for general chat.
-    - ``sliding`` / ``summary`` — compress whenever > 10 turns are kept.
-      ``summary`` uses ``summarizer=`` if provided; otherwise falls back
+    - ``sliding`` — compress by dropping oldest turns whenever > 10 turns
+      are kept. Does NOT require ``max_tokens``; works with ``max_tokens=None``.
+    - ``summary`` — compress whenever > 10 turns are kept.
+      Uses ``summarizer=`` if provided; otherwise falls back
       to keyword extraction (a rough but loss-aware fallback — never a
       silent no-op).
     - ``none`` — never compress; ``max_turns`` is the only backstop.
+    - Failed structured-output retries (internal ``_validate_and_retry``
+      loops) pass ``memory=None`` so correction turns are never stored as
+      real conversation history.
     - ``Memory`` is per-agent by default. Share across agents by passing
       the same instance to each ``memory=`` or via ``sources=[mem]``.
     - ``text()`` is live — every call re-materialises the current view.

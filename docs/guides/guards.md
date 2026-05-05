@@ -57,7 +57,10 @@ print(env.error.message)
     ContentGuard(input_fn: Callable[[str], GuardAction] = None,
                  output_fn: Callable[[str], GuardAction] = None)
     GuardChain(*guards: Guard)                 # first blocker wins
-    LLMGuard(judge: Agent, policy: str)        # LLM-as-judge
+    LLMGuard(judge: Agent, policy: str, *, timeout: float | None = 60.0)
+      # LLM-as-judge; timeout applies to BOTH sync and async paths.
+      # Sync path: daemon thread + join(timeout=). Async path: asyncio.wait_for.
+      # On timeout the guard fails closed (blocked). timeout=None → unbounded.
 
     class GuardError(Exception)                # raised by some integrations
 
@@ -73,6 +76,9 @@ print(env.error.message)
     - ``modified_text`` lets a guard rewrite its input — input rewrites
       become the engine's task; output rewrites replace the payload string.
     - ``GuardChain`` short-circuits on the first ``allowed=False``.
+    - ``Agent.stream()`` calls ``acheck_input`` before emitting the first
+      token. A blocked task raises ``ValueError`` instead of silently
+      streaming — guards are enforced on the streaming path too.
 
 ## See also
 

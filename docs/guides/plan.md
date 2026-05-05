@@ -163,6 +163,49 @@ There is no "no fall-through" mode.  Practical implications:
   the route condition stops firing, the loop exits and linear
   progression resumes.  `max_iterations` is the safety net.
 
+#### Form C — `after_branches="step"` (exclusive routing with rejoin)
+
+Use alongside `routes` or `routes_by` when **exactly one** branch should
+run and execution should then skip the remaining branch steps and resume
+at a named rejoin point.  Without `after_branches` routing is a *detour*
+— the routed-to step runs, then linear progression resumes from its
+declared position, so subsequent steps also execute.  With
+`after_branches` the sibling branch steps are skipped entirely and
+control jumps to the named step after the chosen branch completes.
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class Triage(BaseModel):
+    summary: str
+    severity: Literal["urgent", "normal", "spam"] | None = None
+
+plan = Plan(
+    Step(classifier, name="classify",
+         task="Classify the incoming ticket.",
+         output=Triage,
+         routes_by="severity",
+         after_branches="archive"),   # ← skip non-chosen branches; always land here
+    Step(escalator,  name="urgent",
+         task="Page the on-call team and open a P0."),
+    Step(triager,    name="normal",
+         task="Add to the support backlog with the summary."),
+    Step(closer,     name="spam",
+         task="Close the ticket as spam."),
+    Step(archiver,   name="archive",  # always runs after whichever branch ran
+         task="Log the resolved ticket to the audit archive."),
+)
+```
+
+If the LLM sets `severity=None`, no routing fires, and linear
+progression continues to `urgent` (next declared step).
+
+`after_branches` is only valid alongside `routes` or `routes_by`; the
+compiler raises `PlanCompileError` if it names an unknown step.  For
+branches that span multiple steps, pass an `Agent(engine=Plan(...))` as
+the branch step's target.
+
 #### Three rules to memorise
 
 * **Visible at the call site** — every routing decision lives on the
@@ -170,9 +213,10 @@ There is no "no fall-through" mode.  Practical implications:
 * **Compile-time validated** — unknown target names, malformed
   Literal types, predicate-not-callable: all caught by
   `PlanCompiler` before any LLM call.
-* **Detour, not termination** — the routed-to step runs, then linear
-  progression resumes from its declared position.  Place terminal
-  steps last in declared order.
+* **Detour vs. exclusive branch** — without `after_branches`, the
+  routed-to step runs then linear progression resumes from its declared
+  position.  With `after_branches`, only the matched branch runs;
+  siblings are skipped; execution resumes at the rejoin point.
 
 ### Crash-resume — *what survives across runs* (separate concern)
 
@@ -264,11 +308,15 @@ plan = Plan(
 print(Agent.from_engine(plan)("AI trends April 2026").text())
 ```
 
-### 2. LLM-decided routing via a Literal field
+### 2. LLM-decided routing via a Literal field (exclusive branches)
 
 When the LLM should pick the branch — e.g. classification — use
 ``routes_by="<field>"``.  The output model declares the legal values
 as a ``Literal[...]``; the compiler checks they're real step names.
+Add ``after_branches="step"`` so only the matched branch runs and
+execution resumes at the named rejoin point; without it the routed-to
+step would run and then linear progression would continue through the
+remaining branch steps.
 
 ```python
 from typing import Literal
@@ -283,19 +331,24 @@ plan = Plan(
          task="Classify the incoming ticket. Set severity to "
               "'urgent' for outages, 'spam' for marketing, otherwise 'normal'.",
          output=Triage,
-         routes_by="severity"),    # reads env.payload.severity
+         routes_by="severity",     # reads env.payload.severity
+         after_branches="archive"), # skip siblings; always land at archive
     Step(escalator,  name="urgent",
          task="Page the on-call team and open a P0."),
     Step(triager,    name="normal",
          task="Add to the support backlog with the summary."),
-    Step(closer,     name="spam",  # last in order → terminal
+    Step(closer,     name="spam",
          task="Close the ticket as spam."),
+    Step(archiver,   name="archive",  # always runs after whichever branch ran
+         task="Log the resolved ticket to the audit archive."),
 )
 ```
 
 If the LLM sets ``severity=None`` (or omits it), no routing happens
-and linear progression continues — useful when "I'm not sure" should
-fall through to a default branch.
+and linear progression continues to ``urgent`` (next declared step).
+Use ``after_branches`` whenever you want exactly one branch to run;
+omit it only when detour/fall-through behaviour is intentional (e.g.
+self-correction loops).
 
 ### 3. Self-correction loop
 
@@ -514,8 +567,11 @@ Agent.from_engine(plan, tools=[score_tool])("…")
   there's no shared checkpoint to resume from.
 - ``from_parallel_all("X")`` requires ``X`` to be the FIRST member of
   its parallel band — the engine walks forward from there.
-- A step that fails persists a ``status="failed"`` checkpoint pointing
-  back at itself.  Subsequent ``resume=True`` runs retry that step.
+- A sequential step that fails persists a ``status="failed"`` checkpoint
+  pointing back at itself; subsequent ``resume=True`` runs retry that
+  step.  A parallel band that fails points the checkpoint at the band's
+  **first** step — the whole band re-runs so all sibling ``writes`` are
+  produced consistently.
 - Plan writes go through the *same* store as application writes —
   namespace your keys (e.g. prefix with the pipeline name) so a
   step's ``writes="results"`` doesn't collide with an unrelated
@@ -546,6 +602,7 @@ Agent.from_engine(plan, tools=[score_tool])("…")
         # ── Routing — exactly one (or neither): ───────────────────────────
         routes: dict[str, Callable[[Envelope], bool]] | None = None,
         routes_by: str | None = None,
+        after_branches: str | None = None,                 # exclusive-branch rejoin point
     )
 
     # Sentinels — see the dedicated guide for full semantics.

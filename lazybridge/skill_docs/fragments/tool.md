@@ -106,6 +106,9 @@ Agent("claude-opus-4-7", tools=read_docs_tools())
   if a call fails with "unknown parameter", try ``strict=False``.
 - Tool name collisions trigger a ``UserWarning`` — the second
   registration replaces the first. Pick stable, distinct names.
+- Pydantic ``BaseModel`` parameters are coerced from the raw LLM dict to
+  a model instance before the function is called — you always receive a
+  typed object, not a plain dict.
 
 ## see-also
 - [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).

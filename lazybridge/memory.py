@@ -77,6 +77,41 @@ class Memory:
         summarizer: Any | None = None,
         summarizer_timeout: float | None = _DEFAULT_SUMMARIZER_TIMEOUT,
     ) -> None:
+        """Create a Memory instance.
+
+        Parameters
+        ----------
+        strategy:
+            ``"auto"``    — compress when token budget is exceeded
+            (requires ``max_tokens`` to be set).
+            ``"sliding"`` — compress by turn count regardless of
+            ``max_tokens``; does NOT require a token budget.
+            ``"summary"`` — same trigger as ``"sliding"`` but uses the
+            LLM ``summarizer`` instead of keyword extraction.
+            ``"none"``    — no compression; only the hard ``max_turns``
+            cap applies.
+        max_tokens:
+            Token budget for ``strategy="auto"``.  Ignored by
+            ``"sliding"`` and ``"summary"`` (they compress by turn
+            count).  ``None`` with ``strategy="auto"`` disables
+            compression entirely.
+        max_turns:
+            Hard cap on retained turns after compression runs.  ``None``
+            disables the cap (unbounded history — only safe for short
+            sessions).  Default: :attr:`_DEFAULT_MAX_TURNS` (1000).
+        store:
+            Optional :class:`~lazybridge.store.Store` for persistent
+            memory across sessions.
+        summarizer:
+            Callable used by ``strategy="summary"`` — typically an
+            :class:`~lazybridge.agent.Agent`.  See the class docstring
+            for accepted shapes.
+        summarizer_timeout:
+            Deadline (seconds) applied to async summariser calls.  On
+            timeout the keyword-extraction fallback runs and a one-shot
+            warning is emitted via :attr:`_summarizer_warned`.  ``None``
+            disables the deadline.  Default: 30 s.
+        """
         self.strategy = strategy
         self.max_tokens = max_tokens
         self.max_turns = max_turns
@@ -172,8 +207,10 @@ class Memory:
             return None
         if self.strategy == "none":
             return None
-        # "auto" needs a token budget to know when to compress; "sliding"
-        # and "summary" compress by turn count so they don't need max_tokens.
+        # Only "auto" requires a token budget — "sliding" and "summary"
+        # compress by turn count and must NOT be gated on max_tokens.
+        # Gating all strategies on max_tokens would silently disable
+        # "sliding"/"summary" when max_tokens=None.
         if self.strategy == "auto" and not self.max_tokens:
             return None
         total = sum(t.token_estimate for t in self._turns)
@@ -199,10 +236,14 @@ class Memory:
         "coroutine was never awaited" RuntimeWarning.
 
         ``summarizer_timeout`` (set on the Memory) is enforced when the
-        summariser returns a coroutine / awaitable — on deadline the
-        keyword-extraction fallback runs.  Sync summarisers cannot be
-        cancelled mid-call, so the timeout is advisory there: the
-        caller must enforce it inside their own callable if needed.
+        summariser returns a coroutine / awaitable — the coroutine is
+        wrapped in ``asyncio.wait_for``; on deadline the
+        keyword-extraction fallback runs and :attr:`_summarizer_warned`
+        is set (one-shot warning, separate from the turn-cap
+        :attr:`_overflow_warned` flag).  Sync summarisers are called
+        directly and cannot be interrupted mid-call; callers that need
+        a hard deadline for sync summarisers should enforce it inside
+        their own callable.
         """
         assert self._summarizer is not None
         lines: list[str] = []

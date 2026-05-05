@@ -141,7 +141,9 @@ prod("draft a one-pager on the LazyBridge audit findings")
     - ``verify=`` wraps the run in a judge/retry loop (max ``max_verify``
       attempts). The judge can be an Agent or a plain callable.
     - ``guard=`` filters both input and output. Blocked runs return an
-      error Envelope without invoking the engine.
+      error Envelope without invoking the engine. ``stream()`` also
+      calls ``acheck_input`` before the first token is emitted — a
+      blocked task raises ``ValueError`` rather than silently streaming.
     - ``timeout=`` is the **total** deadline for ``agent.run()``; on
       expiry an ``AGENT_FINISH`` event with ``cancelled=True`` is emitted
       and a ``TimeoutError`` Envelope is returned.

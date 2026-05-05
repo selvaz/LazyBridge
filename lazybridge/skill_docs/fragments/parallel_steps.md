@@ -25,8 +25,11 @@ Plan(
   output; use ``from_parallel("name")`` to reach a specific branch.
 - Parallel steps may have their own ``writes=`` — each branch's
   payload is persisted under the respective Store key.
-- Errors in a parallel branch surface as an error ``Envelope`` for
-  that branch only; sibling branches continue.
+- **Atomicity on failure**: if any branch errors, no ``writes`` from
+  the band are applied (not even those of succeeded siblings), the
+  first-error ``Envelope`` is returned, and the checkpoint points to
+  the band's first step so a future ``resume=True`` re-runs the whole
+  band cleanly.
 
 ## narrative
 **Use `parallel=True` step bands** when independent steps can run
@@ -75,10 +78,11 @@ Agent.from_engine(plan)("framework update — April 2026")
   non-parallel step IS the join. If you want all three outputs you
   must read them via ``from_parallel("…")`` on the join step;
   otherwise only ``from_prev`` (last completed) is visible.
-- Checkpointing across a parallel block is coarse-grained: the engine
-  saves after the block completes, not per-branch. If branch A
-  succeeds but B crashes, resume retries the whole block, not just B.
-  (Tracked for future work.)
+- Checkpointing across a parallel block is coarse-grained: on failure the
+  checkpoint's ``next_step`` is set to the band's **first** step, not the
+  failing step. If branch A succeeds but B crashes, resume re-runs the
+  whole band from the start so all sibling ``writes`` are produced
+  consistently — resuming mid-band would leave earlier branches' kv stale.
 
 ## see-also
 - [Plan](plan.md) — the engine that orchestrates parallel bands.

@@ -577,6 +577,13 @@ class Agent:
     ) -> AsyncGenerator[str, None]:
         """Stream LLM tokens across the full tool-calling loop.
 
+        **Guard enforcement.** ``self.guard`` is checked via
+        ``acheck_input`` before the first token is emitted.  A blocked
+        input raises :class:`ValueError` immediately; a modified input
+        (``GuardAction.modify``) replaces the task in the envelope sent
+        to the provider.  This is identical to the guard contract in
+        :meth:`run` — streaming mode does not bypass the guard.
+
         Honours ``self.timeout`` between chunks so a stalled provider
         can't hang the caller.  Each ``__anext__`` is wrapped in
         ``asyncio.wait_for`` (per-chunk, not whole-stream) so short

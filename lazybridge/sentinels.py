@@ -49,8 +49,9 @@ class _FromParallelAll:
     - ``task``     : labelled-text join
                      (``"[branch_a]\\n<text>\\n\\n[branch_b]\\n<text>..."``)
                      so ordinary LLM steps consume it without changes.
-    - ``payload``  : ``list[Envelope]`` of all branches in declared order,
-                     for steps that want typed access.
+    - ``payload``  : the same labelled-text join string as ``task`` — NOT
+                     a ``list[Envelope]``.  Use ``from_parallel("name")``
+                     to access an individual branch's typed payload.
     - ``metadata`` : summed input/output tokens and cost across branches.
     - ``error``    : first non-None branch error if any
                      (short-circuit semantics — caller can detect failure).

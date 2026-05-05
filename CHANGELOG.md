@@ -6,6 +6,90 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased] — 2026-05-05 — bug-fix and routing hardening
+
+### Features
+
+- **`Step.after_branches`** — exclusive-branch rejoin point.  Set
+  alongside `routes` / `routes_by` to route to exactly one branch and
+  skip all sibling steps; execution resumes at the named step after the
+  branch completes.  Without `after_branches`, routing is a *detour*
+  (linear progression resumes from the routed-to step's declared
+  position).  See `Step` docstring for the full example.
+
+### Bug Fixes (Critical)
+
+- **Store SQLite CAS: open transaction on `JSONDecodeError`** — the
+  `except sqlite3.Error` clause in `compare_and_swap` did not catch
+  `json.loads` failures on corrupt rows, leaving `BEGIN IMMEDIATE`
+  open on the thread-local connection and poisoning every subsequent
+  call on that thread.  Widened to `except (sqlite3.Error, ValueError)`
+  (``json.JSONDecodeError`` is a ``ValueError`` subclass).
+- **Store in-memory: mutable references break CAS invariants** —
+  `read()` and `write()` returned / stored the live Python object,
+  so callers mutating the result could silently alter the stored value
+  and defeat `compare_and_swap`.  Both paths now go through
+  `_deep_copy_safe` (deep-copy with a non-copyable fallback).
+- **`LLMEngine` `tool_choice="any"` infinite loop** — after the model
+  satisfied the "must call at least one tool" contract on the first
+  turn, `provider_tc` stayed `"any"`, forcing every subsequent turn
+  to also call a tool.  The loop never exited until `max_turns` was
+  exhausted.  Fixed: `provider_tc` is reset to `"auto"` immediately
+  after the first tool-result turn.
+- **`LLMEngine` `tool_choice="any"` sent as literal tool name** —
+  Anthropic and OpenAI reject `tool_choice="any"` as an unknown tool
+  name.  The framework now maps `"any"` → `"required"` when building
+  the provider request so the wire value is always a recognised
+  constant.
+- **Plan: parallel-band failure checkpoint pointed at failing step** —
+  when a step inside a parallel band failed, the checkpoint recorded
+  `current_step` as the failing step rather than the band-start, so
+  `resume=True` re-entered mid-band in an inconsistent state.  Now
+  points at the band-start step.
+- **Agent: failed structured-output retries contaminated memory** —
+  correction retries in `_validate_and_retry` were called with the
+  live `memory` object, so each failed attempt added a garbage turn to
+  the agent's conversation history.  Retries now pass `memory=None`;
+  only the final accepted result reaches memory.
+- **`Agent.stream()`: input guard bypassed** — `acheck_input` was not
+  called in the streaming path, so `guard=` had no effect when callers
+  used `async for token in agent.stream(...)`.  The guard check now
+  runs before the first token is emitted.
+
+### Bug Fixes (High)
+
+- **`LLMGuard` sync path: `timeout=` ignored** — `_judge` invoked
+  `self._agent(prompt)` directly on the calling thread without any
+  deadline.  Fixed by running the judge in a daemon thread and calling
+  `thread.join(timeout=self._timeout)`.
+- **Memory `strategy="sliding"` silently disabled with
+  `max_tokens=None`** — `_plan_compression` gated all compression on
+  `bool(self.max_tokens)`, so `strategy="sliding"` with the default
+  `max_tokens=None` never triggered.  Fixed: only `"auto"` requires a
+  token budget; `"sliding"` and `"summary"` compress by turn count
+  independently of `max_tokens`.
+- **Memory: `_overflow_warned` flag shared between turn-cap and
+  summarizer timeout** — a summariser timeout silenced the turn-cap
+  warning (or vice versa) because both used the same flag.  Split into
+  `_overflow_warned` (turn cap) and `_summarizer_warned` (summariser
+  timeout).
+- **Predicates: `empty()` / `not_empty()` treated `0` / `False` as
+  empty** — only `None` and zero-length containers (`str`, `list`,
+  `dict`, `tuple`, `set`, `frozenset`) are now considered empty.
+  Numerics and booleans are always non-empty; use `eq(0)` / `eq(False)`
+  for those cases.
+- **Google provider: `finish_reason` never mapped to `"max_tokens"`** —
+  the `MAX_TOKENS` stop reason from the Google API was not translated,
+  so callers inspecting `stop_reason` always saw `None` instead of
+  `"max_tokens"`.
+- **Tool schema: `model_dump()` destroyed Pydantic model args** —
+  `Tool.definition()` called `model_dump()` on the entire arguments
+  dict, collapsing Pydantic model instances to plain dicts before the
+  schema was built.  Fixed: `getattr` per field preserves the original
+  objects.
+
+---
+
 ## [0.7.0] — pre-1.0 reset, simplified namespace layout
 
 **Major reorganization.** The framework is dropping back to pre-1.0 and

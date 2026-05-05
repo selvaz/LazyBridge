@@ -110,6 +110,12 @@ GPT-5.5 (released 2026-04-23) is the new flagship. There is no `gpt-5.5-mini` /
 
 **Native tools:** `GOOGLE_SEARCH` · `WEB_SEARCH` (alias for Google Search) · `GOOGLE_MAPS`
 
+!!! note "`finish_reason` mapping"
+    The Google provider maps Gemini's `finish_reason` values to the unified
+    LazyBridge vocabulary: `MAX_TOKENS` → `"max_tokens"`, safety-related reasons
+    (`SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`) → `"stop"`,
+    all others → `"end_turn"`.
+
 !!! warning "Incompatibility"
     Google Search grounding and structured output (`output=SomeModel`) cannot be
     combined in a single call — the Gemini API returns 400.
@@ -117,6 +123,28 @@ GPT-5.5 (released 2026-04-23) is the new flagship. There is no `gpt-5.5-mini` /
 !!! warning "Deprecation"
     `gemini-2.0-flash` is deprecated and removed from tier aliases. Kept in the
     price table for compatibility only. Do not use in new code.
+
+---
+
+## `tool_choice` values
+
+The following values are valid for the `tool_choice` parameter across all providers:
+
+| Value | Meaning |
+|-------|---------|
+| `"auto"` | Model decides whether to call a tool (default) |
+| `"none"` | Model must not call any tool |
+| `"required"` | Model must call at least one tool |
+| `"any"` | Alias for `"required"` — provider-neutral spelling; LazyBridge maps it to the provider's equivalent (`"required"` for OpenAI, `{"type": "required"}` for Anthropic) |
+| `"<tool_name>"` | Model must call the named tool specifically |
+
+!!! note "Reset after first tool turn"
+    After the first turn where tool calls are made, `tool_choice` is automatically
+    reset to `"auto"` so the model can produce a final answer in the next turn.
+    This applies when `tool_choice="any"` or `tool_choice="required"` is set.
+
+!!! note "DeepSeek thinking mode"
+    `tool_choice` is not supported when `ThinkingConfig` is active on DeepSeek models.
 
 ---
 

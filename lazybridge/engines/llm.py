@@ -64,7 +64,16 @@ class LLMEngine:
         agentic tasks; lower it during dev to fail fast.
     tool_choice:
         "auto" — provider decides when to call tools (default).
-        "any"  — provider must call at least one tool.
+        "any"  — provider must call at least one tool on the first turn.
+
+        When ``"any"`` is set, the engine maps it to ``"required"`` on
+        the wire (Anthropic and OpenAI both reject the literal string
+        ``"any"`` as an unknown tool name).  After the model satisfies
+        the "must call at least one tool" contract on the first turn,
+        the engine resets to ``"auto"`` for all subsequent turns so the
+        model can produce a final text answer.  Without this reset the
+        model would be forced to call tools on every turn, causing an
+        infinite loop until ``max_turns`` is exhausted.
 
         When the model emits multiple tool calls in a single turn,
         LazyBridge always executes them concurrently via ``asyncio.gather``.

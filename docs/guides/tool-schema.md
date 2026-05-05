@@ -49,6 +49,29 @@ Agent("claude-opus-4-7",
       tools=[Tool(partial_hint, mode="hybrid", schema_llm=tiny)])
 ```
 
+## Pydantic `BaseModel` parameters
+
+Parameters typed as `BaseModel` subclasses are fully supported in
+`mode="signature"`. The schema for the parameter is inferred from the model's
+field definitions, and the raw dict returned by the LLM is coerced into a proper
+model instance before your function is called.
+
+```python
+from pydantic import BaseModel
+from lazybridge import Agent
+
+class Filters(BaseModel):
+    min_score: float = 0.0
+    tags: list[str] = []
+
+def rank(query: str, filters: Filters) -> list[str]:
+    """Rank results for query using optional filters."""
+    ...
+```
+
+No special configuration is needed — just annotate the parameter with the model
+type and LazyBridge handles the rest.
+
 ## Pitfalls
 
 - ``mode="llm"`` without ``schema_llm=`` silently falls back to

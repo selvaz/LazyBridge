@@ -163,6 +163,19 @@ class LLMGuard(Guard):
     so even if both scrubs miss something, an attacker still has to
     convince the judge to emit the verdict word as a leading token,
     not just have it appear somewhere in the response.
+
+    **Timeout enforcement.**  The ``timeout`` parameter is honoured on
+    both code paths:
+
+    * *Async path* (``acheck_input`` / ``acheck_output``) — wraps the
+      judge coroutine in ``asyncio.wait_for``; on deadline returns a
+      fail-closed :class:`GuardAction` (blocked) so the surrounding
+      event loop is never starved.
+    * *Sync path* (``check_input`` / ``check_output``) — runs the judge
+      in a daemon thread and joins with ``thread.join(timeout=...)``;
+      if the thread is still alive after the deadline, returns the same
+      fail-closed block action.  Pass ``timeout=None`` only in tests
+      where the judge is a deterministic stub.
     """
 
     _PROMPT_TEMPLATE = (
@@ -215,10 +228,13 @@ class LLMGuard(Guard):
         # also strip <content>/<system>/<user>/etc. that could break
         # the prompt structure if a future template grows new blocks.
         self._policy = self._scrub_tags(policy)
-        # Per-judgement deadline.  Caps the wait on a hung judge so the
-        # surrounding event loop / executor pool isn't starved by a
-        # slow guard.  ``None`` disables (unbounded — only set this in
-        # tests where the judge is a deterministic stub).
+        # Per-judgement deadline applied on both the async path
+        # (asyncio.wait_for) and the sync path (daemon thread +
+        # thread.join(timeout=...)).  Caps the wait on a hung judge so
+        # neither the event loop nor the calling thread is starved by a
+        # slow or unresponsive LLM judge.  ``None`` disables the deadline
+        # (unbounded — only set this in tests where the judge is a
+        # deterministic stub).
         self._timeout = timeout
 
     # Matches the verdict word as a COMPLETE token on the line.

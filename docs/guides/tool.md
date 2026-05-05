@@ -55,6 +55,27 @@ from lazybridge.external_tools.read_docs import read_docs_tools
 Agent("claude-opus-4-7", tools=read_docs_tools())
 ```
 
+## Pydantic models as parameters
+
+Tool functions can accept Pydantic `BaseModel` parameters directly. LazyBridge
+coerces the raw dict from the LLM into a proper model instance before calling
+your function — you always receive a typed object, not a plain dict.
+
+```python
+from pydantic import BaseModel
+from lazybridge import Agent
+
+class SearchOptions(BaseModel):
+    query: str
+    max_results: int = 10
+
+def search(options: SearchOptions) -> list[str]:
+    """Search the web with the given options."""
+    return [f"result for: {options.query}"]  # options is a SearchOptions instance
+
+Agent("claude-opus-4-7", tools=[search])("find 5 Python tutorials")
+```
+
 ## Pitfalls
 
 - A function with no type hints produces an empty JSON schema and the

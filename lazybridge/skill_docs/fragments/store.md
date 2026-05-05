@@ -23,6 +23,10 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
 - Store is thread-safe via a lock (in-memory) or SQLite WAL mode + busy
   timeout (persistent). Safe to share across concurrent agents.
 - Store is not transactional; each write commits immediately.
+- ``Store()`` (in-memory) returns a **deep copy** from ``read()`` and
+  stores a deep copy on ``write()``, matching the SQLite path's
+  copy-on-write semantics. Do not rely on reference identity from
+  ``store.read()`` — mutating the returned value does not affect the store.
 
 ## narrative
 **Use `Store`** for cross-process or cross-run state — pipeline

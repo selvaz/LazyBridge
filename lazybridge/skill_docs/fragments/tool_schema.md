@@ -90,6 +90,9 @@ Agent("claude-opus-4-7",
 - ``strict=True`` is opinionated about JSON schema shape. Tools that
   rely on extra kwargs or variadic args may fail strict validation;
   try without strict first.
+- Pydantic ``BaseModel`` parameters work in ``mode="signature"``. The
+  schema is inferred from the model's fields; the raw LLM dict is
+  coerced into a model instance before your function is called.
 
 ## see-also
 - [Tool](tool.md) — the wrapper that consumes a schema mode.

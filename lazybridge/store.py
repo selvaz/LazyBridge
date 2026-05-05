@@ -141,12 +141,22 @@ class Store:
         self._conn().commit()
 
     def write(self, key: str, value: Any, *, agent_id: str | None = None) -> None:
-        # Pydantic instances are serialised via ``model_dump(mode="json")``
-        # before JSON encoding — otherwise SQLite storage would fall
-        # through ``default=str`` and persist the model's ``__repr__``
-        # (e.g. ``"x=42 name='hello'"``), which is NOT round-trippable.
-        # In-memory storage keeps the instance as-is since Python dicts
-        # don't need JSON round-tripping.
+        """Store ``value`` under ``key``.
+
+        **Copy semantics (in-memory path)**: the value is deep-copied
+        before storage via :func:`_deep_copy_safe` so that callers
+        mutating the original object after ``write()`` cannot silently
+        alter the stored value and defeat :meth:`compare_and_swap`.
+        The SQLite path gets equivalent isolation for free via the
+        JSON round-trip.
+
+        Pydantic instances are serialised via ``model_dump(mode="json")``
+        before JSON encoding — otherwise SQLite storage would fall
+        through ``default=str`` and persist the model's ``__repr__``
+        (e.g. ``"x=42 name='hello'"``), which is NOT round-trippable.
+        In-memory storage keeps the instance as-is since Python dicts
+        don't need JSON round-tripping.
+        """
         if self._db:
             serialised = _to_jsonable(value)
             self._conn().execute(
@@ -159,6 +169,15 @@ class Store:
                 self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(value), agent_id=agent_id)
 
     def read(self, key: str, default: Any = None) -> Any:
+        """Return the value stored under ``key``, or ``default``.
+
+        **Copy semantics (in-memory path)**: returns a deep copy of the
+        stored value via :func:`_deep_copy_safe` so that callers mutating
+        the returned object cannot silently alter the stored value and
+        defeat :meth:`compare_and_swap`.  The SQLite path returns a fresh
+        object on every call because ``json.loads`` always allocates new
+        containers.
+        """
         if self._db:
             row = self._conn().execute("SELECT value FROM store WHERE key=?", (key,)).fetchone()
             return json.loads(row["value"]) if row else default
@@ -239,7 +258,12 @@ class Store:
 
         SQLite path: wraps the read-check-write in ``BEGIN IMMEDIATE``
         so concurrent writers serialise on the SQLite reserved lock
-        instead of interleaving.
+        instead of interleaving.  Exceptions are caught as
+        ``(sqlite3.Error, ValueError)`` — the ``ValueError`` arm covers
+        ``json.JSONDecodeError`` (a subclass) raised by ``json.loads``
+        on corrupt rows; without it, a corrupt row would leave the
+        ``BEGIN IMMEDIATE`` transaction open on the thread-local
+        connection and poison every subsequent call on that thread.
         """
         if self._closed:
             raise RuntimeError("Store is closed")

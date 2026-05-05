@@ -481,7 +481,7 @@ def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) ->
         # are returned as proper Python objects instead of being recursively
         # converted to plain dicts, which would cause AttributeError when
         # the tool function tries to access model attributes.
-        return {f: getattr(validated, f) for f in validated.model_fields}  # type: ignore[attr-defined]
+        return {f: getattr(validated, f) for f in type(validated).model_fields}  # type: ignore[attr-defined]
     except _ValidationError as exc:
         errors = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
         raise ToolArgumentValidationError(f"Invalid arguments for '{func.__name__}': {errors}") from exc

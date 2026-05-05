@@ -94,12 +94,30 @@ a = Agent("gpt-5.4-mini")
 b = Agent("claude-haiku-4-5")
 ```
 
+## tool_choice values
+| Value          | Meaning |
+|----------------|---------|
+| "auto"         | Model decides (default) |
+| "none"         | No tool calls allowed |
+| "required"     | Must call at least one tool |
+| "any"          | Alias for "required"; mapped to provider equivalent ("required" for OpenAI, {"type":"required"} for Anthropic) |
+| "<tool_name>"  | Must call the named tool |
+
+After the first tool-call turn, tool_choice is reset to "auto" automatically.
+DeepSeek: tool_choice unsupported in thinking mode.
+
+## Google finish_reason mapping
+MAX_TOKENS → "max_tokens"
+SAFETY / RECITATION / BLOCKLIST / PROHIBITED_CONTENT / SPII → "stop"
+all others → "end_turn"
+
 ## pitfalls
 - DeepSeek V4 has 2 models (v4-pro, v4-flash); three tier aliases collapse onto v4-flash.
 - gpt-5.5-mini / gpt-5.5-nano do NOT exist yet; medium/cheap tiers still use gpt-5.4-mini / gpt-5.4-nano.
 - gpt-5-mini does NOT exist. The current OpenAI mini variant is gpt-5.4-mini.
 - gemini-2.0-flash is deprecated June 1 2026; use gemini-2.5-flash-lite instead.
 - Adaptive thinking (Anthropic claude-opus/sonnet 4.6+) ignores budget_tokens.
+- tool_choice="any" is NOT passed literally to providers; it is mapped to "required".
 
 ## see-also
 - [BaseProvider](base-provider.md) — the contract every provider satisfies.
