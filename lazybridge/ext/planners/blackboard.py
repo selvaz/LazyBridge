@@ -116,3 +116,10 @@ def make_blackboard_planner(
         verify=verify,
         max_verify=max_verify,
     )
+
+
+# Canonical name (post unified-surface rename) — sidesteps the verbal
+# collision between "planner" and the static :class:`Plan` engine.
+# ``make_blackboard_planner`` remains a backward-compat alias bound to
+# the same callable so existing user code keeps working unchanged.
+blackboard_orchestrator_agent = make_blackboard_planner

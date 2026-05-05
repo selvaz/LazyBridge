@@ -16,6 +16,38 @@ from lazybridge import Agent
 print(Agent("claude-opus-4-7")("hello").text())
 ```
 
+## The shape
+
+Every Agent is the same: **`Container(engine, tools, state)`**.  The
+engine decides *how* the agent behaves; everything else (memory,
+session, guard, verify, fallback, output, name) is uniform across every
+engine.  Reading any constructor tells you immediately which engine is
+inside.
+
+```python
+# Core engines — built into lazybridge core.
+Agent("claude-opus-4-7")                                   # shortcut for from_model
+Agent.from_model("claude-opus-4-7", tools=[search])
+Agent.from_provider("anthropic", tier="top")
+Agent.from_engine(any_engine_instance)                     # escape hatch
+Agent.from_plan(*steps, store=..., resume=True)            # declared DAG
+Agent.from_chain(researcher, writer)                       # linear pipeline (Plan sugar)
+Agent.from_parallel(a, b, c)                               # scripted fan-out
+
+# Extension engines — module-level factories (kept off Agent core to
+# respect the core/ext import boundary).
+from lazybridge.ext.hil import supervisor_agent, human_agent
+from lazybridge.ext.planners import (
+    orchestrator_agent, blackboard_orchestrator_agent,
+)
+supervisor_agent(tools=[...], agents=[...])
+human_agent(timeout=60.0, default="approve")
+orchestrator_agent(agents=[researcher, writer])
+```
+
+All paths return the same `Agent` shape — call `.run()` / `__call__()`
+/ `stream()` exactly the same way regardless of which engine is inside.
+
 ## Documentation — two tracks
 
 LazyBridge ships docs for two audiences. **Same source of truth** —
@@ -117,14 +149,14 @@ separate engine, no graph wrappers. See [the MCP recipe](docs/recipes/mcp.md).
 ### 5 · Declared typed pipeline with resume
 
 ```python
-from lazybridge import Agent, Plan, Step, Store, from_prev, from_step
+from lazybridge import Agent, Step, Store, from_prev, from_step
 
 store = Store(db="pipeline.sqlite")
 
 # Idiomatic shape: each step has an explicit task instruction; upstream
 # data flows through `context=`.  `context=[from_step("a"), from_step("b")]`
 # also works to pull from multiple upstream steps without a combiner.
-plan = Plan(
+Agent.from_plan(
     Step(researcher, name="search",
          writes="hits", output=Hits),
     Step(ranker,     name="rank",
@@ -135,9 +167,7 @@ plan = Plan(
          task="Write a 200-word brief from the ranked items.",
          context=from_step("rank")),
     store=store, checkpoint_key="research", resume=True,
-)
-
-Agent.from_engine(plan)("AI trends April 2026")
+)("AI trends April 2026")
 ```
 
 If a step fails mid-plan, the next run with `resume=True` retries
@@ -179,14 +209,13 @@ Conventions, with proper parent-child span hierarchy
 
 ```python
 from lazybridge import Agent
-from lazybridge.ext.hil import SupervisorEngine
+from lazybridge.ext.hil import supervisor_agent
 
-sup = Agent(engine=SupervisorEngine(
+sup = supervisor_agent(
     tools=[search],
     agents=[researcher],   # human can `retry researcher: <feedback>`
-))
-agents = [researcher, sup, writer]
-Agent.chain(*agents)("publish a policy brief")
+)
+Agent.from_chain(researcher, sup, writer)("publish a policy brief")
 ```
 
 Commands in the REPL: `continue`, `retry <agent>: <feedback>`,

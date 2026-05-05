@@ -79,26 +79,72 @@ def _resolve_runtime_kwargs(
 
 
 class Agent:
-    """Universal agent — delegates execution to a swappable Engine.
+    """Universal agent — ``Container(engine, tools, state)``.
 
-    ``Agent`` is the only public abstraction the user interacts with.  The
-    engine (LLM, Human, Supervisor, Plan) is swappable; the call surface
-    is identical.
+    **The framework's invariant.**  Every Agent is the same shape: an
+    *engine* that decides how the agent behaves, a *tools* list it can
+    invoke, and *state* (memory, session, guard, verify, fallback,
+    output, name).  Reading any agent constructor tells you immediately
+    which engine is in there — the engine is the lever that swaps
+    behaviour, everything else is uniform.
 
-    **Tool-is-Tool contract.** ``tools=[...]`` accepts plain functions,
-    ``Tool`` instances, other ``Agent`` instances, and Agents whose tools
-    are themselves Agents.  The composition is closed and uniform: an
-    Agent of an Agent of a function looks the same at every level.
-    LazyBridge wraps each entry via :func:`wrap_tool` at construction
-    time; nested Agents inherit the outer session so observability flows
-    through the whole tree.
+    **Tool-is-Tool contract.**  ``tools=[...]`` accepts plain functions,
+    :class:`Tool` instances, other :class:`Agent` instances, and Agents
+    whose tools are themselves Agents.  The composition is closed and
+    uniform: an Agent of an Agent of a function looks the same at every
+    level.  Nested Agents inherit the outer session so observability
+    flows through the whole tree.
 
     **Parallelism is a capability, not a configuration.**  When the
     underlying engine emits multiple tool invocations in a single step
     (e.g. an LLM tool loop turn with N tool calls), LazyBridge executes
     them concurrently via ``asyncio.gather``.  There is no "serial vs
-    parallel" mode to pick — if you want N things to happen at once, put
-    N things in ``tools=[]`` and the engine will do it for you.
+    parallel" mode to pick — if you want N things to happen at once,
+    put N things in ``tools=[]`` and the engine will do it for you.
+
+    Construction surface — ``Agent.from_<engine_kind>(...)``
+    --------------------------------------------------------
+
+    Every factory builds the right engine, forwards the same uniform
+    state kwargs (``memory=``/``session=``/``guard=``/``verify=``/
+    ``fallback=``/``output=``/``name=``/etc.) to the unified
+    constructor, and returns an :class:`Agent` (or, for the one
+    documented asymmetry, a fan-out runner).
+
+    *Core engines* (built into ``lazybridge``)::
+
+        Agent("claude-opus-4-7")               # implicit shortcut for from_model
+        Agent.from_model("claude-opus-4-7", tools=[search])
+        Agent.from_provider("anthropic", tier="top")
+        Agent.from_engine(any_engine_instance) # escape hatch — any engine
+        Agent.from_plan(*steps, store=..., resume=True)
+        Agent.from_chain(researcher, writer)           # linear Plan sugar
+        Agent.from_parallel(a, b, c)                   # → list[Envelope]
+
+    *Extension engines* (live in :mod:`lazybridge.ext`, kept off the
+    core ``Agent`` class to respect the core/ext import boundary —
+    see ``docs/guides/core-vs-ext.md``).  Two equivalent paths::
+
+        # 1. Escape-hatch through Agent.from_engine
+        from lazybridge.ext.hil import SupervisorEngine
+        Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
+
+        # 2. Module-level factory (symmetric ergonomic shape)
+        from lazybridge.ext.hil import supervisor_agent, human_agent
+        from lazybridge.ext.planners import (
+            orchestrator_agent, blackboard_orchestrator_agent,
+        )
+        supervisor_agent(tools=[...], agents=[...], session=sess)
+        human_agent(timeout=60.0, default="approve")
+        orchestrator_agent(agents=[researcher, writer])
+        blackboard_orchestrator_agent(agents=[researcher, writer])
+
+    All paths return the same :class:`Agent` shape.  Call ``.run()`` /
+    ``__call__()`` / ``stream()`` exactly the same way regardless of
+    which engine is inside.
+
+    Examples
+    --------
 
     Tier 1 (2 lines)::
 
@@ -106,28 +152,26 @@ class Agent:
 
     Tier 2 (with tools — functions, agents, or mixed)::
 
-        Agent("claude-opus-4-7", tools=[search, summarizer])("…").text()
+        Agent.from_model("claude-opus-4-7", tools=[search, summarizer])("…").text()
 
     Tier 3 (structured output)::
 
-        Agent("claude-opus-4-7", output=Summary)("…").payload.title
+        Agent.from_model("claude-opus-4-7", output=Summary)("…").payload.title
 
-    Tier 4 (deterministic fan-out / sequential chain — sugar helpers)::
+    Tier 4 (deterministic fan-out / sequential chain)::
 
-        Agent.chain(researcher, writer)("AI trends").text()
-        Agent.parallel(a, b, c)("task")   # → list[Envelope], no LLM orchestrator
+        Agent.from_chain(researcher, writer)("AI trends").text()
+        Agent.from_parallel(a, b, c)("task")   # → list[Envelope]
 
-    Tier 5/6 — pluggable engines (same ``tools=`` surface)::
+    Tier 5 (declared pipeline)::
 
-        # Core engines
-        Agent(engine=Plan(...), tools=[...], output=Report, session=session)
-
-        # Extension engines (lazybridge.ext.hil)
-        from lazybridge.ext.hil import SupervisorEngine
-        Agent(engine=SupervisorEngine(...), tools=[...], session=session)
-
-    Core and extension engines share the :class:`Engine` protocol; the
-    ``Agent`` surface is identical regardless of where the engine lives.
+        Agent.from_plan(
+            Step(researcher, name="search"),
+            Step(writer,     name="write"),
+            store=Store(db="run.sqlite"),
+            checkpoint_key="research",
+            resume=True,
+        )("AI trends April 2026")
     """
 
     _is_lazy_agent = True  # recognised by wrap_tool()
@@ -733,6 +777,128 @@ class Agent:
             step_timeout=step_timeout,
             **kwargs,
         )
+
+    # ------------------------------------------------------------------
+    # Unified ``from_<engine_kind>`` factories
+    # ------------------------------------------------------------------
+    #
+    # Every Agent is ``Container(engine, tools, state)``.  The engine
+    # decides HOW the agent behaves; everything else (memory, session,
+    # guard, verify, fallback, output, name) is uniform across every
+    # engine.  These factories are sugar that build the right engine
+    # and forward shared kwargs through to the unified Agent
+    # constructor.  Reading any ``Agent.from_X(...)`` call site tells
+    # you immediately which engine is in there.
+
+    @classmethod
+    def from_plan(
+        cls,
+        *steps: Any,
+        max_iterations: int = 100,
+        store: Any | None = None,
+        checkpoint_key: str | None = None,
+        resume: bool = False,
+        on_concurrent: str = "fail",
+        **kwargs: Any,
+    ) -> Agent:
+        """Construct an Agent backed by a declarative :class:`Plan`.
+
+        Explicit counterpart to ``Agent(engine=Plan(*steps, ...))``::
+
+            Agent.from_plan(
+                Step(researcher, name="search", writes="hits"),
+                Step(ranker,     name="rank",   context=from_prev),
+                Step(writer,     name="write",  context=from_step("rank")),
+                store=Store(db="run.sqlite"),
+                checkpoint_key="research",
+                resume=True,
+            )
+
+        All :class:`Plan` kwargs are accepted directly; remaining
+        ``**kwargs`` (``memory=`` / ``session=`` / ``output=`` /
+        ``verify=`` / ``fallback=`` / ``guard=`` / ``name=`` / etc.)
+        forward to the unified Agent constructor.
+        """
+        from lazybridge.engines.plan import Plan
+
+        plan = Plan(
+            *steps,
+            max_iterations=max_iterations,
+            store=store,
+            checkpoint_key=checkpoint_key,
+            resume=resume,
+            on_concurrent=on_concurrent,  # type: ignore[arg-type]
+        )
+        return cls(engine=plan, **kwargs)
+
+    @classmethod
+    def from_chain(cls, *agents: Agent, **kwargs: Any) -> Agent:
+        """Construct an Agent that runs ``agents`` sequentially (linear pipeline).
+
+        Each agent's output becomes the next agent's input.  Internally
+        wraps a :class:`Plan` of one ``Step`` per agent — the canonical
+        narrative is "linear Plan", just spelled in two characters less.
+
+        Equivalent to :meth:`Agent.chain`; the ``from_`` form is the
+        documented canonical surface so reading the call site tells you
+        immediately which engine is in there.
+        """
+        return cls.chain(*agents, **kwargs)
+
+    @classmethod
+    def from_parallel(
+        cls,
+        *agents: Agent,
+        concurrency_limit: int | None = None,
+        step_timeout: float | None = None,
+        **kwargs: Any,
+    ) -> _ParallelAgent:
+        """Construct a deterministic fan-out runner over ``agents``.
+
+        Equivalent to :meth:`Agent.parallel`.  **Note:** this is the one
+        ``from_*`` factory that does NOT return a single ``Agent``; it
+        returns a :class:`_ParallelAgent` whose ``__call__`` returns
+        ``list[Envelope]`` (one per input agent, in order).  The
+        asymmetry is intentional: this is **scripted** fan-out, not an
+        orchestrated agent — there is no single "result" to wrap into
+        one envelope.  Use ``Agent(tools=[a, b, c])`` if you want a
+        proper Agent that the engine orchestrates.
+        """
+        return cls.parallel(
+            *agents,
+            concurrency_limit=concurrency_limit,
+            step_timeout=step_timeout,
+            **kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Note on ext-engine factories
+    # ------------------------------------------------------------------
+    #
+    # ``Agent.from_<kind>`` factories for ext engines (Supervisor,
+    # Human, dynamic planners) intentionally do NOT live on this class —
+    # the core-vs-ext boundary (see ``docs/guides/core-vs-ext.md``)
+    # forbids ``lazybridge/`` core from importing ``lazybridge.ext.*``,
+    # even via lazy/local imports.  Use either of:
+    #
+    # 1. The escape-hatch :meth:`from_engine` with the ext engine instance::
+    #
+    #        from lazybridge.ext.hil import SupervisorEngine
+    #        Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
+    #
+    # 2. The module-level ergonomic factories shipped in each ext package::
+    #
+    #        from lazybridge.ext.hil import supervisor_agent, human_agent
+    #        supervisor_agent(tools=[...], agents=[...])
+    #        human_agent(timeout=60.0, default="approve")
+    #
+    #        from lazybridge.ext.planners import make_planner, make_blackboard_planner
+    #        make_planner(agents=[researcher, writer])
+    #        make_blackboard_planner(agents=[researcher, writer])
+    #
+    # The unified narrative — ``Agent = Container(engine, tools, state)``
+    # — still holds: every path returns an Agent, every Agent has an
+    # engine, and the engine is always the swappable behaviour.
 
     # ------------------------------------------------------------------
     # Helpers

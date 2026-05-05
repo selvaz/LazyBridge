@@ -743,3 +743,10 @@ EXACTLY one of:
 
 Do NOT rewrite the answer. Only judge it.
 """
+
+
+# Canonical name (post unified-surface rename) — sidesteps the verbal
+# collision between "planner" and the static :class:`Plan` engine.
+# ``make_planner`` remains a backward-compat alias bound to the same
+# callable so existing user code keeps working unchanged.
+orchestrator_agent = make_planner
