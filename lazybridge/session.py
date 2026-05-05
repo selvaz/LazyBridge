@@ -43,6 +43,11 @@ class EventType(StrEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     TOOL_ERROR = "tool_error"
+    # Tool timeout — a tool exceeded ``LLMEngine.tool_timeout`` and was
+    # cancelled.  Distinct from ``TOOL_ERROR`` so operators can filter
+    # planned cancellations from genuine exceptions in dashboards and
+    # alerting.  Payload mirrors ``TOOL_ERROR`` plus ``timeout_s``.
+    TOOL_TIMEOUT = "tool_timeout"
     # Human-in-the-loop audit trail: one event per decision a human
     # takes inside ``HumanEngine`` / ``SupervisorEngine``.  Payload:
     # ``{"agent_name": ..., "kind": "continue"|"retry"|"store"|"tool"|"input",
@@ -69,6 +74,7 @@ DEFAULT_CRITICAL_EVENT_TYPES: frozenset[str] = frozenset(
         EventType.AGENT_START.value,
         EventType.AGENT_FINISH.value,
         EventType.TOOL_ERROR.value,
+        EventType.TOOL_TIMEOUT.value,
         EventType.TOOL_CALL.value,
         EventType.TOOL_RESULT.value,
         EventType.HIL_DECISION.value,

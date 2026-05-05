@@ -608,6 +608,11 @@ class LLMEngine:
                     nested_cost += nm.cost_usd + nm.nested_cost_usd
                     content = tr.text()
                     is_err = not tr.ok
+                elif isinstance(tr, ToolTimeoutError):
+                    # Explicit timeout marker so the model can recognise
+                    # cancellation distinct from a generic exception.
+                    content = f"[TOOL_TIMEOUT] {tr}"
+                    is_err = True
                 elif isinstance(tr, Exception):
                     content = f"Tool error: {tr}"
                     is_err = True
@@ -770,8 +775,11 @@ class LLMEngine:
                 except TimeoutError:
                     timeout_err = ToolTimeoutError(f"Tool {tc.name!r} timed out after {self.tool_timeout}s")
                     if session:
+                        # Distinct event type so operators can filter
+                        # planned cancellations from genuine exceptions
+                        # in dashboards / alerting.
                         session.emit(
-                            EventType.TOOL_ERROR,
+                            EventType.TOOL_TIMEOUT,
                             {
                                 "tool": tc.name,
                                 "tool_use_id": tc.id,

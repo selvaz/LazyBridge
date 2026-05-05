@@ -99,6 +99,7 @@ def test_eventlog_hybrid_critical_events_default_set() -> None:
         "tool_call",
         "tool_result",
         "tool_error",
+        "tool_timeout",
         "hil_decision",
     }
     assert set(DEFAULT_CRITICAL_EVENT_TYPES) == expected

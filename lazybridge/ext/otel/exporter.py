@@ -199,8 +199,8 @@ class OTelExporter:
             self._on_model_response(run_id, event)
         elif et == "tool_call":
             self._on_tool_call(run_id, event)
-        elif et in ("tool_result", "tool_error"):
-            self._on_tool_end(run_id, event, errored=(et == "tool_error"))
+        elif et in ("tool_result", "tool_error", "tool_timeout"):
+            self._on_tool_end(run_id, event, errored=(et in ("tool_error", "tool_timeout")))
         elif et == "loop_step":
             # Pure progress signal — turn count, message count.  Emit as
             # a child event on the agent span without opening a span.
