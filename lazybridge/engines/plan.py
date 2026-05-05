@@ -586,6 +586,73 @@ class Plan:
             return f"{self.checkpoint_key}:{run_uid}"
         return self.checkpoint_key
 
+    #: Checkpoint schema version.  Bumped when the on-disk layout
+    #: changes in a non-additive way.  v1 = no ``history`` key (pre-W1.3);
+    #: v2 = adds ``history`` (serialised StepResult list) so resume can
+    #: re-aggregate ``from_parallel_all`` and nested-cost rollup against
+    #: completed upstream steps.  Older checkpoints are read as v1 with
+    #: an empty in-memory ``history`` — degrades to pre-W1.3 behaviour
+    #: (the parallel band aggregator falls back to ``start_env``) without
+    #: crashing.
+    CHECKPOINT_VERSION: int = 2
+
+    @staticmethod
+    def _history_to_payload(history: list[StepResult]) -> list[dict[str, Any]]:
+        """JSON-friendly serialisation of the step-result history.
+
+        ``Envelope`` is a Pydantic model; ``model_dump(mode="json")``
+        produces a JSON-compatible dict.  Non-Pydantic payloads fall
+        through to ``str`` via Pydantic's default serialisation (best
+        effort).  On reload we accept whatever shape comes back —
+        ``Envelope.text()`` is JSON-aware so ``from_parallel_all``
+        renders correctly regardless of the original payload type.
+        """
+        out: list[dict[str, Any]] = []
+        for sr in history:
+            try:
+                env_dump = sr.envelope.model_dump(mode="json")
+            except Exception:
+                # Best-effort: a payload that isn't Pydantic/JSON-clean
+                # falls back to its string form; the envelope's
+                # metadata, task, and error survive.
+                env_dump = {
+                    "task": sr.envelope.task,
+                    "context": sr.envelope.context,
+                    "payload": str(sr.envelope.payload) if sr.envelope.payload is not None else None,
+                    "metadata": sr.envelope.metadata.model_dump(mode="json"),
+                    "error": sr.envelope.error.model_dump(mode="json") if sr.envelope.error else None,
+                }
+            out.append({"step_name": sr.step_name, "envelope": env_dump, "ts": sr.ts})
+        return out
+
+    @staticmethod
+    def _payload_to_history(data: Any) -> list[StepResult]:
+        """Inverse of :meth:`_history_to_payload`.  Tolerant of missing
+        / malformed entries — drops them silently rather than failing
+        the whole resume.
+        """
+        if not isinstance(data, list):
+            return []
+        out: list[StepResult] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            env_data = item.get("envelope")
+            if not isinstance(env_data, dict):
+                continue
+            try:
+                env = Envelope.model_validate(env_data)
+            except Exception:
+                continue
+            out.append(
+                StepResult(
+                    step_name=str(item.get("step_name") or ""),
+                    envelope=env,
+                    ts=float(item.get("ts") or 0.0),
+                )
+            )
+        return out
+
     def _save_checkpoint(
         self,
         *,
@@ -596,6 +663,7 @@ class Plan:
         completed: list[str],
         status: str,
         run_uid: str,
+        history: list[StepResult] | None = None,
     ) -> dict[str, Any] | None:
         """CAS-aware checkpoint write.  Returns the snapshot written, or
         ``None`` when no checkpoint store is configured.
@@ -607,6 +675,11 @@ class Plan:
         overwriting.  ``last_snapshot`` is the value we previously wrote
         (or read via :meth:`_claim_checkpoint`) — threading it through
         avoids a read-modify-write window.
+
+        ``history`` is the live in-memory step-result list at write
+        time; persisting it lets a resumed run re-aggregate
+        ``from_parallel_all`` and nested-cost rollup against upstream
+        steps that completed before the crash.
         """
         store = self._checkpoint_store()
         if store is None or effective_key is None:
@@ -626,6 +699,8 @@ class Plan:
             "completed_steps": list(completed),
             "status": status,
             "run_uid": run_uid,
+            "checkpoint_version": self.CHECKPOINT_VERSION,
+            "history": self._history_to_payload(history) if history else [],
         }
         if not store.compare_and_swap(effective_key, last_snapshot, new_snap):
             raise ConcurrentPlanRunError(
@@ -773,6 +848,12 @@ class Plan:
         if checkpoint is not None:
             kv.update(checkpoint.get("kv") or {})
             completed = list(checkpoint.get("completed_steps") or [])
+            # v2+ checkpoints carry the step-result history so a resumed
+            # run can re-aggregate ``from_parallel_all`` bands and the
+            # nested-cost rollup against upstream completed steps.  v1
+            # checkpoints (no ``history`` key) degrade to an empty
+            # in-memory history — same behaviour as pre-W1.3, no crash.
+            history.extend(self._payload_to_history(checkpoint.get("history") or []))
 
         # Resume from checkpoint if available
         current_name: str | None
@@ -877,6 +958,7 @@ class Plan:
                         completed=completed,
                         status="failed",
                         run_uid=run_uid,
+                        history=history,
                     )
                     return self._aggregate_nested_metadata(first_failure_env, history)
 
@@ -909,6 +991,7 @@ class Plan:
                     completed=completed,
                     status="running" if current_name else "done",
                     run_uid=run_uid,
+                    history=history,
                 )
                 continue
 
@@ -937,6 +1020,7 @@ class Plan:
                     completed=completed,
                     status="failed",
                     run_uid=run_uid,
+                    history=history,
                 )
                 return self._aggregate_nested_metadata(result_env, history)
 
@@ -962,6 +1046,7 @@ class Plan:
                 completed=completed,
                 status="running" if current_name else "done",
                 run_uid=run_uid,
+                history=history,
             )
 
         # If we exited the loop because the iteration cap was hit (rather
