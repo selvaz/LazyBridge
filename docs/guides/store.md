@@ -46,7 +46,7 @@ print(monitor("status?").text())
     Store(db: str | None = None) -> Store
       # db=None   → in-memory (lost on exit)
       # db="file" → SQLite WAL-mode, thread-safe, persistent
-
+    
     store.write(key: str, value: Any, *, agent_id: str | None = None) -> None
     store.read(key: str, default: Any = None) -> Any
     store.read_entry(key: str) -> StoreEntry | None
@@ -55,7 +55,7 @@ print(monitor("status?").text())
     store.delete(key: str) -> None
     store.clear() -> None
     store.to_text(keys: list[str] | None = None) -> str   # for sources=
-
+    
     StoreEntry = dataclass(key, value, written_at, agent_id)
 
 !!! warning "Rules & invariants"

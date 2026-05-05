@@ -64,16 +64,16 @@ Agent("claude-opus-4-7",
 !!! note "API reference"
 
     # Three ways to turn a Python function into an LLM-callable Tool.
-
+    
     Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
          schema_llm: Any | None = None, strict: bool = False)
-
+    
     # Mode recap:
     #   "signature" — parse type hints + docstring (default). No LLM cost.
     #   "llm"       — call an LLM to infer schema from the function body
     #                 and docstring.  Needs schema_llm= (an Agent).
     #   "hybrid"    — signature first; LLM fills gaps for missing hints.
-
+    
     # No explicit Tool(...) call needed:
     Agent(..., tools=[func])                  # function auto-wrapped at construction
     Agent(..., tools=[other_agent])           # other_agent.as_tool() called automatically

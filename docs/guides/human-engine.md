@@ -48,9 +48,9 @@ pipeline("draft the release notes")
         timeout: float | None = None,
         default: str | None = None,
     ) -> Engine
-
+    
     Usage: Agent(engine=HumanEngine(), tools=[...], output=Pydantic)
-
+    
     # When output= is a Pydantic model, the terminal UI prompts field-by-field.
 
 !!! warning "Rules & invariants"

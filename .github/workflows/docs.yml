@@ -3,7 +3,13 @@ name: docs
 on:
   push:
     branches: ["main"]
-    paths: ["docs/**", "lazy_wiki/**", "mkdocs.yml"]
+    # Trigger on docs source + the skill_docs source-of-truth (fragments
+    # and the build script that renders them into docs/skill/ and the
+    # site guides).
+    paths:
+      - "docs/**"
+      - "lazybridge/skill_docs/**"
+      - "mkdocs.yml"
 
 permissions:
   contents: read
@@ -25,8 +31,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install mkdocs
-        run: pip install mkdocs-material mkdocstrings[python]
+      - name: Install lazybridge + mkdocs
+        # ``mkdocs build`` reads from ``docs/``; the source-of-truth lives
+        # in ``lazybridge/skill_docs/fragments/``. Install the package so
+        # the build script can render fragments → docs/ before mkdocs runs.
+        run: |
+          pip install -e ".[anthropic,openai,google]"
+          pip install mkdocs-material mkdocstrings[python]
+
+      - name: Render fragments → docs/
+        run: python -m lazybridge.skill_docs._build
 
       - name: Build docs
         run: mkdocs build

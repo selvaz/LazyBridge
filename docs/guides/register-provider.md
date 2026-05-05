@@ -60,7 +60,7 @@ def restore_provider_rules():
         *,
         kind: Literal["contains", "startswith"] = "contains",
     ) -> None
-
+    
     # Internal tables (user-extendable at runtime):
     #   LLMEngine._PROVIDER_ALIASES  — exact-match model string → provider
     #   LLMEngine._PROVIDER_RULES    — [(kind, pattern, provider), ...]

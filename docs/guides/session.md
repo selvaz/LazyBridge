@@ -85,24 +85,24 @@ print(sess.graph.to_json())
         on_full: Literal["drop", "block", "hybrid"] = "hybrid",
         critical_events: frozenset[str] | None = None,  # None = framework default
     ) -> Session
-
+    
     session.emit(event_type: EventType, payload: dict, *, run_id: str = None) -> None
     session.add_exporter(exporter: EventExporter) -> None
     session.remove_exporter(exporter: EventExporter) -> None
     session.flush(timeout: float = 5.0) -> None        # drain batched writer
     session.close() -> None                            # release SQLite + flush exporters
     session.usage_summary() -> {"total": {...}, "by_agent": {...}, "by_run": {...}}
-
+    
     session.events: EventLog          # session.events.query(...) for raw rows
     session.graph:  GraphSchema       # auto-populated when Agents register
-
+    
     EventType (StrEnum):
       AGENT_START  AGENT_FINISH
       LOOP_STEP
       MODEL_REQUEST  MODEL_RESPONSE
       TOOL_CALL  TOOL_RESULT  TOOL_ERROR
       HIL_DECISION
-
+    
     # Agent("model", verbose=True) creates a private Session(console=True).
 
 !!! warning "Rules & invariants"
