@@ -34,6 +34,54 @@ CREATE TABLE IF NOT EXISTS events (
 _FLUSH_SENTINEL = object()
 
 
+def redact_binary_attachments(payload: dict[str, Any]) -> dict[str, Any]:
+    """Redact base64 multimodal blobs from a Session event payload.
+
+    Pass to :class:`Session` as ``redact=redact_binary_attachments``
+    when your event payloads might carry full multimodal message
+    bodies — for example a custom session emitter that logs the
+    complete request that hit the provider.
+
+    The default LazyBridge events emit only metadata (model name, token
+    counts, truncated content snippets) and do not include base64
+    attachments — so this helper is opt-in and safe to leave unwired
+    for the standard pipeline.
+
+    Conservative behaviour: a *deep copy*-style traversal that replaces
+    any ``base64_data`` value longer than 64 chars with a descriptor
+    string of the form ``"<base64 redacted: {media_type}, {N} chars>"``.
+    URLs, paths, and other text fields pass through untouched.
+    """
+    return _redact_walk(payload)
+
+
+def _redact_walk(node: Any) -> Any:
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        media_type = node.get("media_type")
+        for k, v in node.items():
+            if k == "base64_data" and isinstance(v, str) and len(v) > 64:
+                out[k] = f"<base64 redacted: {media_type or 'application/octet-stream'}, {len(v)} chars>"
+            else:
+                out[k] = _redact_walk(v)
+        return out
+    if isinstance(node, list):
+        return [_redact_walk(x) for x in node]
+    if isinstance(node, tuple):
+        return tuple(_redact_walk(x) for x in node)
+    # Dataclass instances (ImageContent / AudioContent) — best-effort
+    # introspection without importing the type.  Fall back to repr so
+    # the event still records SOMETHING useful instead of crashing.
+    if hasattr(node, "__dataclass_fields__"):
+        from dataclasses import asdict
+
+        try:
+            return _redact_walk(asdict(node))
+        except Exception:
+            return repr(node)
+    return node
+
+
 class EventType(StrEnum):
     AGENT_START = "agent_start"
     AGENT_FINISH = "agent_finish"

@@ -94,6 +94,16 @@ class DeepSeekProvider(OpenAIProvider):
     }
     supported_native_tools: frozenset[NativeTool] = frozenset()  # No native server tools
 
+    # DeepSeek's standard API (deepseek-chat / deepseek-v4-*) is
+    # text-only.  DeepSeek-VL2 ships separately and is not routed
+    # through this provider — override OpenAIProvider's vision matrix
+    # explicitly so a model id like ``gpt-4o`` (impossible here, but
+    # MRO-inherited) can't accidentally turn the matcher truthy.
+    _VISION_CAPABLE_MODEL_PATTERNS = frozenset()
+
+    # DeepSeek does not accept audio input on the public API.
+    _AUDIO_CAPABLE_MODEL_PATTERNS = frozenset()
+
     def _compute_cost(
         self, model: str, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
     ) -> float | None:

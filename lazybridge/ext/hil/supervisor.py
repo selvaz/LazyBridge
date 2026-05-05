@@ -120,6 +120,14 @@ class SupervisorEngine:
             task_text = env.task or env.text()
             if env.context:
                 task_text = f"{task_text}\n\nContext:\n{env.context}"
+            # Multimodal: surface a short attachment hint so the human
+            # supervisor knows there's binary content the agent will
+            # see — same shape as :class:`HumanEngine`.
+            from lazybridge.ext.hil.human import _format_attachments
+
+            attachment_hint = _format_attachments(env.images, env.audio)
+            if attachment_hint:
+                task_text = f"{task_text}\n\n{attachment_hint}"
 
             # If the caller supplied an ``ainput_fn`` we use a native
             # async REPL — prompts go through the event loop instead of

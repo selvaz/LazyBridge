@@ -17,6 +17,35 @@ if TYPE_CHECKING:
     from lazybridge.tools import Tool
 
 
+def _format_attachments(images: list[Any] | None, audio: Any | None) -> str:
+    """Render a one-line attachment descriptor for HIL surfaces.
+
+    Humans can't read base64 — and showing the URL of every image is
+    noisy when there are many.  This emits a short summary the user
+    can rely on to decide whether to ask the agent for clarification.
+    Empty inputs return an empty string so the caller can ``if hint:``
+    cleanly without an extra newline.
+    """
+    parts: list[str] = []
+    if images:
+        descs: list[str] = []
+        for i, img in enumerate(images):
+            if getattr(img, "url", None):
+                descs.append(f"#{i + 1} {img.media_type} ({img.url})")
+            elif getattr(img, "base64_data", None):
+                descs.append(f"#{i + 1} {img.media_type} (~{len(img.base64_data) * 3 // 4} bytes inline)")
+        if descs:
+            parts.append("[attached images: " + "; ".join(descs) + "]")
+    if audio is not None:
+        if getattr(audio, "url", None):
+            parts.append(f"[attached audio: {audio.media_type} ({audio.url})]")
+        elif getattr(audio, "base64_data", None):
+            parts.append(
+                f"[attached audio: {audio.media_type} (~{len(audio.base64_data) * 3 // 4} bytes inline)]"
+            )
+    return "\n".join(parts)
+
+
 class _UIProtocol:
     """Minimal protocol for custom UI adapters."""
 
@@ -360,6 +389,14 @@ class HumanEngine:
             task_text = env.task or env.text()
             if env.context:
                 task_text = f"{task_text}\n\nContext:\n{env.context}"
+            # Multimodal: humans can't view base64 in a terminal, but
+            # they need to know SOMETHING is attached to make an
+            # informed decision.  Append a short descriptor — same shape
+            # the SupervisorEngine REPL uses, so users see consistent
+            # attachment hints across HIL surfaces.
+            attachment_hint = _format_attachments(env.images, env.audio)
+            if attachment_hint:
+                task_text = f"{task_text}\n\n{attachment_hint}"
 
             raw = await self._ui.prompt(task_text, tools=tools, output_type=output_type)
 

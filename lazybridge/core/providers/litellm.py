@@ -237,6 +237,22 @@ class LiteLLMProvider(BaseProvider):
     #: Callers that need those should use a native provider.
     supported_native_tools = frozenset()
 
+    # LiteLLM forwards images / audio through the OpenAI wire shape;
+    # whether the eventual backend honours them depends on which
+    # provider the model id resolves to.  We take the optimistic stance
+    # and let the backend reject malformed input — the framework can't
+    # know LiteLLM's evolving capability matrix without the litellm
+    # package itself imported, which is why the optional install gates
+    # the whole provider.
+
+    @classmethod
+    def supports_vision(cls, model: str | None = None) -> bool:
+        return True
+
+    @classmethod
+    def supports_audio(cls, model: str | None = None) -> bool:
+        return True
+
     def _init_client(self, **kwargs: Any) -> None:
         try:
             import litellm

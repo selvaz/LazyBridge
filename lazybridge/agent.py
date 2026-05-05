@@ -382,15 +382,23 @@ class Agent:
     # Core async API
     # ------------------------------------------------------------------
 
-    async def run(self, task: str | Envelope) -> Envelope:
+    async def run(
+        self,
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> Envelope:
         # ``getattr`` with a default keeps this backwards-compatible for
         # Agents constructed via ``Agent.__new__`` (test helpers, custom
         # subclasses) that haven't set ``self.timeout``.
         timeout = getattr(self, "timeout", None)
         if timeout is None:
-            return await self._run_body(task)
+            return await self._run_body(task, images=images, audio=audio)
         try:
-            return await asyncio.wait_for(self._run_body(task), timeout=timeout)
+            return await asyncio.wait_for(
+                self._run_body(task, images=images, audio=audio), timeout=timeout
+            )
         except TimeoutError:
             # Emit a synthetic AGENT_FINISH so callers reading
             # ``session.events.query()`` see a complete trace even when
@@ -416,8 +424,14 @@ class Agent:
                     pass
             return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
 
-    async def _run_body(self, task: str | Envelope) -> Envelope:
-        env = self._to_envelope(task)
+    async def _run_body(
+        self,
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> Envelope:
+        env = self._to_envelope(task, images=images, audio=audio)
         env = self._inject_sources(env)
 
         if self.guard:
@@ -425,7 +439,13 @@ class Agent:
             if not action.allowed:
                 return Envelope.error_envelope(ValueError(action.message or "Blocked by guard"))
             if action.modified_text is not None:
-                env = Envelope(task=action.modified_text, context=env.context, payload=action.modified_text)
+                env = Envelope(
+                    task=action.modified_text,
+                    context=env.context,
+                    images=env.images,
+                    audio=env.audio,
+                    payload=action.modified_text,
+                )
 
         if self.verify:
             from lazybridge._verify import verify_with_retry
@@ -446,6 +466,8 @@ class Agent:
             fallback_env: Envelope[Any] = Envelope(
                 task=env.task,
                 context=merged_context,
+                images=env.images,
+                audio=env.audio,
                 payload=env.payload,
             )
             result = await self.fallback.run(fallback_env)
@@ -544,15 +566,24 @@ class Agent:
 
         return current  # type: ignore[return-value]
 
-    async def stream(self, task: str | Envelope) -> AsyncGenerator[str, None]:
+    async def stream(
+        self,
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> AsyncGenerator[str, None]:
         """Stream LLM tokens across the full tool-calling loop.
 
         Honours ``self.timeout`` between chunks so a stalled provider
         can't hang the caller.  Each ``__anext__`` is wrapped in
         ``asyncio.wait_for`` (per-chunk, not whole-stream) so short
         chunks don't consume the deadline budget.
+
+        Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
+        the streamed turn — same coercion semantics as :meth:`run`.
         """
-        env = self._to_envelope(task)
+        env = self._to_envelope(task, images=images, audio=audio)
         env = self._inject_sources(env)
         timeout = getattr(self, "timeout", None)
 
@@ -585,7 +616,13 @@ class Agent:
     # Sync API
     # ------------------------------------------------------------------
 
-    def __call__(self, task: str | Envelope) -> Envelope:
+    def __call__(
+        self,
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> Envelope:
         # Detect whether we're already inside a running event loop.
         # ``asyncio.get_running_loop`` is the forward-compatible way — it
         # raises ``RuntimeError`` when there is no current loop, unlike
@@ -594,7 +631,7 @@ class Agent:
             asyncio.get_running_loop()
         except RuntimeError:
             # No loop running — safe to use asyncio.run directly.
-            return asyncio.run(self.run(task))
+            return asyncio.run(self.run(task, images=images, audio=audio))
 
         # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
         # Spin up a fresh loop on a worker thread, copying the caller's
@@ -602,7 +639,7 @@ class Agent:
         # logging context flow into the agent's loop instead of starting
         # empty (which would silently break observability for sync
         # callers running inside an async framework).
-        return _run_coro_with_context(self.run(task))
+        return _run_coro_with_context(self.run(task, images=images, audio=audio))
 
     # ------------------------------------------------------------------
     # Tool exposure
@@ -905,10 +942,50 @@ class Agent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_envelope(task: str | Envelope) -> Envelope:
+    def _to_envelope(
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> Envelope:
+        """Coerce ``task`` into an :class:`Envelope`, attaching multimodal blocks.
+
+        Conflict policy: when ``task`` is already an :class:`Envelope`
+        with attachments AND ``images=`` / ``audio=`` are also passed,
+        :class:`ValueError` is raised — explicit > implicit.  Pass
+        attachments through one channel only.
+        """
+        from lazybridge.core.types import _coerce_audio, _coerce_image
+
+        coerced_images = [_coerce_image(x) for x in images] if images else None
+        coerced_audio = _coerce_audio(audio) if audio is not None else None
+
         if isinstance(task, Envelope):
+            if coerced_images is not None and task.images:
+                raise ValueError(
+                    "images= passed to .run()/.__call__() but the supplied "
+                    "Envelope already carries images.  Pass attachments via "
+                    "exactly one channel."
+                )
+            if coerced_audio is not None and task.audio is not None:
+                raise ValueError(
+                    "audio= passed to .run()/.__call__() but the supplied "
+                    "Envelope already carries audio.  Pass attachments via "
+                    "exactly one channel."
+                )
+            if coerced_images is not None or coerced_audio is not None:
+                return task.model_copy(
+                    update={
+                        "images": coerced_images if coerced_images is not None else task.images,
+                        "audio": coerced_audio if coerced_audio is not None else task.audio,
+                    }
+                )
             return task
-        return Envelope.from_task(str(task))
+
+        env = Envelope.from_task(str(task))
+        if coerced_images is not None or coerced_audio is not None:
+            return env.model_copy(update={"images": coerced_images, "audio": coerced_audio})
+        return env
 
     def _inject_sources(self, env: Envelope) -> Envelope:
         """Build context string from sources (live view — read at call time)."""
@@ -922,7 +999,13 @@ class Agent:
             if text:
                 parts.append(text)
         merged = "\n\n".join(p for p in parts if p)
-        return Envelope(task=env.task, context=merged or env.context, payload=env.payload)
+        return Envelope(
+            task=env.task,
+            context=merged or env.context,
+            images=env.images,
+            audio=env.audio,
+            payload=env.payload,
+        )
 
 
 def _safe_register_agent(session: Any, agent: Agent) -> None:

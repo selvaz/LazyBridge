@@ -67,6 +67,18 @@ class UnsupportedNativeToolError(ValueError):
     """
 
 
+class UnsupportedFeatureError(ValueError):
+    """Raised when a request asks for a multimodal modality (vision /
+    audio) the resolved model does not support, and the engine was
+    configured with ``strict_multimodal=True``.
+
+    Distinct from :class:`UnsupportedNativeToolError` so call sites can
+    react differently to "the API tier you asked for is missing" (native
+    tool) versus "the input you sent is wrong shape for this model"
+    (multimodal capability).
+    """
+
+
 class BaseProvider(ABC):
     """Stable abstract base class for all LLM providers.
 
@@ -123,6 +135,49 @@ class BaseProvider(ABC):
     pre-W5.1 behaviour for ad-hoc / interactive use.  Production setups
     should consider opting into strict mode so a misconfigured provider
     fails loud rather than degrading to a non-grounded reply."""
+
+    # ------------------------------------------------------------------
+    # Multimodal capability matrix — class-level so the LLM engine can
+    # consult them without instantiating an SDK client (which would
+    # require an API key just to read static metadata).
+    # ------------------------------------------------------------------
+
+    #: Substrings — when ANY appears in a model id, the provider is
+    #: considered vision-capable for that model.  Subclasses override
+    #: with their own canonical set; the base default is empty so a
+    #: provider that doesn't opt in stays text-only.
+    _VISION_CAPABLE_MODEL_PATTERNS: frozenset[str] = frozenset()
+
+    #: Same shape, audio modality.
+    _AUDIO_CAPABLE_MODEL_PATTERNS: frozenset[str] = frozenset()
+
+    @classmethod
+    def supports_vision(cls, model: str | None = None) -> bool:
+        """Whether the resolved ``model`` accepts image input.
+
+        Default implementation does a substring scan against
+        :attr:`_VISION_CAPABLE_MODEL_PATTERNS`.  Override when the
+        decision needs custom logic (e.g. version-range checks).
+
+        Returns ``False`` for ``None`` / empty model because we don't
+        know what the eventual default will be — caller can re-query
+        once the model is resolved.
+        """
+        if not model:
+            return False
+        m = model.lower()
+        return any(p in m for p in cls._VISION_CAPABLE_MODEL_PATTERNS)
+
+    @classmethod
+    def supports_audio(cls, model: str | None = None) -> bool:
+        """Whether the resolved ``model`` accepts audio input.
+
+        See :meth:`supports_vision` — same semantics, audio modality.
+        """
+        if not model:
+            return False
+        m = model.lower()
+        return any(p in m for p in cls._AUDIO_CAPABLE_MODEL_PATTERNS)
 
     def __init__(
         self,

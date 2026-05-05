@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -17,9 +20,57 @@ class Role(StrEnum):
 class ContentType(StrEnum):
     TEXT = "text"
     IMAGE = "image"
+    AUDIO = "audio"
     TOOL_USE = "tool_use"
     TOOL_RESULT = "tool_result"
     THINKING = "thinking"
+
+
+# Magic-byte signatures used by ``_detect_image_mime`` to recover a
+# media-type when the caller passes raw bytes without one.  The full
+# stdlib ``imghdr`` module is deprecated in 3.13 and gone in 3.14, so
+# we keep our own minimal table — covers the formats every provider
+# accepts inline (PNG, JPEG, GIF, WebP).
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _detect_image_mime(data: bytes) -> str | None:
+    """Best-effort image media-type from the leading magic bytes.
+
+    Returns ``None`` when the signature is unrecognised; callers either
+    fall back to a sensible default or raise.  WebP needs a two-step
+    check because the magic is split: ``RIFF....WEBP`` (the four-byte
+    file size sits between the markers).
+    """
+    for magic, mime in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _detect_audio_mime(data: bytes) -> str | None:
+    """Best-effort audio media-type from the leading magic bytes.
+
+    Covers the four formats every multimodal provider accepts inline:
+    WAV (RIFF...WAVE), MP3 (ID3 tag or 0xFF frame sync), FLAC, OGG.
+    Returns ``None`` for anything else — caller falls back to a default.
+    """
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data.startswith(b"ID3") or (len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return "audio/mpeg"
+    if data.startswith(b"fLaC"):
+        return "audio/flac"
+    if data.startswith(b"OggS"):
+        return "audio/ogg"
+    return None
 
 
 class NativeTool(StrEnum):
@@ -47,6 +98,83 @@ class ImageContent:
     media_type: str = "image/jpeg"
     type: ContentType = ContentType.IMAGE
 
+    @classmethod
+    def from_url(cls, url: str, *, media_type: str | None = None) -> ImageContent:
+        # ``mimetypes.guess_type`` doesn't strip URL schemes — parse the
+        # path component first so ``https://x.com/cat.png`` correctly
+        # resolves to ``image/png`` instead of falling through to the
+        # JPEG default.
+        from urllib.parse import urlparse
+
+        path = urlparse(url).path or url
+        guessed = media_type or mimetypes.guess_type(path)[0] or "image/jpeg"
+        return cls(url=url, media_type=guessed)
+
+    @classmethod
+    def from_path(cls, path: str | Path, *, media_type: str | None = None) -> ImageContent:
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"image not found: {p}")
+        data = p.read_bytes()
+        guessed = media_type or _detect_image_mime(data) or mimetypes.guess_type(p.name)[0] or "image/jpeg"
+        return cls(base64_data=base64.b64encode(data).decode("ascii"), media_type=guessed)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, media_type: str | None = None) -> ImageContent:
+        guessed = media_type or _detect_image_mime(data) or "image/jpeg"
+        return cls(base64_data=base64.b64encode(data).decode("ascii"), media_type=guessed)
+
+    @classmethod
+    def from_data_uri(cls, data_uri: str) -> ImageContent:
+        """Parse ``data:image/png;base64,<...>`` style URIs."""
+        if not data_uri.startswith("data:"):
+            raise ValueError("expected a data: URI")
+        header, _, body = data_uri[5:].partition(",")
+        if not body:
+            raise ValueError("malformed data URI: missing payload")
+        media_type, _, encoding = header.partition(";")
+        media_type = media_type or "image/jpeg"
+        if encoding == "base64":
+            return cls(base64_data=body, media_type=media_type)
+        return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
+
+
+@dataclass
+class AudioContent:
+    """Audio attachment for multimodal LLM input.
+
+    Provider support varies by model — see
+    :meth:`BaseProvider.supports_audio`.  Anthropic / OpenAI accept
+    base64 only; Google Gemini accepts both URL and base64.
+    """
+
+    url: str | None = None
+    base64_data: str | None = None
+    media_type: str = "audio/wav"
+    type: ContentType = ContentType.AUDIO
+
+    @classmethod
+    def from_url(cls, url: str, *, media_type: str | None = None) -> AudioContent:
+        from urllib.parse import urlparse
+
+        path = urlparse(url).path or url
+        guessed = media_type or mimetypes.guess_type(path)[0] or "audio/wav"
+        return cls(url=url, media_type=guessed)
+
+    @classmethod
+    def from_path(cls, path: str | Path, *, media_type: str | None = None) -> AudioContent:
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"audio not found: {p}")
+        data = p.read_bytes()
+        guessed = media_type or _detect_audio_mime(data) or mimetypes.guess_type(p.name)[0] or "audio/wav"
+        return cls(base64_data=base64.b64encode(data).decode("ascii"), media_type=guessed)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, media_type: str | None = None) -> AudioContent:
+        guessed = media_type or _detect_audio_mime(data) or "audio/wav"
+        return cls(base64_data=base64.b64encode(data).decode("ascii"), media_type=guessed)
+
 
 @dataclass
 class ToolUseContent:
@@ -72,7 +200,62 @@ class ThinkingContent:
     type: ContentType = ContentType.THINKING
 
 
-ContentBlock = TextContent | ImageContent | ToolUseContent | ToolResultContent | ThinkingContent
+ContentBlock = TextContent | ImageContent | AudioContent | ToolUseContent | ToolResultContent | ThinkingContent
+
+
+def _coerce_image(x: Any) -> ImageContent:
+    """Best-effort coerce ``x`` into an :class:`ImageContent`.
+
+    Accepted forms:
+
+    * ``ImageContent`` — passthrough.
+    * ``str`` — ``http(s)://`` → URL; ``data:image/...`` → data URI; else
+      treated as a filesystem path (must exist).
+    * ``Path`` — filesystem path.
+    * ``bytes`` — raw bytes; media-type sniffed from magic bytes.
+    * ``dict`` — unpacked as ``ImageContent(**x)``.
+
+    Raises :class:`TypeError` for anything else.  Use this at API
+    boundaries (``Agent.run(images=[...])``) so callers can pass the
+    most natural form for their context.
+    """
+    if isinstance(x, ImageContent):
+        return x
+    if isinstance(x, Path):
+        return ImageContent.from_path(x)
+    if isinstance(x, str):
+        if x.startswith(("http://", "https://")):
+            return ImageContent.from_url(x)
+        if x.startswith("data:"):
+            return ImageContent.from_data_uri(x)
+        return ImageContent.from_path(x)
+    if isinstance(x, bytes):
+        return ImageContent.from_bytes(x)
+    if isinstance(x, dict):
+        return ImageContent(**x)
+    raise TypeError(f"cannot coerce {type(x).__name__!r} to ImageContent — pass a URL, Path, bytes, or ImageContent")
+
+
+def _coerce_audio(x: Any) -> AudioContent:
+    """Best-effort coerce ``x`` into an :class:`AudioContent`.
+
+    See :func:`_coerce_image` for the accepted shapes.  Audio URL
+    handling is provider-dependent (Google supports it, Anthropic /
+    OpenAI do not — see :meth:`BaseProvider.supports_audio`).
+    """
+    if isinstance(x, AudioContent):
+        return x
+    if isinstance(x, Path):
+        return AudioContent.from_path(x)
+    if isinstance(x, str):
+        if x.startswith(("http://", "https://")):
+            return AudioContent.from_url(x)
+        return AudioContent.from_path(x)
+    if isinstance(x, bytes):
+        return AudioContent.from_bytes(x)
+    if isinstance(x, dict):
+        return AudioContent(**x)
+    raise TypeError(f"cannot coerce {type(x).__name__!r} to AudioContent — pass a URL, Path, bytes, or AudioContent")
 
 
 @dataclass

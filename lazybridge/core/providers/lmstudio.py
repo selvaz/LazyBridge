@@ -158,6 +158,23 @@ class LMStudioProvider(OpenAIProvider):
     #: warning rather than a silent 404 from the local server.
     supported_native_tools: frozenset[NativeTool] = frozenset()
 
+    # LM Studio routes any model the user has loaded — vision and audio
+    # capability depend entirely on which weights are downloaded.  We
+    # take the optimistic stance and report ``True`` so callers can pass
+    # images / audio without LazyBridge stripping them client-side; if
+    # the loaded model can't handle them the LM Studio server will
+    # error or silently degrade and the caller sees that directly.
+    # Override per-call by setting ``strict_multimodal=True`` and a
+    # known model name to force a clear failure mode.
+
+    @classmethod
+    def supports_vision(cls, model: str | None = None) -> bool:
+        return True
+
+    @classmethod
+    def supports_audio(cls, model: str | None = None) -> bool:
+        return True
+
     def _init_client(self, **kwargs: Any) -> None:
         """Point the OpenAI SDK at the local LM Studio server.
 

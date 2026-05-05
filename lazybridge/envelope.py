@@ -9,9 +9,12 @@ seen by mypy / pyright without changing runtime behaviour.  Writing
 from __future__ import annotations
 
 import json
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from lazybridge.core.types import AudioContent, ImageContent
 
 T = TypeVar("T")
 
@@ -44,10 +47,23 @@ class Envelope(BaseModel, Generic[T]):
     ``Envelope[str]`` → payload is a string.  ``Envelope[MyModel]`` →
     payload is an instance of ``MyModel``.  ``Envelope`` (no parameter)
     defaults to ``T = Any`` for maximum flexibility.
+
+    Multimodal attachments (``images=`` / ``audio=``) ride alongside
+    ``task`` and reach the LLMEngine's user-message builder verbatim.
+    Steps in a Plan see them only on step 0; downstream steps receive
+    upstream output (text), not the original attachments.
     """
+
+    # ``ImageContent`` / ``AudioContent`` are dataclasses living in
+    # ``core/types``.  Pydantic v2 needs the explicit allowance to
+    # validate them as field values without us having to mirror the
+    # whole type ladder as Pydantic models.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task: str | None = None
     context: str | None = None
+    images: list[Any] | None = None  # list[ImageContent] — typed weakly to dodge runtime import
+    audio: Any | None = None  # AudioContent — single clip per call (model convention)
     payload: T | None = None
     metadata: EnvelopeMetadata = Field(default_factory=EnvelopeMetadata)
     error: ErrorInfo | None = None

@@ -131,6 +131,7 @@ class LLMEngine:
         stream_idle_timeout: float | None = None,
         stream_buffer: int = 64,
         cache: bool | Any = False,
+        strict_multimodal: bool = False,
     ) -> None:
         self.model = model
         self.thinking = thinking
@@ -190,6 +191,12 @@ class LLMEngine:
             self.cache = None
         else:
             self.cache = cache  # assumed CacheConfig
+        # When True, ``Envelope.images`` / ``.audio`` reaching a model
+        # that does not support that modality raises
+        # ``UnsupportedFeatureError`` instead of warning-and-stripping.
+        # Off by default so a single agent fleet can mix vision and
+        # text-only models without crashing on edge cases.
+        self.strict_multimodal = strict_multimodal
         # Provider may be passed explicitly (used by Agent.from_provider
         # when the model is a tier alias like "top" / "cheap" that
         # _infer_provider can't route on its own).  Falls back to the
@@ -417,6 +424,125 @@ class LLMEngine:
         return result
 
     # ------------------------------------------------------------------
+    # Multimodal user-message construction
+    # ------------------------------------------------------------------
+
+    def _build_user_content(self, task_text: str, env: Envelope) -> str | list[Any]:
+        """Build the user-message content payload for ``env``.
+
+        Returns either:
+
+        * a plain ``str`` — when the envelope carries no attachments OR
+          all attachments were filtered out by capability checks; the
+          existing single-string code path is unchanged.
+        * a ``list[ContentBlock]`` of ``[TextContent, ImageContent...,
+          AudioContent?]`` — when the resolved model honours one or
+          more of the attached blocks.
+
+        Capability gating: when the provider reports that the resolved
+        model cannot handle a kind of attachment (vision / audio), the
+        attachments of that kind are dropped with a ``UserWarning``.
+        Setting :attr:`strict_multimodal` flips the warning into a
+        :class:`UnsupportedFeatureError` so callers running in CI catch
+        the misconfiguration before runtime.
+        """
+        from lazybridge.core.types import AudioContent, ImageContent, TextContent
+
+        images = list(env.images) if env.images else []
+        audio = env.audio
+        if not images and audio is None:
+            return task_text
+
+        kept_images = self._filter_by_vision(images)
+        kept_audio = self._filter_by_audio(audio)
+
+        if not kept_images and kept_audio is None:
+            return task_text
+
+        blocks: list[Any] = [TextContent(text=task_text)]
+        blocks.extend(kept_images)
+        if kept_audio is not None:
+            blocks.append(kept_audio)
+        return blocks
+
+    def _provider_class(self) -> type:
+        """Resolve the provider class WITHOUT instantiating a client.
+
+        Capability checks (``supports_vision`` / ``supports_audio``) are
+        class-level — they read the model name and consult provider
+        capability tables.  Going through ``Executor._resolve_provider``
+        would needlessly construct an SDK client (and demand an API key)
+        just to read static metadata.
+        """
+        from lazybridge.core.providers.anthropic import AnthropicProvider
+        from lazybridge.core.providers.deepseek import DeepSeekProvider
+        from lazybridge.core.providers.google import GoogleProvider
+        from lazybridge.core.providers.lmstudio import LMStudioProvider
+        from lazybridge.core.providers.openai import OpenAIProvider
+
+        registry = {
+            "anthropic": AnthropicProvider,
+            "claude": AnthropicProvider,
+            "openai": OpenAIProvider,
+            "gpt": OpenAIProvider,
+            "google": GoogleProvider,
+            "gemini": GoogleProvider,
+            "deepseek": DeepSeekProvider,
+            "lmstudio": LMStudioProvider,
+            "lm-studio": LMStudioProvider,
+            "lm_studio": LMStudioProvider,
+            "local": LMStudioProvider,
+        }
+        key = self.provider.lower().strip() if isinstance(self.provider, str) else "anthropic"
+        if key == "litellm":
+            from lazybridge.core.providers.litellm import LiteLLMProvider
+
+            return LiteLLMProvider
+        return registry.get(key, AnthropicProvider)
+
+    def _filter_by_vision(self, images: list[Any]) -> list[Any]:
+        if not images:
+            return []
+        provider_cls = self._provider_class()
+        if provider_cls.supports_vision(self.model):
+            return images
+        msg = (
+            f"{provider_cls.__name__} model {self.model!r} does not "
+            f"support vision input — {len(images)} image(s) dropped from the "
+            f"request.  Pass a vision-capable model or set strict_multimodal=True "
+            f"to fail fast."
+        )
+        if self.strict_multimodal:
+            from lazybridge.core.providers.base import UnsupportedFeatureError
+
+            raise UnsupportedFeatureError(msg)
+        import warnings
+
+        warnings.warn(msg, UserWarning, stacklevel=4)
+        return []
+
+    def _filter_by_audio(self, audio: Any | None) -> Any | None:
+        if audio is None:
+            return None
+        provider_cls = self._provider_class()
+        if provider_cls.supports_audio(self.model):
+            return audio
+        msg = (
+            f"{provider_cls.__name__} model {self.model!r} does not "
+            f"support audio input — attachment dropped from the request.  "
+            f"Pass an audio-capable model or set strict_multimodal=True to "
+            f"fail fast."
+        )
+        if self.strict_multimodal:
+            from lazybridge.core.providers.base import UnsupportedFeatureError
+
+            raise UnsupportedFeatureError(msg)
+        import warnings
+
+        warnings.warn(msg, UserWarning, stacklevel=4)
+        return None
+
+    # ------------------------------------------------------------------
     # _loop() — shared by run() and stream()
     # ------------------------------------------------------------------
 
@@ -446,7 +572,15 @@ class LLMEngine:
             system = f"{system}\n\nContext:\n{env.context}".strip() if system else f"Context:\n{env.context}"
 
         task_text = env.task or env.text()
-        messages.append(Message(role=Role.USER, content=task_text))
+        # Multimodal: when the Envelope carries images / audio, build a
+        # content-block list instead of a plain string so the provider's
+        # ``_messages_to_<provider>`` method emits the right wire shape.
+        # Capability filtering (M1.5) drops attachments the resolved model
+        # can't handle before they reach the wire — done in
+        # ``_build_user_content`` so the LLM-loop ↔ provider boundary
+        # stays tidy.
+        user_content = self._build_user_content(task_text, env)
+        messages.append(Message(role=Role.USER, content=user_content))
 
         tool_defs = [t.definition() for t in tools]
         tool_map = {t.name: t for t in tools}

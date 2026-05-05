@@ -186,6 +186,36 @@ class OpenAIProvider(BaseProvider):
         }
     )
 
+    # Vision: gpt-4-turbo, gpt-4o, gpt-4.1, gpt-5+ are all multimodal.
+    # Substring match on the model family covers every quant / mini /
+    # nano variant uniformly.  ``gpt-3.5`` and ``gpt-4`` (no suffix)
+    # are intentionally NOT in the list — they were the text-only
+    # generations.
+    _VISION_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "gpt-4-turbo",
+            "gpt-4o",
+            "gpt-4.1",
+            "gpt-5",
+            "o1",  # reasoning models accept images on the multimodal variant
+            "o3",
+            "o4",
+        }
+    )
+
+    # Audio: shipped behind ``-audio-preview`` model variants.  Future
+    # native audio across the gpt-4o family should add ``"gpt-4o"`` to
+    # this set, but for now we keep it tight to what the API actually
+    # accepts to avoid silent drops at the wire.
+    _AUDIO_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "gpt-4o-audio",
+            "gpt-4o-mini-audio",
+            "gpt-4o-realtime",
+            "gpt-4o-mini-realtime",
+        }
+    )
+
     def _compute_cost(
         self,
         model: str,

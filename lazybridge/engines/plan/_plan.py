@@ -778,7 +778,18 @@ class Plan:
                 ctx_parts.append(src.text())
 
         merged_ctx = "\n\n".join(ctx_parts) if ctx_parts else None
-        step_env: Envelope[Any] = Envelope(task=step_task_env.task, context=merged_ctx, payload=step_task_env.payload)
+        # Multimodal: thread attachments through so step 0 (or any step
+        # whose ``task=`` resolves to ``_FromStart``) sees the original
+        # images / audio.  Steps that resolve via ``_FromPrev`` /
+        # ``_FromStep`` naturally inherit ``None`` because text-output
+        # steps don't produce attachments — propagation is automatic.
+        step_env: Envelope[Any] = Envelope(
+            task=step_task_env.task,
+            context=merged_ctx,
+            images=step_task_env.images,
+            audio=step_task_env.audio,
+            payload=step_task_env.payload,
+        )
 
         result_env = await self._exec_step(
             step,
@@ -812,9 +823,16 @@ class Plan:
         # short-circuit rather than silently feed an errored payload into
         # the next step.
         if isinstance(sentinel, _FromPrev):
+            # Multimodal: preserve attachments — for step 0 ``prev`` is
+            # the user-supplied input envelope and the user expects
+            # images / audio to reach the first agent.  For step N>0
+            # ``prev`` is an upstream LLM result which doesn't populate
+            # attachments, so this defaults to ``None`` automatically.
             return Envelope(
                 task=prev.text(),
                 context=prev.context,
+                images=prev.images,
+                audio=prev.audio,
                 payload=prev.payload,
                 metadata=prev.metadata,
                 error=prev.error,
@@ -830,6 +848,8 @@ class Plan:
                     return Envelope(
                         task=e.text(),
                         context=e.context,
+                        images=e.images,
+                        audio=e.audio,
                         payload=e.payload,
                         metadata=e.metadata,
                         error=e.error,
@@ -842,6 +862,8 @@ class Plan:
                     return Envelope(
                         task=e.text(),
                         context=e.context,
+                        images=e.images,
+                        audio=e.audio,
                         payload=e.payload,
                         metadata=e.metadata,
                         error=e.error,

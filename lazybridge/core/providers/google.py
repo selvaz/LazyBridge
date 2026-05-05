@@ -150,6 +150,28 @@ class GoogleProvider(BaseProvider):
         }
     )
 
+    # Vision: every Gemini 1.5+ model is multimodal (text + image +
+    # audio + video).  ``gemini-1.0`` was the last text-only generation
+    # so we explicitly include only the multimodal families.
+    _VISION_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "gemini-1.5",
+            "gemini-2",  # 2.0, 2.5 — all multimodal
+            "gemini-3",  # 3.0, 3.1 — all multimodal
+        }
+    )
+
+    # Audio: same matrix — Gemini 1.5+ accepts audio natively, and
+    # because Gemini's wire format is uniform across modalities, every
+    # vision-capable model is also audio-capable.
+    _AUDIO_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "gemini-1.5",
+            "gemini-2",
+            "gemini-3",
+        }
+    )
+
     def _init_client(self, **kwargs) -> None:
         if _genai is None:
             raise ImportError("google-genai package not installed. Run: pip install google-genai")

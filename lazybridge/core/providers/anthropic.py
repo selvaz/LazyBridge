@@ -132,6 +132,34 @@ class AnthropicProvider(BaseProvider):
         }
     )
 
+    # Vision: every Claude 3+ model is multimodal.  Substring match
+    # covers tier aliases ("top" / "medium") because they resolve to a
+    # canonical id before this check runs.  Older claude-2 / claude-1
+    # models are explicitly out — substring "claude-3" / "claude-4" /
+    # "claude-sonnet" / "claude-opus" / "claude-haiku" gives the right
+    # answer without an exhaustive whitelist.
+    _VISION_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "claude-3",
+            "claude-4",
+            "claude-opus",
+            "claude-sonnet",
+            "claude-haiku",
+        }
+    )
+
+    # Audio: Anthropic shipped audio input on claude-3-7-sonnet and
+    # later (4.x family).  claude-3 / claude-3-5 are vision-only.
+    _AUDIO_CAPABLE_MODEL_PATTERNS = frozenset(
+        {
+            "claude-3-7",
+            "claude-4",
+            "claude-opus-4",
+            "claude-sonnet-4",
+            "claude-haiku-4",
+        }
+    )
+
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         # Substring matching against model.lower() lets a fully-qualified model
         # string like "claude-sonnet-4-6-20250514" match the short key
