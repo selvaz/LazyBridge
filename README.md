@@ -25,7 +25,7 @@ no drift).
 
 | Audience | Where | Style |
 |---|---|---|
-| **Humans** | [MkDocs site](https://selvaz.github.io/LazyBridge/) — [Quickstart](docs/quickstart.md) → [tier pages](docs/tiers/) → [guides](docs/guides/) → [decision trees](docs/decisions/) → [recipes](docs/recipes/) → [API reference](docs/reference.md) | Narrative-first; mermaid diagrams; copy-paste recipes |
+| **Humans** | [MkDocs site](https://selvaz.github.io/LazyBridge/) — [Quickstart](docs/quickstart.md) → [Getting started](docs/guides/getting-started.md) → [guides](docs/guides/) → [decision trees](docs/decisions/) → [recipes](docs/recipes/) → [API reference](docs/reference.md) | Narrative-first; mermaid diagrams; copy-paste recipes |
 | **LLM assistants** | [Claude Skill](lazybridge/skill_docs/SKILL.md) packaged with the wheel; mirrored at [`docs/skill/`](docs/skill/); [`llms.txt`](llms.txt) entry-point | Signature-first; rules block; dense; predictable section structure (`signature` / `rules` / `example` / `pitfalls`) |
 
 Both tracks cover the same surface — Basic / Mid / Full / Advanced
@@ -37,10 +37,10 @@ LazyBridge grows with you — every tier is additive.
 
 | Tier | For | Key imports |
 |---|---|---|
-| [**Basic**](docs/tiers/basic.md) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
-| [**Mid**](docs/tiers/mid.md) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite` |
-| [**Full**](docs/tiers/full.md) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
-| [**Advanced**](docs/tiers/advanced.md) | extending the framework | `Engine` · `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
+| [**Basic**](docs/guides/getting-started.md#basic--one-call) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
+| [**Mid**](docs/guides/getting-started.md#mid--state-observability-multi-agent) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite` |
+| [**Full**](docs/guides/getting-started.md#full--declared-pipelines-crash-resume) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
+| [**Advanced**](docs/guides/getting-started.md#advanced--extending-the-framework) | extending the framework | `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
 
 ## Install
 
@@ -157,7 +157,7 @@ sess = Session(
     batched=True,                     # non-blocking emit
     on_full="hybrid",                 # default — block on AGENT_*/TOOL_*, drop telemetry
     exporters=[
-        JsonFileExporter("run.jsonl"),
+        JsonFileExporter(path="run.jsonl"),
         OTelExporter(endpoint="http://otelcol:4318"),
     ],
 )

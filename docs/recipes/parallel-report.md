@@ -64,7 +64,7 @@ def researcher(region_section: str, region_label: str, model: str) -> Agent:
         ),
         tools=[
             NativeTool.WEB_SEARCH,
-            *fragment_tools(bus, default_section=region_section, step_name=region_section),
+            *fragment_tools(bus=bus, default_section=region_section, step_name=region_section),
         ],
     )
 
@@ -81,7 +81,7 @@ synthesiser = Agent(
         "   body_markdown=<one short paragraph>).\n"
         "Do not duplicate region content — synthesise, don't copy."
     ),
-    tools=fragment_tools(bus, default_section="1.exec", step_name="synth"),
+    tools=fragment_tools(bus=bus, default_section="1.exec", step_name="synth"),
 )
 
 

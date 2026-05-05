@@ -31,7 +31,7 @@ instead of ingesting the whole site.
 ### Human track — narrative-first site
 
 - [Quickstart](https://github.com/selvaz/LazyBridge/blob/main/docs/quickstart.md) — 5 min walkthrough
-- [Tier pages](https://github.com/selvaz/LazyBridge/tree/main/docs/tiers) — Basic / Mid / Full / Advanced
+- [Getting started](https://github.com/selvaz/LazyBridge/blob/main/docs/guides/getting-started.md) — Basic / Mid / Full / Advanced progression
 - [Per-topic guides](https://github.com/selvaz/LazyBridge/tree/main/docs/guides)
 - [Decision trees (mermaid)](https://github.com/selvaz/LazyBridge/tree/main/docs/decisions)
 - [Recipes](https://github.com/selvaz/LazyBridge/tree/main/docs/recipes) — tool-calling, structured-output, plan-with-resume, HIL, MCP, orchestration

@@ -136,7 +136,7 @@ Field names mirror `lazybridge.envelope.EnvelopeMetadata` so a tool-side
 helper can copy the metadata over directly.  In practice, you populate
 provenance two ways:
 
-1. **Through `fragment_tools(bus, step_name=…)`** — every tool call
+1. **Through `fragment_tools(bus=bus, step_name=…)`** — every tool call
    stamps `step_name` automatically.  Other fields stay `None` because
    the tool callback doesn't have access to the running Envelope's
    metadata.

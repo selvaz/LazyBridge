@@ -150,10 +150,10 @@ The bus instance itself is the synchronisation point.  Pass it into
 ```python
 bus = FragmentBus("multi")
 
-us_agent  = Agent(model="…", tools=fragment_tools(bus, default_section="2.us",  step_name="us"))
-cn_agent  = Agent(model="…", tools=fragment_tools(bus, default_section="2.cn",  step_name="cn"))
-in_agent  = Agent(model="…", tools=fragment_tools(bus, default_section="2.in",  step_name="in"))
-synth     = Agent(model="…", tools=fragment_tools(bus, default_section="1.exec", step_name="synth"))
+us_agent  = Agent(model="…", tools=fragment_tools(bus=bus, default_section="2.us",  step_name="us"))
+cn_agent  = Agent(model="…", tools=fragment_tools(bus=bus, default_section="2.cn",  step_name="cn"))
+in_agent  = Agent(model="…", tools=fragment_tools(bus=bus, default_section="2.in",  step_name="in"))
+synth     = Agent(model="…", tools=fragment_tools(bus=bus, default_section="1.exec", step_name="synth"))
 ```
 
 `default_section` is a per-agent shortcut — fragments emitted via that

@@ -30,7 +30,7 @@ Markdown file + chart PNGs) and calls `generate_report` once at the end.
 from lazybridge import Agent
 from lazybridge.external_tools.report_builder import report_tools
 
-agent = Agent(model="anthropic:claude-sonnet-4-6", tools=report_tools("./out"))
+agent = Agent(model="anthropic:claude-sonnet-4-6", tools=report_tools(output_dir="./out"))
 agent("Read the analysis at ./analysis.md and embed the charts in ./charts/.")
 ```
 

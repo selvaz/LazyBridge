@@ -17,7 +17,7 @@ unchanged.
 from lazybridge import Agent
 from lazybridge.external_tools.report_builder import report_tools
 
-agent = Agent("anthropic", tools=report_tools("./out"))
+agent = Agent("anthropic", tools=report_tools(output_dir="./out"))
 agent(
     "Read analysis.md, embed the charts in ./out/charts/, "
     "save the polished report to ./out."
@@ -40,12 +40,12 @@ bus = FragmentBus("audit", assembler=OutlineAssembler(OUTLINE))
 
 researcher = Agent(
     model="claude-haiku-4-5",
-    tools=fragment_tools(bus, default_section="2.body", step_name="research"),
+    tools=fragment_tools(bus=bus, default_section="2.body", step_name="research"),
 )
 
 synth = Agent(
     model="claude-sonnet-4-6",
-    tools=fragment_tools(bus, default_section="1.exec", step_name="synth"),
+    tools=fragment_tools(bus=bus, default_section="1.exec", step_name="synth"),
 )
 
 plan = Plan(

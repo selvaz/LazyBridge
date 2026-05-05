@@ -18,7 +18,7 @@ When to pick this over the [fragment workflow](report-builder.md#quick-start-par
 from lazybridge import Agent
 from lazybridge.external_tools.report_builder import report_tools
 
-agent = Agent(model="anthropic:claude-sonnet-4-6", tools=report_tools("./out"))
+agent = Agent(model="anthropic:claude-sonnet-4-6", tools=report_tools(output_dir="./out"))
 ```
 
 `output_dir` is the directory the tool writes outputs into; created on
@@ -65,8 +65,10 @@ generate_report(
 }
 ```
 
-On error: `{"error": True, "type": str, "message": str}`.  Exceptions
-are caught and wrapped — the LLM sees an error dict, not a stack trace.
+On error: the tool **raises** the underlying exception (`ValueError`,
+`FileNotFoundError`, …). The engine wraps it into an
+`is_error=True` tool result before passing it back to the LLM, so
+the model sees a clear failure signal and can self-correct.
 
 ## Two input flows
 
