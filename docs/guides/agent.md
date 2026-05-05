@@ -108,16 +108,16 @@ prod("draft a one-pager on the LazyBridge audit findings")
         fallback: Agent | None = None,
         cache: bool | CacheConfig = False,    # prompt caching
     ) -> Agent
-
+    
     Sync:    agent(task) -> Envelope
     Async:   await agent.run(task) -> Envelope
     Stream:  async for chunk in agent.stream(task): ...
-
+    
     Factories:
       Agent.from_model(model: str, **kw) -> Agent           # explicit LLM
       Agent.from_engine(engine: Engine, **kw) -> Agent      # explicit Plan / Supervisor / custom
       Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
-
+    
     Composition sugar (NOT new paradigms):
       Agent.chain(*agents, **kw)    -> Agent                 # sequential
       Agent.parallel(*agents, **kw) -> _ParallelAgent        # deterministic fan-out → list[Envelope]
@@ -126,7 +126,7 @@ prod("draft a one-pager on the LazyBridge audit findings")
 
     - ``tools=`` accepts plain functions, ``Tool`` instances, other
       ``Agent`` instances, and tool providers (``MCPServer`` etc.). The
-      framework normalises everything via ``wrap_tool`` at construction.
+      framework normalises everything to ``Tool`` at construction; you never call a wrapper yourself.
     - When a nested Agent has no ``session=`` of its own, it inherits the
       caller's session and is registered on the graph with an ``as_tool``
       edge. Observability flows through the whole tree.

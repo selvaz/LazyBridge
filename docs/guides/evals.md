@@ -50,14 +50,14 @@ assert report.passed == report.total, [r.case.input for r in report.results if n
         expected: Any = None,
         description: str = "",
     )
-
+    
     EvalSuite(*cases: EvalCase)
     suite.run(agent) -> EvalReport
     await suite.arun(agent) -> EvalReport
-
+    
     EvalReport(results: list[EvalResult])
       .total, .passed, .failed, .errors
-
+    
     # Built-in checks
     exact_match(expected: str) -> Callable
     contains(substring: str) -> Callable

@@ -53,21 +53,21 @@ assert len(replay.nodes()) == 3
 !!! note "API reference"
 
     GraphSchema(session_id: str = "") -> GraphSchema
-
+    
     graph.add_agent(agent: Agent) -> None
     graph.add_router(router) -> None
     graph.add_edge(from_id, to_id, *, label="", kind=EdgeType.TOOL) -> None
     graph.nodes() -> list[_BaseNode]
     graph.edges() -> list[Edge]
     graph.edges_from(node_id) / edges_to(node_id) -> list[Edge]
-
+    
     graph.to_dict() / to_json(indent=2) / to_yaml() -> str | dict
     GraphSchema.from_dict / from_json / from_file -> GraphSchema
     graph.save(path: str)     # .json or .yaml by extension
-
+    
     NodeType (StrEnum):  AGENT, ROUTER
     EdgeType (StrEnum):  TOOL, CONTEXT, ROUTER
-
+    
     Auto-populated: every Agent(session=s) registers into s.graph.
     Every as_tool wrapping records an edge with label="as_tool".
 

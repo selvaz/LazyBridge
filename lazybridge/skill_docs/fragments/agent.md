@@ -47,7 +47,7 @@ Composition sugar (NOT new paradigms):
 ## rules
 - ``tools=`` accepts plain functions, ``Tool`` instances, other
   ``Agent`` instances, and tool providers (``MCPServer`` etc.). The
-  framework normalises everything via ``wrap_tool`` at construction.
+  framework normalises everything to ``Tool`` at construction; you never call a wrapper yourself.
 - When a nested Agent has no ``session=`` of its own, it inherits the
   caller's session and is registered on the graph with an ``as_tool``
   edge. Observability flows through the whole tree.

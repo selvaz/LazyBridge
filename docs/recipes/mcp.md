@@ -91,7 +91,7 @@ tools, the agent will simply have no tools from that server — no error.
 
 The transport connects **lazily** on the first `as_tools()` call.
 In practice this means *Agent construction time*: `Agent(tools=[server])`
-calls `build_tool_map()` which calls `server.as_tools()` to discover the
+calls `server.as_tools()` to discover the
 tool catalogue, and that's when the subprocess spawns / HTTP session
 opens. Connection failures therefore surface at the `Agent(...)` call —
 **not** at the first user query — which is what you want for fail-fast
@@ -126,7 +126,7 @@ fs.invalidate_tools_cache()
 ## How it works
 
 `MCPServer` carries the marker attribute `_is_lazy_tool_provider = True`.
-When you pass it to `Agent(tools=[...])`, `build_tool_map()` calls
+When you pass it to `Agent(tools=[...])`, the framework calls
 `server.as_tools()` to expand it into a list of `Tool` instances built
 via `Tool.from_schema(...)` — the MCP server already publishes JSON
 Schemas for each tool, so we use them directly instead of re-introspecting

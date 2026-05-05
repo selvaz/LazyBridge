@@ -56,7 +56,7 @@ Composition sugar (NOT new paradigms):
 
 - ``tools=`` accepts plain functions, ``Tool`` instances, other
   ``Agent`` instances, and tool providers (``MCPServer`` etc.). The
-  framework normalises everything via ``wrap_tool`` at construction.
+  framework normalises everything to ``Tool`` at construction; you never call a wrapper yourself.
 - When a nested Agent has no ``session=`` of its own, it inherits the
   caller's session and is registered on the graph with an ``as_tool``
   edge. Observability flows through the whole tree.
@@ -153,18 +153,26 @@ Tool(
     *,
     name: str | None = None,
     description: str | None = None,
-    guidance: str | None = None,
     mode: Literal["signature", "llm", "hybrid"] = "signature",
     schema_llm: Any | None = None,
     strict: bool = False,
+    returns_envelope: bool = False,
 ) -> Tool
 
+Tool.from_schema(name, description, parameters, func, *, strict=False, returns_envelope=False) -> Tool
 Tool.definition() -> ToolDefinition
 await Tool.run(**kwargs) -> Any
-Tool.run_sync(**kwargs) -> Any   # handles async ``func`` transparently
+Tool.run_sync(**kwargs) -> Any   # drives async ``func`` to completion
 
-wrap_tool(obj) -> Tool   # converts functions / Agents / Tools uniformly
-build_tool_map(tools: list) -> dict[str, Tool]
+Agent.as_tool(name=None, description=None, *, verify=None, max_verify=3) -> Tool
+
+# Six paths to a Tool — pick by what you have:
+Agent(tools=[fn])                                     # plain Python function
+Agent(tools=[Tool(fn, name=..., strict=True)])        # function + override
+Agent(tools=[other_agent])                            # sub-agent (auto-wrapped)
+Agent(tools=[other_agent.as_tool(verify=judge)])      # sub-agent + judge/retry
+Agent(tools=[mcp_server])                             # MCPServer (provider expansion)
+Agent(tools=read_docs_tools())                        # external_tools kit (list[Tool])
 
 **rules**
 
@@ -176,14 +184,19 @@ build_tool_map(tools: list) -> dict[str, Tool]
 - ``strict=True`` enables provider-strict JSON-schema validation on tool
   arguments (Anthropic / OpenAI strict mode).
 - ``run`` is async; ``run_sync`` auto-detects coroutine functions and
-  drives them to completion so REPL callers (e.g. SupervisorEngine) never
-  see a raw coroutine.
+  drives them to completion so synchronous callers (e.g. ``SupervisorEngine``
+  REPL) never see a raw coroutine.
+- ``Agent(tools=[...])`` accepts callables, ``Tool`` instances, ``Agent``
+  instances, and tool providers (objects with ``_is_lazy_tool_provider =
+  True`` + ``as_tools()`` method). Everything is normalised to ``Tool``
+  at construction; users never call a wrapper directly.
 
 **example**
 
 ```python
-from lazybridge import Tool, Agent
+from lazybridge import Agent, Tool
 
+# 1. Plain function — type hints + docstring drive the schema.
 def calculate(expression: str) -> float:
     """Evaluate a basic arithmetic expression and return the result.
 
@@ -191,17 +204,33 @@ def calculate(expression: str) -> float:
     """
     return eval(expression)  # noqa: S307  (trusted inputs only)
 
-# Implicit: pass the function, LazyBridge wraps it.
 Agent("claude-opus-4-7", tools=[calculate])("what is 17 * 23?")
 
-# Explicit: override the name or strictness.
+# 2. Function + explicit configuration (override name, strictness, etc.).
 calc_tool = Tool(calculate, name="calc", strict=True,
                  description="Evaluate an arithmetic expression.")
 Agent("claude-opus-4-7", tools=[calc_tool])("...")
 
-# An Agent is also a Tool — no ceremony.
+# 3. An Agent is also a Tool — no ceremony.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 orchestrator = Agent("claude-opus-4-7", tools=[researcher])
+
+# 4. Agent + verifier (judge + retry).
+judge = Agent("claude-opus-4-7",
+              system="Reply 'approved' or 'rejected: <reason>'.")
+orchestrator = Agent("claude-opus-4-7", tools=[
+    researcher.as_tool(verify=judge, max_verify=2),
+])
+
+# 5. MCP server — drop in, framework expands via as_tools().
+from lazybridge.ext.mcp import MCP
+fs = MCP.stdio("fs", command="npx",
+               args=["@modelcontextprotocol/server-filesystem", "."])
+Agent("claude-opus-4-7", tools=[fs])
+
+# 6. external_tools kit — factory returns list[Tool].
+from lazybridge.external_tools.read_docs import read_docs_tools
+Agent("claude-opus-4-7", tools=read_docs_tools())
 ```
 
 **pitfalls**
@@ -213,6 +242,8 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
   and a one-word condition (sunny / cloudy / rainy) for ``city``."
 - ``strict=True`` rejects optional / defaulted args under some providers;
   if a call fails with "unknown parameter", try ``strict=False``.
+- Tool name collisions trigger a ``UserWarning`` — the second
+  registration replaces the first. Pick stable, distinct names.
 
 ## Native tools (web search, code execution, …)
 
@@ -299,10 +330,10 @@ Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
 #                 and docstring.  Needs schema_llm= (an Agent).
 #   "hybrid"    — signature first; LLM fills gaps for missing hints.
 
-# Convenience APIs (no explicit Tool() call needed):
-wrap_tool(func_or_agent) -> Tool          # uniform wrapper
-build_tool_map(list_of_things) -> dict    # batch wrapping
-Agent(..., tools=[func])                  # wrap_tool applied automatically
+# No explicit Tool(...) call needed:
+Agent(..., tools=[func])                  # function auto-wrapped at construction
+Agent(..., tools=[other_agent])           # other_agent.as_tool() called automatically
+Agent(..., tools=[mcp_server])            # provider.as_tools() expanded automatically
 
 **rules**
 
@@ -357,15 +388,6 @@ def partial_hint(query: str, opts=None) -> list:
 
 Agent("claude-opus-4-7",
       tools=[Tool(partial_hint, mode="hybrid", schema_llm=tiny)])
-
-# --- wrap_tool: uniform conversion -------------------------------
-from lazybridge.tools import wrap_tool, build_tool_map
-
-tool_1 = wrap_tool(calculate)                  # function → Tool
-tool_2 = wrap_tool(legacy_tool)                 # Tool → Tool (idempotent)
-tool_3 = wrap_tool(Agent("claude-opus-4-7"))    # Agent → Tool (via as_tool)
-
-tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
 ```
 
 **pitfalls**

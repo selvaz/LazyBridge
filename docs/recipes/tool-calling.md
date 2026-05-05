@@ -92,8 +92,9 @@ print(editor("find the top 3 AI papers from April 2026 and summarise them").text
   self-corrects, instead of failing later with a misleading
   "missing required field" message.
 - **Tool name collisions are silently shadowed.** When two tools share a
-  name, `build_tool_map` warns once and keeps the last one. Pick stable,
-  unique names — the LLM only ever sees the kept registration.
+  name, the framework emits a `UserWarning` once and keeps the last
+  registration. Pick stable, unique names — the LLM only ever sees the
+  kept one.
 
 ## Next
 

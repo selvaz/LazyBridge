@@ -20,7 +20,7 @@ REPL commands:
 
 ## rules
 - ``tools=`` accepts functions, Tool instances, and Agent instances
-  uniformly (wrap_tool is applied at __init__). Same contract as
+  uniformly — normalised to ``Tool`` at construction. Same contract as
   ``Agent(tools=...)``.
 - The REPL runs on a worker thread so the caller's event loop is not
   blocked. ``input_fn`` is called there; use scripted inputs in tests.

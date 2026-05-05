@@ -64,9 +64,9 @@ pipeline("AI policy brief")
         timeout: float | None = None,
         default: str | None = None,
     ) -> Engine
-
+    
     Usage: Agent(engine=SupervisorEngine(tools=[...], agents=[researcher]))
-
+    
     REPL commands:
       continue [optional text]        accept; return to caller
       retry <agent>: <feedback>       re-run a registered agent with feedback
@@ -76,7 +76,7 @@ pipeline("AI policy brief")
 !!! warning "Rules & invariants"
 
     - ``tools=`` accepts functions, Tool instances, and Agent instances
-      uniformly (wrap_tool is applied at __init__). Same contract as
+      uniformly — normalised to ``Tool`` at construction. Same contract as
       ``Agent(tools=...)``.
     - The REPL runs on a worker thread so the caller's event loop is not
       blocked. ``input_fn`` is called there; use scripted inputs in tests.

@@ -392,7 +392,7 @@ agent.as_tool(
 # Tool schema: (task: str) -> str
 
 Usage: Agent("model", tools=[researcher.as_tool()])
-       Agent("model", tools=[researcher])   # implicit — wrap_tool auto-calls as_tool()
+       Agent("model", tools=[researcher])   # implicit — Agent auto-wraps via as_tool()
 
 **rules**
 
@@ -681,7 +681,7 @@ async with server:        # explicit lifecycle: connect + close
 **rules**
 
 - An ``MCPServer`` is a *tool provider*; pass it directly to
-  ``Agent(tools=[server])``.  ``build_tool_map`` calls
+  ``Agent(tools=[server])``.  Agent expansion calls
   ``server.as_tools()`` to expand it into one ``Tool`` per MCP tool.
   No separate ``MCPEngine`` / ``MCPProvider`` exists.
 - The transport connects **lazily** on the first ``as_tools()`` call,

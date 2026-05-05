@@ -47,15 +47,6 @@ def partial_hint(query: str, opts=None) -> list:
 
 Agent("claude-opus-4-7",
       tools=[Tool(partial_hint, mode="hybrid", schema_llm=tiny)])
-
-# --- wrap_tool: uniform conversion -------------------------------
-from lazybridge.tools import wrap_tool, build_tool_map
-
-tool_1 = wrap_tool(calculate)                  # function → Tool
-tool_2 = wrap_tool(legacy_tool)                 # Tool → Tool (idempotent)
-tool_3 = wrap_tool(Agent("claude-opus-4-7"))    # Agent → Tool (via as_tool)
-
-tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
 ```
 
 ## Pitfalls
@@ -73,20 +64,20 @@ tools_by_name = build_tool_map([calculate, tool_2, Agent(...)])
 !!! note "API reference"
 
     # Three ways to turn a Python function into an LLM-callable Tool.
-
+    
     Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
          schema_llm: Any | None = None, strict: bool = False)
-
+    
     # Mode recap:
     #   "signature" — parse type hints + docstring (default). No LLM cost.
     #   "llm"       — call an LLM to infer schema from the function body
     #                 and docstring.  Needs schema_llm= (an Agent).
     #   "hybrid"    — signature first; LLM fills gaps for missing hints.
-
-    # Convenience APIs (no explicit Tool() call needed):
-    wrap_tool(func_or_agent) -> Tool          # uniform wrapper
-    build_tool_map(list_of_things) -> dict    # batch wrapping
-    Agent(..., tools=[func])                  # wrap_tool applied automatically
+    
+    # No explicit Tool(...) call needed:
+    Agent(..., tools=[func])                  # function auto-wrapped at construction
+    Agent(..., tools=[other_agent])           # other_agent.as_tool() called automatically
+    Agent(..., tools=[mcp_server])            # provider.as_tools() expanded automatically
 
 !!! warning "Rules & invariants"
 

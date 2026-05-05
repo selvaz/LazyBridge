@@ -10,7 +10,7 @@ agent.as_tool(
 # Tool schema: (task: str) -> str
 
 Usage: Agent("model", tools=[researcher.as_tool()])
-       Agent("model", tools=[researcher])   # implicit — wrap_tool auto-calls as_tool()
+       Agent("model", tools=[researcher])   # implicit — Agent auto-wraps via as_tool()
 
 ## rules
 - ``as_tool()`` with no arguments produces a Tool named after the agent.

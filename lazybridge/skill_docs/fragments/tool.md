@@ -4,18 +4,26 @@ Tool(
     *,
     name: str | None = None,
     description: str | None = None,
-    guidance: str | None = None,
     mode: Literal["signature", "llm", "hybrid"] = "signature",
     schema_llm: Any | None = None,
     strict: bool = False,
+    returns_envelope: bool = False,
 ) -> Tool
 
+Tool.from_schema(name, description, parameters, func, *, strict=False, returns_envelope=False) -> Tool
 Tool.definition() -> ToolDefinition
 await Tool.run(**kwargs) -> Any
-Tool.run_sync(**kwargs) -> Any   # handles async ``func`` transparently
+Tool.run_sync(**kwargs) -> Any   # drives async ``func`` to completion
 
-wrap_tool(obj) -> Tool   # converts functions / Agents / Tools uniformly
-build_tool_map(tools: list) -> dict[str, Tool]
+Agent.as_tool(name=None, description=None, *, verify=None, max_verify=3) -> Tool
+
+# Six paths to a Tool — pick by what you have:
+Agent(tools=[fn])                                     # plain Python function
+Agent(tools=[Tool(fn, name=..., strict=True)])        # function + override
+Agent(tools=[other_agent])                            # sub-agent (auto-wrapped)
+Agent(tools=[other_agent.as_tool(verify=judge)])      # sub-agent + judge/retry
+Agent(tools=[mcp_server])                             # MCPServer (provider expansion)
+Agent(tools=read_docs_tools())                        # external_tools kit (list[Tool])
 
 ## rules
 - Schema generation is automatic from ``func``'s type hints and docstring
@@ -26,24 +34,32 @@ build_tool_map(tools: list) -> dict[str, Tool]
 - ``strict=True`` enables provider-strict JSON-schema validation on tool
   arguments (Anthropic / OpenAI strict mode).
 - ``run`` is async; ``run_sync`` auto-detects coroutine functions and
-  drives them to completion so REPL callers (e.g. SupervisorEngine) never
-  see a raw coroutine.
+  drives them to completion so synchronous callers (e.g. ``SupervisorEngine``
+  REPL) never see a raw coroutine.
+- ``Agent(tools=[...])`` accepts callables, ``Tool`` instances, ``Agent``
+  instances, and tool providers (objects with ``_is_lazy_tool_provider =
+  True`` + ``as_tools()`` method). Everything is normalised to ``Tool``
+  at construction; users never call a wrapper directly.
 
 ## narrative
-**Use `Tool` for** any callable you want an LLM to invoke — local
-Python functions, agents wrapped via `as_tool`, or pre-built
-provider-specific helpers. Pass plain functions to `tools=[...]` and
-the framework wraps them automatically; reach for `Tool(...)` only
-when you need to override the name, description, or schema mode.
+A `Tool` is anything an `Agent` can call: a Python function, another
+Agent, or a tool provider (MCP server, external gateway). They all
+flow through the same `tools=[...]` list — **you never have to convert
+them yourself**. The framework normalises the list inside
+`Agent.__init__` and registers each entry under a unique name.
 
-**Reach for `mode="llm"` / `"hybrid"`** when the function lacks type
-hints and you can't add them — see [Function → Tool](tool-schema.md)
-for the trade-offs.
+The common case is **drop the function in**. Type hints + docstring
+drive the JSON schema. Reach for `Tool(...)` only when you need to
+override the name, description, or strictness; reach for
+`Tool.from_schema(...)` only when you already have a JSON schema (MCP,
+OpenAPI). Reach for `mode="llm"` / `"hybrid"` only when the function
+lacks type hints — see [Function → Tool](tool-schema.md).
 
 ## example
 ```python
-from lazybridge import Tool, Agent
+from lazybridge import Agent, Tool
 
+# 1. Plain function — type hints + docstring drive the schema.
 def calculate(expression: str) -> float:
     """Evaluate a basic arithmetic expression and return the result.
 
@@ -51,17 +67,33 @@ def calculate(expression: str) -> float:
     """
     return eval(expression)  # noqa: S307  (trusted inputs only)
 
-# Implicit: pass the function, LazyBridge wraps it.
 Agent("claude-opus-4-7", tools=[calculate])("what is 17 * 23?")
 
-# Explicit: override the name or strictness.
+# 2. Function + explicit configuration (override name, strictness, etc.).
 calc_tool = Tool(calculate, name="calc", strict=True,
                  description="Evaluate an arithmetic expression.")
 Agent("claude-opus-4-7", tools=[calc_tool])("...")
 
-# An Agent is also a Tool — no ceremony.
+# 3. An Agent is also a Tool — no ceremony.
 researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
 orchestrator = Agent("claude-opus-4-7", tools=[researcher])
+
+# 4. Agent + verifier (judge + retry).
+judge = Agent("claude-opus-4-7",
+              system="Reply 'approved' or 'rejected: <reason>'.")
+orchestrator = Agent("claude-opus-4-7", tools=[
+    researcher.as_tool(verify=judge, max_verify=2),
+])
+
+# 5. MCP server — drop in, framework expands via as_tools().
+from lazybridge.ext.mcp import MCP
+fs = MCP.stdio("fs", command="npx",
+               args=["@modelcontextprotocol/server-filesystem", "."])
+Agent("claude-opus-4-7", tools=[fs])
+
+# 6. external_tools kit — factory returns list[Tool].
+from lazybridge.external_tools.read_docs import read_docs_tools
+Agent("claude-opus-4-7", tools=read_docs_tools())
 ```
 
 ## pitfalls
@@ -72,8 +104,12 @@ orchestrator = Agent("claude-opus-4-7", tools=[researcher])
   and a one-word condition (sunny / cloudy / rainy) for ``city``."
 - ``strict=True`` rejects optional / defaulted args under some providers;
   if a call fails with "unknown parameter", try ``strict=False``.
+- Tool name collisions trigger a ``UserWarning`` — the second
+  registration replaces the first. Pick stable, distinct names.
 
 ## see-also
 - [Function → Tool](tool-schema.md) — schema modes (signature / llm / hybrid).
-- [Native tools](native-tools.md) — provider-hosted alternatives.
+- [Native tools](native-tools.md) — provider-hosted alternatives (`native_tools=` kwarg).
 - [Agent](agent.md) — the surface that consumes tools.
+- [Agent.as_tool](as-tool.md) — verifier loop on sub-agent calls.
+- [MCP integration](mcp.md) — drop in any MCP server as a tool catalogue.

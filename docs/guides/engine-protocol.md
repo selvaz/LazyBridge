@@ -46,7 +46,7 @@ print(Agent(engine=EchoEngine())("hello").text())
 !!! note "API reference"
 
     # Protocol contract every engine implements.
-
+    
     @runtime_checkable
     class Engine(Protocol):
         async def run(
@@ -58,7 +58,7 @@ print(Agent(engine=EchoEngine())("hello").text())
             memory: Memory | None,
             session: Session | None,
         ) -> Envelope: ...
-
+    
         async def stream(
             self,
             env: Envelope,
@@ -68,7 +68,7 @@ print(Agent(engine=EchoEngine())("hello").text())
             memory: Memory | None,
             session: Session | None,
         ) -> AsyncIterator[str]: ...
-
+    
     # Built-ins implementing this:
     #   LLMEngine, HumanEngine, SupervisorEngine, Plan
 
@@ -80,7 +80,7 @@ print(Agent(engine=EchoEngine())("hello").text())
     - ``stream`` is optional for non-streaming engines; yield the final
       text as a single chunk if no incremental output is available.
     - Engines receive an already-wrapped ``list[Tool]`` (Agent calls
-      ``build_tool_map`` / ``wrap_tool`` before invoking the engine). You do
+      the user-supplied ``tools=[...]`` is normalised before invoking the engine). You do
       NOT need to handle raw functions / Agents in the engine body.
     - Agents set ``engine._agent_name`` before invocation. Use it when
       emitting events for observability.

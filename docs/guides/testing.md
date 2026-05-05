@@ -23,7 +23,7 @@ Two things live here:
 Real agents have three sources of nondeterminism: the model, the
 network, and human input.  All three break test suites.  The framework
 accepts test doubles through the **same interfaces** as the real
-thing — `wrap_tool` recognises `_is_lazy_agent` on `MockAgent`, the
+thing — `Agent` recognises the duck-typed `_is_lazy_agent` marker on `MockAgent`, the
 Plan engine detects it, and `SupervisorEngine` accepts any callable as
 `input_fn`.  That means no special "test mode"; you wire up a pipeline
 exactly as you would in production and swap the implementations in
@@ -225,10 +225,10 @@ For async harnesses use `scripted_ainputs(...)` with
 
 !!! warning "Rules & invariants"
 
-    - `MockAgent` carries `_is_lazy_agent=True`, so every framework
-      wrapper that accepts an Agent accepts a MockAgent: `wrap_tool`,
-      `Plan(Step(target=mock))`, `Agent(tools=[mock])`, `as_tool()`,
-      `Agent.chain`, `Agent.parallel`.
+    - `MockAgent` carries `_is_lazy_agent=True`, so every place that
+      accepts an Agent accepts a MockAgent: `Plan(Step(target=mock))`,
+      `Agent(tools=[mock])`, `mock.as_tool()`, `Agent.chain`,
+      `Agent.parallel`.
     - Response resolution is: callable → dict → list → scalar.  A callable
       can return any of the other shapes; the value is then fed back
       through the rules.

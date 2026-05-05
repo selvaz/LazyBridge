@@ -77,10 +77,10 @@ async with MCP.stdio("fs", command="...") as fs:
 
 !!! note "API reference"
 
-    # Install: pip install lazybridge[mcp].
-
+    # Status: alpha (lazybridge.ext.mcp).  Install: pip install lazybridge[mcp].
+    
     from lazybridge.ext.mcp import MCP, MCPServer
-
+    
     MCP.stdio(
         name: str,
         *,
@@ -93,7 +93,7 @@ async with MCP.stdio("fs", command="...") as fs:
         deny: Iterable[str] | None = None,
         cache_tools_ttl: float | None = 60.0,    # tool-list cache lifetime
     ) -> MCPServer
-
+    
     MCP.http(
         name: str,
         url: str,
@@ -105,7 +105,7 @@ async with MCP.stdio("fs", command="...") as fs:
         deny: Iterable[str] | None = None,
         cache_tools_ttl: float | None = 60.0,
     ) -> MCPServer
-
+    
     MCP.from_transport(
         name: str,
         transport: _Transport,
@@ -116,7 +116,7 @@ async with MCP.stdio("fs", command="...") as fs:
         deny: Iterable[str] | None = None,
         cache_tools_ttl: float | None = 60.0,
     ) -> MCPServer
-
+    
     # MCPServer behaves like a tool provider — drop into Agent(tools=[...])
     # and it expands into one Tool per MCP tool.
     server.invalidate_tools_cache() -> None
@@ -126,7 +126,7 @@ async with MCP.stdio("fs", command="...") as fs:
 !!! warning "Rules & invariants"
 
     - An ``MCPServer`` is a *tool provider*; pass it directly to
-      ``Agent(tools=[server])``.  ``build_tool_map`` calls
+      ``Agent(tools=[server])``.  Agent expansion calls
       ``server.as_tools()`` to expand it into one ``Tool`` per MCP tool.
       No separate ``MCPEngine`` / ``MCPProvider`` exists.
     - The transport connects **lazily** on the first ``as_tools()`` call,

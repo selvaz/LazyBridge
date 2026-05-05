@@ -9,7 +9,7 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 Universal agent — delegates execution to a swappable Engine.
 
-### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, guidance: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False, returns_envelope: 'bool' = False) -> 'None'`
+### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False, returns_envelope: 'bool' = False) -> 'None'`
 
 Wraps any Python callable as an LLM-accessible tool.
 
@@ -19,14 +19,6 @@ Wraps any Python callable as an LLM-accessible tool.
 ### `Envelope(*, task: str | None = None, context: str | None = None, payload: Optional[~T] = None, metadata: lazybridge.envelope.EnvelopeMetadata = <factory>, error: lazybridge.envelope.ErrorInfo | None = None) -> None`
 
 Typed envelope carrying a payload of type ``T``.
-
-### `EnvelopeMetadata(*, input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0.0, latency_ms: float = 0.0, model: str | None = None, provider: str | None = None, run_id: str | None = None, nested_input_tokens: int = 0, nested_output_tokens: int = 0, nested_cost_usd: float = 0.0) -> None`
-
-!!! abstract "Usage Documentation"
-
-### `ErrorInfo(*, type: str, message: str, retryable: bool = False) -> None`
-
-!!! abstract "Usage Documentation"
 
 ### `from_prev`
 
@@ -47,10 +39,6 @@ Use the initial task/context Envelope passed to the Plan.
 
 ## Engines
 
-### `Engine(*args, **kwargs)`
-
-Contract every engine must satisfy.
-
 ### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, max_parallel_tools: 'int | None' = None, tool_timeout: 'float | None' = None, stream_idle_timeout: 'float | None' = None, cache: 'bool | Any' = False) -> 'None'`
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
@@ -62,14 +50,6 @@ Structured multi-step execution engine.
 ### `Step(target: 'Any', task: 'Sentinel | str' = <factory>, context: 'Sentinel | str | list[Sentinel | str] | None' = None, sources: 'list[Any]' = <factory>, writes: 'str | None' = None, input: 'type' = typing.Any, output: 'type' = <class 'str'>, parallel: 'bool' = False, name: 'str | None' = None, routes: 'dict[str, Callable[[Any], bool]] | None' = None, routes_by: 'str | None' = None) -> None`
 
 A single node in a Plan.
-
-### `PlanState(plan_id: 'str', current_step: 'str', next_step: 'str | None', store: 'dict[str, Any]', history: 'list[StepResult]', status: "Literal['running', 'paused', 'done', 'failed']") -> None`
-
-PlanState(plan_id: 'str', current_step: 'str', next_step: 'str | None', store: 'dict[str, Any]', history: 'list[StepResult]', status: "Literal['running', 'paused', 'done', 'failed']")
-
-### `StepResult(step_name: 'str', envelope: 'Envelope', ts: 'float' = <factory>) -> None`
-
-StepResult(step_name: 'str', envelope: 'Envelope', ts: 'float' = <factory>)
 
 ### `PlanCompileError`
 
@@ -93,10 +73,6 @@ Conversation memory with configurable compression strategy.
 ### `Store(db: 'str | None' = None) -> 'None'`
 
 Key-value store for PlanState and shared data.
-
-### `StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None) -> None`
-
-StoreEntry(key: 'str', value: 'Any', written_at: 'float' = <factory>, agent_id: 'str | None' = None)
 
 ### `Session(*, db: 'str | None' = None, exporters: 'list[Any] | None' = None, redact: 'Callable[[dict[str, Any]], dict[str, Any]] | None' = None, redact_on_error: "Literal['fallback', 'strict']" = 'strict', console: 'bool' = False, batched: 'bool' = False, batch_size: 'int' = 100, batch_interval: 'float' = 1.0, max_queue_size: 'int' = 10000, on_full: "Literal['drop', 'block', 'hybrid']" = 'hybrid', critical_events: 'frozenset[str] | set[str] | None' = None) -> 'None'`
 
@@ -136,7 +112,7 @@ Use an Agent as a judge. Returns block if the verdict begins with 'block' or 'de
 
 ## Exporters
 
-### `CallbackExporter(fn: 'Callable[[dict[str, Any]], None]') -> 'None'`
+### `CallbackExporter(*, fn: 'Callable[[dict[str, Any]], None]') -> 'None'`
 
 Forward every event to a user-supplied callable.
 
@@ -144,15 +120,15 @@ Forward every event to a user-supplied callable.
 
 Pretty-print events to stdout for human inspection.
 
-### `FilteredExporter(inner: 'Any', *, event_types: 'set[str]') -> 'None'`
+### `FilteredExporter(*, inner: 'Any', event_types: 'set[str]') -> 'None'`
 
 Forward only events whose type is in ``event_types`` to ``inner``.
 
-### `JsonFileExporter(path: 'str') -> 'None'`
+### `JsonFileExporter(*, path: 'str') -> 'None'`
 
 Append each event as a JSON line to ``path``.
 
-### `StructuredLogExporter(logger_name: 'str' = 'lazybridge') -> 'None'`
+### `StructuredLogExporter(*, logger_name: 'str' = 'lazybridge') -> 'None'`
 
 Emit each event via Python's ``logging`` module.
 
@@ -163,20 +139,20 @@ Emit each event via Python's ``logging`` module.
 
 Directed graph of agents, routers, and their connections.
 
-### `NodeType(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
-
-Enum where members are also (and must be) strings
-
-### `EdgeType(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
-
-Enum where members are also (and must be) strings
-
 
 ## Core types
 
 ### `from_parallel_all(name: 'str') -> '_FromParallelAll'`
 
 Aggregate every consecutive parallel sibling starting at ``name``.
+
+### `ToolProvider(*args, **kwargs)`
+
+A ``tools=[...]`` entry that expands itself into one or more Tools.
+
+### `NativeTool(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
+
+Provider-native server-side tools (run on provider infrastructure).
 
 ### `when`
 
@@ -194,50 +170,6 @@ Protocol satisfied by all exporter classes.
 
 Stable abstract base class for all LLM providers.
 
-### `CompletionRequest(messages: 'list[Message]', model: 'str | None' = None, system: 'str | None' = None, max_tokens: 'int | None' = None, temperature: 'float | None' = None, tools: 'list[ToolDefinition]' = <factory>, tool_choice: 'str | None' = None, native_tools: 'list[NativeTool]' = <factory>, structured_output: 'StructuredOutputConfig | None' = None, thinking: 'ThinkingConfig | None' = None, skills: 'SkillsConfig | None' = None, cache: 'CacheConfig | None' = None, stream: 'bool' = False, extra: 'dict[str, Any]' = <factory>) -> None`
-
-Unified request object passed to any provider.
-
-### `CompletionResponse(content: 'str', thinking: 'str | None' = None, tool_calls: 'list[ToolCall]' = <factory>, stop_reason: 'str' = 'end_turn', model: 'str | None' = None, usage: 'UsageStats' = <factory>, raw: 'Any' = None, parsed: 'Any' = None, validation_error: 'str | None' = None, validated: 'bool | None' = None, grounding_sources: 'list[GroundingSource]' = <factory>, web_search_queries: 'list[str]' = <factory>, search_entry_point: 'str | None' = None, verify_log: 'list[str]' = <factory>) -> None`
-
-Unified response from any provider.
-
-### `Message(role: 'Role', content: 'str | list[ContentBlock]') -> None`
-
-Message(role: 'Role', content: 'str | list[ContentBlock]')
-
-### `NativeTool(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
-
-Provider-native server-side tools (run on provider infrastructure).
-
-### `Role(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
-
-Enum where members are also (and must be) strings
-
-### `StreamChunk(delta: 'str' = '', thinking_delta: 'str' = '', tool_calls: 'list[ToolCall]' = <factory>, stop_reason: 'str | None' = None, usage: 'UsageStats | None' = None, is_final: 'bool' = False, parsed: 'Any' = None, validation_error: 'str | None' = None, validated: 'bool | None' = None, grounding_sources: 'list[GroundingSource]' = <factory>, web_search_queries: 'list[str]' = <factory>, search_entry_point: 'str | None' = None) -> None`
-
-A single chunk from a streaming response.
-
-### `StructuredOutputConfig(schema: 'type | dict[str, Any]', strict: 'bool' = True) -> None`
-
-Config for constrained JSON output.
-
-### `ThinkingConfig(enabled: 'bool' = True, display: 'str | None' = None, effort: 'str' = 'high', budget_tokens: 'int | None' = None) -> None`
-
-Reasoning/thinking configuration.
-
-### `ToolCall(id: 'str', name: 'str', arguments: 'dict[str, Any]', thought_signature: 'Any' = None) -> None`
-
-ToolCall(id: 'str', name: 'str', arguments: 'dict[str, Any]', thought_signature: 'Any' = None)
-
-### `ToolDefinition(name: 'str', description: 'str', parameters: 'dict[str, Any]', strict: 'bool' = False) -> None`
-
-Unified tool/function definition (JSON Schema based).
-
-### `UsageStats(input_tokens: 'int' = 0, output_tokens: 'int' = 0, thinking_tokens: 'int' = 0, cached_input_tokens: 'int' = 0, cost_usd: 'float | None' = None) -> None`
-
-Token-usage and cost telemetry for one request.
-
 ### `AgentRuntimeConfig(resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None) -> None`
 
 Composite — carries both resilience and observability.
@@ -253,3 +185,7 @@ Bundle of identity / tracing knobs shareable across Agents.
 ### `ResilienceConfig(timeout: 'float | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, cache: 'bool | CacheConfig' = False, max_output_retries: 'int' = 2, output_validator: 'Any' = None, fallback: 'Any' = None) -> None`
 
 Bundle of reliability / performance knobs shareable across Agents.
+
+### `MockAgent(responses: 'Any', *, name: 'str' = 'mock_agent', description: 'str | None' = None, output: 'type' = <class 'str'>, cycle: 'bool' = False, delay_ms: 'float' = 0.0, default_input_tokens: 'int' = 10, default_output_tokens: 'int' = 20, default_cost_usd: 'float' = 0.0, default_latency_ms: 'float | None' = None, default_model: 'str' = 'mock', default_provider: 'str' = 'mock') -> 'None'`
+
+Deterministic test double that quacks like :class:`lazybridge.Agent`.
