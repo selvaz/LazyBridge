@@ -55,6 +55,18 @@ from lazybridge.core.types import (
 )
 
 
+class UnsupportedNativeToolError(ValueError):
+    """Raised when a request asks for a :class:`NativeTool` the provider
+    doesn't implement, and the provider is in strict mode
+    (``strict_native_tools=True``).
+
+    Subclasses :class:`ValueError` so existing call sites that broadly
+    catch ``ValueError`` don't suddenly need a new branch — but the
+    type is distinct so production code can intercept it precisely
+    (e.g. to fail-over to a different provider).
+    """
+
+
 class BaseProvider(ABC):
     """Stable abstract base class for all LLM providers.
 
@@ -100,9 +112,26 @@ class BaseProvider(ABC):
     supported_native_tools: frozenset[NativeTool] = frozenset()
     """Declare which :class:`~lazybridge.core.types.NativeTool` values this
     provider supports (e.g. ``frozenset({NativeTool.WEB_SEARCH})``).
-    Unsupported tools requested by the user are silently filtered and warned."""
+    Unsupported tools requested by the user are filtered and warned —
+    or raised, when ``strict_native_tools=True`` is set on construction."""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None, **kwargs):
+    strict_native_tools: bool = False
+    """When True, requesting an unsupported :class:`NativeTool` raises
+    :class:`UnsupportedNativeToolError` instead of warning-and-dropping.
+    Set on construction (``BaseProvider(..., strict_native_tools=True)``)
+    or via the subclass.  Default ``False`` preserves the friendly
+    pre-W5.1 behaviour for ad-hoc / interactive use.  Production setups
+    should consider opting into strict mode so a misconfigured provider
+    fails loud rather than degrading to a non-grounded reply."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        *,
+        strict_native_tools: bool | None = None,
+        **kwargs,
+    ):
         """Initialise the provider.
 
         Parameters
@@ -113,11 +142,19 @@ class BaseProvider(ABC):
         model:
             Model identifier to use for all requests.  Falls back to
             ``default_model`` when ``None``.
+        strict_native_tools:
+            When ``True``, requesting an unsupported :class:`NativeTool`
+            raises :class:`UnsupportedNativeToolError`.  When ``None``
+            (default) the class-level :attr:`strict_native_tools`
+            attribute is used (typically ``False``).
         **kwargs:
             Forwarded verbatim to :meth:`_init_client`.
         """
         self.api_key = api_key
         self.model = model or self.default_model
+        if strict_native_tools is not None:
+            # Per-instance override of the class-level default.
+            self.strict_native_tools = bool(strict_native_tools)
         self._init_client(**kwargs)
 
     def _init_client(self, **kwargs) -> None:  # noqa: B027
@@ -275,21 +312,39 @@ class BaseProvider(ABC):
     def _check_native_tools(self, tools: list[NativeTool]) -> list[NativeTool]:
         """Filter ``tools`` to only those declared in ``supported_native_tools``.
 
-        Unsupported tools are dropped with a :class:`UserWarning`.
-        Call this at the start of ``complete`` / ``acomplete`` if your provider
-        supports any native tools.
+        By default (``strict_native_tools=False`` — see ``__init__``):
+        unsupported tools are dropped with a :class:`UserWarning` so an
+        accidental mis-routing (e.g. asking DeepSeek for ``WEB_SEARCH``)
+        doesn't silently corrupt a request.  When ``strict_native_tools``
+        is set, the same condition raises :class:`UnsupportedNativeToolError`
+        — useful in production where a missing capability should fail
+        loud rather than degrade silently.
+
+        Either way the warning / error message lists which native tools
+        the provider DOES support, so the user can see alternatives
+        without hunting through documentation.
         """
-        supported = []
+        supported_set = self.supported_native_tools
+        supported_list: list[NativeTool] = []
         for tool in tools:
-            if tool in self.supported_native_tools:
-                supported.append(tool)
-            else:
-                warnings.warn(
-                    f"{self.__class__.__name__} does not support native tool '{tool.value}'. Skipping.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-        return supported
+            if tool in supported_set:
+                supported_list.append(tool)
+                continue
+            available = (
+                ", ".join(sorted(t.value for t in supported_set))
+                if supported_set
+                else "(none — this provider does not implement any server-side native tools)"
+            )
+            msg = (
+                f"{self.__class__.__name__} does not support native tool "
+                f"{tool.value!r}.  Supported: {available}.  Use "
+                f"plain function tools instead, or switch to a provider "
+                f"that supports this capability."
+            )
+            if getattr(self, "strict_native_tools", False):
+                raise UnsupportedNativeToolError(msg)
+            warnings.warn(msg, UserWarning, stacklevel=3)
+        return supported_list
 
     def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
         """Return estimated cost in USD, or ``None`` if unknown.
