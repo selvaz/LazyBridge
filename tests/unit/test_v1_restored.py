@@ -20,7 +20,6 @@ import pytest
 from lazybridge import (
     Agent,
     ConsoleExporter,
-    EdgeType,
     Envelope,
     GraphSchema,
     Plan,
@@ -30,6 +29,7 @@ from lazybridge import (
     Tool,
 )
 from lazybridge.ext.hil import SupervisorEngine
+from lazybridge.graph import EdgeType
 
 # ---------------------------------------------------------------------------
 # Session.graph — auto-registration

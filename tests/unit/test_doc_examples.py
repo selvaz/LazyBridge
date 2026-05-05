@@ -24,9 +24,9 @@ from pydantic import BaseModel
 
 from lazybridge import (
     Agent,
+    CacheConfig,
     CallbackExporter,
     ContentGuard,
-    EdgeType,
     EventType,
     FilteredExporter,
     GraphSchema,
@@ -43,8 +43,8 @@ from lazybridge import (
     from_start,
     from_step,
 )
-from lazybridge.core.types import CacheConfig
 from lazybridge.ext.evals import EvalCase, EvalSuite, contains, llm_judge
+from lazybridge.graph import EdgeType
 from lazybridge.testing import MockAgent, scripted_inputs
 
 # ---------------------------------------------------------------------------

@@ -46,36 +46,32 @@ Tier 6 — full config::
 __version__ = "0.7.0"
 __stability__ = "alpha"
 
-# Core public API
+# Public API.  Symbols a user constructs, passes as a kwarg, or catches as
+# an exception are re-exported from this top-level module.  Internals
+# (provider request/response types, dispatcher helpers like wrap_tool /
+# build_tool_map, attribute-only types like EnvelopeMetadata / StoreEntry,
+# rarely-subclassed Protocols) live under their submodules and stay
+# importable as ``from lazybridge.X import Y`` for advanced callers.
+
+# Primary surface
 from lazybridge.agent import Agent
 from lazybridge.agent import _ParallelAgent as _ParallelAgent
 
-# Core types (re-exported for convenience)
+# Provider entry points
 from lazybridge.core.providers import BaseProvider
 from lazybridge.core.types import (
     AgentRuntimeConfig,
     CacheConfig,
-    CompletionRequest,
-    CompletionResponse,
-    Message,
     NativeTool,
     ObservabilityConfig,
     ResilienceConfig,
-    Role,
-    StreamChunk,
-    StructuredOutputConfig,
-    ThinkingConfig,
-    ToolCall,
-    ToolDefinition,
-    UsageStats,
 )
 
-# Engines.  HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
-# are extension surface — import them from ``lazybridge.ext.{hil,evals,otel}``.
-from lazybridge.engines.base import Engine
+# Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
+# live under ``lazybridge.ext.{hil,evals,otel}``).
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import Plan, PlanCompileError, Step
-from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.envelope import Envelope
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
 from lazybridge.exporters import (
@@ -88,23 +84,21 @@ from lazybridge.exporters import (
 )
 
 # Graph
-from lazybridge.graph import EdgeType, GraphSchema, NodeType
+from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
 from lazybridge.predicates import when
 from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
 from lazybridge.session import EventLog, EventType, Session
-from lazybridge.store import Store, StoreEntry
+from lazybridge.store import Store
 from lazybridge.testing import MockAgent
-from lazybridge.tools import Tool, ToolProvider, build_tool_map, wrap_tool
+from lazybridge.tools import Tool, ToolProvider
 
 __all__ = [
     # Primary API
     "Agent",
     # Envelope
     "Envelope",
-    "EnvelopeMetadata",
-    "ErrorInfo",
     # Sentinels
     "from_prev",
     "from_start",
@@ -114,14 +108,13 @@ __all__ = [
     # Tools
     "Tool",
     "ToolProvider",
-    "wrap_tool",
-    "build_tool_map",
+    # Native tools (provider-hosted, e.g. web search)
+    "NativeTool",
     # Predicates DSL (for Step.routes)
     "when",
-    # Memory & Store
+    # State
     "Memory",
     "Store",
-    "StoreEntry",
     # Session / Observability
     "Session",
     "EventLog",
@@ -133,8 +126,7 @@ __all__ = [
     "ContentGuard",
     "GuardChain",
     "LLMGuard",
-    # Engines
-    "Engine",
+    # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
     "LLMEngine",
     "Plan",
     "Step",
@@ -143,8 +135,6 @@ __all__ = [
     "StreamStallError",
     # Graph
     "GraphSchema",
-    "NodeType",
-    "EdgeType",
     # Exporters
     "EventExporter",
     "CallbackExporter",
@@ -152,20 +142,9 @@ __all__ = [
     "FilteredExporter",
     "JsonFileExporter",
     "StructuredLogExporter",
-    # Core types
+    # Provider entry point (custom adapters)
     "BaseProvider",
-    "CompletionRequest",
-    "CompletionResponse",
-    "Message",
-    "NativeTool",
-    "Role",
-    "StreamChunk",
-    "StructuredOutputConfig",
-    "ThinkingConfig",
-    "ToolCall",
-    "ToolDefinition",
-    "UsageStats",
-    # Config objects
+    # Shareable runtime configs
     "AgentRuntimeConfig",
     "CacheConfig",
     "ObservabilityConfig",
