@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -44,6 +45,24 @@ _BETA_SKILLS = "skills-2025-10-02"
 _BETA_FILES = "files-api-2025-04-14"
 _BETA_COMPUTER_USE = "computer-use-2025-01-24"
 _FORCE_STREAM_MAX_TOKENS = 20_000
+
+#: Recognised keys for ``beta_overrides``.  Any other key is a user
+#: typo (e.g. ``"web-search"`` vs ``"web_search"``) — pre-W2.2 these
+#: were silently ignored, hiding misconfigurations until the API
+#: returned an opaque "unsupported feature" error in production.
+#: W2.2 surfaces unknown keys as a ``UserWarning`` at construction
+#: and drops them from the effective override dict.
+_KNOWN_BETA_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {"web_search", "code_execution", "computer_use", "skills", "files"}
+)
+
+#: Anthropic beta header values follow ``<feature>-<YYYY>-<MM>-<DD>``.
+#: Values that don't match are likely malformed (e.g. wrong date
+#: separator, leftover spaces from an env var read).  We warn but
+#: still pass them through — the API is the source of truth for which
+#: header strings it accepts; we don't want to block a freshly-released
+#: variant LazyBridge hasn't been updated for.
+_BETA_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*-\d{4}-\d{2}-\d{2}$")
 
 # Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
@@ -142,6 +161,13 @@ class AnthropicProvider(BaseProvider):
         return 8_192
 
     def _init_client(self, **kwargs) -> None:
+        # Validate caller-supplied override knobs FIRST — even if the SDK
+        # isn't installed (so the constructor will fail on the next
+        # check), surfacing a typo'd key here helps a user diagnose
+        # their config without first having to install anthropic.
+        raw_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
+        self._beta_overrides: dict[str, str] = self._validate_beta_overrides(raw_overrides)
+        self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
         if _anthropic is None:
             raise ImportError("anthropic package not installed. Run: pip install anthropic")
         key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -154,9 +180,6 @@ class AnthropicProvider(BaseProvider):
         # A class-level bool would suppress the warning for ALL instances once any
         # single instance fires it, masking temperature issues in multi-agent setups.
         self._temperature_warned: bool = False
-        # Allow callers to override beta header versions and the streaming threshold.
-        self._beta_overrides: dict[str, str] = kwargs.pop("beta_overrides", {}) or {}
-        self._force_stream_threshold: int = kwargs.pop("force_stream_threshold", _FORCE_STREAM_MAX_TOKENS)
         self._client = _anthropic.Anthropic(api_key=key, **kwargs)
         self._async_client = _anthropic.AsyncAnthropic(api_key=key, **kwargs)
 
@@ -254,6 +277,55 @@ class AnthropicProvider(BaseProvider):
         for nt in self._check_native_tools(request.native_tools):
             tools.append(_NATIVE_TOOL_MAP[nt])
         return tools
+
+    @staticmethod
+    def _validate_beta_overrides(overrides: dict[str, Any]) -> dict[str, str]:
+        """Validate ``beta_overrides`` at construction time.
+
+        * Unknown keys → ``UserWarning`` + dropped (most often a typo
+          like ``"web-search"`` vs ``"web_search"``; silently ignoring
+          would mask the misconfiguration until the API call fails).
+        * Non-string values → ``UserWarning`` + dropped.
+        * String values that don't match
+          ``<feature>-<YYYY>-<MM>-<DD>`` → ``UserWarning`` but kept;
+          the API is the source of truth for accepted strings, and we
+          don't want to block a freshly-released variant LazyBridge
+          hasn't yet learned about.
+        """
+        if not isinstance(overrides, dict):
+            warnings.warn(
+                f"AnthropicProvider: beta_overrides must be a dict, "
+                f"got {type(overrides).__name__}; ignoring.",
+                stacklevel=3,
+            )
+            return {}
+        validated: dict[str, str] = {}
+        for k, v in overrides.items():
+            if k not in _KNOWN_BETA_OVERRIDE_KEYS:
+                warnings.warn(
+                    f"AnthropicProvider: unknown beta_overrides key {k!r}; "
+                    f"expected one of {sorted(_KNOWN_BETA_OVERRIDE_KEYS)}.  "
+                    f"Ignored — check for typos like 'web-search' vs 'web_search'.",
+                    stacklevel=3,
+                )
+                continue
+            if not isinstance(v, str):
+                warnings.warn(
+                    f"AnthropicProvider: beta_overrides[{k!r}] must be a "
+                    f"string, got {type(v).__name__}; ignored.",
+                    stacklevel=3,
+                )
+                continue
+            if not _BETA_VALUE_PATTERN.match(v):
+                warnings.warn(
+                    f"AnthropicProvider: beta_overrides[{k!r}]={v!r} "
+                    f"doesn't match the expected pattern "
+                    f"'<feature>-<YYYY>-<MM>-<DD>' — the API may reject "
+                    f"it.  Passing through as-is.",
+                    stacklevel=3,
+                )
+            validated[k] = v
+        return validated
 
     def _build_betas(self, request: CompletionRequest) -> list[str]:
         # getattr with default {} because __new__-based test construction can
