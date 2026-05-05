@@ -40,27 +40,31 @@ _IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
 )
 
 
-_VALID_IMAGE_MIMES: frozenset[str] = frozenset({
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
-})
+_VALID_IMAGE_MIMES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+    }
+)
 
-_VALID_AUDIO_MIMES: frozenset[str] = frozenset({
-    "audio/wav",
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/flac",
-    "audio/ogg",
-    "audio/webm",
-    "audio/aac",
-    "audio/mp4",
-    "audio/x-wav",
-    "audio/x-mpeg",
-})
+_VALID_AUDIO_MIMES: frozenset[str] = frozenset(
+    {
+        "audio/wav",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/flac",
+        "audio/ogg",
+        "audio/webm",
+        "audio/aac",
+        "audio/mp4",
+        "audio/x-wav",
+        "audio/x-mpeg",
+    }
+)
 
 
 def _detect_image_mime(data: bytes) -> str | None:
