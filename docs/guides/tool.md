@@ -79,14 +79,14 @@ Agent("claude-opus-4-7", tools=read_docs_tools())
         strict: bool = False,
         returns_envelope: bool = False,
     ) -> Tool
-    
+
     Tool.from_schema(name, description, parameters, func, *, strict=False, returns_envelope=False) -> Tool
     Tool.definition() -> ToolDefinition
     await Tool.run(**kwargs) -> Any
     Tool.run_sync(**kwargs) -> Any   # drives async ``func`` to completion
-    
+
     Agent.as_tool(name=None, description=None, *, verify=None, max_verify=3) -> Tool
-    
+
     # Six paths to a Tool — pick by what you have:
     Agent(tools=[fn])                                     # plain Python function
     Agent(tools=[Tool(fn, name=..., strict=True)])        # function + override

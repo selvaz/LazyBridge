@@ -284,7 +284,7 @@ class Plan:
             if not isinstance(env_data, dict):
                 continue
             try:
-                env = Envelope.model_validate(env_data)
+                env: Envelope = Envelope.model_validate(env_data)
             except Exception:
                 continue
             out.append(

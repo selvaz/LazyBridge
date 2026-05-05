@@ -46,7 +46,7 @@ for env in results:   # list[Envelope], one per agent
         step_timeout: float | None = None,      # per-agent wait_for
         **kwargs,                                # name, description, session
     ) -> _ParallelAgent
-    
+
     parallel_agent(task) -> list[Envelope]   # one entry per input agent, order preserved
 
 !!! warning "Rules & invariants"
