@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import base64
 import warnings
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +33,6 @@ from lazybridge.core.types import (
     _coerce_audio,
     _detect_audio_mime,
 )
-
 
 # ---------------------------------------------------------------------------
 # Magic-byte detection
@@ -138,7 +136,7 @@ def test_audio_from_bytes_explicit_media_type_overrides_detection():
 
 
 def test_audio_from_bytes_encodes_correctly():
-    raw = b"fLaC" + b"\xDE\xAD\xBE\xEF"
+    raw = b"fLaC" + b"\xde\xad\xbe\xef"
     audio = AudioContent.from_bytes(raw)
     assert base64.b64decode(audio.base64_data) == raw
 
@@ -668,7 +666,11 @@ def test_llm_engine_audio_stripped_when_not_supported():
     # _build_user_content should produce plain text, not a list
     content = engine._build_user_content("Summarise this clip.", env)
     # No audio in env → text-only path regardless
-    assert isinstance(content, str) or (isinstance(content, list) and all(isinstance(x, str) for x in content)) or isinstance(content, str)
+    assert (
+        isinstance(content, str)
+        or (isinstance(content, list) and all(isinstance(x, str) for x in content))
+        or isinstance(content, str)
+    )
 
 
 def test_llm_engine_audio_warns_on_unsupported_model():

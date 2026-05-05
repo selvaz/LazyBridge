@@ -396,9 +396,7 @@ class Agent:
         if timeout is None:
             return await self._run_body(task, images=images, audio=audio)
         try:
-            return await asyncio.wait_for(
-                self._run_body(task, images=images, audio=audio), timeout=timeout
-            )
+            return await asyncio.wait_for(self._run_body(task, images=images, audio=audio), timeout=timeout)
         except TimeoutError:
             # Emit a synthetic AGENT_FINISH so callers reading
             # ``session.events.query()`` see a complete trace even when
@@ -1204,8 +1202,8 @@ class _ParallelAgent:
         from lazybridge.tools import Tool
 
         actual_name = name or self.name or "parallel"
-        actual_desc = description or self.description or (
-            f"Run {len(self.agents)} agents in parallel and join their outputs."
+        actual_desc = (
+            description or self.description or (f"Run {len(self.agents)} agents in parallel and join their outputs.")
         )
 
         async def _run(task: str) -> Envelope:
@@ -1223,12 +1221,8 @@ class _ParallelAgent:
             # ``nested_*`` reports the total spend of every branch
             # (their direct + their own nested_*) so an N-deep tree
             # of parallel-of-parallel composes cleanly.
-            nested_in = sum(
-                e.metadata.input_tokens + e.metadata.nested_input_tokens for e in results
-            )
-            nested_out = sum(
-                e.metadata.output_tokens + e.metadata.nested_output_tokens for e in results
-            )
+            nested_in = sum(e.metadata.input_tokens + e.metadata.nested_input_tokens for e in results)
+            nested_out = sum(e.metadata.output_tokens + e.metadata.nested_output_tokens for e in results)
             nested_cost = sum(e.metadata.cost_usd + e.metadata.nested_cost_usd for e in results)
             # First error wins so callers reading ``.error`` can detect
             # branch failure without scanning the whole list.

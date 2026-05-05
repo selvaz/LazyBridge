@@ -246,10 +246,7 @@ class LLMGuard(Guard):
             # Unrecognised first non-empty line — fall through to
             # fail-safe block below.
             break
-        return GuardAction.block(
-            f"LLMGuard could not parse a verdict from judge response — "
-            f"failing closed: {text!r}"
-        )
+        return GuardAction.block(f"LLMGuard could not parse a verdict from judge response — failing closed: {text!r}")
 
     def _prompt(self, text: str) -> str:
         # Scrub structural tags from the caller-supplied content.  Both

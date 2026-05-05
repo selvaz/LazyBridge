@@ -14,10 +14,9 @@ helpers to :mod:`._serialisation`.
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
-from collections.abc import AsyncIterator, Callable
-from typing import TYPE_CHECKING, Any, Literal, cast
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any, Literal
 
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._serialisation import (
@@ -40,7 +39,6 @@ from lazybridge.sentinels import (
     _FromPrev,
     _FromStart,
     _FromStep,
-    from_prev,
 )
 from lazybridge.session import EventType
 
@@ -1223,4 +1221,3 @@ class Plan:
     ) -> AsyncIterator[str]:
         result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield result.text()
-

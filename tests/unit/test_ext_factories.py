@@ -25,8 +25,6 @@ from __future__ import annotations
 import pytest
 
 from lazybridge import Agent, Memory, Session
-from lazybridge.envelope import Envelope
-
 
 # ---------------------------------------------------------------------------
 # ext.planners — canonical names + backward-compat aliases

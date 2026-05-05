@@ -24,7 +24,6 @@ Pins the multimodal-image contract:
 
 from __future__ import annotations
 
-import asyncio
 import warnings
 from pathlib import Path
 
@@ -34,14 +33,12 @@ from lazybridge import Agent, Step
 from lazybridge.core.types import (
     AudioContent,
     ImageContent,
-    Message,
     TextContent,
     _coerce_image,
     _detect_image_mime,
 )
 from lazybridge.envelope import Envelope
 from lazybridge.testing import MockAgent
-
 
 # ---------------------------------------------------------------------------
 # ImageContent factory helpers

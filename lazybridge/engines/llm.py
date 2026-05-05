@@ -22,6 +22,7 @@ from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 
 if TYPE_CHECKING:
+    from lazybridge.core.providers.base import BaseProvider
     from lazybridge.memory import Memory
     from lazybridge.session import Session
     from lazybridge.tools import Tool
@@ -446,7 +447,7 @@ class LLMEngine:
         :class:`UnsupportedFeatureError` so callers running in CI catch
         the misconfiguration before runtime.
         """
-        from lazybridge.core.types import AudioContent, ImageContent, TextContent
+        from lazybridge.core.types import TextContent
 
         images = list(env.images) if env.images else []
         audio = env.audio
@@ -465,7 +466,7 @@ class LLMEngine:
             blocks.append(kept_audio)
         return blocks
 
-    def _provider_class(self) -> type:
+    def _provider_class(self) -> type[BaseProvider]:
         """Resolve the provider class WITHOUT instantiating a client.
 
         Capability checks (``supports_vision`` / ``supports_audio``) are

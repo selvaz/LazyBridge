@@ -23,13 +23,10 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from lazybridge import Agent, Step
 from lazybridge.envelope import Envelope, ErrorInfo
 from lazybridge.testing import MockAgent
 from lazybridge.tools import Tool, wrap_tool
-
 
 # ---------------------------------------------------------------------------
 # Every factory's result wraps cleanly via wrap_tool()

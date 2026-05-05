@@ -23,7 +23,6 @@ import pytest
 from lazybridge.core.providers.base import BaseProvider, UnsupportedNativeToolError
 from lazybridge.core.types import NativeTool
 
-
 # ---------------------------------------------------------------------------
 # UnsupportedNativeToolError type
 # ---------------------------------------------------------------------------

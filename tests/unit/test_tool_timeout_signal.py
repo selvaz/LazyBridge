@@ -20,10 +20,8 @@ import asyncio
 import pytest
 
 from lazybridge.engines.llm import LLMEngine, ToolTimeoutError
-from lazybridge.envelope import Envelope
 from lazybridge.session import EventType, Session
 from lazybridge.tools import wrap_tool
-
 
 # ---------------------------------------------------------------------------
 # EventType is wired up

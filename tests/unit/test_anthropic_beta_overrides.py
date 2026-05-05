@@ -22,7 +22,6 @@ import pytest
 
 from lazybridge.core.providers.anthropic import AnthropicProvider
 
-
 # ---------------------------------------------------------------------------
 # _validate_beta_overrides — pure function tests
 # ---------------------------------------------------------------------------
@@ -42,9 +41,7 @@ def test_unknown_key_warns_and_is_dropped():
 def test_known_key_with_well_formed_value_passes_silently():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        out = AnthropicProvider._validate_beta_overrides(
-            {"web_search": "web-search-2025-03-05"}
-        )
+        out = AnthropicProvider._validate_beta_overrides({"web_search": "web-search-2025-03-05"})
     assert out == {"web_search": "web-search-2025-03-05"}
     # No warnings on the happy path.
     msgs = [str(x.message) for x in w]
@@ -57,9 +54,7 @@ def test_known_key_with_malformed_value_warns_but_keeps():
     surface the suspicion to the user."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        out = AnthropicProvider._validate_beta_overrides(
-            {"web_search": "garbage-no-date"}
-        )
+        out = AnthropicProvider._validate_beta_overrides({"web_search": "garbage-no-date"})
     assert out == {"web_search": "garbage-no-date"}  # kept
     msgs = [str(x.message) for x in w]
     assert any("doesn't match the expected pattern" in m for m in msgs), msgs
@@ -92,9 +87,7 @@ def test_non_dict_input_warns_and_returns_empty():
 def test_all_documented_keys_are_recognised(key):
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        out = AnthropicProvider._validate_beta_overrides(
-            {key: f"{key.replace('_', '-')}-2025-03-05"}
-        )
+        out = AnthropicProvider._validate_beta_overrides({key: f"{key.replace('_', '-')}-2025-03-05"})
     assert key in out, f"{key} should be a recognised override key"
     msgs = [str(x.message) for x in w]
     assert not any("unknown beta_overrides key" in m for m in msgs)

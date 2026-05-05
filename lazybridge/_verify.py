@@ -71,13 +71,11 @@ def _is_approved(verdict: Any) -> bool:
             continue
         if _REJECT_PATTERN.match(stripped):
             return False
-        if _APPROVE_PATTERN.match(stripped):
-            return True
         # First non-blank, non-empty-after-strip line that doesn't
         # match either pattern is the verdict line — fail-safe to
         # rejection rather than scanning down for a maybe-approval
         # buried in a rationale paragraph.
-        return False
+        return bool(_APPROVE_PATTERN.match(stripped))
     return False
 
 

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from lazybridge.core.types import AudioContent, ImageContent
+    pass
 
 T = TypeVar("T")
 

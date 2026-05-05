@@ -25,8 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazybridge.guardrails import GuardAction, LLMGuard
-
+from lazybridge.guardrails import LLMGuard
 
 # ---------------------------------------------------------------------------
 # _scrub_tags — pure substitution
@@ -132,8 +131,7 @@ def test_per_judgement_content_open_tag_scrubbed_too():
     not increase those baselines.
     """
     rec = _Recorder()
-    benign = LLMGuard._scrub_tags  # cheap import-side reference
-    benign  # keep linter quiet
+    _ = LLMGuard._scrub_tags  # cheap import-side reference
     LLMGuard(rec).check_input("safe input")
     baseline = rec.prompts[0]
     base_open = baseline.count("<content>")
@@ -235,10 +233,7 @@ class _NaiveJudge:
         # template gains additional instructional references.
         baseline_open = LLMGuard._PROMPT_TEMPLATE.count("<content>")
         baseline_close = LLMGuard._PROMPT_TEMPLATE.count("</content>")
-        escaped = (
-            prompt.count("<content>") > baseline_open
-            or prompt.count("</content>") > baseline_close
-        )
+        escaped = prompt.count("<content>") > baseline_open or prompt.count("</content>") > baseline_close
 
         class _E:
             def text(self_inner) -> str:

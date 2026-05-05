@@ -47,9 +47,7 @@ def _all_unset() -> dict:
 
 
 def test_all_defaults_when_no_config_no_flat():
-    out = _resolve_runtime_kwargs(
-        runtime=None, resilience=None, observability=None, flat=_all_unset()
-    )
+    out = _resolve_runtime_kwargs(runtime=None, resilience=None, observability=None, flat=_all_unset())
     assert out == {k: default for k, (default, _src) in _RUNTIME_KNOB_DEFAULTS.items()}
 
 
@@ -69,7 +67,7 @@ def test_default_table_pins_documented_values():
         "name": (None, "observability"),
         "description": (None, "observability"),
     }
-    assert _RUNTIME_KNOB_DEFAULTS == expected
+    assert expected == _RUNTIME_KNOB_DEFAULTS
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +80,7 @@ def test_runtime_resilience_fills_when_no_explicit():
         resilience=ResilienceConfig(timeout=30.0, max_retries=7),
         observability=ObservabilityConfig(verbose=True),
     )
-    out = _resolve_runtime_kwargs(
-        runtime=rt, resilience=None, observability=None, flat=_all_unset()
-    )
+    out = _resolve_runtime_kwargs(runtime=rt, resilience=None, observability=None, flat=_all_unset())
     assert out["timeout"] == 30.0
     assert out["max_retries"] == 7
     assert out["retry_delay"] == 1.0  # default — not in the rt config
@@ -93,9 +89,7 @@ def test_runtime_resilience_fills_when_no_explicit():
 
 def test_runtime_with_no_resilience_uses_defaults_for_resilience_knobs():
     rt = AgentRuntimeConfig(observability=ObservabilityConfig(name="x"))
-    out = _resolve_runtime_kwargs(
-        runtime=rt, resilience=None, observability=None, flat=_all_unset()
-    )
+    out = _resolve_runtime_kwargs(runtime=rt, resilience=None, observability=None, flat=_all_unset())
     assert out["name"] == "x"
     assert out["timeout"] is None  # default
 
@@ -108,9 +102,7 @@ def test_runtime_with_no_resilience_uses_defaults_for_resilience_knobs():
 def test_explicit_resilience_overrides_runtime_resilience():
     rt = AgentRuntimeConfig(resilience=ResilienceConfig(timeout=30.0, max_retries=7))
     explicit = ResilienceConfig(timeout=60.0, max_retries=2)
-    out = _resolve_runtime_kwargs(
-        runtime=rt, resilience=explicit, observability=None, flat=_all_unset()
-    )
+    out = _resolve_runtime_kwargs(runtime=rt, resilience=explicit, observability=None, flat=_all_unset())
     assert out["timeout"] == 60.0
     assert out["max_retries"] == 2
 
@@ -118,9 +110,7 @@ def test_explicit_resilience_overrides_runtime_resilience():
 def test_explicit_observability_overrides_runtime_observability():
     rt = AgentRuntimeConfig(observability=ObservabilityConfig(name="from-rt"))
     explicit = ObservabilityConfig(name="explicit")
-    out = _resolve_runtime_kwargs(
-        runtime=rt, resilience=None, observability=explicit, flat=_all_unset()
-    )
+    out = _resolve_runtime_kwargs(runtime=rt, resilience=None, observability=explicit, flat=_all_unset())
     assert out["name"] == "explicit"
 
 
@@ -133,9 +123,7 @@ def test_flat_wins_over_explicit_resilience():
     explicit = ResilienceConfig(timeout=60.0, max_retries=2)
     flat = _all_unset()
     flat["timeout"] = 120.0
-    out = _resolve_runtime_kwargs(
-        runtime=None, resilience=explicit, observability=None, flat=flat
-    )
+    out = _resolve_runtime_kwargs(runtime=None, resilience=explicit, observability=None, flat=flat)
     assert out["timeout"] == 120.0  # flat wins
     assert out["max_retries"] == 2  # untouched, from explicit config
 
@@ -146,9 +134,7 @@ def test_flat_wins_even_when_value_matches_documented_default():
     explicit = ResilienceConfig(max_retries=10)
     flat = _all_unset()
     flat["max_retries"] = 3  # explicit, matches default
-    out = _resolve_runtime_kwargs(
-        runtime=None, resilience=explicit, observability=None, flat=flat
-    )
+    out = _resolve_runtime_kwargs(runtime=None, resilience=explicit, observability=None, flat=flat)
     assert out["max_retries"] == 3
 
 
@@ -159,9 +145,7 @@ def test_flat_none_treated_as_explicit_value():
     explicit = ResilienceConfig(timeout=30.0)
     flat = _all_unset()
     flat["timeout"] = None  # explicit — not _UNSET
-    out = _resolve_runtime_kwargs(
-        runtime=None, resilience=explicit, observability=None, flat=flat
-    )
+    out = _resolve_runtime_kwargs(runtime=None, resilience=explicit, observability=None, flat=flat)
     assert out["timeout"] is None
 
 
@@ -221,7 +205,5 @@ def test_every_documented_knob_resolves_via_helper(knob):
     resolver.  If a future patch adds a knob to the table without
     routing the flat kwarg through, the matrix above fails to update."""
     flat = _all_unset()
-    out = _resolve_runtime_kwargs(
-        runtime=None, resilience=None, observability=None, flat=flat
-    )
+    out = _resolve_runtime_kwargs(runtime=None, resilience=None, observability=None, flat=flat)
     assert knob in out

@@ -40,9 +40,7 @@ def _format_attachments(images: list[Any] | None, audio: Any | None) -> str:
         if getattr(audio, "url", None):
             parts.append(f"[attached audio: {audio.media_type} ({audio.url})]")
         elif getattr(audio, "base64_data", None):
-            parts.append(
-                f"[attached audio: {audio.media_type} (~{len(audio.base64_data) * 3 // 4} bytes inline)]"
-            )
+            parts.append(f"[attached audio: {audio.media_type} (~{len(audio.base64_data) * 3 // 4} bytes inline)]")
     return "\n".join(parts)
 
 

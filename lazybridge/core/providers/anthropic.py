@@ -342,8 +342,7 @@ class AnthropicProvider(BaseProvider):
         """
         if not isinstance(overrides, dict):
             warnings.warn(
-                f"AnthropicProvider: beta_overrides must be a dict, "
-                f"got {type(overrides).__name__}; ignoring.",
+                f"AnthropicProvider: beta_overrides must be a dict, got {type(overrides).__name__}; ignoring.",
                 stacklevel=3,
             )
             return {}
@@ -359,8 +358,7 @@ class AnthropicProvider(BaseProvider):
                 continue
             if not isinstance(v, str):
                 warnings.warn(
-                    f"AnthropicProvider: beta_overrides[{k!r}] must be a "
-                    f"string, got {type(v).__name__}; ignored.",
+                    f"AnthropicProvider: beta_overrides[{k!r}] must be a string, got {type(v).__name__}; ignored.",
                     stacklevel=3,
                 )
                 continue

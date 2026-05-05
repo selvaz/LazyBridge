@@ -19,7 +19,6 @@ import pytest
 
 from lazybridge.engines.llm import LLMEngine
 
-
 # ---------------------------------------------------------------------------
 # Constructor surface — validation
 # ---------------------------------------------------------------------------

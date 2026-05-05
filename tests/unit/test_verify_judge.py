@@ -13,7 +13,6 @@ import pytest
 from lazybridge._verify import _is_approved, verify_with_retry
 from lazybridge.envelope import Envelope
 
-
 # ---------------------------------------------------------------------------
 # _is_approved — pure normalisation
 # ---------------------------------------------------------------------------

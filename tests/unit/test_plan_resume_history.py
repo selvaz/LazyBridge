@@ -25,7 +25,6 @@ from lazybridge import Agent, Plan, Step, Store, from_parallel_all
 from lazybridge.engines.plan import StepResult
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 
-
 # ---------------------------------------------------------------------------
 # Serialisation round-trip
 # ---------------------------------------------------------------------------
