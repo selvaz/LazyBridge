@@ -499,9 +499,9 @@ def build(check: bool = False) -> int:
     decisions = meta.get("decisions", []) or []
     titles = meta.get("titles", {}) or {}
     intros = meta.get("tier_intros", {}) or {}
-    nexts = meta.get("tier_next", {}) or {}
-    walks = meta.get("tier_walkthroughs", {}) or {}
-    extras = meta.get("tier_extras", {}) or {}
+    # tier_next / tier_walkthroughs / tier_extras are still in _meta.yaml
+    # for the skill mirror render_skill_tier path; the docs/tiers/ site
+    # output was retired in 0.7 (folded into docs/guides/getting-started.md).
 
     changed: list[Path] = []
 
@@ -514,32 +514,20 @@ def build(check: bool = False) -> int:
     _write(SKILL_DIR / "05_decision_trees.md", render_skill_decisions(decisions), changed)
     _write(SKILL_DIR / "06_reference.md", render_reference(), changed)
 
-    # Site render
+    # Site render — guides + decisions + skill mirror.
+    # docs/tiers/ was folded into docs/guides/getting-started.md in 0.7;
+    # the build script no longer regenerates per-tier files.
     DOCS_DIR.mkdir(exist_ok=True)
     (DOCS_DIR / "guides").mkdir(exist_ok=True)
-    (DOCS_DIR / "tiers").mkdir(exist_ok=True)
     (DOCS_DIR / "decisions").mkdir(exist_ok=True)
     (DOCS_DIR / "skill").mkdir(exist_ok=True)
 
-    for tier, topics in tiers.items():
+    for _tier, topics in tiers.items():
         for topic in topics:
             slug = topic.replace("_", "-")
             body = render_site_guide(topic, titles)
             if body:
                 _write(DOCS_DIR / "guides" / f"{slug}.md", body, changed)
-        _write(
-            DOCS_DIR / "tiers" / f"{tier}.md",
-            render_site_tier(
-                tier,
-                topics,
-                titles,
-                intros.get(tier, ""),
-                nexts.get(tier, ""),
-                walkthrough=walks.get(tier, ""),
-                extras=extras.get(tier, ""),
-            ),
-            changed,
-        )
 
     for name in decisions:
         frag = _read_fragment(f"decision_{name}")
