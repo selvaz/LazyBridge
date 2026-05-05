@@ -141,3 +141,75 @@ def test_suite_arun():
     suite = EvalSuite(EvalCase(input="q", check=contains("hello")))
     report = asyncio.run(suite.arun(_AsyncAgent()))
     assert report.passed == 1
+
+
+# ── llm_judge — robust verdict parsing (W1.1-bis) ─────────────────────────────
+
+
+class _JudgeAgent:
+    """Stub agent whose .text() returns the canned verdict string."""
+
+    def __init__(self, verdict: str):
+        self._v = verdict
+
+    def __call__(self, prompt: str):
+        v = self._v
+
+        class _E:
+            def text(self) -> str:
+                return v
+
+        return _E()
+
+
+def test_llm_judge_accepts_approved_canonical():
+    from lazybridge.ext.evals import llm_judge
+
+    judge = llm_judge(_JudgeAgent("approved: looks great"), criteria="be concise")
+    assert judge("any output") is True
+
+
+def test_llm_judge_accepts_synonyms():
+    """Pre-W1.1-bis only ``approved`` prefix passed; W1.1-bis recognises
+    a documented synonym set (yes / ok / allow / pass / approve /
+    accept / good / valid)."""
+    from lazybridge.ext.evals import llm_judge
+
+    # NB: "looks good" intentionally NOT in this list — the parser is
+    # conservative (fail-safe).  A judge response that doesn't START
+    # with a recognised verdict word is treated as rejected, even if
+    # the word appears later in the same line; this prevents an
+    # ambiguous "looks good but actually bad" from accidentally
+    # passing.
+    for verdict in ("yes", "OK", "allow", "pass", "approve", "accept", "Good — clear", "Valid"):
+        judge = llm_judge(_JudgeAgent(verdict), criteria="x")
+        assert judge("output") is True, f"verdict {verdict!r} should be approved"
+
+
+def test_llm_judge_rejects_explicit_negatives():
+    from lazybridge.ext.evals import llm_judge
+
+    for verdict in ("rejected", "deny", "block", "fail", "no", "bad", "invalid"):
+        judge = llm_judge(_JudgeAgent(verdict), criteria="x")
+        assert judge("output") is False, f"verdict {verdict!r} should be rejected"
+
+
+def test_llm_judge_unparseable_verdict_fails_closed():
+    """If the judge can't produce a recognised verdict, fail-safe to
+    rejection — a vague ``maybe`` never accidentally passes a bad
+    output."""
+    from lazybridge.ext.evals import llm_judge
+
+    for verdict in ("maybe?", "I'm not sure", "the output might be acceptable", ""):
+        judge = llm_judge(_JudgeAgent(verdict), criteria="x")
+        assert judge("output") is False, f"unparseable verdict {verdict!r} must fail closed"
+
+
+def test_llm_judge_handles_formatted_verdicts():
+    """Markdown / numbered / bullet-prefixed verdicts still parse (the
+    underlying normaliser strips leading punctuation)."""
+    from lazybridge.ext.evals import llm_judge
+
+    for verdict in ("**approved**", "> allow", "- pass", "1. approve", "Approved\nreason: ok"):
+        judge = llm_judge(_JudgeAgent(verdict), criteria="x")
+        assert judge("output") is True, f"formatted verdict {verdict!r} should approve"

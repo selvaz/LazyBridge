@@ -125,11 +125,25 @@ def not_contains(substring: str) -> Callable[[str], bool]:
 
 
 def llm_judge(agent: Any, criteria: str) -> Callable[[str], bool]:
-    """Returns a judge function using an agent to evaluate output."""
+    """Returns a judge function using an agent to evaluate output.
+
+    Verdict recognition uses the same robust normaliser as
+    :func:`lazybridge._verify.verify_with_retry` (W1.1): the judge may
+    return any of ``approved`` / ``accept`` / ``allow`` / ``pass`` /
+    ``ok`` / ``yes`` / ``good`` / ``valid`` (synonyms,
+    case-insensitive, prefix-anchored) to approve.  Explicit reject
+    prefixes (``rejected`` / ``deny`` / ``block`` / ``fail`` / ``no``
+    / ``bad`` / ``invalid``) and any unrecognised verdict are treated
+    as rejection (fail-safe) — so a judge that fails to produce a
+    clean verdict never accidentally passes a bad output.
+    """
+    # Import lazily to avoid a top-of-module dependency on a private
+    # core helper for users who don't use llm_judge.
+    from lazybridge._verify import _is_approved
 
     def judge(output: str) -> bool:
         verdict = agent(f"Criteria: {criteria}\nOutput to judge: {output}\nVerdict (approved/rejected):").text()
-        return verdict.strip().lower().startswith("approved")
+        return _is_approved(verdict)
 
     return judge
 

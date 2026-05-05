@@ -41,6 +41,13 @@ def _is_approved(verdict: Any) -> bool:
     Recognises common synonyms for approve/reject anchored at the start
     of the verdict text (case-insensitive).  Unrecognised verdicts are
     treated as ``rejected`` — fail-safe.
+
+    Tolerant of common formatting that real judges emit: leading
+    markdown (``**approved**``), block-quote (``> allow``), bullet /
+    numbered list (``- pass``, ``1. approve``), or label prefix
+    (``Verdict: yes``).  The first line that yields a recognised
+    verdict word after this trim wins; later lines (judge's
+    rationale) are ignored.
     """
     if verdict is None:
         return False
@@ -49,10 +56,29 @@ def _is_approved(verdict: Any) -> bool:
     text = str(verdict).strip()
     if not text:
         return False
-    # Explicit reject pattern wins over ambiguous starts.
-    if _REJECT_PATTERN.match(text):
+    # Walk lines so a multi-line judge response (verdict + reason on
+    # a separate line) is parsed by its first informative line.
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Strip leading markdown / punctuation / numbering so verdicts
+        # like ``**approved**``, ``> allow``, ``1. pass`` parse cleanly.
+        # The character class mirrors LLMGuard._verdict so both judge
+        # paths share the same tolerance.
+        stripped = line.lstrip("*>#-_ \t:.0123456789")
+        if not stripped:
+            continue
+        if _REJECT_PATTERN.match(stripped):
+            return False
+        if _APPROVE_PATTERN.match(stripped):
+            return True
+        # First non-blank, non-empty-after-strip line that doesn't
+        # match either pattern is the verdict line — fail-safe to
+        # rejection rather than scanning down for a maybe-approval
+        # buried in a rationale paragraph.
         return False
-    return bool(_APPROVE_PATTERN.match(text))
+    return False
 
 
 async def verify_with_retry(
