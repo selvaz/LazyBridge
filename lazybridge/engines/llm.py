@@ -110,6 +110,7 @@ class LLMEngine:
     max_parallel_tools: int | None = None
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = None
+    stream_buffer: int = 64
 
     def __init__(
         self,
@@ -128,6 +129,7 @@ class LLMEngine:
         max_parallel_tools: int | None = None,
         tool_timeout: float | None = None,
         stream_idle_timeout: float | None = None,
+        stream_buffer: int = 64,
         cache: bool | Any = False,
     ) -> None:
         self.model = model
@@ -142,9 +144,20 @@ class LLMEngine:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         if stream_idle_timeout is not None and stream_idle_timeout <= 0:
             raise ValueError(f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}")
+        if stream_buffer < 1:
+            raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
         self.max_parallel_tools = max_parallel_tools
         self.tool_timeout = tool_timeout
         self.stream_idle_timeout = stream_idle_timeout
+        # Bounded queue between the streaming producer (provider) and
+        # the consumer (the ``stream()`` async generator).  Pre-W4.1
+        # the queue was unbounded, so a slow consumer (slow terminal,
+        # slow network, blocked downstream) caused the queue to grow
+        # without limit while the provider kept pushing tokens.  A
+        # bounded queue propagates backpressure all the way to the
+        # provider stream — when the consumer pauses, the producer
+        # naturally pauses on ``await sink.put()``.
+        self.stream_buffer = stream_buffer
         # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
         # with a deprecation warning. The framework no longer has a
         # separate "parallel mode" — tool calls are always executed via
@@ -838,7 +851,12 @@ class LLMEngine:
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
 
-        sink: asyncio.Queue[str | None] = asyncio.Queue()
+        # Bounded sink — see ``stream_buffer`` on ``__init__``.  The
+        # producer ``await sink.put(token)`` naturally blocks when the
+        # consumer falls behind; this is the only mechanism that keeps
+        # an idle consumer from forcing unbounded memory growth as the
+        # provider streams tokens.
+        sink: asyncio.Queue[str | None] = asyncio.Queue(maxsize=self.stream_buffer)
 
         async def _run_loop() -> None:
             try:
