@@ -514,11 +514,15 @@ class Agent:
 
         for attempt in range(self.max_output_retries + 1):
             if attempt > 0:
+                # Pass memory=None for correction retries: these are a
+                # private feedback loop and must not be stored as real
+                # conversation turns.  Only the final successful result
+                # (returned below) contributes to memory history.
                 current = await self.engine.run(
                     _feedback_env(original_env, feedback),
                     tools=list(self._tool_map.values()),
                     output_type=self.output,
-                    memory=self.memory,
+                    memory=None,
                     session=self.session,
                 )
                 if not current.ok:
@@ -584,6 +588,15 @@ class Agent:
         env = self._to_envelope(task, images=images, audio=audio)
         env = self._inject_sources(env)
         timeout = getattr(self, "timeout", None)
+
+        # Apply input guard before the first token is emitted.  A blocked
+        # task must never reach the provider even in streaming mode.
+        if self.guard:
+            action = await self.guard.acheck_input(env.task or "")
+            if not action.allowed:
+                raise ValueError(action.message or "Blocked by guard")
+            if action.modified_text is not None:
+                env = env.model_copy(update={"task": action.modified_text, "payload": action.modified_text})
 
         gen = self.engine.stream(
             env,

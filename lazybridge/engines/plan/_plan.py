@@ -597,10 +597,14 @@ class Plan:
                         first_failure_env = r
                         break
                 if first_failure_env is not None:
+                    # Point the checkpoint at the band's FIRST step, not the
+                    # failing step.  On resume the whole band must re-run so
+                    # all siblings produce fresh writes; resuming mid-band
+                    # would silently skip earlier siblings and leave kv stale.
                     last_snap = self._save_checkpoint(
                         effective_key=effective_key,
                         last_snapshot=last_snap,
-                        next_step=first_failure_step,
+                        next_step=group[0].name,
                         kv=kv,
                         completed=completed,
                         status="failed",

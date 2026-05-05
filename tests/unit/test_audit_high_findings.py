@@ -60,12 +60,13 @@ async def test_e1_parallel_band_failure_does_not_commit_sibling_writes() -> None
     # No sibling writes survive a band failure.
     assert store.read("a_out") is None
     assert store.read("b_out") is None
-    # Checkpoint records the failure at b, with empty kv (no writes
-    # leaked from the failed band).
+    # Checkpoint points at the BAND START (not the failing step) so a
+    # resume re-runs the whole band cleanly rather than skipping earlier
+    # siblings whose writes were never committed.
     cp = store.read("atomicity")
     assert cp is not None
     assert cp["status"] == "failed"
-    assert cp["next_step"] == "b"
+    assert cp["next_step"] == "a"   # band-start, not the failing step
     assert "a_out" not in cp["kv"]
 
 

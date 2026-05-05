@@ -782,6 +782,13 @@ class LLMEngine:
                     )
                 )
             messages.append(Message(role=Role.USER, content=result_blocks))
+            # After the first tool-call turn, the model has fulfilled the
+            # "must call at least one tool" contract.  Reset to "auto" so
+            # subsequent turns can produce a final text answer; otherwise
+            # the model is forced to call tools on every turn and the loop
+            # never exits until max_turns is exhausted.
+            if provider_tc == "any":
+                provider_tc = "auto"
 
         return Envelope(
             task=env.task,

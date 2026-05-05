@@ -93,6 +93,10 @@ class Memory:
         # invoked concurrently.  Only one compression runs at a time;
         # other ``add()``s append turns and skip the compression branch.
         self._compressing = False
+        # Separate one-shot warning flags for distinct warning sources so
+        # a summariser timeout doesn't silence the turn-cap warning and
+        # vice versa.
+        self._summarizer_warned = False
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         # Phase 1 — append + decide whether to compress, under the lock.
@@ -166,7 +170,11 @@ class Memory:
         """
         if self._compressing:
             return None
-        if self.strategy == "none" or not self.max_tokens:
+        if self.strategy == "none":
+            return None
+        # "auto" needs a token budget to know when to compress; "sliding"
+        # and "summary" compress by turn count so they don't need max_tokens.
+        if self.strategy == "auto" and not self.max_tokens:
             return None
         total = sum(t.token_estimate for t in self._turns)
         # "summary" compresses like "sliding" but uses LLM summarization.
@@ -213,9 +221,11 @@ class Memory:
         except TimeoutError:
             # Hung judge / network stall — fall back to keywords rather
             # than letting the agent run sit on a stuck future.  The
-            # warning is one-shot per Memory so a degenerate summariser
-            # is visible without flooding logs.
-            if not self._overflow_warned:
+            # warning is one-shot per Memory (via _summarizer_warned, a
+            # separate flag from _overflow_warned) so a degenerate
+            # summariser is visible without flooding logs.
+            if not self._summarizer_warned:
+                self._summarizer_warned = True
                 import warnings
 
                 warnings.warn(

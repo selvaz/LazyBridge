@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 import threading
@@ -155,7 +156,7 @@ class Store:
             self._conn().commit()
         else:
             with self._lock:
-                self._mem[key] = StoreEntry(key=key, value=value, agent_id=agent_id)
+                self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(value), agent_id=agent_id)
 
     def read(self, key: str, default: Any = None) -> Any:
         if self._db:
@@ -163,7 +164,7 @@ class Store:
             return json.loads(row["value"]) if row else default
         with self._lock:
             entry = self._mem.get(key)
-            return entry.value if entry else default
+            return _deep_copy_safe(entry.value) if entry else default
 
     def read_entry(self, key: str) -> StoreEntry | None:
         if self._db:
@@ -268,14 +269,13 @@ class Store:
                 )
                 conn.commit()
                 return True
-            except sqlite3.Error:
-                # Inner ROLLBACK can itself fail (e.g. the connection
-                # was already torn down by the OS).  If that happens,
-                # the connection is in an undefined state — discard
-                # this thread's cached connection so the next caller
-                # gets a fresh one instead of inheriting the poison.
-                # Surface the rollback failure as a warning so an
-                # operator can notice persistent transaction issues.
+            except (sqlite3.Error, ValueError):
+                # Catch both sqlite3.Error (transaction/IO failures) and
+                # ValueError/JSONDecodeError (corrupt JSON in the row).
+                # Without the ValueError arm, a corrupt row causes
+                # json.loads to raise inside the BEGIN IMMEDIATE block,
+                # leaving the transaction open on the thread-local
+                # connection and poisoning every subsequent call on that thread.
                 try:
                     conn.execute("ROLLBACK")
                 except sqlite3.Error as rollback_exc:
@@ -314,6 +314,21 @@ def _json_eq(a: Any, b: Any) -> bool:
     except TypeError:
         return False
     return sa == sb
+
+
+def _deep_copy_safe(value: Any) -> Any:
+    """Return a deep copy of ``value`` for in-memory Store read/write.
+
+    Gives in-memory Store the same copy-on-write isolation that the
+    SQLite path gets for free via JSON round-trip.  Falls back to the
+    original value for objects that cannot be deep-copied (callables,
+    live connections, etc.) — those callers opt-in to shared-reference
+    semantics by storing non-copyable objects.
+    """
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
 
 
 def _to_jsonable(value: Any) -> Any:

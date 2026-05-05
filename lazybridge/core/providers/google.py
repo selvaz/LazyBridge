@@ -670,11 +670,23 @@ class GoogleProvider(BaseProvider):
 
         grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(candidate)
 
+        # Map Gemini finish_reason to the unified stop_reason vocabulary.
+        # Without this, MAX_TOKENS truncation was silently reported as
+        # "end_turn", causing callers to treat incomplete responses as final.
+        _finish = getattr(candidate, "finish_reason", None)
+        _finish_name = getattr(_finish, "name", str(_finish)) if _finish is not None else ""
+        if _finish_name == "MAX_TOKENS":
+            stop_reason = "max_tokens"
+        elif _finish_name in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+            stop_reason = "stop"
+        else:
+            stop_reason = "end_turn"
+
         return CompletionResponse(
             content=content,
             thinking=thinking,
             tool_calls=tool_calls,
-            stop_reason="end_turn",
+            stop_reason=stop_reason,
             model=model,
             usage=usage,
             raw=response,
@@ -761,12 +773,20 @@ class GoogleProvider(BaseProvider):
         grounding_sources: list[GroundingSource] = []
         web_search_queries: list[str] = []
         search_entry_point: str | None = None
+        stream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
+            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_chunk.candidates[0]  # type: ignore[index]
+                last_candidate
             )
+            _fr = getattr(last_candidate, "finish_reason", None)
+            _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
+            if _fr_name == "MAX_TOKENS":
+                stream_stop_reason = "max_tokens"
+            elif _fr_name in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+                stream_stop_reason = "stop"
         final_chunk = StreamChunk(
-            stop_reason="end_turn",
+            stop_reason=stream_stop_reason,
             tool_calls=tool_calls,
             usage=usage,
             is_final=True,
@@ -856,12 +876,20 @@ class GoogleProvider(BaseProvider):
         grounding_sources: list[GroundingSource] = []
         web_search_queries: list[str] = []
         search_entry_point: str | None = None
+        astream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
+            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_chunk.candidates[0]  # type: ignore[index]
+                last_candidate
             )
+            _fr = getattr(last_candidate, "finish_reason", None)
+            _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
+            if _fr_name == "MAX_TOKENS":
+                astream_stop_reason = "max_tokens"
+            elif _fr_name in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+                astream_stop_reason = "stop"
         final_chunk = StreamChunk(
-            stop_reason="end_turn",
+            stop_reason=astream_stop_reason,
             tool_calls=tool_calls,
             usage=usage,
             is_final=True,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -271,8 +272,33 @@ class LLMGuard(Guard):
         return self._PROMPT_TEMPLATE.format(policy=self._policy, content=safe)
 
     def _judge(self, text: str) -> GuardAction:
-        verdict = self._agent(self._prompt(text)).text()
-        return self._verdict(verdict)
+        prompt = self._prompt(text)
+        if self._timeout is None:
+            verdict = self._agent(prompt).text()
+            return self._verdict(verdict)
+        # Enforce the timeout on the sync path via a daemon thread so a
+        # hung judge doesn't block the calling thread indefinitely.
+        result: list[GuardAction] = []
+        exc_holder: list[BaseException] = []
+
+        def _run() -> None:
+            try:
+                result.append(self._verdict(self._agent(prompt).text()))
+            except BaseException as exc:  # noqa: BLE001
+                exc_holder.append(exc)
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=self._timeout)
+        if t.is_alive():
+            return GuardAction.block(
+                f"LLMGuard judge exceeded timeout={self._timeout}s — "
+                f"failing closed (treat as blocked) so the calling agent "
+                f"doesn't proceed without a verdict."
+            )
+        if exc_holder:
+            raise exc_holder[0]
+        return result[0]
 
     async def _ajudge(self, text: str) -> GuardAction:
         # Prefer the agent's async ``run`` surface so the event loop is

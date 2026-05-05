@@ -493,6 +493,10 @@ class AnthropicProvider(BaseProvider):
         if request.tool_choice:
             if request.tool_choice in ("auto", "none", "required"):
                 params["tool_choice"] = {"type": request.tool_choice}
+            elif request.tool_choice == "any":
+                # "any" is LazyBridge's provider-neutral "must call a tool";
+                # Anthropic's equivalent is "required".
+                params["tool_choice"] = {"type": "required"}
             else:
                 params["tool_choice"] = {"type": "tool", "name": request.tool_choice}
         thinking = self._build_thinking(request)

@@ -55,12 +55,15 @@ def test_store_sqlite_preserves_list_of_pydantic():
         assert raw == [{"x": 1, "name": "a"}, {"x": 2, "name": "b"}]
 
 
-def test_store_inmemory_unchanged():
-    """In-memory store is unaffected — keeps the Python instance."""
+def test_store_inmemory_returns_copy_not_reference():
+    """In-memory store returns a deep copy, not the original reference.
+    Mutating the returned value must not affect the stored value."""
     store = Store()
     m = _MyModel(x=7, name="z")
     store.write("k", m)
-    assert store.read("k") is m
+    got = store.read("k")
+    assert got == m          # value equality
+    assert got is not m      # independent copy — mutation safety
 
 
 # ---------------------------------------------------------------------------

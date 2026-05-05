@@ -476,7 +476,12 @@ def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) ->
 
     try:
         validated = model_cls.model_validate(arguments)  # type: ignore[attr-defined]
-        return validated.model_dump()
+        # Use getattr to extract field values rather than model_dump() so
+        # Pydantic BaseModel instances (parameters typed as a model class)
+        # are returned as proper Python objects instead of being recursively
+        # converted to plain dicts, which would cause AttributeError when
+        # the tool function tries to access model attributes.
+        return {f: getattr(validated, f) for f in validated.model_fields}  # type: ignore[attr-defined]
     except _ValidationError as exc:
         errors = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
         raise ToolArgumentValidationError(f"Invalid arguments for '{func.__name__}': {errors}") from exc

@@ -135,18 +135,36 @@ class _FieldBuilder:
     # ----- emptiness -----
 
     def empty(self) -> Callable[[Envelope], bool]:
-        """``not env.payload.<name>`` — empty list / dict / str / None."""
+        """``True`` when the field is ``None`` or a zero-length container.
+
+        Numeric values (``0``, ``0.0``, ``False``) are treated as
+        non-empty — use ``eq(0)`` / ``eq(False)`` for those cases.
+        """
 
         def _predicate(env: Envelope) -> bool:
-            return not _safe_get(env, self.name)
+            val = _safe_get(env, self.name)
+            if val is None:
+                return True
+            if isinstance(val, (str, list, dict, tuple, set, frozenset)):
+                return len(val) == 0
+            return False
 
         return _predicate
 
     def not_empty(self) -> Callable[[Envelope], bool]:
-        """``bool(env.payload.<name>)`` — truthy / non-empty."""
+        """``True`` when the field is not ``None`` and not a zero-length container.
+
+        Numeric values (``0``, ``0.0``, ``False``) are treated as
+        non-empty — use ``ne(0)`` / ``ne(False)`` for those cases.
+        """
 
         def _predicate(env: Envelope) -> bool:
-            return bool(_safe_get(env, self.name))
+            val = _safe_get(env, self.name)
+            if val is None:
+                return False
+            if isinstance(val, (str, list, dict, tuple, set, frozenset)):
+                return len(val) > 0
+            return True
 
         return _predicate
 

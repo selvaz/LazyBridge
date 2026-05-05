@@ -481,6 +481,9 @@ class OpenAIProvider(BaseProvider):
             if request.tool_choice:
                 if request.tool_choice in ("auto", "none", "required"):
                     params["tool_choice"] = request.tool_choice
+                elif request.tool_choice == "any":
+                    # "any" → "required" (force at least one tool call).
+                    params["tool_choice"] = "required"
                 else:
                     params["tool_choice"] = {
                         "type": "function",
@@ -618,6 +621,8 @@ class OpenAIProvider(BaseProvider):
             if request.tool_choice:
                 if request.tool_choice in ("auto", "none", "required"):
                     params["tool_choice"] = request.tool_choice
+                elif request.tool_choice == "any":
+                    params["tool_choice"] = "required"
                 else:
                     # Responses API specific tool: {"type": "function", "name": "..."}
                     params["tool_choice"] = {"type": "function", "name": request.tool_choice}
