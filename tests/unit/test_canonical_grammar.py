@@ -597,3 +597,75 @@ def test_from_agent_uses_tool_alias_not_agent_name():
     assert result.ok
     # Pipeline completes — alias-based write ensures from_agent("research") finds the data
     assert result.text() == "final output"
+
+
+def test_from_agent_missing_store_entry_is_silent_noop():
+    """from_agent contributes nothing when the store key is absent (agent hasn't run yet).
+
+    This is the documented silent-noop contract: the agent tool exists,
+    has store= attached, but the store contains no __agent_output__:research
+    key because the research agent has never been called.  The step should
+    still complete normally, receiving no context from from_agent.
+    """
+    from lazybridge import Store, from_agent
+    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+    store = Store()
+
+    class _ContextCapture:
+        """Engine that records the context it received."""
+        received_context: str | None = None
+
+        async def run(self, env, *, tools, output_type, memory, session, **_):
+            from lazybridge.envelope import Envelope
+            _ContextCapture.received_context = env.context
+            return Envelope.from_task("done")
+
+        async def stream(self, env, *, tools, output_type, memory, session, **_):
+            async def _gen():
+                yield "done"
+            return _gen()
+
+    researcher = Agent(engine=_FixedEngine("result"), store=store, name="research")
+    writer = Agent(engine=_ContextCapture())
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_agent("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+    )
+
+    # Pre-condition: store is empty — research has NOT run yet.
+    assert store.read(_AGENT_OUTPUT_KEY_PREFIX + "research") is None
+
+    # Manually remove the key that Step("research") will write, to simulate
+    # from_agent being evaluated before any run.  We test by directly
+    # resolving the sentinel against an empty store instead of running
+    # the full pipeline (which would run research first and populate it).
+    from lazybridge.envelope import Envelope
+    from lazybridge.engines.plan._plan import Plan as _Plan
+    from lazybridge.tools import build_tool_map
+
+    tool_map = build_tool_map([researcher.as_tool("research"), writer.as_tool("write")])
+    plan_instance = Plan(
+        Step("research"),
+        Step("write", context=from_agent("research")),
+    )
+    sentinel = from_agent("research")
+    resolved = plan_instance._resolve_sentinel(
+        sentinel,
+        Envelope.from_task("dummy"),
+        Envelope.from_task("dummy"),
+        [],
+        {},
+        tool_map,
+    )
+    # Missing key → empty envelope, no error, no crash
+    assert resolved.error is None
+    assert not resolved.context
+    assert resolved.ok

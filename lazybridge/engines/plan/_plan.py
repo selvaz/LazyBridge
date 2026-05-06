@@ -94,11 +94,14 @@ class Plan:
             )
             Agent(engine=plan)("topic")   # continues if a checkpoint exists
 
-        The persisted shape is intentionally small (no Envelopes, no
-        in-memory history): ``{"next_step": str, "kv": {...},
-        "completed_steps": [...], "status": str, "run_uid": str}``.
-        The in-memory ``history`` restarts empty on resume — only
-        ``writes``-bucket values survive across process boundaries.
+        The persisted shape (v2) includes minimal plan state plus serialized
+        StepResult history: ``{"next_step": str, "kv": {...},
+        "completed_steps": [...], "status": str, "run_uid": str,
+        "history": [...]}``.
+        History is serialized so a resumed run can re-aggregate
+        ``from_parallel_all`` bands and nested-cost rollup against completed
+        upstream steps.  Only ``writes``-bucket values and step history
+        survive across process boundaries; live in-memory state does not.
 
         Concurrency
         -----------

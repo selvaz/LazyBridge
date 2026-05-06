@@ -32,20 +32,23 @@ pipeline("AI trends")
 print(store.read("hits"))
 
 # 2) Agents write their output to store automatically after each run.
-#    Key: "__agent_output__:{agent.name}"
-standalone = Agent(engine=LLMEngine("claude-opus-4-7"), store=store, name="research")
-standalone("AI trends 2026")
-print(store.read("__agent_output__:research"))  # the agent's last output
+#    Key: "__agent_output__:{alias}" where alias = the name passed to as_tool().
+standalone = Agent(engine=LLMEngine("claude-opus-4-7"), store=store)
+tool = standalone.as_tool("research")
+tool.run_sync(task="AI trends 2026")           # writes "__agent_output__:research"
+print(store.read("__agent_output__:research")) # reads back by alias, not agent.name
 
-# 3) from_agent("name") reads that output in a Plan step.
+# 3) from_agent("alias") reads that output in a Plan step.
+#    IMPORTANT: store= must be on the SOURCE AGENT, not just the pipeline.
+researcher_with_store = Agent(engine=LLMEngine("claude-opus-4-7"), store=store)
 editor = Agent(engine=LLMEngine("claude-opus-4-7"), name="edit")
 plan2 = Agent(
     engine=Plan(
         Step("research"),
         Step("edit", context=from_agent("research")),  # reads from store at runtime
     ),
-    tools=[researcher.as_tool("research"), editor.as_tool("edit")],
-    store=store,
+    tools=[researcher_with_store.as_tool("research"), editor.as_tool("edit")],
+    # store= here is for checkpoint/writes; from_agent reads from researcher_with_store's store
 )
 
 # 4) Agent with sources= sees the live store on every call (LLM reads the whole store).
@@ -90,9 +93,16 @@ print(monitor("status?").text())
     - ``store=`` is a **first-class Agent parameter** (like ``memory=`` and
       ``session=``). Pass the same ``Store`` instance to multiple agents to
       create a shared blackboard.
-    - Every Agent automatically writes its last successful output to
-      ``"__agent_output__:{agent.name}"`` after each run. Use
-      ``from_agent("name")`` in a Plan step to read that value at runtime.
+    - Every Agent writes its last successful output to the store after each
+      run. The authoritative key is the **alias** passed to
+      ``agent.as_tool("alias")`` — that is, ``"__agent_output__:alias"``.
+      The agent's own ``name=`` attribute is irrelevant to sentinel resolution.
+      Use ``from_agent("alias")`` in a Plan step or standalone code to read
+      the value at runtime.
+    - ``from_agent("alias")`` requires the **source agent** to have ``store=``
+      attached (not just the pipeline/orchestrator).  Passing ``store=`` only
+      on the outer ``Agent(engine=Plan(...), store=store)`` does not
+      propagate to sub-agents.  PlanCompiler enforces this at construction time.
     - Values are JSON-encoded on write (via ``json.dumps(default=str)``),
       so non-JSON types are stringified. Prefer primitives + Pydantic models
       (use ``.model_dump()`` before writing).
