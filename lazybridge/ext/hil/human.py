@@ -266,9 +266,10 @@ class _WebUI(_UIProtocol):
     The OS picks a free port (port=0) unless an explicit port is supplied.
     """
 
-    def __init__(self, timeout: float | None = None, port: int = 0) -> None:
+    def __init__(self, timeout: float | None = None, port: int = 0, default: str | None = None) -> None:
         self._timeout = timeout
         self._port = port
+        self._default = default
 
     async def prompt(self, task: str, *, tools: list[Any], output_type: type) -> str:
         import asyncio
@@ -332,6 +333,9 @@ class _WebUI(_UIProtocol):
                 timeout=timeout,
             )
         except TimeoutError as exc:
+            if self._default is not None:
+                print(f"[Timeout — using default: {self._default!r}]")
+                return self._default
             raise TimeoutError(f"Web UI timed out after {timeout}s without a response") from exc
         finally:
             server.shutdown()
@@ -359,7 +363,7 @@ class HumanEngine:
             if ui == "terminal":
                 self._ui: _UIProtocol = _TerminalUI(timeout=timeout, default=default)
             elif ui == "web":
-                self._ui = _WebUI(timeout=timeout)
+                self._ui = _WebUI(timeout=timeout, default=default)
             else:
                 raise ValueError(f"Unknown UI type: {ui!r}")
         else:

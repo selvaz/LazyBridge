@@ -418,7 +418,19 @@ class SupervisorEngine:
             )
 
         while True:
-            user_input = (await self._ainput_fn(f"[{agent_name}] > ")).strip()
+            prompt = f"[{agent_name}] > "
+            try:
+                if self.timeout is None:
+                    raw_input = await self._ainput_fn(prompt)
+                else:
+                    raw_input = await asyncio.wait_for(self._ainput_fn(prompt), timeout=self.timeout)
+            except TimeoutError:
+                if self.default is not None:
+                    print(f"[Timeout — using default: {self.default!r}]")
+                    raw_input = self.default
+                else:
+                    raise
+            user_input = raw_input.strip()
             final, last_output = self._handle_command(
                 user_input,
                 task,

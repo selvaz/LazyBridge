@@ -96,11 +96,11 @@ class LLMEngine:
         framework-level timeout and defers to the provider SDK.
     max_parallel_tools:
         Maximum number of tool calls executed concurrently within a
-        single model turn.  ``None`` (default) means unbounded — every
-        tool call returned by the model runs in parallel.  Set to a
-        small integer (e.g. 4–8) to apply backpressure on wide tool
-        fan-outs and prevent thread/socket/DB exhaustion on a single
-        turn.
+        single model turn.  Default is ``8``.  ``None`` means unbounded
+        — every tool call returned by the model runs in parallel.  Set
+        to a small integer (e.g. 4–8) to apply backpressure on wide
+        tool fan-outs and prevent thread/socket/DB exhaustion on a
+        single turn.
     tool_timeout:
         Per-tool deadline in seconds.  When set, each tool execution
         is wrapped in ``asyncio.wait_for``.  On timeout the tool's

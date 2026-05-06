@@ -87,12 +87,13 @@ exclude = [
 pythonpath = ["lazybridge"]
 testpaths  = ["tests"]
 asyncio_mode = "auto"
-addopts = "-m 'not live' --ignore=tests/unit/external_tools"
+addopts = "-m 'not live and not heavy_render' --ignore=tests/unit/external_tools"
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten; anyio:pytest.PytestAssertRewriteWarning",
 ]
 markers = [
     "live: opt-in live tests that call real provider APIs (run with: pytest -m live)",
+    "heavy_render: tests that need WeasyPrint/Quarto/Chrome — excluded from the default suite",
 ]
 
 # ---------------------------------------------------------------------------
@@ -143,11 +144,18 @@ source = ["lazybridge"]
 # Coverage scope.  The framework extensions (``ext.otel``, ``ext.mcp``,
 # ``ext.hil``, ``ext.planners``, ``ext.evals``, ``ext.viz``, ``ext.gateway``)
 # are gated as first-class surface and run in the default test suite.
-# Domain tool packages (``external_tools.*``) are omitted from the gate
-# — their tests live under ``tests/unit/external_tools`` which is ignored
-# by default because they need heavy optional deps to exercise.
+# Domain tool packages (``external_tools.*``) are split: pure logic
+# (path safety, HTML/YAML escaping, fragment validation) is covered by
+# lightweight tests in the default suite; heavy render paths that need
+# optional deps (WeasyPrint, Quarto binary, Chrome) remain excluded.
 omit = [
-    "lazybridge/external_tools/*",
+    "lazybridge/external_tools/report_builder/exporters/*",
+    "lazybridge/external_tools/report_builder/quarto/detect.py",
+    "lazybridge/external_tools/report_builder/quarto/project.py",
+    "lazybridge/external_tools/report_builder/charts/*",
+    "lazybridge/external_tools/report_builder/citations.py",
+    "lazybridge/external_tools/doc_skills/*",
+    "lazybridge/external_tools/read_docs/*",
 ]
 
 [tool.coverage.report]

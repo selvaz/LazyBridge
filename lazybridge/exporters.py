@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
@@ -50,19 +51,23 @@ class JsonFileExporter:
     def __init__(self, *, path: str) -> None:
         self._path = path
         self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115
+        self._lock = threading.Lock()
 
     def export(self, event: dict[str, Any]) -> None:
-        self._fh.write(json.dumps(event, default=str) + "\n")
-        self._fh.flush()
+        line = json.dumps(event, default=str) + "\n"
+        with self._lock:
+            self._fh.write(line)
+            self._fh.flush()
 
     def close(self) -> None:
         """Flush and close the underlying file handle. Idempotent."""
-        try:
-            if not self._fh.closed:
-                self._fh.flush()
-                self._fh.close()
-        except Exception:
-            pass
+        with self._lock:
+            try:
+                if not self._fh.closed:
+                    self._fh.flush()
+                    self._fh.close()
+            except Exception:
+                pass
 
     def __del__(self) -> None:  # pragma: no cover
         self.close()

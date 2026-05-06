@@ -194,14 +194,17 @@ class Store:
                 key=row["key"], value=json.loads(row["value"]), written_at=row["written_at"], agent_id=row["agent_id"]
             )
         with self._lock:
-            return self._mem.get(key)
+            entry = self._mem.get(key)
+            if entry is None:
+                return None
+            return StoreEntry(key=entry.key, value=_deep_copy_safe(entry.value), agent_id=entry.agent_id)
 
     def read_all(self) -> dict[str, Any]:
         if self._db:
             rows = self._conn().execute("SELECT key, value FROM store").fetchall()
             return {r["key"]: json.loads(r["value"]) for r in rows}
         with self._lock:
-            return {k: v.value for k, v in self._mem.items()}
+            return {k: _deep_copy_safe(v.value) for k, v in self._mem.items()}
 
     def delete(self, key: str) -> None:
         if self._db:

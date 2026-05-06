@@ -105,6 +105,9 @@ async def verify_with_retry(
     """
     from lazybridge.envelope import Envelope
 
+    if max_verify < 1:
+        raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
+
     original_task = getattr(env, "task", None) or ""
     original_context = getattr(env, "context", None)
     current_env = env

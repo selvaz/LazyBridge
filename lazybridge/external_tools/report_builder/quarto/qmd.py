@@ -61,7 +61,8 @@ def render_fragment_to_qmd(fragment: Fragment) -> str:
     if fragment.kind == "text":
         parts.append(fragment.body_md or "")
     elif fragment.kind == "callout":
-        style = fragment.callout_style or "note"
+        raw_style = fragment.callout_style or "note"
+        style = raw_style if raw_style in _CALLOUT_STYLES else "note"
         body = (fragment.body_md or "").strip()
         # Quarto callouts: `::: {.callout-note}` … `:::`
         parts.append(f"::: {{.callout-{style}}}")
@@ -187,7 +188,9 @@ def render_report_to_qmd(
         yaml_lines.append(f"csl: {csl_style}")
     if extra_yaml:
         for k, v in extra_yaml.items():
-            yaml_lines.append(f"{k}: {v}")
+            # Emit as a double-quoted scalar so model-generated values
+            # can't inject YAML directives or break the front-matter block.
+            yaml_lines.append(f'{k}: "{_yaml_escape(str(v))}"')
     yaml_lines.append("---")
     yaml_lines.append("")
 
@@ -209,9 +212,16 @@ def render_report_to_qmd(
     return "\n".join(body_parts).rstrip() + "\n"
 
 
+_CALLOUT_STYLES = frozenset({"note", "warning", "important", "tip", "caution"})
+
+
 def _yaml_escape(s: str) -> str:
-    """Escape a string for inclusion inside double-quoted YAML."""
-    return s.replace('"', '\\"')
+    """Escape a string for inclusion inside double-quoted YAML.
+
+    Handles backslashes, double-quotes, and newline/carriage-return
+    sequences that would otherwise terminate or corrupt the YAML scalar.
+    """
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
 
 
 def collect_chart_inputs(fragments: Iterable[Fragment]) -> list[Fragment]:

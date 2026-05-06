@@ -46,12 +46,12 @@ subject to prompt injection from the content it is evaluating. Use a separate,
 hardened model for moderation and keep the guard's system prompt minimal.
 
 ```python
-from lazybridge import Agent, ContentGuard
+from lazybridge import Agent, LLMGuard
 from lazybridge.engines.llm import LLMEngine
 
 # Moderator agent uses a dedicated engine — not the same one handling user input.
 moderator = Agent(engine=LLMEngine("anthropic/claude-haiku-4-5"), name="moderator")
-guard = LLMGuard(judge=moderator)
+guard = LLMGuard(agent=moderator)
 ```
 
 ### Provider API Keys

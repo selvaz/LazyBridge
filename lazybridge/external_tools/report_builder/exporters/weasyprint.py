@@ -312,7 +312,7 @@ def _fragment_to_reveal_html(fragment: Fragment) -> str:
     from lazybridge.external_tools.report_builder.charts import render_chart
 
     if fragment.kind == "text":
-        body = (fragment.body_md or "").replace("\n", "<br>")
+        body = _html_escape(fragment.body_md or "").replace("\n", "<br>")
         return f'<div class="text">{body}</div>'
     if fragment.kind == "callout":
         return (

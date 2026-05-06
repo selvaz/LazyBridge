@@ -312,6 +312,10 @@ class Agent:
         self.timeout = timeout
         self.memory = memory
         self.sources = list(sources or [])
+        if max_verify < 1:
+            raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
+        if max_output_retries < 0:
+            raise ValueError(f"max_output_retries must be >= 0, got {max_output_retries!r}")
         self.guard = guard
         self.verify = verify
         self.max_verify = max_verify
@@ -699,6 +703,8 @@ class Agent:
         and returning a verdict string / bool. On rejection, the judge's
         feedback is injected into the next attempt's task.
         """
+        if max_verify < 1:
+            raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
         agent = self
         effective_name = name or self.name
         effective_desc = description or self.description or f"Run the {effective_name} agent."
@@ -750,9 +756,7 @@ class Agent:
 
             Agent.from_model("claude-opus-4-7", tools=[search])
         """
-        from lazybridge.engines.llm import LLMEngine
-
-        return cls(engine=LLMEngine(model), **kwargs)
+        return cls(model, **kwargs)
 
     @classmethod
     def from_engine(cls, engine: Any, **kwargs: Any) -> Agent:

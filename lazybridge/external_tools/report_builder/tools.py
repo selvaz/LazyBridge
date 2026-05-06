@@ -27,12 +27,17 @@ if TYPE_CHECKING:
     from lazybridge.external_tools.report_builder.bus import FragmentBus
 
 
-def report_tools(*, output_dir: str | Path) -> list[Tool]:
+def report_tools(*, output_dir: str | Path, input_root: str | Path | None = None) -> list[Tool]:
     """Return a list containing the ``generate_report`` tool bound to *output_dir*.
 
     Args:
         output_dir: Directory where report files will be written.
                     Created automatically if it does not exist.
+        input_root: Root directory that all input paths (markdown_path,
+                    chart paths) must fall under.  Defaults to
+                    ``output_dir`` when not supplied.  Prevents an LLM
+                    from reading arbitrary files outside the intended
+                    project directory.
 
     Returns:
         A single-element list: ``[generate_report tool]``.
@@ -46,6 +51,23 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
         agent("Assemble the quarterly report from analysis.md and the chart PNGs.")
     """
     _out = Path(output_dir).resolve()
+    _input_root = Path(input_root).resolve() if input_root is not None else _out
+
+    def _safe_input_path(p: str | Path) -> Path:
+        """Resolve *p* and verify it is under ``_input_root``.
+
+        Raises ``ValueError`` when the resolved path escapes the root so
+        an LLM-controlled argument cannot traverse the filesystem.
+        """
+        resolved = Path(p).resolve()
+        try:
+            resolved.relative_to(_input_root)
+        except ValueError:
+            raise ValueError(
+                f"Input path {str(p)!r} resolves to {str(resolved)!r} which is outside "
+                f"the allowed input root {str(_input_root)!r}"
+            ) from None
+        return resolved
 
     # ------------------------------------------------------------------
     # generate_report
@@ -182,7 +204,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
         else:
             # --- markdown_path flow ---
             assert markdown_path is not None  # Narrowed by the if above; appease mypy.
-            md_path = Path(markdown_path)
+            md_path = _safe_input_path(markdown_path)
             if not md_path.exists():
                 raise FileNotFoundError(f"Markdown file not found: {markdown_path}")
             markdown_text = md_path.read_text(encoding="utf-8")
@@ -198,7 +220,7 @@ def report_tools(*, output_dir: str | Path) -> list[Tool]:
 
             chart_items: list[tuple[str, str]] = []
             for ref in chart_refs:
-                cp = Path(ref.path)
+                cp = _safe_input_path(ref.path)
                 if not cp.exists():
                     raise FileNotFoundError(f"Chart image not found: {ref.path}")
                 if not cp.is_file():
