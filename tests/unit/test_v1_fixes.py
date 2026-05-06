@@ -193,7 +193,11 @@ class TestNativeTools:
         from lazybridge.core.types import NativeTool
         from lazybridge.engines.llm import LLMEngine
 
-        engine = LLMEngine("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH, "code_execution"])
+        engine = LLMEngine(
+            "claude-opus-4-7",
+            native_tools=[NativeTool.WEB_SEARCH, "code_execution"],
+            allow_dangerous_native_tools=True,
+        )
         assert len(engine.native_tools) == 2
         assert NativeTool.WEB_SEARCH in engine.native_tools
         assert NativeTool.CODE_EXECUTION in engine.native_tools

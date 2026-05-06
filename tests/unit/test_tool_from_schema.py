@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import warnings
 
+import pytest
+
 from lazybridge import Agent
 from lazybridge.tools import Tool, build_tool_map
 
@@ -196,8 +198,25 @@ def test_build_tool_map_mixes_providers_with_plain_callables() -> None:
     assert "p.first" in out
 
 
-def test_build_tool_map_collision_warns_only_once_per_name() -> None:
-    """A triple-collision emits ONE warning per collided name —
+def test_build_tool_map_collision_raises_by_default() -> None:
+    """Default collision_policy='raise' prevents silent shadowing."""
+
+    def f1():
+        """f1."""
+        return 1
+
+    def f2():
+        """f2."""
+        return 2
+
+    f2.__name__ = "f1"  # collision against the first
+
+    with pytest.raises(ValueError, match=r"Tool name collision.*f1"):
+        build_tool_map([f1, f2])
+
+
+def test_build_tool_map_collision_replace_warns_only_once_per_name() -> None:
+    """collision_policy='replace' emits ONE warning per collided name —
     each duplicate after the first does not fire its own warning."""
 
     def f1():
@@ -217,7 +236,7 @@ def test_build_tool_map_collision_warns_only_once_per_name() -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        build_tool_map([f1, f2, f3])
+        build_tool_map([f1, f2, f3], collision_policy="replace")
 
     collisions = [w for w in caught if "Tool name collision" in str(w.message) and "f1" in str(w.message)]
     assert len(collisions) == 1, (

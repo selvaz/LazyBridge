@@ -197,7 +197,12 @@ class Store:
             entry = self._mem.get(key)
             if entry is None:
                 return None
-            return StoreEntry(key=entry.key, value=_deep_copy_safe(entry.value), agent_id=entry.agent_id)
+            return StoreEntry(
+                key=entry.key,
+                value=_deep_copy_safe(entry.value),
+                written_at=entry.written_at,
+                agent_id=entry.agent_id,
+            )
 
     def read_all(self) -> dict[str, Any]:
         if self._db:
@@ -276,7 +281,7 @@ class Store:
                 cur = entry.value if entry else None
                 if not _json_eq(cur, expected):
                     return False
-                self._mem[key] = StoreEntry(key=key, value=new, agent_id=agent_id)
+                self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(new), agent_id=agent_id)
                 return True
 
         # SQLite path — serialise concurrent writers via reserved lock.

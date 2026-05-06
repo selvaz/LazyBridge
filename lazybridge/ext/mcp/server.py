@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import time
+import warnings
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -265,7 +266,25 @@ class MCP:
         deny: Iterable[str] | None = None,
         cache_tools_ttl: float | None = MCPServer._DEFAULT_CACHE_TTL,
     ) -> MCPServer:
-        """Build an MCP server bound to a Streamable HTTP transport."""
+        """Build an MCP server bound to a Streamable HTTP transport.
+
+        **Security note.** When ``allow=None`` (the default), *every* tool
+        advertised by the remote server is exposed to the LLM.  For untrusted
+        or third-party HTTP MCP servers, pass an explicit allowlist::
+
+            MCP.http("github", url, allow=["create_issue", "list_prs"])
+
+        Omitting ``allow=`` is only safe when you control the remote server
+        and trust its full tool surface.
+        """
+        if allow is None:
+            warnings.warn(
+                f"MCP.http({name!r}, {url!r}) called without allow=. "
+                f"Every tool the remote server advertises will be exposed to the LLM. "
+                f"Pass allow=['tool_a', 'tool_b'] to restrict the tool surface.",
+                UserWarning,
+                stacklevel=2,
+            )
         from lazybridge.ext.mcp.transports import HttpTransport
 
         return MCPServer(

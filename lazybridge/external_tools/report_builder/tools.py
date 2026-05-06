@@ -8,7 +8,7 @@ Usage::
     from lazybridge import Agent
     from lazybridge.external_tools.report_builder import report_tools
 
-    agent = Agent("anthropic", tools=report_tools(output_dir="./reports"))
+    agent = Agent("anthropic", tools=report_tools(output_dir="./reports", input_root="./"))
     agent(
         "Generate a Q1 analysis report. Use analysis.md and the charts "
         "in ./output/charts/ for the Revenue and Segment sections."
@@ -47,8 +47,17 @@ def report_tools(*, output_dir: str | Path, input_root: str | Path | None = None
         from lazybridge import Agent
         from lazybridge.external_tools.report_builder import report_tools
 
-        agent = Agent("anthropic", tools=report_tools(output_dir="./reports"))
-        agent("Assemble the quarterly report from analysis.md and the chart PNGs.")
+        # input_root="./" allows the agent to read from anywhere under the
+        # project root.  Without it, input_root defaults to output_dir and
+        # the agent can only read files already inside ./reports.
+        agent = Agent(
+            "anthropic",
+            tools=report_tools(output_dir="./reports", input_root="./"),
+        )
+        agent(
+            "Generate a Q1 analysis report. Use analysis.md and the charts "
+            "in ./output/charts/ for the Revenue and Segment sections."
+        )
     """
     _out = Path(output_dir).resolve()
     _input_root = Path(input_root).resolve() if input_root is not None else _out

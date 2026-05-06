@@ -15,10 +15,34 @@ no LLM in the loop on the rendering path.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 
 from lazybridge.external_tools.report_builder.assemblers import AssembledReport, RenderedSection
 from lazybridge.external_tools.report_builder.fragments import Fragment
+
+# ---------------------------------------------------------------------------
+# HTML stripping for untrusted content
+# ---------------------------------------------------------------------------
+
+# Pandoc raw-attribute blocks: ```{=html} ... ``` or raw_html fenced divs.
+_RAW_HTML_BLOCK_RE = re.compile(r"```\{=html\}.*?```", re.DOTALL | re.IGNORECASE)
+# Inline HTML tags — conservative: matches <tag ...> and </tag>.
+_INLINE_HTML_RE = re.compile(r"</?[a-zA-Z][^>]{0,200}>", re.DOTALL)
+
+
+def _strip_raw_html(text: str) -> str:
+    """Remove Pandoc raw-HTML blocks and inline HTML tags from *text*.
+
+    Used by :func:`render_fragment_to_qmd` and
+    :func:`render_report_to_qmd` when ``allow_raw_html=False`` to
+    prevent model-generated fragments from injecting arbitrary HTML into
+    the Quarto document.
+    """
+    text = _RAW_HTML_BLOCK_RE.sub("", text)
+    text = _INLINE_HTML_RE.sub("", text)
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Fragment-level rendering
@@ -45,13 +69,23 @@ def _table_to_pipe(headers: list[str], rows: list[list[str]], caption: str = "")
     return table
 
 
-def render_fragment_to_qmd(fragment: Fragment) -> str:
+def render_fragment_to_qmd(fragment: Fragment, *, allow_raw_html: bool = True) -> str:
     """Return a self-contained Markdown snippet for one fragment.
 
     The caller is responsible for placing this snippet under the right
     section heading; this function emits content + (optional) sub-heading
     only.  ``heading`` on a fragment becomes an h3 (sub-section); the
     section-level h2 is emitted by :func:`render_report_to_qmd`.
+
+    Args:
+        allow_raw_html: When ``True`` (default), Pandoc raw-HTML blocks
+            (``{=html}``) and inline HTML tags in fragment bodies are passed
+            through verbatim — required for interactive Plotly charts.
+            When ``False``, raw HTML blocks and inline tags are stripped
+            from model-generated text and callout fragments before emission,
+            preventing injection of arbitrary HTML/JS into the QMD output.
+            Chart fragments are always stripped when this flag is ``False``
+            since their HTML is system-generated, not model-generated.
     """
     parts: list[str] = []
     if fragment.heading:
@@ -59,11 +93,16 @@ def render_fragment_to_qmd(fragment: Fragment) -> str:
         parts.append("")
 
     if fragment.kind == "text":
-        parts.append(fragment.body_md or "")
+        body = fragment.body_md or ""
+        if not allow_raw_html:
+            body = _strip_raw_html(body)
+        parts.append(body)
     elif fragment.kind == "callout":
         raw_style = fragment.callout_style or "note"
         style = raw_style if raw_style in _CALLOUT_STYLES else "note"
         body = (fragment.body_md or "").strip()
+        if not allow_raw_html:
+            body = _strip_raw_html(body)
         # Quarto callouts: `::: {.callout-note}` … `:::`
         parts.append(f"::: {{.callout-{style}}}")
         parts.append(body)
@@ -77,7 +116,10 @@ def render_fragment_to_qmd(fragment: Fragment) -> str:
         if fragment.chart is None:
             parts.append("<!-- empty chart fragment -->")
         else:
-            parts.append(_render_chart_block(fragment))
+            block = _render_chart_block(fragment)
+            if not allow_raw_html:
+                block = _strip_raw_html(block)
+            parts.append(block)
     else:
         parts.append(f"<!-- unknown fragment kind: {fragment.kind} -->")
 
@@ -123,7 +165,7 @@ def _render_chart_block(fragment: Fragment) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_section(section: RenderedSection, depth: int = 2) -> str:
+def _render_section(section: RenderedSection, depth: int = 2, *, allow_raw_html: bool = True) -> str:
     """Render a section + its children + its fragments as Markdown."""
     parts: list[str] = []
     if section.heading:
@@ -132,10 +174,10 @@ def _render_section(section: RenderedSection, depth: int = 2) -> str:
         parts.append("")
 
     for fragment in section.fragments:
-        parts.append(render_fragment_to_qmd(fragment))
+        parts.append(render_fragment_to_qmd(fragment, allow_raw_html=allow_raw_html))
 
     for child in section.children:
-        parts.append(_render_section(child, depth=depth + 1))
+        parts.append(_render_section(child, depth=depth + 1, allow_raw_html=allow_raw_html))
 
     return "\n".join(parts)
 
@@ -171,6 +213,7 @@ def render_report_to_qmd(
     bibliography_path: str | None = None,
     csl_style: str | None = None,
     extra_yaml: dict | None = None,
+    allow_raw_html: bool = True,
 ) -> str:
     """Render an :class:`AssembledReport` into a complete .qmd document.
 
@@ -178,6 +221,15 @@ def render_report_to_qmd(
     then walks the section tree, then appends the audit-trail appendix and
     the bibliography stub (Pandoc citeproc auto-fills the Sources section
     when ``bibliography:`` is set).
+
+    Args:
+        allow_raw_html: When ``True`` (default), Pandoc raw ``{=html}``
+            blocks and inline HTML tags are passed through verbatim.
+            Set to ``False`` for reports whose fragment content is
+            model-generated and may contain injected markup — strips
+            raw HTML blocks and inline tags from text and callout
+            fragments before emission.  Chart fragments are also
+            stripped.  Does not affect YAML front-matter or headings.
     """
     yaml_lines = ["---", f'title: "{_yaml_escape(report.title)}"']
     if report.metadata.get("author"):
@@ -196,7 +248,7 @@ def render_report_to_qmd(
 
     body_parts: list[str] = list(yaml_lines)
     for section in report.sections:
-        body_parts.append(_render_section(section, depth=2))
+        body_parts.append(_render_section(section, depth=2, allow_raw_html=allow_raw_html))
 
     audit = _render_provenance_appendix(report)
     if audit:

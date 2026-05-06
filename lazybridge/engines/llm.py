@@ -133,6 +133,7 @@ class LLMEngine:
         temperature: float | None = None,
         system: str | None = None,
         native_tools: list[NativeTool | str] | None = None,
+        allow_dangerous_native_tools: bool = False,
         max_retries: int = 3,
         retry_delay: float = 1.0,
         request_timeout: float | None = 120.0,
@@ -187,7 +188,17 @@ class LLMEngine:
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system
-        self.native_tools: list[NativeTool] = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
+        _DANGEROUS = {NativeTool.CODE_EXECUTION, NativeTool.COMPUTER_USE}
+        resolved_native = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
+        if not allow_dangerous_native_tools:
+            found = [t for t in resolved_native if t in _DANGEROUS]
+            if found:
+                raise ValueError(
+                    f"Native tools {[t.value for t in found]!r} require explicit opt-in "
+                    f"because they grant the model code-execution or computer-control "
+                    f"capabilities. Pass allow_dangerous_native_tools=True to confirm."
+                )
+        self.native_tools: list[NativeTool] = resolved_native
         # Prompt caching — ``cache=True`` enables the default
         # (5-minute TTL on Anthropic; no-op on OpenAI / Google /
         # DeepSeek because they either cache automatically or need a

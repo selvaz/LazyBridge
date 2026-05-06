@@ -149,7 +149,9 @@ source = ["lazybridge"]
 # lightweight tests in the default suite; heavy render paths that need
 # optional deps (WeasyPrint, Quarto binary, Chrome) remain excluded.
 omit = [
-    "lazybridge/external_tools/report_builder/exporters/*",
+    # Heavy render back-ends that need optional system deps (WeasyPrint,
+    # Quarto binary, Chrome) — exercised by opt-in smoke tests only.
+    "lazybridge/external_tools/report_builder/exporters/quarto.py",
     "lazybridge/external_tools/report_builder/quarto/detect.py",
     "lazybridge/external_tools/report_builder/quarto/project.py",
     "lazybridge/external_tools/report_builder/charts/*",

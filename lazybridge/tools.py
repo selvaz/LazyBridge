@@ -219,7 +219,11 @@ def _agent_as_tool(agent: Any) -> Tool:
     )
 
 
-def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
+def build_tool_map(
+    tools: list[Any],
+    *,
+    collision_policy: Literal["raise", "replace"] = "raise",
+) -> dict[str, Tool]:
     """Wrap and index tools by name.
 
     Items in ``tools`` may be:
@@ -228,6 +232,15 @@ def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
         and an ``as_tools() -> list[Tool]`` method.  The provider is expanded
         into its constituent tools.  This is how, e.g., an MCP server lands
         in ``Agent(tools=[github])`` and contributes its whole tool surface.
+
+    Args:
+        collision_policy: What to do when two tools share a name.
+            ``"raise"`` (default) — raise ``ValueError`` immediately so the
+            duplicate is caught at construction time rather than silently
+            changing which tool the LLM invokes.
+            ``"replace"`` — keep the last registration and emit a
+            ``UserWarning`` (previous behaviour, useful when composing MCP
+            servers that may overlap on common names like ``search``).
     """
     import warnings
 
@@ -239,19 +252,22 @@ def build_tool_map(tools: list[Any]) -> dict[str, Tool]:
         else:
             expanded = [wrap_tool(t)]
         for wrapped in expanded:
-            # Warn the first time a name reappears — not the second, third,
-            # … which were emitting redundant warnings against an already-
-            # shadowed entry.  ``stacklevel=4`` typically points at the
-            # user's ``Agent(tools=[...])`` call rather than at this loop:
-            # build_tool_map → Agent.__init__ → user.
-            if wrapped.name in result and wrapped.name not in seen_warnings:
-                warnings.warn(
-                    f"Tool name collision: '{wrapped.name}' appears more than once "
-                    f"in the tools list. The first registration will be replaced by "
-                    f"the second. Rename one of the tools to avoid silent shadowing.",
-                    UserWarning,
-                    stacklevel=4,
-                )
-                seen_warnings.add(wrapped.name)
+            if wrapped.name in result:
+                if collision_policy == "raise":
+                    raise ValueError(
+                        f"Tool name collision: '{wrapped.name}' appears more than once "
+                        f"in the tools list. Rename one of the tools or pass "
+                        f"collision_policy='replace' to keep the last registration."
+                    )
+                # collision_policy == "replace": warn once per name.
+                if wrapped.name not in seen_warnings:
+                    warnings.warn(
+                        f"Tool name collision: '{wrapped.name}' appears more than once "
+                        f"in the tools list. The first registration will be replaced by "
+                        f"the second. Rename one of the tools to avoid silent shadowing.",
+                        UserWarning,
+                        stacklevel=4,
+                    )
+                    seen_warnings.add(wrapped.name)
             result[wrapped.name] = wrapped
     return result
