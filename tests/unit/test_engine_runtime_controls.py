@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import warnings
 from typing import Any
 
 import pytest
@@ -57,19 +58,35 @@ def test_stream_idle_timeout_rejects_zero_and_negative() -> None:
 
 
 def test_runtime_knobs_default_to_none() -> None:
+    from lazybridge.engines.llm import DEFAULT_STREAM_IDLE_TIMEOUT
+
     e = LLMEngine("gpt-5.5")
     # max_parallel_tools defaults to 8 (safe cap against resource exhaustion)
     assert e.max_parallel_tools == 8
     assert e.tool_timeout is None
-    assert e.stream_idle_timeout is None
+    # stream_idle_timeout defaults to a conservative positive value (90s) so
+    # half-open provider streams don't pin a worker indefinitely.  Disabling
+    # is opt-in via an explicit ``stream_idle_timeout=None`` (which warns).
+    assert e.stream_idle_timeout == DEFAULT_STREAM_IDLE_TIMEOUT
 
 
 def test_engine_constructed_via_new_inherits_class_defaults() -> None:
     """Tests that bypass ``__init__`` via ``__new__`` still see safe defaults."""
+    from lazybridge.engines.llm import DEFAULT_STREAM_IDLE_TIMEOUT
+
     e = LLMEngine.__new__(LLMEngine)
     # max_parallel_tools class-level default is 8 (safe cap).
     assert e.max_parallel_tools == 8
     assert e.tool_timeout is None
+    # Same conservative default at the class level so subclasses / __new__
+    # bypass paths inherit the safe behaviour.
+    assert e.stream_idle_timeout == DEFAULT_STREAM_IDLE_TIMEOUT
+
+
+def test_explicit_none_disables_stream_idle_timeout_with_warning() -> None:
+    """Passing ``stream_idle_timeout=None`` opts out of stall detection but warns."""
+    with pytest.warns(UserWarning, match="disables stream stall detection"):
+        e = LLMEngine("gpt-5.5", stream_idle_timeout=None)
     assert e.stream_idle_timeout is None
 
 
@@ -252,14 +269,18 @@ async def test_idle_guarded_stream_raises_when_stalled() -> None:
 
 @pytest.mark.asyncio
 async def test_idle_guarded_stream_passes_through_when_disabled() -> None:
-    """When stream_idle_timeout is None, the helper is a transparent passthrough."""
+    """When ``stream_idle_timeout=None`` is passed explicitly, the helper is a transparent passthrough."""
 
     async def gen():
         yield 1
         yield 2
         yield 3
 
-    engine = LLMEngine("gpt-5.5")  # default: None
+    # Explicit ``None`` opts out of stall detection (with the documented
+    # one-shot warning we suppress here because it isn't what we test).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        engine = LLMEngine("gpt-5.5", stream_idle_timeout=None)
     items = [x async for x in engine._idle_guarded_stream(gen())]
     assert items == [1, 2, 3]
 

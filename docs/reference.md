@@ -5,9 +5,9 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: 'Agent | None' = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
+### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, allow_dangerous_native_tools: 'bool' = False, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: 'Agent | None' = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
 
-Universal agent — delegates execution to a swappable Engine.
+Universal agent — ``Container(engine, tools, state)``.
 
 ### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False, returns_envelope: 'bool' = False) -> 'None'`
 
@@ -16,7 +16,7 @@ Wraps any Python callable as an LLM-accessible tool.
 
 ## Envelope
 
-### `Envelope(*, task: str | None = None, context: str | None = None, payload: Optional[~T] = None, metadata: lazybridge.envelope.EnvelopeMetadata = <factory>, error: lazybridge.envelope.ErrorInfo | None = None) -> None`
+### `Envelope(*, task: str | None = None, context: str | None = None, images: list[typing.Any] | None = None, audio: typing.Any | None = None, payload: Optional[~T] = None, metadata: lazybridge.envelope.EnvelopeMetadata = <factory>, error: lazybridge.envelope.ErrorInfo | None = None) -> None`
 
 Typed envelope carrying a payload of type ``T``.
 
@@ -39,7 +39,7 @@ Use the initial task/context Envelope passed to the Plan.
 
 ## Engines
 
-### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, max_parallel_tools: 'int | None' = None, tool_timeout: 'float | None' = None, stream_idle_timeout: 'float | None' = None, cache: 'bool | Any' = False) -> 'None'`
+### `LLMEngine(model: 'str', *, provider: 'str | None' = None, thinking: 'bool' = False, max_turns: 'int' = 20, tool_choice: "Literal['auto', 'any']" = 'auto', temperature: 'float | None' = None, system: 'str | None' = None, native_tools: 'list[NativeTool | str] | None' = None, allow_dangerous_native_tools: 'bool' = False, max_retries: 'int' = 3, retry_delay: 'float' = 1.0, request_timeout: 'float | None' = 120.0, max_parallel_tools: 'int | None' = 8, tool_timeout: 'float | None' = None, stream_idle_timeout: 'float | None' = _UNSET, stream_buffer: 'int' = 64, cache: 'bool | Any' = False, strict_multimodal: 'bool' = False) -> 'None'`
 
 Drives the LLM ↔ tool-call loop for a single agent invocation.
 
@@ -47,7 +47,7 @@ Drives the LLM ↔ tool-call loop for a single agent invocation.
 
 Structured multi-step execution engine.
 
-### `Step(target: 'Any', task: 'Sentinel | str' = <factory>, context: 'Sentinel | str | list[Sentinel | str] | None' = None, sources: 'list[Any]' = <factory>, writes: 'str | None' = None, input: 'type' = typing.Any, output: 'type' = <class 'str'>, parallel: 'bool' = False, name: 'str | None' = None, routes: 'dict[str, Callable[[Any], bool]] | None' = None, routes_by: 'str | None' = None) -> None`
+### `Step(target: 'Any', task: 'Sentinel | str' = <factory>, context: 'Sentinel | str | list[Sentinel | str] | None' = None, sources: 'list[Any]' = <factory>, writes: 'str | None' = None, input: 'type' = typing.Any, output: 'type' = <class 'str'>, parallel: 'bool' = False, name: 'str | None' = None, routes: 'dict[str, Callable[[Any], bool]] | None' = None, routes_by: 'str | None' = None, after_branches: 'str | None' = None) -> None`
 
 A single node in a Plan.
 
@@ -166,7 +166,7 @@ Raised when a Guard blocks execution.
 
 Protocol satisfied by all exporter classes.
 
-### `BaseProvider(api_key: 'str | None' = None, model: 'str | None' = None, **kwargs)`
+### `BaseProvider(api_key: 'str | None' = None, model: 'str | None' = None, *, strict_native_tools: 'bool | None' = None, **kwargs)`
 
 Stable abstract base class for all LLM providers.
 

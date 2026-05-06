@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+import warnings
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -45,6 +46,19 @@ class StreamStallError(Exception):
     catching half-open streams and partial provider outages without
     killing fast streams that legitimately take a long time end-to-end.
     """
+
+
+#: Sentinel that lets ``LLMEngine.__init__`` distinguish "caller did
+#: not pass ``stream_idle_timeout``" (use the safe default) from
+#: "caller explicitly disabled the timeout by passing ``None``"
+#: (warn loudly — half-open streams pin a worker forever).
+_USE_DEFAULT_STREAM_IDLE: Any = object()
+
+#: Conservative default for ``LLMEngine.stream_idle_timeout`` (seconds).
+#: A real Anthropic / OpenAI / Google stream emits chunks far below
+#: this cadence; the value is large enough to absorb provider-side
+#: thinking pauses on Opus / Gemini Pro without false positives.
+DEFAULT_STREAM_IDLE_TIMEOUT: float = 90.0
 
 
 class LLMEngine:
@@ -111,15 +125,18 @@ class LLMEngine:
         Maximum time (seconds) the engine will wait between
         successive streaming chunks before raising
         ``StreamStallError``.  Catches half-open streams without
-        killing legitimately long fast streams.  ``None`` (default)
-        leaves streams unbounded — preserving the prior behavior.
+        killing legitimately long fast streams.  Defaults to
+        :data:`DEFAULT_STREAM_IDLE_TIMEOUT` (``90.0`` s).  Pass an
+        explicit ``None`` to disable stall detection — a one-shot
+        ``UserWarning`` is emitted because a half-open provider
+        stream then pins the worker indefinitely.
     """
 
     # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
     # (and any subclass that forgets to call super) still see safe values.
     max_parallel_tools: int | None = 8
     tool_timeout: float | None = None
-    stream_idle_timeout: float | None = None
+    stream_idle_timeout: float | None = DEFAULT_STREAM_IDLE_TIMEOUT
     stream_buffer: int = 64
 
     def __init__(
@@ -139,7 +156,7 @@ class LLMEngine:
         request_timeout: float | None = 120.0,
         max_parallel_tools: int | None = 8,
         tool_timeout: float | None = None,
-        stream_idle_timeout: float | None = None,
+        stream_idle_timeout: float | None = _USE_DEFAULT_STREAM_IDLE,
         stream_buffer: int = 64,
         cache: bool | Any = False,
         strict_multimodal: bool = False,
@@ -154,7 +171,25 @@ class LLMEngine:
             raise ValueError(f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}")
         if tool_timeout is not None and tool_timeout <= 0:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
-        if stream_idle_timeout is not None and stream_idle_timeout <= 0:
+        # ``stream_idle_timeout`` has three valid input shapes:
+        #   * sentinel (caller did not specify) → use the safe default
+        #   * positive float                    → custom timeout
+        #   * explicit None                     → disabled, but warn loudly
+        # Anything else (zero, negative) raises.
+        if stream_idle_timeout is _USE_DEFAULT_STREAM_IDLE:
+            stream_idle_timeout = DEFAULT_STREAM_IDLE_TIMEOUT
+        elif stream_idle_timeout is None:
+            warnings.warn(
+                "LLMEngine(stream_idle_timeout=None) disables stream stall "
+                "detection.  A half-open provider stream (TCP RST never "
+                f"delivered, HTTP/2 PING dropped) will then pin a worker "
+                f"indefinitely.  The safe default is "
+                f"{DEFAULT_STREAM_IDLE_TIMEOUT}s — pass a positive float to "
+                "tune it instead of disabling.",
+                UserWarning,
+                stacklevel=2,
+            )
+        elif stream_idle_timeout <= 0:
             raise ValueError(f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}")
         if stream_buffer < 1:
             raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
@@ -175,8 +210,6 @@ class LLMEngine:
         # separate "parallel mode" — tool calls are always executed via
         # asyncio.gather when the model emits more than one in a turn.
         if tool_choice == "parallel":
-            import warnings
-
             warnings.warn(
                 "LLMEngine(tool_choice='parallel') is deprecated. "
                 "Concurrent tool execution is now the default and cannot be "

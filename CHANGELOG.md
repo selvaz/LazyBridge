@@ -8,6 +8,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — 2026-05-05 — bug-fix and routing hardening
 
+### Breaking
+
+- **`LLMEngine.stream_idle_timeout` default changed from `None` to
+  `90.0` s.**  Old default left provider streams unbounded — a
+  half-open HTTP/2 connection (TCP RST never delivered, PING dropped)
+  would pin a worker indefinitely.  New default raises
+  ``StreamStallError`` after 90 s of inter-chunk silence, which is
+  large enough to absorb provider-side thinking pauses on
+  Opus / Gemini Pro.  Pass ``stream_idle_timeout=None`` to opt out
+  explicitly — a one-shot ``UserWarning`` flags the choice because
+  the failure mode (worker pinned forever) is silent and hard to
+  diagnose.  The class-level default exposed for ``__new__`` /
+  subclass paths shifts the same way.  No code change is required for
+  callers that already pass an explicit value.
+
 ### Features
 
 - **`Step.after_branches`** — exclusive-branch rejoin point.  Set
