@@ -12,21 +12,48 @@ thread-safe.
 ## Example
 
 ```python
-from lazybridge import Agent, Store, Plan, Step
+from lazybridge import Agent, LLMEngine, Store, Plan, Step, from_agent
 
 store = Store(db="research.sqlite")
 
-# Plan step writes a result into the store automatically.
-plan = Plan(
-    Step(researcher, name="search", writes="hits"),
-    Step(writer,     name="write"),
+# 1) Plan step writes a result into the store via Step(writes=).
+researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="research")
+writer = Agent(engine=LLMEngine("gpt-4o"), name="write")
+
+pipeline = Agent(
+    engine=Plan(
+        Step("research", writes="hits"),  # stores result under key "hits"
+        Step("write"),
+    ),
+    tools=[researcher.as_tool("research"), writer.as_tool("write")],
+    store=store,  # store= is a first-class Agent parameter
 )
-Agent.from_engine(plan)("AI trends")
+pipeline("AI trends")
 print(store.read("hits"))
 
-# Agent with sources= sees the live store on every call.
-monitor = Agent("claude-opus-4-7", name="monitor", sources=[store],
-                system="Report what's currently in the blackboard.")
+# 2) Agents write their output to store automatically after each run.
+#    Key: "__agent_output__:{agent.name}"
+standalone = Agent(engine=LLMEngine("claude-opus-4-7"), store=store, name="research")
+standalone("AI trends 2026")
+print(store.read("__agent_output__:research"))  # the agent's last output
+
+# 3) from_agent("name") reads that output in a Plan step.
+editor = Agent(engine=LLMEngine("claude-opus-4-7"), name="edit")
+plan2 = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("edit", context=from_agent("research")),  # reads from store at runtime
+    ),
+    tools=[researcher.as_tool("research"), editor.as_tool("edit")],
+    store=store,
+)
+
+# 4) Agent with sources= sees the live store on every call (LLM reads the whole store).
+monitor = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    name="monitor",
+    sources=[store],
+)
 print(monitor("status?").text())
 ```
 
@@ -60,6 +87,12 @@ print(monitor("status?").text())
 
 !!! warning "Rules & invariants"
 
+    - ``store=`` is a **first-class Agent parameter** (like ``memory=`` and
+      ``session=``). Pass the same ``Store`` instance to multiple agents to
+      create a shared blackboard.
+    - Every Agent automatically writes its last successful output to
+      ``"__agent_output__:{agent.name}"`` after each run. Use
+      ``from_agent("name")`` in a Plan step to read that value at runtime.
     - Values are JSON-encoded on write (via ``json.dumps(default=str)``),
       so non-JSON types are stringified. Prefer primitives + Pydantic models
       (use ``.model_dump()`` before writing).
@@ -76,4 +109,5 @@ print(monitor("status?").text())
 ## See also
 
 - [Memory](memory.md) — separate concept (in-prompt conversation context).
+- [Sentinels](sentinels.md) — `from_agent` and `from_memory` read from Store/Memory.
 - [Checkpoint & resume](checkpoint.md) — `Plan` uses `Store` under the hood.

@@ -47,11 +47,12 @@ behaviour of the agent without changing anything else about it.
 
 The tool surface is always the same, regardless of what's inside.
 
-### State — memory, session, guard, output
+### State — memory, store, session, guard, output
 
 These carry continuity and observability through the system:
 
-- `memory` — conversation history across turns
+- `memory` — conversation history across turns (in-prompt context)
+- `store` — shared blackboard across agents and runs (durable key-value); agents write their last output here automatically after each run
 - `session` — structured event log for tracing and observability
 - `guard` — pre/post call content policy
 - `output` — expected structured output type
@@ -159,13 +160,18 @@ Step("write",
 
 Available sentinels:
 
-| Sentinel | Resolves to |
-|---|---|
-| `from_prev` | Output of the immediately preceding step |
-| `from_start` | The original input to the whole Plan |
-| `from_step("name")` | Output of the named step |
-| `from_parallel("name")` | Output of one specific parallel branch |
-| `from_parallel_all("name")` | Outputs of all branches in a parallel band |
+| Sentinel | Scope | Resolves to |
+|---|---|---|
+| `from_prev` | Plan-only | Output of the immediately preceding step |
+| `from_start` | Plan-only | The original input to the whole Plan |
+| `from_step("name")` | Plan-only | Output of the named step |
+| `from_parallel("name")` | Plan-only | Output of one specific parallel branch |
+| `from_parallel_all("name")` | Plan-only | Outputs of all branches in a parallel band |
+| `from_memory("name")` | Universal | Live memory of the agent registered as `name`, read at execution time |
+| `from_agent("name")` | Universal | Last output of the agent registered as `name`, read from shared Store |
+
+`from_memory` and `from_agent` are **universal** — they work inside Plan
+steps and also in any context where agents share a `Store` or `Memory`.
 
 The fixed context of a sub-agent — its role, its persona, its
 constraints — belongs on the engine: `LLMEngine("model", system="...")`.

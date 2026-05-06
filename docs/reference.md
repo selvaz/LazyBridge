@@ -7,9 +7,11 @@ Signature-first index of every public symbol. For usage and context, see the tie
 
 ## Agent & tools
 
-### `Agent(engine_or_model: 'str | Any' = 'claude-opus-4-7', tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, model: 'str | None' = None, engine: 'Any | None' = None, native_tools: 'list[Any] | None' = None, allow_dangerous_native_tools: 'bool' = False, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: 'Agent | None' = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
+### `Agent(engine: 'str | Any | None' = None, *, tools: 'list[Tool | Callable | Agent] | None' = None, output: 'type' = <class 'str'>, memory: 'Any | None' = None, store: 'Any | None' = None, sources: 'list[Any] | None' = None, guard: 'Any | None' = None, verify: 'Agent | None' = None, max_verify: 'int' = 3, name: 'str | None' = _UNSET, description: 'str | None' = _UNSET, session: 'Any | None' = _UNSET, verbose: 'bool' = _UNSET, native_tools: 'list[Any] | None' = None, allow_dangerous_native_tools: 'bool' = False, runtime: 'AgentRuntimeConfig | None' = None, resilience: 'ResilienceConfig | None' = None, observability: 'ObservabilityConfig | None' = None, output_validator: 'Callable[[Any], Any] | None' = _UNSET, max_output_retries: 'int' = _UNSET, timeout: 'float | None' = _UNSET, max_retries: 'int' = _UNSET, retry_delay: 'float' = _UNSET, fallback: 'Agent | None' = _UNSET, cache: 'bool | Any' = _UNSET) -> 'None'`
 
-Universal agent — ``Container(engine, tools, state)``.
+Universal agent — ``Agent(engine, tools, memory, store, session)``.  
+``engine=`` accepts an ``LLMEngine``, ``Plan``, or any Engine-protocol object.  
+A plain string is sugar for ``LLMEngine(string)``; ``None`` defaults to ``LLMEngine("claude-opus-4-7")``.
 
 ### `Tool(func: 'Callable', *, name: 'str | None' = None, description: 'str | None' = None, mode: "Literal['signature', 'llm', 'hybrid']" = 'signature', schema_llm: 'Any | None' = None, strict: 'bool' = False, returns_envelope: 'bool' = False) -> 'None'`
 
@@ -41,6 +43,17 @@ Use the initial task/context Envelope passed to the Plan.
 ### `from_parallel_all(name: 'str') -> '_FromParallelAll'`
 
 Aggregate every consecutive parallel sibling starting at ``name``.
+
+### `from_memory(name: 'str') -> '_FromMemory'`
+
+Read the live memory of the agent registered as ``name`` at step execution time.  
+Silent no-op if the agent has no memory or it is empty.
+
+### `from_agent(name: 'str') -> '_FromAgent'`
+
+Read the last output of the agent registered as ``name`` from the shared Store.  
+Works both inside Plan and when agents are called standalone.  
+Silent no-op if the agent hasn't run yet (no entry in the store).
 
 
 ## Engines

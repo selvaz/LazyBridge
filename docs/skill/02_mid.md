@@ -397,7 +397,7 @@ print(pipeline("AI trends April 2026").text())            # invocation → Envel
 **signature**
 
 agent.as_tool(
-    name: str | None = None,
+    name: str,            # canonical — name must match Step target and tool map key
     description: str | None = None,
     *,
     verify: Agent | Callable[[str], Any] | None = None,
@@ -406,42 +406,50 @@ agent.as_tool(
 
 # Tool schema: (task: str) -> str
 
-Usage: Agent("model", tools=[researcher.as_tool()])
-       Agent("model", tools=[researcher])   # implicit — Agent auto-wraps via as_tool()
+# Canonical usage — name is the single string connecting tool map → Step target → sentinels:
+Usage: Agent(engine=..., tools=[researcher.as_tool("research")])
 
 **rules**
 
-- ``as_tool()`` with no arguments produces a Tool named after the agent.
-  Passing ``name`` / ``description`` overrides them.
+- ``as_tool("name")`` is THE canonical way to mount an Agent as a capability.
+  The name connects the tool map to the Plan step that calls it and to all
+  sentinels referencing that agent (``from_step("research")``, ``from_agent("research")``,
+  ``from_memory("research")``). Always pass an explicit name.
 - ``verify=`` turns the tool into a judge-gated call: every invocation
   runs up to ``max_verify`` times against the judge, retrying with the
   judge's feedback injected into the task. This is the "Option B"
   placement — the judge sits at the tool-call boundary.
-- Passing an ``Agent`` directly to ``tools=[...]`` is equivalent to
-  passing ``agent.as_tool()``.
+- Passing an ``Agent`` directly to ``tools=[...]`` is implicit sugar that
+  auto-wraps via ``as_tool()``. Prefer the explicit form when you need a
+  stable name for Plan steps or sentinels.
 - Nested agents inherit the outer session and register an ``as_tool``
   edge in the graph automatically (see Agent docs).
 
 **example**
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
-researcher = Agent("claude-opus-4-7", name="researcher", tools=[search])
-judge      = Agent("claude-opus-4-7", name="judge",
-                   system='Respond "approved" or "rejected: <reason>".')
+researcher = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search], name="researcher")
+judge = Agent(engine=LLMEngine("claude-opus-4-7"),
+              name="judge",
+              system='Respond "approved" or "rejected: <reason>".')
 
-# Implicit: pass the agent, LazyBridge wraps it.
-orchestrator = Agent("claude-opus-4-7",
-                     tools=[researcher])   # equivalent to researcher.as_tool()
+# Canonical: explicit name so Plan steps and sentinels can reference "research".
+orchestrator = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher.as_tool("research")],
+)
 
 # Explicit + verified: the judge gates every research call.
-orchestrator = Agent("claude-opus-4-7",
-                     tools=[researcher.as_tool(
-                         name="research",
-                         description="Find 3 high-quality sources for a topic.",
-                         verify=judge, max_verify=2,
-                     )])
+orchestrator = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher.as_tool(
+        "research",
+        description="Find 3 high-quality sources for a topic.",
+        verify=judge, max_verify=2,
+    )],
+)
 ```
 
 **pitfalls**

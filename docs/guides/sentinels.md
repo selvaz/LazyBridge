@@ -1,10 +1,12 @@
-# Sentinels (from_prev / from_start / from_step / from_parallel)
+# Sentinels (from_prev / from_start / from_step / from_parallel / from_memory / from_agent)
 
 Sentinels are how Plan steps declare "where does my input come from?".
 Without them you'd thread arguments manually at every step; with them,
 the data flow is a 1-liner per step.
 
-Four sentinels, four semantic slots:
+Two categories:
+
+**Plan-only** — resolve against the Plan's execution history:
 
 * `from_prev` — the workhorse. In a straight chain, every step reads
   the one before it. This is the default.
@@ -16,8 +18,19 @@ Four sentinels, four semantic slots:
   three steps ago." Sentinels validate against known step names at
   plan compile time; a typo is caught before any LLM call.
 * `from_parallel("name")` — same mechanic as `from_step`, but reads
-  better at the call site when the referenced step is a parallel
-  branch.
+  better at the call site when the referenced step is a parallel branch.
+* `from_parallel_all("name")` — aggregate all consecutive parallel siblings
+  starting at `name` into one labelled-text Envelope.
+
+**Universal** — work both inside Plan and when agents are called standalone:
+
+* `from_memory("name")` — reads the **live memory** of the agent registered
+  under `name` at step execution time. Never at construction — always
+  reflects the most recent conversation history of that agent.
+* `from_agent("name")` — reads the **last output** of the agent registered
+  under `name` from a shared `Store`. Every Agent writes its output to
+  `store` after a successful run; `from_agent` reads it back.
+  Works inside Plan and outside (LLM orchestrators, standalone calls).
 
 Sentinels are also valid on `context=` — use them to inject prior
 context into a step without overriding its task.
@@ -25,34 +38,65 @@ context into a step without overriding its task.
 ## Example
 
 ```python
-from lazybridge import Plan, Step, from_prev, from_start, from_step
+from lazybridge import Agent, LLMEngine, Memory, Plan, Step, Store
+from lazybridge import from_prev, from_start, from_step, from_memory, from_agent
 
-plan = Plan(
-    Step(researcher,    name="research",  output=Hits),
-    # Each step has an explicit task instruction; the upstream data
-    # flows through ``context=`` (the idiomatic shape).
-    Step(fact_checker,  name="check",
-         task="Score each item for factual correctness; list any rejects.",
-         context=from_prev),                                  # check researcher's output
-    Step(writer,        name="write",
-         task="Draft a 200-word answer to the user's task.",
-         context=from_start),                                  # writer sees ORIGINAL user task
-    Step(editor,        name="edit",
-         task="Polish the draft; remove items the fact-checker flagged.",
-         context=[from_step("write"), from_step("check")]),   # multi-source via list-context
+store = Store(db="pipeline.sqlite")
+mem = Memory(strategy="summary")
+
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    memory=mem,
+    store=store,
+    name="research",
+)
+writer = Agent(engine=LLMEngine("gpt-4o"))
+
+plan = Agent(
+    engine=Plan(
+        Step("research"),
+        # fact_checker sees researcher's output as task, original user task as context
+        Step("fact_check",
+             task=from_prev,
+             context=from_start),
+        # writer sees researcher's live memory AND the fact_checker output
+        Step("write",
+             context=[from_memory("research"), from_step("fact_check")]),
+    ),
+    tools=[
+        researcher.as_tool("research"),
+        fact_checker.as_tool("fact_check"),
+        writer.as_tool("write"),
+    ],
+    store=store,
 )
 
-# context= can carry MANY sources at once (no combiner step needed).
-plan2 = Plan(
-    Step(researcher,    name="research"),
-    Step(policy_loader, name="policy"),
-    Step(synthesiser,   name="synth",
-         task="Draft a brief that cites both sources and follows the style note.",
-         context=[
-             from_step("research"),
-             from_step("policy"),
-             "Style: neutral, third person, no superlatives.",
-         ]),
+# from_agent works outside Plan too — any agent can read another's last output.
+standalone = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher.as_tool("research")],
+    store=store,
+)
+standalone("find AI trends")
+# Now any agent sharing the same store can read researcher's output:
+value = store.read("__agent_output__:research")
+```
+
+```python
+# Multi-source context via list — no combiner step needed.
+plan2 = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("policy"),
+        Step("synth",
+             task="Draft a brief citing both sources.",
+             context=[
+                 from_step("research"),
+                 from_step("policy"),
+                 "Style: neutral, third person, no superlatives.",
+             ]),
+    ),
+    tools=[researcher.as_tool("research"), policy_loader.as_tool("policy"), synthesiser.as_tool("synth")],
 )
 ```
 
@@ -65,17 +109,30 @@ plan2 = Plan(
   variables of the same name.
 - When passing a ``str`` as ``task=``, it's treated as a LITERAL, not a
   sentinel. Don't write ``task="from_prev"`` expecting the sentinel.
+- ``from_memory`` reads at execution time — if the agent hasn't run yet,
+  it contributes nothing (silent no-op, not an error).
+- ``from_agent`` requires the tool to be an agent (via ``as_tool()``),
+  not a plain function. PlanCompiler rejects plain-function targets at
+  construction time.
 
 !!! note "API reference"
 
+    # Plan-only sentinels (resolve against Plan execution history)
     from_prev                    # singleton — previous step's output (default)
     from_start                   # singleton — original user task
     from_step(name: str)         # named prior step's output
     from_parallel(name: str)     # named parallel branch's output
     from_parallel_all(name: str) # aggregate every branch in a parallel band;
                                  # payload is a labelled-text string, same as task
-    
-    # Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
+
+    # Universal sentinels (work inside Plan and standalone)
+    from_memory(name: str)       # another agent's live memory at execution time
+    from_agent(name: str)        # last output of named agent from shared Store
+
+    # All sentinels are valid on:
+    Step(..., task=<sentinel>)
+    Step(..., context=<sentinel>)
+    Step(..., context=[<sentinel>, <sentinel>, "literal string"])
 
 !!! warning "Rules & invariants"
 
@@ -95,6 +152,16 @@ plan2 = Plan(
       are both a labelled-text join (``"[name]\\n<text>\\n\\n..."``).
       ``"n"`` must be the FIRST step of the band; the compile-time check
       rejects mid-band references.
+    - ``from_memory("n")``: reads the live ``Memory`` of the agent whose
+      ``as_tool("n")`` key is ``"n"``. Resolved at step execution, not at
+      plan construction. If the agent has no memory or it's empty, contributes
+      nothing (silent no-op). PlanCompiler validates that ``"n"`` is an agent
+      tool with ``memory=`` attached.
+    - ``from_agent("n")``: reads the last output of the agent registered as
+      ``"n"`` from the shared ``Store``. Requires the tool to be an agent
+      (``returns_envelope=True``); PlanCompiler rejects plain-function targets.
+      Empty store → silent no-op. Agent must share the same ``Store`` instance
+      as the plan.
     - A plain string passed as ``task=`` is used verbatim — useful for
       hard-coded prompts at intermediate steps.
     - ``context=`` accepts a single sentinel/string OR a **list** of them.
@@ -108,3 +175,5 @@ plan2 = Plan(
 - [Plan](plan.md) — the engine that interprets sentinels.
 - [Parallel plan steps](parallel-steps.md) — `from_parallel_all` aggregation.
 - [Envelope](envelope.md) — the object sentinels carry between steps.
+- [Store](store.md) — shared blackboard used by `from_agent`.
+- [Memory](memory.md) — per-agent conversation context used by `from_memory`.
