@@ -164,14 +164,22 @@ Available sentinels:
 |---|---|---|
 | `from_prev` | Plan-only | Output of the immediately preceding step |
 | `from_start` | Plan-only | The original input to the whole Plan |
-| `from_step("name")` | Plan-only | Output of the named step |
+| `from_step("name")` | Plan-only | Output of the named step (in-memory, no store needed) |
 | `from_parallel("name")` | Plan-only | Output of one specific parallel branch |
 | `from_parallel_all("name")` | Plan-only | Outputs of all branches in a parallel band |
-| `from_memory("name")` | Universal | Live memory of the agent registered as `name`, read at execution time |
-| `from_agent("name")` | Universal | Last output of the agent registered as `name`, read from shared Store |
+| `from_memory("name")` | Universal | Live memory of the agent mounted as `name`, at execution time |
+| `from_agent("name")` | Universal | Last stored output of the agent mounted as `name` (from shared Store) |
 
-`from_memory` and `from_agent` are **universal** — they work inside Plan
-steps and also in any context where agents share a `Store` or `Memory`.
+**Choosing between `from_step` and `from_agent`** — inside the same Plan,
+`from_step("research")` is the standard choice: in-memory, no store
+required, validated at compile time.  Use `from_agent("research")` only
+when the data dependency crosses run or plan boundaries:
+- last-known output from a previous execution
+- an agent called by an LLM orchestrator outside this Plan
+- a standalone agent writing to a shared Store for later consumption
+
+The alias passed to `as_tool("research")` is always the authoritative
+key — both for `from_step` (step identity) and `from_agent` (store key).
 
 The fixed context of a sub-agent — its role, its persona, its
 constraints — belongs on the engine: `LLMEngine("model", system="...")`.

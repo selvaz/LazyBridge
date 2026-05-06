@@ -2,13 +2,14 @@
 
 Every Agent has the same shape.  Only the engine changes::
 
-    from lazybridge import Agent, LLMEngine, Plan, Step, Memory, Session
+    from lazybridge import Agent, LLMEngine, Plan, Step, Memory, Session, Store
 
     # --- Build sub-agents first ---
 
     researcher = Agent(
         engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
-        tools=[search.as_tool("search")],
+        tools=[search],          # search is a plain Python function
+        store=store,             # required if other steps use from_agent("research")
     )
     writer = Agent(
         engine=LLMEngine("gpt-4o", system="You are a concise technical writer."),
@@ -22,7 +23,7 @@ Every Agent has the same shape.  Only the engine changes::
             Step("write", task=from_prev, context=from_step("research")),
         ),
         tools=[
-            researcher.as_tool("research"),   # name must match Step target
+            researcher.as_tool("research"),   # alias "research" = Step target + sentinel key
             writer.as_tool("write"),
         ],
         memory=Memory(strategy="summary"),
@@ -48,14 +49,21 @@ Every Agent has the same shape.  Only the engine changes::
 ``LLMEngine(...)`` form when you need ``system=``, ``max_turns=``,
 ``thinking=``, or other engine-level config.
 
-**The name chain** — the string passed to ``as_tool("name")`` must match
-the ``target`` string in the Step that calls it and the tool name the
-LLM will use.  This single string connects the tool map to the plan::
+**The name chain** — the alias passed to ``as_tool("name")`` is the
+authoritative key that connects every part of the system::
 
     researcher.as_tool("research")  →  key in tool map: "research"
     Step("research")                →  looks up "research" in tool map ✓
     routes={"research": predicate}  →  routes to the step named "research" ✓
-    from_step("research")           →  reads output of step "research" ✓
+    from_step("research")           →  reads output of step "research" (in-Plan) ✓
+    from_agent("research")          →  reads last stored output of "research" (cross-run) ✓
+    from_memory("research")         →  reads live memory of "research" ✓
+
+**Choosing between sentinels** — inside a single Plan, ``from_step`` is
+the standard choice: it reads from in-memory step history with no
+external dependency.  ``from_agent`` is for cross-run or cross-plan
+data: last known output persisted in a shared Store.
+``from_memory`` reads the agent's live conversation history.
 """
 
 __version__ = "0.7.0"

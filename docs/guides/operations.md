@@ -80,7 +80,7 @@ agent = Agent(
     max_retries=3,               # provider transient-error retries
     retry_delay=1.0,             # base for exponential backoff (±10% jitter)
     cache=True,                  # prompt caching where supported
-    fallback=Agent("gpt-4o"),     # provider redundancy on hard failure
+    fallback=Agent("gpt-5.5"),     # provider redundancy on hard failure
     output_validator=validate,   # custom post-parse check
     max_output_retries=2,        # structured-output retry-with-feedback
 )

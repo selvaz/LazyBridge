@@ -66,22 +66,34 @@ class _FromParallelAll:
 
 @dataclass(frozen=True)
 class _FromAgent:
-    """Use the last output of the agent registered under ``name``.
+    """Use the last stored output of the agent mounted as ``name``.
 
-    Unlike ``from_step``, which reads from the Plan's execution history,
-    ``from_agent`` reads from a shared :class:`Store` where every agent
-    writes its last output after running.  This means it works both inside
-    a Plan and when agents are called independently by an LLM orchestrator.
+    Unlike ``from_step``, which reads from this Plan's in-memory execution
+    history, ``from_agent`` reads from a shared :class:`Store` where every
+    agent writes its last output after a successful run.  This makes it
+    useful for:
 
-    The name must match the key used in ``agent.as_tool("name")`` and the
-    agent's ``name=`` attribute.  The store must be shared between the
-    writing agent and the orchestrator that resolves the sentinel.
+    - Cross-run dependencies (last known output from a previous execution).
+    - LLM orchestrator + deterministic Plan hybrids (the LLM calls an agent
+      independently; a later Plan step reads what it produced).
+    - Agents called outside the Plan that need to share state with it.
 
-    If the named agent has not yet run (no entry in the store), the sentinel
-    contributes nothing — silent no-op, no error.
+    **Inside the same sequential Plan, prefer** ``from_step("name")`` — it
+    reads from in-memory history, needs no store, and is validated at
+    compile time against the step list.  Use ``from_agent`` only when the
+    data dependency crosses run or plan boundaries.
 
-    Compile-time check (inside Plan): the named tool must exist in the tool
-    map and must be an agent (created via ``as_tool()``), not a plain function.
+    **The authoritative key is the alias passed to** ``as_tool("alias")``.
+    ``from_agent("research")`` always reads from the store key
+    ``"__agent_output__:research"`` regardless of the wrapped agent's
+    internal ``name=`` attribute.  The alias is the public contract.
+
+    The source agent must have ``store=`` attached, and that store must be
+    shared with the orchestrator.  PlanCompiler enforces both at Agent
+    construction time.
+
+    If the store key is absent at runtime (agent hasn't run yet), the
+    sentinel contributes nothing — silent no-op, no error.
 
     Example::
 
@@ -89,17 +101,12 @@ class _FromAgent:
 
         researcher = Agent(
             engine=LLMEngine("claude-opus-4-7"),
-            tools=[search.as_tool("search")],
+            tools=[search],     # search is a plain function
             store=store,
-            name="research",
         )
-        writer = Agent(
-            engine=LLMEngine("gpt-4o"),
-            store=store,
-            name="write",
-        )
+        writer = Agent(engine=LLMEngine("gpt-4o"))
 
-        # Works in Plan
+        # Works in Plan — from_agent reads what the "research" step wrote.
         pipeline = Agent(
             engine=Plan(
                 Step("research"),
@@ -109,8 +116,8 @@ class _FromAgent:
             store=store,
         )
 
-        # Also works when researcher is called standalone — writer reads
-        # from_agent("research") after researcher has run and written to store.
+        # Also works when researcher is called standalone — any agent sharing
+        # the same Store can later read from_agent("research").
     """
 
     name: str
@@ -138,7 +145,7 @@ class _FromMemory:
 
         researcher = Agent(
             engine=LLMEngine("claude-opus-4-7"),
-            tools=[search.as_tool("search")],
+            tools=[search],     # search is a plain function
             memory=Memory(strategy="summary"),
         )
         writer = Agent(engine=LLMEngine("gpt-4o"))
