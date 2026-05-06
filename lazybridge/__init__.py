@@ -1,46 +1,69 @@
-"""lazybridge — zero-boilerplate multi-provider LLM agent framework.
+"""lazybridge — Agent = Engine + Tools + State.
 
-Tier 1 — 2 lines::
+Every Agent has the same shape.  Only the engine changes::
 
-    from lazybridge import Agent
-    Agent("claude-opus-4-7")("hello").text()
+    from lazybridge import Agent, LLMEngine, Plan, Step, Memory, Session, Store
 
-Tier 2 — with tools::
+    # --- Build sub-agents first ---
 
-    Agent("claude-opus-4-7", tools=[search, calculator])("find AI news").text()
-
-Tier 3 — structured output::
-
-    class Summary(BaseModel):
-        title: str
-        bullets: list[str]
-
-    Agent("claude-opus-4-7", output=Summary)("summarize...").payload.title
-
-Tier 4 — multi-agent chain / parallel::
-
-    researcher = Agent("claude-opus-4-7", tools=[search])
-    writer     = Agent("claude-opus-4-7")
-    Agent.chain(researcher, writer)("AI trends").text()
-
-    Agent.parallel(fact_checker, sentiment_analyzer, summarizer)("article text")
-
-Tier 5 — structured plan with routing::
-
-    from lazybridge import Agent, Plan, Step
-    Agent(engine=Plan(Step("search", output=SearchResult), Step("rank")))
-
-Tier 6 — full config::
-
-    from lazybridge import Agent, LLMEngine, Memory, Session
-    from lazybridge.ext.otel import OTelExporter
-    Agent(
-        engine=LLMEngine("claude-opus-4-7", thinking=True, max_turns=20),
-        tools=[search],
-        output=Report,
-        memory=Memory(strategy="auto"),
-        session=Session(exporters=[OTelExporter(endpoint="http://jaeger:4318")]),
+    researcher = Agent(
+        engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
+        tools=[search],          # search is a plain Python function
+        store=store,             # required if other steps use from_agent("research")
     )
+    writer = Agent(
+        engine=LLMEngine("gpt-4o", system="You are a concise technical writer."),
+    )
+
+    # --- Deterministic orchestrator: Plan engine ---
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),                                  # calls researcher tool
+            Step("write", task=from_prev, context=from_step("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),   # alias "research" = Step target + sentinel key
+            writer.as_tool("write"),
+        ],
+        memory=Memory(strategy="summary"),
+        session=Session(),
+    )
+
+    # --- Dynamic orchestrator: LLM engine ---
+
+    orchestrator = Agent(
+        engine=LLMEngine("claude-opus-4-7"),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+        memory=Memory(),
+        session=Session(),
+    )
+
+    result = pipeline("AI trends 2026").text()
+
+**String shortcut** — ``Agent("claude-opus-4-7")`` expands to
+``Agent(engine=LLMEngine("claude-opus-4-7"))``.  Use the explicit
+``LLMEngine(...)`` form when you need ``system=``, ``max_turns=``,
+``thinking=``, or other engine-level config.
+
+**The name chain** — the alias passed to ``as_tool("name")`` is the
+authoritative key that connects every part of the system::
+
+    researcher.as_tool("research")  →  key in tool map: "research"
+    Step("research")                →  looks up "research" in tool map ✓
+    routes={"research": predicate}  →  routes to the step named "research" ✓
+    from_step("research")           →  reads output of step "research" (in-Plan) ✓
+    from_agent("research")          →  reads last stored output of "research" (cross-run) ✓
+    from_memory("research")         →  reads live memory of "research" ✓
+
+**Choosing between sentinels** — inside a single Plan, ``from_step`` is
+the standard choice: it reads from in-memory step history with no
+external dependency.  ``from_agent`` is for cross-run or cross-plan
+data: last known output persisted in a shared Store.
+``from_memory`` reads the agent's live conversation history.
 """
 
 __version__ = "0.7.0"
@@ -88,7 +111,7 @@ from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
 from lazybridge.predicates import when
-from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
+from lazybridge.sentinels import from_agent, from_memory, from_parallel, from_parallel_all, from_prev, from_start, from_step
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
@@ -105,6 +128,8 @@ __all__ = [
     "from_step",
     "from_parallel",
     "from_parallel_all",
+    "from_memory",
+    "from_agent",
     # Tools
     "Tool",
     "ToolProvider",

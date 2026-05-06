@@ -34,6 +34,9 @@ from lazybridge.engines.plan._types import (
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
     Sentinel,
+    _AGENT_OUTPUT_KEY_PREFIX,
+    _FromAgent,
+    _FromMemory,
     _FromParallel,
     _FromParallelAll,
     _FromPrev,
@@ -91,11 +94,14 @@ class Plan:
             )
             Agent(engine=plan)("topic")   # continues if a checkpoint exists
 
-        The persisted shape is intentionally small (no Envelopes, no
-        in-memory history): ``{"next_step": str, "kv": {...},
-        "completed_steps": [...], "status": str, "run_uid": str}``.
-        The in-memory ``history`` restarts empty on resume — only
-        ``writes``-bucket values survive across process boundaries.
+        The persisted shape (v2) includes minimal plan state plus serialized
+        StepResult history: ``{"next_step": str, "kv": {...},
+        "completed_steps": [...], "status": str, "run_uid": str,
+        "history": [...]}``.
+        History is serialized so a resumed run can re-aggregate
+        ``from_parallel_all`` bands and nested-cost rollup against completed
+        upstream steps.  Only ``writes``-bucket values and step history
+        survive across process boundaries; live in-memory state does not.
 
         Concurrency
         -----------
@@ -744,7 +750,7 @@ class Plan:
         ``branch_id`` is set for parallel-branch steps so their Session
         events can be distinguished from sequential-step events.
         """
-        step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
+        step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv, tool_map)
 
         # Short-circuit when the referenced upstream envelope carries an
         # error.  Previously the resolver stripped ``.error`` and this
@@ -770,7 +776,7 @@ class Plan:
             # item normalises to a 1-list so the resolver path is uniform.
             items = step.context if isinstance(step.context, list) else [step.context]
             for item in items:
-                ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv)
+                ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv, tool_map)
                 if ctx_env.context:
                     ctx_parts.append(ctx_env.context)
                 if ctx_env.payload and isinstance(ctx_env.payload, str):
@@ -816,6 +822,7 @@ class Plan:
         start: Envelope,
         history: list[StepResult],
         kv: dict[str, Any],
+        tool_map: dict[str, Any],
     ) -> Envelope:
         # ``from_prev`` means "the previous step's *output* becomes the next
         # step's task" — i.e. real chain semantics.  Without this promotion
@@ -873,6 +880,29 @@ class Plan:
             return start
         if isinstance(sentinel, _FromParallelAll):
             return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
+        if isinstance(sentinel, _FromMemory):
+            # Resolved at execution time — reads the live memory of the agent
+            # registered under sentinel.name in the tool map.  Empty if the
+            # agent has no memory or hasn't run yet (silent no-op, no error).
+            tool = tool_map.get(sentinel.name)
+            memory = getattr(tool, "agent_memory", None) if tool else None
+            if memory is not None:
+                mem_text = memory.text()
+                if mem_text:
+                    return Envelope(task=mem_text, context=mem_text, payload=mem_text)
+            return Envelope(task="", context=None, payload="")
+        if isinstance(sentinel, _FromAgent):
+            # Reads the last output of the named agent from the shared Store.
+            # Written by Agent._run_body after a successful run under key
+            # "__agent_output__:{name}".  Silent no-op if not yet written.
+            tool = tool_map.get(sentinel.name)
+            agent_store = getattr(tool, "agent_store", None) if tool else None
+            if agent_store is not None:
+                value = agent_store.read(_AGENT_OUTPUT_KEY_PREFIX + sentinel.name)
+                if value is not None:
+                    text = str(value)
+                    return Envelope(task=text, context=text, payload=text)
+            return Envelope(task="", context=None, payload="")
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)
         return prev

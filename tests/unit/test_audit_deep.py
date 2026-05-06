@@ -113,6 +113,7 @@ def test_h3_plan_short_circuits_on_upstream_error() -> None:
         start=Envelope.from_task("task"),
         history=[StepResult(step_name="first", envelope=errored)],
         kv={},
+        tool_map={},
     )
     assert resolved.error is not None
     assert resolved.error.message == "boom"

@@ -2,6 +2,37 @@
 
 Five minutes to a working agent. Copy-paste the snippets in order.
 
+## The grammar
+
+Every LazyBridge agent has the same shape:
+
+```python
+Agent(
+    engine=...,    # the brain — decides what happens
+    tools=[...],   # the capabilities — what the agent can call
+    memory=...,    # the context — conversation history
+    session=...,   # observability — event log
+)
+```
+
+The engine is the only thing that changes. A single LLM call, a
+multi-step plan, a human approval gate — all use the same Agent wrapper.
+
+**String shortcut** — `Agent("claude-opus-4-7")` is sugar for
+`Agent(engine=LLMEngine("claude-opus-4-7"))`. It's valid everywhere in
+this guide. Use the explicit `LLMEngine(...)` form when you need to
+configure the engine directly (e.g. `system=`, `max_turns=`,
+`thinking=`).
+
+**`as_tool("name")`** — the way one Agent becomes a capability of
+another. The name you pass connects the tool to the Plan or the LLM::
+
+    researcher.as_tool("research")   →  tool map key: "research"
+    Step("research")                 →  calls the "research" tool
+    routes={"research": predicate}   →  routes to the "research" step
+
+Keep reading to see this in practice.
+
 ## Install
 
 ```bash
@@ -82,27 +113,51 @@ print(env.payload.title)
 print(env.payload.bullets)
 ```
 
-## 5. Two agents, chained
+## 5. Two agents composed
 
-Pass one agent as a tool to another. **No ceremony — tool is tool.**
+Build sub-agents first, then give them to an orchestrator via
+`as_tool("name")`. The name you pass is how the orchestrator refers to
+that capability — in the Plan's Step targets, in LLM tool calls, and in
+routing rules.
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine, Plan, Step
 
 def search(query: str) -> str:
     """Search the web for ``query``; return the top 3 hits."""
     return "..."
 
-researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
-writer     = Agent("claude-opus-4-7", tools=[researcher], name="writer")
+# Sub-agents — declared first, each with its own engine and tools
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7", system="You are a research specialist."),
+    tools=[search],
+)
+writer = Agent(
+    engine=LLMEngine("claude-opus-4-7", system="You are a concise technical writer."),
+)
 
-print(writer("write a one-paragraph summary of AI news April 2026").text())
-```
+# Dynamic orchestrator — LLM decides when to call which agent
+orchestrator = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[
+        researcher.as_tool("research"),   # ← name connects tool map to LLM calls
+        writer.as_tool("write"),
+    ],
+)
+print(orchestrator("write a summary of AI news April 2026").text())
 
-Or use the `chain` sugar for a pre-scripted linear pipeline:
-
-```python
-print(Agent.chain(researcher, writer)("AI news April 2026").text())
+# Deterministic orchestrator — Plan decides the order
+pipeline = Agent(
+    engine=Plan(
+        Step("research"),          # calls researcher.as_tool("research")
+        Step("write"),             # calls writer.as_tool("write")
+    ),
+    tools=[
+        researcher.as_tool("research"),
+        writer.as_tool("write"),
+    ],
+)
+print(pipeline("AI news April 2026").text())
 ```
 
 ## 6. Observe what happened
@@ -151,7 +206,7 @@ agent = Agent(
     timeout=30.0,                    # total deadline for run()
     max_retries=3,                   # provider transient-error retries
     cache=True,                      # prompt caching where supported
-    fallback=Agent("gpt-5"),         # provider redundancy
+    fallback=Agent("gpt-5.5"),         # provider redundancy
 )
 ```
 

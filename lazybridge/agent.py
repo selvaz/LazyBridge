@@ -79,109 +79,91 @@ def _resolve_runtime_kwargs(
 
 
 class Agent:
-    """Universal agent — ``Container(engine, tools, state)``.
+    """Universal agent — ``Agent(engine, tools, state)``.
 
-    **The framework's invariant.**  Every Agent is the same shape: an
-    *engine* that decides how the agent behaves, a *tools* list it can
-    invoke, and *state* (memory, session, guard, verify, fallback,
-    output, name).  Reading any agent constructor tells you immediately
-    which engine is in there — the engine is the lever that swaps
-    behaviour, everything else is uniform.
+    Every Agent has the same shape, regardless of what it does:
 
-    **Tool-is-Tool contract.**  ``tools=[...]`` accepts plain functions,
-    :class:`Tool` instances, other :class:`Agent` instances, and Agents
-    whose tools are themselves Agents.  The composition is closed and
-    uniform: an Agent of an Agent of a function looks the same at every
-    level.  Nested Agents inherit the outer session so observability
-    flows through the whole tree.
+    - ``engine`` — the brain: decides what happens (LLM, Plan, Human, …)
+    - ``tools``  — the capabilities: what the agent can invoke
+    - state      — ``memory``, ``session``, ``guard``, ``verify``, ``output``
 
-    **Parallelism is a capability, not a configuration.**  When the
-    underlying engine emits multiple tool invocations in a single step
-    (e.g. an LLM tool loop turn with N tool calls), LazyBridge executes
-    them concurrently via ``asyncio.gather``.  There is no "serial vs
-    parallel" mode to pick — if you want N things to happen at once,
-    put N things in ``tools=[]`` and the engine will do it for you.
+    **This is the canonical form**::
 
-    Construction surface — ``Agent.from_<engine_kind>(...)``
-    --------------------------------------------------------
-
-    Every factory builds the right engine, forwards the same uniform
-    state kwargs (``memory=``/``session=``/``guard=``/``verify=``/
-    ``fallback=``/``output=``/``name=``/etc.) to the unified
-    constructor, and returns an :class:`Agent` (or, for the one
-    documented asymmetry, a fan-out runner).
-
-    *Core engines* (built into ``lazybridge``)::
-
-        Agent("claude-opus-4-7")               # implicit shortcut for from_model
-        Agent.from_model("claude-opus-4-7", tools=[search])
-        Agent.from_provider("anthropic", tier="top")
-        Agent.from_engine(any_engine_instance) # escape hatch — any engine
-        Agent.from_plan(*steps, store=..., resume=True)
-        Agent.from_chain(researcher, writer)           # linear Plan sugar
-        Agent.from_parallel(a, b, c)                   # → list[Envelope]
-
-    *Extension engines* (live in :mod:`lazybridge.ext`, kept off the
-    core ``Agent`` class to respect the core/ext import boundary —
-    see ``docs/guides/core-vs-ext.md``).  Two equivalent paths::
-
-        # 1. Escape-hatch through Agent.from_engine
-        from lazybridge.ext.hil import SupervisorEngine
-        Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
-
-        # 2. Module-level factory (symmetric ergonomic shape)
-        from lazybridge.ext.hil import supervisor_agent, human_agent
-        from lazybridge.ext.planners import (
-            orchestrator_agent, blackboard_orchestrator_agent,
+        # Sub-agents declared first
+        researcher = Agent(
+            engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
+            tools=[search.as_tool("search")],
         )
-        supervisor_agent(tools=[...], agents=[...], session=sess)
-        human_agent(timeout=60.0, default="approve")
-        orchestrator_agent(agents=[researcher, writer])
-        blackboard_orchestrator_agent(agents=[researcher, writer])
+        writer = Agent(
+            engine=LLMEngine("gpt-4o", system="You are a concise writer."),
+        )
 
-    All paths return the same :class:`Agent` shape.  Call ``.run()`` /
-    ``__call__()`` / ``stream()`` exactly the same way regardless of
-    which engine is inside.
+        # Orchestrator — same Agent shape, different engine
+        pipeline = Agent(
+            engine=Plan(
+                Step("research"),
+                Step("write", task=from_prev, context=from_step("research")),
+            ),
+            tools=[
+                researcher.as_tool("research"),   # name must match Step target
+                writer.as_tool("write"),
+            ],
+            memory=Memory(strategy="summary"),
+            session=sess,
+        )
 
-    Examples
-    --------
+        # LLM orchestrator — same shape, engine decides dynamically
+        orchestrator = Agent(
+            engine=LLMEngine("claude-opus-4-7"),
+            tools=[
+                researcher.as_tool("research"),
+                writer.as_tool("write"),
+            ],
+            memory=Memory(),
+            session=sess,
+        )
 
-    Tier 1 (2 lines)::
+    The engine is the only thing that changes. Everything else — tools,
+    memory, session, guard, output — is the same surface on every Agent.
 
-        Agent("claude-opus-4-7")("hello").text()
+    **String shortcut** — ``Agent("claude-opus-4-7")`` is sugar for
+    ``Agent(engine=LLMEngine("claude-opus-4-7"))``.  Use the explicit
+    form when you need to configure the engine (``system=``, ``max_turns=``,
+    ``thinking=``, etc.).
 
-    Tier 2 (with tools — functions, agents, or mixed)::
+    **``as_tool("name")``** is how an Agent becomes a capability of
+    another Agent.  The name passed to ``as_tool`` must match the
+    ``target`` string in the parent's ``Step`` or the tool name the LLM
+    will call.  This name is the key that connects the tool map to the
+    plan::
 
-        Agent.from_model("claude-opus-4-7", tools=[search, summarizer])("…").text()
+        researcher.as_tool("research")   →  tool map key: "research"
+        Step("research")                 →  looks up "research" in tool map
 
-    Tier 3 (structured output)::
+    **Factory methods** are sugar over the canonical form:
 
-        Agent.from_model("claude-opus-4-7", output=Summary)("…").payload.title
+    - ``Agent.from_plan(*steps)``       → ``Agent(engine=Plan(*steps))``
+    - ``Agent.from_model("model")``     → ``Agent(engine=LLMEngine("model"))``
+    - ``Agent.from_chain(a, b)``        → ``Agent(engine=Plan(Step(a), Step(b)))``
+    - ``Agent.from_engine(e)``          → ``Agent(engine=e)``
 
-    Tier 4 (deterministic fan-out / sequential chain)::
+    Extension engines live in :mod:`lazybridge.ext` to respect the
+    core/ext import boundary::
 
-        Agent.from_chain(researcher, writer)("AI trends").text()
-        Agent.from_parallel(a, b, c)("task")   # → list[Envelope]
-
-    Tier 5 (declared pipeline)::
-
-        Agent.from_plan(
-            Step(researcher, name="search"),
-            Step(writer,     name="write"),
-            store=Store(db="run.sqlite"),
-            checkpoint_key="research",
-            resume=True,
-        )("AI trends April 2026")
+        from lazybridge.ext.hil import HumanEngine, SupervisorEngine
+        Agent(engine=HumanEngine(timeout=60), tools=[approve.as_tool("approve")])
+        Agent(engine=SupervisorEngine(tools=[...]))
     """
 
     _is_lazy_agent = True  # recognised by wrap_tool()
 
     def __init__(
         self,
-        engine_or_model: str | Any = "claude-opus-4-7",
+        engine: str | Any | None = None,
         tools: list[Tool | Callable | Agent] | None = None,
         output: type = str,
         memory: Any | None = None,
+        store: Any | None = None,
         sources: list[Any] | None = None,
         guard: Any | None = None,
         verify: Agent | None = None,
@@ -193,9 +175,6 @@ class Agent:
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
-        # Keyword alias for engine_or_model when passing a non-string Engine
-        # (e.g. ``Agent(engine=SupervisorEngine(...))``).
-        engine: Any | None = None,
         # Provider-native server-side tools (WEB_SEARCH, CODE_EXECUTION, …).
         # Accepted directly on Agent as a shortcut for
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
@@ -280,11 +259,12 @@ class Agent:
         description = _resolved["description"]
         from lazybridge.engines.llm import LLMEngine
 
-        if engine is not None:
-            self.engine: Any = engine
-        elif isinstance(engine_or_model, str):
-            model_str = model or engine_or_model
-            self.engine = LLMEngine(
+        # Canonical: Agent(engine=LLMEngine(...)) or Agent(engine=Plan(...))
+        # Sugar:     Agent("claude-opus-4-7") → engine is a model string → auto-builds LLMEngine
+        #            Agent() → engine is None → defaults to "claude-opus-4-7"
+        if engine is None or isinstance(engine, str):
+            model_str = model or engine or "claude-opus-4-7"
+            self.engine: Any = LLMEngine(
                 model_str,
                 native_tools=native_tools,
                 allow_dangerous_native_tools=allow_dangerous_native_tools,
@@ -293,7 +273,7 @@ class Agent:
                 cache=cache,
             )
         else:
-            self.engine = engine_or_model
+            self.engine = engine
 
         # If the caller passed native_tools but also supplied a pre-built
         # engine, push the list onto the engine if it has the attribute.
@@ -326,6 +306,7 @@ class Agent:
         self.max_output_retries = max_output_retries
         self.timeout = timeout
         self.memory = memory
+        self.store = store
         self.sources = list(sources or [])
         if max_verify < 1:
             raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
@@ -500,6 +481,12 @@ class Agent:
                     error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
                     metadata=result.metadata,
                 )
+
+        # Write last output to shared store so from_agent("name") can read it.
+        # Only written on success — failed runs do not overwrite the last good output.
+        if self.store is not None and result.ok:
+            from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+            self.store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, result.text())
 
         return result
 
@@ -727,7 +714,17 @@ class Agent:
         if verify is None:
 
             async def _run(task: str) -> Envelope:
-                return await agent.run(task)
+                result = await agent.run(task)
+                # Always write under the alias so from_agent("alias") can find
+                # the output regardless of agent.name.  _run_body also writes
+                # under agent.name (for standalone callers); the alias write
+                # here is the authoritative key for Plan sentinel resolution.
+                _store = getattr(agent, "store", None)
+                if _store is not None and result.ok and effective_name != getattr(agent, "name", None):
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + effective_name, result.text())
+                return result
         else:
 
             async def _run(task: str) -> Envelope:  # type: ignore[misc]
@@ -735,12 +732,18 @@ class Agent:
                 from lazybridge.envelope import Envelope as _Env
 
                 env = _Env.from_task(str(task))
-                return await verify_with_retry(
+                result = await verify_with_retry(
                     agent,
                     env,
                     verify,
                     max_verify=max_verify,
                 )
+                _store = getattr(agent, "store", None)
+                if _store is not None and result.ok and effective_name != getattr(agent, "name", None):
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + effective_name, result.text())
+                return result
 
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc
@@ -751,6 +754,8 @@ class Agent:
             description=effective_desc,
             mode="signature",
             returns_envelope=True,
+            agent_memory=getattr(self, "memory", None),
+            agent_store=getattr(self, "store", None),
         )
 
     def definition(self) -> Any:

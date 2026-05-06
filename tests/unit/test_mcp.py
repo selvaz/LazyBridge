@@ -134,7 +134,7 @@ def test_as_tools_caches_after_first_call() -> None:
 
 def test_agent_tools_argument_accepts_mcp_server_directly() -> None:
     agent = Agent(
-        engine_or_model=MockAgent.__name__,  # placeholder; we won't run
+        engine=MockAgent.__name__,  # placeholder; we won't run
         tools=[MCP.from_transport("fs", FakeTransport())],
     )
     expected = {"fs.list_directory", "fs.read_file", "fs.delete_file"}
@@ -147,7 +147,7 @@ def test_agent_tools_can_mix_mcp_with_plain_callables() -> None:
         return f"hit: {query}"
 
     agent = Agent(
-        engine_or_model="claude-opus-4-7",
+        engine="claude-opus-4-7",
         tools=[search, MCP.from_transport("fs", FakeTransport())],
     )
     assert "search" in agent._tool_map
@@ -297,7 +297,7 @@ def test_transport_connect_error_surfaces_at_agent_construction() -> None:
     A failing connect should bubble up immediately."""
     fs = MCP.from_transport("fs", _RaisingTransport(RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
-        Agent(engine_or_model="claude-opus-4-7", tools=[fs])
+        Agent(engine="claude-opus-4-7", tools=[fs])
 
 
 def test_empty_tool_catalogue_yields_no_tools() -> None:
