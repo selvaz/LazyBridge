@@ -49,21 +49,21 @@ async def astream(self, request):
 !!! note "API reference"
 
     # lazybridge.core.types — internal types exposed for Engine / Provider authors.
-    
+
     Role (StrEnum):   USER, ASSISTANT, SYSTEM, TOOL
     Message:          role + content (str or list[ContentBlock])
       Message.user(text)  Message.assistant(text)  Message.system(text)
-    
+
     ContentBlock (union):
       TextContent(text)
       ImageContent(source, mime_type)
       ToolUseContent(id, name, input)
       ToolResultContent(tool_use_id, content, is_error)
       ThinkingContent(text)
-    
+
     ToolDefinition(name, description, parameters: dict, strict: bool = False)
     ToolCall(id, name, arguments, thought_signature=None)
-    
+
     CompletionRequest(
         messages: list[Message],
         model: str | None = None,
@@ -79,7 +79,7 @@ async def astream(self, request):
         stream: bool = False,
         extra: dict = {},
     )
-    
+
     CompletionResponse(
         content: str,
         thinking: str | None = None,
@@ -92,9 +92,9 @@ async def astream(self, request):
         grounding_sources: list = [],
         # …plus provider-specific fields
     )
-    
+
     UsageStats(input_tokens, output_tokens, thinking_tokens, cached_input_tokens, cost_usd)
-    
+
     StructuredOutputConfig(schema, strict=True)
     ThinkingConfig(enabled=True, effort="high", budget_tokens=None, display=None)
     SkillsConfig(skills: list[str])

@@ -62,12 +62,12 @@ judge("grade the last turn")
         summarizer: Agent | Callable | None = None,
         summarizer_timeout: float | None = 30.0,  # deadline applied to async summarisers
     ) -> Memory
-    
+
     memory.add(user: str, assistant: str, *, tokens: int = 0) -> None
     memory.messages() -> list[Message]
     memory.text() -> str           # current view as plain text (live read)
     memory.clear() -> None
-    
+
     Usage: Agent("model", memory=Memory("auto"))
            Agent("model", sources=[mem])     # share live view across agents
 

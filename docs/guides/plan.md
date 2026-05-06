@@ -566,7 +566,7 @@ Agent.from_engine(plan, tools=[score_tool])("…")
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
     ) -> Engine
-    
+
     Step(
         target: str | Callable | Agent,                    # tool name, function, or Agent
         task: Sentinel | str = from_prev,                  # where my input comes from
@@ -583,19 +583,19 @@ Agent.from_engine(plan, tools=[score_tool])("…")
         routes_by: str | None = None,
         after_branches: str | None = None,                 # exclusive-branch rejoin point
     )
-    
+
     # Sentinels — see the dedicated guide for full semantics.
     from_prev                    # previous step's output (default)
     from_start                   # original user task
     from_step("name")            # named prior step
     from_parallel("name")        # named parallel branch
     from_parallel_all("name")    # aggregate every branch in a parallel band, labelled-text join
-    
+
     PlanCompileError             # raised at Agent construction if the DAG is invalid
     ConcurrentPlanRunError       # raised by CAS when two runs share a checkpoint_key
     PlanState                    # checkpoint shape: plan_id, current_step, next_step, store, history, status
     StepResult                   # single step record: step_name, envelope, ts
-    
+
     Usage: Agent(engine=Plan(Step(a), Step(b)))
 
 !!! warning "Rules & invariants"

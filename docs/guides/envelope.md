@@ -54,7 +54,7 @@ def process(env: "Envelope[Article]") -> str:
         payload: T | None = None
         metadata: EnvelopeMetadata = ...
         error: ErrorInfo | None = None
-    
+
         @property
         def ok: bool
         def text() -> str
@@ -62,7 +62,7 @@ def process(env: "Envelope[Article]") -> str:
         def from_task(task: str, context: str | None = None) -> Envelope
         @classmethod
         def error_envelope(exc: Exception, retryable: bool = False) -> Envelope
-    
+
     class EnvelopeMetadata(BaseModel):
         input_tokens: int = 0
         output_tokens: int = 0
@@ -75,7 +75,7 @@ def process(env: "Envelope[Article]") -> str:
         nested_input_tokens: int = 0
         nested_output_tokens: int = 0
         nested_cost_usd: float = 0.0
-    
+
     class ErrorInfo(BaseModel):
         type: str
         message: str

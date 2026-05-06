@@ -50,7 +50,7 @@ Agent.from_engine(plan_reloaded)("AI trends")
 
     Plan.to_dict() -> dict
     Plan.from_dict(data: dict, *, registry: dict[str, Any] | None = None) -> Plan
-    
+
     # Persisted shape (v=1):
     # {
     #   "version": 1,
