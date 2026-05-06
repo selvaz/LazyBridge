@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import time
-import warnings
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -268,22 +267,23 @@ class MCP:
     ) -> MCPServer:
         """Build an MCP server bound to a Streamable HTTP transport.
 
-        **Security note.** When ``allow=None`` (the default), *every* tool
-        advertised by the remote server is exposed to the LLM.  For untrusted
-        or third-party HTTP MCP servers, pass an explicit allowlist::
+        ``allow=`` is **required**. Omitting it raises ``ValueError`` because
+        a remote server could advertise any number of tools and silently
+        exposing them all to the LLM is a security mistake. Pass an explicit
+        list of the tools you want to expose::
 
             MCP.http("github", url, allow=["create_issue", "list_prs"])
 
-        Omitting ``allow=`` is only safe when you control the remote server
-        and trust its full tool surface.
+        To permit all tools advertised by a server you fully control::
+
+            MCP.http("internal", url, allow=["*"])
         """
         if allow is None:
-            warnings.warn(
-                f"MCP.http({name!r}, {url!r}) called without allow=. "
-                f"Every tool the remote server advertises will be exposed to the LLM. "
-                f"Pass allow=['tool_a', 'tool_b'] to restrict the tool surface.",
-                UserWarning,
-                stacklevel=2,
+            raise ValueError(
+                f"MCP.http({name!r}, {url!r}) requires an explicit allow= list. "
+                f"Every tool the remote server advertises would otherwise be exposed to the LLM. "
+                f"Pass allow=['tool_a', 'tool_b'] to restrict the tool surface, "
+                f"or allow=['*'] to permit everything and silence this error."
             )
         from lazybridge.ext.mcp.transports import HttpTransport
 
