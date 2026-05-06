@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 # Valid step name: alphanumeric, underscores, hyphens — no path separators
 # or shell-special characters that could indicate injection attempts.
-_STEP_NAME_RE = re.compile(r'^[\w][\w\-]*$')
+_STEP_NAME_RE = re.compile(r"^[\w][\w\-]*$")
 
 
 def _first_arg_kwargs(tool: Tool, value: str) -> dict[str, str]:
@@ -165,8 +165,7 @@ def validate_plan_refs(
             name = ref.get("name", "")
             if name not in known_names:
                 errors.append(
-                    f"{ctx}: sentinel kind={kind!r} references unknown step {name!r}"
-                    f" (known: {sorted(known_names)})"
+                    f"{ctx}: sentinel kind={kind!r} references unknown step {name!r} (known: {sorted(known_names)})"
                 )
 
     for step in steps:

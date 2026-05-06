@@ -437,7 +437,9 @@ def _make_arg_model(func: Callable) -> type | None:
             if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                 continue
             annotation = hints.get(name, Any)
-            fields[name] = (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
+            fields[name] = (
+                (annotation, ...) if param.default is inspect.Parameter.empty else (annotation, param.default)
+            )
 
         if not fields:
             return None  # zero-arg or pure **kwargs — nothing to validate
