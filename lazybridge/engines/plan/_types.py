@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from lazybridge.envelope import Envelope
-from lazybridge.sentinels import Sentinel, _FromMemory, from_prev
+from lazybridge.sentinels import Sentinel, from_prev
 
 if TYPE_CHECKING:
     pass

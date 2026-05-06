@@ -33,8 +33,8 @@ from lazybridge.engines.plan._types import (
 )
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
-    Sentinel,
     _AGENT_OUTPUT_KEY_PREFIX,
+    Sentinel,
     _FromAgent,
     _FromMemory,
     _FromParallel,
