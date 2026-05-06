@@ -69,7 +69,12 @@ def _table_to_pipe(headers: list[str], rows: list[list[str]], caption: str = "")
     return table
 
 
-def render_fragment_to_qmd(fragment: Fragment, *, allow_raw_html: bool = True) -> str:
+def render_fragment_to_qmd(
+    fragment: Fragment,
+    *,
+    allow_raw_html: bool = True,
+    allow_system_chart_html: bool = True,
+) -> str:
     """Return a self-contained Markdown snippet for one fragment.
 
     The caller is responsible for placing this snippet under the right
@@ -79,13 +84,16 @@ def render_fragment_to_qmd(fragment: Fragment, *, allow_raw_html: bool = True) -
 
     Args:
         allow_raw_html: When ``True`` (default), Pandoc raw-HTML blocks
-            (``{=html}``) and inline HTML tags in fragment bodies are passed
-            through verbatim — required for interactive Plotly charts.
-            When ``False``, raw HTML blocks and inline tags are stripped
-            from model-generated text and callout fragments before emission,
-            preventing injection of arbitrary HTML/JS into the QMD output.
-            Chart fragments are always stripped when this flag is ``False``
-            since their HTML is system-generated, not model-generated.
+            (``{=html}``) and inline HTML tags in *model-generated* text and
+            callout fragment bodies are passed through verbatim.  Set to
+            ``False`` to strip them and prevent HTML/JS injection from
+            LLM-produced content.  Does not affect chart fragments.
+        allow_system_chart_html: When ``True`` (default), the system-generated
+            Plotly ``{=html}`` embed block for chart fragments is passed
+            through verbatim, enabling interactive charts in HTML/Reveal
+            output.  Set to ``False`` to strip it — Plotly charts will be
+            silently omitted (Vega-Lite is unaffected; it uses a non-HTML
+            block).  Independent of ``allow_raw_html``.
     """
     parts: list[str] = []
     if fragment.heading:
@@ -117,7 +125,7 @@ def render_fragment_to_qmd(fragment: Fragment, *, allow_raw_html: bool = True) -
             parts.append("<!-- empty chart fragment -->")
         else:
             block = _render_chart_block(fragment)
-            if not allow_raw_html:
+            if not allow_system_chart_html:
                 block = _strip_raw_html(block)
             parts.append(block)
     else:
@@ -165,7 +173,13 @@ def _render_chart_block(fragment: Fragment) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_section(section: RenderedSection, depth: int = 2, *, allow_raw_html: bool = True) -> str:
+def _render_section(
+    section: RenderedSection,
+    depth: int = 2,
+    *,
+    allow_raw_html: bool = True,
+    allow_system_chart_html: bool = True,
+) -> str:
     """Render a section + its children + its fragments as Markdown."""
     parts: list[str] = []
     if section.heading:
@@ -174,10 +188,23 @@ def _render_section(section: RenderedSection, depth: int = 2, *, allow_raw_html:
         parts.append("")
 
     for fragment in section.fragments:
-        parts.append(render_fragment_to_qmd(fragment, allow_raw_html=allow_raw_html))
+        parts.append(
+            render_fragment_to_qmd(
+                fragment,
+                allow_raw_html=allow_raw_html,
+                allow_system_chart_html=allow_system_chart_html,
+            )
+        )
 
     for child in section.children:
-        parts.append(_render_section(child, depth=depth + 1, allow_raw_html=allow_raw_html))
+        parts.append(
+            _render_section(
+                child,
+                depth=depth + 1,
+                allow_raw_html=allow_raw_html,
+                allow_system_chart_html=allow_system_chart_html,
+            )
+        )
 
     return "\n".join(parts)
 
@@ -214,6 +241,7 @@ def render_report_to_qmd(
     csl_style: str | None = None,
     extra_yaml: dict | None = None,
     allow_raw_html: bool = True,
+    allow_system_chart_html: bool = True,
 ) -> str:
     """Render an :class:`AssembledReport` into a complete .qmd document.
 
@@ -224,12 +252,15 @@ def render_report_to_qmd(
 
     Args:
         allow_raw_html: When ``True`` (default), Pandoc raw ``{=html}``
-            blocks and inline HTML tags are passed through verbatim.
-            Set to ``False`` for reports whose fragment content is
-            model-generated and may contain injected markup — strips
-            raw HTML blocks and inline tags from text and callout
-            fragments before emission.  Chart fragments are also
-            stripped.  Does not affect YAML front-matter or headings.
+            blocks and inline HTML tags in *model-generated* text and callout
+            fragments are passed through verbatim.  Set to ``False`` to strip
+            them and prevent HTML/JS injection from LLM-produced content.
+            Does not affect chart fragments or YAML front-matter.
+        allow_system_chart_html: When ``True`` (default), the
+            system-generated Plotly ``{=html}`` embed block is passed through
+            verbatim for interactive HTML/Reveal output.  Set to ``False`` to
+            strip it — Plotly charts are silently omitted while Vega-Lite
+            charts are unaffected.  Independent of ``allow_raw_html``.
     """
     yaml_lines = ["---", f'title: "{_yaml_escape(report.title)}"']
     if report.metadata.get("author"):
@@ -248,7 +279,14 @@ def render_report_to_qmd(
 
     body_parts: list[str] = list(yaml_lines)
     for section in report.sections:
-        body_parts.append(_render_section(section, depth=2, allow_raw_html=allow_raw_html))
+        body_parts.append(
+            _render_section(
+                section,
+                depth=2,
+                allow_raw_html=allow_raw_html,
+                allow_system_chart_html=allow_system_chart_html,
+            )
+        )
 
     audit = _render_provenance_appendix(report)
     if audit:

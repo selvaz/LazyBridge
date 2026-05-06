@@ -21,6 +21,7 @@ from lazybridge.external_tools.report_builder.fragments import (
 )
 
 _WEASYPRINT_AVAILABLE = importlib.util.find_spec("weasyprint") is not None
+_MARKDOWN_AVAILABLE = importlib.util.find_spec("markdown") is not None
 
 
 def _seed_bus() -> FragmentBus:
@@ -74,6 +75,7 @@ def _seed_bus() -> FragmentBus:
     return bus
 
 
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestExporterContract:
     def test_html_only_round_trip(self, tmp_path):
         bus = _seed_bus()
@@ -113,6 +115,7 @@ class TestExporterContract:
 
 
 @pytest.mark.skipif(not _WEASYPRINT_AVAILABLE, reason="weasyprint not installed")
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestPdfPath:
     def test_pdf_produced(self, tmp_path):
         # Tolerate WeasyPrint version-specific runtime bugs (e.g. pydyf
@@ -132,6 +135,7 @@ class TestPdfPath:
         assert pdf_path.stat().st_size > 1000  # actual PDF content
 
 
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestRevealjsBundle:
     def test_revealjs_html_emitted(self, tmp_path):
         bus = _seed_bus()
@@ -144,6 +148,7 @@ class TestRevealjsBundle:
         assert "<section>" in text
 
 
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestOutlineWithExporter:
     def test_outline_assembler_produces_structured_output(self, tmp_path):
         outline = {"1.intro": "Introduction", "2.data": "Data"}
@@ -158,6 +163,7 @@ class TestOutlineWithExporter:
         assert "Data" in text
 
 
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestBusExportConvenience:
     def test_bus_export_picks_weasyprint_when_quarto_absent(self, tmp_path, monkeypatch):
         # Force the resolver to pick WeasyPrint regardless of system state.

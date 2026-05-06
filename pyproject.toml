@@ -87,7 +87,7 @@ exclude = [
 pythonpath = ["lazybridge"]
 testpaths  = ["tests"]
 asyncio_mode = "auto"
-addopts = "-m 'not live and not heavy_render' --ignore=tests/unit/external_tools"
+addopts = "-m 'not live and not heavy_render'"
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten; anyio:pytest.PytestAssertRewriteWarning",
 ]

@@ -22,9 +22,12 @@ file; no LLM API keys are required.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
+
+_MARKDOWN_AVAILABLE = importlib.util.find_spec("markdown") is not None
 
 from lazybridge import Agent, Plan, Step, from_parallel_all
 from lazybridge.envelope import Envelope
@@ -236,6 +239,7 @@ class TestParallelMockPipeline:
         assert report.metadata["tokens_out_total"] == 3 * 400 + 120
         assert report.metadata["cost_usd_total"] == pytest.approx(3 * 0.0042 + 0.018)
 
+    @pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
     def test_export_produces_html(self, tmp_path):
         bus = FragmentBus(
             "mock-export",
@@ -436,6 +440,7 @@ class TestResumeWithStore:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _MARKDOWN_AVAILABLE, reason="markdown not installed")
 class TestRenderedOutputShape:
     def test_audit_trail_contains_every_step(self, tmp_path):
         OUTLINE = {"1.exec": "E", "2.us": "U", "3.cn": "C"}

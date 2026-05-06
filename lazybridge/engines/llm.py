@@ -188,6 +188,11 @@ class LLMEngine:
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system
+        # CODE_EXECUTION and COMPUTER_USE grant the model arbitrary code
+        # execution / OS control, so they require an explicit opt-in.
+        # FILE_SEARCH (OpenAI vector-store lookup) is intentionally NOT
+        # gated here: it only reaches data the caller has already uploaded
+        # to their own vector store and carries no ambient privilege.
         _DANGEROUS = {NativeTool.CODE_EXECUTION, NativeTool.COMPUTER_USE}
         resolved_native = [NativeTool(t) if isinstance(t, str) else t for t in (native_tools or [])]
         if not allow_dangerous_native_tools:

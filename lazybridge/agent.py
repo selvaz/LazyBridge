@@ -201,6 +201,11 @@ class Agent:
         # ``Agent(engine=LLMEngine(..., native_tools=[...]))``.  Ignored when
         # ``engine=`` is a non-LLM engine.
         native_tools: list[Any] | None = None,
+        # Required opt-in for capabilities with broad access (CODE_EXECUTION,
+        # COMPUTER_USE).  Forwarded to LLMEngine when auto-created and used
+        # to gate the pre-built engine path so callers can't silently bypass
+        # the LLMEngine.__init__ check by passing engine= separately.
+        allow_dangerous_native_tools: bool = False,
         # Structured alternatives to the flat resilience / observability
         # kwargs below.  Precedence: flat kwarg > config object > default.
         # ``Agent(resilience=cfg, timeout=30.0)`` uses the config's
@@ -282,6 +287,7 @@ class Agent:
             self.engine = LLMEngine(
                 model_str,
                 native_tools=native_tools,
+                allow_dangerous_native_tools=allow_dangerous_native_tools,
                 max_retries=max_retries,
                 retry_delay=retry_delay,
                 cache=cache,
@@ -297,6 +303,15 @@ class Agent:
             from lazybridge.core.types import NativeTool
 
             resolved = [NativeTool(t) if isinstance(t, str) else t for t in native_tools]
+            # Run the same dangerous-tools gate that LLMEngine.__init__ would
+            # run — prevents bypassing it by passing engine= separately.
+            _DANGEROUS = {NativeTool.CODE_EXECUTION, NativeTool.COMPUTER_USE}
+            found = [t for t in resolved if t in _DANGEROUS]
+            if found and not allow_dangerous_native_tools:
+                names = ", ".join(t.value for t in found)
+                raise ValueError(
+                    f"Native tools {names} have broad system access. Pass allow_dangerous_native_tools=True to opt in."
+                )
             # Merge without dup — preserve order of existing + append new.
             existing = list(getattr(self.engine, "native_tools", []) or [])
             for t in resolved:
