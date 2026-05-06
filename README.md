@@ -1,5 +1,10 @@
 # LazyBridge
 
+> **Status: alpha (0.7.x).** API is intentionally fluid pre-1.0 — see
+> [CHANGELOG](CHANGELOG.md) for breaking changes between minor
+> releases.  Pin a minor (`lazybridge>=0.7,<0.8`) in production until
+> 1.0.
+
 **Zero-boilerplate Python agent framework.** One `Agent`, swappable
 engines (LLM / Plan / Human / Supervisor), and one tool contract —
 plain functions, other Agents, and Agents-of-Agents all compose the

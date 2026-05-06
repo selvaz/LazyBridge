@@ -157,7 +157,7 @@ from lazybridge.ext.gateway import ExternalToolGateway
 
 ---
 
-## [Unreleased] — short-term audit hardening
+## [0.7.0 — short-term audit hardening] — bundled into the 0.7.0 cut
 
 Closes the high-severity findings from the deep architecture audit
 (plan §5.1).  All changes are additive; defaults shift only on

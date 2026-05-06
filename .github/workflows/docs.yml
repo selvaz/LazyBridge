@@ -43,7 +43,10 @@ jobs:
         run: python -m lazybridge.skill_docs._build
 
       - name: Build docs
-        run: mkdocs build
+        # ``--strict`` turns warnings into errors so a missing nav target
+        # or an unresolved cross-reference fails the build instead of
+        # silently shipping an empty page.
+        run: mkdocs build --strict
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

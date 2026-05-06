@@ -67,6 +67,16 @@ jobs:
       - name: Typecheck
         run: mypy lazybridge/
 
+      - name: Skill docs drift (fragments → docs/skill/ + lazybridge/skill_docs/)
+        # README claims "CI enforces no drift" between fragment sources and
+        # the rendered SKILL.md / per-tier files.  ``--check`` exits non-zero
+        # if any rendered file differs from what the fragments would produce
+        # right now, which catches commits that edit a fragment without
+        # re-running the build.  Lives in the typecheck job because it
+        # imports the full lazybridge package (and therefore needs the
+        # provider SDKs already installed in this job).
+        run: python -m lazybridge.skill_docs._build --check
+
   unit:
     name: unit tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

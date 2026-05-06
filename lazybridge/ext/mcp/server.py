@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import time
+import warnings
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -239,7 +240,27 @@ class MCP:
         deny: Iterable[str] | None = None,
         cache_tools_ttl: float | None = MCPServer._DEFAULT_CACHE_TTL,
     ) -> MCPServer:
-        """Build an MCP server bound to a stdio (subprocess) transport."""
+        """Build an MCP server bound to a stdio (subprocess) transport.
+
+        Unlike :meth:`http`, ``allow=`` is **not required** here: stdio
+        servers are subprocesses you spawn yourself, so the trust model
+        is "you control what runs".  When neither ``allow=`` nor
+        ``deny=`` is given a one-shot ``UserWarning`` is emitted as a
+        gentle reminder that *every* tool the subprocess advertises
+        will be visible to the LLM — pass ``allow=["*"]`` to silence
+        the warning once you've audited the surface.
+        """
+        if allow is None and deny is None:
+            warnings.warn(
+                f"MCP.stdio({name!r}, command={command!r}) was called without an "
+                "explicit allow= or deny= list, so every tool the subprocess "
+                "advertises will be exposed to the LLM.  This is fine when you "
+                "fully control the subprocess, but pass allow=['tool_a', ...] "
+                "to restrict the surface, allow=['*'] to opt in explicitly, or "
+                "deny=['dangerous_*'] to block specific patterns.",
+                UserWarning,
+                stacklevel=2,
+            )
         from lazybridge.ext.mcp.transports import StdioTransport
 
         return MCPServer(
