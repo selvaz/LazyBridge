@@ -218,7 +218,7 @@ class Memory:
         # "sliding" always compresses when turns > window.
         # "auto"    compresses only once token budget is exceeded.
         should_compress = self.strategy in ("sliding", "summary") or (
-            self.strategy == "auto" and total > self.max_tokens
+            self.strategy == "auto" and self.max_tokens is not None and total > self.max_tokens
         )
         if not (should_compress and len(self._turns) > 10):
             return None
