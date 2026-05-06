@@ -254,5 +254,5 @@ def test_build_tool_map_empty_provider_contributes_nothing() -> None:
 def test_agent_constructor_accepts_provider_in_tools_list() -> None:
     a = Tool.from_schema("p.x", "x", {"type": "object", "properties": {}}, lambda: None)
     provider = _FakeToolProvider([a])
-    agent = Agent(engine_or_model="claude-opus-4-7", tools=[provider])
+    agent = Agent(engine="claude-opus-4-7", tools=[provider])
     assert "p.x" in agent._tool_map

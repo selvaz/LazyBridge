@@ -29,6 +29,28 @@ if TYPE_CHECKING:
 class Step:
     """A single node in a Plan.
 
+    ``target`` and ``name`` are two distinct concepts:
+
+    - ``target`` — **which tool to call**.  When a string, it must match
+      the key registered in the parent Agent's tool map, i.e. the name
+      passed to ``agent.as_tool("name")``.  This is the link between the
+      Plan and the tools list::
+
+          researcher.as_tool("research")  →  tool map key: "research"
+          Step("research")                →  target="research", calls that tool
+          Step("research", name="phase1") →  calls "research" tool, step is "phase1"
+
+      When ``target`` is a string and ``name`` is omitted, ``name``
+      defaults to ``target`` — so in the common case they are the same.
+      They only diverge when you want a display name or routing key that
+      differs from the tool name.
+
+    - ``name`` — **the step's identity in the plan**.  Used for routing
+      (``routes={"name": predicate}``), sentinel lookups
+      (``from_step("name")``), checkpointing, and display.  If routing
+      breaks silently, check that the target name in ``routes=`` matches
+      the ``name`` of the intended step, not its ``target``.
+
     Args:
         target:  Tool name (str), callable, or Agent. Required.
         task:    Sentinel or str for the step's task. Default: from_prev.
@@ -43,7 +65,8 @@ class Step:
         input:   Expected input payload type (PlanCompiler validates).
         output:  Expected output payload type (triggers structured output).
         parallel: True if this step runs concurrently with siblings.
-        name:    Override for display / from_step() lookups.
+        name:    The step's identity for routing, sentinels, and display.
+                 Defaults to ``target`` when target is a string.
 
         routes:  **Predicate-based routing**.  Mapping ``{step_name:
                  predicate(envelope) -> bool}``.  After this step runs,
