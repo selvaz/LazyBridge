@@ -120,7 +120,15 @@ class PlanCompiler:
             # plain string.  Anything else falls through ``_resolve_sentinel``
             # to the ``prev`` envelope at runtime — a silent degradation we
             # want to catch at construction.
-            _SENTINEL_TYPES = (_FromPrev, _FromStart, _FromStep, _FromParallel, _FromParallelAll, _FromAgent, _FromMemory)
+            _SENTINEL_TYPES = (
+                _FromPrev,
+                _FromStart,
+                _FromStep,
+                _FromParallel,
+                _FromParallelAll,
+                _FromAgent,
+                _FromMemory,
+            )
             for n, item in enumerate(context_items):
                 if not isinstance(item, (str, *_SENTINEL_TYPES)):
                     raise PlanCompileError(

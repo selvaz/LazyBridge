@@ -487,6 +487,7 @@ class Agent:
         _store = getattr(self, "store", None)
         if _store is not None and result.ok:
             from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
             _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, result.text())
 
         return result
