@@ -67,6 +67,46 @@ agent = Agent("anthropic")
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."  # don't do this
 ```
 
+### MCP Servers — Tool Surface Audit
+
+`MCP.stdio()` and `MCP.http()` integrate an external MCP server's tool
+catalogue into an Agent.  Each tool advertised by the server becomes a
+first-class `Tool` on the Agent — i.e. **anything the LLM decides to
+call will run inside your process or via the server's permissions**.
+
+The two factories use different defaults because the trust models
+differ:
+
+- **`MCP.http(...)` — deny-by-default.**  A remote server is treated
+  as untrusted: omitting `allow=` raises `ValueError` at construction
+  time.  Pass an explicit list of the tools you want the LLM to see,
+  e.g. `allow=["create_issue", "list_prs"]`, or `allow=["*"]` once
+  you have audited the catalogue.
+- **`MCP.stdio(...)` — audit-on-init.**  The subprocess is spawned by
+  your code, so the trust model is "you control the binary".  Both
+  `allow=` and `deny=` are optional; when neither is set a one-shot
+  `UserWarning` reminds you that *every* tool the subprocess
+  advertises will be visible to the LLM.  Suppress the warning by
+  passing `allow=["*"]` once you have audited the surface, or restrict
+  it with a glob (`allow=["fs.read_*"]`) or a `deny=` block list.
+
+```python
+from lazybridge.ext.mcp import MCP
+
+# Restrict an internal stdio MCP server to read-only filesystem tools.
+fs_safe = MCP.stdio(
+    "fs",
+    command="npx",
+    args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+    allow=["fs.list_*", "fs.read_*"],
+    deny=["fs.delete_*", "fs.write_*"],
+)
+```
+
+`allow` / `deny` patterns use `fnmatch` against the **namespaced**
+tool name (`"<server-name>.<tool>"`) — write `"github.delete_*"`,
+not `"delete_*"`.
+
 ### HumanEngine Web UI
 
 `HumanEngine(ui="web")` starts an HTTP server on `localhost` only. It is not

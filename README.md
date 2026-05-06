@@ -76,7 +76,7 @@ LazyBridge grows with you — every tier is additive.
 |---|---|---|
 | [**Basic**](docs/guides/getting-started.md#basic--one-call) | one-shot or tool-calling agents | `Agent` · `Tool` · `NativeTool` · `Envelope` |
 | [**Mid**](docs/guides/getting-started.md#mid--state-observability-multi-agent) | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `chain` · `parallel` · `as_tool` · `MCP` · `HumanEngine` · `EvalSuite` |
-| [**Full**](docs/guides/getting-started.md#full--declared-pipelines-crash-resume) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · `from_prev`/`from_step`/`from_parallel` · `SupervisorEngine` · checkpoint · exporters · `verify=` |
+| [**Full**](docs/guides/getting-started.md#full--declared-pipelines-crash-resume) | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · sentinels (`from_prev`/`from_start`/`from_step`/`from_parallel`/`from_parallel_all`) · `SupervisorEngine` · checkpoint · exporters · `verify=` |
 | [**Advanced**](docs/guides/getting-started.md#advanced--extending-the-framework) | extending the framework | `BaseProvider` · `Plan.to_dict` · `register_provider_*` · `core.types` |
 
 ## Install

@@ -32,6 +32,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   (linear progression resumes from the routed-to step's declared
   position).  See `Step` docstring for the full example.
 
+### Hardening
+
+- **`MCP.stdio()` now warns on unrestricted tool surface.**  When
+  both ``allow=`` and ``deny=`` are omitted a one-shot ``UserWarning``
+  reminds the caller that every tool the subprocess advertises will
+  reach the LLM.  Trust model is unchanged (stdio is still
+  audit-on-init, not deny-by-default like ``MCP.http``); silence the
+  warning by passing ``allow=["*"]`` once you've audited the surface,
+  or restrict it with a glob.  See ``SECURITY.md`` for the full
+  guidance.
+- **CI now enforces skill-doc drift.**  ``test.yml`` runs
+  ``python -m lazybridge.skill_docs._build --check`` in the typecheck
+  job: a fragment edit without a re-render now fails the PR instead
+  of slipping through (this was the documented contract; CI just
+  hadn't been wired).
+- **`mkdocs build --strict`.**  A missing nav target or unresolved
+  cross-reference in ``docs/`` now fails the docs workflow instead of
+  shipping an empty page.
+
+### Documentation
+
+- **README** — added an "alpha (0.7.x)" status callout up top, and
+  expanded the *Full* tier sentinel list to cover all five exports
+  (``from_prev`` / ``from_start`` / ``from_step`` / ``from_parallel``
+  / ``from_parallel_all``).
+- **SECURITY.md** — new "MCP Servers — Tool Surface Audit" section
+  documenting the deny-by-default contract on ``MCP.http`` and the
+  audit-on-init warning on ``MCP.stdio``.
+- **API reference** — ``_UNSET`` sentinels in generated signatures
+  now have an explicit explanation at the top of the reference page,
+  including the ``LLMEngine.stream_idle_timeout`` semantics.
+- **Skill docs reference grouping fixed** —
+  ``from_parallel_all``, ``GuardError``, and ``EventExporter`` are
+  now classified under their proper categories instead of falling
+  through to "Core types".
+- **CHANGELOG hygiene** — the second ``[Unreleased]`` section was
+  renamed to ``[0.7.0 — short-term audit hardening]`` so the file no
+  longer carries two unreleased headers.
+
 ### Bug Fixes (Critical)
 
 - **Store SQLite CAS: open transaction on `JSONDecodeError`** — the

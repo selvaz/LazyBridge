@@ -399,6 +399,12 @@ def render_reference() -> str:
     out = [
         "# LazyBridge — API reference\n\n",
         "Signature-first index of every public symbol. For usage and context, see the tier pages.\n\n",
+        "> **About `_UNSET` in signatures.**  Some constructors (e.g. ``Agent``, "
+        "``LLMEngine``) use a private sentinel to distinguish *omitted* from "
+        "*explicit ``None``*.  Treat it as 'use the framework default' — pass a "
+        "real value if you want to override.  For ``LLMEngine.stream_idle_timeout`` "
+        "the default is 90 s (positive float) and passing ``None`` explicitly "
+        "disables stall detection with a one-shot ``UserWarning``.\n\n",
     ]
 
     groups: dict[str, list[tuple[str, str, str]]] = {
@@ -421,6 +427,7 @@ def render_reference() -> str:
         "from_start": "Envelope",
         "from_step": "Envelope",
         "from_parallel": "Envelope",
+        "from_parallel_all": "Envelope",
         "Engine": "Engines",
         "LLMEngine": "Engines",
         "Plan": "Engines",
@@ -438,9 +445,11 @@ def render_reference() -> str:
         "EventType": "Memory / Store / Session",
         "Guard": "Guards",
         "GuardAction": "Guards",
+        "GuardError": "Guards",
         "ContentGuard": "Guards",
         "GuardChain": "Guards",
         "LLMGuard": "Guards",
+        "EventExporter": "Exporters",
         "CallbackExporter": "Exporters",
         "ConsoleExporter": "Exporters",
         "FilteredExporter": "Exporters",

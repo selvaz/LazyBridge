@@ -58,6 +58,16 @@ async with server:        # explicit lifecycle: connect + close
   override.
 - ``allow`` / ``deny`` use shell-style globs (``fnmatch``) against the
   full namespaced name.  ``"github.delete_*"``, not regex.
+- ``MCP.http(...)`` is **deny-by-default**: omitting ``allow=`` raises
+  ``ValueError`` because a remote server is untrusted by default.
+  Pass ``allow=["*"]`` to permit everything once you have audited the
+  catalogue.
+- ``MCP.stdio(...)`` is **audit-on-init**: the subprocess is yours, so
+  ``allow=`` / ``deny=`` are optional.  When both are omitted a
+  one-shot ``UserWarning`` reminds you that every tool advertised by
+  the subprocess will be exposed to the LLM.  Pass ``allow=["*"]``
+  after auditing to silence the warning, or restrict the surface with
+  a glob.
 - The discovered-tools cache lives ``cache_tools_ttl`` seconds
   (default 60).  An MCP server that hot-loads or unloads tools is
   reflected on the next call past the TTL.  Pass

@@ -2,6 +2,8 @@
 
 Signature-first index of every public symbol. For usage and context, see the tier pages.
 
+> **About `_UNSET` in signatures.**  Some constructors (e.g. ``Agent``, ``LLMEngine``) use a private sentinel to distinguish *omitted* from *explicit ``None``*.  Treat it as 'use the framework default' — pass a real value if you want to override.  For ``LLMEngine.stream_idle_timeout`` the default is 90 s (positive float) and passing ``None`` explicitly disables stall detection with a one-shot ``UserWarning``.
+
 
 ## Agent & tools
 
@@ -35,6 +37,10 @@ Use the initial task/context Envelope passed to the Plan.
 ### `from_parallel(name: 'str') -> '_FromParallel'`
 
 *(no docstring)*
+
+### `from_parallel_all(name: 'str') -> '_FromParallelAll'`
+
+Aggregate every consecutive parallel sibling starting at ``name``.
 
 
 ## Engines
@@ -97,6 +103,10 @@ Base guard. Override check_input and/or check_output.
 
 GuardAction(allowed: 'bool' = True, message: 'str | None' = None, modified_text: 'str | None' = None, metadata: 'dict[str, Any]' = <factory>)
 
+### `GuardError`
+
+Raised when a Guard blocks execution.
+
 ### `ContentGuard(input_fn: 'Callable[[str], GuardAction] | None' = None, output_fn: 'Callable[[str], GuardAction] | None' = None) -> 'None'`
 
 Function-based guard.
@@ -111,6 +121,10 @@ Use an Agent as a judge. Returns block if the verdict begins with 'block' or 'de
 
 
 ## Exporters
+
+### `EventExporter(*args, **kwargs)`
+
+Protocol satisfied by all exporter classes.
 
 ### `CallbackExporter(*, fn: 'Callable[[dict[str, Any]], None]') -> 'None'`
 
@@ -142,10 +156,6 @@ Directed graph of agents, routers, and their connections.
 
 ## Core types
 
-### `from_parallel_all(name: 'str') -> '_FromParallelAll'`
-
-Aggregate every consecutive parallel sibling starting at ``name``.
-
 ### `ToolProvider(*args, **kwargs)`
 
 A ``tools=[...]`` entry that expands itself into one or more Tools.
@@ -157,14 +167,6 @@ Provider-native server-side tools (run on provider infrastructure).
 ### `when`
 
 Entry point for the predicate DSL.
-
-### `GuardError`
-
-Raised when a Guard blocks execution.
-
-### `EventExporter(*args, **kwargs)`
-
-Protocol satisfied by all exporter classes.
 
 ### `BaseProvider(api_key: 'str | None' = None, model: 'str | None' = None, *, strict_native_tools: 'bool | None' = None, **kwargs)`
 
