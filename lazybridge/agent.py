@@ -484,7 +484,7 @@ class Agent:
 
         # Write last output to shared store so from_agent("name") can read it.
         # Only written on success — failed runs do not overwrite the last good output.
-        if self.store is not None and result.ok:
+        if getattr(self, "store", None) is not None and result.ok:
             from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
             self.store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, result.text())
 
