@@ -30,6 +30,7 @@ Step(
     # ── Routing — exactly one (or neither): ───────────────────────────
     routes: dict[str, Callable[[Envelope], bool]] | None = None,
     routes_by: str | None = None,
+    after_branches: str | None = None,                 # exclusive-branch rejoin point
 )
 
 # Sentinels — see the dedicated guide for full semantics.
@@ -134,11 +135,15 @@ plan = Plan(
 print(Agent.from_engine(plan)("AI trends April 2026").text())
 ```
 
-### 2. LLM-decided routing via a Literal field
+### 2. LLM-decided routing via a Literal field (exclusive branches)
 
 When the LLM should pick the branch — e.g. classification — use
 ``routes_by="<field>"``.  The output model declares the legal values
 as a ``Literal[...]``; the compiler checks they're real step names.
+Add ``after_branches="step"`` so only the matched branch runs and
+execution resumes at the named rejoin point; without it the routed-to
+step would run and then linear progression would continue through the
+remaining branch steps.
 
 ```python
 from typing import Literal
@@ -153,19 +158,24 @@ plan = Plan(
          task="Classify the incoming ticket. Set severity to "
               "'urgent' for outages, 'spam' for marketing, otherwise 'normal'.",
          output=Triage,
-         routes_by="severity"),    # reads env.payload.severity
+         routes_by="severity",     # reads env.payload.severity
+         after_branches="archive"), # skip siblings; always land at archive
     Step(escalator,  name="urgent",
          task="Page the on-call team and open a P0."),
     Step(triager,    name="normal",
          task="Add to the support backlog with the summary."),
-    Step(closer,     name="spam",  # last in order → terminal
+    Step(closer,     name="spam",
          task="Close the ticket as spam."),
+    Step(archiver,   name="archive",  # always runs after whichever branch ran
+         task="Log the resolved ticket to the audit archive."),
 )
 ```
 
 If the LLM sets ``severity=None`` (or omits it), no routing happens
-and linear progression continues — useful when "I'm not sure" should
-fall through to a default branch.
+and linear progression continues to ``urgent`` (next declared step).
+Use ``after_branches`` whenever you want exactly one branch to run;
+omit it only when detour/fall-through behaviour is intentional (e.g.
+self-correction loops).
 
 ### 3. Self-correction loop
 
@@ -384,8 +394,11 @@ Agent.from_engine(plan, tools=[score_tool])("…")
   there's no shared checkpoint to resume from.
 - ``from_parallel_all("X")`` requires ``X`` to be the FIRST member of
   its parallel band — the engine walks forward from there.
-- A step that fails persists a ``status="failed"`` checkpoint pointing
-  back at itself.  Subsequent ``resume=True`` runs retry that step.
+- A sequential step that fails persists a ``status="failed"`` checkpoint
+  pointing back at itself; subsequent ``resume=True`` runs retry that
+  step.  A parallel band that fails points the checkpoint at the band's
+  **first** step — the whole band re-runs so all sibling ``writes`` are
+  produced consistently.
 - Plan writes go through the *same* store as application writes —
   namespace your keys (e.g. prefix with the pipeline name) so a
   step's ``writes="results"`` doesn't collide with an unrelated
@@ -395,10 +408,12 @@ Agent.from_engine(plan, tools=[score_tool])("…")
 
 **signature**
 
-from_prev                # singleton — previous step's output (default)
-from_start               # singleton — original user task
-from_step(name: str)     # named prior step's output
-from_parallel(name: str) # named parallel branch's output
+from_prev                    # singleton — previous step's output (default)
+from_start                   # singleton — original user task
+from_step(name: str)         # named prior step's output
+from_parallel(name: str)     # named parallel branch's output
+from_parallel_all(name: str) # aggregate every branch in a parallel band;
+                             # payload is a labelled-text string, same as task
 
 # Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
 
@@ -415,6 +430,11 @@ from_parallel(name: str) # named parallel branch's output
 - ``from_parallel("n")``: alias for ``from_step`` intended for parallel
   branch joins. Indicates to readers that the step being referred to
   ran concurrently with siblings.
+- ``from_parallel_all("n")``: aggregates every consecutive parallel step
+  starting at ``"n"`` into one Envelope whose ``task`` and ``payload``
+  are both a labelled-text join (``"[name]\\n<text>\\n\\n..."``).
+  ``"n"`` must be the FIRST step of the band; the compile-time check
+  rejects mid-band references.
 - A plain string passed as ``task=`` is used verbatim — useful for
   hard-coded prompts at intermediate steps.
 - ``context=`` accepts a single sentinel/string OR a **list** of them.
@@ -498,8 +518,11 @@ Plan(
   output; use ``from_parallel("name")`` to reach a specific branch.
 - Parallel steps may have their own ``writes=`` — each branch's
   payload is persisted under the respective Store key.
-- Errors in a parallel branch surface as an error ``Envelope`` for
-  that branch only; sibling branches continue.
+- **Atomicity on failure**: if any branch errors, no ``writes`` from
+  the band are applied (not even those of succeeded siblings), the
+  first-error ``Envelope`` is returned, and the checkpoint points to
+  the band's first step so a future ``resume=True`` re-runs the whole
+  band cleanly.
 
 **example**
 
@@ -540,10 +563,11 @@ Agent.from_engine(plan)("framework update — April 2026")
   non-parallel step IS the join. If you want all three outputs you
   must read them via ``from_parallel("…")`` on the join step;
   otherwise only ``from_prev`` (last completed) is visible.
-- Checkpointing across a parallel block is coarse-grained: the engine
-  saves after the block completes, not per-branch. If branch A
-  succeeds but B crashes, resume retries the whole block, not just B.
-  (Tracked for future work.)
+- Checkpointing across a parallel block is coarse-grained: on failure the
+  checkpoint's ``next_step`` is set to the band's **first** step, not the
+  failing step. If branch A succeeds but B crashes, resume re-runs the
+  whole band from the start so all sibling ``writes`` are produced
+  consistently — resuming mid-band would leave earlier branches' kv stale.
 
 ## SupervisorEngine (ext.hil)
 
@@ -651,9 +675,11 @@ Plan(
 - Success path: ``status="running"`` (next step pending) →
   ``status="done"`` when ``next_step is None``.
 - Fail path: the failing step is NOT added to ``completed_steps``;
-  the checkpoint saves ``next_step=<failing step name>`` +
-  ``status="failed"``. A subsequent run with ``resume=True`` restarts
-  from that step.
+  ``status="failed"`` is written.  For a sequential step, ``next_step``
+  points to the failing step itself so resume retries it.  For a
+  parallel band, ``next_step`` points to the **band's first step** —
+  the whole band must re-run cleanly so all sibling ``writes`` are
+  produced; resuming mid-band would leave earlier siblings' kv stale.
 - Success + ``resume=True`` + ``status="done"`` → short-circuit: Plan
   returns an Envelope with payload = cached ``kv``, without re-running.
 - Checkpoint is JSON-encoded via ``Store.write``; ``writes=`` payloads

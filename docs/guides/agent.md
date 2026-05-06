@@ -108,16 +108,16 @@ prod("draft a one-pager on the LazyBridge audit findings")
         fallback: Agent | None = None,
         cache: bool | CacheConfig = False,    # prompt caching
     ) -> Agent
-
+    
     Sync:    agent(task) -> Envelope
     Async:   await agent.run(task) -> Envelope
     Stream:  async for chunk in agent.stream(task): ...
-
+    
     Factories:
       Agent.from_model(model: str, **kw) -> Agent           # explicit LLM
       Agent.from_engine(engine: Engine, **kw) -> Agent      # explicit Plan / Supervisor / custom
       Agent.from_provider(name: str, *, tier: str = "medium", **kw) -> Agent
-
+    
     Composition sugar (NOT new paradigms):
       Agent.chain(*agents, **kw)    -> Agent                 # sequential
       Agent.parallel(*agents, **kw) -> _ParallelAgent        # deterministic fan-out → list[Envelope]
@@ -141,9 +141,7 @@ prod("draft a one-pager on the LazyBridge audit findings")
     - ``verify=`` wraps the run in a judge/retry loop (max ``max_verify``
       attempts). The judge can be an Agent or a plain callable.
     - ``guard=`` filters both input and output. Blocked runs return an
-      error Envelope without invoking the engine. ``stream()`` also
-      calls ``acheck_input`` before the first token is emitted — a
-      blocked task raises ``ValueError`` rather than silently streaming.
+      error Envelope without invoking the engine.
     - ``timeout=`` is the **total** deadline for ``agent.run()``; on
       expiry an ``AGENT_FINISH`` event with ``cancelled=True`` is emitted
       and a ``TimeoutError`` Envelope is returned.

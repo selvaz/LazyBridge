@@ -62,7 +62,7 @@ print(result.payload)  # {"hits": ..., "ranked": ..., "draft": ...}
         checkpoint_key: str,
         resume: bool = False,
     ) -> Engine
-
+    
     # Persisted shape at store[checkpoint_key]:
     #   {
     #     "next_step": str | None,

@@ -163,48 +163,27 @@ There is no "no fall-through" mode.  Practical implications:
   the route condition stops firing, the loop exits and linear
   progression resumes.  `max_iterations` is the safety net.
 
-#### Form C — `after_branches="step"` (exclusive routing with rejoin)
+#### `after_branches` — exclusive routing with rejoin
 
-Use alongside `routes` or `routes_by` when **exactly one** branch should
-run and execution should then skip the remaining branch steps and resume
-at a named rejoin point.  Without `after_branches` routing is a *detour*
-— the routed-to step runs, then linear progression resumes from its
-declared position, so subsequent steps also execute.  With
-`after_branches` the sibling branch steps are skipped entirely and
-control jumps to the named step after the chosen branch completes.
+Set `after_branches="step"` alongside `routes` or `routes_by` to make
+branching **exclusive**: only the matched branch runs; all other declared
+steps between the routing step and the rejoin point are skipped;
+execution continues at the named step after the branch completes.
+Without `after_branches`, routing is a *detour* — the routed-to step
+runs and linear progression then continues from its declared position.
 
 ```python
-from typing import Literal
-from pydantic import BaseModel
-
-class Triage(BaseModel):
-    summary: str
-    severity: Literal["urgent", "normal", "spam"] | None = None
-
 plan = Plan(
     Step(classifier, name="classify",
-         task="Classify the incoming ticket.",
          output=Triage,
          routes_by="severity",
-         after_branches="archive"),   # ← skip non-chosen branches; always land here
-    Step(escalator,  name="urgent",
-         task="Page the on-call team and open a P0."),
-    Step(triager,    name="normal",
-         task="Add to the support backlog with the summary."),
-    Step(closer,     name="spam",
-         task="Close the ticket as spam."),
-    Step(archiver,   name="archive",  # always runs after whichever branch ran
-         task="Log the resolved ticket to the audit archive."),
+         after_branches="archive"),   # skip non-chosen branches
+    Step(escalator,  name="urgent", ...),
+    Step(triager,    name="normal", ...),
+    Step(closer,     name="spam",   ...),
+    Step(archiver,   name="archive", ...),  # always runs
 )
 ```
-
-If the LLM sets `severity=None`, no routing fires, and linear
-progression continues to `urgent` (next declared step).
-
-`after_branches` is only valid alongside `routes` or `routes_by`; the
-compiler raises `PlanCompileError` if it names an unknown step.  For
-branches that span multiple steps, pass an `Agent(engine=Plan(...))` as
-the branch step's target.
 
 #### Three rules to memorise
 
@@ -587,7 +566,7 @@ Agent.from_engine(plan, tools=[score_tool])("…")
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
     ) -> Engine
-
+    
     Step(
         target: str | Callable | Agent,                    # tool name, function, or Agent
         task: Sentinel | str = from_prev,                  # where my input comes from
@@ -604,19 +583,19 @@ Agent.from_engine(plan, tools=[score_tool])("…")
         routes_by: str | None = None,
         after_branches: str | None = None,                 # exclusive-branch rejoin point
     )
-
+    
     # Sentinels — see the dedicated guide for full semantics.
     from_prev                    # previous step's output (default)
     from_start                   # original user task
     from_step("name")            # named prior step
     from_parallel("name")        # named parallel branch
     from_parallel_all("name")    # aggregate every branch in a parallel band, labelled-text join
-
+    
     PlanCompileError             # raised at Agent construction if the DAG is invalid
     ConcurrentPlanRunError       # raised by CAS when two runs share a checkpoint_key
     PlanState                    # checkpoint shape: plan_id, current_step, next_step, store, history, status
     StepResult                   # single step record: step_name, envelope, ts
-
+    
     Usage: Agent(engine=Plan(Step(a), Step(b)))
 
 !!! warning "Rules & invariants"

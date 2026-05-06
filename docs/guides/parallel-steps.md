@@ -58,7 +58,7 @@ Agent.from_engine(plan)("framework update — April 2026")
 
     Step(target, *, parallel: bool = False, name: str | None = None, ...)
     from_parallel(name: str) -> Sentinel
-
+    
     # Typical shape: N parallel branches followed by a join step.
     # Idiomatic: ``task=`` is the join's instruction (a literal); upstream
     # branch outputs flow through ``context=`` — a list of sentinels reads

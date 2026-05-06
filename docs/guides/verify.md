@@ -58,16 +58,16 @@ plan = Plan(
 !!! note "API reference"
 
     # Three placements, same judge contract.
-
+    
     # 1. Agent-level (final output gate)
     Agent("model", verify=judge_agent, max_verify=3, ...)
-
+    
     # 2. Tool-level (every call through the tool gated — "Option B")
     agent.as_tool(name, description, verify=judge_agent, max_verify=3)
-
+    
     # 3. Plan-level (per-step, via agent-as-step with verify=)
     Plan(Step(Agent(..., verify=judge_agent), ...))
-
+    
     # Judge contract
     # Judge receives the agent's output text (and the original task for
     # context) and must respond with a string starting with

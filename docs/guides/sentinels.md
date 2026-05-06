@@ -74,7 +74,7 @@ plan2 = Plan(
     from_parallel(name: str)     # named parallel branch's output
     from_parallel_all(name: str) # aggregate every branch in a parallel band;
                                  # payload is a labelled-text string, same as task
-
+    
     # Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
 
 !!! warning "Rules & invariants"

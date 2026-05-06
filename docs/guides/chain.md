@@ -35,11 +35,11 @@ print(pipeline("AI trends April 2026").text())            # invocation → Envel
 !!! note "API reference"
 
     Agent.chain(*agents: Agent, name: str = "chain", **kwargs) -> Agent
-
+    
     Under the hood: Plan(*[Step(target=a, name=a.name) for a in agents]).
     Sequential. Each agent's output becomes the next agent's task
     (``from_prev`` default). Result: the last agent's Envelope.
-
+    
     Alternatives:
       Plan(Step(a), Step(b))                    # same thing, more explicit
       Plan(Step(a, name="a"),

@@ -49,29 +49,6 @@ Agent("claude-opus-4-7",
       tools=[Tool(partial_hint, mode="hybrid", schema_llm=tiny)])
 ```
 
-## Pydantic `BaseModel` parameters
-
-Parameters typed as `BaseModel` subclasses are fully supported in
-`mode="signature"`. The schema for the parameter is inferred from the model's
-field definitions, and the raw dict returned by the LLM is coerced into a proper
-model instance before your function is called.
-
-```python
-from pydantic import BaseModel
-from lazybridge import Agent
-
-class Filters(BaseModel):
-    min_score: float = 0.0
-    tags: list[str] = []
-
-def rank(query: str, filters: Filters) -> list[str]:
-    """Rank results for query using optional filters."""
-    ...
-```
-
-No special configuration is needed — just annotate the parameter with the model
-type and LazyBridge handles the rest.
-
 ## Pitfalls
 
 - ``mode="llm"`` without ``schema_llm=`` silently falls back to
@@ -83,20 +60,23 @@ type and LazyBridge handles the rest.
 - ``strict=True`` is opinionated about JSON schema shape. Tools that
   rely on extra kwargs or variadic args may fail strict validation;
   try without strict first.
+- Pydantic ``BaseModel`` parameters work in ``mode="signature"``. The
+  schema is inferred from the model's fields; the raw LLM dict is
+  coerced into a model instance before your function is called.
 
 !!! note "API reference"
 
     # Three ways to turn a Python function into an LLM-callable Tool.
-
+    
     Tool(func, *, mode: Literal["signature", "llm", "hybrid"] = "signature",
          schema_llm: Any | None = None, strict: bool = False)
-
+    
     # Mode recap:
     #   "signature" — parse type hints + docstring (default). No LLM cost.
     #   "llm"       — call an LLM to infer schema from the function body
     #                 and docstring.  Needs schema_llm= (an Agent).
     #   "hybrid"    — signature first; LLM fills gaps for missing hints.
-
+    
     # No explicit Tool(...) call needed:
     Agent(..., tools=[func])                  # function auto-wrapped at construction
     Agent(..., tools=[other_agent])           # other_agent.as_tool() called automatically

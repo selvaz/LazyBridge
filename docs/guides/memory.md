@@ -62,12 +62,12 @@ judge("grade the last turn")
         summarizer: Agent | Callable | None = None,
         summarizer_timeout: float | None = 30.0,  # deadline applied to async summarisers
     ) -> Memory
-
+    
     memory.add(user: str, assistant: str, *, tokens: int = 0) -> None
     memory.messages() -> list[Message]
     memory.text() -> str           # current view as plain text (live read)
     memory.clear() -> None
-
+    
     Usage: Agent("model", memory=Memory("auto"))
            Agent("model", sources=[mem])     # share live view across agents
 
@@ -75,8 +75,8 @@ judge("grade the last turn")
 
     - ``auto`` — sliding window plus summary of older turns once
       ``max_tokens`` is exceeded; default. Good for general chat.
-    - ``sliding`` — compress by dropping oldest turns whenever > 10 turns
-      are kept. Does NOT require ``max_tokens``; works with ``max_tokens=None``.
+    - ``sliding`` — compress by dropping oldest turns whenever > 10 turns are
+      kept. Does NOT require ``max_tokens``; works with ``max_tokens=None``.
     - ``summary`` — compress whenever > 10 turns are kept.
       Uses ``summarizer=`` if provided; otherwise falls back
       to keyword extraction (a rough but loss-aware fallback — never a

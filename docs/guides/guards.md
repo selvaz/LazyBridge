@@ -50,10 +50,10 @@ print(env.error.message)
     class Guard:
         async def acheck_input(self, text: str) -> GuardAction
         async def acheck_output(self, text: str) -> GuardAction
-
+    
     GuardAction(allowed: bool = True, message: str = None, modified_text: str = None,
                 metadata: dict = {})
-
+    
     ContentGuard(input_fn: Callable[[str], GuardAction] = None,
                  output_fn: Callable[[str], GuardAction] = None)
     GuardChain(*guards: Guard)                 # first blocker wins
@@ -61,9 +61,9 @@ print(env.error.message)
       # LLM-as-judge; timeout applies to BOTH sync and async paths.
       # Sync path: daemon thread + join(timeout=). Async path: asyncio.wait_for.
       # On timeout the guard fails closed (blocked). timeout=None → unbounded.
-
+    
     class GuardError(Exception)                # raised by some integrations
-
+    
     Usage: Agent("model", guard=GuardChain(my_filter, LLMGuard(judge, "no PII")))
 
 !!! warning "Rules & invariants"

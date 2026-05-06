@@ -29,11 +29,16 @@ Usage: Agent("model", memory=Memory("auto"))
 
 - ``auto`` — sliding window plus summary of older turns once
   ``max_tokens`` is exceeded; default. Good for general chat.
-- ``sliding`` / ``summary`` — compress whenever > 10 turns are kept.
-  ``summary`` uses ``summarizer=`` if provided; otherwise falls back
+- ``sliding`` — compress by dropping oldest turns whenever > 10 turns are
+  kept. Does NOT require ``max_tokens``; works with ``max_tokens=None``.
+- ``summary`` — compress whenever > 10 turns are kept.
+  Uses ``summarizer=`` if provided; otherwise falls back
   to keyword extraction (a rough but loss-aware fallback — never a
   silent no-op).
 - ``none`` — never compress; ``max_turns`` is the only backstop.
+- Failed structured-output retries (internal ``_validate_and_retry``
+  loops) pass ``memory=None`` so correction turns are never stored as
+  real conversation history.
 - ``Memory`` is per-agent by default. Share across agents by passing
   the same instance to each ``memory=`` or via ``sources=[mem]``.
 - ``text()`` is live — every call re-materialises the current view.
@@ -111,6 +116,10 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
 - Store is thread-safe via a lock (in-memory) or SQLite WAL mode + busy
   timeout (persistent). Safe to share across concurrent agents.
 - Store is not transactional; each write commits immediately.
+- ``Store()`` (in-memory) returns a **deep copy** from ``read()`` and
+  stores a deep copy on ``write()``, matching the SQLite path's
+  copy-on-write semantics. Do not rely on reference identity from
+  ``store.read()`` — mutating the returned value does not affect the store.
 
 **example**
 
@@ -274,7 +283,10 @@ GuardAction(allowed: bool = True, message: str = None, modified_text: str = None
 ContentGuard(input_fn: Callable[[str], GuardAction] = None,
              output_fn: Callable[[str], GuardAction] = None)
 GuardChain(*guards: Guard)                 # first blocker wins
-LLMGuard(judge: Agent, policy: str)        # LLM-as-judge
+LLMGuard(judge: Agent, policy: str, *, timeout: float | None = 60.0)
+  # LLM-as-judge; timeout applies to BOTH sync and async paths.
+  # Sync path: daemon thread + join(timeout=). Async path: asyncio.wait_for.
+  # On timeout the guard fails closed (blocked). timeout=None → unbounded.
 
 class GuardError(Exception)                # raised by some integrations
 
@@ -290,6 +302,9 @@ Usage: Agent("model", guard=GuardChain(my_filter, LLMGuard(judge, "no PII")))
 - ``modified_text`` lets a guard rewrite its input — input rewrites
   become the engine's task; output rewrites replace the payload string.
 - ``GuardChain`` short-circuits on the first ``allowed=False``.
+- ``Agent.stream()`` calls ``acheck_input`` before emitting the first
+  token. A blocked task raises ``ValueError`` instead of silently
+  streaming — guards are enforced on the streaming path too.
 
 **example**
 

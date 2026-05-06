@@ -46,7 +46,7 @@ print(Agent(engine=EchoEngine())("hello").text())
 !!! note "API reference"
 
     # Protocol contract every engine implements.
-
+    
     @runtime_checkable
     class Engine(Protocol):
         async def run(
@@ -58,7 +58,7 @@ print(Agent(engine=EchoEngine())("hello").text())
             memory: Memory | None,
             session: Session | None,
         ) -> Envelope: ...
-
+    
         async def stream(
             self,
             env: Envelope,
@@ -68,7 +68,7 @@ print(Agent(engine=EchoEngine())("hello").text())
             memory: Memory | None,
             session: Session | None,
         ) -> AsyncIterator[str]: ...
-
+    
     # Built-ins implementing this:
     #   LLMEngine, HumanEngine, SupervisorEngine, Plan
 
