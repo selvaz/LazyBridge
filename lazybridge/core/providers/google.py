@@ -776,9 +776,7 @@ class GoogleProvider(BaseProvider):
         stream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
             last_candidate = last_chunk.candidates[0]  # type: ignore[index]
-            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_candidate
-            )
+            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
             if _fr_name == "MAX_TOKENS":
@@ -879,9 +877,7 @@ class GoogleProvider(BaseProvider):
         astream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
             last_candidate = last_chunk.candidates[0]  # type: ignore[index]
-            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(
-                last_candidate
-            )
+            grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
             if _fr_name == "MAX_TOKENS":

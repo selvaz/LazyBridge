@@ -62,8 +62,8 @@ def test_store_inmemory_returns_copy_not_reference():
     m = _MyModel(x=7, name="z")
     store.write("k", m)
     got = store.read("k")
-    assert got == m          # value equality
-    assert got is not m      # independent copy — mutation safety
+    assert got == m  # value equality
+    assert got is not m  # independent copy — mutation safety
 
 
 # ---------------------------------------------------------------------------

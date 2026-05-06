@@ -186,8 +186,7 @@ def validate_plan_refs(
         after = step.get("after_branches")
         if isinstance(after, str) and after not in known_names:
             errors.append(
-                f"step {step_name!r} after_branches: target {after!r} not in known steps"
-                f" (known: {sorted(known_names)})"
+                f"step {step_name!r} after_branches: target {after!r} not in known steps (known: {sorted(known_names)})"
             )
 
     return errors

@@ -66,7 +66,7 @@ async def test_e1_parallel_band_failure_does_not_commit_sibling_writes() -> None
     cp = store.read("atomicity")
     assert cp is not None
     assert cp["status"] == "failed"
-    assert cp["next_step"] == "a"   # band-start, not the failing step
+    assert cp["next_step"] == "a"  # band-start, not the failing step
     assert "a_out" not in cp["kv"]
 
 

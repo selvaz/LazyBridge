@@ -297,7 +297,7 @@ class LLMGuard(Guard):
         def _run() -> None:
             try:
                 result.append(self._verdict(self._agent(prompt).text()))
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:
                 exc_holder.append(exc)
 
         t = threading.Thread(target=_run, daemon=True)

@@ -584,16 +584,12 @@ class Plan:
                 # — so a later resume re-runs the whole band cleanly
                 # instead of partially-double-applying side-effects from
                 # siblings that succeeded earlier in the iteration order.
-                first_failure_step: str | None = None
                 first_failure_env: Envelope | None = None
-                for s, r in zip(group, raw):
-                    step_name = s.name or ""
+                for _s, r in zip(group, raw):
                     if isinstance(r, BaseException):
-                        first_failure_step = step_name
                         first_failure_env = Envelope.error_envelope(r)
                         break
                     if r.error is not None:
-                        first_failure_step = step_name
                         first_failure_env = r
                         break
                 if first_failure_env is not None:
