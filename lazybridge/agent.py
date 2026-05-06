@@ -730,6 +730,7 @@ class Agent:
             description=effective_desc,
             mode="signature",
             returns_envelope=True,
+            agent_memory=getattr(self, "memory", None),
         )
 
     def definition(self) -> Any:

@@ -103,7 +103,7 @@ from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
 from lazybridge.predicates import when
-from lazybridge.sentinels import from_parallel, from_parallel_all, from_prev, from_start, from_step
+from lazybridge.sentinels import from_memory, from_parallel, from_parallel_all, from_prev, from_start, from_step
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
@@ -120,6 +120,7 @@ __all__ = [
     "from_step",
     "from_parallel",
     "from_parallel_all",
+    "from_memory",
     # Tools
     "Tool",
     "ToolProvider",

@@ -34,6 +34,7 @@ from lazybridge.engines.plan._types import (
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
     Sentinel,
+    _FromMemory,
     _FromParallel,
     _FromParallelAll,
     _FromPrev,
@@ -744,7 +745,7 @@ class Plan:
         ``branch_id`` is set for parallel-branch steps so their Session
         events can be distinguished from sequential-step events.
         """
-        step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv)
+        step_task_env = self._resolve_sentinel(step.task, prev_env, start_env, history, kv, tool_map)
 
         # Short-circuit when the referenced upstream envelope carries an
         # error.  Previously the resolver stripped ``.error`` and this
@@ -770,7 +771,7 @@ class Plan:
             # item normalises to a 1-list so the resolver path is uniform.
             items = step.context if isinstance(step.context, list) else [step.context]
             for item in items:
-                ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv)
+                ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv, tool_map)
                 if ctx_env.context:
                     ctx_parts.append(ctx_env.context)
                 if ctx_env.payload and isinstance(ctx_env.payload, str):
@@ -816,6 +817,7 @@ class Plan:
         start: Envelope,
         history: list[StepResult],
         kv: dict[str, Any],
+        tool_map: dict[str, Any],
     ) -> Envelope:
         # ``from_prev`` means "the previous step's *output* becomes the next
         # step's task" — i.e. real chain semantics.  Without this promotion
@@ -873,6 +875,17 @@ class Plan:
             return start
         if isinstance(sentinel, _FromParallelAll):
             return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
+        if isinstance(sentinel, _FromMemory):
+            # Resolved at execution time — reads the live memory of the agent
+            # registered under sentinel.name in the tool map.  Empty if the
+            # agent has no memory or hasn't run yet (silent no-op, no error).
+            tool = tool_map.get(sentinel.name)
+            memory = getattr(tool, "agent_memory", None) if tool else None
+            if memory is not None:
+                mem_text = memory.text()
+                if mem_text:
+                    return Envelope(task=mem_text, context=mem_text, payload=mem_text)
+            return Envelope(task="", context=None, payload="")
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)
         return prev

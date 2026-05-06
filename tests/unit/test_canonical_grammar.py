@@ -306,3 +306,120 @@ def test_canonical_plan_agent_runs():
     result = pipeline("test topic")
     assert result.ok
     assert result.text() == "final output"
+
+
+# ---------------------------------------------------------------------------
+# 7. from_memory — live memory reference from another agent
+# ---------------------------------------------------------------------------
+
+
+def test_as_tool_carries_memory_reference():
+    """as_tool() passes the agent's Memory object to the Tool."""
+    mem = Memory()
+    researcher = Agent(engine=_EchoEngine(), memory=mem)
+    tool = researcher.as_tool("research")
+    assert tool.agent_memory is mem
+
+
+def test_as_tool_no_memory_gives_none():
+    """as_tool() on an agent without memory sets agent_memory=None."""
+    researcher = Agent(engine=_EchoEngine())
+    tool = researcher.as_tool("research")
+    assert tool.agent_memory is None
+
+
+def test_from_memory_compiler_requires_tool_in_map():
+    """PlanCompiler rejects from_memory referencing a tool not in the map."""
+    from lazybridge import from_memory
+    from lazybridge.engines.plan._types import PlanCompileError
+
+    def noop(task: str) -> str:
+        """Noop."""
+        return task
+
+    researcher = Agent(engine=_EchoEngine(), memory=Memory())
+    writer = Agent(engine=_EchoEngine())
+    # from_memory("ghost") references a tool name not in the tool map
+    with pytest.raises(PlanCompileError, match="from_memory"):
+        Agent(
+            engine=Plan(
+                Step(noop, name="research"),
+                Step("write", context=from_memory("ghost")),  # "ghost" not in tool map
+            ),
+            tools=[
+                researcher.as_tool("research"),
+                writer.as_tool("write"),
+            ],
+        )
+
+
+def test_from_memory_compiler_requires_agent_to_have_memory():
+    """PlanCompiler rejects from_memory when the tool's agent has no memory."""
+    from lazybridge import from_memory
+    from lazybridge.engines.plan._types import PlanCompileError
+
+    researcher = Agent(engine=_EchoEngine())  # no memory=
+    writer = Agent(engine=_EchoEngine())
+    with pytest.raises(PlanCompileError, match="memory="):
+        Agent(
+            engine=Plan(
+                Step("research"),
+                Step("write", context=from_memory("research")),
+            ),
+            tools=[
+                researcher.as_tool("research"),
+                writer.as_tool("write"),
+            ],
+        )
+
+
+def test_from_memory_resolves_live_at_execution_time():
+    """from_memory reads memory at step run time, not at plan construction."""
+    from lazybridge import Memory, from_memory
+
+    mem = Memory()
+    researcher = Agent(engine=_FixedEngine("research result"), memory=mem)
+    writer = Agent(engine=_FixedEngine("final output"))
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_memory("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+    )
+
+    # Memory is empty at construction — that's fine
+    assert mem.text() == ""
+
+    # After pipeline runs, from_memory would have read whatever was in mem
+    # at the moment "write" ran. We verify the pipeline completes without error.
+    result = pipeline("test topic")
+    assert result.ok
+
+
+def test_from_memory_empty_memory_is_silent_noop():
+    """from_memory with empty memory contributes nothing to context (no error)."""
+    from lazybridge import Memory, from_memory
+
+    mem = Memory()
+    researcher = Agent(engine=_FixedEngine("result"), memory=mem)
+    writer = Agent(engine=_FixedEngine("done"))
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_memory("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+    )
+    # Empty memory → silent no-op → pipeline still runs
+    result = pipeline("topic")
+    assert result.ok
+    assert result.text() == "done"

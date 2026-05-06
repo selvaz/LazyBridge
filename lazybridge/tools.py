@@ -48,6 +48,7 @@ class Tool:
         schema_llm: Any | None = None,
         strict: bool = False,
         returns_envelope: bool = False,
+        agent_memory: Any | None = None,
     ) -> None:
         self.func = func
         self.name = name or func.__name__
@@ -62,6 +63,10 @@ class Tool:
         #: set automatically by ``wrap_tool`` for Agents wrapped via
         #: ``agent.as_tool()``.
         self.returns_envelope = returns_envelope
+        #: Live reference to the source agent's Memory, set by ``agent.as_tool()``.
+        #: Resolved lazily at step execution time via ``from_memory("name")``.
+        #: None for plain function tools.
+        self.agent_memory = agent_memory
         self._definition: ToolDefinition | None = None
         self._lock = threading.Lock()
 
