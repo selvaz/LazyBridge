@@ -423,3 +423,129 @@ def test_from_memory_empty_memory_is_silent_noop():
     result = pipeline("topic")
     assert result.ok
     assert result.text() == "done"
+
+
+# ---------------------------------------------------------------------------
+# 8. from_agent — reads last output of a named agent from shared Store
+# ---------------------------------------------------------------------------
+
+
+def test_as_tool_carries_store_reference():
+    """as_tool() passes the agent's Store object to the Tool."""
+    from lazybridge import Store
+
+    store = Store()
+    researcher = Agent(engine=_EchoEngine(), store=store)
+    tool = researcher.as_tool("research")
+    assert tool.agent_store is store
+
+
+def test_as_tool_no_store_gives_none():
+    """as_tool() on an agent without a store sets agent_store=None."""
+    researcher = Agent(engine=_EchoEngine())
+    tool = researcher.as_tool("research")
+    assert tool.agent_store is None
+
+
+def test_agent_writes_output_to_store_after_run():
+    """Agent writes its last output to store under '__agent_output__:{name}' after success."""
+    from lazybridge import Store
+    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+    store = Store()
+    researcher = Agent(engine=_FixedEngine("research result"), store=store, name="research")
+    researcher("some topic")
+    value = store.read(_AGENT_OUTPUT_KEY_PREFIX + "research")
+    assert value == "research result"
+
+
+def test_from_agent_compiler_requires_tool_in_map():
+    """PlanCompiler rejects from_agent referencing a tool not in the map."""
+    from lazybridge import from_agent
+    from lazybridge.engines.plan._types import PlanCompileError
+
+    researcher = Agent(engine=_EchoEngine())
+    writer = Agent(engine=_EchoEngine())
+    with pytest.raises(PlanCompileError, match="from_agent"):
+        Agent(
+            engine=Plan(
+                Step("research"),
+                Step("write", context=from_agent("ghost")),  # "ghost" not in tool map
+            ),
+            tools=[
+                researcher.as_tool("research"),
+                writer.as_tool("write"),
+            ],
+        )
+
+
+def test_from_agent_compiler_requires_agent_tool():
+    """PlanCompiler rejects from_agent when the tool is a plain function (not an agent)."""
+    from lazybridge import from_agent
+    from lazybridge.engines.plan._types import PlanCompileError
+
+    def plain(task: str) -> str:
+        """A plain function."""
+        return task
+
+    researcher = Agent(engine=_EchoEngine())
+    with pytest.raises(PlanCompileError, match="from_agent"):
+        Agent(
+            engine=Plan(
+                Step("research"),
+                Step("plain", context=from_agent("plain")),
+            ),
+            tools=[
+                researcher.as_tool("research"),
+                plain,
+            ],
+        )
+
+
+def test_from_agent_resolves_from_store():
+    """from_agent reads the named agent's last output from the shared Store."""
+    from lazybridge import Store, from_agent
+
+    store = Store()
+
+    researcher = Agent(engine=_FixedEngine("research result"), store=store, name="research")
+    writer = Agent(engine=_FixedEngine("final output"))
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_agent("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+    )
+    result = pipeline("test topic")
+    assert result.ok
+    assert result.text() == "final output"
+
+
+def test_from_agent_empty_store_is_silent_noop():
+    """from_agent when agent hasn't run contributes nothing to context (no error)."""
+    from lazybridge import Store, from_agent
+
+    store = Store()
+
+    researcher = Agent(engine=_FixedEngine("result"), store=store, name="research")
+    writer = Agent(engine=_FixedEngine("done"))
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_agent("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),
+            writer.as_tool("write"),
+        ],
+    )
+    # store is empty at start — from_agent is a silent no-op
+    result = pipeline("topic")
+    assert result.ok
+    assert result.text() == "done"

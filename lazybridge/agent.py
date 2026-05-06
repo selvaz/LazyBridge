@@ -163,6 +163,7 @@ class Agent:
         tools: list[Tool | Callable] | None = None,
         output: type = str,
         memory: Any | None = None,
+        store: Any | None = None,
         sources: list[Any] | None = None,
         guard: Any | None = None,
         verify: Agent | None = None,
@@ -305,6 +306,7 @@ class Agent:
         self.max_output_retries = max_output_retries
         self.timeout = timeout
         self.memory = memory
+        self.store = store
         self.sources = list(sources or [])
         if max_verify < 1:
             raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
@@ -479,6 +481,12 @@ class Agent:
                     error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
                     metadata=result.metadata,
                 )
+
+        # Write last output to shared store so from_agent("name") can read it.
+        # Only written on success — failed runs do not overwrite the last good output.
+        if self.store is not None and result.ok:
+            from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+            self.store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, result.text())
 
         return result
 
@@ -731,6 +739,7 @@ class Agent:
             mode="signature",
             returns_envelope=True,
             agent_memory=getattr(self, "memory", None),
+            agent_store=getattr(self, "store", None),
         )
 
     def definition(self) -> Any:

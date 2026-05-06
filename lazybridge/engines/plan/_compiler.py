@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_origin, get_
 from lazybridge.engines.plan._types import PlanCompileError, Step
 from lazybridge.sentinels import (
     Sentinel,
+    _FromAgent,
     _FromMemory,
     _FromParallel,
     _FromParallelAll,
@@ -119,7 +120,7 @@ class PlanCompiler:
             # plain string.  Anything else falls through ``_resolve_sentinel``
             # to the ``prev`` envelope at runtime — a silent degradation we
             # want to catch at construction.
-            _SENTINEL_TYPES = (_FromPrev, _FromStart, _FromStep, _FromParallel, _FromParallelAll, _FromMemory)
+            _SENTINEL_TYPES = (_FromPrev, _FromStart, _FromStep, _FromParallel, _FromParallelAll, _FromAgent, _FromMemory)
             for n, item in enumerate(context_items):
                 if not isinstance(item, (str, *_SENTINEL_TYPES)):
                     raise PlanCompileError(
@@ -157,12 +158,32 @@ class PlanCompiler:
                         f"references a step that is not earlier in the plan.  "
                         f"from_step targets must be defined before they're used."
                     )
-            # from_memory: tool must exist in tool_map and carry a memory reference.
-            # Resolved lazily at execution time — only the wiring is validated here.
+            # Build the sentinel list once; used for from_agent and from_memory validation.
             all_sentinels: list[tuple[str, Any]] = [("task", step.task)] + [
                 (f"context[{n}]" if isinstance(step.context, list) else "context", item)
                 for n, item in enumerate(context_items)
             ]
+
+            # from_agent: tool must exist in tool_map and be an agent tool (via as_tool()),
+            # not a plain function. Agent tools have returns_envelope=True.
+            for slot, sentinel in all_sentinels:
+                if isinstance(sentinel, _FromAgent):
+                    if sentinel.name not in tool_map:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
+                            f"references tool {sentinel.name!r} which is not in the tool map.  "
+                            f"Available tools: {sorted(tool_map)}."
+                        )
+                    tool = tool_map[sentinel.name]
+                    if not getattr(tool, "returns_envelope", False):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
+                            f"requires '{sentinel.name}' to be an agent tool (via as_tool()), "
+                            f"not a plain function."
+                        )
+
+            # from_memory: tool must exist in tool_map and carry a memory reference.
+            # Resolved lazily at execution time — only the wiring is validated here.
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromMemory):
                     if sentinel.name not in tool_map:

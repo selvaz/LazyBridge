@@ -65,6 +65,58 @@ class _FromParallelAll:
 
 
 @dataclass(frozen=True)
+class _FromAgent:
+    """Use the last output of the agent registered under ``name``.
+
+    Unlike ``from_step``, which reads from the Plan's execution history,
+    ``from_agent`` reads from a shared :class:`Store` where every agent
+    writes its last output after running.  This means it works both inside
+    a Plan and when agents are called independently by an LLM orchestrator.
+
+    The name must match the key used in ``agent.as_tool("name")`` and the
+    agent's ``name=`` attribute.  The store must be shared between the
+    writing agent and the orchestrator that resolves the sentinel.
+
+    If the named agent has not yet run (no entry in the store), the sentinel
+    contributes nothing — silent no-op, no error.
+
+    Compile-time check (inside Plan): the named tool must exist in the tool
+    map and must be an agent (created via ``as_tool()``), not a plain function.
+
+    Example::
+
+        store = Store(db="shared.sqlite")
+
+        researcher = Agent(
+            engine=LLMEngine("claude-opus-4-7"),
+            tools=[search.as_tool("search")],
+            store=store,
+            name="research",
+        )
+        writer = Agent(
+            engine=LLMEngine("gpt-4o"),
+            store=store,
+            name="write",
+        )
+
+        # Works in Plan
+        pipeline = Agent(
+            engine=Plan(
+                Step("research"),
+                Step("write", context=from_agent("research")),
+            ),
+            tools=[researcher.as_tool("research"), writer.as_tool("write")],
+            store=store,
+        )
+
+        # Also works when researcher is called standalone — writer reads
+        # from_agent("research") after researcher has run and written to store.
+    """
+
+    name: str
+
+
+@dataclass(frozen=True)
 class _FromMemory:
     """Inject the live memory of the agent registered under ``name`` as context.
 
@@ -124,9 +176,18 @@ def from_parallel_all(name: str) -> _FromParallelAll:
     return _FromParallelAll(name=name)
 
 
+def from_agent(name: str) -> _FromAgent:
+    """Read the last output of the agent registered as ``name`` from the shared store."""
+    return _FromAgent(name=name)
+
+
 def from_memory(name: str) -> _FromMemory:
     """Inject the live memory of the agent registered as ``name`` at execution time."""
     return _FromMemory(name=name)
 
 
-Sentinel = _FromPrev | _FromStart | _FromStep | _FromParallel | _FromParallelAll | _FromMemory
+Sentinel = _FromPrev | _FromStart | _FromStep | _FromParallel | _FromParallelAll | _FromAgent | _FromMemory
+
+#: Store key prefix used when an agent writes its last output.
+#: Internal — not part of the public API.
+_AGENT_OUTPUT_KEY_PREFIX = "__agent_output__:"

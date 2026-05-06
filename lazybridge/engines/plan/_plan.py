@@ -34,6 +34,8 @@ from lazybridge.engines.plan._types import (
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.sentinels import (
     Sentinel,
+    _AGENT_OUTPUT_KEY_PREFIX,
+    _FromAgent,
     _FromMemory,
     _FromParallel,
     _FromParallelAll,
@@ -885,6 +887,18 @@ class Plan:
                 mem_text = memory.text()
                 if mem_text:
                     return Envelope(task=mem_text, context=mem_text, payload=mem_text)
+            return Envelope(task="", context=None, payload="")
+        if isinstance(sentinel, _FromAgent):
+            # Reads the last output of the named agent from the shared Store.
+            # Written by Agent._run_body after a successful run under key
+            # "__agent_output__:{name}".  Silent no-op if not yet written.
+            tool = tool_map.get(sentinel.name)
+            agent_store = getattr(tool, "agent_store", None) if tool else None
+            if agent_store is not None:
+                value = agent_store.read(_AGENT_OUTPUT_KEY_PREFIX + sentinel.name)
+                if value is not None:
+                    text = str(value)
+                    return Envelope(task=text, context=text, payload=text)
             return Envelope(task="", context=None, payload="")
         if isinstance(sentinel, str):
             return Envelope(task=sentinel, payload=sentinel)

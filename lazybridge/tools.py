@@ -49,6 +49,7 @@ class Tool:
         strict: bool = False,
         returns_envelope: bool = False,
         agent_memory: Any | None = None,
+        agent_store: Any | None = None,
     ) -> None:
         self.func = func
         self.name = name or func.__name__
@@ -67,6 +68,10 @@ class Tool:
         #: Resolved lazily at step execution time via ``from_memory("name")``.
         #: None for plain function tools.
         self.agent_memory = agent_memory
+        #: Live reference to the source agent's Store, set by ``agent.as_tool()``.
+        #: Used by ``from_agent("name")`` to read the agent's last output.
+        #: None for plain function tools.
+        self.agent_store = agent_store
         self._definition: ToolDefinition | None = None
         self._lock = threading.Lock()
 
