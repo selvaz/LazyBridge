@@ -70,7 +70,7 @@ from lazybridge.sentinels import from_prev, from_step
 # 1. Sub-agents — each with its own engine, tools, and fixed context
 researcher = Agent(
     engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
-    tools=[search.as_tool("search")],
+    tools=[search],
 )
 
 writer = Agent(
@@ -200,7 +200,7 @@ Agent(
         thinking=True,
         temperature=0.2,
     ),
-    tools=[search.as_tool("search")],
+    tools=[search],
 )
 ```
 
@@ -234,7 +234,7 @@ Agent("claude-opus-4-7")("hello").text()
 Agent("claude-opus-4-7", tools=[search])("find AI news").text()
 
 # Add a sub-agent as a tool
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search.as_tool("search")])
+researcher = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search])
 Agent("claude-opus-4-7", tools=[researcher.as_tool("research")])("summarise AI news")
 
 # Add memory and observability

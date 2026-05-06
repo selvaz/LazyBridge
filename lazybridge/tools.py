@@ -103,6 +103,8 @@ class Tool:
         tool.schema_llm = None
         tool.strict = strict
         tool.returns_envelope = returns_envelope
+        tool.agent_memory = None
+        tool.agent_store = None
         tool._definition = ToolDefinition(
             name=name,
             description=description,

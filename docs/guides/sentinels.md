@@ -100,6 +100,31 @@ plan2 = Agent(
 )
 ```
 
+## When to use from_agent vs from_step
+
+Inside the same Plan, **prefer `from_step("name")`**:
+
+```python
+# Clear, validated at compile time, no store required
+Step("write", context=from_step("research"))
+```
+
+Use `from_agent("name")` only when you intentionally want the agent's
+**last stored output independent of this Plan's step history** — for example:
+
+- Reading across Plan runs (previous execution, stored in SQLite).
+- A standalone LLM orchestrator where there is no step history.
+- A step that needs the output of an agent called outside this Plan.
+
+```python
+# from_agent reads from Store, not from step history.
+# Requires the referenced agent to have store= attached.
+Step("write", context=from_agent("research"))
+```
+
+The store key is always the **tool alias** passed to `as_tool("alias")`,
+not the agent's internal `name=` attribute.
+
 ## Pitfalls
 
 - ``from_prev`` after a parallel branch returns the join step's output,
@@ -114,6 +139,10 @@ plan2 = Agent(
 - ``from_agent`` requires the tool to be an agent (via ``as_tool()``),
   not a plain function. PlanCompiler rejects plain-function targets at
   construction time.
+- ``from_agent`` requires the source agent to have ``store=`` attached.
+  PlanCompiler rejects it at construction time if the agent has no store.
+- Inside a plain sequential Plan, ``from_step()`` is clearer and
+  lighter — it reads from in-memory step history, needs no store.
 
 !!! note "API reference"
 
@@ -159,9 +188,13 @@ plan2 = Agent(
       tool with ``memory=`` attached.
     - ``from_agent("n")``: reads the last output of the agent registered as
       ``"n"`` from the shared ``Store``. Requires the tool to be an agent
-      (``returns_envelope=True``); PlanCompiler rejects plain-function targets.
-      Empty store → silent no-op. Agent must share the same ``Store`` instance
-      as the plan.
+      (``returns_envelope=True``) AND the source agent must have ``store=``
+      attached; PlanCompiler rejects both violations at construction time.
+      The store key is always the alias passed to ``as_tool("n")``, never
+      the agent's internal ``name=``. If the key is absent at runtime
+      (agent hasn't run yet), contributes nothing (silent no-op).
+      Prefer ``from_step("n")`` inside a single Plan — ``from_agent`` is
+      for cross-run or cross-plan data dependencies.
     - A plain string passed as ``task=`` is used verbatim — useful for
       hard-coded prompts at intermediate steps.
     - ``context=`` accepts a single sentinel/string OR a **list** of them.

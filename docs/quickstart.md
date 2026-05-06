@@ -206,7 +206,7 @@ agent = Agent(
     timeout=30.0,                    # total deadline for run()
     max_retries=3,                   # provider transient-error retries
     cache=True,                      # prompt caching where supported
-    fallback=Agent("gpt-5"),         # provider redundancy
+    fallback=Agent("gpt-4o"),         # provider redundancy
 )
 ```
 

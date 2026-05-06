@@ -160,7 +160,7 @@ class Agent:
     def __init__(
         self,
         engine: str | Any | None = None,
-        tools: list[Tool | Callable] | None = None,
+        tools: list[Tool | Callable | Agent] | None = None,
         output: type = str,
         memory: Any | None = None,
         store: Any | None = None,
@@ -714,7 +714,17 @@ class Agent:
         if verify is None:
 
             async def _run(task: str) -> Envelope:
-                return await agent.run(task)
+                result = await agent.run(task)
+                # Always write under the alias so from_agent("alias") can find
+                # the output regardless of agent.name.  _run_body also writes
+                # under agent.name (for standalone callers); the alias write
+                # here is the authoritative key for Plan sentinel resolution.
+                _store = getattr(agent, "store", None)
+                if _store is not None and result.ok and effective_name != getattr(agent, "name", None):
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + effective_name, result.text())
+                return result
         else:
 
             async def _run(task: str) -> Envelope:  # type: ignore[misc]
@@ -722,12 +732,18 @@ class Agent:
                 from lazybridge.envelope import Envelope as _Env
 
                 env = _Env.from_task(str(task))
-                return await verify_with_retry(
+                result = await verify_with_retry(
                     agent,
                     env,
                     verify,
                     max_verify=max_verify,
                 )
+                _store = getattr(agent, "store", None)
+                if _store is not None and result.ok and effective_name != getattr(agent, "name", None):
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + effective_name, result.text())
+                return result
 
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc

@@ -164,8 +164,8 @@ class PlanCompiler:
                 for n, item in enumerate(context_items)
             ]
 
-            # from_agent: tool must exist in tool_map and be an agent tool (via as_tool()),
-            # not a plain function. Agent tools have returns_envelope=True.
+            # from_agent: tool must exist in tool_map, be an agent tool (via as_tool()),
+            # and the source agent must have store= attached (so the output can be written).
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromAgent):
                     if sentinel.name not in tool_map:
@@ -180,6 +180,13 @@ class PlanCompiler:
                             f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
                             f"requires '{sentinel.name}' to be an agent tool (via as_tool()), "
                             f"not a plain function."
+                        )
+                    if getattr(tool, "agent_store", None) is None:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
+                            f"requires the '{sentinel.name}' agent to have store= attached.  "
+                            f"Add store=Store(...) when constructing that agent, and share the "
+                            f"same Store instance with the orchestrator."
                         )
 
             # from_memory: tool must exist in tool_map and carry a memory reference.

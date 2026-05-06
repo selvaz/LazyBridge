@@ -526,8 +526,8 @@ def test_from_agent_resolves_from_store():
     assert result.text() == "final output"
 
 
-def test_from_agent_empty_store_is_silent_noop():
-    """from_agent when agent hasn't run contributes nothing to context (no error)."""
+def test_from_agent_store_populated_by_research_step():
+    """from_agent reads the output that the research step wrote to the store."""
     from lazybridge import Store, from_agent
 
     store = Store()
@@ -537,15 +537,63 @@ def test_from_agent_empty_store_is_silent_noop():
 
     pipeline = Agent(
         engine=Plan(
-            Step("research"),
-            Step("write", context=from_agent("research")),
+            Step("research"),                            # runs first, writes to store
+            Step("write", context=from_agent("research")),  # reads what research wrote
         ),
         tools=[
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
     )
-    # store is empty at start — from_agent is a silent no-op
     result = pipeline("topic")
     assert result.ok
     assert result.text() == "done"
+
+
+def test_from_agent_compiler_requires_store_on_agent():
+    """PlanCompiler rejects from_agent when the referenced agent has no store= attached."""
+    from lazybridge import from_agent
+    from lazybridge.engines.plan._types import PlanCompileError
+
+    researcher = Agent(engine=_EchoEngine())  # no store= — cannot support from_agent
+    writer = Agent(engine=_EchoEngine())
+    with pytest.raises(PlanCompileError, match="store="):
+        Agent(
+            engine=Plan(
+                Step("research"),
+                Step("write", context=from_agent("research")),
+            ),
+            tools=[
+                researcher.as_tool("research"),
+                writer.as_tool("write"),
+            ],
+        )
+
+
+def test_from_agent_uses_tool_alias_not_agent_name():
+    """from_agent reads under the tool alias, not the agent's internal name= attribute.
+
+    This is the key contract: as_tool("research") makes "research" the authoritative
+    key, even if the wrapped agent has a different name or no name at all.
+    """
+    from lazybridge import Store, from_agent
+
+    store = Store()
+    # Agent has no explicit name= — its internal name won't match the alias "research"
+    researcher = Agent(engine=_FixedEngine("research result"), store=store)
+    writer = Agent(engine=_FixedEngine("final output"))
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_agent("research")),
+        ),
+        tools=[
+            researcher.as_tool("research"),  # alias is "research"
+            writer.as_tool("write"),
+        ],
+    )
+    result = pipeline("topic")
+    assert result.ok
+    # Pipeline completes — alias-based write ensures from_agent("research") finds the data
+    assert result.text() == "final output"
