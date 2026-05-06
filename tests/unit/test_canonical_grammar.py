@@ -16,15 +16,10 @@ Key contracts verified:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from lazybridge import Agent, LLMEngine, Memory, Plan, Session, Step
 from lazybridge.engines.plan._types import PlanCompileError
-
 
 # ---------------------------------------------------------------------------
 # Fake engines for isolation — no real LLM calls
@@ -537,7 +532,7 @@ def test_from_agent_store_populated_by_research_step():
 
     pipeline = Agent(
         engine=Plan(
-            Step("research"),                            # runs first, writes to store
+            Step("research"),  # runs first, writes to store
             Step("write", context=from_agent("research")),  # reads what research wrote
         ),
         tools=[
@@ -614,31 +609,23 @@ def test_from_agent_missing_store_entry_is_silent_noop():
 
     class _ContextCapture:
         """Engine that records the context it received."""
+
         received_context: str | None = None
 
         async def run(self, env, *, tools, output_type, memory, session, **_):
             from lazybridge.envelope import Envelope
+
             _ContextCapture.received_context = env.context
             return Envelope.from_task("done")
 
         async def stream(self, env, *, tools, output_type, memory, session, **_):
             async def _gen():
                 yield "done"
+
             return _gen()
 
     researcher = Agent(engine=_FixedEngine("result"), store=store, name="research")
     writer = Agent(engine=_ContextCapture())
-
-    pipeline = Agent(
-        engine=Plan(
-            Step("research"),
-            Step("write", context=from_agent("research")),
-        ),
-        tools=[
-            researcher.as_tool("research"),
-            writer.as_tool("write"),
-        ],
-    )
 
     # Pre-condition: store is empty — research has NOT run yet.
     assert store.read(_AGENT_OUTPUT_KEY_PREFIX + "research") is None
@@ -648,7 +635,6 @@ def test_from_agent_missing_store_entry_is_silent_noop():
     # resolving the sentinel against an empty store instead of running
     # the full pipeline (which would run research first and populate it).
     from lazybridge.envelope import Envelope
-    from lazybridge.engines.plan._plan import Plan as _Plan
     from lazybridge.tools import build_tool_map
 
     tool_map = build_tool_map([researcher.as_tool("research"), writer.as_tool("write")])
