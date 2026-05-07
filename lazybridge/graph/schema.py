@@ -276,12 +276,11 @@ class GraphSchema:
         tool_map = getattr(agent, "_tool_map", None) or {}
         callable_tool_names: list[str] = []
         for tool_name, tool_obj in tool_map.items():
-            # Agent-as-tool entries have non-None agent_memory or agent_store;
-            # plain Tool wrappers always carry these attributes but set them to None.
-            if not (
-                getattr(tool_obj, "agent_memory", None) is not None
-                or getattr(tool_obj, "agent_store", None) is not None
-            ):
+            # Agent-as-tool wrappers have returns_envelope=True (set by _agent_as_tool).
+            # Plain Tool.from_fn() wrappers have returns_envelope=False.
+            # This is the only stable discriminator: agent_memory/agent_store can both
+            # be None for an agent-as-tool when the source agent has no memory or store.
+            if not getattr(tool_obj, "returns_envelope", False):
                 callable_tool_names.append(tool_name)
 
         node = AgentNode(

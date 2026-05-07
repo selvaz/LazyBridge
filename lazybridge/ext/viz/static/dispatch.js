@@ -31,6 +31,22 @@ on("select", (seq) => {
   if (ev) _gesture(ev, { replay: true });
 });
 
+// Shared cleanup for tool_result / tool_error / tool_timeout:
+// removes the entry from toolsInFlight, recomputes toolCount for that agent,
+// updates engineState (idle when no more tools in-flight, tools otherwise),
+// and fires engineStateChanged so the inspector reflects the new phase.
+// Returns the inflight record so callers can use the stored toolId.
+function _completeTool(ev, agent) {
+  const inflight = ev.tool_use_id ? state.toolsInFlight.get(ev.tool_use_id) : null;
+  if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
+  if (!agent) return inflight;
+  const count = [...state.toolsInFlight.values()].filter(v => v.agent === agent).length;
+  const prev  = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+  state.engineState.set(agent, { ...prev, phase: count > 0 ? "tools" : "idle", toolCount: count });
+  emit("engineStateChanged", agent);
+  return inflight;
+}
+
 // Visual gesture for a single event. In replay mode we still fire
 // setInFlight(false) on model_request so we don't leave ghosts.
 function _gesture(ev, { replay = false } = {}) {
@@ -72,7 +88,9 @@ function _gesture(ev, { replay = false } = {}) {
         emit("engineStateChanged", agent);
       }
       if (ev.error && agent) flashError(agent);
-      if (agent && (ev.payload != null)) state.pipelineOutputs.set(agent, ev.payload);
+      // Support both new shape (payload) and legacy DB shape (result) for replay compat
+      const output = ev.payload ?? ev.result;
+      if (agent && output != null) state.pipelineOutputs.set(agent, output);
       // Pulse along every outgoing context/router edge
       if (agent && !ev.error) {
         const srcNode = state.nodes.find(n => n.name === agent || n.id === agent);
@@ -122,7 +140,8 @@ function _gesture(ev, { replay = false } = {}) {
       break;
 
     case "tool_call": {
-      const name = ev.tool;
+      // Support both new shape (tool) and legacy DB shape (name) for replay compat
+      const name = ev.tool ?? ev.name;
       if (!name || !agent) break;
       const toolId = ensureToolNode(name, agent);
       // Track in-flight tool calls by tool_use_id for parallel correlation
@@ -139,35 +158,33 @@ function _gesture(ev, { replay = false } = {}) {
     }
 
     case "tool_result": {
-      const name = ev.tool;
+      const name = ev.tool ?? ev.name;
       if (!name || !agent) break;
-      const toolId = `tool:${name}`;
-      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
-      // If no more tools in flight for this agent, phase returns to idle
-      const trCount = [...state.toolsInFlight.values()].filter(v => v.agent === agent).length;
-      if (trCount === 0) {
-        const trState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
-        state.engineState.set(agent, { ...trState, phase: "idle", toolCount: 0 });
-        emit("engineStateChanged", agent);
-      }
+      // Use the toolId stored at tool_call time; fall back to reconstructed id.
+      // This ensures the pulse targets the correct node even when ensureToolNode()
+      // deduplicated an agent-as-tool entry to an existing agent node.
+      const inflight = _completeTool(ev, agent);
+      const toolId   = inflight?.toolId || `tool:${name}`;
       pulse(toolId, agent, COLOR.tool);
       refreshStore();
       break;
     }
 
     case "tool_error": {
-      const name = ev.tool;
-      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
-      if (name) flashError(`tool:${name}`);
-      if (agent) flashError(agent);
+      const name     = ev.tool ?? ev.name;
+      const inflight = _completeTool(ev, agent);
+      const toolId   = inflight?.toolId || (name ? `tool:${name}` : null);
+      if (toolId) flashError(toolId);
+      if (agent)  flashError(agent);
       break;
     }
 
     case "tool_timeout": {
-      const name = ev.tool;
-      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
-      if (name) flashError(`tool:${name}`);
-      if (agent) flashError(agent);
+      const name     = ev.tool ?? ev.name;
+      const inflight = _completeTool(ev, agent);
+      const toolId   = inflight?.toolId || (name ? `tool:${name}` : null);
+      if (toolId) flashError(toolId);
+      if (agent)  flashError(agent);
       break;
     }
 

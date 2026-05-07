@@ -1,20 +1,29 @@
-// Token handling — extracted once from window.location.hash on load.
-// The token is sent only via the X-Token request header to avoid it
-// appearing in server access logs (query-string exposure) or browser
-// history (hash persistence after navigation).  The hash is cleared
-// immediately after extraction so it does not survive page reload or
-// appear in the browser history entry for this URL.
+// Token handling — extracted once from window.location.hash on load,
+// then persisted to sessionStorage so that a manual page reload (F5)
+// does not break the session.  sessionStorage is tab-scoped and is
+// cleared when the tab is closed, so the token does not leak to other
+// tabs or survive browser restarts.
+//
+// Priority: URL hash > sessionStorage.  The hash is cleared from the
+// URL bar immediately after extraction (history.replaceState) so it is
+// never logged by the server on subsequent navigations.
+
+const _SS_KEY = "lb_viz_token";
 
 let token = "";
 const hash = window.location.hash || "";
 const _m = hash.match(/[#&]t=([^&]+)/);
 if (_m) {
   token = decodeURIComponent(_m[1]);
-  // Remove the token from the URL bar so it is not logged by the
-  // server on the next navigation and does not persist in history.
+  // Persist for reload survivability before clearing the URL bar.
+  try { sessionStorage.setItem(_SS_KEY, token); } catch (_) {}
   try {
     history.replaceState(null, "", window.location.pathname + window.location.search);
   } catch (_) { /* replaceState may be blocked in some sandboxed frames */ }
+} else {
+  // Reload path: no hash present, but a previous load may have stored
+  // the token in sessionStorage.
+  try { token = sessionStorage.getItem(_SS_KEY) || ""; } catch (_) {}
 }
 
 export function withToken(path) {

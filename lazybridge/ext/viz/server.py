@@ -114,6 +114,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -252,6 +253,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")  # disable proxy buffering
+        self._send_security_headers()
         self.end_headers()
 
         sub = self.hub.subscribe(replay_recent=False)

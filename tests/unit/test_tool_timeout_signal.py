@@ -16,12 +16,13 @@ must happen:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 
 import pytest
 
 from lazybridge.engines.llm import LLMEngine, ToolTimeoutError
 from lazybridge.session import EventType, Session
-from lazybridge.tools import wrap_tool
+from lazybridge.tools import Tool, wrap_tool
 
 # ---------------------------------------------------------------------------
 # EventType is wired up
@@ -88,6 +89,100 @@ async def test_run_tool_emits_tool_timeout_event_on_timeout():
 # ---------------------------------------------------------------------------
 # The next-turn message marker
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_marker_reaches_model_in_next_turn():
+    """The real _loop() path: after a tool timeout the USER message sent to
+    the model in turn 2 must contain a ToolResultContent whose content starts
+    with [TOOL_TIMEOUT].  This verifies the actual engine code, not a mirrored
+    local copy of the classification logic."""
+    from lazybridge.core.types import (
+        CompletionRequest,
+        CompletionResponse,
+        StreamChunk,
+        ToolCall,
+        ToolResultContent,
+        UsageStats,
+    )
+    from lazybridge.envelope import Envelope
+
+    captured_requests: list[CompletionRequest] = []
+    _call_turn = 0
+
+    async def _fake_aexecute(req: CompletionRequest) -> CompletionResponse:
+        nonlocal _call_turn
+        captured_requests.append(req)
+        if _call_turn == 0:
+            _call_turn += 1
+            return CompletionResponse(
+                content="",
+                tool_calls=[ToolCall(id="tc-timeout-1", name="slow_op", arguments={})],
+                stop_reason="tool_use",
+                usage=UsageStats(input_tokens=5, output_tokens=1),
+                model="fake",
+            )
+        return CompletionResponse(
+            content="acknowledged",
+            tool_calls=[],
+            stop_reason="end_turn",
+            usage=UsageStats(input_tokens=8, output_tokens=3),
+            model="fake",
+        )
+
+    async def _fake_astream(req: CompletionRequest) -> AsyncIterator[StreamChunk]:
+        resp = await _fake_aexecute(req)
+        yield StreamChunk(
+            delta=resp.content,
+            tool_calls=resp.tool_calls,
+            stop_reason=resp.stop_reason,
+            usage=resp.usage,
+            is_final=True,
+        )
+
+    class _FakeExecutor:
+        async def aexecute(self, req: CompletionRequest) -> CompletionResponse:
+            return await _fake_aexecute(req)
+
+        async def astream(self, req: CompletionRequest) -> AsyncIterator[StreamChunk]:
+            async for c in _fake_astream(req):
+                yield c
+
+    async def slow_op() -> str:
+        await asyncio.sleep(10)
+        return "never"
+
+    engine = LLMEngine("fake", provider="fake", tool_timeout=0.05, request_timeout=None)
+    engine._make_executor = lambda: _FakeExecutor()  # type: ignore[assignment]
+
+    tool = Tool(slow_op)
+    env = Envelope(task="please call slow_op")
+    await engine.run(env, tools=[tool], output_type=str, memory=None, session=None)
+
+    # Two round-trips to the model: turn 1 = tool_call, turn 2 = tool result.
+    assert len(captured_requests) == 2, (
+        f"Expected 2 requests (tool-call + result), got {len(captured_requests)}"
+    )
+
+    # The last message in the second request is the USER message with tool results.
+    second_req = captured_requests[1]
+    tool_result_blocks = [
+        b
+        for msg in second_req.messages
+        if not isinstance(msg.content, str)
+        for b in msg.content
+        if isinstance(b, ToolResultContent)
+    ]
+    assert tool_result_blocks, "No ToolResultContent found in second request"
+    timeout_block = next(
+        (b for b in tool_result_blocks if b.tool_use_id == "tc-timeout-1"),
+        None,
+    )
+    assert timeout_block is not None, "Expected ToolResultContent for tc-timeout-1"
+    assert timeout_block.content.startswith("[TOOL_TIMEOUT]"), (
+        f"Expected [TOOL_TIMEOUT] prefix, got: {timeout_block.content!r}"
+    )
+    assert timeout_block.is_error is True
 
 
 @pytest.mark.asyncio
