@@ -253,13 +253,18 @@ def _resolve_auto_tool(
             f"    allow_llm_schema=True  (with schema_llm=<engine>)"
         ) from sig_exc
 
-    # Signature succeeded — upgrade only if enrichment is available.
+    # Signature succeeded — upgrade only if enrichment is available AND useful.
+    # ToolSchemaBuilder catches schema_llm failures internally and silently
+    # falls back to signature, so we must check quality of the hybrid result,
+    # not just whether definition() raised.
     if _schema_needs_enrichment(sig_def) and schema_llm is not None:
         try:
             hyb = Tool(func, name=name, description=description,
                        mode="hybrid", schema_llm=schema_llm, strict=strict)
-            hyb.definition()
-            return hyb
+            hyb_def = hyb.definition()
+            if not _schema_needs_enrichment(hyb_def):
+                # Hybrid genuinely improved the schema — return it.
+                return hyb
         except Exception:
             pass  # fall through to sig_tool or llm
 

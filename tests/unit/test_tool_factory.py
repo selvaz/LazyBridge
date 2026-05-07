@@ -444,3 +444,80 @@ def test_tool_clone_can_enable_strict():
     base = Tool(_fn, name="x", strict=False)
     cloned = tool(base, strict=True)
     assert cloned.strict is True
+
+
+# ---------------------------------------------------------------------------
+# 14. mode="auto" end-to-end with fake schema_llm
+# ---------------------------------------------------------------------------
+
+
+def _underdescribed(x):
+    # No type hints, no docstring → signature schema has no descriptions.
+    pass
+
+
+def test_auto_with_schema_llm_selects_hybrid_for_underdescribed_schema():
+    """When a function has no docstring/types and schema_llm is provided,
+    _resolve_auto_tool must pick hybrid (not llm, not plain signature)."""
+    from lazybridge.tools import _resolve_auto_tool
+
+    calls: list[str] = []
+
+    def fake_llm(prompt: str) -> dict:
+        calls.append(prompt)
+        # _LLMEnrichment shape expected by hybrid mode
+        return {
+            "description": "Enriched tool description.",
+            "param_descriptions": {"x": "The x input parameter."},
+        }
+
+    result = _resolve_auto_tool(
+        _underdescribed,
+        name="fn",
+        description=None,
+        schema_llm=fake_llm,
+        strict=False,
+        allow_llm_schema=False,
+    )
+
+    assert result.mode == "hybrid"
+    # fake_llm was called exactly once (hybrid enrichment call)
+    assert len(calls) == 1
+    defn = result.definition()
+    assert "Enriched" in defn.description
+
+
+def test_auto_with_allow_llm_schema_selects_llm_when_hybrid_fails():
+    """When hybrid fails (LLM raises for the enrichment call) and
+    allow_llm_schema=True, _resolve_auto_tool must fall back to llm mode."""
+    from lazybridge.tools import _resolve_auto_tool
+
+    call_count = [0]
+
+    def fake_llm(prompt: str) -> dict:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # First call: hybrid enrichment — simulate failure
+            raise RuntimeError("hybrid LLM unavailable")
+        # Second call: full LLM schema — _LLMToolSchema shape
+        return {
+            "name": "fn",
+            "description": "LLM-generated full description.",
+            "params": {
+                "x": {"type": "string", "description": "The x parameter.", "required": True},
+            },
+        }
+
+    result = _resolve_auto_tool(
+        _underdescribed,
+        name="fn",
+        description=None,
+        schema_llm=fake_llm,
+        strict=False,
+        allow_llm_schema=True,
+    )
+
+    assert result.mode == "llm"
+    assert call_count[0] == 2  # hybrid attempt + llm attempt
+    defn = result.definition()
+    assert "LLM-generated" in defn.description
