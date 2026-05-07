@@ -77,15 +77,16 @@ def _load_meta() -> dict:
 def _parse_yaml_mini(text: str) -> dict:
     """Minimal YAML parser sufficient for the shapes used in _meta.yaml."""
     root: dict = {}
-    # stack of (indent, container) — container is dict or list
-    stack: list[tuple[int, object]] = [(-1, root)]
+    # stack of (indent, container, owner, owner_key) — the last two track the
+    # parent dict and key that hold this container, so an empty-dict placeholder
+    # can be demoted to a list the moment the first "- item" is encountered.
+    stack: list[tuple[int, object, object, object]] = [(-1, root, None, None)]
     pending_block: list[str] | None = None
     pending_key: tuple[object, str] | None = None
 
     for raw in text.splitlines():
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        # block-scalar accumulation
         indent = len(raw) - len(raw.lstrip(" "))
         stripped = raw.strip()
 
@@ -111,6 +112,17 @@ def _parse_yaml_mini(text: str) -> dict:
             value = stripped[2:].strip()
             if isinstance(parent, list):
                 parent.append(value)
+            elif isinstance(parent, dict):
+                # Demote the empty-dict placeholder to a list in its owner.
+                # This handles YAML like:
+                #   tiers:
+                #     - agent
+                #     - tool
+                top_indent, _, p_owner, p_key = stack[-1]
+                new_list: list = [value]
+                if p_owner is not None and p_key is not None:
+                    p_owner[p_key] = new_list  # type: ignore[index]
+                stack[-1] = (top_indent, new_list, p_owner, p_key)
             continue
 
         # mapping
@@ -119,14 +131,11 @@ def _parse_yaml_mini(text: str) -> dict:
             key = key.strip()
             rest = rest.strip()
             if rest == "":
-                # nested container (dict or list) — decide by next non-empty line
+                # Start with an empty dict; the first "- " beneath it will
+                # demote it to a list (see list-item handling above).
                 if isinstance(parent, dict):
                     parent[key] = {}
-                    stack.append((indent, parent[key]))
-                    # Peek: if siblings start with "- ", convert to list
-                    # We lazily switch: the first "- " under this key converts
-                    # it to a list via _demote_to_list.
-                    # Nothing to do here; the list-demote happens on first list item.
+                    stack.append((indent, parent[key], parent, key))
                 continue
             if rest == "|":
                 pending_block = []
@@ -147,10 +156,10 @@ def _parse_yaml_mini(text: str) -> dict:
     return root
 
 
-def _owner_indent(stack: list[tuple[int, object]], owner: object) -> int:
-    for indent, container in stack:
-        if container is owner:
-            return indent
+def _owner_indent(stack: list[tuple], owner: object) -> int:
+    for entry in stack:
+        if entry[1] is owner:
+            return entry[0]
     return 0
 
 

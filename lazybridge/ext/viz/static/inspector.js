@@ -130,8 +130,8 @@ function renderEndCard() {
   const outputs = [...state.pipelineOutputs.entries()];
   const totalEvts  = state.events.length;
   const llmCalls   = state.events.filter(e => e.event_type === "model_response").length;
-  const totalIn    = state.events.reduce((s, e) => s + (e.usage?.input_tokens  || 0), 0);
-  const totalOut   = state.events.reduce((s, e) => s + (e.usage?.output_tokens || 0), 0);
+  const totalIn    = state.events.reduce((s, e) => s + (e.input_tokens  || 0), 0);
+  const totalOut   = state.events.reduce((s, e) => s + (e.output_tokens || 0), 0);
   body.innerHTML = `
     <div class="agent-card">
       <div class="ac-nameplate">
@@ -263,7 +263,10 @@ function renderNodeCard(node) {
   const inFlightTools = [...state.toolsInFlight.values()].filter(v => v.agent === (node.name || node.id));
 
   const typeLabel  = node.type || "agent";
-  const typeClass  = `type-${typeLabel}`;
+  // Sanitise: CSS class names must not contain characters that could break
+  // out of an HTML attribute when typeLabel comes from server-supplied data.
+  const safeTypeLabel = typeLabel.replace(/[^\w-]/g, "");
+  const typeClass  = `type-${safeTypeLabel}`;
   const isActive   = evts.length > 0;
   const engineType = node.engine_type || "";
 
@@ -276,14 +279,14 @@ function renderNodeCard(node) {
     <div class="agent-card">
 
       <div class="ac-nameplate">
-        <span class="ac-type-icon ${typeClass}">${typeLabel === "tool" ? "⬡" : typeLabel === "router" ? "◆" : "▣"}</span>
+        <span class="ac-type-icon ${typeClass}">${safeTypeLabel === "tool" ? "⬡" : safeTypeLabel === "router" ? "◆" : "▣"}</span>
         <div>
           <div class="ac-name">${escapeHtml(node.name)}</div>
           <div class="ac-badges">
             ${node.provider ? `<span class="ac-badge provider">${escapeHtml(node.provider)}</span>` : ""}
             ${node.model    ? `<span class="ac-badge model">${escapeHtml(truncate(node.model, 22))}</span>` : ""}
             ${engineType    ? `<span class="ac-badge" style="color:#888;border-color:rgba(128,128,128,.3)">${escapeHtml(engineType)}</span>` : ""}
-            <span class="ac-badge ${typeClass}">${typeLabel}</span>
+            <span class="ac-badge ${typeClass}">${escapeHtml(typeLabel)}</span>
             ${isActive ? `<span class="ac-badge live">● active</span>` : `<span class="ac-badge dormant">○ idle</span>`}
           </div>
         </div>
@@ -399,8 +402,9 @@ function renderEvent(ev) {
     return;
   }
   const ts  = ev.ts ? new Date(ev.ts * 1000).toLocaleTimeString() : "";
-  const cls = (ev.event_type || "").startsWith("tool") ? "tool"
-            : ev.event_type === "tool_error" ? "error" : "";
+  const cls = ev.event_type === "tool_error" ? "error"
+            : (ev.event_type || "").startsWith("tool") ? "tool"
+            : "";
   body.innerHTML = `
     <div class="evt-head">
       <div class="row">

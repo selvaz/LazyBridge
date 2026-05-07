@@ -72,7 +72,7 @@ function _gesture(ev, { replay = false } = {}) {
         emit("engineStateChanged", agent);
       }
       if (ev.error && agent) flashError(agent);
-      if (agent && (ev.result != null)) state.pipelineOutputs.set(agent, ev.result);
+      if (agent && (ev.payload != null)) state.pipelineOutputs.set(agent, ev.payload);
       // Pulse along every outgoing context/router edge
       if (agent && !ev.error) {
         const srcNode = state.nodes.find(n => n.name === agent || n.id === agent);

@@ -18,9 +18,14 @@ if (_m) {
 }
 
 export function withToken(path) {
-  // Do NOT append the token as a query parameter — it would appear in
-  // server access logs and HTTP Referer headers.  Use X-Token instead.
-  return path;
+  // EventSource does not support custom request headers, so the token
+  // must travel as a query parameter for SSE connections.  The viz server
+  // suppresses all access logs (log_message is a no-op), so query-string
+  // exposure is not a concern here.  fetch()-based helpers (getJSON /
+  // postJSON) continue to use the X-Token header instead.
+  if (!token) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}t=${encodeURIComponent(token)}`;
 }
 
 export async function getJSON(path) {

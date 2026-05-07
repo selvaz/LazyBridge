@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+import warnings
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -863,6 +864,12 @@ class Plan:
                         metadata=e.metadata,
                         error=e.error,
                     )
+            warnings.warn(
+                f"from_step({sentinel.name!r}) found no matching step in history; "
+                "falling back to the original input. Check that the step name matches "
+                "an earlier Step in this Plan.",
+                stacklevel=4,
+            )
             return start
         if isinstance(sentinel, _FromParallel):
             for r in reversed(history):
@@ -877,6 +884,12 @@ class Plan:
                         metadata=e.metadata,
                         error=e.error,
                     )
+            warnings.warn(
+                f"from_parallel({sentinel.name!r}) found no matching step in history; "
+                "falling back to the original input. Check that the step name matches "
+                "an earlier parallel Step in this Plan.",
+                stacklevel=4,
+            )
             return start
         if isinstance(sentinel, _FromParallelAll):
             return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
@@ -1138,6 +1151,10 @@ class Plan:
         tasks: list[str | Envelope],
         *,
         concurrency: int | None = None,
+        tools: list[Any] | None = None,
+        memory: Any = None,
+        session: Any = None,
+        output_type: type = str,
     ) -> list[Envelope]:
         """Run this Plan concurrently against ``N`` inputs; sync return.
 
@@ -1155,6 +1172,11 @@ class Plan:
         asyncio semaphore.  ``None`` (default) lets every task fire
         immediately.
 
+        Pass ``tools`` when the Plan's steps use string-name targets that
+        must be resolved against a live tool map.  Omitting ``tools``
+        (or passing ``[]``) works only when every step target is an
+        ``Agent`` object rather than a string alias.
+
         See :meth:`arun_many` for the async variant when the caller is
         already inside an event loop.
         """
@@ -1163,20 +1185,39 @@ class Plan:
         # the worker loop so observability flows through fan-outs.
         from lazybridge.agent import _run_coro_with_context
 
-        return _run_coro_with_context(self.arun_many(tasks, concurrency=concurrency))
+        return _run_coro_with_context(
+            self.arun_many(
+                tasks,
+                concurrency=concurrency,
+                tools=tools,
+                memory=memory,
+                session=session,
+                output_type=output_type,
+            )
+        )
 
     async def arun_many(
         self,
         tasks: list[str | Envelope],
         *,
         concurrency: int | None = None,
+        tools: list[Any] | None = None,
+        memory: Any = None,
+        session: Any = None,
+        output_type: type = str,
     ) -> list[Envelope]:
         """Async counterpart to :meth:`run_many`.
 
         Use this directly when you're already inside an event loop and
         want to ``await`` the fan-out without the sync-bridge overhead.
+
+        Pass ``tools`` when the Plan's steps use string-name targets that
+        must be resolved against a live tool map.  Omitting ``tools``
+        (or passing ``[]``) works only when every step target is an
+        ``Agent`` object rather than a string alias.
         """
         sem = asyncio.Semaphore(concurrency) if concurrency else None
+        resolved_tools: list[Any] = tools or []
 
         async def _one(task: str | Envelope) -> Envelope:
             # ``Envelope.from_task`` populates BOTH ``task`` and
@@ -1187,10 +1228,10 @@ class Plan:
             async def _go() -> Envelope:
                 return await self.run(
                     env,
-                    tools=[],
-                    output_type=str,
-                    memory=None,
-                    session=None,
+                    tools=resolved_tools,
+                    output_type=output_type,
+                    memory=memory,
+                    session=session,
                 )
 
             if sem is None:

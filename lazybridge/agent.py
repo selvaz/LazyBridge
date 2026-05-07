@@ -1197,12 +1197,20 @@ class _ParallelAgent:
             return await _coro()
 
         results = await asyncio.gather(*[_run_one(a) for a in self.agents], return_exceptions=True)
-        return [
-            r
-            if isinstance(r, Envelope)
-            else Envelope.error_envelope(r if isinstance(r, Exception) else RuntimeError(str(r)))
-            for r in results
-        ]
+        out: list[Envelope] = []
+        for r in results:
+            if isinstance(r, Envelope):
+                out.append(r)
+            elif isinstance(r, asyncio.CancelledError):
+                # CancelledError is BaseException (not Exception) in Python 3.8+;
+                # wrapping it as an error envelope would silently swallow the
+                # cancellation signal. Re-raise so structured cancellation works.
+                raise r
+            elif isinstance(r, Exception):
+                out.append(Envelope.error_envelope(r))
+            else:
+                out.append(Envelope.error_envelope(RuntimeError(str(r))))
+        return out
 
     def __call__(self, task: str | Envelope) -> list[Envelope]:
         # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only

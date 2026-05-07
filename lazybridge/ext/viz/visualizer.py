@@ -209,7 +209,10 @@ class Visualizer:
         elif action == "step":
             self._replay.step()
         elif action == "speed":
-            self._replay.set_speed(float(body.get("speed", 1.0)))
+            raw_speed = float(body.get("speed", 1.0))
+            if not (0.1 <= raw_speed <= 100.0):
+                return {"error": "speed must be between 0.1 and 100.0"}
+            self._replay.set_speed(raw_speed)
         else:
             return {"error": f"unknown action: {action}"}
         idx, total = self._replay.progress

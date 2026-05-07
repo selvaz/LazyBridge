@@ -276,8 +276,12 @@ class GraphSchema:
         tool_map = getattr(agent, "_tool_map", None) or {}
         callable_tool_names: list[str] = []
         for tool_name, tool_obj in tool_map.items():
-            # Agent-as-tool entries expose agent_memory / agent_store; plain tools don't.
-            if not (hasattr(tool_obj, "agent_memory") or hasattr(tool_obj, "agent_store")):
+            # Agent-as-tool entries have non-None agent_memory or agent_store;
+            # plain Tool wrappers always carry these attributes but set them to None.
+            if not (
+                getattr(tool_obj, "agent_memory", None) is not None
+                or getattr(tool_obj, "agent_store", None) is not None
+            ):
                 callable_tool_names.append(tool_name)
 
         node = AgentNode(
@@ -396,6 +400,8 @@ class GraphSchema:
         for n in data.get("nodes", []):
             if n.get("type") == NodeType.ROUTER:
                 g._nodes[n["id"]] = RouterNode.from_dict(n)
+            elif n.get("type") == "tool":
+                g._nodes[n["id"]] = _ToolNode(id=n["id"], name=n.get("name", n["id"]))
             else:
                 g._nodes[n["id"]] = AgentNode.from_dict(n)
         g._edges = [Edge.from_dict(e) for e in data.get("edges", [])]

@@ -130,6 +130,7 @@ researcher = Agent(
     store=store,
     name="research",
 )
+fact_checker = Agent(engine=LLMEngine("claude-opus-4-7"), store=store)
 writer = Agent(engine=LLMEngine("gpt-4o"))
 
 plan = Agent(
