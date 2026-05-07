@@ -49,6 +49,11 @@ export function initInspector() {
       _refreshNodeTab(state.selectedNode);
     }
   });
+  on("engineStateChanged", () => {
+    if (activeTab === "node" && state.selectedNode) {
+      _refreshNodeTab(state.selectedNode);
+    }
+  });
   on("nodeClick", (n) => {
     switchTab("node");
     if (n.id === "__START__") renderStartCard();
@@ -191,16 +196,19 @@ function renderStoreCard() {
 // ---- Agent card (D&D character sheet) ------------------------------------
 
 function renderNodeCard(node) {
-  // Derive tools from graph links
-  const tools = node.tools || state.links
-    .filter(l => {
-      const src = typeof l.source === "object" ? l.source.id : l.source;
-      return src === node.id && l.kind === "tool";
-    })
-    .map(l => {
-      const tgt = typeof l.target === "object" ? l.target.id : l.target;
-      return tgt.replace(/^tool:/, "");
-    });
+  // Derive callable tools: prefer the node's own tools list (populated from schema),
+  // fall back to deriving from graph links for backwards compatibility.
+  const tools = (node.tools && node.tools.length)
+    ? node.tools
+    : state.links
+        .filter(l => {
+          const src = typeof l.source === "object" ? l.source.id : l.source;
+          return src === node.id && l.kind === "tool";
+        })
+        .map(l => {
+          const tgt = typeof l.target === "object" ? l.target.id : l.target;
+          return tgt.replace(/^tool:/, "");
+        });
 
   // Context sources: nodes that send context INTO this node
   const ctxSources = state.links
@@ -244,12 +252,25 @@ function renderNodeCard(node) {
   const evts     = state.events.filter(e => e.agent_name === node.name || e.agent_name === node.id);
   const llmCalls = evts.filter(e => e.event_type === "model_response").length;
   const toolCalls = evts.filter(e => e.event_type === "tool_call").length;
-  const inputTok  = evts.reduce((s, e) => s + (e.usage?.input_tokens  || 0), 0);
-  const outputTok = evts.reduce((s, e) => s + (e.usage?.output_tokens || 0), 0);
+  const inputTok  = evts.reduce((s, e) => s + (e.input_tokens  || 0), 0);
+  const outputTok = evts.reduce((s, e) => s + (e.output_tokens || 0), 0);
+
+  // Canonical engine state: live phase from dispatch (idle / llm / tools)
+  const engState   = state.engineState.get(node.name) || state.engineState.get(node.id);
+  const engPhase   = engState?.phase || "idle";
+  const engTurn    = engState?.turn ?? null;
+  // In-flight tool calls for this agent (parallel tool execution)
+  const inFlightTools = [...state.toolsInFlight.values()].filter(v => v.agent === (node.name || node.id));
 
   const typeLabel  = node.type || "agent";
   const typeClass  = `type-${typeLabel}`;
   const isActive   = evts.length > 0;
+  const engineType = node.engine_type || "";
+
+  // Engine phase badge colour
+  const phaseBadgeStyle = engPhase === "llm"   ? "color:#b388ff;border-color:rgba(179,136,255,.3)"
+                        : engPhase === "tools" ? "color:var(--accent-tool, #ff3ec9);border-color:rgba(255,62,201,.3)"
+                        :                       "color:var(--text-dim)";
 
   body.innerHTML = `
     <div class="agent-card">
@@ -261,11 +282,26 @@ function renderNodeCard(node) {
           <div class="ac-badges">
             ${node.provider ? `<span class="ac-badge provider">${escapeHtml(node.provider)}</span>` : ""}
             ${node.model    ? `<span class="ac-badge model">${escapeHtml(truncate(node.model, 22))}</span>` : ""}
+            ${engineType    ? `<span class="ac-badge" style="color:#888;border-color:rgba(128,128,128,.3)">${escapeHtml(engineType)}</span>` : ""}
             <span class="ac-badge ${typeClass}">${typeLabel}</span>
             ${isActive ? `<span class="ac-badge live">● active</span>` : `<span class="ac-badge dormant">○ idle</span>`}
           </div>
         </div>
       </div>
+
+      ${isActive ? `
+      <div class="ac-section">
+        <div class="ac-section-title">ENGINE STATE</div>
+        <div class="ac-stats">
+          <div class="ac-stat"><span class="ac-v"><span style="${phaseBadgeStyle}">${engPhase.toUpperCase()}</span></span><span class="ac-l">phase</span></div>
+          ${engTurn !== null ? `<div class="ac-stat"><span class="ac-v">${engTurn}</span><span class="ac-l">turn</span></div>` : ""}
+          ${inFlightTools.length ? `<div class="ac-stat"><span class="ac-v" style="color:var(--accent-tool,#ff3ec9)">${inFlightTools.length}</span><span class="ac-l">tools in-flight</span></div>` : ""}
+        </div>
+        ${inFlightTools.length ? `
+        <div style="margin-top:6px">
+          ${inFlightTools.map(t => `<span class="ac-tool" style="border-color:rgba(255,62,201,.4);color:#ff3ec9">⟳ ${escapeHtml(t.tool)}</span>`).join("")}
+        </div>` : ""}
+      </div>` : ""}
 
       ${task ? `
       <div class="ac-section">

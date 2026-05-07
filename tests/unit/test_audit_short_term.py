@@ -283,7 +283,7 @@ async def test_engine_emits_tool_error_on_malformed_args() -> None:
             name="my_tool",
             arguments={"_raw_arguments": "{not json", "_parse_error": "Expecting property name"},
         )
-        result = await engine._exec_tool(bad_call, {"my_tool": tool}, session=sess, run_id="r1")
+        result = await engine._exec_tool(bad_call, {"my_tool": tool}, agent_name="test", session=sess, run_id="r1")
         assert isinstance(result, RuntimeError)
         assert "ToolArgumentParseError" not in str(result)  # human-readable, not the type tag
         assert "malformed JSON" in str(result)

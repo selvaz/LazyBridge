@@ -51,7 +51,7 @@ def test_replay_mode_loads_events_and_serves(tmp_path):
     db = tmp_path / "rec.db"
     sess = Session(db=str(db))
     sess.emit(EventType.AGENT_START, {"agent_name": "alice"})
-    sess.emit(EventType.TOOL_CALL, {"agent_name": "alice", "name": "search", "arguments": {"q": "x"}})
+    sess.emit(EventType.TOOL_CALL, {"agent_name": "alice", "tool": "search", "tool_use_id": "tc-1", "arguments": {"q": "x"}})
     sess.flush()
     sess.close()
 

@@ -620,6 +620,10 @@ class LLMEngine:
 
         from lazybridge.core.types import TextContent, ThinkingConfig, ToolResultContent, ToolUseContent
 
+        # Resolved once here so emit calls and the _exec_tool closure all see
+        # the same value without re-computing it on every tool call.
+        agent_name = getattr(self, "_agent_name", "agent")
+
         executor = self._make_executor()
 
         messages: list[Message] = []
@@ -678,7 +682,11 @@ class LLMEngine:
 
         for turn in range(self.max_turns):
             if session:
-                session.emit(EventType.LOOP_STEP, {"turn": turn, "messages": len(messages)}, run_id=run_id)
+                session.emit(
+                    EventType.LOOP_STEP,
+                    {"agent_name": agent_name, "turn": turn, "messages": len(messages)},
+                    run_id=run_id,
+                )
 
             req = CompletionRequest(
                 messages=messages,
@@ -708,7 +716,12 @@ class LLMEngine:
             if session:
                 session.emit(
                     EventType.MODEL_REQUEST,
-                    {"provider": executor._provider.__class__.__name__, "model": self.model, "turn": turn},
+                    {
+                        "agent_name": agent_name,
+                        "provider": executor._provider.__class__.__name__,
+                        "model": self.model,
+                        "turn": turn,
+                    },
                     run_id=run_id,
                 )
 
@@ -734,6 +747,7 @@ class LLMEngine:
                 session.emit(
                     EventType.MODEL_RESPONSE,
                     {
+                        "agent_name": agent_name,
                         "content": resp.content[:500],
                         "input_tokens": resp.usage.input_tokens,
                         "output_tokens": resp.usage.output_tokens,
@@ -796,9 +810,9 @@ class LLMEngine:
 
             async def _run_one(tc: ToolCall, *, _sem: asyncio.Semaphore | None = sem) -> Any:
                 if _sem is None:
-                    return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
+                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
                 async with _sem:
-                    return await self._exec_tool(tc, tool_map, session=session, run_id=run_id)
+                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
 
             raw_results = await asyncio.gather(
                 *[_run_one(tc) for tc in resp.tool_calls],
@@ -933,18 +947,19 @@ class LLMEngine:
         tc: ToolCall,
         tool_map: dict[str, Tool],
         *,
+        agent_name: str,
         session: Session | None,
         run_id: str,
     ) -> Any:
         if session:
             # ``tool_use_id`` is the provider-supplied call id; it lets
-            # downstream consumers (OTel exporter, audit dashboards)
+            # downstream consumers (OTel exporter, audit dashboards, viz)
             # correlate a TOOL_CALL with its eventual TOOL_RESULT /
             # TOOL_ERROR even when N parallel invocations of the same
             # tool name are in flight in a single turn.
             session.emit(
                 EventType.TOOL_CALL,
-                {"tool": tc.name, "tool_use_id": tc.id, "arguments": tc.arguments},
+                {"agent_name": agent_name, "tool": tc.name, "tool_use_id": tc.id, "arguments": tc.arguments},
                 run_id=run_id,
             )
 
@@ -965,6 +980,7 @@ class LLMEngine:
                 session.emit(
                     EventType.TOOL_ERROR,
                     {
+                        "agent_name": agent_name,
                         "tool": tc.name,
                         "tool_use_id": tc.id,
                         "error": str(err),
@@ -982,7 +998,7 @@ class LLMEngine:
             if session:
                 session.emit(
                     EventType.TOOL_ERROR,
-                    {"tool": tc.name, "tool_use_id": tc.id, "error": str(err)},
+                    {"agent_name": agent_name, "tool": tc.name, "tool_use_id": tc.id, "error": str(err)},
                     run_id=run_id,
                 )
             return err
@@ -1000,6 +1016,7 @@ class LLMEngine:
                         session.emit(
                             EventType.TOOL_TIMEOUT,
                             {
+                                "agent_name": agent_name,
                                 "tool": tc.name,
                                 "tool_use_id": tc.id,
                                 "error": str(timeout_err),
@@ -1014,7 +1031,7 @@ class LLMEngine:
             if session:
                 session.emit(
                     EventType.TOOL_RESULT,
-                    {"tool": tc.name, "tool_use_id": tc.id, "result": str(result)[:500]},
+                    {"agent_name": agent_name, "tool": tc.name, "tool_use_id": tc.id, "result": str(result)[:500]},
                     run_id=run_id,
                 )
             return result
@@ -1023,6 +1040,7 @@ class LLMEngine:
                 session.emit(
                     EventType.TOOL_ERROR,
                     {
+                        "agent_name": agent_name,
                         "tool": tc.name,
                         "tool_use_id": tc.id,
                         "error": str(exc),

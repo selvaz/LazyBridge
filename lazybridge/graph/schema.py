@@ -116,7 +116,7 @@ class _ToolNode(_BaseNode):
 class AgentNode(_BaseNode):
     """Serialisable descriptor for an Agent node."""
 
-    __slots__ = ("model", "provider", "system")
+    __slots__ = ("engine_type", "model", "provider", "system", "tools")
 
     def __init__(
         self,
@@ -125,11 +125,19 @@ class AgentNode(_BaseNode):
         provider: str = "",
         model: str = "",
         system: str | None = None,
+        engine_type: str = "",
+        tools: list[str] | None = None,
     ) -> None:
         super().__init__(id, name)
         self.provider = provider
         self.model = model
         self.system = system
+        # Canonical engine kind: "LLMEngine", "Plan", "HumanEngine", or custom class name.
+        # Lets the viz differentiate LLM nodes from Plan orchestrators.
+        self.engine_type = engine_type
+        # Names of Python-callable tools registered on this agent (agent-as-tool
+        # entries are captured as edges, not listed here).
+        self.tools = tools or []
         self.type = NodeType.AGENT
 
     def to_dict(self) -> dict:
@@ -139,6 +147,8 @@ class AgentNode(_BaseNode):
             "provider": self.provider,
             "model": self.model,
             "system": self.system,
+            "engine_type": self.engine_type,
+            "tools": self.tools,
             "type": self.type,
         }
 
@@ -150,6 +160,8 @@ class AgentNode(_BaseNode):
             provider=d.get("provider", ""),
             model=d.get("model", ""),
             system=d.get("system"),
+            engine_type=d.get("engine_type", ""),
+            tools=d.get("tools", []),
         )
 
 
@@ -253,19 +265,35 @@ class GraphSchema:
         """
         provider, model = _derive_provider_model(agent)
         node_id = str(getattr(agent, "id", None) or getattr(agent, "name", "agent"))
+
+        # Canonical engine kind — lets the viz distinguish LLM nodes from Plan
+        # orchestrators or custom engines without needing to parse the model string.
+        engine = getattr(agent, "engine", None)
+        engine_type = engine.__class__.__name__ if engine is not None else ""
+
+        # Collect names of Python-callable tools (not agent-as-tool entries) for
+        # the node badge so the inspector can list them without reading edges.
+        tool_map = getattr(agent, "_tool_map", None) or {}
+        callable_tool_names: list[str] = []
+        for tool_name, tool_obj in tool_map.items():
+            # Agent-as-tool entries expose agent_memory / agent_store; plain tools don't.
+            if not (hasattr(tool_obj, "agent_memory") or hasattr(tool_obj, "agent_store")):
+                callable_tool_names.append(tool_name)
+
         node = AgentNode(
             id=node_id,
             name=getattr(agent, "name", node_id),
             provider=provider,
             model=model,
             system=getattr(agent, "system", None),
+            engine_type=engine_type,
+            tools=callable_tool_names,
         )
         self._nodes[node.id] = node
 
         # Register Python-callable tool functions as ToolNode stubs so the
         # full pipeline topology is visible before execution starts.
         # Skips Agent-as-tool entries (those register themselves separately).
-        tool_map = getattr(agent, "_tool_map", None) or {}
         for tool_name in tool_map:
             tool_id = f"tool:{tool_name}"
             if tool_id not in self._nodes:

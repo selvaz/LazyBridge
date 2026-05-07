@@ -69,6 +69,8 @@ function buildNodes(graph) {
     provider: n.provider,
     model: n.model,
     system: n.system,
+    engine_type: n.engine_type || "",  // canonical engine class name (LLMEngine, Plan, …)
+    tools: n.tools || [],              // list of callable tool names registered on this agent
   }));
 }
 

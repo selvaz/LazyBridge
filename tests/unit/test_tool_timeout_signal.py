@@ -65,6 +65,7 @@ async def test_run_tool_emits_tool_timeout_event_on_timeout():
     result = await engine._exec_tool(  # type: ignore[attr-defined]
         _ToolCall(),
         tool_map,
+        agent_name="test",
         session=sess,
         run_id="r1",
     )
@@ -156,6 +157,7 @@ async def test_genuine_exception_still_emits_tool_error():
     result = await engine._exec_tool(  # type: ignore[attr-defined]
         _ToolCall(),
         tool_map,
+        agent_name="test",
         session=sess,
         run_id="r2",
     )

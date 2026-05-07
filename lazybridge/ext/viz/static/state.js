@@ -18,6 +18,9 @@ export const state = {
   storeProvenance: new Map(),  // key -> {agent: name, ts: number}
   memoryEntries: new Map(),    // agent_name -> [{key, value, ts}]
   sessionInfo: {},             // {session_id, run_id, mode}
+  // Canonical engine state — tracks the live phase of each agent's engine
+  toolsInFlight: new Map(),    // tool_use_id -> {agent, tool, toolId} for parallel tool correlation
+  engineState: new Map(),      // agent_name -> {phase: "idle"|"llm"|"tools", turn: number, toolCount: number}
 };
 
 const EVENTS_CAP = 5000;

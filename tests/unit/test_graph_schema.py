@@ -176,3 +176,63 @@ def test_save_and_load_json(tmp_path):
     g2 = GraphSchema.from_file(path)
     assert g2.session_id == "sess-8"
     assert g2.node("id-1").name == "agent"
+
+
+# ---------------------------------------------------------------------------
+# T11.09 — engine_type and tools fields round-trip through to_dict/from_dict
+# ---------------------------------------------------------------------------
+
+
+def test_agent_node_engine_type_and_tools_in_to_dict():
+    # T11.09 — canonical engine fields are serialised into the graph payload
+    from lazybridge.graph.schema import AgentNode
+
+    node = AgentNode(
+        id="n1",
+        name="researcher",
+        provider="anthropic",
+        model="claude",
+        engine_type="LLMEngine",
+        tools=["search", "summarize"],
+    )
+    d = node.to_dict()
+    assert d["engine_type"] == "LLMEngine"
+    assert d["tools"] == ["search", "summarize"]
+
+
+def test_agent_node_engine_type_round_trips_via_from_dict():
+    # T11.09b — from_dict restores engine_type and tools
+    from lazybridge.graph.schema import AgentNode
+
+    d = {
+        "id": "n2",
+        "name": "writer",
+        "provider": "openai",
+        "model": "gpt-4o",
+        "engine_type": "Plan",
+        "tools": ["write_section"],
+    }
+    node = AgentNode.from_dict(d)
+    assert node.engine_type == "Plan"
+    assert node.tools == ["write_section"]
+
+
+def test_add_agent_populates_engine_type_from_live_agent():
+    # T11.09c — add_agent reads engine_type from agent.engine class name
+    class _FakeEngine:
+        pass
+
+    class _AgentWithEngine:
+        id = "ae1"
+        name = "smart_agent"
+        system = None
+        _tool_map: dict = {}
+
+        def __init__(self):
+            self.engine = _FakeEngine()
+
+    g = GraphSchema("sess-9")
+    g.add_agent(_AgentWithEngine())
+    node = g.node("ae1")
+    assert node is not None
+    assert node.engine_type == "_FakeEngine"

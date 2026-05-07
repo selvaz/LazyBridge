@@ -65,7 +65,12 @@ function _gesture(ev, { replay = false } = {}) {
     }
 
     case "agent_finish": {
-      if (agent) fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
+      if (agent) {
+        fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
+        // Engine is done — reset to idle and clear any stale in-flight tools
+        state.engineState.set(agent, { phase: "idle", turn: 0, toolCount: 0 });
+        emit("engineStateChanged", agent);
+      }
       if (ev.error && agent) flashError(agent);
       if (agent && (ev.result != null)) state.pipelineOutputs.set(agent, ev.result);
       // Pulse along every outgoing context/router edge
@@ -87,40 +92,80 @@ function _gesture(ev, { replay = false } = {}) {
     }
 
     case "model_request":
-      if (agent) setInFlight(agent, !replay);
-      if (agent && replay) fireHitRing(agent, COLOR.think);
+      if (agent) {
+        setInFlight(agent, !replay);
+        if (agent && replay) fireHitRing(agent, COLOR.think);
+        // Engine phase: waiting for LLM response
+        const mreqState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+        state.engineState.set(agent, { ...mreqState, phase: "llm", turn: ev.turn ?? mreqState.turn });
+        emit("engineStateChanged", agent);
+      }
       break;
 
     case "model_response":
       if (agent) {
         setInFlight(agent, false);
         fireHitRing(agent, COLOR.agent);
+        const mrespState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+        state.engineState.set(agent, { ...mrespState, phase: "idle" });
+        emit("engineStateChanged", agent);
       }
       break;
 
     case "loop_step":
-      if (agent) fireHitRing(agent, COLOR.think);
+      if (agent) {
+        fireHitRing(agent, COLOR.think);
+        const lsState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+        state.engineState.set(agent, { ...lsState, turn: ev.turn ?? lsState.turn });
+        emit("engineStateChanged", agent);
+      }
       break;
 
     case "tool_call": {
-      const name = ev.name;
+      const name = ev.tool;
       if (!name || !agent) break;
       const toolId = ensureToolNode(name, agent);
+      // Track in-flight tool calls by tool_use_id for parallel correlation
+      if (ev.tool_use_id) {
+        state.toolsInFlight.set(ev.tool_use_id, { agent, tool: name, toolId });
+      }
+      // Engine phase: executing tools
+      const tcState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+      const tcCount = [...state.toolsInFlight.values()].filter(v => v.agent === agent).length;
+      state.engineState.set(agent, { ...tcState, phase: "tools", toolCount: tcCount });
+      emit("engineStateChanged", agent);
       pulse(agent, toolId, COLOR.tool);
       break;
     }
 
     case "tool_result": {
-      const name = ev.name;
+      const name = ev.tool;
       if (!name || !agent) break;
       const toolId = `tool:${name}`;
+      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
+      // If no more tools in flight for this agent, phase returns to idle
+      const trCount = [...state.toolsInFlight.values()].filter(v => v.agent === agent).length;
+      if (trCount === 0) {
+        const trState = state.engineState.get(agent) || { phase: "idle", turn: 0, toolCount: 0 };
+        state.engineState.set(agent, { ...trState, phase: "idle", toolCount: 0 });
+        emit("engineStateChanged", agent);
+      }
       pulse(toolId, agent, COLOR.tool);
       refreshStore();
       break;
     }
 
     case "tool_error": {
-      const name = ev.name;
+      const name = ev.tool;
+      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
+      if (name) flashError(`tool:${name}`);
+      if (agent) flashError(agent);
+      break;
+    }
+
+    case "tool_timeout": {
+      const name = ev.tool;
+      if (ev.tool_use_id) state.toolsInFlight.delete(ev.tool_use_id);
       if (name) flashError(`tool:${name}`);
       if (agent) flashError(agent);
       break;
