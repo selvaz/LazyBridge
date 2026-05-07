@@ -45,9 +45,9 @@ def test_as_tool_propagates_session_to_nested_agent():
     # Both agents are registered in the graph.
     names = {n.name for n in sess.graph.nodes()}
     assert names == {"inner", "outer"}
-    # An edge outer → inner is recorded with the as_tool label.
+    # An edge outer → inner is recorded, labelled with the agent's own name.
     edges = sess.graph.edges()
-    assert any(e.from_id == "outer" and e.to_id == "inner" and e.label == "as_tool" for e in edges)
+    assert any(e.from_id == "outer" and e.to_id == "inner" and e.label == "inner" for e in edges)
 
 
 def test_as_tool_does_not_override_existing_session():

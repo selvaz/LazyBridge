@@ -2,43 +2,42 @@
 
 Every Agent has the same shape.  Only the engine changes::
 
-    from lazybridge import Agent, LLMEngine, Plan, Step, Memory, Session, Store
+    from lazybridge import Agent, LLMEngine, Plan, Step, Session, tool, from_step
 
-    # --- Build sub-agents first ---
+    # --- Wrap Python functions as tools with explicit names ---
+
+    search = tool(search_web, name="search", description="Search the web.")
+
+    # --- Build sub-agents with explicit names ---
 
     researcher = Agent(
+        name="research",
         engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
-        tools=[search],          # search is a plain Python function
-        store=store,             # required if other steps use from_agent("research")
+        tools=[search],
     )
     writer = Agent(
+        name="write",
         engine=LLMEngine("gpt-4o", system="You are a concise technical writer."),
     )
 
     # --- Deterministic orchestrator: Plan engine ---
 
     pipeline = Agent(
+        name="pipeline",
         engine=Plan(
-            Step("research"),                                  # calls researcher tool
+            Step("research"),
             Step("write", task=from_prev, context=from_step("research")),
         ),
-        tools=[
-            researcher.as_tool("research"),   # alias "research" = Step target + sentinel key
-            writer.as_tool("write"),
-        ],
-        memory=Memory(strategy="summary"),
+        tools=[researcher, writer],   # sub-agents passed directly
         session=Session(),
     )
 
     # --- Dynamic orchestrator: LLM engine ---
 
     orchestrator = Agent(
+        name="orchestrator",
         engine=LLMEngine("claude-opus-4-7"),
-        tools=[
-            researcher.as_tool("research"),
-            writer.as_tool("write"),
-        ],
-        memory=Memory(),
+        tools=[researcher, writer],
         session=Session(),
     )
 
@@ -49,15 +48,31 @@ Every Agent has the same shape.  Only the engine changes::
 ``LLMEngine(...)`` form when you need ``system=``, ``max_turns=``,
 ``thinking=``, or other engine-level config.
 
-**The name chain** — the alias passed to ``as_tool("name")`` is the
-authoritative key that connects every part of the system::
+**The name chain** — ``Agent(name=...)`` is the authoritative key that
+connects every part of the system::
 
-    researcher.as_tool("research")  →  key in tool map: "research"
-    Step("research")                →  looks up "research" in tool map ✓
-    routes={"research": predicate}  →  routes to the step named "research" ✓
-    from_step("research")           →  reads output of step "research" (in-Plan) ✓
-    from_agent("research")          →  reads last stored output of "research" (cross-run) ✓
-    from_memory("research")         →  reads live memory of "research" ✓
+    Agent(name="research")      →  tool map key when passed in tools=[researcher]
+    Step("research")            →  looks up "research" in tool map ✓
+    routes={"research": pred}   →  routes to the step named "research" ✓
+    from_step("research")       →  reads output of step "research" (in-Plan) ✓
+    from_agent("research")      →  reads last stored output of "research" (cross-run) ✓
+    from_memory("research")     →  reads live memory of "research" ✓
+
+**tool() factory** — the canonical way to wrap a Python function::
+
+    search = tool(search_web, name="search", description="...")
+
+``name`` is required; it becomes the stable key in the tool map.  Raw
+callables in ``tools=[fn]`` still work for backward compatibility, but
+the factory is the preferred form in new code.
+
+**Advanced alias / backward compat** — ``.as_tool("alias")`` remains
+available when you need a name different from the agent's own::
+
+    tools=[researcher.as_tool("deep_research")]
+
+Direct ``tools=[agent]`` is the canonical composition style;
+``.as_tool()`` is the advanced / compatibility path.
 
 **Choosing between sentinels** — inside a single Plan, ``from_step`` is
 the standard choice: it reads from in-memory step history with no
@@ -123,7 +138,7 @@ from lazybridge.sentinels import (
 from lazybridge.session import EventLog, EventType, Session
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
-from lazybridge.tools import Tool, ToolProvider
+from lazybridge.tools import Tool, ToolProvider, tool
 
 __all__ = [
     # Primary API
@@ -139,6 +154,7 @@ __all__ = [
     "from_memory",
     "from_agent",
     # Tools
+    "tool",
     "Tool",
     "ToolProvider",
     # Native tools (provider-hosted, e.g. web search)

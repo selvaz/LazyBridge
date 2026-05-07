@@ -87,39 +87,39 @@ class Agent:
     - ``tools``  — the capabilities: what the agent can invoke
     - state      — ``memory``, ``session``, ``guard``, ``verify``, ``output``
 
-    **This is the canonical form**::
+    **Canonical composition** — give each sub-agent an explicit ``name=``
+    and pass it directly in ``tools=[...]``::
 
-        # Sub-agents declared first
+        from lazybridge import Agent, LLMEngine, Plan, Step, tool, from_step
+
+        search = tool(search_web, name="search", description="Search the web.")
+
         researcher = Agent(
+            name="research",
             engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
-            tools=[search.as_tool("search")],
+            tools=[search],
         )
         writer = Agent(
+            name="write",
             engine=LLMEngine("gpt-4o", system="You are a concise writer."),
         )
 
-        # Orchestrator — same Agent shape, different engine
+        # Deterministic orchestrator — Plan engine
         pipeline = Agent(
+            name="pipeline",
             engine=Plan(
                 Step("research"),
                 Step("write", task=from_prev, context=from_step("research")),
             ),
-            tools=[
-                researcher.as_tool("research"),   # name must match Step target
-                writer.as_tool("write"),
-            ],
-            memory=Memory(strategy="summary"),
+            tools=[researcher, writer],   # agents passed directly
             session=sess,
         )
 
-        # LLM orchestrator — same shape, engine decides dynamically
+        # Dynamic orchestrator — LLM engine
         orchestrator = Agent(
+            name="orchestrator",
             engine=LLMEngine("claude-opus-4-7"),
-            tools=[
-                researcher.as_tool("research"),
-                writer.as_tool("write"),
-            ],
-            memory=Memory(),
+            tools=[researcher, writer],
             session=sess,
         )
 
@@ -131,14 +131,19 @@ class Agent:
     form when you need to configure the engine (``system=``, ``max_turns=``,
     ``thinking=``, etc.).
 
-    **``as_tool("name")``** is how an Agent becomes a capability of
-    another Agent.  The name passed to ``as_tool`` must match the
-    ``target`` string in the parent's ``Step`` or the tool name the LLM
-    will call.  This name is the key that connects the tool map to the
-    plan::
+    **The name chain** — ``Agent(name=...)`` is the authoritative key that
+    connects every part of the system::
 
-        researcher.as_tool("research")   →  tool map key: "research"
-        Step("research")                 →  looks up "research" in tool map
+        Agent(name="research")      →  tool map key when passed in tools=[researcher]
+        Step("research")            →  looks up "research" in tool map ✓
+        from_step("research")       →  reads output of step "research" (in-Plan) ✓
+        from_agent("research")      →  reads stored output of "research" (cross-run) ✓
+        from_memory("research")     →  reads live memory of "research" ✓
+
+    **Advanced alias / backward compat** — ``.as_tool("alias")`` remains
+    available when you need a different name than the agent's own::
+
+        tools=[researcher.as_tool("deep_research")]
 
     **Factory methods** are sugar over the canonical form:
 
@@ -151,7 +156,7 @@ class Agent:
     core/ext import boundary::
 
         from lazybridge.ext.hil import HumanEngine, SupervisorEngine
-        Agent(engine=HumanEngine(timeout=60), tools=[approve.as_tool("approve")])
+        Agent(engine=HumanEngine(timeout=60), tools=[approve])
         Agent(engine=SupervisorEngine(tools=[...]))
     """
 
@@ -224,6 +229,22 @@ class Agent:
         # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
         cache: bool | Any = _UNSET,
     ) -> None:
+        # Compute _name_explicit BEFORE _resolve_runtime_kwargs so we preserve
+        # the distinction between "user chose a name" and "name fell from model
+        # default".  After resolution the two are indistinguishable.
+        _flat_name_given = (
+            name is not _UNSET and name is not None and str(name).strip() != ""
+        )
+        _obs_name_given = False
+        _obs_src = observability if observability is not None else (
+            getattr(runtime, "observability", None) if runtime is not None else None
+        )
+        if _obs_src is not None:
+            _obs_name_val = getattr(_obs_src, "name", None)
+            if _obs_name_val is not None and str(_obs_name_val).strip() != "":
+                _obs_name_given = True
+        _name_explicit_flag: bool = _flat_name_given or _obs_name_given
+
         # Merge config objects into flat kwargs via the centralised
         # precedence helper.  See ``_resolve_runtime_kwargs`` for the
         # contract; the table-driven approach keeps this block
@@ -300,6 +321,25 @@ class Agent:
             self.engine.native_tools = existing
 
         self._tools_raw = list(tools or [])
+        # Validate before building the tool map so errors surface early with
+        # the agent's current name rather than a wrapped Tool name.
+        for _raw in self._tools_raw:
+            if getattr(_raw, "_is_lazy_agent", False):
+                # Default True so duck-typed agents (MockAgent, custom subclasses)
+                # that predate _name_explicit are not rejected.  Only real Agent
+                # instances explicitly set this to False when no name= was given.
+                if getattr(_raw, "_name_explicit", True) is False:
+                    _raw_name = getattr(_raw, "name", repr(_raw))
+                    raise ValueError(
+                        f"Agent used as a tool must have an explicit name=...\n"
+                        f"The agent currently has name={_raw_name!r} "
+                        f"(derived from the model or left as the default).\n\n"
+                        f"Set an explicit name:\n"
+                        f"    Agent(name=\"research\", engine=LLMEngine(...))\n\n"
+                        f"Or use an alias:\n"
+                        f"    agent.as_tool(\"research\")\n"
+                        f"    tool(agent, name=\"research\")"
+                    )
         self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)
         self.output = output
         self.output_validator = output_validator
@@ -318,6 +358,12 @@ class Agent:
         self.fallback = fallback
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
+        #: True when the caller supplied an explicit ``name=`` (or an
+        #: ``ObservabilityConfig.name``).  False when the name was derived
+        #: from the model string or left as the ``"agent"`` default.
+        #: Used by ``build_tool_map`` and the ``tool()`` factory to require
+        #: an explicit identity before an Agent is used as a sub-agent tool.
+        self._name_explicit: bool = _name_explicit_flag
 
         # Private per-agent console exporter when verbose= is set without
         # an explicit Session. Attached when we bind to a session below.
@@ -355,7 +401,12 @@ class Agent:
                     agent_raw = cast("Agent", raw)
                     agent_raw.session = self.session
                     _safe_register_agent(self.session, agent_raw)
-                    _safe_register_tool_edge(self.session, self, agent_raw, label="as_tool")
+                    # Use the agent's own name as the edge label so the
+                    # visualizer shows "research" instead of the generic
+                    # "as_tool" — the name is the stable composition key.
+                    _safe_register_tool_edge(
+                        self.session, self, agent_raw, label=agent_raw.name
+                    )
             # ``fallback=`` and ``verify=`` Agents inherit the same
             # session + graph-registration the tools list gets, so any
             # events they produce (errors handled by the fallback, judge
@@ -679,24 +730,34 @@ class Agent:
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
     ) -> Tool:
-        """Return a Tool that wraps this agent.
+        """Wrap this agent as a :class:`Tool` (advanced / compatibility API).
 
-        The tool schema is: ``(task: str) -> str``.
-        Use this to plug one agent into another agent's tools list.
+        The canonical way to use a sub-agent is to give it an explicit
+        ``name=`` and pass it directly in ``tools=[...]``::
 
-            researcher = Agent("claude-opus-4-7", tools=[search])
-            orchestrator = Agent("claude-opus-4-7",
-                                 tools=[researcher.as_tool("researcher",
-                                                           "Search and summarise papers")])
+            # Canonical
+            researcher = Agent(name="research", engine=LLMEngine(...))
+            orchestrator = Agent(..., tools=[researcher])
 
-        Verify (Option B) — wrap the tool in a judge/retry loop so every
-        call through this tool is vetted by a judge before returning::
+        ``.as_tool()`` remains available for **local aliases** and
+        **backward compatibility**::
+
+            # Advanced alias — use a different name than the agent's own
+            tools=[researcher.as_tool("deep_research")]
+
+            # Backward compat — existing code that already calls as_tool()
+            tools=[researcher.as_tool("research")]
+
+        The tool schema is ``(task: str) -> Envelope``.
+
+        Verify (Option B) — wrap the call in a judge/retry loop so every
+        invocation is vetted before returning::
 
             judge = Agent(engine=LLMEngine(
                 "claude-opus-4-7",
                 system="Reply 'approved' or 'rejected: <reason>'.",
             ))
-            synth = Agent(...)
+            synth = Agent(name="synth", engine=LLMEngine(...))
             orchestrator = Agent(
                 ...,
                 tools=[synth.as_tool("synthesize", verify=judge, max_verify=2)],

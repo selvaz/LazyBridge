@@ -186,6 +186,177 @@ class Tool:
         return f"Tool({self.name!r})"
 
 
+def _resolve_auto_mode(
+    func: Any,
+    mode: str,
+    schema_llm: Any | None,
+    allow_llm_schema: bool,
+) -> Literal["signature", "hybrid", "llm"]:
+    """Resolve ``mode="auto"`` to a concrete schema-build mode.
+
+    Tries ``"signature"`` then ``"hybrid"``; falls back to ``"llm"`` only
+    when the caller has explicitly opted in via ``allow_llm_schema=True``
+    or by supplying ``schema_llm``.  Never calls an LLM implicitly.
+    """
+    if mode != "auto":
+        return mode  # type: ignore[return-value]
+
+    errors: list[tuple[str, str]] = []
+    for attempt in ("signature", "hybrid"):
+        try:
+            # Force eager schema build to detect failures now.
+            Tool(func, name="_schema_probe_", mode=attempt).definition()  # type: ignore[arg-type]
+            return attempt  # type: ignore[return-value]
+        except Exception as exc:
+            errors.append((attempt, str(exc)))
+
+    if allow_llm_schema or schema_llm is not None:
+        return "llm"
+
+    fn_name = getattr(func, "__name__", repr(func))
+    sig_err = next(msg for n, msg in errors if n == "signature")
+    hyb_err = next(msg for n, msg in errors if n == "hybrid")
+    raise ValueError(
+        f"Could not build tool schema for {fn_name!r} using signature or hybrid mode.\n"
+        f"  signature error: {sig_err}\n"
+        f"  hybrid error: {hyb_err}\n"
+        f"To allow LLM schema generation, pass:\n"
+        f"    allow_llm_schema=True\n"
+        f"  or: mode=\"llm\", schema_llm=<engine>"
+    )
+
+
+def _agent_as_tool_named(agent: Any, name: str, description: str | None) -> Tool:
+    """Fallback for duck-typed agents that have no ``as_tool()`` method."""
+
+    async def _run(task: str) -> Any:
+        return await agent.run(task)
+
+    desc = description or getattr(agent, "description", None) or f"Run the {name} agent."
+    _run.__name__ = name
+    _run.__doc__ = desc
+    return Tool(_run, name=name, description=desc, mode="signature", returns_envelope=True)
+
+
+def tool(
+    obj: Any,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    mode: Literal["auto", "signature", "hybrid", "llm"] = "auto",
+    schema_llm: Any | None = None,
+    strict: bool = False,
+    allow_llm_schema: bool = False,
+) -> Tool:
+    """Public factory — the canonical way to create a :class:`Tool`.
+
+    **For Python functions** — ``name`` is required so that Plan steps,
+    tool maps, and LLM calls all share the same stable identifier::
+
+        search = tool(search_web, name="search", description="Search the web.")
+        researcher = Agent(name="research", engine=LLMEngine(...), tools=[search])
+
+    **For Agents** — the canonical path is ``tools=[agent]`` directly; the
+    factory is useful when you need a local alias::
+
+        tool(researcher, name="deep_research")
+
+    **For existing Tools** — returns the object unchanged (no overrides) or
+    clones it with the specified overrides (non-mutating)::
+
+        search_v2 = tool(search, name="web_search")  # clone with new name
+
+    Parameters
+    ----------
+    obj:
+        A callable, :class:`Agent`, or :class:`Tool` to wrap.
+    name:
+        Required for callables.  Optional alias for agents and Tools.
+    description:
+        Human-readable description forwarded to the LLM.
+    mode:
+        Schema generation mode.  ``"auto"`` (default) tries ``"signature"``
+        then ``"hybrid"``; only falls back to ``"llm"`` when
+        ``allow_llm_schema=True`` or ``schema_llm`` is supplied.
+    schema_llm:
+        Engine used when ``mode="llm"`` schema generation is needed.
+    strict:
+        Enable JSON Schema strict mode.
+    allow_llm_schema:
+        Opt in to LLM-based schema generation when signature/hybrid fail.
+    """
+    # ── Case 1: already a Tool ──────────────────────────────────────────
+    if isinstance(obj, Tool):
+        has_overrides = (
+            name is not None
+            or description is not None
+            or mode != "auto"
+            or schema_llm is not None
+            or strict
+        )
+        if not has_overrides:
+            return obj
+        return Tool(
+            obj.func,
+            name=name if name is not None else obj.name,
+            description=description if description is not None else obj.description,
+            mode=mode if mode != "auto" else obj.mode,
+            schema_llm=schema_llm if schema_llm is not None else obj.schema_llm,
+            strict=strict if strict else obj.strict,
+            returns_envelope=obj.returns_envelope,
+            agent_memory=obj.agent_memory,
+            agent_store=obj.agent_store,
+        )
+
+    # ── Case 2: Agent-like ──────────────────────────────────────────────
+    if getattr(obj, "_is_lazy_agent", False):
+        # An explicit alias passed here is always accepted.
+        # Without an alias, the agent must have _name_explicit=True.
+        if name is None and getattr(obj, "_name_explicit", True) is False:
+            # Only reject real Agent instances that set _name_explicit=False.
+            # Duck-typed agents (MockAgent, custom subclasses) default to True.
+            agent_name = getattr(obj, "name", repr(obj))
+            raise ValueError(
+                f"Agent used as a tool must have an explicit name=...\n"
+                f"The agent currently has name={agent_name!r} "
+                f"(derived from the model or left as the default).\n\n"
+                f"Set an explicit name:\n"
+                f"    Agent(name=\"research\", engine=LLMEngine(...))\n\n"
+                f"Or pass an alias to the factory:\n"
+                f"    tool(agent, name=\"research\")"
+            )
+        effective_name = name or getattr(obj, "name", None)
+        if not effective_name or not str(effective_name).strip():
+            raise ValueError(
+                "Agent used as a tool must have an explicit name=...\n"
+                "Example:\n"
+                "    Agent(name=\"research\", engine=LLMEngine(...))"
+            )
+        if hasattr(obj, "as_tool"):
+            return obj.as_tool(effective_name, description=description)
+        return _agent_as_tool_named(obj, effective_name, description)
+
+    # ── Case 3: plain callable ──────────────────────────────────────────
+    if callable(obj):
+        if name is None:
+            fn_name = getattr(obj, "__name__", repr(obj))
+            raise ValueError(
+                f"tool() requires an explicit name=... for callables.\n"
+                f"Example: tool({fn_name!r}, name=\"{fn_name}\")"
+            )
+        effective_mode = _resolve_auto_mode(obj, mode, schema_llm, allow_llm_schema)
+        return Tool(
+            obj,
+            name=name,
+            description=description,
+            mode=effective_mode,
+            schema_llm=schema_llm,
+            strict=strict,
+        )
+
+    raise TypeError(f"tool() cannot wrap {type(obj).__name__!r}")
+
+
 def wrap_tool(obj: Any) -> Tool:
     """Convert a raw callable or Agent into a Tool. Returns Tool unchanged.
 

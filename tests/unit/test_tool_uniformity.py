@@ -170,11 +170,12 @@ def test_nested_agents_share_outer_session_by_default():
     # doesn't have one.
     assert middle.session is sess
 
-    # Both agents are visible in the session's graph, with an as_tool edge.
+    # Both agents are visible in the session's graph; edge is labelled with
+    # the sub-agent's own name (not the generic "as_tool" string).
     names = {n.name for n in sess.graph.nodes()}
     assert {"outer", "middle"}.issubset(names)
     edges = [(e.from_id, e.to_id, e.label) for e in sess.graph.edges()]
-    assert ("outer", "middle", "as_tool") in edges
+    assert ("outer", "middle", "middle") in edges
 
 
 # ---------------------------------------------------------------------------
