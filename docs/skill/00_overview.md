@@ -24,7 +24,7 @@ Covers: Memory, Store, Session & tracing, Guards, Agent.chain, Agent.as_tool, Ag
 
 **Stay at Mid** if your pipeline is a straight line with no typed models between steps and you don't need resume semantics.
 
-Covers: Plan, Sentinels (from_prev / from_start / from_step / from_parallel), Parallel plan steps, SupervisorEngine (ext.hil), Checkpoint & resume, Exporters, GraphSchema, verify=
+Covers: Plan, Sentinels (from_prev / from_start / from_step / from_parallel / from_memory / from_agent), Parallel plan steps, SupervisorEngine (ext.hil), Checkpoint & resume, Exporters, GraphSchema, verify=
 
 ### Advanced
 **Use this when** you are extending the framework itself: adding a new LLM provider, writing a custom execution engine, or serialising Plans across processes.

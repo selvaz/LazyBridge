@@ -17,8 +17,8 @@ from lazybridge import Agent, LLMEngine, Store, Plan, Step, from_agent
 store = Store(db="research.sqlite")
 
 # 1) Plan step writes a result into the store via Step(writes=).
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="research")
-writer = Agent(engine=LLMEngine("gpt-4o"), name="write")
+researcher = Agent(engine=LLMEngine("claude-opus-4-7"), store=store, name="research")
+writer = Agent(engine=LLMEngine("gpt-4o"))
 
 pipeline = Agent(
     engine=Plan(
@@ -33,28 +33,24 @@ print(store.read("hits"))
 
 # 2) Agents write their output to store automatically after each run.
 #    Key: "__agent_output__:{alias}" where alias = the name passed to as_tool().
-standalone = Agent(engine=LLMEngine("claude-opus-4-7"), store=store)
-tool = standalone.as_tool("research")
+tool = researcher.as_tool("research")
 tool.run_sync(task="AI trends 2026")           # writes "__agent_output__:research"
 print(store.read("__agent_output__:research")) # reads back by alias, not agent.name
 
 # 3) from_agent("alias") reads that output in a Plan step.
 #    IMPORTANT: store= must be on the SOURCE AGENT, not just the pipeline.
-researcher_with_store = Agent(engine=LLMEngine("claude-opus-4-7"), store=store)
-editor = Agent(engine=LLMEngine("claude-opus-4-7"), name="edit")
+editor = Agent(engine=LLMEngine("claude-opus-4-7"))
 plan2 = Agent(
     engine=Plan(
         Step("research"),
         Step("edit", context=from_agent("research")),  # reads from store at runtime
     ),
-    tools=[researcher_with_store.as_tool("research"), editor.as_tool("edit")],
-    # store= here is for checkpoint/writes; from_agent reads from researcher_with_store's store
+    tools=[researcher.as_tool("research"), editor.as_tool("edit")],
 )
 
 # 4) Agent with sources= sees the live store on every call (LLM reads the whole store).
 monitor = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    name="monitor",
     sources=[store],
 )
 print(monitor("status?").text())
@@ -90,19 +86,6 @@ print(monitor("status?").text())
 
 !!! warning "Rules & invariants"
 
-    - ``store=`` is a **first-class Agent parameter** (like ``memory=`` and
-      ``session=``). Pass the same ``Store`` instance to multiple agents to
-      create a shared blackboard.
-    - Every Agent writes its last successful output to the store after each
-      run. The authoritative key is the **alias** passed to
-      ``agent.as_tool("alias")`` — that is, ``"__agent_output__:alias"``.
-      The agent's own ``name=`` attribute is irrelevant to sentinel resolution.
-      Use ``from_agent("alias")`` in a Plan step or standalone code to read
-      the value at runtime.
-    - ``from_agent("alias")`` requires the **source agent** to have ``store=``
-      attached (not just the pipeline/orchestrator).  Passing ``store=`` only
-      on the outer ``Agent(engine=Plan(...), store=store)`` does not
-      propagate to sub-agents.  PlanCompiler enforces this at construction time.
     - Values are JSON-encoded on write (via ``json.dumps(default=str)``),
       so non-JSON types are stringified. Prefer primitives + Pydantic models
       (use ``.model_dump()`` before writing).
@@ -115,9 +98,13 @@ print(monitor("status?").text())
       stores a deep copy on ``write()``, matching the SQLite path's
       copy-on-write semantics. Do not rely on reference identity from
       ``store.read()`` — mutating the returned value does not affect the store.
+    - Agent auto-write key: ``"__agent_output__:{alias}"`` where ``alias``
+      is the name passed to ``as_tool("alias")``. ``store=`` must be on the
+      SOURCE AGENT (the one doing the writing), not just the pipeline agent.
+      ``from_agent("alias")`` reads this key; PlanCompiler rejects
+      ``from_agent`` if the source agent has no ``store=`` attached.
 
 ## See also
 
 - [Memory](memory.md) — separate concept (in-prompt conversation context).
-- [Sentinels](sentinels.md) — `from_agent` and `from_memory` read from Store/Memory.
 - [Checkpoint & resume](checkpoint.md) — `Plan` uses `Store` under the hood.

@@ -16,7 +16,7 @@ The flat kwargs work the same and override the config objects.
 ## Example
 
 ```python
-from lazybridge import Agent, LLMEngine, Memory, Session, Store
+from lazybridge import Agent, Session
 from lazybridge.core.types import ResilienceConfig
 from pydantic import BaseModel
 
@@ -24,47 +24,30 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
+# 1) Two-line agent.
+print(Agent("claude-opus-4-7")("hello").text())
+
+# 2) Tools — auto-schema from type hints + docstring.
 def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
-# 1) Canonical form — engine= is the primary parameter.
-agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    tools=[search],
-    memory=Memory(),
-    session=Session(),
-)
-print(agent("hello").text())
+print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
-# String shortcut (sugar) — Agent("model") expands to Agent(engine=LLMEngine("model")).
-print(Agent("claude-opus-4-7")("hello").text())
-
-# 2) Structured output — read .payload, not .text().
-resp = Agent(engine=LLMEngine("claude-opus-4-7"), output=Summary)("summarise LazyBridge")
+# 3) Structured output — read .payload, not .text().
+resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
 print(resp.payload.title, resp.payload.bullets)
 
-# 3) Agent-as-tool composition — as_tool("name") is canonical.
-researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    tools=[search],
-    name="researcher",
-)
-editor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    tools=[researcher.as_tool("research")],  # as_tool("name") is the canonical way
-    name="editor",
-)
+# 4) Tool-is-Tool composition (Agents wrap Agents).
+researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
+editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())
 
-# 4) Production-shape: timeout + cache + provider fallback + tracing + store.
-store = Store(db="pipeline.sqlite")
-fb = Agent(engine=LLMEngine("gpt-4o"), tools=[search], name="fallback")
+# 5) Production-shape: timeout + cache + provider fallback + tracing.
+fb = Agent("gpt-5", tools=[search], name="fallback")
 prod = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    "claude-opus-4-7",
     tools=[search],
-    memory=Memory(strategy="summary"),
-    store=store,
     timeout=30.0,
     cache=True,
     fallback=fb,
@@ -95,12 +78,11 @@ prod("draft a one-pager on the LazyBridge audit findings")
 !!! note "API reference"
 
     Agent(
-        engine: str | Engine | None = None,  # canonical — LLMEngine, Plan, or string shortcut
+        model_or_engine: str | Engine = "claude-opus-4-7",
         *,
         tools: list[Tool | Callable | Agent | ToolProvider] | None = None,
         output: type = str,
         memory: Memory | None = None,
-        store: Store | None = None,          # shared blackboard; agents write output here after run
         sources: list = (),
         guard: Guard | None = None,
         verify: Agent | None = None,
@@ -109,6 +91,9 @@ prod("draft a one-pager on the LazyBridge audit findings")
         description: str | None = None,
         session: Session | None = None,
         verbose: bool = False,
+        # Convenience — pass provider name + model separately:
+        model: str | None = None,
+        engine: Engine | None = None,        # kwarg alias for the first positional
         native_tools: list[NativeTool | str] | None = None,
         # Structured config objects (compose with the flat kwargs below):
         runtime: AgentRuntimeConfig | None = None,
@@ -139,20 +124,9 @@ prod("draft a one-pager on the LazyBridge audit findings")
 
 !!! warning "Rules & invariants"
 
-    - ``engine=`` is the canonical first parameter. Pass an ``LLMEngine``,
-      ``Plan``, or any Engine-protocol object. A plain string is sugar for
-      ``LLMEngine(string)``; ``None`` defaults to ``LLMEngine("claude-opus-4-7")``.
-    - ``as_tool("name")`` is THE canonical way to mount an Agent as a capability.
-      The name must match the ``Step`` target string (for Plan engines) or the
-      tool name the LLM will call. Pass the result into ``tools=[]``.
-    - ``store=`` is a first-class parameter alongside ``memory=`` and ``session=``.
-      Agents automatically write their last successful output to the store under
-      ``"__agent_output__:{name}"`` after each run. Use ``from_agent("name")``
-      in Plan steps to read another agent's output from the store.
     - ``tools=`` accepts plain functions, ``Tool`` instances, other
-      ``Agent`` instances (wrapped via ``as_tool()``), and tool providers
-      (``MCPServer`` etc.). The framework normalises everything to ``Tool`` at
-      construction; you never call a wrapper yourself.
+      ``Agent`` instances, and tool providers (``MCPServer`` etc.). The
+      framework normalises everything to ``Tool`` at construction; you never call a wrapper yourself.
     - When a nested Agent has no ``session=`` of its own, it inherits the
       caller's session and is registered on the graph with an ``as_tool``
       edge. Observability flows through the whole tree.

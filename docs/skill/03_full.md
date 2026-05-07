@@ -404,10 +404,11 @@ Agent.from_engine(plan, tools=[score_tool])("…")
   step's ``writes="results"`` doesn't collide with an unrelated
   agent's stored value.
 
-## Sentinels (from_prev / from_start / from_step / from_parallel)
+## Sentinels (from_prev / from_start / from_step / from_parallel / from_memory / from_agent)
 
 **signature**
 
+# Plan-only sentinels (resolve against Plan execution history)
 from_prev                    # singleton — previous step's output (default)
 from_start                   # singleton — original user task
 from_step(name: str)         # named prior step's output
@@ -415,7 +416,14 @@ from_parallel(name: str)     # named parallel branch's output
 from_parallel_all(name: str) # aggregate every branch in a parallel band;
                              # payload is a labelled-text string, same as task
 
-# Used on Step(..., task=<sentinel>) or Step(..., context=<sentinel>).
+# Universal sentinels (work inside Plan and standalone)
+from_memory(name: str)       # another agent's live memory at execution time
+from_agent(name: str)        # last output of named agent from shared Store
+
+# All sentinels are valid on:
+Step(..., task=<sentinel>)
+Step(..., context=<sentinel>)
+Step(..., context=[<sentinel>, <sentinel>, "literal string"])
 
 **rules**
 
@@ -435,6 +443,20 @@ from_parallel_all(name: str) # aggregate every branch in a parallel band;
   are both a labelled-text join (``"[name]\\n<text>\\n\\n..."``).
   ``"n"`` must be the FIRST step of the band; the compile-time check
   rejects mid-band references.
+- ``from_memory("n")``: reads the live ``Memory`` of the agent whose
+  ``as_tool("n")`` key is ``"n"``. Resolved at step execution, not at
+  plan construction. If the agent has no memory or it's empty, contributes
+  nothing (silent no-op). PlanCompiler validates that ``"n"`` is an agent
+  tool with ``memory=`` attached.
+- ``from_agent("n")``: reads the last output of the agent registered as
+  ``"n"`` from the shared ``Store``. Requires the tool to be an agent
+  (``returns_envelope=True``) AND the source agent must have ``store=``
+  attached; PlanCompiler rejects both violations at construction time.
+  The store key is always the alias passed to ``as_tool("n")``, never
+  the agent's internal ``name=``. If the key is absent at runtime
+  (agent hasn't run yet), contributes nothing (silent no-op).
+  Prefer ``from_step("n")`` inside a single Plan — ``from_agent`` is
+  for cross-run or cross-plan data dependencies.
 - A plain string passed as ``task=`` is used verbatim — useful for
   hard-coded prompts at intermediate steps.
 - ``context=`` accepts a single sentinel/string OR a **list** of them.
@@ -446,34 +468,65 @@ from_parallel_all(name: str) # aggregate every branch in a parallel band;
 **example**
 
 ```python
-from lazybridge import Plan, Step, from_prev, from_start, from_step
+from lazybridge import Agent, LLMEngine, Memory, Plan, Step, Store
+from lazybridge import from_prev, from_start, from_step, from_memory, from_agent
 
-plan = Plan(
-    Step(researcher,    name="research",  output=Hits),
-    # Each step has an explicit task instruction; the upstream data
-    # flows through ``context=`` (the idiomatic shape).
-    Step(fact_checker,  name="check",
-         task="Score each item for factual correctness; list any rejects.",
-         context=from_prev),                                  # check researcher's output
-    Step(writer,        name="write",
-         task="Draft a 200-word answer to the user's task.",
-         context=from_start),                                  # writer sees ORIGINAL user task
-    Step(editor,        name="edit",
-         task="Polish the draft; remove items the fact-checker flagged.",
-         context=[from_step("write"), from_step("check")]),   # multi-source via list-context
+store = Store(db="pipeline.sqlite")
+mem = Memory(strategy="summary")
+
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    memory=mem,
+    store=store,
+    name="research",
+)
+writer = Agent(engine=LLMEngine("gpt-4o"))
+
+plan = Agent(
+    engine=Plan(
+        Step("research"),
+        # fact_checker sees researcher's output as task, original user task as context
+        Step("fact_check",
+             task=from_prev,
+             context=from_start),
+        # writer sees researcher's live memory AND the fact_checker output
+        Step("write",
+             context=[from_memory("research"), from_step("fact_check")]),
+    ),
+    tools=[
+        researcher.as_tool("research"),
+        fact_checker.as_tool("fact_check"),
+        writer.as_tool("write"),
+    ],
+    store=store,
 )
 
-# context= can carry MANY sources at once (no combiner step needed).
-plan2 = Plan(
-    Step(researcher,    name="research"),
-    Step(policy_loader, name="policy"),
-    Step(synthesiser,   name="synth",
-         task="Draft a brief that cites both sources and follows the style note.",
-         context=[
-             from_step("research"),
-             from_step("policy"),
-             "Style: neutral, third person, no superlatives.",
-         ]),
+# from_agent works outside Plan too — any agent can read another's last output.
+standalone = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher.as_tool("research")],
+    store=store,
+)
+standalone("find AI trends")
+# Now any agent sharing the same store can read researcher's output:
+value = store.read("__agent_output__:research")
+```
+
+```python
+# Multi-source context via list — no combiner step needed.
+plan2 = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("policy"),
+        Step("synth",
+             task="Draft a brief citing both sources.",
+             context=[
+                 from_step("research"),
+                 from_step("policy"),
+                 "Style: neutral, third person, no superlatives.",
+             ]),
+    ),
+    tools=[researcher.as_tool("research"), policy_loader.as_tool("policy"), synthesiser.as_tool("synth")],
 )
 ```
 
@@ -486,6 +539,15 @@ plan2 = Plan(
   variables of the same name.
 - When passing a ``str`` as ``task=``, it's treated as a LITERAL, not a
   sentinel. Don't write ``task="from_prev"`` expecting the sentinel.
+- ``from_memory`` reads at execution time — if the agent hasn't run yet,
+  it contributes nothing (silent no-op, not an error).
+- ``from_agent`` requires the tool to be an agent (via ``as_tool()``),
+  not a plain function. PlanCompiler rejects plain-function targets at
+  construction time.
+- ``from_agent`` requires the source agent to have ``store=`` attached.
+  PlanCompiler rejects it at construction time if the agent has no store.
+- Inside a plain sequential Plan, ``from_step()`` is clearer and
+  lighter — it reads from in-memory step history, needs no store.
 
 ## Parallel plan steps
 

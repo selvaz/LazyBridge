@@ -67,7 +67,7 @@ titles:
   evals: EvalSuite (ext.evals)
   mcp: MCP integration (ext.mcp)
   plan: Plan
-  sentinels: Sentinels (from_prev / from_start / from_step / from_parallel)
+  sentinels: Sentinels (from_prev / from_start / from_step / from_parallel / from_memory / from_agent)
   parallel_steps: Parallel plan steps
   supervisor: SupervisorEngine (ext.hil)
   checkpoint: Checkpoint & resume

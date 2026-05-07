@@ -302,13 +302,13 @@ def render_site_guide(topic: str, titles: dict) -> str:
     if sig:
         out.append('!!! note "API reference"\n\n')
         for line in sig.rstrip().splitlines():
-            out.append(f"    {line}\n")
+            out.append(f"    {line}\n" if line.strip() else "\n")
         out.append("\n")
     rules = frag.get("rules")
     if rules:
         out.append('!!! warning "Rules & invariants"\n\n')
         for line in rules.rstrip().splitlines():
-            out.append(f"    {line}\n")
+            out.append(f"    {line}\n" if line.strip() else "\n")
         out.append("\n")
     see_also = frag.get("see-also")
     if see_also:

@@ -35,6 +35,31 @@ Two categories:
 Sentinels are also valid on `context=` — use them to inject prior
 context into a step without overriding its task.
 
+## When to use from_agent vs from_step
+
+Inside the same Plan, **prefer `from_step("name")`**:
+
+```python
+# Clear, validated at compile time, no store required
+Step("write", context=from_step("research"))
+```
+
+Use `from_agent("name")` only when you intentionally want the agent's
+**last stored output independent of this Plan's step history** — for example:
+
+- Reading across Plan runs (previous execution, stored in SQLite).
+- A standalone LLM orchestrator where there is no step history.
+- A step that needs the output of an agent called outside this Plan.
+
+```python
+# from_agent reads from Store, not from step history.
+# Requires the referenced agent to have store= attached.
+Step("write", context=from_agent("research"))
+```
+
+The store key is always the **tool alias** passed to `as_tool("alias")`,
+not the agent's internal `name=` attribute.
+
 ## Example
 
 ```python
@@ -99,31 +124,6 @@ plan2 = Agent(
     tools=[researcher.as_tool("research"), policy_loader.as_tool("policy"), synthesiser.as_tool("synth")],
 )
 ```
-
-## When to use from_agent vs from_step
-
-Inside the same Plan, **prefer `from_step("name")`**:
-
-```python
-# Clear, validated at compile time, no store required
-Step("write", context=from_step("research"))
-```
-
-Use `from_agent("name")` only when you intentionally want the agent's
-**last stored output independent of this Plan's step history** — for example:
-
-- Reading across Plan runs (previous execution, stored in SQLite).
-- A standalone LLM orchestrator where there is no step history.
-- A step that needs the output of an agent called outside this Plan.
-
-```python
-# from_agent reads from Store, not from step history.
-# Requires the referenced agent to have store= attached.
-Step("write", context=from_agent("research"))
-```
-
-The store key is always the **tool alias** passed to `as_tool("alias")`,
-not the agent's internal `name=` attribute.
 
 ## Pitfalls
 

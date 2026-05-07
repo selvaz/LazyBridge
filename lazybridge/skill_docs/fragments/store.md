@@ -27,6 +27,11 @@ StoreEntry = dataclass(key, value, written_at, agent_id)
   stores a deep copy on ``write()``, matching the SQLite path's
   copy-on-write semantics. Do not rely on reference identity from
   ``store.read()`` — mutating the returned value does not affect the store.
+- Agent auto-write key: ``"__agent_output__:{alias}"`` where ``alias``
+  is the name passed to ``as_tool("alias")``. ``store=`` must be on the
+  SOURCE AGENT (the one doing the writing), not just the pipeline agent.
+  ``from_agent("alias")`` reads this key; PlanCompiler rejects
+  ``from_agent`` if the source agent has no ``store=`` attached.
 
 ## narrative
 **Use `Store`** for cross-process or cross-run state — pipeline
@@ -40,21 +45,47 @@ thread-safe.
 
 ## example
 ```python
-from lazybridge import Agent, Store, Plan, Step
+from lazybridge import Agent, LLMEngine, Store, Plan, Step, from_agent
 
 store = Store(db="research.sqlite")
 
-# Plan step writes a result into the store automatically.
-plan = Plan(
-    Step(researcher, name="search", writes="hits"),
-    Step(writer,     name="write"),
+# 1) Plan step writes a result into the store via Step(writes=).
+researcher = Agent(engine=LLMEngine("claude-opus-4-7"), store=store, name="research")
+writer = Agent(engine=LLMEngine("gpt-4o"))
+
+pipeline = Agent(
+    engine=Plan(
+        Step("research", writes="hits"),  # stores result under key "hits"
+        Step("write"),
+    ),
+    tools=[researcher.as_tool("research"), writer.as_tool("write")],
+    store=store,  # store= is a first-class Agent parameter
 )
-Agent.from_engine(plan)("AI trends")
+pipeline("AI trends")
 print(store.read("hits"))
 
-# Agent with sources= sees the live store on every call.
-monitor = Agent("claude-opus-4-7", name="monitor", sources=[store],
-                system="Report what's currently in the blackboard.")
+# 2) Agents write their output to store automatically after each run.
+#    Key: "__agent_output__:{alias}" where alias = the name passed to as_tool().
+tool = researcher.as_tool("research")
+tool.run_sync(task="AI trends 2026")           # writes "__agent_output__:research"
+print(store.read("__agent_output__:research")) # reads back by alias, not agent.name
+
+# 3) from_agent("alias") reads that output in a Plan step.
+#    IMPORTANT: store= must be on the SOURCE AGENT, not just the pipeline.
+editor = Agent(engine=LLMEngine("claude-opus-4-7"))
+plan2 = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("edit", context=from_agent("research")),  # reads from store at runtime
+    ),
+    tools=[researcher.as_tool("research"), editor.as_tool("edit")],
+)
+
+# 4) Agent with sources= sees the live store on every call (LLM reads the whole store).
+monitor = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    sources=[store],
+)
 print(monitor("status?").text())
 ```
 
