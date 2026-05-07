@@ -336,7 +336,7 @@ def tool(
     mode:
         Schema generation mode.  ``"auto"`` (default) tries ``"signature"``
         then ``"hybrid"``; only falls back to ``"llm"`` when
-        ``allow_llm_schema=True`` or ``schema_llm`` is supplied.
+        ``allow_llm_schema=True`` **and** ``schema_llm`` is supplied.
     schema_llm:
         Engine used when ``mode="llm"`` schema generation is needed.
     strict:
