@@ -296,8 +296,11 @@ class GraphSchema:
 
         # Register Python-callable tool functions as ToolNode stubs so the
         # full pipeline topology is visible before execution starts.
-        # Skips Agent-as-tool entries (those register themselves separately).
-        for tool_name in tool_map:
+        # Agent-as-tool wrappers (returns_envelope=True) register themselves
+        # as AgentNodes separately and must not get a duplicate _ToolNode stub.
+        for tool_name, tool_obj in tool_map.items():
+            if getattr(tool_obj, "returns_envelope", False):
+                continue
             tool_id = f"tool:{tool_name}"
             if tool_id not in self._nodes:
                 self._nodes[tool_id] = _ToolNode(id=tool_id, name=tool_name)

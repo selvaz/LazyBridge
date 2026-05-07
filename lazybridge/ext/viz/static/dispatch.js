@@ -83,7 +83,10 @@ function _gesture(ev, { replay = false } = {}) {
     case "agent_finish": {
       if (agent) {
         fireHitRing(agent, ev.error ? COLOR.error : COLOR.store);
-        // Engine is done — reset to idle and clear any stale in-flight tools
+        // Engine is done — evict stale in-flight entries for this agent and reset state.
+        for (const [id, v] of state.toolsInFlight.entries()) {
+          if (v.agent === agent) state.toolsInFlight.delete(id);
+        }
         state.engineState.set(agent, { phase: "idle", turn: 0, toolCount: 0 });
         emit("engineStateChanged", agent);
       }
