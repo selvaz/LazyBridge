@@ -8,12 +8,11 @@
 **signature**
 
 Agent(
-    engine: str | Engine | None = None,  # canonical — LLMEngine, Plan, or string shortcut
+    model_or_engine: str | Engine = "claude-opus-4-7",
     *,
     tools: list[Tool | Callable | Agent | ToolProvider] | None = None,
     output: type = str,
     memory: Memory | None = None,
-    store: Store | None = None,          # shared blackboard; agents write output here after run
     sources: list = (),
     guard: Guard | None = None,
     verify: Agent | None = None,
@@ -22,6 +21,9 @@ Agent(
     description: str | None = None,
     session: Session | None = None,
     verbose: bool = False,
+    # Convenience — pass provider name + model separately:
+    model: str | None = None,
+    engine: Engine | None = None,        # kwarg alias for the first positional
     native_tools: list[NativeTool | str] | None = None,
     # Structured config objects (compose with the flat kwargs below):
     runtime: AgentRuntimeConfig | None = None,
@@ -91,11 +93,7 @@ class Summary(BaseModel):
     title: str
     bullets: list[str]
 
-# 1) Canonical form — engine= is the primary parameter.
-agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[], memory=Memory(), session=Session())
-print(agent("hello").text())
-
-# String shortcut (sugar) — Agent("model") == Agent(engine=LLMEngine("model")).
+# 1) Two-line agent.
 print(Agent("claude-opus-4-7")("hello").text())
 
 # 2) Tools — auto-schema from type hints + docstring.
@@ -103,21 +101,21 @@ def search(query: str) -> str:
     """Search the web for ``query`` and return the top 3 hits."""
     return "..."
 
-print(Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search])("AI news April 2026").text())
+print(Agent("claude-opus-4-7", tools=[search])("AI news April 2026").text())
 
 # 3) Structured output — read .payload, not .text().
-resp = Agent(engine=LLMEngine("claude-opus-4-7"), output=Summary)("summarise LazyBridge")
+resp = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge")
 print(resp.payload.title, resp.payload.bullets)
 
-# 4) Agent-as-tool composition — as_tool("name") is canonical.
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search], name="researcher")
-editor = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[researcher.as_tool("research")], name="editor")
+# 4) Tool-is-Tool composition (Agents wrap Agents).
+researcher = Agent("claude-opus-4-7", tools=[search], name="researcher")
+editor     = Agent("claude-opus-4-7", tools=[researcher], name="editor")
 print(editor("find papers and write a one-paragraph summary").text())
 
 # 5) Production-shape: timeout + cache + provider fallback + tracing.
-fb = Agent(engine=LLMEngine("gpt-4o"), tools=[search], name="fallback")
+fb = Agent("gpt-5", tools=[search], name="fallback")
 prod = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    "claude-opus-4-7",
     tools=[search],
     timeout=30.0,
     cache=True,
