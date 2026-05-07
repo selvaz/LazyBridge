@@ -390,23 +390,29 @@ class Agent:
         # nothing anywhere.
         if self.session is not None:
             for raw in self._tools_raw:
-                # Duck-typed: any Agent-compatible object (real Agent,
-                # MockAgent from lazybridge.testing, user subclasses) with
-                # the ``_is_lazy_agent`` marker gets the outer session
-                # propagated when it has none of its own.
-                if getattr(raw, "_is_lazy_agent", False) and getattr(raw, "session", None) is None:
-                    # Duck-typed Agent (real Agent, MockAgent, user subclass).
-                    # The marker check above narrows the type at runtime; cast
-                    # so mypy accepts the attribute write + helper calls.
-                    agent_raw = cast("Agent", raw)
+                if not getattr(raw, "_is_lazy_agent", False):
+                    continue
+                agent_raw = cast("Agent", raw)
+                child_session = getattr(agent_raw, "session", None)
+
+                if child_session is None:
+                    # Propagate parent session down to child and register both
+                    # the agent node and the parent → child edge.
                     agent_raw.session = self.session
                     _safe_register_agent(self.session, agent_raw)
-                    # Use the agent's own name as the edge label so the
-                    # visualizer shows "research" instead of the generic
-                    # "as_tool" — the name is the stable composition key.
                     _safe_register_tool_edge(
                         self.session, self, agent_raw, label=agent_raw.name
                     )
+                elif child_session is self.session:
+                    # Child already shares the same session (canonical pattern:
+                    # all agents built with session= up front).  Register the
+                    # edge — it was missing because the old guard checked for
+                    # ``session is None`` only.
+                    _safe_register_agent(self.session, agent_raw)
+                    _safe_register_tool_edge(
+                        self.session, self, agent_raw, label=agent_raw.name
+                    )
+                # else: child belongs to a different session — don't steal it.
             # ``fallback=`` and ``verify=`` Agents inherit the same
             # session + graph-registration the tools list gets, so any
             # events they produce (errors handled by the fallback, judge

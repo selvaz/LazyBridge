@@ -186,44 +186,98 @@ class Tool:
         return f"Tool({self.name!r})"
 
 
-def _resolve_auto_mode(
-    func: Any,
-    mode: str,
-    schema_llm: Any | None,
-    allow_llm_schema: bool,
-) -> Literal["signature", "hybrid", "llm"]:
-    """Resolve ``mode="auto"`` to a concrete schema-build mode.
+def _schema_needs_enrichment(defn: ToolDefinition) -> bool:
+    """Return True when the signature-built schema is likely under-described.
 
-    Tries ``"signature"`` then ``"hybrid"``; falls back to ``"llm"`` only
-    when the caller has explicitly opted in via ``allow_llm_schema=True``
-    or by supplying ``schema_llm``.  Never calls an LLM implicitly.
+    Triggers enrichment when:
+    - the tool itself has no description, OR
+    - any parameter has no description.
+
+    This is intentionally conservative: a fully-typed, fully-documented
+    function returns False and stays at signature mode at zero cost.
     """
-    if mode != "auto":
-        return mode  # type: ignore[return-value]
+    if not defn.description:
+        return True
+    props: dict[str, Any] = defn.parameters.get("properties", {})
+    return any(not p.get("description") for p in props.values())
 
-    errors: list[tuple[str, str]] = []
-    for attempt in ("signature", "hybrid"):
-        try:
-            # Force eager schema build to detect failures now.
-            Tool(func, name="_schema_probe_", mode=attempt).definition()  # type: ignore[arg-type]
-            return attempt  # type: ignore[return-value]
-        except Exception as exc:
-            errors.append((attempt, str(exc)))
 
-    if allow_llm_schema or schema_llm is not None:
-        return "llm"
+def _resolve_auto_tool(
+    func: Any,
+    name: str,
+    description: str | None,
+    schema_llm: Any | None,
+    strict: bool,
+    allow_llm_schema: bool,
+) -> "Tool":
+    """Build and return the best Tool for ``mode="auto"``.
 
-    fn_name = getattr(func, "__name__", repr(func))
-    sig_err = next(msg for n, msg in errors if n == "signature")
-    hyb_err = next(msg for n, msg in errors if n == "hybrid")
-    raise ValueError(
-        f"Could not build tool schema for {fn_name!r} using signature or hybrid mode.\n"
-        f"  signature error: {sig_err}\n"
-        f"  hybrid error: {hyb_err}\n"
-        f"To allow LLM schema generation, pass:\n"
-        f"    allow_llm_schema=True\n"
-        f"  or: mode=\"llm\", schema_llm=<engine>"
+    Decision tree (never calls LLM implicitly):
+
+    1. Build with ``"signature"`` — always tried first; zero cost.
+    2. If the schema is under-described *and* ``schema_llm`` is provided,
+       try ``"hybrid"`` (signature + LLM enrichment).
+    3. If still under-described *and* ``allow_llm_schema=True``, try ``"llm"``.
+    4. Otherwise return the best result so far — never raise due to quality.
+
+    If ``"signature"`` genuinely fails (e.g. unresolvable forward ref),
+    the same LLM opt-in rules apply and the error is re-raised if neither
+    is available.
+    """
+    sig_tool = Tool(
+        func, name=name, description=description,
+        mode="signature", schema_llm=schema_llm, strict=strict,
     )
+    try:
+        sig_def = sig_tool.definition()
+    except Exception as sig_exc:
+        # Signature genuinely failed — try LLM paths if opted in.
+        if schema_llm is not None:
+            try:
+                hyb = Tool(func, name=name, description=description,
+                           mode="hybrid", schema_llm=schema_llm, strict=strict)
+                hyb.definition()
+                return hyb
+            except Exception:
+                pass
+        if allow_llm_schema and schema_llm is not None:
+            llm = Tool(func, name=name, description=description,
+                       mode="llm", schema_llm=schema_llm, strict=strict)
+            llm.definition()
+            return llm
+        fn_name = getattr(func, "__name__", repr(func))
+        raise ValueError(
+            f"Could not build tool schema for {fn_name!r} (signature mode failed).\n"
+            f"  error: {sig_exc}\n"
+            f"To allow LLM schema generation, pass:\n"
+            f"    allow_llm_schema=True  (with schema_llm=<engine>)"
+        ) from sig_exc
+
+    # Signature succeeded — upgrade only if enrichment is available.
+    if _schema_needs_enrichment(sig_def) and schema_llm is not None:
+        try:
+            hyb = Tool(func, name=name, description=description,
+                       mode="hybrid", schema_llm=schema_llm, strict=strict)
+            hyb.definition()
+            return hyb
+        except Exception:
+            pass  # fall through to sig_tool or llm
+
+    if _schema_needs_enrichment(sig_def) and allow_llm_schema and schema_llm is not None:
+        try:
+            llm = Tool(func, name=name, description=description,
+                       mode="llm", schema_llm=schema_llm, strict=strict)
+            llm.definition()
+            return llm
+        except Exception:
+            pass
+
+    return sig_tool
+
+
+#: Sentinel distinguishing "caller omitted strict=" from "caller passed strict=False".
+#: Needed so ``tool(base, strict=False)`` can override a base with ``strict=True``.
+_UNSET_BOOL: Any = object()
 
 
 def _agent_as_tool_named(agent: Any, name: str, description: str | None) -> Tool:
@@ -245,7 +299,7 @@ def tool(
     description: str | None = None,
     mode: Literal["auto", "signature", "hybrid", "llm"] = "auto",
     schema_llm: Any | None = None,
-    strict: bool = False,
+    strict: bool = _UNSET_BOOL,  # type: ignore[assignment]
     allow_llm_schema: bool = False,
 ) -> Tool:
     """Public factory — the canonical way to create a :class:`Tool`.
@@ -292,7 +346,7 @@ def tool(
             or description is not None
             or mode != "auto"
             or schema_llm is not None
-            or strict
+            or strict is not _UNSET_BOOL
         )
         if not has_overrides:
             return obj
@@ -302,7 +356,7 @@ def tool(
             description=description if description is not None else obj.description,
             mode=mode if mode != "auto" else obj.mode,
             schema_llm=schema_llm if schema_llm is not None else obj.schema_llm,
-            strict=strict if strict else obj.strict,
+            strict=obj.strict if strict is _UNSET_BOOL else bool(strict),
             returns_envelope=obj.returns_envelope,
             agent_memory=obj.agent_memory,
             agent_store=obj.agent_store,
@@ -344,14 +398,21 @@ def tool(
                 f"tool() requires an explicit name=... for callables.\n"
                 f"Example: tool({fn_name!r}, name=\"{fn_name}\")"
             )
-        effective_mode = _resolve_auto_mode(obj, mode, schema_llm, allow_llm_schema)
+        strict_val = False if strict is _UNSET_BOOL else bool(strict)  # type: ignore[arg-type]
+        if mode == "auto":
+            return _resolve_auto_tool(
+                obj, name, description,
+                schema_llm=schema_llm,
+                strict=strict_val,
+                allow_llm_schema=allow_llm_schema,
+            )
         return Tool(
             obj,
             name=name,
             description=description,
-            mode=effective_mode,
+            mode=mode,
             schema_llm=schema_llm,
-            strict=strict,
+            strict=strict_val,
         )
 
     raise TypeError(f"tool() cannot wrap {type(obj).__name__!r}")

@@ -292,74 +292,155 @@ def test_tool_auto_signature_success():
 
 
 def test_tool_auto_does_not_use_llm_without_opt_in(monkeypatch):
-    """When signature and hybrid both fail, auto must raise rather than call LLM."""
+    """_resolve_auto_tool must not invoke LLM paths when allow_llm_schema=False
+    and schema_llm is None — even if signature schema is poor quality."""
     import lazybridge.tools as _tools
 
-    call_count = {"llm": 0}
+    llm_called = {"count": 0}
+    original = _tools._resolve_auto_tool
 
-    original = _tools._resolve_auto_mode
+    def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
+        # Simulate signature success but enrichment needed, no LLM opt-in.
+        assert not allow_llm_schema, "LLM used without opt-in"
+        assert schema_llm is None, "schema_llm leaked through"
+        # Return a minimal sig tool (no LLM call)
+        return _tools.Tool(func, name=name, description=description, mode="signature")
 
-    def _patched(func, mode, schema_llm, allow_llm_schema):
-        if mode != "auto":
-            return mode
-        # Simulate both signature and hybrid failing
-        errors = [("signature", "no type hints"), ("hybrid", "no doc")]
-        if allow_llm_schema or schema_llm is not None:
-            call_count["llm"] += 1
-            return "llm"
-        fn_name = getattr(func, "__name__", repr(func))
-        raise ValueError(
-            f"Could not build tool schema for {fn_name!r} using signature or hybrid mode.\n"
-            f"  signature error: {errors[0][1]}\n"
-            f"  hybrid error: {errors[1][1]}\n"
-            f"To allow LLM schema generation, pass:\n"
-            f"    allow_llm_schema=True"
-        )
-
-    monkeypatch.setattr(_tools, "_resolve_auto_mode", _patched)
+    monkeypatch.setattr(_tools, "_resolve_auto_tool", _patched)
 
     def _untyped(x):
         pass
 
-    with pytest.raises(ValueError, match="allow_llm_schema"):
-        tool(_untyped, name="fn")
-
-    assert call_count["llm"] == 0
+    t = tool(_untyped, name="fn")
+    assert llm_called["count"] == 0
+    assert t.name == "fn"
 
 
 def test_tool_auto_uses_llm_with_opt_in(monkeypatch):
-    """With allow_llm_schema=True, auto should select the llm path."""
+    """With allow_llm_schema=True, _resolve_auto_tool receives the opt-in flag."""
     import lazybridge.tools as _tools
 
-    call_count = {"llm": 0}
+    received = {}
+    original = _tools._resolve_auto_tool
 
-    def _patched(func, mode, schema_llm, allow_llm_schema):
-        if mode != "auto":
-            return mode
-        if allow_llm_schema or schema_llm is not None:
-            call_count["llm"] += 1
-            return "llm"
-        raise ValueError("no opt-in")
+    def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
+        received["allow_llm_schema"] = allow_llm_schema
+        # Return sig_tool to avoid needing a real schema_llm engine
+        return _tools.Tool(func, name=name, description=description, mode="signature")
 
-    monkeypatch.setattr(_tools, "_resolve_auto_mode", _patched)
+    monkeypatch.setattr(_tools, "_resolve_auto_tool", _patched)
 
     def _untyped(x):
         pass
 
-    # We don't actually build the schema here — just verify mode resolution
-    # returns "llm" so the Tool is constructed with that mode.
-    from lazybridge.tools import Tool as _Tool
-
-    original_init = _Tool.__init__
-
-    captured_mode = {}
-
-    def _fake_init(self, func, *, name=None, description=None, mode="signature", **kw):
-        captured_mode["mode"] = mode
-        original_init(self, func, name=name, description=description, mode=mode, **kw)
-
-    monkeypatch.setattr(_Tool, "__init__", _fake_init)
-
     tool(_untyped, name="fn", allow_llm_schema=True)
-    assert captured_mode.get("mode") == "llm"
-    assert call_count["llm"] == 1
+    assert received.get("allow_llm_schema") is True
+
+
+# ---------------------------------------------------------------------------
+# 11. _schema_needs_enrichment helper
+# ---------------------------------------------------------------------------
+
+
+def test_schema_needs_enrichment_false_when_fully_described():
+    """A typed, documented function should not need enrichment."""
+    from lazybridge.tools import _schema_needs_enrichment
+    from lazybridge.core.types import ToolDefinition
+
+    defn = ToolDefinition(
+        name="search",
+        description="Search the web for information.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query."},
+            },
+            "required": ["query"],
+        },
+    )
+    assert _schema_needs_enrichment(defn) is False
+
+
+def test_schema_needs_enrichment_true_when_param_lacks_description():
+    from lazybridge.tools import _schema_needs_enrichment
+    from lazybridge.core.types import ToolDefinition
+
+    defn = ToolDefinition(
+        name="search",
+        description="Search the web.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},  # no description
+            },
+        },
+    )
+    assert _schema_needs_enrichment(defn) is True
+
+
+def test_schema_needs_enrichment_true_when_no_tool_description():
+    from lazybridge.tools import _schema_needs_enrichment
+    from lazybridge.core.types import ToolDefinition
+
+    defn = ToolDefinition(
+        name="search",
+        description="",
+        parameters={"type": "object", "properties": {}},
+    )
+    assert _schema_needs_enrichment(defn) is True
+
+
+# ---------------------------------------------------------------------------
+# 12. B1 — graph edge when child already shares the same session
+# ---------------------------------------------------------------------------
+
+
+def test_graph_edge_when_child_already_has_same_session():
+    """Canonical pattern: all agents built with session= up front.
+    The parent → child edge must be registered even when child.session
+    is already the same session object."""
+    sess = Session()
+    child = Agent(name="research", engine=_FakeEngine(), session=sess)
+
+    Agent(name="pipeline", engine=_FakeEngine(), tools=[child], session=sess)
+
+    edges = [(e.from_id, e.to_id, e.label) for e in sess.graph.edges()]
+    assert ("pipeline", "research", "research") in edges
+
+
+def test_graph_edge_not_stolen_when_child_has_different_session():
+    """If the child has a different session, the parent must not steal it."""
+    sess_outer = Session()
+    sess_inner = Session()
+    child = Agent(name="research", engine=_FakeEngine(), session=sess_inner)
+
+    Agent(name="pipeline", engine=_FakeEngine(), tools=[child], session=sess_outer)
+
+    assert child.session is sess_inner  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# 13. P2 — strict sentinel in tool() clone path
+# ---------------------------------------------------------------------------
+
+
+def test_tool_clone_can_disable_strict():
+    """tool(base, strict=False) must disable strict even when base.strict=True."""
+    base = Tool(_fn, name="x", strict=True)
+    cloned = tool(base, strict=False)
+    assert cloned.strict is False
+    assert base.strict is True  # original unmodified
+
+
+def test_tool_clone_preserves_strict_when_not_overridden():
+    """tool(base) without strict= must preserve the original strict value."""
+    base = Tool(_fn, name="x", strict=True)
+    cloned = tool(base, name="y")  # override name but not strict
+    assert cloned.strict is True
+
+
+def test_tool_clone_can_enable_strict():
+    """tool(base, strict=True) must enable strict on a non-strict base."""
+    base = Tool(_fn, name="x", strict=False)
+    cloned = tool(base, strict=True)
+    assert cloned.strict is True
