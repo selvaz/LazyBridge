@@ -219,8 +219,16 @@ class OTelExporter:
         # available before closing it.  Other open children (model
         # mid-stream, tool that crashed without TOOL_ERROR) are closed
         # too so we don't leak open spans on a cancelled run.
+        #
+        # Snapshot ALL keys (agent + orphans) under a single lock so a
+        # concurrent ``_on_tool_call`` / ``_on_model_request`` for the
+        # same run_id can't slip a new entry between our two reads and
+        # cause a double-close (the new entry would also be picked up
+        # the second time the lock is taken).
         with self._lock:
-            agent_entry = self._spans.get(run_id, {}).get("agent")
+            run_spans = dict(self._spans.get(run_id, {}))
+        agent_entry = run_spans.get("agent")
+        orphan_keys = [k for k in run_spans if k != "agent"]
         if agent_entry is not None:
             if "payload" in event:
                 self._set_attr(agent_entry.span, "gen_ai.completion", _truncate(event["payload"]))
@@ -229,10 +237,8 @@ class OTelExporter:
             if event.get("cancelled"):
                 self._set_attr(agent_entry.span, "lazybridge.cancelled", True)
 
-        # Close any orphan children before the agent span itself.
-        with self._lock:
-            keys = [k for k in self._spans.get(run_id, {}) if k != "agent"]
-        for k in keys:
+        # Close orphan children first, then the agent span.
+        for k in orphan_keys:
             self._end_span(run_id, k, error="orphan: agent ended before child")
 
         err = event.get("error")

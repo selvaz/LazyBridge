@@ -803,7 +803,17 @@ class Session:
         for row in model_responses:
             p = row["payload"]
             run_id = row.get("run_id")
-            agent_name = run_agent.get(run_id or "", "unknown") if run_id else "unknown"
+            # Prefer the agent_name carried in the MODEL_RESPONSE payload
+            # (LLMEngine populates it as the innermost agent name).  Falling
+            # back to the AGENT_START → run_id map only matters for legacy
+            # / external emitters that don't include the field.
+            payload_agent = p.get("agent_name")
+            if payload_agent:
+                agent_name = str(payload_agent)
+            elif run_id:
+                agent_name = run_agent.get(run_id, "unknown")
+            else:
+                agent_name = "unknown"
 
             in_tok = p.get("input_tokens", 0) or 0
             out_tok = p.get("output_tokens", 0) or 0

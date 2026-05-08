@@ -530,7 +530,8 @@ def build(check: bool = False) -> int:
     for tier, fname in tier_file_map.items():
         _write(SKILL_DIR / fname, render_skill_tier(tier, tiers.get(tier, []), titles, intros.get(tier, "")), changed)
     _write(SKILL_DIR / "05_decision_trees.md", render_skill_decisions(decisions), changed)
-    # 06_reference.md is written unconditionally below (excluded from drift check)
+    # 06_reference.md is written below; like every other generated file it
+    # routes through _write() so --check catches drift in the reference docs.
 
     # Site render — guides + decisions + skill mirror.
     # docs/tiers/ was folded into docs/guides/getting-started.md in 0.7;

@@ -104,6 +104,20 @@ class Plan:
         upstream steps.  Only ``writes``-bucket values and step history
         survive across process boundaries; live in-memory state does not.
 
+        Crash-window durability
+        -----------------------
+        Each step writes its checkpoint *before* the durable
+        ``store.write(step.writes, value)`` call.  This eliminates
+        double-writes on resume — the checkpoint already records
+        ``next_step`` as the following step, so a resumed run does not
+        re-execute the completed step.  The trade-off is that a crash in
+        the gap between the checkpoint and the Store write makes the
+        durable Store write *lost*; the value still lives in the
+        checkpoint's serialised ``kv`` and is read back into in-memory
+        state on resume, so the Plan continues correctly, but **sidecar
+        consumers reading the Store directly should reconcile against
+        the checkpoint snapshot rather than assume Store completeness**.
+
         Concurrency
         -----------
         Every checkpoint write goes through
@@ -621,6 +635,14 @@ class Plan:
                 # ensures that a crash between the checkpoint and the store.write()
                 # does NOT replay the step on resume (the checkpoint already records
                 # next_step as the step after this band), so no double-write occurs.
+                #
+                # Trade-off: the inverse failure mode is a *lost durable write* —
+                # if we crash between checkpoint and store.write, the resumed run
+                # advances past the band and never retries the durable write.
+                # The values still live in the checkpoint's serialised ``kv``, so
+                # Plan replay reads them correctly via ``_load_checkpoint``; only
+                # sidecar consumers reading the Store directly would observe the
+                # gap.  See ``Plan.run`` doc above for the full contract.
                 last_ok: Envelope | None = None
                 for s, r in zip(group, raw):
                     step_name = s.name or ""
@@ -699,7 +721,11 @@ class Plan:
 
             # Save checkpoint first; durable store write comes after so a crash
             # between the two is safe — resume sees the checkpoint and skips the
-            # step rather than re-running it (no double-write).
+            # step rather than re-running it (no double-write).  Inverse trade:
+            # a crash in the gap means the durable Store write is *lost*; the
+            # value still survives in the checkpoint's ``kv`` for Plan replay,
+            # so any sidecar that reads the Store directly should reconcile
+            # against the checkpoint snapshot, not assume Store completeness.
             last_snap = self._save_checkpoint(
                 effective_key=effective_key,
                 last_snapshot=last_snap,

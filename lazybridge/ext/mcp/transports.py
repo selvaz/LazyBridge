@@ -81,11 +81,13 @@ class StdioTransport(_Transport):
         )
         read, write = await self._stack.enter_async_context(stdio_client(params))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
-        assert self._session is not None  # narrow for mypy after enter_async_context
+        if self._session is None:  # type-narrow + sanity check
+            raise RuntimeError("MCP stdio_client returned no session")
         await self._session.initialize()
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        assert self._session is not None, "list_tools called before connect"
+        if self._session is None:
+            raise RuntimeError("list_tools called before connect()")
         result = await self._session.list_tools()
         out: list[dict[str, Any]] = []
         for t in result.tools:
@@ -99,7 +101,8 @@ class StdioTransport(_Transport):
         return out
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        assert self._session is not None, "call_tool called before connect"
+        if self._session is None:
+            raise RuntimeError("call_tool called before connect()")
         result = await self._session.call_tool(name, arguments=arguments)
         # MCP returns a list of content blocks; flatten text content into a string.
         return _extract_text(result)
@@ -144,11 +147,13 @@ class HttpTransport(_Transport):
 
         read, write, _ = await self._stack.enter_async_context(streamablehttp_client(self._url, headers=self._headers))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
-        assert self._session is not None  # narrow for mypy after enter_async_context
+        if self._session is None:  # type-narrow + sanity check
+            raise RuntimeError("MCP streamablehttp_client returned no session")
         await self._session.initialize()
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        assert self._session is not None, "list_tools called before connect"
+        if self._session is None:
+            raise RuntimeError("list_tools called before connect()")
         result = await self._session.list_tools()
         return [
             {
@@ -160,7 +165,8 @@ class HttpTransport(_Transport):
         ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        assert self._session is not None, "call_tool called before connect"
+        if self._session is None:
+            raise RuntimeError("call_tool called before connect()")
         result = await self._session.call_tool(name, arguments=arguments)
         return _extract_text(result)
 

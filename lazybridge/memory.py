@@ -136,11 +136,13 @@ class Memory:
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         if tokens == 0 and (user or assistant):
             # Estimate from word count when no real token count is supplied.
-            # This is intentionally rough — the goal is to fire compression at
-            # the right order of magnitude.  LLMEngine passes real counts;
-            # HIL and other callers get a free estimate without any changes
-            # at their call sites.
-            tokens = len((user + " " + assistant).split())
+            # English LLM tokenisers run ~1.3 tokens per word on average,
+            # so we scale the word count up to avoid undershooting the
+            # ``max_tokens`` budget.  LLMEngine passes the real count and
+            # bypasses this branch entirely; HIL and other non-LLM callers
+            # get a free estimate without changes at their call sites.
+            words = len((user + " " + assistant).split())
+            tokens = max(1, int(words * 1.3))
         # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
             self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))

@@ -79,7 +79,7 @@
         <ul class="dd-toc-list">
           {% for item in toc_items %}
           <li class="toc-h{{ item.level }}">
-            <a href="#{{ item.id }}">{{ item.text }}</a>
+            <a href="#{{ item.id|e }}">{{ item.text|e }}</a>
           </li>
           {% endfor %}
         </ul>

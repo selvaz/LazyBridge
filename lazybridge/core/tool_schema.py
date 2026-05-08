@@ -1050,6 +1050,10 @@ class ToolSchemaBuilder:
             json_schema["required"] = required
         if strict:
             json_schema["additionalProperties"] = False
+            # Some strict-mode validators (OpenAI, certain Gemini endpoints)
+            # require ``required`` to be present even when empty.  Emit an
+            # explicit empty list rather than omitting the key.
+            json_schema.setdefault("required", [])
 
         return ToolDefinition(
             name=name,
@@ -1136,6 +1140,7 @@ class ToolSchemaBuilder:
             json_schema["required"] = required
         if strict:
             json_schema["additionalProperties"] = False
+            json_schema.setdefault("required", [])
 
         return (
             ToolDefinition(

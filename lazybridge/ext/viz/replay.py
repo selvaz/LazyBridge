@@ -152,19 +152,27 @@ class ReplayController:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            # Claim ownership of the next index *before* publishing so a
+            # concurrent ``step()`` cannot see the un-bumped ``_idx`` and
+            # re-publish the same event.  The publish runs outside the
+            # lock so a slow subscriber doesn't block ``step()`` /
+            # ``pause()``.
             with self._lock:
                 paused = self._paused
                 idx = self._idx
                 speed = self._speed
-            if paused or idx >= len(self._events):
+                if not paused and idx < len(self._events):
+                    self._idx = idx + 1
+                    claimed = True
+                else:
+                    claimed = False
+            if not claimed:
                 self._wake.wait(timeout=0.5)
                 self._wake.clear()
                 continue
             now_ev = self._events[idx]
             next_ev = self._events[idx + 1] if idx + 1 < len(self._events) else None
             self._hub.publish(normalise_event(now_ev))
-            with self._lock:
-                self._idx = idx + 1
             if next_ev is not None:
                 gap = max(0.0, (next_ev.get("ts", 0.0) - now_ev.get("ts", 0.0)) / speed)
                 gap = min(gap, 2.0)  # cap so a long idle in the recorded run doesn't stall us
