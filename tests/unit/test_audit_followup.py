@@ -10,6 +10,12 @@ Sections:
   P2.10 — Session.usage_summary prefers payload agent_name over run_id map.
   P2.12 — ReplayController._run claims the index before publishing.
   P2.13 — Memory.add scales word-count estimate to ~1.3 tokens per word.
+
+Third-round (replay-mode graph reconstruction):
+  R1   — Plan emits AGENT_START + AGENT_FINISH around its body.
+  R2   — Plan TOOL_CALL / TOOL_RESULT / TOOL_ERROR carry agent_name.
+  R3   — reconstruct_graph derives child nodes from `step` and parent→child
+         edges from agent_name → step.
 """
 
 from __future__ import annotations
@@ -309,3 +315,158 @@ def test_memory_estimate_floor_of_one_for_one_word():
     mem.add("solo", "")
     # int(1 * 1.3) == 1; max(1, ...) keeps the floor at 1.
     assert mem._turns[-1].token_estimate >= 1
+
+
+# ---------------------------------------------------------------------------
+# R1 / R2 — Plan emits AGENT_START + AGENT_FINISH; tool events carry agent_name
+# ---------------------------------------------------------------------------
+
+
+def _drive_plan(plan_engine, agent_name="pipeline"):
+    """Run a Plan engine through an Agent + Session and return event rows."""
+    from lazybridge import Agent, EventType, Session
+
+    sess = Session()
+    agent = Agent(engine=plan_engine, name=agent_name, session=sess)
+    agent("seed task")
+    rows = sess.events.query()
+    return rows, EventType
+
+
+def test_plan_emits_agent_start_and_finish_with_agent_name():
+    from lazybridge.engines.plan import Plan, Step
+    from lazybridge.testing import MockAgent
+
+    a = MockAgent("ok", name="step_a")
+    plan = Plan(Step(target=a, name="step_a"))
+    rows, EventType = _drive_plan(plan, agent_name="orchestrator")
+
+    starts = [r for r in rows if r["event_type"] == EventType.AGENT_START.value]
+    finishes = [r for r in rows if r["event_type"] == EventType.AGENT_FINISH.value]
+    assert any(r["payload"].get("agent_name") == "orchestrator" for r in starts)
+    assert any(r["payload"].get("agent_name") == "orchestrator" for r in finishes)
+
+
+def test_plan_tool_events_carry_agent_name():
+    from lazybridge.engines.plan import Plan, Step
+    from lazybridge.testing import MockAgent
+
+    a = MockAgent("ok", name="step_a")
+    plan = Plan(Step(target=a, name="step_a"))
+    rows, EventType = _drive_plan(plan, agent_name="parent")
+
+    tool_calls = [r for r in rows if r["event_type"] == EventType.TOOL_CALL.value]
+    tool_results = [r for r in rows if r["event_type"] == EventType.TOOL_RESULT.value]
+    assert tool_calls and tool_results
+    for r in tool_calls + tool_results:
+        assert r["payload"].get("agent_name") == "parent"
+        # The step name must also survive so reconstruct_graph can
+        # rebuild the parent → child edge.
+        assert r["payload"].get("step") == "step_a"
+
+
+def test_plan_emits_agent_finish_on_step_error():
+    """Even when a step raises, AGENT_FINISH must still emit with the error."""
+    from lazybridge.engines.plan import Plan, Step
+
+    def boom(_task: str) -> str:
+        raise RuntimeError("step crashed")
+
+    plan = Plan(Step(target=boom, name="boom"))
+    rows, EventType = _drive_plan(plan, agent_name="errcase")
+
+    finishes = [r for r in rows if r["event_type"] == EventType.AGENT_FINISH.value]
+    assert finishes, "AGENT_FINISH must always be emitted, even on error"
+    payloads = [r["payload"] for r in finishes if r["payload"].get("agent_name") == "errcase"]
+    assert payloads, "AGENT_FINISH must reference the wrapping agent name"
+    # Plan returns an error envelope rather than raising, so the
+    # AGENT_FINISH payload carries error= from the envelope's ErrorInfo.
+    assert "error" in payloads[-1]
+
+
+# ---------------------------------------------------------------------------
+# R3 — reconstruct_graph derives nodes + edges from event payloads
+# ---------------------------------------------------------------------------
+
+
+def test_reconstruct_graph_links_agent_to_steps_via_tool_call_events():
+    from lazybridge.ext.viz.replay import reconstruct_graph
+
+    events = [
+        {"event_type": "agent_start", "agent_name": "pipeline"},
+        {"event_type": "tool_call", "agent_name": "pipeline", "step": "research"},
+        {"event_type": "tool_result", "agent_name": "pipeline", "step": "research"},
+        {"event_type": "tool_call", "agent_name": "pipeline", "step": "write"},
+        {"event_type": "tool_result", "agent_name": "pipeline", "step": "write"},
+        {"event_type": "agent_finish", "agent_name": "pipeline"},
+    ]
+    g = reconstruct_graph(events)
+    node_ids = {n["id"] for n in g["nodes"]}
+    assert node_ids == {"pipeline", "research", "write"}
+    edge_pairs = {(e["from"], e["to"]) for e in g["edges"]}
+    assert edge_pairs == {("pipeline", "research"), ("pipeline", "write")}
+    # Edge keys match the live GraphSchema.to_dict shape so the frontend
+    # renders replay edges with the same code path as live mode.
+    for e in g["edges"]:
+        assert set(e.keys()) >= {"from", "to", "label", "type"}
+
+
+def test_reconstruct_graph_handles_llm_engine_tool_field():
+    """LLMEngine emits tool calls with `tool` (not `step`); replay must still
+    surface those as edges."""
+    from lazybridge.ext.viz.replay import reconstruct_graph
+
+    events = [
+        {"event_type": "agent_start", "agent_name": "researcher"},
+        {"event_type": "tool_call", "agent_name": "researcher", "tool": "search"},
+        {"event_type": "agent_finish", "agent_name": "researcher"},
+    ]
+    g = reconstruct_graph(events)
+    assert {"researcher", "search"} <= {n["id"] for n in g["nodes"]}
+    assert any(e["from"] == "researcher" and e["to"] == "search" for e in g["edges"])
+
+
+def test_reconstruct_graph_dedupes_repeat_tool_calls():
+    from lazybridge.ext.viz.replay import reconstruct_graph
+
+    events = [
+        {"event_type": "tool_call", "agent_name": "p", "step": "child"},
+        {"event_type": "tool_call", "agent_name": "p", "step": "child"},
+        {"event_type": "tool_call", "agent_name": "p", "step": "child"},
+    ]
+    g = reconstruct_graph(events)
+    assert sum(1 for e in g["edges"] if e["from"] == "p" and e["to"] == "child") == 1
+
+
+def test_replay_visualizer_graph_matches_live_graph_for_mockagent_plan():
+    """End-to-end: a MockAgent-driven Plan run replayed from SQLite produces
+    the same node set the live session.graph carried."""
+    import os
+    import tempfile
+
+    from lazybridge import Agent, Plan, Session, Step
+    from lazybridge.ext.viz.replay import (
+        load_session_events,
+        reconstruct_graph,
+    )
+    from lazybridge.testing import MockAgent
+
+    tmpdir = tempfile.mkdtemp(prefix="viz-graph-")
+    db_path = os.path.join(tmpdir, "demo.db")
+
+    research = MockAgent("hits", name="research")
+    write = MockAgent("draft", name="write")
+    plan = Plan(Step(target=research, name="research"), Step(target=write, name="write"))
+
+    sess = Session(db=db_path)
+    pipeline = Agent(engine=plan, name="pipeline", session=sess, tools=[research, write])
+    pipeline("seed")
+
+    # Replay reads only the SQLite events — no live graph, no agents.
+    events = load_session_events(db_path, sess.session_id)
+    replay_graph = reconstruct_graph(events)
+    replay_nodes = {n["id"] for n in replay_graph["nodes"]}
+    assert {"pipeline", "research", "write"} <= replay_nodes
+    replay_edges = {(e["from"], e["to"]) for e in replay_graph["edges"]}
+    assert ("pipeline", "research") in replay_edges
+    assert ("pipeline", "write") in replay_edges

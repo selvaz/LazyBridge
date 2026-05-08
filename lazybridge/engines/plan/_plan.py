@@ -487,7 +487,65 @@ class Plan:
         store: Store | None = None,
         plan_state: PlanState | None = None,
     ) -> Envelope:
+        # ``Agent.__init__`` stamps the wrapping agent's name on the engine
+        # via ``engine._agent_name = self.name``.  Plan emits AGENT_START
+        # and AGENT_FINISH like every other engine so replay mode (which
+        # rebuilds the graph from events alone) can see the parent node.
         run_id = str(uuid.uuid4())
+        agent_name = getattr(self, "_agent_name", "plan")
+        if session:
+            session.emit(
+                EventType.AGENT_START,
+                {"agent_name": agent_name, "task": env.task},
+                run_id=run_id,
+            )
+
+        result_env: Envelope | None = None
+        error_msg: str | None = None
+        try:
+            result_env = await self._run_impl(
+                env,
+                tools=tools,
+                output_type=output_type,
+                memory=memory,
+                session=session,
+                store=store,
+                plan_state=plan_state,
+                run_id=run_id,
+                agent_name=agent_name,
+            )
+            return result_env
+        except BaseException as exc:  # propagate after emitting AGENT_FINISH
+            error_msg = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            if session:
+                payload: dict[str, Any] = {"agent_name": agent_name}
+                if error_msg is not None:
+                    payload["error"] = error_msg
+                elif result_env is not None and result_env.error is not None:
+                    payload["error"] = result_env.error.message
+                elif result_env is not None:
+                    payload["payload"] = (result_env.text() or "")[:500]
+                session.emit(EventType.AGENT_FINISH, payload, run_id=run_id)
+
+    async def _run_impl(
+        self,
+        env: Envelope,
+        *,
+        tools: list[Tool],
+        output_type: type,
+        memory: Memory | None,
+        session: Session | None,
+        store: Store | None = None,
+        plan_state: PlanState | None = None,
+        run_id: str,
+        agent_name: str,
+    ) -> Envelope:
+        # ``run_id`` and ``agent_name`` are threaded in from ``run()`` so
+        # AGENT_START/FINISH and TOOL_CALL/RESULT all share the same
+        # correlation id — matches how LLMEngine and HumanEngine attach
+        # their child events to the agent span.
         run_uid = uuid.uuid4().hex  # checkpoint ownership stamp (CAS guard)
         tool_map = {t.name: t for t in tools}
         step_map = self._step_map()
@@ -593,6 +651,7 @@ class Plan:
                             session=session,
                             run_id=run_id,
                             branch_id=s.name,
+                            agent_name=agent_name,
                         )
                         for s in group
                     ],
@@ -691,6 +750,7 @@ class Plan:
                 tool_map=tool_map,
                 session=session,
                 run_id=run_id,
+                agent_name=agent_name,
             )
 
             # If the step errored, persist a "failed" checkpoint that
@@ -778,6 +838,7 @@ class Plan:
         session: Session | None,
         run_id: str,
         branch_id: str | None = None,
+        agent_name: str | None = None,
     ) -> Envelope:
         """Resolve sentinels, build the step env, and execute the step.
 
@@ -843,6 +904,7 @@ class Plan:
             session=session,
             run_id=run_id,
             branch_id=branch_id,
+            agent_name=agent_name,
         )
         return Envelope(
             task=step_env.task,
@@ -1034,11 +1096,16 @@ class Plan:
         session: Session | None,
         run_id: str,
         branch_id: str | None = None,
+        agent_name: str | None = None,
     ) -> Envelope:
         if session:
             payload: dict[str, Any] = {"step": step.name, "task": env.task}
             if branch_id is not None:
                 payload["branch_id"] = branch_id
+            if agent_name is not None:
+                # Tag every TOOL_CALL with the wrapping agent so replay
+                # can rebuild the parent → step edge from events alone.
+                payload["agent_name"] = agent_name
             session.emit(EventType.TOOL_CALL, payload, run_id=run_id)
 
         try:
@@ -1084,6 +1151,8 @@ class Plan:
                 result_payload: dict[str, Any] = {"step": step.name, "result": result_env.text()[:200]}
                 if branch_id is not None:
                     result_payload["branch_id"] = branch_id
+                if agent_name is not None:
+                    result_payload["agent_name"] = agent_name
                 session.emit(EventType.TOOL_RESULT, result_payload, run_id=run_id)
             return result_env
 
@@ -1092,6 +1161,8 @@ class Plan:
                 err_payload: dict[str, Any] = {"step": step.name, "error": str(exc)}
                 if branch_id is not None:
                     err_payload["branch_id"] = branch_id
+                if agent_name is not None:
+                    err_payload["agent_name"] = agent_name
                 session.emit(EventType.TOOL_ERROR, err_payload, run_id=run_id)
             return Envelope.error_envelope(exc)
 
