@@ -616,7 +616,11 @@ class Plan:
                     )
                     return self._aggregate_nested_metadata(first_failure_env, history)
 
-                # All branches succeeded — apply writes in declared order.
+                # All branches succeeded — collect results, update in-memory kv,
+                # checkpoint FIRST, then flush to the durable store.  This ordering
+                # ensures that a crash between the checkpoint and the store.write()
+                # does NOT replay the step on resume (the checkpoint already records
+                # next_step as the step after this band), so no double-write occurs.
                 last_ok: Envelope | None = None
                 for s, r in zip(group, raw):
                     step_name = s.name or ""
@@ -624,9 +628,7 @@ class Plan:
                     # BaseException / r.error; remaining ``r`` are Envelopes.
                     assert isinstance(r, Envelope)
                     if s.writes and r.payload is not None:
-                        kv[s.writes] = r.payload
-                        if effective_store:
-                            effective_store.write(s.writes, r.payload)
+                        kv[s.writes] = r.payload  # in-memory; goes into checkpoint below
                     history.append(StepResult(step_name=step_name, envelope=r))
                     completed.append(step_name)
                     last_ok = r
@@ -647,6 +649,12 @@ class Plan:
                     run_uid=run_uid,
                     history=history,
                 )
+                # Durable store writes AFTER checkpoint — crash here is safe because
+                # the checkpoint already points to the next step.
+                if effective_store:
+                    for s, r in zip(group, raw):
+                        if s.writes and r.payload is not None:
+                            effective_store.write(s.writes, r.payload)
                 continue
 
             # ──────────────────────────────────────────────────────────────
@@ -678,11 +686,9 @@ class Plan:
                 )
                 return self._aggregate_nested_metadata(result_env, history)
 
-            # Persist writes
+            # Persist writes — in-memory only here so kv goes into the checkpoint below.
             if step.writes and result_env.payload is not None:
                 kv[step.writes] = result_env.payload
-                if effective_store:
-                    effective_store.write(step.writes, result_env.payload)
 
             history.append(StepResult(step_name=step.name or "", envelope=result_env))
             completed.append(step.name or "")
@@ -691,7 +697,9 @@ class Plan:
             # Determine next step via routes / routes_by or linear progression.
             current_name = self._routing(result_env, step, step_map, branch_return)
 
-            # Save checkpoint after each step so a crash mid-plan can resume
+            # Save checkpoint first; durable store write comes after so a crash
+            # between the two is safe — resume sees the checkpoint and skips the
+            # step rather than re-running it (no double-write).
             last_snap = self._save_checkpoint(
                 effective_key=effective_key,
                 last_snapshot=last_snap,
@@ -702,6 +710,8 @@ class Plan:
                 run_uid=run_uid,
                 history=history,
             )
+            if step.writes and result_env.payload is not None and effective_store:
+                effective_store.write(step.writes, result_env.payload)
 
         # If we exited the loop because the iteration cap was hit (rather
         # than because the plan ran to completion with ``current_name``

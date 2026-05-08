@@ -555,20 +555,18 @@ def build(check: bool = False) -> int:
         _write(DOCS_DIR / "decisions" / f"{slug}.md", render_site_decision(name, frag), changed)
     _write(DOCS_DIR / "decisions" / "index.md", render_site_decisions_index(decisions), changed)
 
-    # Reference is generated via inspect.signature() — output is Python-version-
-    # dependent (3.11 vs 3.12 differ).  Always write fresh; never report as drift
-    # so --check doesn't fail just because CI uses a different Python than local.
+    # Reference is generated via inspect.signature().  The _UNSET sentinel regex at
+    # line ~486 normalises memory-address reprs so output is deterministic across
+    # Python versions and OS.  Route through _write() so --check catches stale files.
     ref_content = render_reference()
     for ref_path in [
         SKILL_DIR / "06_reference.md",
         DOCS_DIR / "reference.md",
         DOCS_DIR / "skill" / "06_reference.md",
     ]:
-        ref_path.parent.mkdir(parents=True, exist_ok=True)
-        ref_path.write_text(ref_content)
+        _write(ref_path, ref_content, changed)
 
     # Sync skill into docs/skill/ so the site can publish it too.
-    # 06_reference.md is already written above (excluded from drift check).
     for md in SKILL_DIR.glob("*.md"):
         if md.name == "06_reference.md":
             continue

@@ -83,34 +83,27 @@ class OTelExporter:
     work.
     """
 
-    def __init__(self, *, endpoint: str | None = None, exporter: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: str | None = None,
+        exporter: Any | None = None,
+        batch: bool = True,
+    ) -> None:
         try:
-            from opentelemetry import trace
             from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 
             provider = TracerProvider()
+            _proc = BatchSpanProcessor if batch else SimpleSpanProcessor
             if exporter:
-                provider.add_span_processor(SimpleSpanProcessor(exporter))
+                provider.add_span_processor(_proc(exporter))
             elif endpoint:
                 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-                provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
-            # Keep a per-instance tracer rooted in *our* provider so
-            # multiple ``OTelExporter`` instances in one process (test
-            # suites, multi-tenant agents) don't fight over the global
-            # provider.  Cross-agent parenting still works through the
-            # OTel context (contextvars), which is provider-agnostic.
+                provider.add_span_processor(_proc(OTLPSpanExporter(endpoint=endpoint)))
             self._provider = provider
             self._tracer = provider.get_tracer("lazybridge")
-            # Best-effort install as the global provider so ad-hoc OTel
-            # users (their own ``trace.get_tracer(...)`` calls) see
-            # spans without an explicit handle to ours.  No-op if
-            # another component already set one.
-            try:
-                trace.set_tracer_provider(provider)
-            except Exception:
-                pass
         except ImportError:
             raise ImportError("Install opentelemetry-sdk: pip install lazybridge[otel]") from None
 
@@ -345,6 +338,14 @@ class OTelExporter:
                 keys = list(self._spans.get(run_id, {}).keys())
             for key in keys:
                 self._end_span(run_id, key, error="exporter closed")
+
+    def flush(self, timeout_millis: int = 30_000) -> None:
+        """Drain pending spans from the BatchSpanProcessor.
+
+        No-op when ``batch=False`` (SimpleSpanProcessor flushes synchronously).
+        Call before process exit to ensure all spans reach the collector.
+        """
+        self._provider.force_flush(timeout_millis=timeout_millis)
 
 
 # ---------------------------------------------------------------------------

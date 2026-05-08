@@ -733,21 +733,12 @@ class Session:
             try:
                 exp.export(event_dict)
             except Exception as exc:
-                # Warn once per exporter instance so a buggy exporter
-                # is visible in logs instead of silently eating events.
-                if not getattr(exp, "_lazybridge_export_warned", False):
-                    import warnings
+                import warnings
 
-                    warnings.warn(
-                        f"Exporter {exp.__class__.__name__} raised "
-                        f"{type(exc).__name__}: {exc}. Further failures "
-                        f"from this exporter will be suppressed.",
-                        stacklevel=2,
-                    )
-                    try:
-                        exp._lazybridge_export_warned = True  # type: ignore[attr-defined]
-                    except AttributeError:
-                        pass
+                warnings.warn(
+                    f"Exporter {exp.__class__.__name__} raised {type(exc).__name__}: {exc}.",
+                    stacklevel=2,
+                )
 
     def flush(self, timeout: float = 5.0) -> None:
         """Drain the EventLog's batched-writer queue.

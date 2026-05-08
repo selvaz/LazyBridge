@@ -134,6 +134,13 @@ class Memory:
         self._summarizer_warned = False
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
+        if tokens == 0 and (user or assistant):
+            # Estimate from word count when no real token count is supplied.
+            # This is intentionally rough — the goal is to fire compression at
+            # the right order of magnitude.  LLMEngine passes real counts;
+            # HIL and other callers get a free estimate without any changes
+            # at their call sites.
+            tokens = len((user + " " + assistant).split())
         # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
             self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))

@@ -363,6 +363,28 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
         schema.pop("title", None)
         return schema
 
+    # TypedDict subclass — expand to an object schema using its field annotations.
+    if typing.is_typeddict(annotation):
+        hints = typing.get_type_hints(annotation)
+        required = [k for k in getattr(annotation, "__required_keys__", hints.keys())]
+        return {
+            "type": "object",
+            "properties": {k: _annotation_to_schema(v) for k, v in hints.items()},
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    # NamedTuple subclass — expand to an object schema using its field annotations.
+    if isinstance(annotation, type) and issubclass(annotation, tuple) and hasattr(annotation, "_fields"):
+        hints = typing.get_type_hints(annotation) if hasattr(annotation, "__annotations__") else {}
+        fields: tuple[str, ...] = annotation._fields  # type: ignore[attr-defined]
+        return {
+            "type": "object",
+            "properties": {f: _annotation_to_schema(hints.get(f, typing.Any)) for f in fields},
+            "required": list(fields),
+            "additionalProperties": False,
+        }
+
     # inspect.Parameter.empty, typing.Any, unknown → permissive string
     # fallback.  An empty ``{}`` is rejected by strict-mode schemas on
     # OpenAI and Gemini: the parameter silently disappears from the

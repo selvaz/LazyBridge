@@ -16,7 +16,6 @@ import pytest
 from lazybridge import Agent, Session, tool
 from lazybridge.tools import Tool
 
-
 # ---------------------------------------------------------------------------
 # Minimal fake engine — satisfies Agent.__init__ without hitting a real LLM
 # ---------------------------------------------------------------------------
@@ -297,7 +296,6 @@ def test_tool_auto_does_not_use_llm_without_opt_in(monkeypatch):
     import lazybridge.tools as _tools
 
     llm_called = {"count": 0}
-    original = _tools._resolve_auto_tool
 
     def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
         # Simulate signature success but enrichment needed, no LLM opt-in.
@@ -321,7 +319,6 @@ def test_tool_auto_uses_llm_with_opt_in(monkeypatch):
     import lazybridge.tools as _tools
 
     received = {}
-    original = _tools._resolve_auto_tool
 
     def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
         received["allow_llm_schema"] = allow_llm_schema
@@ -344,8 +341,8 @@ def test_tool_auto_uses_llm_with_opt_in(monkeypatch):
 
 def test_schema_needs_enrichment_false_when_fully_described():
     """A typed, documented function should not need enrichment."""
-    from lazybridge.tools import _schema_needs_enrichment
     from lazybridge.core.types import ToolDefinition
+    from lazybridge.tools import _schema_needs_enrichment
 
     defn = ToolDefinition(
         name="search",
@@ -362,8 +359,8 @@ def test_schema_needs_enrichment_false_when_fully_described():
 
 
 def test_schema_needs_enrichment_true_when_param_lacks_description():
-    from lazybridge.tools import _schema_needs_enrichment
     from lazybridge.core.types import ToolDefinition
+    from lazybridge.tools import _schema_needs_enrichment
 
     defn = ToolDefinition(
         name="search",
@@ -379,8 +376,8 @@ def test_schema_needs_enrichment_true_when_param_lacks_description():
 
 
 def test_schema_needs_enrichment_true_when_no_tool_description():
-    from lazybridge.tools import _schema_needs_enrichment
     from lazybridge.core.types import ToolDefinition
+    from lazybridge.tools import _schema_needs_enrichment
 
     defn = ToolDefinition(
         name="search",

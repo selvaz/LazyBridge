@@ -324,11 +324,10 @@ class Agent:
         # Validate before building the tool map so errors surface early with
         # the agent's current name rather than a wrapped Tool name.
         for _raw in self._tools_raw:
-            if getattr(_raw, "_is_lazy_agent", False):
-                # Default True so duck-typed agents (MockAgent, custom subclasses)
-                # that predate _name_explicit are not rejected.  Only real Agent
-                # instances explicitly set this to False when no name= was given.
-                if getattr(_raw, "_name_explicit", True) is False:
+            # Default True so duck-typed agents (MockAgent, custom subclasses)
+            # that predate _name_explicit are not rejected.  Only real Agent
+            # instances explicitly set this to False when no name= was given.
+            if getattr(_raw, "_is_lazy_agent", False) and getattr(_raw, "_name_explicit", True) is False:
                     _raw_name = getattr(_raw, "name", repr(_raw))
                     raise ValueError(
                         f"Agent used as a tool must have an explicit name=...\n"
@@ -356,6 +355,16 @@ class Agent:
         self.verify = verify
         self.max_verify = max_verify
         self.fallback = fallback
+        if self.fallback is not None:
+            seen, fb = {id(self)}, self.fallback
+            while fb is not None:
+                if id(fb) in seen:
+                    raise ValueError(
+                        "fallback= chain contains a cycle. "
+                        "Check your Agent(fallback=...) configuration."
+                    )
+                seen.add(id(fb))
+                fb = getattr(fb, "fallback", None)
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
         #: True when the caller supplied an explicit ``name=`` (or an
@@ -677,6 +686,8 @@ class Agent:
             memory=self.memory,
             session=self.session,
         ).__aiter__()
+        chunks: list[str] = []
+        _completed = False
         try:
             while True:
                 try:
@@ -685,8 +696,10 @@ class Agent:
                     else:
                         chunk = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
                 except StopAsyncIteration:
+                    _completed = True
                     return
                 yield chunk
+                chunks.append(chunk)
         finally:
             aclose = getattr(gen, "aclose", None)
             if aclose is not None:
@@ -694,6 +707,12 @@ class Agent:
                     await aclose()
                 except Exception:
                     pass
+            if _completed:
+                _store = getattr(self, "store", None)
+                if _store is not None and self.name and chunks:
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, "".join(chunks))
 
     # ------------------------------------------------------------------
     # Sync API

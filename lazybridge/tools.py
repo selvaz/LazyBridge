@@ -209,7 +209,7 @@ def _resolve_auto_tool(
     schema_llm: Any | None,
     strict: bool,
     allow_llm_schema: bool,
-) -> "Tool":
+) -> Tool:
     """Build and return the best Tool for ``mode="auto"``.
 
     Decision tree (never calls LLM implicitly):
