@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import uuid
 import warnings
@@ -211,7 +212,8 @@ class LLMEngine:
         # asyncio.gather when the model emits more than one in a turn.
         if tool_choice == "parallel":
             warnings.warn(
-                "LLMEngine(tool_choice='parallel') is deprecated. "
+                "LLMEngine(tool_choice='parallel') is deprecated since "
+                "lazybridge 0.7.0 and will be removed in 1.0.  "
                 "Concurrent tool execution is now the default and cannot be "
                 "disabled; drop the argument (or use 'auto'/'any').",
                 DeprecationWarning,
@@ -325,6 +327,15 @@ class LLMEngine:
     #: raise ``ValueError`` instead.
     _PROVIDER_DEFAULT: str | None = "anthropic"
 
+    #: Serialises mutations to ``_PROVIDER_ALIASES`` / ``_PROVIDER_RULES``.
+    #: Both registration helpers do read-then-write on a class attribute;
+    #: without this lock two threads racing on
+    #: ``register_provider_alias`` / ``register_provider_rule`` can each
+    #: rebuild the new value from the same starting state and the second
+    #: assignment silently drops the first registration.  The lock is held
+    #: only across the rebuild + swap (microseconds); reads are unlocked.
+    _PROVIDER_REGISTRY_LOCK: threading.Lock = threading.Lock()
+
     @classmethod
     def set_default_provider(cls, provider: str | None) -> None:
         """Set (or disable) the fallback provider used when no rule matches.
@@ -355,8 +366,13 @@ class LLMEngine:
 
             LLMEngine.register_provider_alias("mistral", "mistral")
             Agent("mistral")   # resolves to the mistral provider
+
+        Thread-safe: serialised via ``_PROVIDER_REGISTRY_LOCK`` so two
+        threads racing here can't lose a registration to a read-then-write
+        clobber on the class attribute.
         """
-        cls._PROVIDER_ALIASES = {**cls._PROVIDER_ALIASES, alias.lower(): provider}
+        with cls._PROVIDER_REGISTRY_LOCK:
+            cls._PROVIDER_ALIASES = {**cls._PROVIDER_ALIASES, alias.lower(): provider}
 
     @classmethod
     def register_provider_rule(
@@ -373,8 +389,13 @@ class LLMEngine:
 
             LLMEngine.register_provider_rule("claude-opus-5", "anthropic")
             Agent("claude-opus-5-20260701")   # routed to anthropic
+
+        Thread-safe: serialised via ``_PROVIDER_REGISTRY_LOCK`` so two
+        threads racing here can't lose a rule to a read-then-write
+        clobber on the class attribute.
         """
-        cls._PROVIDER_RULES = [(kind, pattern.lower(), provider), *cls._PROVIDER_RULES]
+        with cls._PROVIDER_REGISTRY_LOCK:
+            cls._PROVIDER_RULES = [(kind, pattern.lower(), provider), *cls._PROVIDER_RULES]
 
     @classmethod
     def _infer_provider(cls, model: str) -> str:

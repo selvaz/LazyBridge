@@ -232,12 +232,12 @@ class Agent:
         # Compute _name_explicit BEFORE _resolve_runtime_kwargs so we preserve
         # the distinction between "user chose a name" and "name fell from model
         # default".  After resolution the two are indistinguishable.
-        _flat_name_given = (
-            name is not _UNSET and name is not None and str(name).strip() != ""
-        )
+        _flat_name_given = name is not _UNSET and name is not None and str(name).strip() != ""
         _obs_name_given = False
-        _obs_src = observability if observability is not None else (
-            getattr(runtime, "observability", None) if runtime is not None else None
+        _obs_src = (
+            observability
+            if observability is not None
+            else (getattr(runtime, "observability", None) if runtime is not None else None)
         )
         if _obs_src is not None:
             _obs_name_val = getattr(_obs_src, "name", None)
@@ -324,22 +324,21 @@ class Agent:
         # Validate before building the tool map so errors surface early with
         # the agent's current name rather than a wrapped Tool name.
         for _raw in self._tools_raw:
-            if getattr(_raw, "_is_lazy_agent", False):
-                # Default True so duck-typed agents (MockAgent, custom subclasses)
-                # that predate _name_explicit are not rejected.  Only real Agent
-                # instances explicitly set this to False when no name= was given.
-                if getattr(_raw, "_name_explicit", True) is False:
-                    _raw_name = getattr(_raw, "name", repr(_raw))
-                    raise ValueError(
-                        f"Agent used as a tool must have an explicit name=...\n"
-                        f"The agent currently has name={_raw_name!r} "
-                        f"(derived from the model or left as the default).\n\n"
-                        f"Set an explicit name:\n"
-                        f"    Agent(name=\"research\", engine=LLMEngine(...))\n\n"
-                        f"Or use an alias:\n"
-                        f"    agent.as_tool(\"research\")\n"
-                        f"    tool(agent, name=\"research\")"
-                    )
+            # Default True so duck-typed agents (MockAgent, custom subclasses)
+            # that predate _name_explicit are not rejected.  Only real Agent
+            # instances explicitly set this to False when no name= was given.
+            if getattr(_raw, "_is_lazy_agent", False) and getattr(_raw, "_name_explicit", True) is False:
+                _raw_name = getattr(_raw, "name", repr(_raw))
+                raise ValueError(
+                    f"Agent used as a tool must have an explicit name=...\n"
+                    f"The agent currently has name={_raw_name!r} "
+                    f"(derived from the model or left as the default).\n\n"
+                    f"Set an explicit name:\n"
+                    f'    Agent(name="research", engine=LLMEngine(...))\n\n'
+                    f"Or use an alias:\n"
+                    f'    agent.as_tool("research")\n'
+                    f'    tool(agent, name="research")'
+                )
         self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)
         self.output = output
         self.output_validator = output_validator
@@ -356,6 +355,13 @@ class Agent:
         self.verify = verify
         self.max_verify = max_verify
         self.fallback = fallback
+        if self.fallback is not None:
+            seen, fb = {id(self)}, self.fallback
+            while fb is not None:
+                if id(fb) in seen:
+                    raise ValueError("fallback= chain contains a cycle. Check your Agent(fallback=...) configuration.")
+                seen.add(id(fb))
+                fb = getattr(fb, "fallback", None)
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
         #: True when the caller supplied an explicit ``name=`` (or an
@@ -400,18 +406,14 @@ class Agent:
                     # the agent node and the parent → child edge.
                     agent_raw.session = self.session
                     _safe_register_agent(self.session, agent_raw)
-                    _safe_register_tool_edge(
-                        self.session, self, agent_raw, label=agent_raw.name
-                    )
+                    _safe_register_tool_edge(self.session, self, agent_raw, label=agent_raw.name)
                 elif child_session is self.session:
                     # Child already shares the same session (canonical pattern:
                     # all agents built with session= up front).  Register the
                     # edge — it was missing because the old guard checked for
                     # ``session is None`` only.
                     _safe_register_agent(self.session, agent_raw)
-                    _safe_register_tool_edge(
-                        self.session, self, agent_raw, label=agent_raw.name
-                    )
+                    _safe_register_tool_edge(self.session, self, agent_raw, label=agent_raw.name)
                 # else: child belongs to a different session — don't steal it.
             # ``fallback=`` and ``verify=`` Agents inherit the same
             # session + graph-registration the tools list gets, so any
@@ -677,6 +679,8 @@ class Agent:
             memory=self.memory,
             session=self.session,
         ).__aiter__()
+        chunks: list[str] = []
+        _completed = False
         try:
             while True:
                 try:
@@ -685,15 +689,36 @@ class Agent:
                     else:
                         chunk = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
                 except StopAsyncIteration:
+                    _completed = True
                     return
                 yield chunk
+                chunks.append(chunk)
         finally:
             aclose = getattr(gen, "aclose", None)
             if aclose is not None:
                 try:
                     await aclose()
-                except Exception:
-                    pass
+                except asyncio.CancelledError:
+                    # Cancellation is BaseException; let it propagate so
+                    # structured cancellation works through the boundary.
+                    raise
+                except Exception as exc:
+                    # Surface non-cancellation errors as a UserWarning so
+                    # buggy provider cleanup paths don't disappear; we
+                    # still don't re-raise (the consumer has either
+                    # finished or already abandoned the stream).
+                    import warnings as _w
+
+                    _w.warn(
+                        f"stream() aclose raised {type(exc).__name__}: {exc}.",
+                        stacklevel=2,
+                    )
+            if _completed:
+                _store = getattr(self, "store", None)
+                if _store is not None and self.name and chunks:
+                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, "".join(chunks))
 
     # ------------------------------------------------------------------
     # Sync API

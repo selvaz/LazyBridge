@@ -81,7 +81,22 @@ data: last known output persisted in a shared Store.
 ``from_memory`` reads the agent's live conversation history.
 """
 
-__version__ = "0.7.0"
+# Single-source the version from the installed distribution metadata so
+# ``__version__`` and ``importlib.metadata.version("lazybridge")`` can
+# never disagree.  Falls back to a literal only when the package isn't
+# installed (running from a source tree without ``pip install -e .``).
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _dist_version
+
+    try:
+        __version__ = _dist_version("lazybridge")
+    except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
+        __version__ = "0.7.0"
+    del _dist_version, PackageNotFoundError
+except ImportError:  # pragma: no cover — Python < 3.8, not supported
+    __version__ = "0.7.0"
+
 __stability__ = "alpha"
 
 # Public API.  Symbols a user constructs, passes as a kwarg, or catches as

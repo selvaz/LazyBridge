@@ -530,7 +530,8 @@ def build(check: bool = False) -> int:
     for tier, fname in tier_file_map.items():
         _write(SKILL_DIR / fname, render_skill_tier(tier, tiers.get(tier, []), titles, intros.get(tier, "")), changed)
     _write(SKILL_DIR / "05_decision_trees.md", render_skill_decisions(decisions), changed)
-    # 06_reference.md is written unconditionally below (excluded from drift check)
+    # 06_reference.md is written below; like every other generated file it
+    # routes through _write() so --check catches drift in the reference docs.
 
     # Site render — guides + decisions + skill mirror.
     # docs/tiers/ was folded into docs/guides/getting-started.md in 0.7;
@@ -555,20 +556,18 @@ def build(check: bool = False) -> int:
         _write(DOCS_DIR / "decisions" / f"{slug}.md", render_site_decision(name, frag), changed)
     _write(DOCS_DIR / "decisions" / "index.md", render_site_decisions_index(decisions), changed)
 
-    # Reference is generated via inspect.signature() — output is Python-version-
-    # dependent (3.11 vs 3.12 differ).  Always write fresh; never report as drift
-    # so --check doesn't fail just because CI uses a different Python than local.
+    # Reference is generated via inspect.signature().  The _UNSET sentinel regex at
+    # line ~486 normalises memory-address reprs so output is deterministic across
+    # Python versions and OS.  Route through _write() so --check catches stale files.
     ref_content = render_reference()
     for ref_path in [
         SKILL_DIR / "06_reference.md",
         DOCS_DIR / "reference.md",
         DOCS_DIR / "skill" / "06_reference.md",
     ]:
-        ref_path.parent.mkdir(parents=True, exist_ok=True)
-        ref_path.write_text(ref_content)
+        _write(ref_path, ref_content, changed)
 
     # Sync skill into docs/skill/ so the site can publish it too.
-    # 06_reference.md is already written above (excluded from drift check).
     for md in SKILL_DIR.glob("*.md"):
         if md.name == "06_reference.md":
             continue

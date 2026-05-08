@@ -274,9 +274,9 @@ def test_session_emit_warns_on_exporter_exception():
     assert any("_BadExporter" in m and "ValueError" in m for m in msgs), msgs
 
 
-def test_session_emit_suppresses_repeated_exporter_warnings():
-    """First failure warns; subsequent failures from the same exporter
-    are suppressed to avoid log spam.
+def test_session_emit_warns_on_every_exporter_failure():
+    """Every failure from a broken exporter must produce a warning —
+    no suppression so a flapping collector stays visible in logs.
     """
 
     class _BadExporter:
@@ -291,7 +291,7 @@ def test_session_emit_suppresses_repeated_exporter_warnings():
         sess.emit(EventType.AGENT_FINISH, {"agent_name": "x"})
 
     bad_msgs = [m for m in (str(x.message) for x in w) if "_BadExporter" in m]
-    assert len(bad_msgs) == 1
+    assert len(bad_msgs) == 2
 
 
 # ---------------------------------------------------------------------------

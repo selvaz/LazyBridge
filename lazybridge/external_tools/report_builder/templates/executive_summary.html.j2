@@ -51,8 +51,8 @@
     <header class="report-header">
       <h1>{{ title|e }}</h1>
       <div class="report-meta">
-        <span class="meta-chip">{{ meta.generated_at }}</span>
-        <span class="meta-chip">{{ meta.theme }}</span>
+        <span class="meta-chip">{{ meta.generated_at|e }}</span>
+        <span class="meta-chip">{{ meta.theme|e }}</span>
         {% if meta.charts_embedded > 0 %}
         <span class="meta-chip">{{ meta.charts_embedded }} chart{{ 's' if meta.charts_embedded != 1 else '' }}</span>
         {% endif %}
@@ -62,8 +62,8 @@
 {{ body_html }}
     </article>
     <footer class="report-footer">
-      <span>Generated {{ meta.generated_at }}</span>
-      <span>{{ meta.template }} · {{ meta.theme }}</span>
+      <span>Generated {{ meta.generated_at|e }}</span>
+      <span>{{ meta.template|e }} · {{ meta.theme|e }}</span>
     </footer>
   </main>
 </body>

@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from lazybridge.external_tools.report_builder.quarto.qmd import _yaml_escape
+
 # Bootswatch themes bundled with Quarto.  We default to ``cosmo`` which
 # is clean, conservative, and renders well in both light + print.
 _VALID_HTML_THEMES = {
@@ -96,10 +98,14 @@ def build_quarto_yml(
         # Project-level metadata is inherited by every format unless the
         # .qmd file overrides it.  We still set title in the .qmd front-
         # matter for clarity, but author belongs at the project level.
+        # Escape both fields so a stray ``"``, ``\``, or newline in
+        # LLM-supplied metadata can't break the YAML scalar and inject
+        # new top-level keys (Quarto would happily run a smuggled
+        # ``pre-render`` / ``post-render`` hook as a shell command).
         if title:
-            parts.append(f'title: "{title}"')
+            parts.append(f'title: "{_yaml_escape(title)}"')
         if author:
-            parts.append(f'author: "{author}"')
+            parts.append(f'author: "{_yaml_escape(author)}"')
         parts.append("")
 
     parts.append("format:")

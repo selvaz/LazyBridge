@@ -328,8 +328,12 @@ class _WebUI(_UIProtocol):
         timeout = self._timeout or 3600.0
         loop = asyncio.get_running_loop()
         try:
+            # Same timeout on both sides: ``wait_for`` cancels the asyncio
+            # future on deadline and the executor's blocking ``get`` returns
+            # at the same moment instead of leaking the worker thread for
+            # an extra second after ``server.shutdown()`` runs.
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: response_q.get(timeout=timeout + 1)),
+                loop.run_in_executor(None, lambda: response_q.get(timeout=timeout)),
                 timeout=timeout,
             )
         except TimeoutError as exc:

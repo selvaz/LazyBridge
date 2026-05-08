@@ -164,6 +164,10 @@ Inject the live memory of the agent registered as ``name`` at execution time.
 
 Read the last output of the agent registered as ``name`` from the shared store.
 
+### `tool(obj: 'Any', *, name: 'str | None' = None, description: 'str | None' = None, mode: "Literal['auto', 'signature', 'hybrid', 'llm']" = 'auto', schema_llm: 'Any | None' = None, strict: 'bool' = _UNSET, allow_llm_schema: 'bool' = False) -> 'Tool'`
+
+Public factory — the canonical way to create a :class:`Tool`.
+
 ### `ToolProvider(*args, **kwargs)`
 
 A ``tools=[...]`` entry that expands itself into one or more Tools.

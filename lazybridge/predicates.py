@@ -46,13 +46,19 @@ class _When:
     """
 
     @staticmethod
-    def field(name: str) -> _FieldBuilder:
+    def field(name: str, *, strict: bool = False) -> _FieldBuilder:
         """Inspect ``env.payload.<name>`` (typed when ``output=`` is set).
 
         The returned builder exposes verbs (``equals``, ``empty``,
         ``in_``, …) that each finalise the chain into a predicate.
+
+        When ``strict=True``, a missing attribute on the payload raises
+        ``AttributeError`` at predicate-call time instead of being
+        silently treated as ``None``.  Use this to catch typos in
+        field names that would otherwise mask routing bugs (e.g.,
+        ``when.field("itmes")`` for a real attribute ``items``).
         """
-        return _FieldBuilder(name)
+        return _FieldBuilder(name, strict=strict)
 
     @staticmethod
     def payload(predicate: Callable[[Any], bool]) -> Callable[[Envelope], bool]:
@@ -101,6 +107,7 @@ class _FieldBuilder:
     """Intermediate object — call one of the verbs below to finalise."""
 
     name: str
+    strict: bool = False
 
     # ----- equality / identity -----
 
@@ -108,7 +115,7 @@ class _FieldBuilder:
         """``env.payload.<name> == value``."""
 
         def _predicate(env: Envelope) -> bool:
-            return _safe_get(env, self.name) == value
+            return _safe_get(env, self.name, strict=self.strict) == value
 
         return _predicate
 
@@ -116,7 +123,7 @@ class _FieldBuilder:
         """``env.payload.<name> != value``."""
 
         def _predicate(env: Envelope) -> bool:
-            return _safe_get(env, self.name) != value
+            return _safe_get(env, self.name, strict=self.strict) != value
 
         return _predicate
 
@@ -128,7 +135,7 @@ class _FieldBuilder:
         """
 
         def _predicate(env: Envelope) -> bool:
-            return _safe_get(env, self.name) is value
+            return _safe_get(env, self.name, strict=self.strict) is value
 
         return _predicate
 
@@ -142,7 +149,7 @@ class _FieldBuilder:
         """
 
         def _predicate(env: Envelope) -> bool:
-            val = _safe_get(env, self.name)
+            val = _safe_get(env, self.name, strict=self.strict)
             if val is None:
                 return True
             if isinstance(val, (str, list, dict, tuple, set, frozenset)):
@@ -159,7 +166,7 @@ class _FieldBuilder:
         """
 
         def _predicate(env: Envelope) -> bool:
-            val = _safe_get(env, self.name)
+            val = _safe_get(env, self.name, strict=self.strict)
             if val is None:
                 return False
             if isinstance(val, (str, list, dict, tuple, set, frozenset)):
@@ -183,7 +190,7 @@ class _FieldBuilder:
             haystack = tuple(values)
 
         def _predicate(env: Envelope) -> bool:
-            return _safe_get(env, self.name) in haystack
+            return _safe_get(env, self.name, strict=self.strict) in haystack
 
         return _predicate
 
@@ -202,7 +209,7 @@ class _FieldBuilder:
         """``env.payload.<name> > threshold``."""
 
         def _predicate(env: Envelope) -> bool:
-            value = _safe_get(env, self.name)
+            value = _safe_get(env, self.name, strict=self.strict)
             return value is not None and value > threshold
 
         return _predicate
@@ -211,7 +218,7 @@ class _FieldBuilder:
         """``env.payload.<name> < threshold``."""
 
         def _predicate(env: Envelope) -> bool:
-            value = _safe_get(env, self.name)
+            value = _safe_get(env, self.name, strict=self.strict)
             return value is not None and value < threshold
 
         return _predicate
@@ -226,7 +233,7 @@ class _FieldBuilder:
         compiled = re.compile(pattern)
 
         def _predicate(env: Envelope) -> bool:
-            value = _safe_get(env, self.name)
+            value = _safe_get(env, self.name, strict=self.strict)
             return isinstance(value, str) and compiled.search(value) is not None
 
         return _predicate
@@ -237,21 +244,35 @@ class _FieldBuilder:
 # ---------------------------------------------------------------------------
 
 
-def _safe_get(env: Envelope, name: str) -> Any:
+def _safe_get(env: Envelope, name: str, *, strict: bool = False) -> Any:
     """Return ``env.payload.<name>`` or ``None`` if the path is missing.
 
     Falling back to ``None`` rather than raising lets predicates fire
     cleanly even when the payload is a string (no attribute) or a
     dict (no attribute access) — the DSL stays predictable across
     payload shapes.
+
+    When ``strict=True``, a missing attribute / key raises
+    ``AttributeError`` so typos in field names surface loudly instead
+    of silently routing the wrong way.
     """
     payload = env.payload
     if payload is None:
+        if strict:
+            raise AttributeError(f"when.field({name!r}, strict=True): payload is None")
+        return None
+    if isinstance(payload, dict):
+        if name in payload:
+            return payload[name]
+        if strict:
+            raise AttributeError(f"when.field({name!r}, strict=True): missing key on dict payload")
         return None
     if hasattr(payload, name):
         return getattr(payload, name)
-    if isinstance(payload, dict):
-        return payload.get(name)
+    if strict:
+        raise AttributeError(
+            f"when.field({name!r}, strict=True): no attribute on payload of type {type(payload).__name__}"
+        )
     return None
 
 

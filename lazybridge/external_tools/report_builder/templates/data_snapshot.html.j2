@@ -81,7 +81,7 @@
   <main class="report-shell">
     <div class="snapshot-header">
       <h1>{{ title|e }}</h1>
-      <span class="snapshot-date">{{ meta.generated_at }}</span>
+      <span class="snapshot-date">{{ meta.generated_at|e }}</span>
     </div>
     <article class="markdown-body">
 {{ body_html }}

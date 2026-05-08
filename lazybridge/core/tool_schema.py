@@ -340,6 +340,29 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     if annotation in _PY_TO_JSON:
         return {"type": _PY_TO_JSON[annotation]}
 
+    # Stdlib types that don't map to a JSON primitive but have an
+    # obvious string/number representation.  Without these branches the
+    # final fallback (``{"type": "string"}``) silently degrades them
+    # and the dispatcher gets a string instead of a ``Decimal`` /
+    # ``datetime`` / ``Path``, which surfaces as a ``TypeError`` deep
+    # inside the user's tool function.
+    import datetime as _datetime
+    import decimal as _decimal
+    import pathlib as _pathlib
+
+    if annotation is bytes or annotation is bytearray:
+        return {"type": "string", "format": "byte"}
+    if annotation is _datetime.datetime:
+        return {"type": "string", "format": "date-time"}
+    if annotation is _datetime.date:
+        return {"type": "string", "format": "date"}
+    if annotation is _datetime.time:
+        return {"type": "string", "format": "time"}
+    if annotation is _decimal.Decimal:
+        return {"type": "number"}
+    if isinstance(annotation, type) and issubclass(annotation, _pathlib.PurePath):
+        return {"type": "string"}
+
     # Enum subclass -> {"type": "string"/"integer", "enum": [...]}
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
         enum_vals = [e.value for e in annotation]
@@ -362,6 +385,28 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
         schema = annotation.model_json_schema(mode="validation")
         schema.pop("title", None)
         return schema
+
+    # TypedDict subclass — expand to an object schema using its field annotations.
+    if typing.is_typeddict(annotation):
+        hints = typing.get_type_hints(annotation)
+        required = [k for k in getattr(annotation, "__required_keys__", hints.keys())]
+        return {
+            "type": "object",
+            "properties": {k: _annotation_to_schema(v) for k, v in hints.items()},
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    # NamedTuple subclass — expand to an object schema using its field annotations.
+    if isinstance(annotation, type) and issubclass(annotation, tuple) and hasattr(annotation, "_fields"):
+        hints = typing.get_type_hints(annotation) if hasattr(annotation, "__annotations__") else {}
+        fields: tuple[str, ...] = annotation._fields  # type: ignore[attr-defined]
+        return {
+            "type": "object",
+            "properties": {f: _annotation_to_schema(hints.get(f, typing.Any)) for f in fields},
+            "required": list(fields),
+            "additionalProperties": False,
+        }
 
     # inspect.Parameter.empty, typing.Any, unknown → permissive string
     # fallback.  An empty ``{}`` is rejected by strict-mode schemas on
@@ -1028,6 +1073,20 @@ class ToolSchemaBuilder:
             json_schema["required"] = required
         if strict:
             json_schema["additionalProperties"] = False
+            # Some strict-mode validators (OpenAI, certain Gemini endpoints)
+            # require ``required`` to be present even when empty.  Emit an
+            # explicit empty list rather than omitting the key.
+            #
+            # Dialect note: this shape (properties + sparse ``required``)
+            # is accepted by Gemini's strict mode and Anthropic tool use,
+            # but OpenAI's strict structured-output validator additionally
+            # demands that *every* property appear in ``required``.  If
+            # you target OpenAI strict tool calling, mark all parameters
+            # as required (no defaults) at the function signature, or
+            # use ``Optional[T]`` and let the LLM emit ``null``.  See
+            # https://platform.openai.com/docs/guides/structured-outputs
+            # for the full rule set.
+            json_schema.setdefault("required", [])
 
         return ToolDefinition(
             name=name,
@@ -1114,6 +1173,7 @@ class ToolSchemaBuilder:
             json_schema["required"] = required
         if strict:
             json_schema["additionalProperties"] = False
+            json_schema.setdefault("required", [])
 
         return (
             ToolDefinition(

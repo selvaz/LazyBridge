@@ -83,34 +83,27 @@ class OTelExporter:
     work.
     """
 
-    def __init__(self, *, endpoint: str | None = None, exporter: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: str | None = None,
+        exporter: Any | None = None,
+        batch: bool = True,
+    ) -> None:
         try:
-            from opentelemetry import trace
             from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 
             provider = TracerProvider()
+            _proc = BatchSpanProcessor if batch else SimpleSpanProcessor
             if exporter:
-                provider.add_span_processor(SimpleSpanProcessor(exporter))
+                provider.add_span_processor(_proc(exporter))
             elif endpoint:
                 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-                provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
-            # Keep a per-instance tracer rooted in *our* provider so
-            # multiple ``OTelExporter`` instances in one process (test
-            # suites, multi-tenant agents) don't fight over the global
-            # provider.  Cross-agent parenting still works through the
-            # OTel context (contextvars), which is provider-agnostic.
+                provider.add_span_processor(_proc(OTLPSpanExporter(endpoint=endpoint)))
             self._provider = provider
             self._tracer = provider.get_tracer("lazybridge")
-            # Best-effort install as the global provider so ad-hoc OTel
-            # users (their own ``trace.get_tracer(...)`` calls) see
-            # spans without an explicit handle to ours.  No-op if
-            # another component already set one.
-            try:
-                trace.set_tracer_provider(provider)
-            except Exception:
-                pass
         except ImportError:
             raise ImportError("Install opentelemetry-sdk: pip install lazybridge[otel]") from None
 
@@ -226,8 +219,16 @@ class OTelExporter:
         # available before closing it.  Other open children (model
         # mid-stream, tool that crashed without TOOL_ERROR) are closed
         # too so we don't leak open spans on a cancelled run.
+        #
+        # Snapshot ALL keys (agent + orphans) under a single lock so a
+        # concurrent ``_on_tool_call`` / ``_on_model_request`` for the
+        # same run_id can't slip a new entry between our two reads and
+        # cause a double-close (the new entry would also be picked up
+        # the second time the lock is taken).
         with self._lock:
-            agent_entry = self._spans.get(run_id, {}).get("agent")
+            run_spans = dict(self._spans.get(run_id, {}))
+        agent_entry = run_spans.get("agent")
+        orphan_keys = [k for k in run_spans if k != "agent"]
         if agent_entry is not None:
             if "payload" in event:
                 self._set_attr(agent_entry.span, "gen_ai.completion", _truncate(event["payload"]))
@@ -236,10 +237,8 @@ class OTelExporter:
             if event.get("cancelled"):
                 self._set_attr(agent_entry.span, "lazybridge.cancelled", True)
 
-        # Close any orphan children before the agent span itself.
-        with self._lock:
-            keys = [k for k in self._spans.get(run_id, {}) if k != "agent"]
-        for k in keys:
+        # Close orphan children first, then the agent span.
+        for k in orphan_keys:
             self._end_span(run_id, k, error="orphan: agent ended before child")
 
         err = event.get("error")
@@ -326,8 +325,18 @@ class OTelExporter:
 
     @staticmethod
     def _set_attr(span: Any, key: str, value: Any) -> None:
+        # Bound the attribute size before handing to the SDK.  OTel
+        # builds vary in how they enforce per-attribute limits (some
+        # silently truncate, some reject the entire span); applying a
+        # cap here gives a single, predictable shape regardless of
+        # collector / SDK build.  Numeric / bool / list-of-primitive
+        # values pass through unchanged — the SDK accepts them
+        # natively and they cannot blow the wire payload.
         try:
-            span.set_attribute(key, _stringify(value))
+            stringified = _stringify(value)
+            if isinstance(stringified, str) and len(stringified) > 1024:
+                stringified = stringified[:1021] + "..."
+            span.set_attribute(key, stringified)
         except Exception:
             pass
 
@@ -345,6 +354,14 @@ class OTelExporter:
                 keys = list(self._spans.get(run_id, {}).keys())
             for key in keys:
                 self._end_span(run_id, key, error="exporter closed")
+
+    def flush(self, timeout_millis: int = 30_000) -> None:
+        """Drain pending spans from the BatchSpanProcessor.
+
+        No-op when ``batch=False`` (SimpleSpanProcessor flushes synchronously).
+        Call before process exit to ensure all spans reach the collector.
+        """
+        self._provider.force_flush(timeout_millis=timeout_millis)
 
 
 # ---------------------------------------------------------------------------

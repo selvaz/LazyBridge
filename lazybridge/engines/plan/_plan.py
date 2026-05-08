@@ -104,6 +104,20 @@ class Plan:
         upstream steps.  Only ``writes``-bucket values and step history
         survive across process boundaries; live in-memory state does not.
 
+        Crash-window durability
+        -----------------------
+        Each step writes its checkpoint *before* the durable
+        ``store.write(step.writes, value)`` call.  This eliminates
+        double-writes on resume — the checkpoint already records
+        ``next_step`` as the following step, so a resumed run does not
+        re-execute the completed step.  The trade-off is that a crash in
+        the gap between the checkpoint and the Store write makes the
+        durable Store write *lost*; the value still lives in the
+        checkpoint's serialised ``kv`` and is read back into in-memory
+        state on resume, so the Plan continues correctly, but **sidecar
+        consumers reading the Store directly should reconcile against
+        the checkpoint snapshot rather than assume Store completeness**.
+
         Concurrency
         -----------
         Every checkpoint write goes through
@@ -473,7 +487,65 @@ class Plan:
         store: Store | None = None,
         plan_state: PlanState | None = None,
     ) -> Envelope:
+        # ``Agent.__init__`` stamps the wrapping agent's name on the engine
+        # via ``engine._agent_name = self.name``.  Plan emits AGENT_START
+        # and AGENT_FINISH like every other engine so replay mode (which
+        # rebuilds the graph from events alone) can see the parent node.
         run_id = str(uuid.uuid4())
+        agent_name = getattr(self, "_agent_name", "plan")
+        if session:
+            session.emit(
+                EventType.AGENT_START,
+                {"agent_name": agent_name, "task": env.task},
+                run_id=run_id,
+            )
+
+        result_env: Envelope | None = None
+        error_msg: str | None = None
+        try:
+            result_env = await self._run_impl(
+                env,
+                tools=tools,
+                output_type=output_type,
+                memory=memory,
+                session=session,
+                store=store,
+                plan_state=plan_state,
+                run_id=run_id,
+                agent_name=agent_name,
+            )
+            return result_env
+        except BaseException as exc:  # propagate after emitting AGENT_FINISH
+            error_msg = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            if session:
+                payload: dict[str, Any] = {"agent_name": agent_name}
+                if error_msg is not None:
+                    payload["error"] = error_msg
+                elif result_env is not None and result_env.error is not None:
+                    payload["error"] = result_env.error.message
+                elif result_env is not None:
+                    payload["payload"] = (result_env.text() or "")[:500]
+                session.emit(EventType.AGENT_FINISH, payload, run_id=run_id)
+
+    async def _run_impl(
+        self,
+        env: Envelope,
+        *,
+        tools: list[Tool],
+        output_type: type,
+        memory: Memory | None,
+        session: Session | None,
+        store: Store | None = None,
+        plan_state: PlanState | None = None,
+        run_id: str,
+        agent_name: str,
+    ) -> Envelope:
+        # ``run_id`` and ``agent_name`` are threaded in from ``run()`` so
+        # AGENT_START/FINISH and TOOL_CALL/RESULT all share the same
+        # correlation id — matches how LLMEngine and HumanEngine attach
+        # their child events to the agent span.
         run_uid = uuid.uuid4().hex  # checkpoint ownership stamp (CAS guard)
         tool_map = {t.name: t for t in tools}
         step_map = self._step_map()
@@ -579,6 +651,7 @@ class Plan:
                             session=session,
                             run_id=run_id,
                             branch_id=s.name,
+                            agent_name=agent_name,
                         )
                         for s in group
                     ],
@@ -616,7 +689,19 @@ class Plan:
                     )
                     return self._aggregate_nested_metadata(first_failure_env, history)
 
-                # All branches succeeded — apply writes in declared order.
+                # All branches succeeded — collect results, update in-memory kv,
+                # checkpoint FIRST, then flush to the durable store.  This ordering
+                # ensures that a crash between the checkpoint and the store.write()
+                # does NOT replay the step on resume (the checkpoint already records
+                # next_step as the step after this band), so no double-write occurs.
+                #
+                # Trade-off: the inverse failure mode is a *lost durable write* —
+                # if we crash between checkpoint and store.write, the resumed run
+                # advances past the band and never retries the durable write.
+                # The values still live in the checkpoint's serialised ``kv``, so
+                # Plan replay reads them correctly via ``_load_checkpoint``; only
+                # sidecar consumers reading the Store directly would observe the
+                # gap.  See ``Plan.run`` doc above for the full contract.
                 last_ok: Envelope | None = None
                 for s, r in zip(group, raw):
                     step_name = s.name or ""
@@ -624,9 +709,7 @@ class Plan:
                     # BaseException / r.error; remaining ``r`` are Envelopes.
                     assert isinstance(r, Envelope)
                     if s.writes and r.payload is not None:
-                        kv[s.writes] = r.payload
-                        if effective_store:
-                            effective_store.write(s.writes, r.payload)
+                        kv[s.writes] = r.payload  # in-memory; goes into checkpoint below
                     history.append(StepResult(step_name=step_name, envelope=r))
                     completed.append(step_name)
                     last_ok = r
@@ -647,6 +730,12 @@ class Plan:
                     run_uid=run_uid,
                     history=history,
                 )
+                # Durable store writes AFTER checkpoint — crash here is safe because
+                # the checkpoint already points to the next step.
+                if effective_store:
+                    for s, r in zip(group, raw):
+                        if s.writes and r.payload is not None:
+                            effective_store.write(s.writes, r.payload)
                 continue
 
             # ──────────────────────────────────────────────────────────────
@@ -661,6 +750,7 @@ class Plan:
                 tool_map=tool_map,
                 session=session,
                 run_id=run_id,
+                agent_name=agent_name,
             )
 
             # If the step errored, persist a "failed" checkpoint that
@@ -678,11 +768,9 @@ class Plan:
                 )
                 return self._aggregate_nested_metadata(result_env, history)
 
-            # Persist writes
+            # Persist writes — in-memory only here so kv goes into the checkpoint below.
             if step.writes and result_env.payload is not None:
                 kv[step.writes] = result_env.payload
-                if effective_store:
-                    effective_store.write(step.writes, result_env.payload)
 
             history.append(StepResult(step_name=step.name or "", envelope=result_env))
             completed.append(step.name or "")
@@ -691,7 +779,13 @@ class Plan:
             # Determine next step via routes / routes_by or linear progression.
             current_name = self._routing(result_env, step, step_map, branch_return)
 
-            # Save checkpoint after each step so a crash mid-plan can resume
+            # Save checkpoint first; durable store write comes after so a crash
+            # between the two is safe — resume sees the checkpoint and skips the
+            # step rather than re-running it (no double-write).  Inverse trade:
+            # a crash in the gap means the durable Store write is *lost*; the
+            # value still survives in the checkpoint's ``kv`` for Plan replay,
+            # so any sidecar that reads the Store directly should reconcile
+            # against the checkpoint snapshot, not assume Store completeness.
             last_snap = self._save_checkpoint(
                 effective_key=effective_key,
                 last_snapshot=last_snap,
@@ -702,6 +796,8 @@ class Plan:
                 run_uid=run_uid,
                 history=history,
             )
+            if step.writes and result_env.payload is not None and effective_store:
+                effective_store.write(step.writes, result_env.payload)
 
         # If we exited the loop because the iteration cap was hit (rather
         # than because the plan ran to completion with ``current_name``
@@ -742,6 +838,7 @@ class Plan:
         session: Session | None,
         run_id: str,
         branch_id: str | None = None,
+        agent_name: str | None = None,
     ) -> Envelope:
         """Resolve sentinels, build the step env, and execute the step.
 
@@ -807,6 +904,7 @@ class Plan:
             session=session,
             run_id=run_id,
             branch_id=branch_id,
+            agent_name=agent_name,
         )
         return Envelope(
             task=step_env.task,
@@ -998,11 +1096,16 @@ class Plan:
         session: Session | None,
         run_id: str,
         branch_id: str | None = None,
+        agent_name: str | None = None,
     ) -> Envelope:
         if session:
             payload: dict[str, Any] = {"step": step.name, "task": env.task}
             if branch_id is not None:
                 payload["branch_id"] = branch_id
+            if agent_name is not None:
+                # Tag every TOOL_CALL with the wrapping agent so replay
+                # can rebuild the parent → step edge from events alone.
+                payload["agent_name"] = agent_name
             session.emit(EventType.TOOL_CALL, payload, run_id=run_id)
 
         try:
@@ -1048,6 +1151,8 @@ class Plan:
                 result_payload: dict[str, Any] = {"step": step.name, "result": result_env.text()[:200]}
                 if branch_id is not None:
                     result_payload["branch_id"] = branch_id
+                if agent_name is not None:
+                    result_payload["agent_name"] = agent_name
                 session.emit(EventType.TOOL_RESULT, result_payload, run_id=run_id)
             return result_env
 
@@ -1056,6 +1161,8 @@ class Plan:
                 err_payload: dict[str, Any] = {"step": step.name, "error": str(exc)}
                 if branch_id is not None:
                     err_payload["branch_id"] = branch_id
+                if agent_name is not None:
+                    err_payload["agent_name"] = agent_name
                 session.emit(EventType.TOOL_ERROR, err_payload, run_id=run_id)
             return Envelope.error_envelope(exc)
 

@@ -73,18 +73,57 @@ def reconstruct_graph(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Best-effort graph from a flat event list (used when the live
     GraphSchema is no longer available — typical for replay).
 
-    Adds an agent node for every distinct ``agent_name`` seen in
-    ``agent_start`` (or any other event). Tool nodes appear lazily on
-    the frontend as ``tool_call`` events stream in, so we don't need
-    to add them here.
+    Adds:
+
+    * An **agent node** for every distinct ``agent_name`` (from
+      ``agent_start`` and Plan-emitted tool events).
+    * A **child node** for every distinct ``step`` (from Plan
+      ``tool_call``) so sub-agents in a Plan show up even when they
+      never produced their own ``agent_start`` event (e.g. ``MockAgent``
+      / direct callable steps).
+    * An **edge** from ``agent_name`` → ``step`` for every
+      ``tool_call``, deduplicated, so the graph reproduces the parent
+      / child relationship recorded live via ``register_tool_edge``.
+
+    Tool-name-only events (LLMEngine's TOOL_CALL with ``tool`` instead
+    of ``step``) similarly contribute a node + edge keyed off
+    ``agent_name`` → ``tool``.
     """
     nodes: dict[str, dict[str, Any]] = {}
+    edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def _add_node(name: str, kind: str) -> None:
+        if not name or name in nodes:
+            return
+        nodes[name] = {"id": name, "name": name, "type": kind}
+
     for ev in events:
+        et = ev.get("event_type", "")
         agent = ev.get("agent_name")
-        if not agent or agent in nodes:
-            continue
-        nodes[agent] = {"id": agent, "name": agent, "type": "agent"}
-    return {"nodes": list(nodes.values()), "edges": []}
+        step = ev.get("step")
+        tool = ev.get("tool")
+        if agent:
+            _add_node(agent, "agent")
+        if step:
+            # Plan steps are agent-or-callable targets — render as agents
+            # so the frontend lays them out the same way it does for
+            # explicitly-registered children.
+            _add_node(step, "agent")
+        if tool:
+            _add_node(tool, "tool")
+        if et == "tool_call" and agent:
+            child = step or tool
+            if child:
+                key = (agent, child, "tool")
+                # Match the on-the-wire shape produced by ``GraphSchema.to_dict``
+                # — ``from`` / ``to`` / ``label`` / ``type`` — so the live
+                # frontend renders replay edges with the same code path.
+                edges.setdefault(
+                    key,
+                    {"from": agent, "to": child, "label": child, "type": "tool"},
+                )
+
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
 class ReplayController:
@@ -152,19 +191,27 @@ class ReplayController:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            # Claim ownership of the next index *before* publishing so a
+            # concurrent ``step()`` cannot see the un-bumped ``_idx`` and
+            # re-publish the same event.  The publish runs outside the
+            # lock so a slow subscriber doesn't block ``step()`` /
+            # ``pause()``.
             with self._lock:
                 paused = self._paused
                 idx = self._idx
                 speed = self._speed
-            if paused or idx >= len(self._events):
+                if not paused and idx < len(self._events):
+                    self._idx = idx + 1
+                    claimed = True
+                else:
+                    claimed = False
+            if not claimed:
                 self._wake.wait(timeout=0.5)
                 self._wake.clear()
                 continue
             now_ev = self._events[idx]
             next_ev = self._events[idx + 1] if idx + 1 < len(self._events) else None
             self._hub.publish(normalise_event(now_ev))
-            with self._lock:
-                self._idx = idx + 1
             if next_ev is not None:
                 gap = max(0.0, (next_ev.get("ts", 0.0) - now_ev.get("ts", 0.0)) / speed)
                 gap = min(gap, 2.0)  # cap so a long idle in the recorded run doesn't stall us

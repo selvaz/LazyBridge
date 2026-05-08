@@ -366,6 +366,12 @@ class EventLog:
         """
         if not rows:
             return
+        # Fast-path check: if ``close()`` has fired we fail fast instead
+        # of executing against a connection that's about to disappear.
+        # Same race semantics as :meth:`record` — bounded to a single
+        # ``executemany + COMMIT``; SQLite will either succeed or raise
+        # ``ProgrammingError``, which the background writer logs and
+        # drops the row batch.
         if self._closed:
             raise RuntimeError("EventLog is closed")
         conn = self._conn()
@@ -733,21 +739,12 @@ class Session:
             try:
                 exp.export(event_dict)
             except Exception as exc:
-                # Warn once per exporter instance so a buggy exporter
-                # is visible in logs instead of silently eating events.
-                if not getattr(exp, "_lazybridge_export_warned", False):
-                    import warnings
+                import warnings
 
-                    warnings.warn(
-                        f"Exporter {exp.__class__.__name__} raised "
-                        f"{type(exc).__name__}: {exc}. Further failures "
-                        f"from this exporter will be suppressed.",
-                        stacklevel=2,
-                    )
-                    try:
-                        exp._lazybridge_export_warned = True  # type: ignore[attr-defined]
-                    except AttributeError:
-                        pass
+                warnings.warn(
+                    f"Exporter {exp.__class__.__name__} raised {type(exc).__name__}: {exc}.",
+                    stacklevel=2,
+                )
 
     def flush(self, timeout: float = 5.0) -> None:
         """Drain the EventLog's batched-writer queue.
@@ -812,7 +809,17 @@ class Session:
         for row in model_responses:
             p = row["payload"]
             run_id = row.get("run_id")
-            agent_name = run_agent.get(run_id or "", "unknown") if run_id else "unknown"
+            # Prefer the agent_name carried in the MODEL_RESPONSE payload
+            # (LLMEngine populates it as the innermost agent name).  Falling
+            # back to the AGENT_START → run_id map only matters for legacy
+            # / external emitters that don't include the field.
+            payload_agent = p.get("agent_name")
+            if payload_agent:
+                agent_name = str(payload_agent)
+            elif run_id:
+                agent_name = run_agent.get(run_id, "unknown")
+            else:
+                agent_name = "unknown"
 
             in_tok = p.get("input_tokens", 0) or 0
             out_tok = p.get("output_tokens", 0) or 0

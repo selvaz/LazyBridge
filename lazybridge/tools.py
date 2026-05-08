@@ -209,7 +209,7 @@ def _resolve_auto_tool(
     schema_llm: Any | None,
     strict: bool,
     allow_llm_schema: bool,
-) -> "Tool":
+) -> Tool:
     """Build and return the best Tool for ``mode="auto"``.
 
     Decision tree (never calls LLM implicitly):
@@ -225,8 +225,12 @@ def _resolve_auto_tool(
     is available.
     """
     sig_tool = Tool(
-        func, name=name, description=description,
-        mode="signature", schema_llm=schema_llm, strict=strict,
+        func,
+        name=name,
+        description=description,
+        mode="signature",
+        schema_llm=schema_llm,
+        strict=strict,
     )
     try:
         sig_def = sig_tool.definition()
@@ -234,15 +238,15 @@ def _resolve_auto_tool(
         # Signature genuinely failed — try LLM paths if opted in.
         if schema_llm is not None:
             try:
-                hyb = Tool(func, name=name, description=description,
-                           mode="hybrid", schema_llm=schema_llm, strict=strict)
+                hyb = Tool(
+                    func, name=name, description=description, mode="hybrid", schema_llm=schema_llm, strict=strict
+                )
                 hyb.definition()
                 return hyb
             except Exception:
                 pass
         if allow_llm_schema and schema_llm is not None:
-            llm = Tool(func, name=name, description=description,
-                       mode="llm", schema_llm=schema_llm, strict=strict)
+            llm = Tool(func, name=name, description=description, mode="llm", schema_llm=schema_llm, strict=strict)
             llm.definition()
             return llm
         fn_name = getattr(func, "__name__", repr(func))
@@ -259,8 +263,7 @@ def _resolve_auto_tool(
     # not just whether definition() raised.
     if _schema_needs_enrichment(sig_def) and schema_llm is not None:
         try:
-            hyb = Tool(func, name=name, description=description,
-                       mode="hybrid", schema_llm=schema_llm, strict=strict)
+            hyb = Tool(func, name=name, description=description, mode="hybrid", schema_llm=schema_llm, strict=strict)
             hyb_def = hyb.definition()
             if not _schema_needs_enrichment(hyb_def):
                 # Hybrid genuinely improved the schema — return it.
@@ -270,8 +273,7 @@ def _resolve_auto_tool(
 
     if _schema_needs_enrichment(sig_def) and allow_llm_schema and schema_llm is not None:
         try:
-            llm = Tool(func, name=name, description=description,
-                       mode="llm", schema_llm=schema_llm, strict=strict)
+            llm = Tool(func, name=name, description=description, mode="llm", schema_llm=schema_llm, strict=strict)
             llm.definition()
             return llm
         except Exception:
@@ -380,16 +382,16 @@ def tool(
                 f"The agent currently has name={agent_name!r} "
                 f"(derived from the model or left as the default).\n\n"
                 f"Set an explicit name:\n"
-                f"    Agent(name=\"research\", engine=LLMEngine(...))\n\n"
+                f'    Agent(name="research", engine=LLMEngine(...))\n\n'
                 f"Or pass an alias to the factory:\n"
-                f"    tool(agent, name=\"research\")"
+                f'    tool(agent, name="research")'
             )
         effective_name = name or getattr(obj, "name", None)
         if not effective_name or not str(effective_name).strip():
             raise ValueError(
                 "Agent used as a tool must have an explicit name=...\n"
                 "Example:\n"
-                "    Agent(name=\"research\", engine=LLMEngine(...))"
+                '    Agent(name="research", engine=LLMEngine(...))'
             )
         if hasattr(obj, "as_tool"):
             return obj.as_tool(effective_name, description=description)
@@ -400,13 +402,14 @@ def tool(
         if name is None:
             fn_name = getattr(obj, "__name__", repr(obj))
             raise ValueError(
-                f"tool() requires an explicit name=... for callables.\n"
-                f"Example: tool({fn_name!r}, name=\"{fn_name}\")"
+                f'tool() requires an explicit name=... for callables.\nExample: tool({fn_name!r}, name="{fn_name}")'
             )
         strict_val = False if strict is _UNSET_BOOL else bool(strict)  # type: ignore[arg-type]
         if mode == "auto":
             return _resolve_auto_tool(
-                obj, name, description,
+                obj,
+                name,
+                description,
                 schema_llm=schema_llm,
                 strict=strict_val,
                 allow_llm_schema=allow_llm_schema,

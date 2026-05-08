@@ -160,9 +160,7 @@ async def test_tool_timeout_marker_reaches_model_in_next_turn():
     await engine.run(env, tools=[tool], output_type=str, memory=None, session=None)
 
     # Two round-trips to the model: turn 1 = tool_call, turn 2 = tool result.
-    assert len(captured_requests) == 2, (
-        f"Expected 2 requests (tool-call + result), got {len(captured_requests)}"
-    )
+    assert len(captured_requests) == 2, f"Expected 2 requests (tool-call + result), got {len(captured_requests)}"
 
     # The last message in the second request is the USER message with tool results.
     second_req = captured_requests[1]

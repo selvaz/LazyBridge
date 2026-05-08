@@ -345,6 +345,9 @@ async def test_otel_exporter_emits_genai_attribute_names() -> None:
     exp.export({"event_type": "tool_result", "run_id": "r1", "tool": "search", "tool_use_id": "tu1", "result": "ok"})
     exp.export({"event_type": "agent_finish", "run_id": "r1", "agent_name": "researcher", "latency_ms": 12.5})
 
+    # BatchSpanProcessor (the default since S5) buffers spans; flush so the
+    # in-memory sink sees them before we assert.
+    exp.flush()
     spans = sink.get_finished_spans()
     by_name = {s.name: s for s in spans}
     assert "invoke_agent researcher" in by_name
@@ -379,6 +382,7 @@ async def test_otel_exporter_parents_children_under_agent_span() -> None:
     exp.export({"event_type": "tool_result", "run_id": "r1", "tool": "t", "tool_use_id": "tu1", "result": "ok"})
     exp.export({"event_type": "agent_finish", "run_id": "r1", "agent_name": "a"})
 
+    exp.flush()
     spans = sink.get_finished_spans()
     agent_span = next(s for s in spans if s.name == "invoke_agent a")
     tool_span = next(s for s in spans if s.name == "execute_tool t")
@@ -401,6 +405,7 @@ async def test_otel_exporter_close_flushes_orphans() -> None:
     exp.export({"event_type": "tool_call", "run_id": "r1", "tool": "t", "tool_use_id": "tu1"})
     # No tool_result, no agent_finish — simulate a cancelled run.
     exp.close()
+    exp.flush()
     spans = sink.get_finished_spans()
     names = {s.name for s in spans}
     assert "invoke_agent a" in names
