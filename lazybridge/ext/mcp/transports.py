@@ -58,32 +58,46 @@ class StdioTransport(_Transport):
         self._env = env
         self._session: Any | None = None
         self._stack: Any | None = None  # contextlib.AsyncExitStack
+        # Serialise concurrent connect() callers so two coroutines racing
+        # past the early-return don't each open an AsyncExitStack and
+        # leak the loser's subprocess.
+        self._connect_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         if self._session is not None:
             return
-        try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
-        except ImportError as e:  # pragma: no cover — exercised only without [mcp]
-            raise ImportError(
-                "lazybridge.ext.mcp.MCP.stdio requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
-            ) from e
-        from contextlib import AsyncExitStack
+        async with self._connect_lock:
+            if self._session is not None:
+                return
+            try:
+                from mcp import ClientSession, StdioServerParameters
+                from mcp.client.stdio import stdio_client
+            except ImportError as e:  # pragma: no cover — exercised only without [mcp]
+                raise ImportError(
+                    "lazybridge.ext.mcp.MCP.stdio requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
+                ) from e
+            from contextlib import AsyncExitStack
 
-        self._stack = AsyncExitStack()
-        await self._stack.__aenter__()
-
-        params = StdioServerParameters(
-            command=self._command,
-            args=self._args,
-            env=self._env,
-        )
-        read, write = await self._stack.enter_async_context(stdio_client(params))
-        self._session = await self._stack.enter_async_context(ClientSession(read, write))
-        if self._session is None:  # type-narrow + sanity check
-            raise RuntimeError("MCP stdio_client returned no session")
-        await self._session.initialize()
+            stack = AsyncExitStack()
+            await stack.__aenter__()
+            try:
+                params = StdioServerParameters(
+                    command=self._command,
+                    args=self._args,
+                    env=self._env,
+                )
+                read, write = await stack.enter_async_context(stdio_client(params))
+                session = await stack.enter_async_context(ClientSession(read, write))
+                if session is None:  # type-narrow + sanity check
+                    raise RuntimeError("MCP stdio_client returned no session")
+                await session.initialize()
+            except BaseException:
+                # If anything in the setup raises, unwind the partially-built
+                # stack so we don't leak the subprocess.
+                await stack.__aexit__(None, None, None)
+                raise
+            self._stack = stack
+            self._session = session
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self._session is None:
@@ -129,27 +143,39 @@ class HttpTransport(_Transport):
         self._headers = headers or {}
         self._session: Any | None = None
         self._stack: Any | None = None
+        # See StdioTransport for rationale.
+        self._connect_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         if self._session is not None:
             return
-        try:
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-        except ImportError as e:  # pragma: no cover
-            raise ImportError(
-                "lazybridge.ext.mcp.MCP.http requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
-            ) from e
-        from contextlib import AsyncExitStack
+        async with self._connect_lock:
+            if self._session is not None:
+                return
+            try:
+                from mcp import ClientSession
+                from mcp.client.streamable_http import streamablehttp_client
+            except ImportError as e:  # pragma: no cover
+                raise ImportError(
+                    "lazybridge.ext.mcp.MCP.http requires the official MCP SDK. Install with: pip install lazybridge[mcp]"
+                ) from e
+            from contextlib import AsyncExitStack
 
-        self._stack = AsyncExitStack()
-        await self._stack.__aenter__()
-
-        read, write, _ = await self._stack.enter_async_context(streamablehttp_client(self._url, headers=self._headers))
-        self._session = await self._stack.enter_async_context(ClientSession(read, write))
-        if self._session is None:  # type-narrow + sanity check
-            raise RuntimeError("MCP streamablehttp_client returned no session")
-        await self._session.initialize()
+            stack = AsyncExitStack()
+            await stack.__aenter__()
+            try:
+                read, write, _ = await stack.enter_async_context(
+                    streamablehttp_client(self._url, headers=self._headers)
+                )
+                session = await stack.enter_async_context(ClientSession(read, write))
+                if session is None:  # type-narrow + sanity check
+                    raise RuntimeError("MCP streamablehttp_client returned no session")
+                await session.initialize()
+            except BaseException:
+                await stack.__aexit__(None, None, None)
+                raise
+            self._stack = stack
+            self._session = session
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self._session is None:

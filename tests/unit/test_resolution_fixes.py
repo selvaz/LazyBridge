@@ -74,17 +74,11 @@ def test_plan_sequential_checkpoint_before_store_write():
     )
     Agent(engine=plan, name="p")("task")
 
-    store_write_idx = next(
-        (i for i, o in enumerate(ops) if o == "store.write:out"), None
-    )
+    store_write_idx = next((i for i, o in enumerate(ops) if o == "store.write:out"), None)
     assert store_write_idx is not None, f"store.write:out never happened; ops={ops}"
 
-    checkpoints_after_write = [
-        i for i, o in enumerate(ops) if o == "checkpoint" and i > store_write_idx
-    ]
-    assert not checkpoints_after_write, (
-        f"Found checkpoint(s) AFTER store.write — wrong order; ops={ops}"
-    )
+    checkpoints_after_write = [i for i, o in enumerate(ops) if o == "checkpoint" and i > store_write_idx]
+    assert not checkpoints_after_write, f"Found checkpoint(s) AFTER store.write — wrong order; ops={ops}"
 
 
 def test_plan_parallel_checkpoint_before_store_write():
@@ -118,17 +112,11 @@ def test_plan_parallel_checkpoint_before_store_write():
     Agent(engine=plan, name="pp")("task")
 
     for write_key in ("o1", "o2"):
-        store_write_idx = next(
-            (i for i, o in enumerate(ops) if o == f"store.write:{write_key}"), None
-        )
+        store_write_idx = next((i for i, o in enumerate(ops) if o == f"store.write:{write_key}"), None)
         if store_write_idx is None:
             continue  # step may not have written if output was None
-        checkpoints_after = [
-            i for i, o in enumerate(ops) if o == "checkpoint" and i > store_write_idx
-        ]
-        assert not checkpoints_after, (
-            f"Found checkpoint after store.write:{write_key}; ops={ops}"
-        )
+        checkpoints_after = [i for i, o in enumerate(ops) if o == "checkpoint" and i > store_write_idx]
+        assert not checkpoints_after, f"Found checkpoint after store.write:{write_key}; ops={ops}"
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +152,7 @@ def test_memory_add_explicit_tokens_stored_as_is():
     mem.add("one two three four five", "", tokens=42)
     # 5 words → word-count estimate would be 6 (incl. empty assistant " ")
     # but explicit tokens=42 must be stored
-    assert mem._turns[-1].token_estimate == 42, (
-        "Explicit tokens=42 must not be overridden by word-count estimate"
-    )
+    assert mem._turns[-1].token_estimate == 42, "Explicit tokens=42 must not be overridden by word-count estimate"
 
 
 def test_memory_add_no_estimation_for_empty_content():
@@ -204,9 +190,7 @@ def test_otel_exporter_default_uses_batch_span_processor():
     exp = OTelExporter(exporter=inner)
 
     processors = exp._provider._active_span_processor._span_processors
-    assert any(isinstance(p, BatchSpanProcessor) for p in processors), (
-        f"Expected BatchSpanProcessor; got {processors}"
-    )
+    assert any(isinstance(p, BatchSpanProcessor) for p in processors), f"Expected BatchSpanProcessor; got {processors}"
 
 
 @pytest.mark.skipif(
@@ -339,9 +323,7 @@ def test_typeddict_used_as_function_param_schema():
     t = tool(search, name="search")
     defn = t.definition()
     query_schema = defn.parameters.get("properties", {}).get("query", {})
-    assert query_schema.get("type") == "object", (
-        f"Expected object schema for TypedDict param; got {query_schema}"
-    )
+    assert query_schema.get("type") == "object", f"Expected object schema for TypedDict param; got {query_schema}"
 
 
 def test_namedtuple_used_as_function_param_schema():
@@ -355,9 +337,7 @@ def test_namedtuple_used_as_function_param_schema():
     t = tool(plot, name="plot")
     defn = t.definition()
     point_schema = defn.parameters.get("properties", {}).get("point", {})
-    assert point_schema.get("type") == "object", (
-        f"Expected object schema for NamedTuple param; got {point_schema}"
-    )
+    assert point_schema.get("type") == "object", f"Expected object schema for NamedTuple param; got {point_schema}"
 
 
 # ---------------------------------------------------------------------------

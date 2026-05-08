@@ -79,6 +79,10 @@ _MIME = {
 # connections aggressively (some proxies at 30s) so a heartbeat
 # ensures the EventSource stays open during quiet pipeline phases.
 _SSE_HEARTBEAT_S = 12.0
+# Cap on POST control-body size (bytes).  Visualizer commands are tiny
+# JSON payloads — anything larger is almost certainly malformed or
+# malicious; reject before reading from the socket.
+_MAX_CONTROL_BODY = 1_000_000
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -229,7 +233,15 @@ class _Handler(BaseHTTPRequestHandler):
         if not self.control_handler:
             self._send_json({"error": "controls not enabled"}, code=400)
             return
+        # Cap the POST body size: stdlib http.server reads exactly
+        # ``Content-Length`` bytes from rfile, so a malicious client
+        # advertising a huge length could pin a handler thread on a
+        # multi-GB allocation.  1 MB is generous for control payloads
+        # (the visualizer issues compact JSON commands).
         length = int(self.headers.get("Content-Length") or 0)
+        if length > _MAX_CONTROL_BODY:
+            self._send_json({"error": "payload too large"}, code=413)
+            return
         raw = self.rfile.read(length) if length else b""
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}

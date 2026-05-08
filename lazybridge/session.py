@@ -366,6 +366,12 @@ class EventLog:
         """
         if not rows:
             return
+        # Fast-path check: if ``close()`` has fired we fail fast instead
+        # of executing against a connection that's about to disappear.
+        # Same race semantics as :meth:`record` — bounded to a single
+        # ``executemany + COMMIT``; SQLite will either succeed or raise
+        # ``ProgrammingError``, which the background writer logs and
+        # drops the row batch.
         if self._closed:
             raise RuntimeError("EventLog is closed")
         conn = self._conn()

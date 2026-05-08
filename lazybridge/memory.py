@@ -206,11 +206,15 @@ class Memory:
     def _plan_compression(self) -> tuple[list[_Turn], int] | None:
         """Decide whether to compress and snapshot the head turns.
 
-        Caller MUST hold ``self._lock``.  Returns ``(head_copy,
-        drop_count)`` when compression should run, or ``None`` when no
-        action is needed (already compressing / strategy disabled / not
-        enough turns).  Marks ``self._compressing`` so a second
-        concurrent ``add()`` skips the work.
+        Caller MUST hold ``self._lock`` while invoking this method *and*
+        while reading the returned snapshot.  The snapshot itself
+        (``head_copy``) is safe to summarise outside the lock once
+        ``self._compressing`` has been set to ``True`` — that flag, not
+        the lock, is the synchronisation primitive that prevents a
+        second concurrent ``add()`` from re-entering the compression
+        path.  Returns ``(head_copy, drop_count)`` when compression
+        should run, or ``None`` when no action is needed (already
+        compressing / strategy disabled / not enough turns).
         """
         if self._compressing:
             return None

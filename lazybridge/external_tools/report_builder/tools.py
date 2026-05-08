@@ -208,7 +208,7 @@ def report_tools(*, output_dir: str | Path, input_root: str | Path | None = None
                 except Exception as exc:
                     raise ValueError(f"sections[{i}] is invalid: {exc}") from exc
 
-            body_html, charts_embedded = sections_to_html(parsed_sections)
+            body_html, charts_embedded = sections_to_html(parsed_sections, input_root=_input_root)
 
         else:
             # --- markdown_path flow ---

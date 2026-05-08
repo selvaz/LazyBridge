@@ -340,6 +340,29 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     if annotation in _PY_TO_JSON:
         return {"type": _PY_TO_JSON[annotation]}
 
+    # Stdlib types that don't map to a JSON primitive but have an
+    # obvious string/number representation.  Without these branches the
+    # final fallback (``{"type": "string"}``) silently degrades them
+    # and the dispatcher gets a string instead of a ``Decimal`` /
+    # ``datetime`` / ``Path``, which surfaces as a ``TypeError`` deep
+    # inside the user's tool function.
+    import datetime as _datetime
+    import decimal as _decimal
+    import pathlib as _pathlib
+
+    if annotation is bytes or annotation is bytearray:
+        return {"type": "string", "format": "byte"}
+    if annotation is _datetime.datetime:
+        return {"type": "string", "format": "date-time"}
+    if annotation is _datetime.date:
+        return {"type": "string", "format": "date"}
+    if annotation is _datetime.time:
+        return {"type": "string", "format": "time"}
+    if annotation is _decimal.Decimal:
+        return {"type": "number"}
+    if isinstance(annotation, type) and issubclass(annotation, _pathlib.PurePath):
+        return {"type": "string"}
+
     # Enum subclass -> {"type": "string"/"integer", "enum": [...]}
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
         enum_vals = [e.value for e in annotation]
@@ -1053,6 +1076,16 @@ class ToolSchemaBuilder:
             # Some strict-mode validators (OpenAI, certain Gemini endpoints)
             # require ``required`` to be present even when empty.  Emit an
             # explicit empty list rather than omitting the key.
+            #
+            # Dialect note: this shape (properties + sparse ``required``)
+            # is accepted by Gemini's strict mode and Anthropic tool use,
+            # but OpenAI's strict structured-output validator additionally
+            # demands that *every* property appear in ``required``.  If
+            # you target OpenAI strict tool calling, mark all parameters
+            # as required (no defaults) at the function signature, or
+            # use ``Optional[T]`` and let the LLM emit ``null``.  See
+            # https://platform.openai.com/docs/guides/structured-outputs
+            # for the full rule set.
             json_schema.setdefault("required", [])
 
         return ToolDefinition(

@@ -212,7 +212,8 @@ class LLMEngine:
         # asyncio.gather when the model emits more than one in a turn.
         if tool_choice == "parallel":
             warnings.warn(
-                "LLMEngine(tool_choice='parallel') is deprecated. "
+                "LLMEngine(tool_choice='parallel') is deprecated since "
+                "lazybridge 0.7.0 and will be removed in 1.0.  "
                 "Concurrent tool execution is now the default and cannot be "
                 "disabled; drop the argument (or use 'auto'/'any').",
                 DeprecationWarning,

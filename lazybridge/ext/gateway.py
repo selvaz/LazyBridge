@@ -25,6 +25,43 @@ from lazybridge.tools import Tool
 _JSON_OBJECT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": True}
 
 
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """``HTTPRedirectHandler`` that refuses scheme / host changes.
+
+    The default handler follows redirects to *any* host, which means a
+    302 from ``https://api.example.com`` to ``http://internal-only/admin``
+    would be followed silently — and the gateway's ``Authorization``
+    header would travel with it.  Same-host path redirects (e.g. an
+    HTTP→HTTPS upgrade on the same FQDN) remain allowed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        old = urllib.parse.urlparse(req.get_full_url())
+        new = urllib.parse.urlparse(newurl)
+        # Allow scheme upgrades within the same host (http → https) but
+        # reject downgrades and any host change.
+        if old.netloc != new.netloc:
+            raise urllib.error.HTTPError(
+                req.get_full_url(),
+                code,
+                f"refusing redirect to different host: {old.netloc!r} -> {new.netloc!r}",
+                headers,
+                fp,
+            )
+        if old.scheme == "https" and new.scheme != "https":
+            raise urllib.error.HTTPError(
+                req.get_full_url(),
+                code,
+                f"refusing https → {new.scheme} downgrade redirect",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_GATEWAY_OPENER = urllib.request.build_opener(_SameOriginRedirectHandler())
+
+
 @dataclass(frozen=True)
 class ExternalToolSpec:
     """A remotely hosted tool definition.
@@ -152,7 +189,7 @@ class JsonHttpExternalToolClient:
 
         request = urllib.request.Request(url, data=encoded, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with _GATEWAY_OPENER.open(request, timeout=self.timeout) as response:
                 data = response.read()
                 if not data:
                     return None

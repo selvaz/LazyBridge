@@ -325,8 +325,18 @@ class OTelExporter:
 
     @staticmethod
     def _set_attr(span: Any, key: str, value: Any) -> None:
+        # Bound the attribute size before handing to the SDK.  OTel
+        # builds vary in how they enforce per-attribute limits (some
+        # silently truncate, some reject the entire span); applying a
+        # cap here gives a single, predictable shape regardless of
+        # collector / SDK build.  Numeric / bool / list-of-primitive
+        # values pass through unchanged — the SDK accepts them
+        # natively and they cannot blow the wire payload.
         try:
-            span.set_attribute(key, _stringify(value))
+            stringified = _stringify(value)
+            if isinstance(stringified, str) and len(stringified) > 1024:
+                stringified = stringified[:1021] + "..."
+            span.set_attribute(key, stringified)
         except Exception:
             pass
 
