@@ -394,15 +394,22 @@ def test_session_record_many_has_close_race_comment() -> None:
 def test_version_matches_distribution_metadata() -> None:
     """``__version__`` must equal what ``importlib.metadata`` reports."""
     pytest.importorskip("importlib.metadata")
-    from importlib.metadata import PackageNotFoundError, version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _dist_version
 
     from lazybridge import __version__ as lb_version
 
+    # Initialise ``dist_version`` outside the try so the static
+    # analyser doesn't flag it as "may be used before initialised"
+    # on the except branch (``pytest.skip`` raises, but CodeQL
+    # can't see that).
+    dist_version: str | None = None
     try:
-        dist_version = version("lazybridge")
+        dist_version = _dist_version("lazybridge")
     except PackageNotFoundError:
         pytest.skip("lazybridge not installed (running from raw source tree)")
 
+    assert dist_version is not None
     assert lb_version == dist_version
 
 
