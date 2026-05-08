@@ -88,7 +88,7 @@ Container for observability config: exporters, redaction, EventLog.
 
 SQLite-backed event log. Thread-safe via thread-local connections.
 
-### `EventType(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
+### `EventType(*values)`
 
 Enum where members are also (and must be) strings
 
@@ -172,7 +172,7 @@ Public factory — the canonical way to create a :class:`Tool`.
 
 A ``tools=[...]`` entry that expands itself into one or more Tools.
 
-### `NativeTool(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)`
+### `NativeTool(*values)`
 
 Provider-native server-side tools (run on provider infrastructure).
 
