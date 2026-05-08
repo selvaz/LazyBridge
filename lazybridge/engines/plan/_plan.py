@@ -734,6 +734,12 @@ class Plan:
                 # the checkpoint already points to the next step.
                 if effective_store:
                     for s, r in zip(group, raw):
+                        # Same narrowing as the loop at line 706: the
+                        # failure scan above already returned on
+                        # BaseException, so every remaining ``r`` is an
+                        # Envelope.  Repeat the assert to keep mypy happy
+                        # in this scope.
+                        assert isinstance(r, Envelope)
                         if s.writes and r.payload is not None:
                             effective_store.write(s.writes, r.payload)
                 continue
