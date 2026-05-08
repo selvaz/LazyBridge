@@ -396,14 +396,14 @@ def test_version_matches_distribution_metadata() -> None:
     pytest.importorskip("importlib.metadata")
     from importlib.metadata import PackageNotFoundError, version
 
-    import lazybridge
+    from lazybridge import __version__ as lb_version
 
     try:
         dist_version = version("lazybridge")
     except PackageNotFoundError:
         pytest.skip("lazybridge not installed (running from raw source tree)")
 
-    assert lazybridge.__version__ == dist_version
+    assert lb_version == dist_version
 
 
 # ---------------------------------------------------------------------------
