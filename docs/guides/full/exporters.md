@@ -55,7 +55,6 @@ The full `EventType` enum (`lazybridge.session.EventType`):
 | `MODEL_REQUEST` / `MODEL_RESPONSE` | every provider call |
 | `TOOL_CALL` / `TOOL_RESULT` / `TOOL_ERROR` / `TOOL_TIMEOUT` | every tool dispatch (with `TOOL_TIMEOUT` carrying `timeout_s`) |
 | `HIL_DECISION` | one per `HumanEngine` / `SupervisorEngine` decision |
-| `STORE_WRITE` / `STORE_READ` / `MEMORY_WRITE` / `MEMORY_READ` | declared in the enum but **not currently emitted** by any engine — reserved for future state-mutation audit events |
 
 The five core exporters cover the dev / prod / custom surface:
 
