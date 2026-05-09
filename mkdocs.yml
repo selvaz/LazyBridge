@@ -140,3 +140,14 @@ nav:
       - Daily news: recipes/daily-news.md
       - Live visualization: recipes/live-visualization.md
       - Visualization mock: recipes/visualization-mock.md
+  - Decisions:
+      - Overview: decisions/index.md
+      - Pick your tier: decisions/pick-tier.md
+      - Return type: decisions/return-type.md
+      - State layer: decisions/state-layer.md
+      - Composition: decisions/composition.md
+      - Parallelism: decisions/parallelism.md
+      - HumanEngine vs SupervisorEngine: decisions/human-engine-vs-supervisor.md
+      - "verify= placement": decisions/verify-placement.md
+      - Checkpoint & resume: decisions/checkpoint.md
+      - Do I need Advanced?: decisions/need-advanced.md
