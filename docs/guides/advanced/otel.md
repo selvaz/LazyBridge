@@ -200,7 +200,11 @@ sess = Session(
 - **`batch=True` (default) buffers spans.** Spans from a fast-
   finishing run may not be flushed by the time the process exits.
   Always `sess.close()` (or use `Session` as a context manager)
-  before exit so the BatchSpanProcessor drains.
+  before exit so the BatchSpanProcessor drains. For finer
+  control, call `OTelExporter.flush(timeout_millis=30_000)`
+  directly — useful between runs in a long-lived process where
+  you want intermediate spans to reach the collector without
+  closing the exporter.
 - **`batch=False` ↔ `SimpleSpanProcessor`** is the right choice
   for tests against an `InMemorySpanExporter` — every span is
   flushed synchronously on close. Don't use it in production:
