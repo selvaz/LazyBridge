@@ -29,7 +29,7 @@ import pytest
 from pydantic import BaseModel
 
 from lazybridge import Plan, Step
-from lazybridge.engines.plan import PlanCompileError
+from lazybridge.engines.plan import PlanCompileError, PlanRuntimeError
 from lazybridge.envelope import Envelope
 from lazybridge.testing import MockAgent
 
@@ -608,3 +608,46 @@ def test_after_branches_serialises_and_deserialises() -> None:
     )
     triage_step = next(s for s in plan2.steps if s.name == "triage")
     assert triage_step.after_branches == "archive"
+
+
+# ---------------------------------------------------------------------------
+# Predicate exceptions wrapped as PlanRuntimeError (issue #20).
+# Pre-fix the engine wrapped runtime predicate exceptions in
+# ``PlanCompileError`` — a class named for build-time DAG validation.
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_runtime_exception_wraps_as_plan_runtime_error() -> None:
+    """A ``Step(routes={...})`` predicate that raises during evaluation
+    must surface as ``PlanRuntimeError`` (RuntimeError subclass), not
+    ``PlanCompileError`` (build-time exception)."""
+
+    def buggy_predicate(env):
+        raise ValueError("predicate is broken")
+
+    a = MockAgent("a-out", name="a")
+    b = MockAgent("b-out", name="b")
+
+    plan = Plan(
+        Step(a, name="a", routes={"b": buggy_predicate}),
+        Step(b, name="b"),
+    )
+
+    with pytest.raises(PlanRuntimeError, match="routes predicate"):
+        asyncio.run(
+            plan.run(
+                Envelope.from_task("hello"),
+                tools=[a, b],
+                output_type=str,
+                memory=None,
+                session=None,
+            )
+        )
+
+
+def test_plan_runtime_error_subclasses_runtime_error_not_plan_compile_error() -> None:
+    """Class invariant: PlanRuntimeError must NOT be a PlanCompileError —
+    catching one class must NOT catch the other."""
+    assert issubclass(PlanRuntimeError, RuntimeError)
+    assert not issubclass(PlanRuntimeError, PlanCompileError)
+    assert not issubclass(PlanCompileError, PlanRuntimeError)

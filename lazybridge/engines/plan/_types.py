@@ -187,6 +187,24 @@ class PlanCompileError(Exception):
     pass
 
 
+class PlanRuntimeError(RuntimeError):
+    """Raised when a Plan step misbehaves at runtime in a way that
+    indicates a programming bug — not a recoverable runtime condition.
+
+    The canonical case is a ``Step(routes={...})`` predicate that
+    raises an exception during evaluation.  The engine wraps the
+    underlying exception in :class:`PlanRuntimeError` with the
+    offending step and target named, then propagates.
+
+    Distinct from :class:`PlanCompileError` (which fires at
+    construction time for static DAG validation) and from
+    :class:`ConcurrentPlanRunError` (which fires at runtime CAS
+    collision).  Distinct from regular ``Envelope.error_envelope``
+    return paths (which signal recoverable runtime failures the
+    caller can handle without a try/except).
+    """
+
+
 class PlanPaused(BaseException):
     """Raised by a step target to halt the Plan and persist a resumable checkpoint.
 

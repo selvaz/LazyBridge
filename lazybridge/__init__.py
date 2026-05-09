@@ -123,7 +123,7 @@ from lazybridge.core.types import (
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
 # live under ``lazybridge.ext.{hil,evals,otel}``).
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
-from lazybridge.engines.plan import Plan, PlanCompileError, PlanPaused, Step
+from lazybridge.engines.plan import Plan, PlanCompileError, PlanPaused, PlanRuntimeError, Step
 from lazybridge.envelope import Envelope
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
@@ -196,6 +196,7 @@ __all__ = [
     "Step",
     "PlanCompileError",
     "PlanPaused",
+    "PlanRuntimeError",
     "ToolTimeoutError",
     "StreamStallError",
     # Graph

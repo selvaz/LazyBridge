@@ -29,6 +29,7 @@ from lazybridge.engines.plan._types import (
     ConcurrentPlanRunError,
     PlanCompileError,
     PlanPaused,
+    PlanRuntimeError,
     PlanState,
     Step,
     StepResult,
@@ -1268,11 +1269,16 @@ class Plan:
                             branch_return[target_name] = step.after_branches
                         return target_name
                 except Exception as exc:
-                    # A misbehaving predicate is a bug, not a runtime
-                    # condition — surface it instead of silently
-                    # falling through to linear progression and
-                    # masking the failure.
-                    raise PlanCompileError(
+                    # A misbehaving predicate is a bug, not a recoverable
+                    # runtime condition — surface it instead of silently
+                    # falling through to linear progression and masking
+                    # the failure.  ``PlanRuntimeError`` (not
+                    # ``PlanCompileError``) is the right class because
+                    # this fires at run time, not at Plan construction;
+                    # mixing the two would force callers to catch
+                    # ``PlanCompileError`` at runtime, conflating
+                    # build-time and runtime failure modes.
+                    raise PlanRuntimeError(
                         f"Step {step.name!r}: routes predicate for {target_name!r} raised {type(exc).__name__}: {exc}"
                     ) from exc
 
