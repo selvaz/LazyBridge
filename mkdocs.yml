@@ -151,3 +151,4 @@ nav:
       - "verify= placement": decisions/verify-placement.md
       - Checkpoint & resume: decisions/checkpoint.md
       - Do I need Advanced?: decisions/need-advanced.md
+  - Errors: errors.md

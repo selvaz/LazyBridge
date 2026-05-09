@@ -49,9 +49,21 @@ mental model is the same.
   [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md),
   [Envelope](guides/basic/envelope.md),
   [Native tools](guides/basic/native-tools.md).
-- **Guides → Mid / Full / Advanced** *(coming next)* — Memory,
-  Store, Session, Plan, sentinels, routing, checkpoints,
-  human-in-the-loop, OpenTelemetry, custom engines and providers.
+- **Guides → Mid** — `Memory`, `Store`, `Session`, `Guards`,
+  `verify=`, `chain` / `parallel` / `as_tool`, `HumanEngine`,
+  `MCP`, `Evals` (eleven pages).
+- **Guides → Full** — `Plan`, `Step`, `Sentinels`, `Routing`,
+  `Parallel plan steps`, `Checkpoint & resume`, `Exporters`,
+  `GraphSchema`, `SupervisorEngine` (nine pages).
+- **Guides → Advanced** — `Engine` protocol, `BaseProvider`,
+  `Providers` catalogue, `Plan serialization`, `OpenTelemetry`,
+  `Visualizer` (six pages).
+- [**Recipes**](recipes/index.md) — twelve runnable examples
+  from the `examples/` directory, embedded verbatim.
+- [**Decisions**](decisions/index.md) — nine "which one do I
+  use?" decision trees with quick-reference tables.
+- [**Errors**](errors.md) — cause → diagnosis → fix table for
+  every framework exception and `Envelope.error.type` value.
 - **Recipes** *(coming next)* — runnable end-to-end examples lifted from
   `examples/`.
 - **For LLM assistants** *(coming next)* — install the LazyBridge Claude
