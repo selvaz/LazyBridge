@@ -75,26 +75,43 @@ against the model and re-prompts on validation errors.
 ### 4 — Sequential chain
 
 ```python
+from lazybridge import Agent, Plan, Step
+
 researcher = Agent("claude-opus-4-7", name="research", tools=[web_search])
 writer     = Agent("claude-opus-4-7", name="write")
-pipeline   = Agent.chain(researcher, writer)
 
+pipeline = Agent(
+    engine=Plan(Step("research"), Step("write")),
+    tools=[researcher, writer],
+)
 print(pipeline("Topic: AI agents in 2026").text())
 ```
 
-Two agents, output of one feeds the next. No new primitive — `chain`
-returns an `Agent`, so you can chain chains.
+The canonical sequential form is a `Plan` of named steps — same shape
+you'll use for routing, parallel bands, and checkpoints later in the
+ladder, so the mental model stays uniform as the workflow grows.
+
+For a *purely* linear handoff with no other plan features,
+`Agent.chain(researcher, writer)` is sugar for exactly the form above.
+Reach for it when you want a one-liner; reach for the explicit `Plan`
+when you can already see a router or a parallel band coming.
 
 ### 5 — Parallel fan-out
 
 ```python
-multi = Agent.parallel(researcher_a, researcher_b, researcher_c)
-envelopes = multi("Same task for everyone")   # returns list[Envelope]
+multi     = Agent.parallel(researcher_a, researcher_b, researcher_c)
+envelopes = multi("Same task for everyone")   # → list[Envelope]
 ```
 
-Three agents run concurrently against the same input. The result is the
-list of their envelopes — `Agent.parallel` returns a deterministic
-fan-out, not a different kind of agent.
+`Agent.parallel(...)` is composition sugar for **scripted** fan-out: the
+agents run concurrently against the same input and you get back a
+`list[Envelope]`, one per branch. Use it when you want every branch
+unconditionally and you care about each individual result.
+
+Use a `Plan` parallel band (rung 8) instead when you want concurrent
+steps that **aggregate** into the next step via `from_parallel_all`, or
+when only one branch should run based on a router. Use `tools=[a, b, c]`
+when you want the **LLM** to decide which sub-agent to call.
 
 ### 6 — Agent as tool
 
@@ -175,10 +192,11 @@ step.
 ### 10 — Human-in-the-loop
 
 ```python
-from lazybridge import Plan, Step
-from lazybridge.ext.hil import human_agent
+from lazybridge import Agent, Plan, Step
+from lazybridge.ext.hil import HumanEngine
 
-approval = human_agent(timeout=300, name="approve")
+approval = Agent(engine=HumanEngine(timeout=300), name="approve")
+
 pipeline = Agent(
     engine=Plan(
         Step("draft"),
@@ -189,9 +207,15 @@ pipeline = Agent(
 )
 ```
 
-A human approval is just another agent. Drop it into the plan's
-`tools=[...]` and reference its name from a `Step`; the plan halts and
-waits when that step runs.
+A human approval is just another agent — the engine is `HumanEngine`
+instead of `LLMEngine`, but the agent slots into the plan exactly like
+any other tool.
+
+`human_agent(timeout=300, name="approve")` is sugar for the
+`Agent(engine=HumanEngine(...))` line above; `supervisor_agent(...)`
+does the same for `SupervisorEngine`. Use the sugar for one-liners; use
+the canonical form when you need to see the engine choice at the call
+site.
 
 ### 11 — Observability
 

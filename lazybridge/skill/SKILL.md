@@ -57,6 +57,26 @@ introduction. **Do not wrap simple examples in `asyncio.run(main())`**;
 LazyBridge agents are synchronous-callable by design, and the example
 files in `examples/` follow that convention.
 
+## Style rule — show the canonical form first
+
+When you generate code for the user, lead with the canonical
+`Agent(engine=..., tools=[...])` shape and the string-positional
+shortcut `Agent("claude-opus-4-7", ...)`. Treat the factory and
+composition helpers as **sugar** and only mention them after the
+canonical form, with a one-line "use this when …":
+
+| Sugar | Canonical equivalent | Use the sugar when |
+|---|---|---|
+| `Agent.from_model("m")` | `Agent("m")` | Never — the string shortcut already exists |
+| `Agent.from_engine(e)` | `Agent(engine=e)` | Never — adds no clarity |
+| `Agent.from_plan(*steps)` | `Agent(engine=Plan(*steps))` | One-liner where no `tools=[...]` is needed |
+| `Agent.from_chain(a, b)` / `Agent.chain(a, b)` | `Agent(engine=Plan(Step("a"), Step("b")), tools=[a, b])` | Purely linear handoff with no router / parallel band / checkpoint |
+| `Agent.parallel(a, b)` | (no clean canonical equivalent — it's the canonical form for scripted fan-out → `list[Envelope]`) | You want every branch and the list of results |
+| `human_agent(...)` | `Agent(engine=HumanEngine(...))` | One-liner; canonical form when the engine choice should be visible at the call site |
+| `supervisor_agent(...)` | `Agent(engine=SupervisorEngine(...))` | Same as above |
+
+Default model in examples: `claude-opus-4-7`.
+
 ## Canonical patterns
 
 ### Single agent
@@ -104,14 +124,29 @@ print(result.payload.headline)    # read .payload, not .text()
 
 ### Sequential / parallel composition
 
+The canonical sequential form is a `Plan` of named steps — same shape
+you'll use for routing, parallel bands, and checkpoints later, so the
+mental model stays uniform as the workflow grows:
+
 ```python
-chain    = Agent.chain(researcher, writer)            # sequential
-parallel = Agent.parallel(researcher_a, researcher_b) # deterministic fan-out → list[Envelope]
+from lazybridge import Agent, Plan, Step
+
+pipeline = Agent(
+    engine=Plan(Step("research"), Step("write")),
+    tools=[researcher, writer],
+)
 ```
 
-Both return Agent-shaped objects, so they compose recursively. The
-parallel form is **scripted** fan-out; if you want the LLM to decide
-which sub-agent to call, put the candidates in `tools=[...]` instead.
+For a *purely* linear handoff with no other plan features,
+`Agent.chain(researcher, writer)` is sugar for exactly the form above —
+reach for it when you want a one-liner.
+
+For **scripted** fan-out where you want every branch and a
+`list[Envelope]` back, use `Agent.parallel(a, b, c)`. Use a `Plan`
+parallel band (`Step("a", parallel=True)`) when concurrent steps need to
+aggregate via `from_parallel_all`, and put the candidates in
+`tools=[...]` when you want the **LLM** to decide which sub-agent to
+dispatch instead of running all of them.
 
 ### Agent as tool (supervisor / hierarchical)
 
@@ -199,14 +234,18 @@ Concurrent forks on the same key are protected by compare-and-swap; pass
 ### Human-in-the-loop
 
 ```python
-from lazybridge.ext.hil import human_agent, supervisor_agent
+from lazybridge import Agent
+from lazybridge.ext.hil import HumanEngine, SupervisorEngine
 
-approval = human_agent(timeout=300, name="approve")    # gate: approve / reject / redirect
-repl     = supervisor_agent(tools=[...], name="repl")  # full REPL with retry / inspect
+approval = Agent(engine=HumanEngine(timeout=300), name="approve")
+repl     = Agent(engine=SupervisorEngine(tools=[...]), name="repl")
 ```
 
-Both return regular `Agent` objects. Drop them into a `Plan`'s `tools=[...]`
-and reference them from a `Step` like any other agent.
+`human_agent(timeout=300, name="approve")` and
+`supervisor_agent(tools=[...], name="repl")` are sugar for the two lines
+above. Both forms return regular `Agent` objects — drop them into a
+`Plan`'s `tools=[...]` and reference them from a `Step` like any other
+agent.
 
 ### MCP
 
