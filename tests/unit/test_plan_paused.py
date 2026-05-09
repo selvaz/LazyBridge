@@ -19,7 +19,6 @@ import pytest
 
 from lazybridge import Agent, Plan, PlanPaused, Step, Store
 
-
 # ---------------------------------------------------------------------------
 # PlanPaused class invariants
 # ---------------------------------------------------------------------------

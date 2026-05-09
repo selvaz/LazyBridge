@@ -27,7 +27,6 @@ from lazybridge.engines.plan._serialisation import (
 )
 from lazybridge.engines.plan._types import (
     ConcurrentPlanRunError,
-    PlanCompileError,
     PlanPaused,
     PlanRuntimeError,
     PlanState,
@@ -694,8 +693,7 @@ class Plan:
                         error=ErrorInfo(
                             type="PlanPaused",
                             message=(
-                                f"Plan paused at parallel step "
-                                f"{paused_branch[0].name!r}: {paused_branch[1].message}"
+                                f"Plan paused at parallel step {paused_branch[0].name!r}: {paused_branch[1].message}"
                             ),
                             retryable=True,
                         ),
