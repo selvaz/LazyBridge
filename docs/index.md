@@ -42,6 +42,9 @@ mental model is the same.
   the composition rule that holds the framework together.
 - [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
   the twelve rungs from one-line agent to checkpointed pipeline.
+- [**Concepts → Canonical vs sugar**](concepts/canonical-vs-sugar.md) —
+  every factory function and shortcut LazyBridge ships, with its
+  canonical equivalent and any subtle differences.
 - **Guides** *(coming next)* — one focused page per public concept,
   organised by tier (Basic → Mid → Full → Advanced).
 - **Recipes** *(coming next)* — runnable end-to-end examples lifted from

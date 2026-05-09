@@ -79,23 +79,80 @@ print(result.text())
 with each constructor argument on its own line and `result = agent(task)`
 on a separate line from the print. Lead with this form; treat factories
 and string-positional shortcuts as **sugar** and only mention them
-after, with a one-line "use this when …":
+after, with a one-line "use this when …".
 
-| Sugar | Canonical equivalent | Use the sugar when |
+### Sugar catalogue (verified against the source)
+
+Several factories are sugar **but not all are pure aliases** — some
+build extra structure or return different types. Read the
+"Differences" column carefully before substituting.
+
+**Build an Agent with an LLM engine**
+
+| Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent("m", ...)` | `Agent(engine=LLMEngine("m"), ...)` | Trivially short snippets where the engine choice is uninteresting (rare in real code; never in tutorials) |
-| `Agent.from_model("m", ...)` | `Agent(engine=LLMEngine("m"), ...)` | Never — `Agent("m", ...)` already exists and reads better |
-| `Agent.from_engine(e)` | `Agent(engine=e)` | Never — adds no clarity |
-| `Agent.from_plan(*steps)` | `Agent(engine=Plan(*steps))` | One-liner where no `tools=[...]` is needed |
-| `Agent.from_chain(a, b)` / `Agent.chain(a, b)` | `Agent(engine=Plan(Step("a"), Step("b")), tools=[a, b])` | Purely linear handoff with no router / parallel band / checkpoint |
-| `Agent.parallel(a, b)` | (no clean canonical equivalent — it's the canonical form for scripted fan-out → `list[Envelope]`) | You want every branch and the list of results |
-| `human_agent(...)` | `Agent(engine=HumanEngine(...))` | One-liner; canonical form when the engine choice should be visible at the call site |
-| `supervisor_agent(...)` | `Agent(engine=SupervisorEngine(...))` | Same as above |
+| `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias. |
+| `Agent.from_model("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias of `Agent("model", …)`. |
+| `Agent.from_engine(engine, **kw)` | `Agent(engine=engine, **kw)` | Pure alias. |
+| `Agent.from_provider("anthropic", tier="top", **kw)` | `Agent(engine=LLMEngine("top", provider="anthropic"), **kw)` | **Not pure sugar** — uses tier-alias model strings (`super_cheap`/`cheap`/`medium`/`expensive`/`top`) resolved via the provider's tier map. Use when you want freshest-in-tier without pinning a date-stamped name. |
+
+**Build an Agent with a Plan engine**
+
+| Sugar | Canonical | Differences |
+|---|---|---|
+| `Agent.from_plan(*steps, store=…, checkpoint_key=…, resume=…, **kw)` | `Agent(engine=Plan(*steps, store=…, checkpoint_key=…, resume=…), **kw)` | Pure alias; forwards Plan kwargs (`max_iterations`, `store`, `checkpoint_key`, `resume`, `on_concurrent`) to a freshly-built `Plan`. |
+
+**Compose agents — sequential**
+
+| Sugar | Canonical | Differences |
+|---|---|---|
+| `Agent.chain(a, b)` | `Agent(engine=Plan(Step(target=a, name=a.name), Step(target=b, name=b.name)), name="chain")` | **Not pure alias** — builds the `Plan`+`Step` graph for you. Targets are the agents themselves (no `tools=` needed; `Plan` dispatches `Agent` targets via `target.run()` directly). |
+| `Agent.from_chain(a, b)` | Identical to `Agent.chain(a, b)` | Pure alias of `.chain`. |
+
+**Compose agents — parallel fan-out**
+
+| Sugar | Canonical | Differences |
+|---|---|---|
+| `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]`. Closest from-primitives form is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
+| `Agent.from_parallel(*agents, …)` | Identical to `Agent.parallel(...)` | Pure alias of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional. |
+
+**Build an Agent with a HIL engine**
+
+| Sugar | Canonical | Differences |
+|---|---|---|
+| `human_agent(timeout=…, ui=…, default=…, **agent_kw)` | `Agent(engine=HumanEngine(timeout=…, ui=…, default=…), **agent_kw)` | Pure alias with kwarg split: HIL-engine kwargs go to `HumanEngine(...)`, `**agent_kw` flows to `Agent(...)`. Lives in `lazybridge.ext.hil` to respect the core/ext import boundary. |
+| `supervisor_agent(tools=…, agents=…, store=…, input_fn=…, ainput_fn=…, timeout=…, default=…, **agent_kw)` | `Agent(engine=SupervisorEngine(tools=…, agents=…, store=…, input_fn=…, ainput_fn=…, timeout=…, default=…), **agent_kw)` | Same kwarg-split pattern. |
+
+**Wrap a callable as a Tool**
+
+| Sugar / variant | Canonical | Differences |
+|---|---|---|
+| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). **Default `mode="auto"` differs from `Tool(...)`'s `"signature"`**: `auto` tries `signature` then `hybrid`, falling back to `llm` only when `allow_llm_schema=True` and `schema_llm=` is supplied. |
+| `Tool.from_schema(name, description, parameters, func, strict=…, returns_envelope=…)` | (no callable-introspection canonical) | **Not sugar over `Tool(callable, …)`** — this is the canonical form when the JSON Schema is already known (MCP, OpenAPI bridges, third-party registries). Bypasses the schema builder. |
+
+**Wrap an Agent as a Tool**
+
+| Sugar | Canonical | Differences |
+|---|---|---|
+| `tools=[other_agent]` (in another agent) | (this is itself the canonical) | The agent's `name=` becomes the surface tool name. |
+| `researcher.as_tool("deep_research")` | A `Tool` whose `func` calls `researcher.run` | **Not pure alias.** Use to **rename** (different surface name than `researcher.name`) or to attach a `verify=` / `max_verify=` judge-and-retry loop — a feature `tools=[researcher]` does **not** expose. |
+| `tool(researcher, name="deep_research")` | Identical to `researcher.as_tool("deep_research")` | Pure alias of `as_tool` for agent-like inputs. |
+
+**Call an Agent**
+
+| Form | When |
+|---|---|
+| `result = agent(task)` (sync) | **Canonical entry point.** `__call__` auto-detects an event loop. |
+| `result = await agent.run(task)` | Inside an existing `async def` caller. |
+| `async for chunk in agent.stream(task):` | Incremental tokens / events. |
 
 Default model in examples: `claude-opus-4-7`. When a user is learning,
 err on the side of the longer canonical form — even if a one-liner
 works, the canonical version teaches the shape they will need at every
 later rung.
+
+Full reference with worked examples for each row:
+<https://docs.lazybridge.com/concepts/canonical-vs-sugar/>.
 
 ## Canonical patterns
 
