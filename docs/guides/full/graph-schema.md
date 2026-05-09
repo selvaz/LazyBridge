@@ -54,17 +54,32 @@ class EdgeType:
 
 ## Synopsis
 
-A `GraphSchema` records two kinds of nodes and three kinds of edges:
+A `GraphSchema` records three kinds of nodes and three kinds of edges:
 
 - **`AgentNode`** — every `Agent` constructed with `session=sess`
-  gets one. Carries the agent's name, provider, model, and system
-  prompt (read duck-typed from `agent.engine`).
+  gets one. Carries `id`, `name`, `provider`, `model`, `system`,
+  `engine_type` (the engine class name — `"LLMEngine"`, `"Plan"`,
+  `"HumanEngine"`, `"SupervisorEngine"`, …), and `tools` (a list
+  of names of plain Python-callable tools registered on the
+  agent; agent-as-tool wrappings are captured as edges, not
+  listed here).
 - **`RouterNode`** — explicit router primitive (rare; most routing
   is encoded directly on `Step(routes=...)` and shows up as an
   edge instead).
+- **`_ToolNode`** — auto-registered for every plain Python-callable
+  tool an agent exposes (i.e. tools where `returns_envelope=False`).
+  Lets the topology show *every* tool stub as a separate node before
+  any execution starts. `_ToolNode.type` is the literal string
+  `"tool"` (not a `NodeType` enum value); the leading underscore is
+  a hint that the class is a small internal stub, not an extension
+  surface.
 - **`Edge(from_id, to_id, label, kind)`** — three flavours:
-    - `TOOL` — outer agent's `tools=[...]` includes inner agent.
-      `as_tool` wrappings are recorded automatically.
+    - `TOOL` — outer agent's `tools=[...]` includes inner agent or
+      a plain callable. `as_tool` wrappings and the auto-registered
+      `_ToolNode` stubs both produce these. **Edges are
+      idempotent**: the same `(from, to, kind, label)` quadruple
+      registered twice is a no-op, so a tool fired N times in a
+      run shows up once in the graph.
     - `CONTEXT` — data dependency (e.g. a shared `Memory`
       referenced by another agent's `sources=`).
     - `ROUTER` — routing edges from explicit router nodes.
@@ -199,8 +214,15 @@ g.render("pipeline.gv")
 - **Manual `add_edge` is rare.** Most edges register
   automatically when an agent is wrapped via `as_tool` (or passed
   directly into another agent's `tools=[...]`). Use
-  `session.register_tool_edge(outer, inner, label=…)` only when
+  `session.register_tool_edge(outer, inner, label="")` only when
   wiring outside of `as_tool` (custom routing primitives, etc.).
+- **Engine class name is the fallback for `provider` / `model`.**
+  When an `Agent` is built with a non-LLM engine (`Plan`,
+  `HumanEngine`, `SupervisorEngine`), `_derive_provider_model`
+  fills `provider` and `model` with the engine's class name so
+  non-LLM nodes don't render as empty strings in dumps. If you
+  rely on the `provider` field being a real LLM provider name,
+  filter on `engine_type == "LLMEngine"` first.
 
 ## See also
 

@@ -20,12 +20,15 @@ Plan(
 )
 
 
-# Persisted shape at store[checkpoint_key]
+# Persisted shape at store[checkpoint_key] (CHECKPOINT_VERSION = 2).
 {
     "next_step": "step_name" | None,
     "kv": {"writes_key": payload, ...},
     "completed_steps": [...],
-    "status": "running" | "failed" | "done",
+    "status": "claimed" | "running" | "failed" | "done",
+    "run_uid": "<hex>",            # CAS ownership stamp; identifies the writer
+    "checkpoint_version": 2,
+    "history": [...],              # serialised StepResult list (v2 only)
 }
 
 
@@ -48,8 +51,12 @@ The persisted object captures three things:
 - `completed_steps` + `status` — bookkeeping for the resume logic
   to decide what to skip.
 
-Three states transitions:
+Four state transitions:
 
+- **Claimed** — `status="claimed"`, transient. Written via CAS
+  before any step runs so two concurrent fresh runs collide here
+  rather than corrupting each other later. You'll only see this
+  status if you inspect the store mid-run.
 - **Running** — `status="running"`, `next_step=<the next step>`.
   Normal progression after a successful step.
 - **Failed** — `status="failed"`, `next_step=<failing step>` (or
@@ -58,6 +65,14 @@ Three states transitions:
 - **Done** — `status="done"`, `next_step=None`. A subsequent
   `resume=True` short-circuits and returns an envelope whose
   payload is the cached `kv`.
+
+The persisted `history` field (v2 only) is a serialised
+`StepResult` list — a resumed run rebuilds in-memory step history
+from it, which is what makes `from_parallel_all` and the nested-
+cost rollup behave correctly across crash boundaries. v1
+checkpoints (no `history` key) degrade gracefully: in-memory
+history starts empty and the parallel-band aggregator falls back
+to the start envelope (legacy pre-W1.3 behaviour, no crash).
 
 `on_concurrent` controls what happens when two runs try to use the
 same `checkpoint_key` at once:
@@ -226,6 +241,17 @@ print(state["kv"]["clean"])      # the partial result
   short-circuited run returns instantly but still hits the Store
   to read the cached kv. For very high read rates, layer your
   own in-process cache.
+- **Sidecar consumers should reconcile against the checkpoint
+  snapshot, not the raw Store.** Each step writes its checkpoint
+  *before* the durable `store.write(step.writes, value)` call —
+  this eliminates double-writes on resume (the checkpoint
+  already records `next_step` past the completed step). The
+  trade-off is that a crash in the gap between the two writes
+  loses the durable Store value; the value still lives in the
+  checkpoint's serialised `kv` and is read back on resume, so
+  the Plan continues correctly. Anything reading the Store
+  out-of-band (a dashboard, a sidecar process) should compare
+  the keys against `state["kv"]` to detect this gap.
 
 ## See also
 

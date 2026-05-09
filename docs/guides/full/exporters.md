@@ -24,16 +24,17 @@ from lazybridge import (
     EventType,
 )
 
-CallbackExporter(fn)                       # fn: Callable[[dict], None]
-ConsoleExporter(*, stream=sys.stdout)      # pretty-prints to stdout
-FilteredExporter(inner, *, event_types)    # combinator: forward only matching events
-JsonFileExporter(path)                     # JSON-lines append (one event per line)
-StructuredLogExporter(logger_name="lazybridge")
+# Every core exporter has a keyword-only constructor.
+CallbackExporter(*, fn)                                  # fn: Callable[[dict], None]
+ConsoleExporter(*, stream=None)                          # defaults to sys.stdout when None
+FilteredExporter(*, inner, event_types)                  # combinator: forward only matching events
+JsonFileExporter(*, path)                                # JSON-lines append (one event per line)
+StructuredLogExporter(*, logger_name="lazybridge")
 
 
 # Built-in from ext (lazybridge[otel] extras).
 from lazybridge.ext.otel import OTelExporter
-OTelExporter(endpoint=None, *, exporter=None)
+OTelExporter(*, endpoint=None, exporter=None, batch=True)
 ```
 
 Wire any list of exporters into a `Session(exporters=[...])`.
@@ -44,6 +45,17 @@ A `Session` fans every event into all registered exporters in
 registration order. Each event is a `dict` with at minimum
 `event_type`, `session_id`, `run_id` (possibly `None`); engine-
 specific fields are merged in by the emitter.
+
+The full `EventType` enum (`lazybridge.session.EventType`):
+
+| Member | Emitted by |
+|---|---|
+| `AGENT_START` / `AGENT_FINISH` | every `Agent` run, including nested |
+| `LOOP_STEP` | each iteration of an `LLMEngine` tool-calling loop |
+| `MODEL_REQUEST` / `MODEL_RESPONSE` | every provider call |
+| `TOOL_CALL` / `TOOL_RESULT` / `TOOL_ERROR` / `TOOL_TIMEOUT` | every tool dispatch (with `TOOL_TIMEOUT` carrying `timeout_s`) |
+| `HIL_DECISION` | one per `HumanEngine` / `SupervisorEngine` decision |
+| `STORE_WRITE` / `STORE_READ` / `MEMORY_WRITE` / `MEMORY_READ` | state-mutation audit events |
 
 The five core exporters cover the dev / prod / custom surface:
 
@@ -72,6 +84,12 @@ outer tool span, no run-id chaining required.
 
 For high-throughput emit paths, pair `Session(batched=True,
 on_full="hybrid")` with the slow exporters (OTel, JSON-file).
+
+`OTelExporter` defaults to `batch=True`, which wraps the underlying
+OTLP exporter in `BatchSpanProcessor`. Set `batch=False` to use
+`SimpleSpanProcessor` instead — primarily useful in tests against an
+in-memory exporter, where you want each span flushed synchronously
+on close.
 
 ## When to use which
 

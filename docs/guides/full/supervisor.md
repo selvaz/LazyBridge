@@ -221,9 +221,12 @@ supervisor_web = Agent(
   scripted-input tests must end the iterator with `continue`.
 - **Session events.** Like any engine, an Agent wrapping
   `SupervisorEngine` emits `AGENT_START` / `AGENT_FINISH` events
-  via the session. The REPL itself doesn't emit per-command
-  events; if you need that, layer logging inside `input_fn` or
-  use a custom adapter.
+  via the session. **Plus**, the REPL emits one `HIL_DECISION`
+  event per command — `kind` is one of `continue` / `retry` /
+  `store` / `tool` / `unknown` / `empty`, `command` is the raw
+  REPL input, and `result` (when present) is a brief of the
+  outcome. Auditing a multi-step REPL session is a sequential
+  read of those events.
 - **`store=` is read-only from the REPL by default.** The
   `store <key>` command prints the value. Writes happen through
   tool calls or registered agents — there's no `store set <key>
