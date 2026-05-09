@@ -138,12 +138,17 @@ agent = Agent(
 )
 ```
 
-The gate exists on **both** `Agent` and `LLMEngine` so a caller can't
-silently bypass the check by passing a pre-built `engine=
-LLMEngine(...)` (the Agent re-validates against the same flag at its
-own construction). `WEB_SEARCH`, `FILE_SEARCH`, `IMAGE_GENERATION`,
-`GOOGLE_SEARCH`, `GOOGLE_MAPS` are NOT gated by this flag — only the
-two genuinely dangerous tools.
+The gate runs at **each construction site** that introduces native
+tools — `LLMEngine(native_tools=...)` validates against its own
+`allow_dangerous_native_tools=`, and `Agent(native_tools=...)` (whose
+list is merged into the engine) validates against the Agent's flag.
+Specify your native tools at the construction site that owns the
+flag; an already-configured `engine.native_tools` on a pre-built
+engine is **not** re-checked when you wrap it in `Agent(engine=...)`,
+so don't rely on `Agent(allow_dangerous_native_tools=False)` to
+"undo" a permissive engine. `WEB_SEARCH`, `FILE_SEARCH`,
+`IMAGE_GENERATION`, `GOOGLE_SEARCH`, `GOOGLE_MAPS` are NOT gated by
+this flag — only the two genuinely dangerous tools.
 
 The default (`allow_dangerous_native_tools=False`) raises
 `ValueError` at construction with a message naming the offending
