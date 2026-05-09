@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "lazybridge"
 version = "0.7.0"
 description = "Zero-boilerplate multi-provider LLM agent framework"
-readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 authors = [{ name = "Marco Selvatici" }]
