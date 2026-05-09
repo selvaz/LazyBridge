@@ -1,0 +1,67 @@
+# LazyBridge
+
+A zero-boilerplate, multi-provider Python framework for composing LLMs, plain
+functions, deterministic plans, humans, and external tools under one uniform
+model: **everything is a tool.**
+
+```python
+from lazybridge import Agent
+
+agent = Agent.from_model("claude-sonnet-4-6")
+result = await agent.run("What's the capital of France?")
+print(result.text())
+```
+
+That's the whole framework's surface area when you start. It grows only when
+your problem grows.
+
+## What LazyBridge gives you
+
+An agent in LazyBridge is the composition of three things — and only these three:
+
+- **Engine** — the decision-making layer (an LLM, a deterministic `Plan`, a
+  human-in-the-loop, or your own).
+- **Tools** — every capability the agent can use. Plain Python functions,
+  other agents, MCP servers, and full pipelines all behave the same way.
+- **State** — `Memory`, `Session`, and `Store`: continuity, traceability, and
+  shared blackboard between steps.
+
+That's it. Whether you're writing a one-shot helper or a checkpointed
+multi-region pipeline with human approvals and OpenTelemetry traces, the
+mental model is the same.
+
+## Where to go next
+
+- [**Quickstart**](quickstart.md) — install LazyBridge and run your first
+  agent in five minutes.
+- **Concepts** *(coming next)* — the mental model, in 15 minutes.
+- **Guides** *(coming next)* — one focused page per public concept,
+  organised by tier (Basic → Mid → Full → Advanced).
+- **Recipes** *(coming next)* — runnable end-to-end examples lifted from
+  `examples/`.
+- **For LLM assistants** *(coming next)* — install the LazyBridge Claude
+  Skill, point your AI tooling at `/llms.txt`, or connect the docs MCP
+  server.
+
+## Design principles
+
+- **Provider freedom.** Switch models or providers without rewriting
+  your architecture.
+- **Everything is a tool.** Functions, agents, plans, pipelines, MCP
+  servers, and external systems all compose through the same primitive.
+- **Zero boilerplate.** No duplicated function definitions, no manual
+  JSON schema translation, no orchestration glue you have to maintain.
+- **Progressive complexity.** Simple use cases stay simple. Complex
+  workflows are possible without changing the core mental model.
+- **Designed for humans and LLMs.** Code that's readable to a
+  reviewer is also learnable to an assistant that writes the next
+  patch.
+- **Determinism when you need it.** Drop down from autonomous LLM
+  loops to a typed, validated `Plan` whenever auditability or repeat
+  cost matters.
+- **Composability over monoliths.** Large systems emerge from small,
+  specialised components — not one overloaded prompt.
+- **Observable and debuggable.** Sessions, exporters, the Visualizer,
+  and OpenTelemetry mean you can always see what happened and why.
+
+LazyBridge is meant to feel like a bridge, not a cage.
