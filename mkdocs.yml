@@ -114,3 +114,8 @@ nav:
           - Step: guides/full/step.md
           - Sentinels: guides/full/sentinels.md
           - Routing: guides/full/routing.md
+          - Parallel plan steps: guides/full/parallel-plan-steps.md
+          - Checkpoint & resume: guides/full/checkpoint.md
+          - Exporters: guides/full/exporters.md
+          - GraphSchema: guides/full/graph-schema.md
+          - SupervisorEngine: guides/full/supervisor.md
