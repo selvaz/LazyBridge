@@ -91,3 +91,9 @@ nav:
       - Everything is a tool: concepts/everything-is-a-tool.md
       - Progressive complexity: concepts/progressive-complexity.md
       - Canonical vs sugar: concepts/canonical-vs-sugar.md
+  - Guides:
+      - Basic:
+          - Agent: guides/basic/agent.md
+          - Tool: guides/basic/tool.md
+          - Envelope: guides/basic/envelope.md
+          - Native tools: guides/basic/native-tools.md

@@ -45,8 +45,13 @@ mental model is the same.
 - [**Concepts → Canonical vs sugar**](concepts/canonical-vs-sugar.md) —
   every factory function and shortcut LazyBridge ships, with its
   canonical equivalent and any subtle differences.
-- **Guides** *(coming next)* — one focused page per public concept,
-  organised by tier (Basic → Mid → Full → Advanced).
+- **Guides → Basic** — one focused page per Day-1 concept:
+  [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md),
+  [Envelope](guides/basic/envelope.md),
+  [Native tools](guides/basic/native-tools.md).
+- **Guides → Mid / Full / Advanced** *(coming next)* — Memory,
+  Store, Session, Plan, sentinels, routing, checkpoints,
+  human-in-the-loop, OpenTelemetry, custom engines and providers.
 - **Recipes** *(coming next)* — runnable end-to-end examples lifted from
   `examples/`.
 - **For LLM assistants** *(coming next)* — install the LazyBridge Claude

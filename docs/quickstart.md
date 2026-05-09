@@ -92,8 +92,9 @@ exposed as a tool. From here:
 - [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
   the twelve rungs from this quickstart to a checkpointed production
   pipeline.
-- **Guides → Basic → Tool** *(coming next)* — the three schema modes
-  (`signature` / `llm` / `hybrid`) and when to pick each.
+- [**Guides → Basic → Tool**](guides/basic/tool.md) — the three
+  schema modes (`signature` / `llm` / `hybrid`), six paths to a
+  `Tool`, and when to construct one explicitly.
 - **Recipes → React agent** *(coming next)* — the same pattern as above,
   end-to-end with a real tool and a verbose run.
 - **For LLM assistants** *(coming next)* — let Claude or ChatGPT generate
