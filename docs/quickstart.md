@@ -95,7 +95,7 @@ exposed as a tool. From here:
 - [**Guides → Basic → Tool**](guides/basic/tool.md) — the three
   schema modes (`signature` / `llm` / `hybrid`), six paths to a
   `Tool`, and when to construct one explicitly.
-- **Recipes → React agent** *(coming next)* — the same pattern as above,
-  end-to-end with a real tool and a verbose run.
-- **For LLM assistants** *(coming next)* — let Claude or ChatGPT generate
-  more LazyBridge code for you.
+- [**Recipes → React agent**](recipes/react-agent.md) — the same
+  pattern as above, end-to-end with a real tool and a verbose run.
+- [**For LLM assistants**](for-llms/index.md) — let Claude or
+  ChatGPT generate more LazyBridge code for you.

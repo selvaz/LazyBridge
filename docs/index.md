@@ -64,11 +64,16 @@ mental model is the same.
   use?" decision trees with quick-reference tables.
 - [**Errors**](errors.md) — cause → diagnosis → fix table for
   every framework exception and `Envelope.error.type` value.
-- **Recipes** *(coming next)* — runnable end-to-end examples lifted from
-  `examples/`.
-- **For LLM assistants** *(coming next)* — install the LazyBridge Claude
-  Skill, point your AI tooling at `/llms.txt`, or connect the docs MCP
-  server.
+- [**Recipes**](recipes/index.md) — twelve runnable examples from
+  `examples/`, embedded verbatim.
+- [**Decisions**](decisions/index.md) — nine "which one do I use?"
+  decision trees with quick-reference tables.
+- [**Reference**](reference/index.md) — auto-generated API surface
+  for every public symbol, organised by category.
+- [**Errors**](errors.md) — cause → diagnosis → fix table for every
+  framework exception.
+- [**For LLM assistants**](for-llms/index.md) — Claude Skill install,
+  `/llms.txt` index, and `/llms-full.txt` corpus dump.
 
 ## Design principles
 
