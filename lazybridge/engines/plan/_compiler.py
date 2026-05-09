@@ -140,27 +140,31 @@ class PlanCompiler:
                         f"or a literal str."
                     )
 
-            # from_step references valid step …
-            if isinstance(step.task, _FromStep) and step.task.name not in pos:
+            # from_step / from_parallel references valid step …
+            # ``_FromParallel`` is documented as an alias of ``_FromStep`` —
+            # treat them identically for compile-time forward-ref checks
+            # so a typo in either form fails fast at construction rather
+            # than degrading to a runtime warnings.warn fallback.
+            if isinstance(step.task, (_FromStep, _FromParallel)) and step.task.name not in pos:
                 raise PlanCompileError(
                     f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step."
                 )
             for n, ctx_item in enumerate(context_items):
-                if isinstance(ctx_item, _FromStep) and ctx_item.name not in pos:
+                if isinstance(ctx_item, (_FromStep, _FromParallel)) and ctx_item.name not in pos:
                     raise PlanCompileError(
                         f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references unknown step."
                     )
             # … and that step must come *before* this one.  A ``from_step``
             # to a future step quietly degrades to the start envelope at
             # runtime, which looks like success but isn't.
-            if isinstance(step.task, _FromStep) and pos.get(step.task.name, -1) >= i:
+            if isinstance(step.task, (_FromStep, _FromParallel)) and pos.get(step.task.name, -1) >= i:
                 raise PlanCompileError(
                     f"Step {step.name!r}: task=from_step({step.task.name!r}) "
                     f"references a step that is not earlier in the plan.  "
                     f"from_step targets must be defined before they're used."
                 )
             for n, ctx_item in enumerate(context_items):
-                if isinstance(ctx_item, _FromStep) and pos.get(ctx_item.name, -1) >= i:
+                if isinstance(ctx_item, (_FromStep, _FromParallel)) and pos.get(ctx_item.name, -1) >= i:
                     raise PlanCompileError(
                         f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) "
                         f"references a step that is not earlier in the plan.  "

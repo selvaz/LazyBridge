@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazybridge import from_step, tool
+from lazybridge import from_parallel, from_step, tool
 from lazybridge.engines.plan import Step
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._types import PlanCompileError
@@ -95,3 +95,51 @@ def test_compiler_accepts_valid_plan() -> None:
         ],
         tool_map,
     )  # no error
+
+
+# ---------------------------------------------------------------------------
+# from_parallel — must be validated identically to from_step (issue #19).
+# Pre-fix, ``from_parallel("nonexistent")`` slipped through the compiler
+# and degraded to a runtime warnings.warn fallback to the start envelope.
+# ---------------------------------------------------------------------------
+
+
+def test_compiler_rejects_unknown_from_parallel_reference() -> None:
+    """``from_parallel`` is documented as an alias of ``from_step`` —
+    a typo'd name must fail at construction, not at runtime."""
+    tool_map = _tool_map("a", "b")
+    with pytest.raises(PlanCompileError, match="references unknown step"):
+        PlanCompiler().validate(
+            [
+                Step("a"),
+                Step("b", task=from_parallel("does_not_exist")),
+            ],
+            tool_map,
+        )
+
+
+def test_compiler_rejects_forward_from_parallel_reference() -> None:
+    """A forward `from_parallel` ref is the same compile-time error as
+    a forward `from_step` ref — both quietly degrade at runtime."""
+    tool_map = _tool_map("a", "b")
+    with pytest.raises(PlanCompileError, match="not earlier in the plan"):
+        PlanCompiler().validate(
+            [
+                Step("a", task=from_parallel("b")),  # forward ref — illegal
+                Step("b"),
+            ],
+            tool_map,
+        )
+
+
+def test_compiler_rejects_unknown_from_parallel_in_context() -> None:
+    """Same as task=, but in the context= position."""
+    tool_map = _tool_map("a", "b")
+    with pytest.raises(PlanCompileError, match="references unknown step"):
+        PlanCompiler().validate(
+            [
+                Step("a"),
+                Step("b", context=from_parallel("does_not_exist")),
+            ],
+            tool_map,
+        )

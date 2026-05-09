@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lazybridge.graph.schema import AgentNode, EdgeType, GraphSchema, NodeType, RouterNode
+from lazybridge.graph.schema import AgentNode, EdgeType, GraphSchema, NodeType, RouterNode, _ToolNode
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -236,3 +236,36 @@ def test_add_agent_populates_engine_type_from_live_agent():
     node = g.node("ae1")
     assert node is not None
     assert node.engine_type == "_FakeEngine"
+
+
+# ---------------------------------------------------------------------------
+# NodeType.TOOL — issue #21.  Pre-fix the enum had only AGENT and ROUTER,
+# yet ``_ToolNode.type`` was the literal string "tool".  A consumer
+# iterating NodeType missed the third de-facto type.
+# ---------------------------------------------------------------------------
+
+
+def test_nodetype_enum_has_tool_value() -> None:
+    """``NodeType`` must include TOOL so consumers iterating the enum
+    see all three node types that GraphSchema actually stores."""
+    assert NodeType.TOOL.value == "tool"
+    assert {nt.value for nt in NodeType} == {"agent", "router", "tool"}
+
+
+def test_tool_node_type_is_enum_value_not_literal() -> None:
+    """``_ToolNode.type`` must be the enum member, not a bare string."""
+    node = _ToolNode(id="tool:fn", name="fn")
+    assert node.type == NodeType.TOOL
+    assert isinstance(node.type, NodeType)
+
+
+def test_tool_node_round_trips_through_from_dict() -> None:
+    """A serialised tool node round-trips correctly via the enum dispatch."""
+    g = GraphSchema("sess-tool-rt")
+    g._nodes["tool:fn"] = _ToolNode(id="tool:fn", name="fn")
+    payload = g.to_dict()
+    g2 = GraphSchema.from_dict(payload)
+    rt = g2.node("tool:fn")
+    assert rt is not None
+    assert rt.type == NodeType.TOOL
+    assert isinstance(rt, _ToolNode)

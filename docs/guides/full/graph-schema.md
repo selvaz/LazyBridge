@@ -69,10 +69,10 @@ A `GraphSchema` records three kinds of nodes and three kinds of edges:
 - **`_ToolNode`** — auto-registered for every plain Python-callable
   tool an agent exposes (i.e. tools where `returns_envelope=False`).
   Lets the topology show *every* tool stub as a separate node before
-  any execution starts. `_ToolNode.type` is the literal string
-  `"tool"` (not a `NodeType` enum value); the leading underscore is
-  a hint that the class is a small internal stub, not an extension
-  surface.
+  any execution starts. `_ToolNode.type` is `NodeType.TOOL`; the
+  leading underscore on the class is a hint that the class itself is
+  a small internal stub, not an extension surface, but the enum
+  value is part of the public `NodeType` surface.
 - **`Edge(from_id, to_id, label, kind)`** — three flavours:
     - `TOOL` — outer agent's `tools=[...]` includes inner agent or
       a plain callable. `as_tool` wrappings and the auto-registered
