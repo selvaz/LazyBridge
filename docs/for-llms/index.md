@@ -10,8 +10,8 @@ authoritative current API rather than from training-data snapshots.
 | Surface | Where | Use it for |
 |---|---|---|
 | **Claude Skill** | Bundled with `pip install lazybridge` at `lazybridge/skill/` | Claude Code / Claude API / Claude.ai gets canonical-form guidance whenever it edits LazyBridge code |
-| **`llms.txt`** | <https://docs.lazybridge.com/llms.txt> | Any tool following the [llmstxt.org](https://llmstxt.org) convention — discovers every doc page with one fetch |
-| **`llms-full.txt`** | <https://docs.lazybridge.com/llms-full.txt> | The whole docs corpus concatenated; paste into a long-context model when you don't have a tool that supports `llms.txt` |
+| **`llms.txt`** | <https://selvaz.github.io/LazyBridge/llms.txt> | Any tool following the [llmstxt.org](https://llmstxt.org) convention — discovers every doc page with one fetch |
+| **`llms-full.txt`** | <https://selvaz.github.io/LazyBridge/llms-full.txt> | The whole docs corpus concatenated; paste into a long-context model when you don't have a tool that supports `llms.txt` |
 
 ## Claude Skill
 

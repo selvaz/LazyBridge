@@ -11,7 +11,7 @@ To make Claude Code pick it up::
           ~/.claude/skills/lazybridge
 
 The full how-to (Claude API, Claude.ai zip upload, downloadable mirror) lives
-at ``docs.lazybridge.com/for-llms/claude-skill``.
+at ``selvaz.github.io/LazyBridge/for-llms/claude-skill``.
 """
 
 from __future__ import annotations

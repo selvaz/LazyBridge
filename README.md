@@ -23,10 +23,10 @@ print(result.text())
 That's the whole surface when you start. It grows only when your problem
 grows.
 
-- **Documentation:** <https://docs.lazybridge.com>
-- **Recipes:** <https://docs.lazybridge.com/recipes/>
+- **Documentation:** <https://selvaz.github.io/LazyBridge>
+- **Recipes:** <https://selvaz.github.io/LazyBridge/recipes/>
 - **For LLM assistants** (Claude Skill, `llms.txt`):
-  <https://docs.lazybridge.com/for-llms/>
+  <https://selvaz.github.io/LazyBridge/for-llms/>
 
 ## The mental model
 
@@ -44,7 +44,7 @@ Every `Agent` is the composition `Engine + Tools + State`:
 The same `Agent(engine=..., tools=..., ...)` shape supports a one-shot helper,
 a hierarchical multi-agent system, and a checkpointed production pipeline —
 only the `engine=` argument changes. See
-[Concepts → Mental model](https://docs.lazybridge.com/concepts/mental-model/).
+[Concepts → Mental model](https://selvaz.github.io/LazyBridge/concepts/mental-model/).
 
 ## Pick your tier
 
@@ -52,12 +52,12 @@ LazyBridge grows with you — every tier is additive.
 
 | Tier | For | Key imports |
 |---|---|---|
-| **[Basic](https://docs.lazybridge.com/guides/basic/agent/)** | one-shot or tool-calling agents | `Agent` · `LLMEngine` · `Tool` · `NativeTool` · `Envelope` |
-| **[Mid](https://docs.lazybridge.com/guides/mid/memory/)** | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `verify=` · `MCP` · `HumanEngine` · `EvalSuite` |
-| **[Full](https://docs.lazybridge.com/guides/full/plan/)** | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · sentinels · `SupervisorEngine` · checkpoint · exporters |
-| **[Advanced](https://docs.lazybridge.com/guides/advanced/engine-protocol/)** | extending the framework | `BaseProvider` · `Plan.to_dict` · custom engines · OpenTelemetry · Visualizer |
+| **[Basic](https://selvaz.github.io/LazyBridge/guides/basic/agent/)** | one-shot or tool-calling agents | `Agent` · `LLMEngine` · `Tool` · `NativeTool` · `Envelope` |
+| **[Mid](https://selvaz.github.io/LazyBridge/guides/mid/memory/)** | real apps with memory, tracing, guardrails, composition | `Memory` · `Store` · `Session` · `Guard*` · `verify=` · `MCP` · `HumanEngine` · `EvalSuite` |
+| **[Full](https://selvaz.github.io/LazyBridge/guides/full/plan/)** | production pipelines: typed hand-offs, routing, resume, OTel | `Plan` · `Step` · sentinels · `SupervisorEngine` · checkpoint · exporters |
+| **[Advanced](https://selvaz.github.io/LazyBridge/guides/advanced/engine-protocol/)** | extending the framework | `BaseProvider` · `Plan.to_dict` · custom engines · OpenTelemetry · Visualizer |
 
-See [Decisions → Pick your tier](https://docs.lazybridge.com/decisions/pick-tier/)
+See [Decisions → Pick your tier](https://selvaz.github.io/LazyBridge/decisions/pick-tier/)
 for a flowchart.
 
 ## Install
@@ -93,7 +93,7 @@ print(result.text())
 
 No decorators, no JSON schemas. Type hints + docstring become the tool's
 LLM-facing schema automatically. See
-[Guides → Basic → Tool](https://docs.lazybridge.com/guides/basic/tool/).
+[Guides → Basic → Tool](https://selvaz.github.io/LazyBridge/guides/basic/tool/).
 
 ### 2 · Native tools (no code at all)
 
@@ -156,7 +156,7 @@ agent("Read README.md and summarise the install steps")
 
 The MCP server expands into one LazyBridge `Tool` per remote tool — no
 separate engine, no graph wrappers. See
-[Guides → Mid → MCP](https://docs.lazybridge.com/guides/mid/mcp/).
+[Guides → Mid → MCP](https://selvaz.github.io/LazyBridge/guides/mid/mcp/).
 
 ### 5 · Declared typed pipeline with crash resume
 
@@ -191,7 +191,7 @@ If a step fails mid-plan, the next run with `resume=True` retries from the
 failing step only. Concurrent runs on the same `checkpoint_key` are serialised
 via `compare_and_swap` — first writer wins, second raises
 `ConcurrentPlanRunError`. Pass `on_concurrent="fork"` for fan-out workflows.
-See [Guides → Full → Checkpoint & resume](https://docs.lazybridge.com/guides/full/checkpoint/).
+See [Guides → Full → Checkpoint & resume](https://selvaz.github.io/LazyBridge/guides/full/checkpoint/).
 
 ### 6 · Human-in-the-loop with a full REPL
 
@@ -210,7 +210,7 @@ print(result.text())
 REPL commands: `continue`, `retry <agent>: <feedback>`, `store <key>`,
 `<tool>(<args>)`. For approval-only flows use the lighter `human_agent(...)`
 or `HumanEngine` — see
-[Decisions → HumanEngine vs SupervisorEngine](https://docs.lazybridge.com/decisions/human-engine-vs-supervisor/).
+[Decisions → HumanEngine vs SupervisorEngine](https://selvaz.github.io/LazyBridge/decisions/human-engine-vs-supervisor/).
 
 ## What makes LazyBridge different
 
@@ -235,28 +235,28 @@ or `HumanEngine` — see
 7. **First-class LLM-assistant artifact.** A signature-first Claude Skill
    ships with the library at `lazybridge/skill/`, loadable by any LLM
    coding assistant. See
-   [For LLM assistants](https://docs.lazybridge.com/for-llms/).
+   [For LLM assistants](https://selvaz.github.io/LazyBridge/for-llms/).
 
 ## Documentation
 
-The full docs live at <https://docs.lazybridge.com>. Highlights:
+The full docs live at <https://selvaz.github.io/LazyBridge>. Highlights:
 
-- **[Concepts](https://docs.lazybridge.com/concepts/mental-model/)** —
+- **[Concepts](https://selvaz.github.io/LazyBridge/concepts/mental-model/)** —
   the mental model, "everything is a tool", progressive complexity, and
   canonical-vs-sugar.
-- **[Guides](https://docs.lazybridge.com/guides/basic/agent/)** —
+- **[Guides](https://selvaz.github.io/LazyBridge/guides/basic/agent/)** —
   one focused page per public concept, all following the same
   Signature → Synopsis → When to use / NOT → Example → Pitfalls →
   See also template.
-- **[Recipes](https://docs.lazybridge.com/recipes/)** — runnable
+- **[Recipes](https://selvaz.github.io/LazyBridge/recipes/)** — runnable
   examples from `examples/`, embedded verbatim.
-- **[Decisions](https://docs.lazybridge.com/decisions/)** — "which
+- **[Decisions](https://selvaz.github.io/LazyBridge/decisions/)** — "which
   one do I use?" trees for tier, return type, state layer, composition,
   parallelism, HumanEngine vs SupervisorEngine, `verify=` placement,
   checkpointing.
-- **[Errors](https://docs.lazybridge.com/errors/)** — cause → diagnosis
+- **[Errors](https://selvaz.github.io/LazyBridge/errors/)** — cause → diagnosis
   → fix table for every framework exception.
-- **[For LLM assistants](https://docs.lazybridge.com/for-llms/)** —
+- **[For LLM assistants](https://selvaz.github.io/LazyBridge/for-llms/)** —
   Claude Skill install, `/llms.txt` index, `/llms-full.txt` corpus.
 
 ## Contributing

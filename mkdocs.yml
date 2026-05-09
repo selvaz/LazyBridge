@@ -1,6 +1,6 @@
 site_name: LazyBridge
 site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
-site_url: https://docs.lazybridge.com
+site_url: https://selvaz.github.io/LazyBridge/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
 edit_uri: edit/main/docs/
