@@ -126,3 +126,17 @@ nav:
           - Plan serialization: guides/advanced/plan-serialize.md
           - OpenTelemetry: guides/advanced/otel.md
           - Visualizer: guides/advanced/visualizer.md
+  - Recipes:
+      - Overview: recipes/index.md
+      - React agent: recipes/react-agent.md
+      - Researcher (single agent): recipes/researcher-single.md
+      - Researcher → reporter: recipes/researcher-reporter.md
+      - Supervisor pattern: recipes/supervisor-pattern.md
+      - Plan tool: recipes/plan-tool.md
+      - Agent builds a plan: recipes/agent-builds-plan.md
+      - Blackboard planner: recipes/blackboard-planner.md
+      - Dynamic re-planning: recipes/dynamic-replanning.md
+      - Parallel report: recipes/parallel-report.md
+      - Daily news: recipes/daily-news.md
+      - Live visualization: recipes/live-visualization.md
+      - Visualization mock: recipes/visualization-mock.md
