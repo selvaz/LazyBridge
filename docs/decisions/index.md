@@ -1,13 +1,38 @@
-# Decision trees
+# Decisions
 
-Each tree answers a concrete "when to use which" question.
+Short reference pages, one per recurring "which one do I use?"
+question. Each page has a decision tree, a quick-reference table,
+and pointers to the deep guides for the chosen option.
 
-* [Where do I start: Basic, Mid, Full, or Advanced?](pick-tier.md)
-* [What does my agent return — text, typed object, or metadata?](return-type.md)
-* [State: Memory, Store, or sources=?](state-layer.md)
-* [Composing agents: chain, Agent.parallel, Plan, or tools=?](composition.md)
-* [Parallelism: automatic or declared?](parallelism.md)
-* [Human-in-the-loop: HumanEngine or SupervisorEngine?](human-engine-vs-supervisor.md)
-* [verify= at Agent level, tool level, or Plan step level?](verify-placement.md)
-* [Checkpoint/resume: when is it worth the storage complexity?](checkpoint.md)
-* [Do I actually need the Advanced tier?](need-advanced.md)
+## Picking your starting point
+
+- [Which tier?](pick-tier.md) — Basic, Mid, Full, or Advanced.
+
+## Inside an Agent
+
+- [Return type](return-type.md) — `.text()` vs `.payload` vs
+  `.metadata`.
+- [State layer](state-layer.md) — `Memory`, `Store`, or `sources=`.
+
+## Composing Agents
+
+- [Composition](composition.md) — `Agent.chain` vs
+  `Agent.parallel` vs `Agent(tools=[...])` vs `Plan`.
+- [Parallelism](parallelism.md) — automatic (LLM-decided) vs
+  declared.
+
+## Human / verifier placement
+
+- [HumanEngine vs SupervisorEngine](human-engine-vs-supervisor.md)
+- [`verify=` placement](verify-placement.md) — Agent / tool /
+  Plan step.
+
+## Production-grade Plan
+
+- [Checkpoint & resume](checkpoint.md) — when is the storage
+  overhead worth it?
+
+## Extension surface
+
+- [Do I need Advanced?](need-advanced.md) — smell test for the
+  framework-author tier.

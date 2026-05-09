@@ -1,227 +1,101 @@
 # Quickstart
 
-Five minutes to a working agent. Copy-paste the snippets in order.
+Five minutes from `pip install` to a running agent that calls a tool.
 
-## The grammar
-
-Every LazyBridge agent has the same shape:
-
-```python
-Agent(
-    engine=...,    # the brain — decides what happens
-    tools=[...],   # the capabilities — what the agent can call
-    memory=...,    # the context — conversation history
-    session=...,   # observability — event log
-)
-```
-
-The engine is the only thing that changes. A single LLM call, a
-multi-step plan, a human approval gate — all use the same Agent wrapper.
-
-**String shortcut** — `Agent("claude-opus-4-7")` is sugar for
-`Agent(engine=LLMEngine("claude-opus-4-7"))`. It's valid everywhere in
-this guide. Use the explicit `LLMEngine(...)` form when you need to
-configure the engine directly (e.g. `system=`, `max_turns=`,
-`thinking=`).
-
-**`as_tool("name")`** — the way one Agent becomes a capability of
-another. The name you pass connects the tool to the Plan or the LLM::
-
-    researcher.as_tool("research")   →  tool map key: "research"
-    Step("research")                 →  calls the "research" tool
-    routes={"research": predicate}   →  routes to the "research" step
-
-Keep reading to see this in practice.
-
-## Install
+## 1. Install
 
 ```bash
-pip install lazybridge[anthropic]   # or [openai], [google], [deepseek], [all]
+pip install "lazybridge[anthropic]"
 ```
 
-Set your API key:
+LazyBridge has no required provider — pick the SDK matching the model you
+want to call. Available extras: `anthropic`, `openai`, `google`, `deepseek`,
+`litellm` (for 100+ providers via LiteLLM). You can install several at once.
+
+Set the matching API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## 1. Hello world (two lines)
+## 2. Your first agent
 
 ```python
-from lazybridge import Agent
-
-print(Agent("claude-opus-4-7")("what's the capital of France?").text())
-```
-
-## 2. Add a native tool (no code)
-
-Native tools run server-side at the provider — no function to write,
-no schema to ship. Just pass an enum.
-
-```python
-from lazybridge import Agent, NativeTool
-
-search = Agent("claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH])
-print(search("what happened in AI news this week?").text())
-```
-
-Available: `WEB_SEARCH`, `CODE_EXECUTION`, `FILE_SEARCH`,
-`COMPUTER_USE`, `GOOGLE_SEARCH`, `GOOGLE_MAPS` (each supported by a
-subset of providers — see the [native-tools guide](guides/native-tools.md)).
-
-## 3. Add your own tool
-
-Any Python function with type hints + docstring becomes a tool. No
-decorators, no JSON schemas. LazyBridge reads the signature and the
-docstring and builds the tool schema automatically; if hints are
-missing you can switch to [LLM-inferred schemas](guides/tool-schema.md).
-
-```python
-from lazybridge import Agent
-
-def get_weather(city: str) -> str:
-    """Return current temperature and conditions for ``city``."""
-    return f"{city}: 22°C, sunny"
-
-print(
-    Agent("claude-opus-4-7", tools=[get_weather])(
-        "what's the weather in Rome and Paris?"
-    ).text()
-)
-```
-
-Behind the scenes, LazyBridge wraps the function as a `Tool`, extracts
-the JSON schema from the type hints, passes it to the model, and
-executes all returned tool calls concurrently via `asyncio.gather`.
-
-## 4. Structured output
-
-Declare the shape you want and read it off the Envelope. If the model
-returns malformed JSON the engine retries up to `max_output_retries`
-times with the validation error fed back as context.
-
-```python
-from lazybridge import Agent
-from pydantic import BaseModel
-
-class Summary(BaseModel):
-    title: str
-    bullets: list[str]
-
-env = Agent("claude-opus-4-7", output=Summary)("summarise LazyBridge in 3 bullets")
-print(env.payload.title)
-print(env.payload.bullets)
-```
-
-## 5. Two agents composed
-
-Build sub-agents first, then give them to an orchestrator via
-`as_tool("name")`. The name you pass is how the orchestrator refers to
-that capability — in the Plan's Step targets, in LLM tool calls, and in
-routing rules.
-
-```python
-from lazybridge import Agent, LLMEngine, Plan, Step
-
-def search(query: str) -> str:
-    """Search the web for ``query``; return the top 3 hits."""
-    return "..."
-
-# Sub-agents — declared first, each with its own engine and tools
-researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7", system="You are a research specialist."),
-    tools=[search],
-)
-writer = Agent(
-    engine=LLMEngine("claude-opus-4-7", system="You are a concise technical writer."),
-)
-
-# Dynamic orchestrator — LLM decides when to call which agent
-orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    tools=[
-        researcher.as_tool("research"),   # ← name connects tool map to LLM calls
-        writer.as_tool("write"),
-    ],
-)
-print(orchestrator("write a summary of AI news April 2026").text())
-
-# Deterministic orchestrator — Plan decides the order
-pipeline = Agent(
-    engine=Plan(
-        Step("research"),          # calls researcher.as_tool("research")
-        Step("write"),             # calls writer.as_tool("write")
-    ),
-    tools=[
-        researcher.as_tool("research"),
-        writer.as_tool("write"),
-    ],
-)
-print(pipeline("AI news April 2026").text())
-```
-
-## 6. Observe what happened
-
-```python
-from lazybridge import Agent, Session
-
-sess = Session(console=True)   # stdout tracing, one line per event
-researcher = Agent("claude-opus-4-7", tools=[search], name="researcher", session=sess)
-
-print(researcher("summarise this week's AI news").text())
-
-# Cost / tokens / latency breakdown across nested agents.
-print(sess.usage_summary())
-```
-
-For production observability, use `batched=True` (non-blocking emit)
-plus `OTelExporter` (GenAI Semantic Conventions out of the box):
-
-```python
-from lazybridge import Agent, Session, JsonFileExporter
-from lazybridge.ext.otel import OTelExporter
-
-sess = Session(
-    db="events.sqlite",
-    batched=True,                     # non-blocking
-    on_full="hybrid",                 # default — block on AGENT_*/TOOL_*, drop telemetry
-    exporters=[
-        JsonFileExporter(path="events.jsonl"),
-        OTelExporter(endpoint="http://otelcol:4318"),
-    ],
-)
-```
-
-## 7. Reliability knobs
-
-The Agent surface includes the production knobs by default — opt
-into them per call site:
-
-```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    "claude-opus-4-7",
-    tools=[search],
-    timeout=30.0,                    # total deadline for run()
-    max_retries=3,                   # provider transient-error retries
-    cache=True,                      # prompt caching where supported
-    fallback=Agent("gpt-5.5"),         # provider redundancy
+    engine=LLMEngine("claude-opus-4-7"),
 )
+result = agent("Explain LazyBridge in one sentence.")
+print(result.text())
 ```
 
-If the model emits a malformed tool-call JSON blob the engine emits a
-structured `TOOL_ERROR` with `type="ToolArgumentParseError"` and the
-raw arguments — the model gets the real failure on the next turn and
-self-corrects, instead of failing later with a misleading
-"missing required field" message.
+That's a complete, runnable program — no `asyncio.run`, no event loop,
+no `@tool` decorators. The canonical shape is `Agent(engine=...)` with
+each argument on its own line: it's what every example in `examples/`
+uses, and it's what you'll extend the moment you need to configure the
+engine (`system=`, `max_turns=`, `thinking=`, …).
 
-## Next
+Shorter forms exist (`Agent.from_model("claude-opus-4-7")` and the
+string-positional shortcut `Agent("claude-opus-4-7")`) but they're
+sugar — they save a line at the cost of hiding which engine the agent
+actually runs. Stick to the canonical form while you're learning;
+reach for sugar only after you can write the canonical version from
+memory.
 
-* Keep going with the [**Getting started guide**](guides/getting-started.md).
-* Skim the [**decision trees**](decisions/index.md) if you're unsure
-  which tool fits your use case.
-* Jump to [**Plan + Step**](guides/plan.md) if you're building a
-  production pipeline with typed hand-offs and resume semantics.
-* Read [**MCP integration**](recipes/mcp.md) if you want to wire in
-  an existing Model Context Protocol server.
+Calling `agent(task)` returns an `Envelope` — LazyBridge's typed
+result wrapper that carries the payload, token / cost metadata, error
+info, and any nested sub-agent rollup. Call `.text()` to get a string.
+
+If you'd rather drive things asynchronously, every agent also exposes
+`await agent.run(task)` and an `async for chunk in agent.stream(task)`
+streaming form. The sync call shown above is the canonical entry point.
+
+## 3. Add a tool
+
+A tool is just a normal Python function. LazyBridge inspects the
+signature, type hints, and docstring to build the schema the LLM sees —
+no second JSON definition required.
+
+```python
+from lazybridge import Agent, LLMEngine
+
+def get_weather(city: str) -> str:
+    """Return the current weather for ``city``."""
+    # Replace with a real API call. This stub keeps the example offline.
+    return f"It's 18°C and sunny in {city}."
+
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[get_weather],
+)
+result = agent("What's the weather like in Paris right now?")
+print(result.text())
+```
+
+The agent will decide on its own to call `get_weather("Paris")`,
+observe the result, and produce the final answer. You did not define a
+JSON schema, you did not write any orchestration code, and you did not
+lock yourself to a specific provider.
+
+To watch the loop turn-by-turn, pass `verbose=True` — it's the
+equivalent of LangGraph's `graph.stream(stream_mode="updates")`.
+
+## 4. What to read next
+
+You've now seen the whole core surface: an agent, a model, and a function
+exposed as a tool. From here:
+
+- [**Concepts → Mental model**](concepts/mental-model.md) —
+  `Agent = Engine + Tools + State` and the composition rules you'll
+  lean on.
+- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
+  the twelve rungs from this quickstart to a checkpointed production
+  pipeline.
+- [**Guides → Basic → Tool**](guides/basic/tool.md) — the three
+  schema modes (`signature` / `llm` / `hybrid`), six paths to a
+  `Tool`, and when to construct one explicitly.
+- [**Recipes → React agent**](recipes/react-agent.md) — the same
+  pattern as above, end-to-end with a real tool and a verbose run.
+- [**For LLM assistants**](for-llms/index.md) — let Claude or
+  ChatGPT generate more LazyBridge code for you.

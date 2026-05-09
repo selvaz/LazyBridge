@@ -23,12 +23,7 @@ FORBIDDEN_PREFIXES = tuple(f"lazybridge.{name}" for name in NON_CORE_SUBTREES)
 
 
 def _core_python_files() -> list[pathlib.Path]:
-    """Every ``.py`` file under ``lazybridge/`` except the three non-core
-    subtrees. ``skill_docs`` is included on purpose — it builds
-    reference pages introspecting the public API; importing from an
-    extension from there would let the build script accidentally pull
-    in optional deps.
-    """
+    """Every ``.py`` file under ``lazybridge/`` except the non-core subtrees."""
     files: list[pathlib.Path] = []
     for path in CORE_ROOT.rglob("*.py"):
         rel = path.relative_to(CORE_ROOT)

@@ -3,13 +3,12 @@ name: docs
 on:
   push:
     branches: ["main"]
-    # Trigger on docs source + the skill_docs source-of-truth (fragments
-    # and the build script that renders them into docs/skill/ and the
-    # site guides).
     paths:
       - "docs/**"
-      - "lazybridge/skill_docs/**"
       - "mkdocs.yml"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,21 +30,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install lazybridge + mkdocs
-        # ``mkdocs build`` reads from ``docs/``; the source-of-truth lives
-        # in ``lazybridge/skill_docs/fragments/``. Install the package so
-        # the build script can render fragments → docs/ before mkdocs runs.
-        run: |
-          pip install -e ".[anthropic,openai,google]"
-          pip install mkdocs-material mkdocstrings[python]
+      - name: Install LazyBridge + docs extras
+        run: pip install -e ".[docs]"
 
-      - name: Render fragments → docs/
-        run: python -m lazybridge.skill_docs._build
-
-      - name: Build docs
-        # ``--strict`` turns warnings into errors so a missing nav target
-        # or an unresolved cross-reference fails the build instead of
-        # silently shipping an empty page.
+      - name: Build site (strict)
         run: mkdocs build --strict
 
       - name: Upload Pages artifact

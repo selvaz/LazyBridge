@@ -1,142 +1,197 @@
 site_name: LazyBridge
-site_description: One Agent, swappable engines, tool-is-tool composition, and Plans with compile-time validation.
-site_url: https://selvaz.github.io/LazyBridge/
+site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
+site_url: https://docs.lazybridge.com
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Marco Selvatici — Apache-2.0
+
+docs_dir: docs
+strict: true
 
 theme:
   name: material
+  language: en
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: deep purple
       accent: amber
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: deep purple
       accent: amber
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.sections
     - navigation.tabs
-    - navigation.instant
+    - navigation.tabs.sticky
     - navigation.top
-    - content.code.copy
-    - content.tabs.link
+    - navigation.tracking
+    - navigation.indexes
     - search.suggest
-
-nav:
-  - Home: index.md
-  - Quickstart: quickstart.md
-
-  - Getting started: guides/getting-started.md
-
-  - Guides:
-    - Production:
-      - Operations checklist: guides/operations.md
-    - Basic:
-      - Agent: guides/agent.md
-      - Tool: guides/tool.md
-      - Native tools: guides/native-tools.md
-      - Function → Tool: guides/tool-schema.md
-      - Envelope: guides/envelope.md
-    - Mid:
-      - Memory: guides/memory.md
-      - Store: guides/store.md
-      - Session & tracing: guides/session.md
-      - Guards: guides/guards.md
-      - Agent.chain: guides/chain.md
-      - Agent.parallel: guides/agent-parallel.md
-      - Agent.as_tool: guides/as-tool.md
-      - MCP integration: guides/mcp.md
-      - HumanEngine: guides/human-engine.md
-      - EvalSuite: guides/evals.md
-      - Testing (MockAgent): guides/testing.md
-    - Full:
-      - Plan: guides/plan.md
-      - Sentinels: guides/sentinels.md
-      - Parallel plan steps: guides/parallel-steps.md
-      - SupervisorEngine: guides/supervisor.md
-      - Checkpoint & resume: guides/checkpoint.md
-      - Exporters: guides/exporters.md
-      - GraphSchema: guides/graph-schema.md
-      - "verify=": guides/verify.md
-    - Reporting (extension):
-      - Overview: guides/report-builder.md
-      - Single-shot generate_report: guides/report-generate.md
-      - FragmentBus: guides/fragment-bus.md
-      - Fragment schema: guides/report-fragments.md
-      - Assemblers: guides/report-assemblers.md
-      - Chart contract: guides/report-charts.md
-      - Citations: guides/report-citations.md
-      - Multi-format exporters: guides/report-exporters.md
-    - Advanced:
-      - Providers & model tiers: guides/providers.md
-      - Engine protocol: guides/engine-protocol.md
-      - BaseProvider: guides/base-provider.md
-      - LiteLLM bridge: guides/litellm.md
-      - Plan serialization: guides/plan-serialize.md
-      - Provider registry: guides/register-provider.md
-      - core.types: guides/core-types.md
-      - Core vs Extension policy: guides/core-vs-ext.md
-
-  - Recipes:
-    - Overview: recipes/index.md
-    - Tool calling: recipes/tool-calling.md
-    - Structured output: recipes/structured-output.md
-    - Plan with resume: recipes/plan-with-resume.md
-    - Human-in-the-loop: recipes/human-in-the-loop.md
-    - Orchestration tools: recipes/orchestration-tools.md
-    - MCP integration: recipes/mcp.md
-    - Parallel report pipeline: recipes/parallel-report.md
-
-  - Decision trees:
-    - Index: decisions/index.md
-    - Pick your tier: decisions/pick-tier.md
-    - Return type: decisions/return-type.md
-    - State layer: decisions/state-layer.md
-    - Composition: decisions/composition.md
-    - Parallelism: decisions/parallelism.md
-    - HumanEngine vs SupervisorEngine: decisions/human-engine-vs-supervisor.md
-    - "verify= placement": decisions/verify-placement.md
-    - Checkpoint & resume: decisions/checkpoint.md
-    - Which report shape?: decisions/report-shape.md
-    - Need Advanced?: decisions/need-advanced.md
-
-  - Reference: reference.md
-  - Errors: skill/99_errors.md
-  - Claude Skill:
-    - Manifest: skill/SKILL.md
-    - Overview: skill/00_overview.md
-    - Basic: skill/01_basic.md
-    - Mid: skill/02_mid.md
-    - Full: skill/03_full.md
-    - Advanced: skill/04_advanced.md
-    - Decision trees: skill/05_decision_trees.md
-    - Reference: skill/06_reference.md
-    - Errors: skill/99_errors.md
-
-markdown_extensions:
-  - pymdownx.highlight:
-      anchor_linenums: true
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
-  - pymdownx.tabbed:
-      alternate_style: true
-  - admonition
-  - pymdownx.details
-  - toc:
-      permalink: true
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - content.tabs.link
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
 
 plugins:
   - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            show_root_heading: true
+            show_root_toc_entry: false
+            heading_level: 3
+            docstring_style: google
+            merge_init_into_class: true
+  - llmstxt:
+      full_output: llms-full.txt
+      sections:
+        Concepts:
+          - concepts/*.md
+        Guides:
+          - guides/**/*.md
+        Recipes:
+          - recipes/*.md
+        Decisions:
+          - decisions/*.md
+        Reference:
+          - reference/*.md
+        Errors:
+          - errors.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      check_paths: true
+      base_path:
+        - .
+        - examples
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
 
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/lazybridge/
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - Mental model: concepts/mental-model.md
+      - Everything is a tool: concepts/everything-is-a-tool.md
+      - Progressive complexity: concepts/progressive-complexity.md
+      - Canonical vs sugar: concepts/canonical-vs-sugar.md
+  - Guides:
+      - Basic:
+          - Agent: guides/basic/agent.md
+          - Tool: guides/basic/tool.md
+          - Envelope: guides/basic/envelope.md
+          - Native tools: guides/basic/native-tools.md
+      - Mid:
+          - Memory: guides/mid/memory.md
+          - Store: guides/mid/store.md
+          - Session: guides/mid/session.md
+          - Guards: guides/mid/guards.md
+          - verify=: guides/mid/verify.md
+          - Chain: guides/mid/chain.md
+          - Parallel: guides/mid/parallel.md
+          - As tool: guides/mid/as-tool.md
+          - HumanEngine: guides/mid/human-engine.md
+          - MCP: guides/mid/mcp.md
+          - Evals: guides/mid/evals.md
+      - Full:
+          - Plan: guides/full/plan.md
+          - Step: guides/full/step.md
+          - Sentinels: guides/full/sentinels.md
+          - Routing: guides/full/routing.md
+          - Parallel plan steps: guides/full/parallel-plan-steps.md
+          - Checkpoint & resume: guides/full/checkpoint.md
+          - Exporters: guides/full/exporters.md
+          - GraphSchema: guides/full/graph-schema.md
+          - SupervisorEngine: guides/full/supervisor.md
+      - Advanced:
+          - Engine protocol: guides/advanced/engine-protocol.md
+          - BaseProvider: guides/advanced/base-provider.md
+          - Providers: guides/advanced/providers.md
+          - Plan serialization: guides/advanced/plan-serialize.md
+          - OpenTelemetry: guides/advanced/otel.md
+          - Visualizer: guides/advanced/visualizer.md
+  - Recipes:
+      - Overview: recipes/index.md
+      - React agent: recipes/react-agent.md
+      - Researcher (single agent): recipes/researcher-single.md
+      - Researcher → reporter: recipes/researcher-reporter.md
+      - Supervisor pattern: recipes/supervisor-pattern.md
+      - Plan tool: recipes/plan-tool.md
+      - Agent builds a plan: recipes/agent-builds-plan.md
+      - Blackboard planner: recipes/blackboard-planner.md
+      - Dynamic re-planning: recipes/dynamic-replanning.md
+      - Parallel report: recipes/parallel-report.md
+      - Daily news: recipes/daily-news.md
+      - Live visualization: recipes/live-visualization.md
+      - Visualization mock: recipes/visualization-mock.md
+  - Decisions:
+      - Overview: decisions/index.md
+      - Pick your tier: decisions/pick-tier.md
+      - Return type: decisions/return-type.md
+      - State layer: decisions/state-layer.md
+      - Composition: decisions/composition.md
+      - Parallelism: decisions/parallelism.md
+      - HumanEngine vs SupervisorEngine: decisions/human-engine-vs-supervisor.md
+      - "verify= placement": decisions/verify-placement.md
+      - Checkpoint & resume: decisions/checkpoint.md
+      - Do I need Advanced?: decisions/need-advanced.md
+  - Reference:
+      - Overview: reference/index.md
+      - Agent + Envelope: reference/agent.md
+      - Tool family: reference/tools.md
+      - State primitives: reference/state.md
+      - Session & observability: reference/session.md
+      - Guards: reference/guards.md
+      - Engines: reference/engines.md
+      - Sentinels & predicates: reference/sentinels.md
+      - Extensions: reference/extensions.md
+      - Custom providers: reference/providers.md
+      - Configs & testing: reference/configs.md
+  - Errors: errors.md
+  - For LLM assistants:
+      - Overview: for-llms/index.md
+      - Claude Skill install: for-llms/claude-skill.md
+      - llms.txt explained: for-llms/llms-txt.md
