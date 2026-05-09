@@ -5,6 +5,12 @@ planner: it picks between a direct sub-agent call or a multi-step
 plan automatically, based on the input. Use it as the orchestrator
 when you want planning logic without writing it from scratch.
 
+> **Canonical name**: `make_planner` is a backward-compat alias for
+> `orchestrator_agent` (in `lazybridge.ext.planners`). New code can
+> use either; the alias signals "this orchestrates sub-agents", the
+> canonical name distinguishes from `lazybridge.Plan` (the
+> *static* DAG engine) since both involve "planning".
+
 ## Source
 
 ```python

@@ -20,6 +20,14 @@ Plan(
 )
 
 
+
+# Concurrent fan-out — N inputs against the same Plan shape.
+# Pair with on_concurrent="fork" so each input run claims its own
+# isolated keyspace.
+plan.run_many(tasks, *, concurrency=None, ...)   # sync — returns list[Envelope]
+await plan.arun_many(tasks, *, concurrency=None, ...)  # async equivalent
+
+
 # Construction errors (all raised at Agent construction).
 PlanCompileError                   # invalid DAG: dangling refs, duplicates, malformed routes
 ConcurrentPlanRunError             # raised at runtime CAS when two runs share a checkpoint_key

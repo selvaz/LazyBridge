@@ -150,6 +150,7 @@ nav:
           - Engine protocol: guides/advanced/engine-protocol.md
           - BaseProvider: guides/advanced/base-provider.md
           - Providers: guides/advanced/providers.md
+          - External tool gateway: guides/advanced/external-tools.md
           - Plan serialization: guides/advanced/plan-serialize.md
           - OpenTelemetry: guides/advanced/otel.md
           - Visualizer: guides/advanced/visualizer.md

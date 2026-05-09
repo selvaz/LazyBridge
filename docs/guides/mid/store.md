@@ -21,8 +21,9 @@ store.read_entry(key)            # StoreEntry | None — value plus metadata
 store.read_all()                 # dict[str, Any]
 store.keys()                     # list[str]
 store.delete(key)
-store.clear()
+store.clear()                    # drop every key (irreversible, no resume)
 store.to_text(keys=None)         # render as "key: <json>" lines for sources=
+store.compare_and_swap(key, expected, new)   # atomic CAS — internal to checkpoint, also useful for cross-process locks
 ```
 
 `StoreEntry` is a dataclass `(key, value, written_at, agent_id)`.

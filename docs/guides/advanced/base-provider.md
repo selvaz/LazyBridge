@@ -209,7 +209,8 @@ LLMEngine.register_provider_rule("mistral-", "mistral", kind="startswith")
 agent = Agent(
     engine=LLMEngine("mistral-large-latest"),
 )
-print(agent("hello").text())
+result = agent("hello")
+print(result.text())
 ```
 
 ## Provider registry

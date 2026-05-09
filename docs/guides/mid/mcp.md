@@ -117,7 +117,8 @@ agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
     tools=[fs],
 )
-print(agent("Read README.md and summarise the install steps").text())
+result = agent("Read README.md and summarise the install steps")
+print(result.text())
 
 
 # 2) Mix MCP with custom Python tools and other agents.
