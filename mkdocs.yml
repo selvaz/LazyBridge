@@ -109,3 +109,8 @@ nav:
           - HumanEngine: guides/mid/human-engine.md
           - MCP: guides/mid/mcp.md
           - Evals: guides/mid/evals.md
+      - Full:
+          - Plan: guides/full/plan.md
+          - Step: guides/full/step.md
+          - Sentinels: guides/full/sentinels.md
+          - Routing: guides/full/routing.md
