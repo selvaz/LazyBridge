@@ -28,6 +28,7 @@ from lazybridge.engines.plan._serialisation import (
 from lazybridge.engines.plan._types import (
     ConcurrentPlanRunError,
     PlanCompileError,
+    PlanPaused,
     PlanState,
     Step,
     StepResult,
@@ -664,6 +665,42 @@ class Plan:
                 # — so a later resume re-runs the whole band cleanly
                 # instead of partially-double-applying side-effects from
                 # siblings that succeeded earlier in the iteration order.
+                # Cooperative pause: any branch raising PlanPaused halts
+                # the whole band atomically.  Same atomicity as failure —
+                # no writes from succeeded siblings are applied; resume
+                # re-runs the whole band cleanly.
+                paused_branch: tuple[Step, PlanPaused] | None = None
+                for _s, r in zip(group, raw):
+                    if isinstance(r, PlanPaused):
+                        paused_branch = (_s, r)
+                        break
+                if paused_branch is not None:
+                    last_snap = self._save_checkpoint(
+                        effective_key=effective_key,
+                        last_snapshot=last_snap,
+                        next_step=group[0].name,  # whole band re-runs on resume
+                        kv=kv,
+                        completed=completed,
+                        status="paused",
+                        run_uid=run_uid,
+                        history=history,
+                    )
+                    paused_env: Envelope[Any] = Envelope(
+                        task=prev_env.task,
+                        context=prev_env.context,
+                        payload=prev_env.payload,
+                        metadata=prev_env.metadata,
+                        error=ErrorInfo(
+                            type="PlanPaused",
+                            message=(
+                                f"Plan paused at parallel step "
+                                f"{paused_branch[0].name!r}: {paused_branch[1].message}"
+                            ),
+                            retryable=True,
+                        ),
+                    )
+                    return self._aggregate_nested_metadata(paused_env, history)
+
                 first_failure_env: Envelope | None = None
                 for _s, r in zip(group, raw):
                     if isinstance(r, BaseException):
@@ -747,17 +784,44 @@ class Plan:
             # ──────────────────────────────────────────────────────────────
             # Sequential path
             # ──────────────────────────────────────────────────────────────
-            result_env = await self._execute_one(
-                step,
-                prev_env,
-                start_env,
-                history,
-                kv,
-                tool_map=tool_map,
-                session=session,
-                run_id=run_id,
-                agent_name=agent_name,
-            )
+            try:
+                result_env = await self._execute_one(
+                    step,
+                    prev_env,
+                    start_env,
+                    history,
+                    kv,
+                    tool_map=tool_map,
+                    session=session,
+                    run_id=run_id,
+                    agent_name=agent_name,
+                )
+            except PlanPaused as pause:
+                # Cooperative pause — write a paused checkpoint pointing
+                # back at this step (resume=True will re-invoke it) and
+                # return a paused-error envelope so the caller can detect.
+                last_snap = self._save_checkpoint(
+                    effective_key=effective_key,
+                    last_snapshot=last_snap,
+                    next_step=step.name,
+                    kv=kv,
+                    completed=completed,
+                    status="paused",
+                    run_uid=run_uid,
+                    history=history,
+                )
+                paused_env = Envelope(
+                    task=prev_env.task,
+                    context=prev_env.context,
+                    payload=prev_env.payload,
+                    metadata=prev_env.metadata,
+                    error=ErrorInfo(
+                        type="PlanPaused",
+                        message=f"Plan paused at step {step.name!r}: {pause.message}",
+                        retryable=True,
+                    ),
+                )
+                return self._aggregate_nested_metadata(paused_env, history)
 
             # If the step errored, persist a "failed" checkpoint that
             # points back at the same step so a future resume= retries it.

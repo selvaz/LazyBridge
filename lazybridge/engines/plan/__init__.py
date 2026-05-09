@@ -51,6 +51,7 @@ from lazybridge.engines.plan._serialisation import (
 from lazybridge.engines.plan._types import (
     ConcurrentPlanRunError,
     PlanCompileError,
+    PlanPaused,
     PlanState,
     Step,
     StepResult,
@@ -64,6 +65,7 @@ __all__ = [
     "PlanState",
     "PlanCompiler",
     "PlanCompileError",
+    "PlanPaused",
     "ConcurrentPlanRunError",
     # Historically-private serialisation helpers exposed for test suites
     # and third-party renderers (YAML, Mermaid, etc.).  Kept on the public
