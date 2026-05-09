@@ -36,24 +36,38 @@ already know. Nothing rewinds.
 ### 1 — Single agent
 
 ```python
-agent = Agent("claude-opus-4-7")
-print(agent("Hello").text())
+from lazybridge import Agent, LLMEngine
+
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+)
+result = agent("Hello")
+print(result.text())
 ```
 
-The string `"claude-opus-4-7"` is sugar for
-`Agent(engine=LLMEngine("claude-opus-4-7"))`. Call the agent directly to
-run it; `.text()` extracts the string payload from the returned `Envelope`.
+`Agent(engine=...)` with each argument on its own line is the
+canonical shape — every rung from here on adds to it without changing
+it. Shorter forms (`Agent.from_model("claude-opus-4-7")` and the
+string-positional shortcut `Agent("claude-opus-4-7")`) are sugar:
+convenient for one-liners, but they hide the engine choice you'll need
+to configure as soon as the agent does anything non-trivial. Learn the
+canonical form first; reach for sugar only when you can already write
+the canonical version from memory.
 
 ### 2 — Agent with tools
 
 ```python
-agent = Agent("claude-opus-4-7", tools=[get_weather])
-print(agent("What's the weather in Paris?").text())
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[get_weather],
+)
+result = agent("What's the weather in Paris?")
+print(result.text())
 ```
 
 The agent decides when to call the tool. You added a list element. The
-function's signature, type hints, and docstring become the tool schema —
-no JSON to write.
+function's signature, type hints, and docstring become the tool schema
+— no JSON to write.
 
 ### 3 — Structured output
 
@@ -64,7 +78,10 @@ class Summary(BaseModel):
     headline: str
     bullets: list[str]
 
-agent = Agent("claude-opus-4-7", output=Summary)
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    output=Summary,
+)
 result = agent("Summarise the news")
 print(result.payload.headline)   # read .payload, not .text(), with output=
 ```
@@ -75,10 +92,17 @@ against the model and re-prompts on validation errors.
 ### 4 — Sequential chain
 
 ```python
-from lazybridge import Agent, Plan, Step
+from lazybridge import Agent, LLMEngine, Plan, Step
 
-researcher = Agent("claude-opus-4-7", name="research", tools=[web_search])
-writer     = Agent("claude-opus-4-7", name="write")
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    name="research",
+    tools=[web_search],
+)
+writer = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    name="write",
+)
 
 pipeline = Agent(
     engine=Plan(Step("research"), Step("write")),
@@ -117,15 +141,15 @@ when you want the **LLM** to decide which sub-agent to call.
 
 ```python
 supervisor = Agent(
-    "claude-opus-4-7",
+    engine=LLMEngine("claude-opus-4-7"),
     tools=[researcher],   # researcher's name= becomes the tool name
 )
 ```
 
 The supervisor decides when to delegate to the researcher. This is the
 hierarchical / sub-agent pattern, expressed as a tool list. Use
-`researcher.as_tool("alias")` only when you need a surface name different
-from the agent's `name=`.
+`researcher.as_tool("alias")` only when you need a surface name
+different from the agent's `name=`.
 
 ### 7 — Deterministic Plan
 
@@ -220,14 +244,18 @@ site.
 ### 11 — Observability
 
 ```python
-from lazybridge import Agent, Session, JsonFileExporter
+from lazybridge import Agent, LLMEngine, Session, JsonFileExporter
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
-agent   = Agent("claude-opus-4-7", session=session)
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    session=session,
+)
 ```
 
-Add a `Session` once at the top. Every nested agent, tool call, and step
-emits events to it. The OpenTelemetry exporter is one extra import away.
+Add a `Session` once at the top. Every nested agent, tool call, and
+step emits events to it. The OpenTelemetry exporter is one extra
+import away.
 
 ### 12 — Custom engine / provider
 

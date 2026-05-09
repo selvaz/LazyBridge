@@ -46,7 +46,11 @@ as separate classes; use plain `Agent` with different engines and tools.
 ## Calling convention — sync is canonical
 
 ```python
-agent = Agent("claude-opus-4-7")
+from lazybridge import Agent, LLMEngine
+
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+)
 result = agent("hello")           # sync — returns Envelope
 print(result.text())              # str payload
 ```
@@ -59,15 +63,28 @@ files in `examples/` follow that convention.
 
 ## Style rule — show the canonical form first
 
-When you generate code for the user, lead with the canonical
-`Agent(engine=..., tools=[...])` shape and the string-positional
-shortcut `Agent("claude-opus-4-7", ...)`. Treat the factory and
-composition helpers as **sugar** and only mention them after the
-canonical form, with a one-line "use this when …":
+When you generate code for the user, the canonical shape is
+
+```python
+agent = Agent(
+    engine=LLMEngine("model-id"),
+    tools=[...],
+    name="...",
+    ...
+)
+result = agent(task)
+print(result.text())
+```
+
+with each constructor argument on its own line and `result = agent(task)`
+on a separate line from the print. Lead with this form; treat factories
+and string-positional shortcuts as **sugar** and only mention them
+after, with a one-line "use this when …":
 
 | Sugar | Canonical equivalent | Use the sugar when |
 |---|---|---|
-| `Agent.from_model("m")` | `Agent("m")` | Never — the string shortcut already exists |
+| `Agent("m", ...)` | `Agent(engine=LLMEngine("m"), ...)` | Trivially short snippets where the engine choice is uninteresting (rare in real code; never in tutorials) |
+| `Agent.from_model("m", ...)` | `Agent(engine=LLMEngine("m"), ...)` | Never — `Agent("m", ...)` already exists and reads better |
 | `Agent.from_engine(e)` | `Agent(engine=e)` | Never — adds no clarity |
 | `Agent.from_plan(*steps)` | `Agent(engine=Plan(*steps))` | One-liner where no `tools=[...]` is needed |
 | `Agent.from_chain(a, b)` / `Agent.chain(a, b)` | `Agent(engine=Plan(Step("a"), Step("b")), tools=[a, b])` | Purely linear handoff with no router / parallel band / checkpoint |
@@ -75,32 +92,45 @@ canonical form, with a one-line "use this when …":
 | `human_agent(...)` | `Agent(engine=HumanEngine(...))` | One-liner; canonical form when the engine choice should be visible at the call site |
 | `supervisor_agent(...)` | `Agent(engine=SupervisorEngine(...))` | Same as above |
 
-Default model in examples: `claude-opus-4-7`.
+Default model in examples: `claude-opus-4-7`. When a user is learning,
+err on the side of the longer canonical form — even if a one-liner
+works, the canonical version teaches the shape they will need at every
+later rung.
 
 ## Canonical patterns
 
 ### Single agent
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
-print(Agent("claude-opus-4-7")("hello").text())
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+)
+result = agent("hello")
+print(result.text())
 ```
 
-The string `"claude-opus-4-7"` is sugar for
-`Agent(engine=LLMEngine("claude-opus-4-7"))`. Use the explicit form when
-you need to configure the engine (`system=`, `max_turns=`, `thinking=`,
-…). Default model is `claude-opus-4-7`.
+`LLMEngine("claude-opus-4-7")` is what makes this an LLM-driven agent.
+Configure the engine in place — `LLMEngine("claude-opus-4-7", system=
+"...", max_turns=10, thinking=True, ...)` — instead of reaching for
+factory variants. Default model is `claude-opus-4-7`.
 
 ### Agent with a tool
 
 ```python
+from lazybridge import Agent, LLMEngine
+
 def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
     ...
 
-agent = Agent("claude-opus-4-7", tools=[get_weather])
-print(agent("Weather in Paris?").text())
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[get_weather],
+)
+result = agent("Weather in Paris?")
+print(result.text())
 ```
 
 Do **not** write a JSON schema by hand. LazyBridge infers it from the
@@ -112,12 +142,16 @@ For legacy callables you can't annotate, switch the mode to `"llm"` or
 
 ```python
 from pydantic import BaseModel
+from lazybridge import Agent, LLMEngine
 
 class Summary(BaseModel):
     headline: str
     bullets: list[str]
 
-agent = Agent("claude-opus-4-7", output=Summary)
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    output=Summary,
+)
 result = agent("Summarise the news")
 print(result.payload.headline)    # read .payload, not .text()
 ```
@@ -151,14 +185,23 @@ dispatch instead of running all of them.
 ### Agent as tool (supervisor / hierarchical)
 
 ```python
-researcher = Agent("claude-opus-4-7", name="research", tools=[search])
-supervisor = Agent("claude-opus-4-7", tools=[researcher])
+from lazybridge import Agent, LLMEngine
+
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    name="research",
+    tools=[search],
+)
+supervisor = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher],
+)
 ```
 
-The researcher's `name=` becomes the tool name the supervisor sees. Use
-`researcher.as_tool("alias")` only when you need a surface name different
-from the agent's own `name=`. Prefer this over building bespoke
-multi-agent orchestration glue.
+The researcher's `name=` becomes the tool name the supervisor sees.
+Use `researcher.as_tool("alias")` only when you need a surface name
+different from the agent's own `name=`. Prefer this over building
+bespoke multi-agent orchestration glue.
 
 ### Deterministic plan
 
@@ -250,24 +293,31 @@ agent.
 ### MCP
 
 ```python
+from lazybridge import Agent, LLMEngine
 from lazybridge.ext.mcp import MCP
 
 fs   = MCP.stdio("fs",  "npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 http = MCP.http("docs", "https://example.com/mcp")
 
-agent = Agent("claude-opus-4-7", tools=[fs, http])
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[fs, http],
+)
 ```
 
-`MCPServer` is a `ToolProvider` — pass it directly into `tools=[...]`. Tool
-names are namespaced as `"<server>.<tool>"`.
+`MCPServer` is a `ToolProvider` — pass it directly into `tools=[...]`.
+Tool names are namespaced as `"<server>.<tool>"`.
 
 ### Sessions and exporters
 
 ```python
-from lazybridge import Agent, Session, JsonFileExporter
+from lazybridge import Agent, JsonFileExporter, LLMEngine, Session
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
-agent   = Agent("claude-opus-4-7", session=session)
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    session=session,
+)
 ```
 
 For OpenTelemetry, install `lazybridge[otel]` and add `OTelExporter(...)`
@@ -279,10 +329,14 @@ their own.
 - **Wrapping simple examples in `asyncio.run(main())`**. The canonical
   call shape is `agent(task)`. Reach for `await agent.run(task)` only
   inside an existing async caller.
-- **Defining a JSON tool schema by hand** when a Python function exists.
-  The signature path is the default and covers >95% of real callables.
-- **`Agent.from_model(...)` boilerplate** when `Agent("claude-opus-4-7")`
-  works. The string positional arg is the canonical shortcut.
+- **Defining a JSON tool schema by hand** when a Python function
+  exists. The signature path is the default and covers >95% of real
+  callables.
+- **Hiding the engine behind sugar.** `Agent.from_model(...)`, the
+  string-positional `Agent("claude-opus-4-7")`, and `Agent.from_engine(...)`
+  all save a line of code at the cost of hiding which engine the agent
+  actually runs. Lead with `Agent(engine=LLMEngine("..."), ...)`,
+  especially in tutorials and code reviews.
 - **Wrapping every helper in its own sub-agent.** Sub-agents are not
   free — use them when the responsibility is genuinely distinct.
 - **Reaching for a `Plan` when one `Agent` with a few tools would do.**

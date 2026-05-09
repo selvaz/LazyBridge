@@ -5,10 +5,13 @@ functions, deterministic plans, humans, and external tools under one uniform
 model: **everything is a tool.**
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
-agent = Agent("claude-opus-4-7")
-print(agent("What's the capital of France?").text())
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+)
+result = agent("What's the capital of France?")
+print(result.text())
 ```
 
 That's the whole framework's surface area when you start. It grows only when

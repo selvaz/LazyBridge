@@ -18,7 +18,7 @@ into a single concept.
 | Another `Agent` | Pass it directly: `Agent(tools=[other_agent])`. Its `name=` becomes the tool name. | Hierarchical / supervisor patterns |
 | The same agent under a different name | `other_agent.as_tool("alias")` | When you want a different surface name than `other_agent.name` |
 | A `Plan` | `Agent(engine=Plan(...), name="...")` then pass that agent in `tools=[...]` | Reusable deterministic pipelines |
-| A provider-native capability | `Agent("claude-opus-4-7", native_tools=["web_search"])` or `NativeTool.CODE_EXECUTION`, … | Provider-side, no code |
+| A provider-native capability | `Agent(engine=LLMEngine("claude-opus-4-7"), native_tools=["web_search"])`; the `NativeTool` enum (`NativeTool.CODE_EXECUTION`, …) when you want IDE autocompletion | Provider-side, no code |
 | An MCP server | `MCP.stdio(...)` or `MCP.http(...)` passed in `tools=[...]` | External tool ecosystems |
 | A pre-built JSON schema | `Tool.from_schema(name, description, parameters, func)` | OpenAPI bridges, third-party registries |
 
@@ -43,11 +43,20 @@ Because every capability is a tool, you can compose at every level.
                                               tool ──────────► added to a top-level orchestrator
 ```
 
-A two-line illustration:
+A short illustration:
 
 ```python
-researcher = Agent("claude-opus-4-7", name="research", tools=[web_search, fetch_url])
-writer     = Agent("claude-opus-4-7", tools=[researcher])
+from lazybridge import Agent, LLMEngine
+
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    name="research",
+    tools=[web_search, fetch_url],
+)
+writer = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[researcher],
+)
 ```
 
 The `writer` agent now has a tool called `research` (taken from the

@@ -45,11 +45,16 @@ useful capability is a tool: a plain Python function, another agent, a
 execution).
 
 ```python
+from lazybridge import Agent, LLMEngine
+
 def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
     ...
 
-agent = Agent("claude-opus-4-7", tools=[get_weather])
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[get_weather],
+)
 ```
 
 There is no second JSON schema to define and no `@tool` decorator to
@@ -80,25 +85,38 @@ The `Store` is especially important when a system grows beyond one agent.
 Multiple agents and pipeline steps can read and write to it, exchanging
 structured information without relying on fragile free-form text passing.
 
-## A working agent in two lines
+## A working agent
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
-print(Agent("claude-opus-4-7")("Explain LazyBridge in one sentence.").text())
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+)
+result = agent("Explain LazyBridge in one sentence.")
+print(result.text())
 ```
 
 In this example:
 
-- The **engine** is `LLMEngine` (created implicitly because the first
-  positional argument is a model string).
+- The **engine** is `LLMEngine("claude-opus-4-7")`.
 - There are no **tools**.
 - The only **state** is the result `Envelope`.
 
-Calling `agent(task)` is the canonical sync entry point. An `await
-agent.run(task)` async form and an `async for chunk in agent.stream(task)`
-streaming form exist when you need them — start with the sync call and
-opt into async only where it matters.
+`Agent(engine=...)` with each argument on its own line is the
+canonical shape — every example in `examples/` follows it, and every
+rung on the [progressive complexity ladder](progressive-complexity.md)
+adds to it without changing it. Shorter forms exist
+(`Agent.from_model("claude-opus-4-7")`, `Agent("claude-opus-4-7")`)
+but they're sugar: convenient for one-liners, but they hide the engine
+choice that you'll need to configure as soon as the agent does
+anything non-trivial. Learn the canonical form first.
+
+Calling `agent(task)` is the canonical sync entry point. An
+`await agent.run(task)` async form and an
+`async for chunk in agent.stream(task)` streaming form exist when you
+need them — start with the sync call and opt into async only where it
+matters.
 
 The same `Agent` would be ready for tools, memory, sessions, plans, or
 human approvals the moment you needed any of them — without rewriting.
