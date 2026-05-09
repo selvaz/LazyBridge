@@ -419,6 +419,3 @@ their own.
 - Runnable recipes: <https://selvaz.github.io/LazyBridge/recipes/>
 - API reference: <https://selvaz.github.io/LazyBridge/reference/>
 - Errors → fixes: <https://selvaz.github.io/LazyBridge/errors/>
-
-The `references/` directory next to this file will (in a later release)
-mirror the per-tier reference for offline / progressive disclosure use.
