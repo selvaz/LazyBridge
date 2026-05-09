@@ -23,6 +23,7 @@ agent = Agent(
     verify=None,                   # Agent or callable — judge-and-retry loop
     max_verify=3,                  # retries when verify=...
     native_tools=None,             # list[NativeTool | str] — provider-hosted tools
+    allow_dangerous_native_tools=False,  # security gate: opt-in for CODE_EXECUTION / COMPUTER_USE
     runtime=None,                  # AgentRuntimeConfig (groups resilience + observability)
     resilience=None,               # ResilienceConfig — retries / timeout / cache / fallback
     observability=None,            # ObservabilityConfig — session / verbose / name / description
@@ -186,6 +187,14 @@ prod("draft a one-pager on the LazyBridge audit findings")
   memory, and guards — on the same envelope, with the primary's
   error threaded into `context`. Configure compatible `output=` and
   `tools=` on both agents, or the fallback may fail differently.
+- **`output_validator=`** is a callable applied to the payload
+  *after* Pydantic validation passes (or directly when `output=str`).
+  Receives the payload, returns the validated payload (may
+  transform). Raise to reject — the framework re-prompts up to
+  `max_output_retries` times with the validator's error message
+  threaded back into the prompt. Useful for application-level
+  invariants that aren't expressible in the Pydantic schema (e.g.
+  "the `start_date` field must come before `end_date`").
 - **`cache=True`** enables prompt caching where the provider supports
   it (Anthropic explicit, OpenAI / DeepSeek auto). Pass
   `CacheConfig(ttl="1h")` for the longer Anthropic TTL.

@@ -102,6 +102,7 @@ analyst = Agent(
     engine=LLMEngine("claude-opus-4-7"),
     native_tools=[NativeTool.WEB_SEARCH, NativeTool.CODE_EXECUTION],
     tools=[read_report],
+    allow_dangerous_native_tools=True,   # required opt-in for CODE_EXECUTION
 )
 analyst("cross-reference report.md against current web consensus")
 
@@ -120,6 +121,34 @@ gemini_grounded = Agent(
     native_tools=[NativeTool.GOOGLE_SEARCH],
 )
 ```
+
+## Security gate: `allow_dangerous_native_tools`
+
+`NativeTool.CODE_EXECUTION` and `NativeTool.COMPUTER_USE` give the
+provider broad access — sandboxed code execution at the provider's
+side, screen control on the user's machine. Both require explicit
+opt-in via `allow_dangerous_native_tools=True` on either the `Agent`
+or the `LLMEngine`:
+
+```python
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    native_tools=[NativeTool.CODE_EXECUTION],
+    allow_dangerous_native_tools=True,   # without this: ValueError at construction
+)
+```
+
+The gate exists on **both** `Agent` and `LLMEngine` so a caller can't
+silently bypass the check by passing a pre-built `engine=
+LLMEngine(...)` (the Agent re-validates against the same flag at its
+own construction). `WEB_SEARCH`, `FILE_SEARCH`, `IMAGE_GENERATION`,
+`GOOGLE_SEARCH`, `GOOGLE_MAPS` are NOT gated by this flag — only the
+two genuinely dangerous tools.
+
+The default (`allow_dangerous_native_tools=False`) raises
+`ValueError` at construction with a message naming the offending
+native tool. Catch it explicitly if you want to fall back to
+non-dangerous alternatives.
 
 ## Pitfalls
 

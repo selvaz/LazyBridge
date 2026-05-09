@@ -67,3 +67,21 @@ or crash-resume?
 - [Plan](../guides/full/plan.md) — declared orchestration with
   compile-time DAG validation.
 - [Parallelism decision](parallelism.md) — automatic vs declared.
+
+## See also: LLM-driven orchestrators
+
+When the structure of the work is decided at runtime, two factory
+helpers in `lazybridge.ext.planners` ship a pre-built orchestrator
+agent:
+
+- `orchestrator_agent(...)` (alias `make_planner`) — DAG builder; the
+  LLM composes a `Plan` step by step via builder tools, with
+  compile-time validation.
+- `blackboard_orchestrator_agent(...)` (alias `make_blackboard_planner`)
+  — flat to-do list; the LLM manages tasks via `set_plan` / `get_plan`
+  / `mark_done` tools without DAG structure.
+
+Both wrap an LLM with the planning toolkit. Use them when you want
+LLM-driven dispatch but don't want to author the planning prompt from
+scratch. See the [Plan tool](../recipes/plan-tool.md) and
+[Blackboard planner](../recipes/blackboard-planner.md) recipes.

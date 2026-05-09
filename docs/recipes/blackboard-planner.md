@@ -5,6 +5,11 @@ to-do list (`set_plan` / `get_plan` / `mark_done` tools). Simpler
 than a DAG for exploratory work where the structure isn't known up
 front and the LLM iterates on a checklist.
 
+> **Canonical name**: `make_blackboard_planner` is a backward-compat
+> alias for `blackboard_orchestrator_agent` (in
+> `lazybridge.ext.planners`). New code can use either; both resolve
+> to the same factory.
+
 ## Source
 
 ```python
