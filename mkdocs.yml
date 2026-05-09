@@ -97,3 +97,8 @@ nav:
           - Tool: guides/basic/tool.md
           - Envelope: guides/basic/envelope.md
           - Native tools: guides/basic/native-tools.md
+      - Mid:
+          - Memory: guides/mid/memory.md
+          - Store: guides/mid/store.md
+          - Session: guides/mid/session.md
+          - Guards: guides/mid/guards.md
