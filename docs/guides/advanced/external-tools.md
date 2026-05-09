@@ -140,8 +140,8 @@ client = JsonHttpExternalToolClient(
 # 2. Wrap in a provider with allow/deny + namespace prefix.
 gateway = ExternalToolProvider(
     client,
-    include=["search", "fetch", "summarise"],
-    exclude=["delete_*"],          # safety: never expose destructive ops
+    include=["search", "fetch", "summarise"],   # exact names — allowlist wins
+    exclude=["delete_user", "drop_table"],       # exact names; not glob
     name_prefix="ext.",
 )
 
@@ -158,6 +158,7 @@ print(result.text())
 
 # 4. Custom client — implement the protocol for SDK-backed registries.
 from collections.abc import Iterable, Mapping
+from typing import Any
 
 from lazybridge.ext.gateway import ExternalToolClient, ExternalToolSpec
 
@@ -187,6 +188,11 @@ provider = ExternalToolProvider(client=PipedreamClient(my_sdk))
 
 ## Pitfalls
 
+- **`include` / `exclude` are exact-name sets, not globs.**
+  `exclude=["delete_*"]` does **not** block `delete_user` — it only
+  filters a tool literally named `delete_*`. List the names you want to
+  block (`exclude=["delete_user", "drop_table"]`), or pre-filter the
+  catalogue with `specs=[...]` and pass only the safe subset.
 - **`include` / `exclude` match the *original* tool name** (before
   `name_prefix` is applied). Allowlist `["search"]` not
   `["ext.search"]`.
