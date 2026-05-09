@@ -14,11 +14,12 @@ into a single concept.
 | Source | How | Where it lives |
 |---|---|---|
 | A Python function | Pass it directly to `Agent(tools=[...])` | Your code |
-| Any callable | Wrap with `Tool(...)` | Your code |
-| Another `Agent` | `agent.as_tool(name, description)` | Hierarchical / supervisor patterns |
-| A `Plan` | Wrap an `Agent.from_plan(...)` agent and call `.as_tool(...)` | Reusable deterministic pipelines |
-| A provider-native capability | `NativeTool.WEB_SEARCH`, `NativeTool.CODE_EXECUTION`, … | Provider-side, no code |
-| An MCP server | `MCPServer.stdio(...)` or `MCPServer.http(...)` | External tool ecosystems |
+| Any callable | Wrap with `Tool(...)` or `tool(callable, name=...)` | Your code |
+| Another `Agent` | Pass it directly: `Agent(tools=[other_agent])`. Its `name=` becomes the tool name. | Hierarchical / supervisor patterns |
+| The same agent under a different name | `other_agent.as_tool("alias")` | When you want a different surface name than `other_agent.name` |
+| A `Plan` | `Agent(engine=Plan(...), name="...")` then pass that agent in `tools=[...]` | Reusable deterministic pipelines |
+| A provider-native capability | `Agent("claude-opus-4-7", native_tools=["web_search"])` or `NativeTool.CODE_EXECUTION`, … | Provider-side, no code |
+| An MCP server | `MCP.stdio(...)` or `MCP.http(...)` passed in `tools=[...]` | External tool ecosystems |
 | A pre-built JSON schema | `Tool.from_schema(name, description, parameters, func)` | OpenAPI bridges, third-party registries |
 
 In every case, the agent that consumes the tool sees the same `Tool`
@@ -45,14 +46,15 @@ Because every capability is a tool, you can compose at every level.
 A two-line illustration:
 
 ```python
-researcher = Agent.from_model("claude-sonnet-4-6", tools=[web_search, fetch_url])
-writer     = Agent.from_model("claude-sonnet-4-6", tools=[researcher.as_tool("research", "Look things up online")])
+researcher = Agent("claude-opus-4-7", name="research", tools=[web_search, fetch_url])
+writer     = Agent("claude-opus-4-7", tools=[researcher])
 ```
 
-The `writer` agent now has a tool called `research` whose implementation
-is a fully-fledged sub-agent with its own model, prompt, tools, and cost
-tracking. The supervisor pattern, hierarchical planning, and "agents as
-tools" are all the same primitive.
+The `writer` agent now has a tool called `research` (taken from the
+researcher's `name=`) whose implementation is a fully-fledged sub-agent
+with its own model, prompt, tools, and cost tracking. The supervisor
+pattern, hierarchical planning, and "agents as tools" are all the same
+primitive — one Agent, in another Agent's `tools=[...]`.
 
 ## Why this matters
 

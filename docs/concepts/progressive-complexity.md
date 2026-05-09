@@ -36,17 +36,24 @@ already know. Nothing rewinds.
 ### 1 — Single agent
 
 ```python
-agent = Agent.from_model("claude-sonnet-4-6")
-result = await agent.run("Hello")
+agent = Agent("claude-opus-4-7")
+print(agent("Hello").text())
 ```
+
+The string `"claude-opus-4-7"` is sugar for
+`Agent(engine=LLMEngine("claude-opus-4-7"))`. Call the agent directly to
+run it; `.text()` extracts the string payload from the returned `Envelope`.
 
 ### 2 — Agent with tools
 
 ```python
-agent = Agent.from_model("claude-sonnet-4-6", tools=[get_weather])
+agent = Agent("claude-opus-4-7", tools=[get_weather])
+print(agent("What's the weather in Paris?").text())
 ```
 
-The agent decides when to call the tool. You added a list element.
+The agent decides when to call the tool. You added a list element. The
+function's signature, type hints, and docstring become the tool schema —
+no JSON to write.
 
 ### 3 — Structured output
 
@@ -57,9 +64,9 @@ class Summary(BaseModel):
     headline: str
     bullets: list[str]
 
-agent = Agent.from_model("claude-sonnet-4-6", output=Summary)
-result = await agent.run("Summarise the news")
-print(result.payload.headline)
+agent = Agent("claude-opus-4-7", output=Summary)
+result = agent("Summarise the news")
+print(result.payload.headline)   # read .payload, not .text(), with output=
 ```
 
 You added an `output=` argument. The framework validates the payload
@@ -68,9 +75,11 @@ against the model and re-prompts on validation errors.
 ### 4 — Sequential chain
 
 ```python
-researcher = Agent.from_model("claude-sonnet-4-6", tools=[web_search])
-writer     = Agent.from_model("claude-sonnet-4-6")
+researcher = Agent("claude-opus-4-7", name="research", tools=[web_search])
+writer     = Agent("claude-opus-4-7", name="write")
 pipeline   = Agent.chain(researcher, writer)
+
+print(pipeline("Topic: AI agents in 2026").text())
 ```
 
 Two agents, output of one feeds the next. No new primitive — `chain`
@@ -80,48 +89,62 @@ returns an `Agent`, so you can chain chains.
 
 ```python
 multi = Agent.parallel(researcher_a, researcher_b, researcher_c)
+envelopes = multi("Same task for everyone")   # returns list[Envelope]
 ```
 
 Three agents run concurrently against the same input. The result is the
-list of their envelopes. Same `Agent` shape.
+list of their envelopes — `Agent.parallel` returns a deterministic
+fan-out, not a different kind of agent.
 
 ### 6 — Agent as tool
 
 ```python
-supervisor = Agent.from_model(
-    "claude-sonnet-4-6",
-    tools=[researcher.as_tool("research", "Look things up online")],
+supervisor = Agent(
+    "claude-opus-4-7",
+    tools=[researcher],   # researcher's name= becomes the tool name
 )
 ```
 
 The supervisor decides when to delegate to the researcher. This is the
-hierarchical / sub-agent pattern, expressed as a tool list.
+hierarchical / sub-agent pattern, expressed as a tool list. Use
+`researcher.as_tool("alias")` only when you need a surface name different
+from the agent's `name=`.
 
 ### 7 — Deterministic Plan
 
 ```python
 from lazybridge import Plan, Step
 
-plan = Plan(
-    Step(researcher, name="research"),
-    Step(writer,     name="write"),
+pipeline = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("write"),
+    ),
+    tools=[researcher, writer],
 )
-agent = Agent.from_engine(plan)
+
+print(pipeline("Topic: AI agents in 2026").text())
 ```
 
-When you want **the LLM to stop deciding the order**, switch the engine
-from `LLMEngine` (implicit in `from_model`) to `Plan`. Same `Agent`
-interface. The plan is validated at construction — broken references fail
-fast, not at runtime.
+When you want **the LLM to stop deciding the order**, swap the engine for
+`Plan`. The agent's interface stays identical: same `agent(task)` call,
+same `Envelope` back. Steps reference sub-agents by `name=` (the same
+name they have in `tools=[...]`); the plan is validated at construction
+so broken references fail fast, before any LLM call.
 
 ### 8 — Parallel band + routing
 
 ```python
-plan = Plan(
-    Step(triage,      name="triage", routes_by="category"),
-    Step(legal,       name="legal", parallel=True),
-    Step(technical,   name="technical", parallel=True),
-    Step(write_reply, name="reply"),
+from lazybridge import Plan, Step
+
+pipeline = Agent(
+    engine=Plan(
+        Step("triage", routes_by="category"),
+        Step("legal",     parallel=True),
+        Step("technical", parallel=True),
+        Step("reply"),
+    ),
+    tools=[triage, legal, technical, write_reply],
 )
 ```
 
@@ -131,37 +154,52 @@ structured field of the previous step's payload.
 ### 9 — Checkpoint + resume
 
 ```python
-plan = Plan(*steps, store=Store(db="runs.db"), checkpoint_key="ticket-42")
+from lazybridge import Plan, Step, Store
+
+store    = Store(db="runs.db")
+pipeline = Agent(
+    engine=Plan(*steps, store=store, checkpoint_key="ticket-42"),
+    tools=[...],
+)
 # crash...
-plan = Plan(*steps, store=Store(db="runs.db"), checkpoint_key="ticket-42", resume=True)
+resumed = Agent(
+    engine=Plan(*steps, store=store, checkpoint_key="ticket-42", resume=True),
+    tools=[...],
+)
 ```
 
-Pass a persistent `Store` and a key. After a crash, re-run with
-`resume=True` and the plan picks up at the failed step.
+Pass a persistent `Store` and a key. After a crash, build the same plan
+with `resume=True` and call it again — execution picks up at the failed
+step.
 
 ### 10 — Human-in-the-loop
 
 ```python
-from lazybridge import Agent
+from lazybridge import Plan, Step
 from lazybridge.ext.hil import human_agent
 
-approval = human_agent(timeout=300)
-plan = Plan(
-    Step(draft,    name="draft"),
-    Step(approval, name="approve"),
-    Step(send,     name="send"),
+approval = human_agent(timeout=300, name="approve")
+pipeline = Agent(
+    engine=Plan(
+        Step("draft"),
+        Step("approve"),
+        Step("send"),
+    ),
+    tools=[draft, approval, send],
 )
 ```
 
-A human approval is just another step. The plan halts and waits.
+A human approval is just another agent. Drop it into the plan's
+`tools=[...]` and reference its name from a `Step`; the plan halts and
+waits when that step runs.
 
 ### 11 — Observability
 
 ```python
-from lazybridge import Session, JsonFileExporter
+from lazybridge import Agent, Session, JsonFileExporter
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
-agent   = Agent.from_model("claude-sonnet-4-6", session=session)
+agent   = Agent("claude-opus-4-7", session=session)
 ```
 
 Add a `Session` once at the top. Every nested agent, tool call, and step

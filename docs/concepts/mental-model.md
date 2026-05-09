@@ -46,10 +46,10 @@ execution).
 
 ```python
 def get_weather(city: str) -> str:
-    """Return the current weather for a city."""
+    """Return the current weather for ``city``."""
     ...
 
-agent = Agent.from_model("claude-sonnet-4-6", tools=[get_weather])
+agent = Agent("claude-opus-4-7", tools=[get_weather])
 ```
 
 There is no second JSON schema to define and no `@tool` decorator to
@@ -80,21 +80,25 @@ The `Store` is especially important when a system grows beyond one agent.
 Multiple agents and pipeline steps can read and write to it, exchanging
 structured information without relying on fragile free-form text passing.
 
-## A working agent in three lines
+## A working agent in two lines
 
 ```python
 from lazybridge import Agent
 
-agent = Agent.from_model("claude-sonnet-4-6")
-result = await agent.run("Explain LazyBridge in one sentence.")
-print(result.text())
+print(Agent("claude-opus-4-7")("Explain LazyBridge in one sentence.").text())
 ```
 
 In this example:
 
-- The **engine** is `LLMEngine` (created implicitly by `from_model`).
+- The **engine** is `LLMEngine` (created implicitly because the first
+  positional argument is a model string).
 - There are no **tools**.
 - The only **state** is the result `Envelope`.
+
+Calling `agent(task)` is the canonical sync entry point. An `await
+agent.run(task)` async form and an `async for chunk in agent.stream(task)`
+streaming form exist when you need them — start with the sync call and
+opt into async only where it matters.
 
 The same `Agent` would be ready for tools, memory, sessions, plans, or
 human approvals the moment you needed any of them — without rewriting.

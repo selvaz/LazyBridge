@@ -21,24 +21,28 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## 2. Your first agent
 
 ```python
-import asyncio
 from lazybridge import Agent
 
-async def main():
-    agent = Agent.from_model("claude-sonnet-4-6")
-    result = await agent.run("Explain LazyBridge in one sentence.")
-    print(result.text())
-
-asyncio.run(main())
+agent = Agent("claude-opus-4-7")
+print(agent("Explain LazyBridge in one sentence.").text())
 ```
 
-`Agent.from_model(...)` infers the provider from the model name (Anthropic,
-OpenAI, Google, …). If you want to be explicit, use
-`Agent.from_provider("anthropic", "claude-sonnet-4-6")`.
+That's a complete, runnable program — no `asyncio.run`, no event loop, no
+`@tool` decorators, no `.from_model(...)` factory required. The string
+`"claude-opus-4-7"` is sugar for `Agent(engine=LLMEngine("claude-opus-4-7"))`;
+LazyBridge infers the provider from the model name (Anthropic, OpenAI,
+Google, …). Use the explicit form when you need to configure the engine
+(`system=`, `max_turns=`, `thinking=`, …) or
+[`Agent.from_provider("anthropic", "claude-opus-4-7")`](concepts/mental-model.md)
+when you want to pin the provider.
 
-`agent.run(...)` returns an `Envelope` — LazyBridge's typed result wrapper
-that carries the payload, token/cost metadata, error info, and any nested
-sub-agent rollup. Call `.text()` to get a string.
+Calling `agent(task)` returns an `Envelope` — LazyBridge's typed result
+wrapper that carries the payload, token / cost metadata, error info, and
+any nested sub-agent rollup. Call `.text()` to get a string.
+
+If you'd rather drive things asynchronously, every agent also exposes
+`await agent.run(task)` and an `async for chunk in agent.stream(task)`
+streaming form. The sync call shown above is the canonical entry point.
 
 ## 3. Add a tool
 
@@ -47,30 +51,24 @@ type hints, and docstring to build the schema the LLM sees — no second
 JSON definition required.
 
 ```python
-import asyncio
 from lazybridge import Agent
 
 def get_weather(city: str) -> str:
-    """Return the current weather for a city.
-
-    Args:
-        city: A city name, e.g. "Paris" or "Tokyo".
-    """
+    """Return the current weather for ``city``."""
     # Replace with a real API call. This stub keeps the example offline.
     return f"It's 18°C and sunny in {city}."
 
-async def main():
-    agent = Agent.from_model("claude-sonnet-4-6", tools=[get_weather])
-    result = await agent.run("What's the weather like in Paris right now?")
-    print(result.text())
-
-asyncio.run(main())
+agent = Agent("claude-opus-4-7", tools=[get_weather])
+print(agent("What's the weather like in Paris right now?").text())
 ```
 
-The agent will decide on its own to call `get_weather("Paris")`, observe the
-result, and produce the final answer. You did not define a JSON schema, you
-did not write any orchestration code, and you did not lock yourself to a
-specific provider.
+The agent will decide on its own to call `get_weather("Paris")`, observe
+the result, and produce the final answer. You did not define a JSON
+schema, you did not write any orchestration code, and you did not lock
+yourself to a specific provider.
+
+To watch the loop turn-by-turn, pass `verbose=True` — it's the equivalent
+of LangGraph's `graph.stream(stream_mode="updates")`.
 
 ## 4. What to read next
 
