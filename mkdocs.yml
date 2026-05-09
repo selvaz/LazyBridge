@@ -119,3 +119,10 @@ nav:
           - Exporters: guides/full/exporters.md
           - GraphSchema: guides/full/graph-schema.md
           - SupervisorEngine: guides/full/supervisor.md
+      - Advanced:
+          - Engine protocol: guides/advanced/engine-protocol.md
+          - BaseProvider: guides/advanced/base-provider.md
+          - Providers: guides/advanced/providers.md
+          - Plan serialization: guides/advanced/plan-serialize.md
+          - OpenTelemetry: guides/advanced/otel.md
+          - Visualizer: guides/advanced/visualizer.md
