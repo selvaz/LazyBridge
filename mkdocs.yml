@@ -102,3 +102,6 @@ nav:
           - Store: guides/mid/store.md
           - Session: guides/mid/session.md
           - Guards: guides/mid/guards.md
+          - Chain: guides/mid/chain.md
+          - Parallel: guides/mid/parallel.md
+          - As tool: guides/mid/as-tool.md
