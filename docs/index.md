@@ -34,7 +34,12 @@ mental model is the same.
 
 - [**Quickstart**](quickstart.md) — install LazyBridge and run your first
   agent in five minutes.
-- **Concepts** *(coming next)* — the mental model, in 15 minutes.
+- [**Concepts → Mental model**](concepts/mental-model.md) — Agent =
+  Engine + Tools + State, the only decomposition you need.
+- [**Concepts → Everything is a tool**](concepts/everything-is-a-tool.md) —
+  the composition rule that holds the framework together.
+- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
+  the twelve rungs from one-line agent to checkpointed pipeline.
 - **Guides** *(coming next)* — one focused page per public concept,
   organised by tier (Basic → Mid → Full → Advanced).
 - **Recipes** *(coming next)* — runnable end-to-end examples lifted from

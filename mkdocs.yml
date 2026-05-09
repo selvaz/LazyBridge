@@ -86,3 +86,7 @@ extra:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Concepts:
+      - Mental model: concepts/mental-model.md
+      - Everything is a tool: concepts/everything-is-a-tool.md
+      - Progressive complexity: concepts/progressive-complexity.md

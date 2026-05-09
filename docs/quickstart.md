@@ -77,8 +77,12 @@ specific provider.
 You've now seen the whole core surface: an agent, a model, and a function
 exposed as a tool. From here:
 
-- **Concepts** *(coming next)* — `Agent = Engine + Tools + State` and the
-  composition rules you'll lean on.
+- [**Concepts → Mental model**](concepts/mental-model.md) —
+  `Agent = Engine + Tools + State` and the composition rules you'll
+  lean on.
+- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
+  the twelve rungs from this quickstart to a checkpointed production
+  pipeline.
 - **Guides → Basic → Tool** *(coming next)* — the three schema modes
   (`signature` / `llm` / `hybrid`) and when to pick each.
 - **Recipes → React agent** *(coming next)* — the same pattern as above,
