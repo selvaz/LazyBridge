@@ -300,13 +300,13 @@ plan = Agent(
   `parallel=True` step's `routes=` / `routes_by=` is silently
   dropped — parallel bands have their own control flow. Set
   routing on the step *after* the band.
-- **A predicate that raises is wrapped as `PlanCompileError`.**
-  Even though it's strictly a runtime failure (the predicate fires
-  during plan execution), the engine surfaces the exception as
-  `PlanCompileError` with the offending step name, target, and
-  underlying error class. This is by design — a misbehaving
-  predicate is treated as a build-time bug, not a runtime
-  condition.
+- **A predicate that raises is wrapped as `PlanRuntimeError`.**
+  The engine catches the underlying exception and re-raises it
+  as `PlanRuntimeError` (a `RuntimeError` subclass) with the
+  offending step name, target, and underlying error class in
+  the message. Distinct from `PlanCompileError` (build-time
+  DAG validation) so caught-at-runtime predicate bugs don't
+  conflate with caught-at-construction DAG bugs.
 - **`after_branches` must come AFTER the routing step in declared
   order.** A typo or a backward reference fails fast at
   construction with a `PlanCompileError` message that names both

@@ -28,6 +28,7 @@ from typing import Any
 class NodeType(StrEnum):
     AGENT = "agent"
     ROUTER = "router"
+    TOOL = "tool"  # plain Python-callable tools registered on an agent
 
 
 class EdgeType(StrEnum):
@@ -107,7 +108,7 @@ class _ToolNode(_BaseNode):
 
     def __init__(self, id: str, name: str) -> None:
         super().__init__(id, name)
-        self.type = "tool"
+        self.type = NodeType.TOOL
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "type": self.type}
@@ -402,7 +403,7 @@ class GraphSchema:
         for n in data.get("nodes", []):
             if n.get("type") == NodeType.ROUTER:
                 g._nodes[n["id"]] = RouterNode.from_dict(n)
-            elif n.get("type") == "tool":
+            elif n.get("type") == NodeType.TOOL:
                 g._nodes[n["id"]] = _ToolNode(id=n["id"], name=n.get("name", n["id"]))
             else:
                 g._nodes[n["id"]] = AgentNode.from_dict(n)

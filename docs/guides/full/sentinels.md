@@ -33,7 +33,7 @@ Step(target, context=[<sentinel>, <sentinel>, "literal string"])
 | `from_prev` | The previous step's output | Plan execution history | — (always available) |
 | `from_start` | The Plan's original input | Plan execution history | — |
 | `from_step("n")` | A named prior step's output | Plan execution history | `"n"` must name an earlier step |
-| `from_parallel("n")` | Same as `from_step("n")` — different name signals intent | Plan execution history | **Not separately validated.** A typo'd `from_parallel("foo")` surfaces at runtime as a `warnings.warn(...)` fallback to the start envelope, not a `PlanCompileError`. Prefer `from_step` when you want compile-time safety. |
+| `from_parallel("n")` | Same as `from_step("n")` — different name signals intent | Plan execution history | `"n"` must name an earlier step (validated identically to `from_step`). |
 | `from_parallel_all("n")` | Every consecutive parallel sibling starting at `"n"`, joined as labelled text | Plan execution history | `"n"` must exist, come earlier, be `parallel=True`, AND be the FIRST member of its band (the step immediately before it must be non-parallel) |
 | `from_memory("n")` | The live `Memory` of the agent registered under `"n"` | Step execution time (live) | The named tool must be an agent with `memory=` attached |
 | `from_agent("n")` | The last output of agent `"n"` from a shared `Store` | Step execution time (live) | The tool must be an agent (`returns_envelope=True`) AND the source agent must have `store=` attached |

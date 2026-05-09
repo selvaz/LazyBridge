@@ -185,3 +185,70 @@ class ConcurrentPlanRunError(RuntimeError):
 
 class PlanCompileError(Exception):
     pass
+
+
+class PlanRuntimeError(RuntimeError):
+    """Raised when a Plan step misbehaves at runtime in a way that
+    indicates a programming bug — not a recoverable runtime condition.
+
+    The canonical case is a ``Step(routes={...})`` predicate that
+    raises an exception during evaluation.  The engine wraps the
+    underlying exception in :class:`PlanRuntimeError` with the
+    offending step and target named, then propagates.
+
+    Distinct from :class:`PlanCompileError` (which fires at
+    construction time for static DAG validation) and from
+    :class:`ConcurrentPlanRunError` (which fires at runtime CAS
+    collision).  Distinct from regular ``Envelope.error_envelope``
+    return paths (which signal recoverable runtime failures the
+    caller can handle without a try/except).
+    """
+
+
+class PlanPaused(BaseException):
+    """Raised by a step target to halt the Plan and persist a resumable checkpoint.
+
+    Subclasses :class:`BaseException` (not :class:`Exception`) so user
+    code's ``except Exception`` clauses do not accidentally swallow the
+    pause signal — same pattern as :class:`KeyboardInterrupt` and
+    :class:`SystemExit`.
+
+    The engine catches ``PlanPaused`` after the offending step's
+    invocation:
+
+    1. Writes a checkpoint with ``status="paused"`` and ``next_step``
+       pointing at the **same step** (so a future ``resume=True`` run
+       re-invokes the step rather than skipping past it).
+    2. Returns an ``Envelope`` whose ``error`` is
+       ``ErrorInfo(type="PlanPaused", retryable=True, ...)`` so the
+       caller can detect the pause and arrange for the resume.
+
+    Use this when a step needs to halt the pipeline cooperatively —
+    for example, the step has detected that an external precondition
+    isn't met (webhook hasn't arrived, human approval pending) and
+    the rest of the pipeline cannot proceed yet.
+
+    Example::
+
+        from lazybridge.engines.plan import PlanPaused
+
+        def webhook_step(task: str) -> str:
+            if not webhook_payload_available():
+                raise PlanPaused("waiting for webhook delivery")
+            return process(task)
+
+    Resume::
+
+        # Same Plan, resume=True picks up at the paused step.
+        Agent(
+            engine=Plan(*steps,
+                        store=store,
+                        checkpoint_key="run-42",
+                        resume=True),
+            tools=[...],
+        )("…")
+    """
+
+    def __init__(self, message: str = "Plan paused") -> None:
+        super().__init__(message)
+        self.message = message

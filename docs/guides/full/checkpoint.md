@@ -25,7 +25,7 @@ Plan(
     "next_step": "step_name" | None,
     "kv": {"writes_key": payload, ...},
     "completed_steps": [...],
-    "status": "claimed" | "running" | "failed" | "done",
+    "status": "claimed" | "running" | "paused" | "failed" | "done",
     "run_uid": "<hex>",            # CAS ownership stamp; identifies the writer
     "checkpoint_version": 2,
     "history": [...],              # serialised StepResult list (v2 only)
@@ -51,7 +51,7 @@ The persisted object captures three things:
 - `completed_steps` + `status` — bookkeeping for the resume logic
   to decide what to skip.
 
-Four state transitions:
+Five state transitions:
 
 - **Claimed** — `status="claimed"`, transient. Written via CAS
   before any step runs so two concurrent fresh runs collide here
@@ -62,6 +62,14 @@ Four state transitions:
 - **Failed** — `status="failed"`, `next_step=<failing step>` (or
   the parallel band's first step). A subsequent `resume=True` run
   retries from there.
+- **Paused** — `status="paused"`, `next_step=<paused step>` (or
+  the parallel band's first step). Written when a step raises
+  `PlanPaused` to signal a cooperative halt. A subsequent
+  `resume=True` run re-invokes the paused step. Use this when a
+  step has detected that an external precondition isn't met
+  (webhook hasn't arrived, human approval pending) and the
+  pipeline cannot proceed yet — distinct from `failed` which
+  signals an actual error.
 - **Done** — `status="done"`, `next_step=None`. A subsequent
   `resume=True` short-circuits and returns an envelope whose
   payload is the cached `kv`.
