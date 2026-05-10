@@ -1,7 +1,7 @@
 """Provider classes — import from here for convenience."""
 
 from lazybridge.core.providers.anthropic import AnthropicProvider
-from lazybridge.core.providers.base import BaseProvider
+from lazybridge.core.providers.base import BaseProvider, UnsupportedFeatureError
 from lazybridge.core.providers.deepseek import DeepSeekProvider
 from lazybridge.core.providers.google import GoogleProvider
 from lazybridge.core.providers.lmstudio import LMStudioProvider
@@ -14,4 +14,5 @@ __all__ = [
     "GoogleProvider",
     "LMStudioProvider",
     "OpenAIProvider",
+    "UnsupportedFeatureError",
 ]

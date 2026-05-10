@@ -51,7 +51,7 @@ mental model is the same.
   [Native tools](guides/basic/native-tools.md).
 - **Guides → Mid** — `Memory`, `Store`, `Session`, `Guards`,
   `verify=`, `chain` / `parallel` / `as_tool`, `HumanEngine`,
-  `MCP`, `Evals` (eleven pages).
+  `MCP`, `Multimodal`, `Evals` (twelve pages).
 - **Guides → Full** — `Plan`, `Step`, `Sentinels`, `Routing`,
   `Parallel plan steps`, `Checkpoint & resume`, `Exporters`,
   `GraphSchema`, `SupervisorEngine` (nine pages).
