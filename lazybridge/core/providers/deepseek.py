@@ -291,11 +291,17 @@ class DeepSeekProvider(OpenAIProvider):
                 return
             instruction = "Respond with a valid JSON object."
 
+        # Never mutate ``params["messages"]`` in place: BaseProvider treats
+        # ``request`` as read-only, and even though ``_messages_to_openai``
+        # currently builds a fresh list, an upstream change could share
+        # references and silently corrupt the caller's ``request.messages``
+        # across turns. Always rebuild the list and the first dict.
         messages = params.get("messages", [])
         if messages and messages[0].get("role") == "system":
-            messages[0] = {**messages[0], "content": messages[0]["content"] + "\n" + instruction}
+            new_first = {**messages[0], "content": messages[0]["content"] + "\n" + instruction}
+            params["messages"] = [new_first, *messages[1:]]
         else:
-            params["messages"] = [{"role": "system", "content": instruction}] + messages
+            params["messages"] = [{"role": "system", "content": instruction}, *messages]
 
     def complete(self, request: CompletionRequest) -> CompletionResponse:
         """Execute a synchronous completion."""

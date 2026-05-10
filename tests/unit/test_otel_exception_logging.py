@@ -38,10 +38,9 @@ async def test_otel_set_status_failure_is_logged(caplog: pytest.LogCaptureFixtur
     with caplog.at_level(logging.WARNING, logger="lazybridge.ext.otel.exporter"):
         exp.export({"event_type": "agent_error", "run_id": "r1", "agent_name": "a", "error": "x"})
 
-    assert any(
-        "set_status" in rec.message and "boom-set-status" in rec.message
-        for rec in caplog.records
-    ), f"expected set_status warning, got: {[r.message for r in caplog.records]}"
+    assert any("set_status" in rec.message and "boom-set-status" in rec.message for rec in caplog.records), (
+        f"expected set_status warning, got: {[r.message for r in caplog.records]}"
+    )
 
 
 @pytest.mark.asyncio
@@ -62,6 +61,6 @@ async def test_otel_span_end_failure_is_logged(caplog: pytest.LogCaptureFixture)
     with caplog.at_level(logging.WARNING, logger="lazybridge.ext.otel.exporter"):
         exp.export({"event_type": "agent_finish", "run_id": "r2", "agent_name": "a"})
 
-    assert any(
-        "span.end" in rec.message and "boom-end" in rec.message for rec in caplog.records
-    ), f"expected span.end warning, got: {[r.message for r in caplog.records]}"
+    assert any("span.end" in rec.message and "boom-end" in rec.message for rec in caplog.records), (
+        f"expected span.end warning, got: {[r.message for r in caplog.records]}"
+    )

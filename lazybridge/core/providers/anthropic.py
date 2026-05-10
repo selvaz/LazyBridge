@@ -160,7 +160,13 @@ class AnthropicProvider(BaseProvider):
         }
     )
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float | None:
         # Substring matching against model.lower() lets a fully-qualified model
         # string like "claude-sonnet-4-6-20250514" match the short key
         # "claude-sonnet-4-6" without having to enumerate every version suffix.
@@ -169,11 +175,34 @@ class AnthropicProvider(BaseProvider):
         # ones in _PRICE_TABLE (e.g. "claude-3-5-sonnet" before "claude-3-sonnet")
         # so that a longer, specific key matches first.  Python 3.7+ dicts preserve
         # insertion order, which makes the match deterministic.
+        #
+        # Cache-hit pricing: Anthropic charges 10% of the base input rate for
+        # cache reads (uniform across cache-capable models).  ``cached_input_tokens``
+        # is clamped to ``input_tokens`` to handle SDK noise where the reported
+        # cache hits exceed total input.
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
-                return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+                cached = max(0, min(cached_input_tokens, input_tokens))
+                uncached = input_tokens - cached
+                cached_rate = 0.1 * in_price
+                return (uncached * in_price + cached * cached_rate + output_tokens * out_price) / 1_000_000
         return None
+
+    @staticmethod
+    def _populate_cached_input_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
+        """Extract Anthropic prompt-cache hits.
+
+        The SDK exposes the cache-read count on ``usage.cache_read_input_tokens``
+        (added in 0.39.x).  Older SDK builds simply lack the attribute, in which
+        case ``usage.cached_input_tokens`` stays at zero.
+        """
+        if not raw_usage:
+            return usage
+        cached = getattr(raw_usage, "cache_read_input_tokens", None)
+        if cached:
+            usage.cached_input_tokens = int(cached)
+        return usage
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for a given Anthropic model."""
@@ -263,10 +292,9 @@ class AnthropicProvider(BaseProvider):
                         # Anthropic audio input: claude-3-7-sonnet+ and
                         # claude-4.x.  Wire format mirrors the image
                         # block — base64-only on Anthropic; URL audio
-                        # is rejected by the API so we re-fetch nothing
-                        # and skip the URL branch.  Capability gating
-                        # in LLMEngine has already filtered to a
-                        # supported model by this point.
+                        # is rejected by the API.  Mirror OpenAI's
+                        # warn-and-skip so the rest of the request
+                        # still goes through with the text part.
                         if block.base64_data:
                             blocks.append(
                                 {
@@ -277,6 +305,14 @@ class AnthropicProvider(BaseProvider):
                                         "data": block.base64_data,
                                     },
                                 }
+                            )
+                        elif block.url:
+                            warnings.warn(
+                                "Anthropic audio input requires base64 — URL audio "
+                                f"({block.url}) is not supported and was skipped. "
+                                "Pass AudioContent.from_path()/from_bytes() instead.",
+                                UserWarning,
+                                stacklevel=3,
                             )
                     elif isinstance(block, ToolUseContent):
                         blocks.append(
@@ -545,7 +581,10 @@ class AnthropicProvider(BaseProvider):
         if _tt is not None:
             usage.thinking_tokens = _tt
         # Price lookup by substring match — see _compute_cost for ordering notes.
-        usage.cost_usd = self._compute_cost(response.model, usage.input_tokens, usage.output_tokens)
+        usage = self._populate_cached_input_tokens(usage, response.usage)
+        usage.cost_usd = self._compute_cost(
+            response.model, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+        )
 
         return CompletionResponse(
             content=content,
@@ -754,8 +793,12 @@ class AnthropicProvider(BaseProvider):
                     _thinking_tokens = getattr(final.usage, "reasoning_tokens", None)
                     if _thinking_tokens is not None:
                         usage.thinking_tokens = _thinking_tokens
+                    usage = self._populate_cached_input_tokens(usage, final.usage)
                     usage.cost_usd = self._compute_cost(
-                        getattr(final, "model", ""), usage.input_tokens, usage.output_tokens
+                        getattr(final, "model", ""),
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cached_input_tokens,
                     )
                     tool_calls = [
                         ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"
@@ -898,8 +941,12 @@ class AnthropicProvider(BaseProvider):
                     _thinking_tokens = getattr(final.usage, "reasoning_tokens", None)
                     if _thinking_tokens is not None:
                         usage.thinking_tokens = _thinking_tokens
+                    usage = self._populate_cached_input_tokens(usage, final.usage)
                     usage.cost_usd = self._compute_cost(
-                        getattr(final, "model", ""), usage.input_tokens, usage.output_tokens
+                        getattr(final, "model", ""),
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cached_input_tokens,
                     )
                     tool_calls = [
                         ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"

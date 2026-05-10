@@ -29,18 +29,18 @@ Goal: every audit-confirmed bug is fixed and locked by a regression test.
 
 | ID | File:line | Status | Owner | PR |
 |---|---|---|---|---|
-| B1 | `core/providers/deepseek.py:268-298` — copy `params["messages"]` before mutating | [-] | — | **Skipped: false positive.** `params["messages"]` is freshly built by `_messages_to_openai` per call. `messages[0] = {**messages[0], ...}` assigns a fresh dict to the freshly-built list slot. `request.messages` is never touched. |
-| B2 | `core/providers/anthropic.py:163-176` — extend `_compute_cost(cached_input_tokens=0)`; 25% rate | [ ] | | |
-| B3 | `core/providers/openai.py:818-825, 884` — preserve `usage` across null-check (streamed Responses) | [ ] | | |
-| B4 | `core/providers/anthropic.py:262-280` — warn on URL-source AudioContent | [ ] | | |
-| B5 | `core/providers/google.py:649-661, 749-757` — re-use raw Part; never reconstruct `thought_signature` | [ ] | | |
-| B6 | `engines/plan/_compiler.py:148-165` — validate existence first; typo-aware error | [ ] | | |
+| B1 | `core/providers/deepseek.py:268-298` — defensive: rebuild list, never mutate in place | [x] | claude | Original audit was false-positive (`_messages_to_openai` builds fresh dicts), but in-place mutation is fragile to upstream changes; hardened to always reassign `params["messages"]`. |
+| B2 | `core/providers/anthropic.py:163-176` — extend `_compute_cost(cached_input_tokens=0)`; 10% rate (Anthropic standard) | [x] | claude | Added `_populate_cached_input_tokens` helper, wired all three call sites (sync + 2 streaming). Cache reads costed at 0.1× input rate. |
+| B3 | `core/providers/openai.py:818-825, 884` — preserve `usage` across null-check (streamed Responses) | [-] | — | **Skipped: false positive.** Code at lines 818-825 and 882-895 already populates `cached_input_tokens` correctly when `u` is non-None. Interrupted-stream `usage=None` is correct (don't fabricate cost). Audit conflated the two cases. |
+| B4 | `core/providers/anthropic.py:262-280` — warn on URL-source AudioContent | [x] | claude | Added `elif block.url:` branch with mirroring `UserWarning` (parity with OpenAI provider). |
+| B5 | `core/providers/google.py:649-661, 749-757` — re-use raw Part; never reconstruct `thought_signature` | [-] | — | **Skipped: already correct.** Both non-streaming (`_parse_response:659`) and streaming (`stream:756`) paths already preserve the raw SDK Part. `_messages_to_gemini:306-309` already prefers raw Part if available. |
+| B6 | `engines/plan/_compiler.py:148-165` — typo-aware "Did you mean 'X'?" via `difflib.get_close_matches`; applies to `from_step`, `from_agent`, `from_memory` errors | [x] | claude | direct commit; tests: `test_audit_phase1_regressions.py::{test_compiler_unknown_step_suggests_close_match, test_compiler_unknown_step_suggests_when_close}` |
 | B7 | `engines/plan/_serialisation.py:95-119` — raise `ValueError` on unknown sentinel kind | [x] | claude | direct commit; test: `tests/unit/test_serialisation_unknown_sentinel.py` + updated `test_provider_static_paths.py::test_plan_serialization_unknown_sentinel_kind_raises` |
 | B8 | `ext/otel/exporter.py:146-175` — log SDK exceptions at WARNING (don't swallow) | [x] | claude | direct commit; test: `tests/unit/test_otel_exception_logging.py` |
 | B9 | `ext/planners/blackboard.py:67-93` — reset closure state per `run()` | [x] | claude | direct commit; test: `tests/unit/test_blackboard_state_reset.py` |
-| B10 | `engines/plan/_types.py:145`, `_plan.py:849` — forbid auto-name when step referenced | [ ] | | |
-| B11 | `engines/plan/_plan.py:858-869` — reorder: `store.write(step.writes)` before checkpoint commit | [ ] | | |
-| B12 | `lazybridge/skill_docs/_build.py` — recover from `Old doc/`; add `--check`; wire into CI | [ ] | | |
+| B10 | `engines/plan/_types.py:136-156`, `_plan.py:849` — auto-name fallback now `_anon_<id>` with `_name_is_opaque=True`; compiler rejects any sentinel referencing it | [x] | claude | direct commit; test: `test_audit_phase1_regressions.py::test_compiler_rejects_opaque_anonymous_step_reference` |
+| B11 | `engines/plan/_plan.py:580+` — on resume, replay every completed step's `step.writes` from the checkpoint kv to the durable Store (idempotent). Closes "external consumers see incomplete state" without forcing the brittle reorder. | [x] | claude | direct commit; test: `test_audit_phase1_regressions.py::test_resume_replays_store_sidecar_writes` |
+| B12 | `lazybridge/skill_docs/_build.py` — minimal-viable rebuild with `--check` (asserts SKILL.md exists, non-empty, mentions every public symbol modulo curated `_SKILL_OPTIONAL`, no stale references); wired into `test.yml` typecheck job | [x] | claude | direct commit; test: `test_audit_phase1_regressions.py::test_skill_docs_check_passes_for_current_state` |
 
 ### Regression tests (new in `tests/unit/`)
 
@@ -57,16 +57,17 @@ Goal: every audit-confirmed bug is fixed and locked by a regression test.
 
 ### CI hygiene
 
-- [ ] Add `permissions: contents: read` to `.github/workflows/test.yml` (top-level)
-- [ ] `docs.yml` asserts `site/llms.txt` and `site/llms-full.txt` are >1KB after `mkdocs build --strict`
-- [ ] Remove false CHANGELOG line about `skill_docs._build --check` (or fulfill via B12)
+- [x] Top-level `permissions: contents: read` added to `.github/workflows/test.yml`
+- [x] `docs.yml` asserts `site/llms.txt` and `site/llms-full.txt` exist and are ≥1KB after `mkdocs build --strict` (with `::error::` annotations on regression)
+- [x] CHANGELOG claim about `skill_docs._build --check` now fulfilled — wired into the `typecheck` job in `test.yml`
 
 ### Acceptance gate (Phase 1 → Phase 2)
 
-- [ ] B1–B12 fixed; each has a regression test that passes
-- [ ] `pytest tests/unit/` green on Python 3.11 / 3.12 / 3.13
-- [ ] `mkdocs build --strict` green; `llms.txt` non-empty
-- [ ] `python -m lazybridge.skill_docs._build --check` exits 0
+- [x] B1–B12 cleared (3 verified false-positive, 9 fixed) with regression coverage in `test_audit_phase1_regressions.py` (12 new tests) plus the prior-session triplet (`test_serialisation_unknown_sentinel`, `test_otel_exception_logging`, `test_blackboard_state_reset`)
+- [x] `pytest tests/unit/` green locally (1701 passed, 44 skipped, 13 warnings on Python 3.11)
+- [ ] `pytest tests/unit/` green on 3.12 + 3.13 (CI-only verification — pending push)
+- [ ] `mkdocs build --strict` green with `llms.txt` ≥1KB (CI-only — depends on docs build)
+- [x] `python -m lazybridge.skill_docs._build --check` exits 0 locally
 
 ---
 

@@ -22,6 +22,7 @@ Carved out of the old monolithic ``plan.py`` (W3.1).
 
 from __future__ import annotations
 
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_origin, get_type_hints
 
 from lazybridge.engines.plan._types import PlanCompileError, Step
@@ -38,6 +39,19 @@ from lazybridge.sentinels import (
 
 if TYPE_CHECKING:
     from lazybridge.tools import Tool
+
+
+def _suggest(name: str, known: list[str]) -> str:
+    """Return ``  Did you mean 'X'?`` (with leading spaces) for a misspelled
+    reference, or an empty string when nothing close enough exists.
+
+    Used uniformly by sentinel-target validation to turn ``unknown step`` /
+    ``unknown tool`` errors into one-shot LLM-fixable messages.
+    """
+    matches = get_close_matches(name, known, n=1, cutoff=0.6)
+    if matches:
+        return f"  Did you mean {matches[0]!r}?"
+    return ""
 
 
 def _extract_literal_string_values(annotation: Any) -> list[str]:
@@ -97,6 +111,11 @@ class PlanCompiler:
         pos: dict[str, int] = {cast("str", s.name): i for i, s in enumerate(steps)}
         # Position-keyed parallel flag for from_parallel_all band-start checks.
         is_parallel: dict[str, bool] = {cast("str", s.name): bool(s.parallel) for s in steps}
+        # Position-keyed flag for steps whose name is the opaque ``_anon_<id>``
+        # fallback — references to these names would type-check (the name does
+        # exist) but are unintelligible to a code-generating LLM, so the
+        # compiler rejects them upfront.
+        opaque_names: set[str] = {cast("str", s.name) for s in steps if getattr(s, "_name_is_opaque", False)}
 
         for i, step in enumerate(steps):
             # Tool exists
@@ -145,15 +164,35 @@ class PlanCompiler:
             # treat them identically for compile-time forward-ref checks
             # so a typo in either form fails fast at construction rather
             # than degrading to a runtime warnings.warn fallback.
-            if isinstance(step.task, (_FromStep, _FromParallel)) and step.task.name not in pos:
-                raise PlanCompileError(
-                    f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step."
-                )
-            for n, ctx_item in enumerate(context_items):
-                if isinstance(ctx_item, (_FromStep, _FromParallel)) and ctx_item.name not in pos:
+            known_steps = [n for n in pos if n not in opaque_names]
+            if isinstance(step.task, (_FromStep, _FromParallel)):
+                if step.task.name in opaque_names:
                     raise PlanCompileError(
-                        f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references unknown step."
+                        f"Step {step.name!r}: task=from_step({step.task.name!r}) references an "
+                        f"auto-named step (target had no name source — fell back to id()).\n"
+                        f"  Defined steps you can reference: {known_steps}.\n"
+                        f"  Fix: pass an explicit name= to the referenced Step, or use a target "
+                        f"that has a __name__ / .name attribute."
                     )
+                if step.task.name not in pos:
+                    raise PlanCompileError(
+                        f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step.\n"
+                        f"  Defined steps: {known_steps}.{_suggest(step.task.name, known_steps)}"
+                    )
+            for n, ctx_item in enumerate(context_items):
+                if isinstance(ctx_item, (_FromStep, _FromParallel)):
+                    if ctx_item.name in opaque_names:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references an "
+                            f"auto-named step (target had no name source — fell back to id()).\n"
+                            f"  Defined steps you can reference: {known_steps}.\n"
+                            f"  Fix: pass an explicit name= to the referenced Step."
+                        )
+                    if ctx_item.name not in pos:
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references unknown step.\n"
+                            f"  Defined steps: {known_steps}.{_suggest(ctx_item.name, known_steps)}"
+                        )
             # … and that step must come *before* this one.  A ``from_step``
             # to a future step quietly degrades to the start envelope at
             # runtime, which looks like success but isn't.
@@ -181,10 +220,11 @@ class PlanCompiler:
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromAgent):
                     if sentinel.name not in tool_map:
+                        known_tools = sorted(tool_map)
                         raise PlanCompileError(
                             f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
-                            f"references tool {sentinel.name!r} which is not in the tool map.  "
-                            f"Available tools: {sorted(tool_map)}."
+                            f"references tool {sentinel.name!r} which is not in the tool map.\n"
+                            f"  Available tools: {known_tools}.{_suggest(sentinel.name, known_tools)}"
                         )
                     tool = tool_map[sentinel.name]
                     if not getattr(tool, "returns_envelope", False):
@@ -206,10 +246,11 @@ class PlanCompiler:
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromMemory):
                     if sentinel.name not in tool_map:
+                        known_tools = sorted(tool_map)
                         raise PlanCompileError(
                             f"Step {step.name!r}: {slot}=from_memory({sentinel.name!r}) "
-                            f"references tool {sentinel.name!r} which is not in the tool map.  "
-                            f"Available tools: {sorted(tool_map)}."
+                            f"references tool {sentinel.name!r} which is not in the tool map.\n"
+                            f"  Available tools: {known_tools}.{_suggest(sentinel.name, known_tools)}"
                         )
                     tool = tool_map[sentinel.name]
                     if not getattr(tool, "agent_memory", None):

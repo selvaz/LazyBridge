@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: ["main"]
 
+# Default to least-privilege.  Individual jobs override only when they
+# need extra permissions (none here — all jobs are read-only against
+# the repo and write only test artifacts).
+permissions:
+  contents: read
+
 jobs:
   pre-commit:
     name: pre-commit hooks
@@ -63,6 +69,12 @@ jobs:
 
       - name: Typecheck
         run: mypy lazybridge/
+
+      - name: Skill-doc drift check
+        # Asserts lazybridge/skill/SKILL.md exists, is non-empty, and
+        # references every public symbol the skill is expected to teach.
+        # See lazybridge/skill_docs/_build.py for the gate semantics.
+        run: python -m lazybridge.skill_docs._build --check
 
   unit:
     name: unit tests (Python ${{ matrix.python-version }})

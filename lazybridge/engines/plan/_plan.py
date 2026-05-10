@@ -577,6 +577,17 @@ class Plan:
             # checkpoints (no ``history`` key) degrade to an empty
             # in-memory history — same behaviour as pre-W1.3, no crash.
             history.extend(self._payload_to_history(checkpoint.get("history") or []))
+            # Replay Store sidecar writes for any step that completed but
+            # whose durable write was lost in the checkpoint→Store gap on
+            # the prior run.  Idempotent: writing the same value is a no-op
+            # for any sane Store backend.  Closes the "external consumers
+            # see incomplete state" failure mode.
+            effective_store = store if store is not None else self.store
+            if effective_store is not None:
+                completed_set = set(completed)
+                for step_def in self.steps:
+                    if step_def.name in completed_set and step_def.writes and step_def.writes in kv:
+                        effective_store.write(step_def.writes, kv[step_def.writes])
 
         # Resume from checkpoint if available
         current_name: str | None

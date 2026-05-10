@@ -12,10 +12,7 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from lazybridge import Agent, Envelope
-from lazybridge.engines.base import Engine
 from lazybridge.ext.planners.blackboard import make_blackboard_planner
 
 
