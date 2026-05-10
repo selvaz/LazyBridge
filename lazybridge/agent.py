@@ -161,6 +161,21 @@ class Agent:
         _name_explicit_flag: bool = name is not None and str(name).strip() != ""
         from lazybridge.engines.llm import LLMEngine
 
+        # Phase-3 Block H, T6 — ``model=`` is only meaningful on the LLM-engine
+        # construction path (engine is None or a model-string).  Passing both
+        # ``model=`` and a non-string ``engine=`` was silently dropped pre-0.8;
+        # 0.8.0 raises so the typo / misconfiguration is visible.
+        if model is not None and engine is not None and not isinstance(engine, str):
+            raise ValueError(
+                f"Agent(model={model!r}, engine={type(engine).__name__}(...)): "
+                f"the ``model=`` kwarg is only consumed when ``engine=None`` or "
+                f"``engine=<model_string>`` (in which case Agent auto-builds an "
+                f"``LLMEngine``).  When you pass a pre-built engine, configure "
+                f"the model on that engine itself.\n"
+                f"  Fix: drop ``model=`` (engine controls the model), or pass "
+                f"the model string directly: ``Agent({model!r}, ...)``."
+            )
+
         # Canonical: Agent(engine=LLMEngine(...)) or Agent(engine=Plan(...))
         # Sugar:     Agent("claude-opus-4-7") → engine is a model string → auto-builds LLMEngine
         #            Agent() → engine is None → defaults to "claude-opus-4-7"
@@ -176,6 +191,22 @@ class Agent:
             )
         else:
             self.engine = engine
+            # Phase-3 Block H, T7 — when the engine isn't an LLM (Plan,
+            # SupervisorEngine, HumanEngine, custom), the auto-name fallback
+            # to the engine's ``model`` attribute (or to the literal
+            # ``"agent"`` placeholder) silently produces ambiguous names that
+            # collide once the agent is used as a tool or referenced by a
+            # ``Step``.  Require ``name=`` upfront so the failure is at the
+            # construction point rather than at first composition.
+            if not _name_explicit_flag and not hasattr(self.engine, "model"):
+                engine_kind = type(self.engine).__name__
+                raise ValueError(
+                    f"Agent(engine={engine_kind}(...)) requires an explicit ``name=``.\n"
+                    f"  Engines other than ``LLMEngine`` have no ``.model`` attribute to derive\n"
+                    f"  a default name from, so the agent would silently get the placeholder\n"
+                    f"  ``'agent'`` and collide the moment another agent is built or composed.\n"
+                    f"  Fix: pass ``name=`` (e.g. ``Agent(engine={engine_kind}(...), name='pipeline')``)."
+                )
 
         # If the caller passed native_tools but also supplied a pre-built
         # engine, push the list onto the engine if it has the attribute.

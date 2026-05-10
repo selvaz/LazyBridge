@@ -42,7 +42,7 @@ def test_from_chain_wraps_as_tool():
 
 
 def test_plan_engine_wraps_as_tool():
-    plan_agent = Agent(engine=Plan(Step(target=lambda task: "x", name="step1")))
+    plan_agent = Agent(engine=Plan(Step(target=lambda task: "x", name="step1")), name="_t_204")
     t = _wrap_tool(plan_agent)
     assert isinstance(t, Tool)
 

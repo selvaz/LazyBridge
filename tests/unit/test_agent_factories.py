@@ -109,7 +109,7 @@ def test_from_provider_returns_agent_with_llm_engine():
 
 def test_engine_kwarg_wraps_any_engine_unchanged():
     plan = Plan(Step(target=lambda t: f"out:{t}", name="step1"))
-    a = Agent(engine=plan)
+    a = Agent(engine=plan, name="_t_101")
     assert isinstance(a, Agent)
     assert a.engine is plan
 
@@ -123,14 +123,14 @@ def test_engine_kwarg_passes_kwargs():
 
 
 # ---------------------------------------------------------------------------
-# Plan engine — declarative DAG (canonical form: Agent(engine=Plan(...)))
+# Plan engine — declarative DAG (canonical form: Agent(engine=Plan(...), name="_t_102"))
 # ---------------------------------------------------------------------------
 
 
 def test_plan_engine_builds_from_steps():
     s1 = Step(target=lambda t: "a", name="s1")
     s2 = Step(target=lambda t: "b", name="s2")
-    a = Agent(engine=Plan(s1, s2))
+    a = Agent(engine=Plan(s1, s2), name="_t_103")
     assert isinstance(a, Agent)
     assert isinstance(a.engine, Plan)
     assert [s.name for s in a.engine.steps] == ["s1", "s2"]
@@ -143,7 +143,8 @@ def test_plan_engine_threads_plan_kwargs():
             Step(target=lambda t: "x", name="s"),
             max_iterations=42,
             on_concurrent="fork",
-        )
+        ),
+        name="kwargs_plan",
     )
     assert a.engine.max_iterations == 42
     assert a.engine.on_concurrent == "fork"
@@ -174,7 +175,8 @@ def test_plan_engine_executes_end_to_end():
         engine=Plan(
             Step(target=step_a, name="a"),
             Step(target=step_b, name="b"),
-        )
+        ),
+        name="e2e_plan",
     )
     env = a("hello")
     assert isinstance(env, Envelope)
@@ -230,7 +232,8 @@ def test_parallel_threads_concurrency_kwargs():
         lambda **kw: Agent("claude-opus-4-7", **kw),
         # Tier-aliased provider factory (the only non-pure-alias factory left)
         lambda **kw: Agent.from_provider("anthropic", tier="top", **kw),
-        # Canonical Plan engine
+        # Canonical Plan engine — caller-supplied ``name=`` flows through ``**kw``
+        # because the test passes ``name="uniform"`` explicitly; T7 is satisfied.
         lambda **kw: Agent(engine=Plan(Step(target=lambda t: "x", name="s")), **kw),
     ],
 )

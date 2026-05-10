@@ -195,7 +195,7 @@ def test_agent_str_output_skips_validation_retry_loop():
             "anything",
         ]
     )
-    agent = Agent(engine=engine, output=str, max_output_retries=2)
+    agent = Agent(engine=engine, output=str, max_output_retries=2, name="_test_agent_17")
     env = agent("task")
     assert env.payload == "anything"
     assert engine.runs == 1

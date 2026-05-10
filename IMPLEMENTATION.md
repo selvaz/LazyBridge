@@ -332,9 +332,9 @@ In `lazybridge/session.py`:
 
 | Phase | Status | Started | Tagged | Notes |
 |---|---|---|---|---|
-| Phase 1 — bugs + tests + CI hygiene | **in progress** | 2026-05-10 | | B1 cleared (false positive); B7, B8, B9 fixed + locked. 1689/1689 unit tests green. Remaining: B2, B3, B4, B5, B6, B10, B11, B12 + 8 regression tests + CI hygiene. |
-| Phase 2 — deletions A–G | not started | | | |
-| Phase 3 — validation parity + provider consistency + observability | not started | | | |
+| Phase 1 — bugs + tests + CI hygiene | **done** | 2026-05-10 | (no tag) | B1, B2, B4, B6, B10, B11, B12 fixed; B3 + B5 verified false positives; B7-B9 done in prior session.  12 new regression tests in `test_audit_phase1_regressions.py`.  Commits `f6c9d00` + `ed71280`. |
+| Phase 2 — deletions A–G | **done** | 2026-05-10 | (no tag) | All 7 blocks shipped: G (dead weight, `e783291`), A (5 factory aliases, `74da34a`), D (`mode="auto"` ladder, `01d2bcc`), E (soft — `tool()` canonical in user-facing surface, `94a96f7`), F (`_ParallelAgent`→`ParallelAgent` + folded-Envelope return, `4b6e4bb`), B (3 config objects + `_UNSET` + precedence game, `d45760a`), C (silent fallbacks → errors, `0bfc84a`). 1660 passed, 44 skipped.  Net −21 723 LOC.  Public surface: −2 in `__all__` (50→48). |
+| Phase 3 — validation parity + provider consistency + observability | **in progress** | 2026-05-10 | | Block H (compile-time validation + standard error format), Block I (provider classvars + cost parity), Block J (OTel nesting + Session exporter dedup). |
 | Phase 4 — docs + examples + CI + skill_docs (v0.8.0) | not started | | | |
 | Phase 5 — extract `report_builder` (v0.9.0) | not started | | | |
 | Phase 6 — stabilisation (v1.0.0) | not started | | | |

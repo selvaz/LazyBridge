@@ -366,7 +366,7 @@ def test_plan_step_0_receives_images():
             return Envelope(task=str(task), payload="captured")
 
     a = Capturing("out", name="cap")
-    plan = Agent(engine=Plan(Step(target=a, name="s0")))
+    plan = Agent(engine=Plan(Step(target=a, name="s0")), name="_t_205")
     img = ImageContent.from_url("https://x.com/cat.png")
     plan(Envelope(task="describe", images=[img]))
 
@@ -394,7 +394,8 @@ def test_plan_step_n_does_not_inherit_images_from_step_0():
         engine=Plan(
             Step(target=s0, name="s0"),
             Step(target=s1, name="s1"),
-        )
+        ),
+        name="_t_206",
     )
     plan(Envelope(task="describe", images=[ImageContent.from_url("https://x.com/a.png")]))
 

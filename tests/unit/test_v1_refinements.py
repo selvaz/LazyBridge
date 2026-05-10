@@ -222,7 +222,7 @@ def test_plan_round_trip_executes_correctly_after_reload():
     blob = plan.to_dict()
     restored = Plan.from_dict(blob, registry={"producer": producer, "consumer": consumer})
 
-    out = Agent(engine=restored)("hello")
+    out = Agent(engine=restored, name="_test_agent_18")("hello")
     assert out.payload == "consumed(produced:hello)"
 
 

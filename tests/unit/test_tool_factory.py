@@ -103,6 +103,8 @@ def test_name_explicit_true_when_name_kwarg_given():
 
 
 def test_name_explicit_false_when_no_name_given():
+    # ``_FakeEngine`` has ``model = "fake"``, so the auto-name fallback fires
+    # (the agent gets ``name="fake"``) and the explicit-flag stays False.
     a = Agent(engine=_FakeEngine())
     assert a._name_explicit is False
 
@@ -128,7 +130,7 @@ def test_name_explicit_true_with_explicit_kwarg():
 
 
 def test_direct_agent_tool_requires_explicit_name():
-    child = Agent(engine=_FakeEngine())  # no name=
+    child = Agent(engine=_FakeEngine())  # no name=, _name_explicit stays False
     with pytest.raises(ValueError, match="explicit name"):
         Agent(name="parent", engine=_FakeEngine(), tools=[child])
 

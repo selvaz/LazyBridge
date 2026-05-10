@@ -90,6 +90,7 @@ def test_plan_agent_canonical_shape():
         tools=[noop],
         memory=Memory(),
         session=Session(),
+        name="_t_201",
     )
     assert isinstance(agent.engine, Plan)
     assert agent.memory is not None
@@ -102,6 +103,7 @@ def test_custom_engine_canonical_shape():
         tools=[],
         memory=Memory(),
         session=Session(),
+        name="_t_1",
     )
     assert isinstance(agent.engine, _EchoEngine)
 
@@ -114,8 +116,8 @@ def test_all_three_engines_have_same_call_interface():
         return task
 
     agents = [
-        Agent(engine=_EchoEngine(), tools=[]),
-        Agent(engine=_FixedEngine("done"), tools=[]),
+        Agent(engine=_EchoEngine(), tools=[], name="_t_2"),
+        Agent(engine=_FixedEngine("done"), tools=[], name="_tt_307"),
     ]
     for a in agents:
         assert callable(a)
@@ -150,15 +152,15 @@ def test_none_shortcut_defaults_to_claude():
 
 def test_as_tool_registers_under_given_name():
     """researcher.as_tool("research") → key "research" in tool map."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_3")
     tool = researcher.as_tool("research")
     assert tool.name == "research"
 
 
 def test_orchestrator_tool_map_contains_as_tool_names():
     """The name from as_tool appears in the orchestrator's tool map."""
-    researcher = Agent(engine=_EchoEngine())
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_4")
+    writer = Agent(engine=_EchoEngine(), name="_t_5")
 
     orchestrator = Agent(
         engine=LLMEngine("claude-opus-4-7"),
@@ -178,8 +180,8 @@ def test_orchestrator_tool_map_contains_as_tool_names():
 
 def test_plan_step_target_matches_as_tool_name():
     """Step("research") resolves to researcher.as_tool("research") in tool map."""
-    researcher = Agent(engine=_EchoEngine())
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_6")
+    writer = Agent(engine=_EchoEngine(), name="_t_7")
 
     # This must not raise — the names are consistent
     orchestrator = Agent(
@@ -191,27 +193,30 @@ def test_plan_step_target_matches_as_tool_name():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_8",
     )
     assert isinstance(orchestrator.engine, Plan)
 
 
 def test_plan_compiler_catches_missing_tool_name():
     """PlanCompiler raises PlanCompileError when Step target not in tool map."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_9")
 
     with pytest.raises(PlanCompileError, match="tool 'research' not found"):
         Agent(
             engine=Plan(Step("research")),
-            tools=[researcher.as_tool("wrong_name")],  # mismatch
+            tools=[researcher.as_tool("wrong_name")],  # mismatch,
+            name="_t_10",
         )
 
 
 def test_step_name_defaults_to_target_string():
     """Step("research") → name="research" automatically."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_11")
     orchestrator = Agent(
         engine=Plan(Step("research")),
         tools=[researcher.as_tool("research")],
+        name="_t_12",
     )
     steps = orchestrator.engine.steps
     assert steps[0].name == "research"
@@ -220,12 +225,13 @@ def test_step_name_defaults_to_target_string():
 
 def test_step_target_and_name_can_differ():
     """Step(target="research", name="phase_1") — calls "research", step is "phase_1"."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_13")
 
     # Valid: target exists in tool map, name is different
     orchestrator = Agent(
         engine=Plan(Step(target="research", name="phase_1")),
         tools=[researcher.as_tool("research")],
+        name="_t_202",
     )
     steps = orchestrator.engine.steps
     assert steps[0].target == "research"
@@ -241,8 +247,8 @@ def test_sentinels_on_step_not_agent():
     """task= and context= sentinels are Step attributes, not Agent attributes."""
     from lazybridge.sentinels import from_prev, from_step
 
-    researcher = Agent(engine=_EchoEngine())
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_14")
+    writer = Agent(engine=_EchoEngine(), name="_t_15")
 
     orchestrator = Agent(
         engine=Plan(
@@ -253,6 +259,7 @@ def test_sentinels_on_step_not_agent():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_16",
     )
     steps = orchestrator.engine.steps
     assert steps[1].task is from_prev
@@ -274,6 +281,7 @@ def test_canonical_agent_runs():
         tools=[],
         memory=Memory(),
         session=Session(),
+        name="_tt_308",
     )
     result = agent("test input")
     assert result.text() == "hello"
@@ -283,8 +291,8 @@ def test_canonical_plan_agent_runs():
     """Plan agent with as_tool composition runs end-to-end."""
     from lazybridge.sentinels import from_prev
 
-    researcher = Agent(engine=_FixedEngine("research result"))
-    writer = Agent(engine=_FixedEngine("final output"))
+    researcher = Agent(engine=_FixedEngine("research result"), name="_tt_309")
+    writer = Agent(engine=_FixedEngine("final output"), name="_tt_310")
 
     pipeline = Agent(
         engine=Plan(
@@ -297,6 +305,7 @@ def test_canonical_plan_agent_runs():
         ],
         memory=Memory(),
         session=Session(),
+        name="_t_17",
     )
     result = pipeline("test topic")
     assert result.ok
@@ -311,14 +320,14 @@ def test_canonical_plan_agent_runs():
 def test_as_tool_carries_memory_reference():
     """as_tool() passes the agent's Memory object to the Tool."""
     mem = Memory()
-    researcher = Agent(engine=_EchoEngine(), memory=mem)
+    researcher = Agent(engine=_EchoEngine(), memory=mem, name="_t_18")
     tool = researcher.as_tool("research")
     assert tool.agent_memory is mem
 
 
 def test_as_tool_no_memory_gives_none():
     """as_tool() on an agent without memory sets agent_memory=None."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_19")
     tool = researcher.as_tool("research")
     assert tool.agent_memory is None
 
@@ -332,8 +341,8 @@ def test_from_memory_compiler_requires_tool_in_map():
         """Noop."""
         return task
 
-    researcher = Agent(engine=_EchoEngine(), memory=Memory())
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), memory=Memory(), name="_t_20")
+    writer = Agent(engine=_EchoEngine(), name="_t_21")
     # from_memory("ghost") references a tool name not in the tool map
     with pytest.raises(PlanCompileError, match="from_memory"):
         Agent(
@@ -345,6 +354,7 @@ def test_from_memory_compiler_requires_tool_in_map():
                 researcher.as_tool("research"),
                 writer.as_tool("write"),
             ],
+            name="_t_203",
         )
 
 
@@ -353,8 +363,8 @@ def test_from_memory_compiler_requires_agent_to_have_memory():
     from lazybridge import from_memory
     from lazybridge.engines.plan._types import PlanCompileError
 
-    researcher = Agent(engine=_EchoEngine())  # no memory=
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_22")  # no memory=
+    writer = Agent(engine=_EchoEngine(), name="_t_23")
     with pytest.raises(PlanCompileError, match="memory="):
         Agent(
             engine=Plan(
@@ -365,6 +375,7 @@ def test_from_memory_compiler_requires_agent_to_have_memory():
                 researcher.as_tool("research"),
                 writer.as_tool("write"),
             ],
+            name="_t_24",
         )
 
 
@@ -373,8 +384,8 @@ def test_from_memory_resolves_live_at_execution_time():
     from lazybridge import Memory, from_memory
 
     mem = Memory()
-    researcher = Agent(engine=_FixedEngine("research result"), memory=mem)
-    writer = Agent(engine=_FixedEngine("final output"))
+    researcher = Agent(engine=_FixedEngine("research result"), memory=mem, name="_tt_311")
+    writer = Agent(engine=_FixedEngine("final output"), name="_tt_312")
 
     pipeline = Agent(
         engine=Plan(
@@ -385,6 +396,7 @@ def test_from_memory_resolves_live_at_execution_time():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_25",
     )
 
     # Memory is empty at construction — that's fine
@@ -401,8 +413,8 @@ def test_from_memory_empty_memory_is_silent_noop():
     from lazybridge import Memory, from_memory
 
     mem = Memory()
-    researcher = Agent(engine=_FixedEngine("result"), memory=mem)
-    writer = Agent(engine=_FixedEngine("done"))
+    researcher = Agent(engine=_FixedEngine("result"), memory=mem, name="_tt_313")
+    writer = Agent(engine=_FixedEngine("done"), name="_tt_314")
 
     pipeline = Agent(
         engine=Plan(
@@ -413,6 +425,7 @@ def test_from_memory_empty_memory_is_silent_noop():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_26",
     )
     # Empty memory → silent no-op → pipeline still runs
     result = pipeline("topic")
@@ -430,14 +443,14 @@ def test_as_tool_carries_store_reference():
     from lazybridge import Store
 
     store = Store()
-    researcher = Agent(engine=_EchoEngine(), store=store)
+    researcher = Agent(engine=_EchoEngine(), store=store, name="_t_27")
     tool = researcher.as_tool("research")
     assert tool.agent_store is store
 
 
 def test_as_tool_no_store_gives_none():
     """as_tool() on an agent without a store sets agent_store=None."""
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_28")
     tool = researcher.as_tool("research")
     assert tool.agent_store is None
 
@@ -459,8 +472,8 @@ def test_from_agent_compiler_requires_tool_in_map():
     from lazybridge import from_agent
     from lazybridge.engines.plan._types import PlanCompileError
 
-    researcher = Agent(engine=_EchoEngine())
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_29")
+    writer = Agent(engine=_EchoEngine(), name="_t_30")
     with pytest.raises(PlanCompileError, match="from_agent"):
         Agent(
             engine=Plan(
@@ -471,6 +484,7 @@ def test_from_agent_compiler_requires_tool_in_map():
                 researcher.as_tool("research"),
                 writer.as_tool("write"),
             ],
+            name="_t_31",
         )
 
 
@@ -483,7 +497,7 @@ def test_from_agent_compiler_requires_agent_tool():
         """A plain function."""
         return task
 
-    researcher = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_32")
     with pytest.raises(PlanCompileError, match="from_agent"):
         Agent(
             engine=Plan(
@@ -494,6 +508,7 @@ def test_from_agent_compiler_requires_agent_tool():
                 researcher.as_tool("research"),
                 plain,
             ],
+            name="_t_33",
         )
 
 
@@ -504,7 +519,7 @@ def test_from_agent_resolves_from_store():
     store = Store()
 
     researcher = Agent(engine=_FixedEngine("research result"), store=store, name="research")
-    writer = Agent(engine=_FixedEngine("final output"))
+    writer = Agent(engine=_FixedEngine("final output"), name="_tt_315")
 
     pipeline = Agent(
         engine=Plan(
@@ -515,6 +530,7 @@ def test_from_agent_resolves_from_store():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_34",
     )
     result = pipeline("test topic")
     assert result.ok
@@ -528,7 +544,7 @@ def test_from_agent_store_populated_by_research_step():
     store = Store()
 
     researcher = Agent(engine=_FixedEngine("result"), store=store, name="research")
-    writer = Agent(engine=_FixedEngine("done"))
+    writer = Agent(engine=_FixedEngine("done"), name="_tt_316")
 
     pipeline = Agent(
         engine=Plan(
@@ -539,6 +555,7 @@ def test_from_agent_store_populated_by_research_step():
             researcher.as_tool("research"),
             writer.as_tool("write"),
         ],
+        name="_t_35",
     )
     result = pipeline("topic")
     assert result.ok
@@ -550,8 +567,8 @@ def test_from_agent_compiler_requires_store_on_agent():
     from lazybridge import from_agent
     from lazybridge.engines.plan._types import PlanCompileError
 
-    researcher = Agent(engine=_EchoEngine())  # no store= — cannot support from_agent
-    writer = Agent(engine=_EchoEngine())
+    researcher = Agent(engine=_EchoEngine(), name="_t_36")  # no store= — cannot support from_agent
+    writer = Agent(engine=_EchoEngine(), name="_t_37")
     with pytest.raises(PlanCompileError, match="store="):
         Agent(
             engine=Plan(
@@ -562,6 +579,7 @@ def test_from_agent_compiler_requires_store_on_agent():
                 researcher.as_tool("research"),
                 writer.as_tool("write"),
             ],
+            name="_t_38",
         )
 
 
@@ -575,8 +593,8 @@ def test_from_agent_uses_tool_alias_not_agent_name():
 
     store = Store()
     # Agent has no explicit name= — its internal name won't match the alias "research"
-    researcher = Agent(engine=_FixedEngine("research result"), store=store)
-    writer = Agent(engine=_FixedEngine("final output"))
+    researcher = Agent(engine=_FixedEngine("research result"), store=store, name="_tt_317")
+    writer = Agent(engine=_FixedEngine("final output"), name="_tt_318")
 
     pipeline = Agent(
         engine=Plan(
@@ -587,6 +605,7 @@ def test_from_agent_uses_tool_alias_not_agent_name():
             researcher.as_tool("research"),  # alias is "research"
             writer.as_tool("write"),
         ],
+        name="_t_39",
     )
     result = pipeline("topic")
     assert result.ok
@@ -625,7 +644,7 @@ def test_from_agent_missing_store_entry_is_silent_noop():
             return _gen()
 
     researcher = Agent(engine=_FixedEngine("result"), store=store, name="research")
-    writer = Agent(engine=_ContextCapture())
+    writer = Agent(engine=_ContextCapture(), name="write")
 
     # Pre-condition: store is empty — research has NOT run yet.
     assert store.read(_AGENT_OUTPUT_KEY_PREFIX + "research") is None

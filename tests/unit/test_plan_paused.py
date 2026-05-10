@@ -72,6 +72,7 @@ def test_sequential_step_pause_persists_paused_checkpoint() -> None:
             store=store,
             checkpoint_key="paused-test-1",
         ),
+        name="_t_207",
     )
 
     result = pipeline("hello")
@@ -118,6 +119,7 @@ def test_sequential_step_pause_resumes_via_resume_true() -> None:
                 checkpoint_key="paused-test-2",
                 resume=resume,
             ),
+            name="_t_208",
         )
 
     # Run 1 — pauses.
@@ -172,6 +174,7 @@ def test_parallel_band_pause_atomic() -> None:
                 checkpoint_key="paused-band-1",
                 resume=resume,
             ),
+            name="_t_209",
         )
 
     # Run 1 — band pauses.
@@ -208,6 +211,7 @@ def test_pause_without_store_still_surfaces_error_envelope() -> None:
 
     pipeline = Agent(
         engine=Plan(Step(gate, name="gate")),
+        name="_t_210",
     )
 
     with pytest.warns(UserWarning) if False else _no_warn():

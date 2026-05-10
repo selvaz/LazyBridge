@@ -12,7 +12,7 @@ Style note
 These tests deliberately avoid every ``async``/``await``/
 ``asyncio.run``/``ThreadPoolExecutor`` idiom — that's exactly the
 boilerplate LazyBridge was built to hide.  Plans are dispatched via
-the sync ``Agent(engine=plan)("task")`` façade and via
+the sync ``Agent(engine=plan, name="_test_agent_31")("task")`` façade and via
 ``plan.run_many(...)`` for fan-out; routing predicates use the
 ``when`` DSL.  Read these scenarios as if they were sample apps,
 not framework internals.
@@ -123,7 +123,7 @@ def test_e2e_research_happy_path_runs_full_linear_then_terminates() -> None:
     Pattern B caveat."""
     plan, agents = _build_research_plan(["paper-1", "paper-2", "paper-3"])
     with Session() as sess:
-        result = Agent(engine=plan, session=sess)("AI trends April 2026")
+        result = Agent(engine=plan, session=sess, name="_test_agent_32")("AI trends April 2026")
         assert result.ok, f"plan errored: {result.error}"
         assert len(agents["search"].calls) == 1
         assert len(agents["rank"].calls) == 1
@@ -138,7 +138,7 @@ def test_e2e_research_early_out_routes_directly_to_apology() -> None:
     to apology.  Rank/analyse/publish never run."""
     plan, agents = _build_research_plan(items_returned=[])
     with Session() as sess:
-        result = Agent(engine=plan, session=sess)("obscure query")
+        result = Agent(engine=plan, session=sess, name="_test_agent_33")("obscure query")
         assert result.ok
         assert len(agents["search"].calls) == 1
         assert len(agents["rank"].calls) == 0, "rank should be skipped on early-out"
@@ -151,7 +151,7 @@ def test_e2e_cost_rollup_aggregates_across_all_steps() -> None:
     """Session events must capture every step's token / cost usage."""
     plan, _agents = _build_research_plan(["item"])
     with Session() as sess:
-        Agent(engine=plan, session=sess)("t")
+        Agent(engine=plan, session=sess, name="_test_agent_34")("t")
         # The Plan engine emits TOOL_CALL / TOOL_RESULT around each step.
         tool_calls = sess.events.query(event_type=EventType.TOOL_CALL)
         tool_results = sess.events.query(event_type=EventType.TOOL_RESULT)
@@ -214,7 +214,7 @@ def test_e2e_parallel_band_atomicity_under_branch_error() -> None:
         )
         plan._validate({})
 
-        result = Agent(engine=plan)("t")
+        result = Agent(engine=plan, name="_test_agent_35")("t")
         assert not result.ok, "expected error envelope from failed band"
 
         # Atomicity: no band writes were applied.
@@ -253,7 +253,7 @@ def test_e2e_parallel_band_aggregates_via_from_parallel_all() -> None:
         Step(synth, name="synth", context=from_parallel_all("a")),
     )
     plan._validate({})
-    Agent(engine=plan)("t")
+    Agent(engine=plan, name="_test_agent_36")("t")
     # All three branch outputs ended up in synth's context.
     ctx = captured_context[0]
     assert "alpha-result" in ctx
@@ -293,7 +293,7 @@ def test_e2e_resume_picks_up_at_failed_step_after_simulated_crash() -> None:
         # Run 1: transform crashes on first attempt.
         plan1 = make_plan(store)
         plan1._validate({})
-        result1 = Agent(engine=plan1)("batch")
+        result1 = Agent(engine=plan1, name="_test_agent_37")("batch")
         assert not result1.ok, "expected first run to fail at transform"
         # extract's write survived; transform's didn't.
         assert store.read("raw") == "raw-data"
@@ -307,7 +307,7 @@ def test_e2e_resume_picks_up_at_failed_step_after_simulated_crash() -> None:
         # Run 2: resume.
         plan2 = make_plan(store)
         plan2._validate({})
-        result2 = Agent(engine=plan2)("batch")
+        result2 = Agent(engine=plan2, name="_test_agent_38")("batch")
         assert result2.ok, f"expected resume to succeed; got {result2.error}"
         assert len(extract.calls) == 1, "extract should have been skipped on resume"
         assert attempts["transform"] == 2, "transform should have been re-attempted once"
@@ -419,7 +419,7 @@ def test_e2e_self_correction_loop_terminates_on_acceptance() -> None:
         max_iterations=20,
     )
     plan._validate({})
-    result = Agent(engine=plan)("topic")
+    result = Agent(engine=plan, name="_test_agent_39")("topic")
     assert result.ok, f"plan errored: {result.error}"
     assert len(writer.calls) == accept_after
     assert len(reviewer.calls) == accept_after
@@ -449,7 +449,7 @@ def test_e2e_runaway_loop_caps_at_max_iterations() -> None:
         max_iterations=6,
     )
     plan._validate({})
-    result = Agent(engine=plan)("topic")
+    result = Agent(engine=plan, name="_test_agent_40")("topic")
     assert not result.ok, "expected MaxIterationsExceeded error"
     assert result.error is not None
     assert result.error.type == "MaxIterationsExceeded"
@@ -494,7 +494,7 @@ def test_e2e_nested_agent_cost_rollup_three_levels() -> None:
     )
     plan._validate({})
     with Session() as sess:
-        result = Agent(engine=plan, session=sess)("t")
+        result = Agent(engine=plan, session=sess, name="_test_agent_41")("t")
         assert result.ok
         meta = result.metadata
         total_cost = (meta.cost_usd or 0.0) + meta.nested_cost_usd
@@ -537,7 +537,7 @@ def test_e2e_mixed_step_targets_dispatch_uniformly() -> None:
     )
     plan._validate(tools)
     # The Agent façade hides the tools= / output_type= / etc. plumbing.
-    result = Agent(engine=plan, tools=list(tools.values()))("t")
+    result = Agent(engine=plan, tools=list(tools.values()), name="_test_agent_42")("t")
     assert result.ok, f"plan errored: {result.error}"
     assert captured["normalised"] == "hello world"
     assert captured["scored"] == "hello world"

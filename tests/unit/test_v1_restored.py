@@ -285,7 +285,7 @@ def test_plan_writes_checkpoint_to_store_after_each_step():
         store=store,
         checkpoint_key="ck",
     )
-    Agent(engine=plan)("go")
+    Agent(engine=plan, name="_test_agent_19")("go")
 
     saved = store.read("ck")
     assert saved["status"] == "done"
@@ -324,14 +324,14 @@ def test_plan_resume_after_failure_retries_only_failed_step():
         )
 
     # First run — s3 fails.
-    env1 = Agent(engine=build())("go")
+    env1 = Agent(engine=build(), name="_test_agent_20")("go")
     assert env1.error is not None
     saved = store.read("ck")
     assert saved["status"] == "failed"
     assert saved["next_step"] == "s3"
 
     # Second run — s1/s2 are skipped, s3 retries and succeeds.
-    env2 = Agent(engine=build())("go")
+    env2 = Agent(engine=build(), name="_test_agent_21")("go")
     assert env2.error is None
     assert run_counts == {"s1": 1, "s2": 1, "s3": 2}
     saved2 = store.read("ck")
@@ -354,7 +354,7 @@ def test_plan_resume_after_done_returns_cached_kv_without_rerun():
             resume=True,
         )
 
-    Agent(engine=build())("go")
-    Agent(engine=build())("go")  # should NOT re-run
+    Agent(engine=build(), name="_test_agent_22")("go")
+    Agent(engine=build(), name="_test_agent_23")("go")  # should NOT re-run
 
     assert calls["s1"] == 1

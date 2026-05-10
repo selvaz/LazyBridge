@@ -101,7 +101,7 @@ def test_checkpoint_save_persists_history():
         store=store,
         checkpoint_key="cp1",
     )
-    Agent(engine=plan)("hi")
+    Agent(engine=plan, name="_test_agent_11")("hi")
 
     snap = store.read("cp1")
     assert snap is not None
@@ -149,7 +149,7 @@ def test_resume_legacy_v1_checkpoint_does_not_crash():
         checkpoint_key="cp_legacy",
         resume=True,
     )
-    env = Agent(engine=plan)("hi")
+    env = Agent(engine=plan, name="_test_agent_12")("hi")
 
     # Pipeline completed past 'a' (resumed at 'b').
     assert env.ok
@@ -192,7 +192,7 @@ async def test_resume_restores_history_for_from_parallel_all():
         store=store,
         checkpoint_key="cp_band",
     )
-    env = Agent(engine=plan)("topic")
+    env = Agent(engine=plan, name="_test_agent_13")("topic")
     assert env.ok
 
     # The consumer was called with the labelled-text join of both branches.

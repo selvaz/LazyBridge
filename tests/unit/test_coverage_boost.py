@@ -682,7 +682,7 @@ class _EchoEngine2:
 class TestAgentUncoveredPaths:
     @pytest.mark.asyncio
     async def test_run_with_sources(self):
-        agent = Agent(engine=_EchoEngine2(), sources=["source context"])
+        agent = Agent(engine=_EchoEngine2(), sources=["source context"], name="_test_agent_44")
         result = await agent.run("task")
         assert result.ok
 
@@ -695,7 +695,9 @@ class TestAgentUncoveredPaths:
         assert inner.session is sess
 
     def test_agent_name_fallback_chain(self):
-        # When no name is provided, falls back to model name from engine
+        # When no name= is provided AND the engine has a ``.model`` attribute,
+        # the auto-name fallback uses that string.  ``_EchoEngine2.model =
+        # "echo"`` so the agent's name should be ``"echo"`` here.
         agent = Agent(engine=_EchoEngine2())
         assert agent.name == "echo"
 
@@ -713,7 +715,7 @@ class TestAgentUncoveredPaths:
             async def stream(self, env, *, tools, output_type, memory, session):
                 yield ""
 
-        agent = Agent(engine=_SlowEngine(), timeout=0.05)
+        agent = Agent(engine=_SlowEngine(), timeout=0.05, name="_test_agent_46")
         result = await agent.run("task")
         assert not result.ok
         assert "timeout" in result.error.message.lower()
@@ -764,7 +766,7 @@ class TestAgentUncoveredPaths:
             async def stream(self, env, *, tools, output_type, memory, session):
                 yield ""
 
-        agent = Agent(engine=_JsonEngine(), output=Out)
+        agent = Agent(engine=_JsonEngine(), output=Out, name="_test_agent_47")
         result = await agent.run("task")
         # payload should be an Out instance or passed through
         assert result.ok
