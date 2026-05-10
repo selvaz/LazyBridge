@@ -125,9 +125,7 @@ class EncryptedStoreAdapter:
                 )
             self._fernet = MultiFernet([Fernet(k) for k in key])
         else:
-            raise ValueError(
-                f"EncryptedStoreAdapter: key must be bytes or list[bytes], got {type(key).__name__}."
-            )
+            raise ValueError(f"EncryptedStoreAdapter: key must be bytes or list[bytes], got {type(key).__name__}.")
 
         self._inner = inner
 

@@ -268,7 +268,8 @@ class Agent:
         self.max_verify = max_verify
         self.fallback = fallback
         if self.fallback is not None:
-            seen, fb = {id(self)}, self.fallback
+            seen: set[int] = {id(self)}
+            fb: Agent | None = self.fallback
             while fb is not None:
                 if id(fb) in seen:
                     raise ValueError("fallback= chain contains a cycle. Check your Agent(fallback=...) configuration.")
