@@ -165,8 +165,6 @@ nav:
       - Agent builds a plan: recipes/agent-builds-plan.md
       - Blackboard planner: recipes/blackboard-planner.md
       - Dynamic re-planning: recipes/dynamic-replanning.md
-      - Parallel report: recipes/parallel-report.md
-      - Daily news: recipes/daily-news.md
       - Live visualization: recipes/live-visualization.md
       - Visualization mock: recipes/visualization-mock.md
   - Decisions:

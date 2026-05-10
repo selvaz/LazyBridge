@@ -31,8 +31,10 @@ single agent → tools → composition → planning → production.
 
 ## Production pipelines
 
-- [Parallel report](parallel-report.md) — `examples/parallel_report_pipeline.py`
-- [Daily news](daily-news.md) — `examples/daily_news_report.py`
+The HTML/PDF reporting recipes moved with the rest of the report
+builder to the sibling [LazyReport](https://github.com/selvaz/LazyReport)
+repository in 0.7.9. Install it with `pip install lazybridge-reports`
+and follow the recipes there.
 
 ## Observability
 

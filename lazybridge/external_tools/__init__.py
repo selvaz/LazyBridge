@@ -8,7 +8,10 @@ Available packages::
 
     lazybridge.external_tools.read_docs        Multi-format document reader
     lazybridge.external_tools.doc_skills       BM25 local doc skill runtime
-    lazybridge.external_tools.report_builder   HTML/PDF report assembler
+
+The HTML/PDF report assembler lives in the sibling
+``lazybridge-reports`` package since 0.7.9 (see
+https://github.com/selvaz/LazyReport).
 
 Each package ships its own optional-deps extra in ``pyproject.toml``.
 

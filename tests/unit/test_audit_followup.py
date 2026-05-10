@@ -164,18 +164,7 @@ def test_stream_aclose_warns_on_non_cancellation_exception():
 # ---------------------------------------------------------------------------
 # P1.7 — deep_dive TOC escapes id and text
 # ---------------------------------------------------------------------------
-
-
-def test_deep_dive_toc_template_escapes_id_and_text():
-    from pathlib import Path
-
-    here = Path(__file__).resolve()
-    repo = here.parents[2]
-    tmpl = repo / "lazybridge/external_tools/report_builder/templates/deep_dive.html.j2"
-    text = tmpl.read_text()
-    assert "{{ item.id|e }}" in text
-    assert "{{ item.text|e }}" in text
-
+# Moved to lazybridge-reports — the deep_dive template lives there.
 
 # ---------------------------------------------------------------------------
 # P2.9 — strict-mode SIGNATURE schema emits required: [] when no required args

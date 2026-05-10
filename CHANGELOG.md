@@ -12,7 +12,8 @@ The headline change: **deletion-led simplification**.  The framework
 had no users yet, so we ship breaking changes without deprecation
 paths or shims.  Net public surface change: −2 in
 ``lazybridge.__all__`` (50 → 48), 5 deleted ``Agent.from_*`` class
-methods, 9 silent-fallback paths converted to explicit errors.
+methods, 9 silent-fallback paths converted to explicit errors, and
+the entire ``report_builder`` subsystem extracted to its own repo.
 Zero new public concept.
 
 The single LLM-friendliness lever is consistency: one canonical
@@ -20,6 +21,25 @@ form per concept, errors always raise, no opt-in modes.
 
 See ``docs/migrations/0.7-to-0.8.md`` for per-deletion before/after
 codemod snippets.
+
+### Breaking — extraction
+
+- **``lazybridge.external_tools.report_builder`` extracted** to the
+  sibling repo
+  [``selvaz/LazyReport``](https://github.com/selvaz/LazyReport)
+  (PyPI: ``lazybridge-reports``).  Every import path
+  ``lazybridge.external_tools.report_builder.*`` is gone — replace
+  with ``lazybridge_reports.*`` after installing the new package.
+  The five optional extras ``[report]``, ``[report-charts]``,
+  ``[report-citations]``, ``[report-fallback]``, ``[pdf]`` are
+  gone from ``lazybridge``'s ``pyproject.toml``; their replacements
+  live as ``lazybridge-reports[charts,citations,fallback,pdf]``.
+  No shim — there is no fallback import path.
+- **New optional extra**: ``[encryption]`` →
+  ``cryptography>=42,<46`` for the new
+  ``lazybridge.store.encryption.EncryptedStoreAdapter`` (Fernet
+  at-rest encryption for ``Store`` values, with ``MultiFernet``
+  key rotation).
 
 ### Breaking — deletions
 

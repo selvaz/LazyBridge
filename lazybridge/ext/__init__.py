@@ -5,7 +5,9 @@ change between any two releases. Pin exact versions in production.
 
 This sub-package holds **framework-level** extensions — code that
 augments the agent runtime itself. Domain tool kits live alongside in
-``lazybridge.external_tools``: read_docs, doc_skills, report_builder.
+``lazybridge.external_tools``: read_docs, doc_skills.  HTML/PDF
+report assembly moved to the sibling ``lazybridge-reports`` package
+in 0.7.9.
 
 Available framework extensions::
 

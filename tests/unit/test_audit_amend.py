@@ -80,81 +80,10 @@ async def test_mcp_connect_serialises_concurrent_callers() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3.2 — Quarto YAML title/author escape
+# 3.2 + 3.3 — Quarto YAML escape / section_renderer sandbox
 # ---------------------------------------------------------------------------
-
-
-def test_quarto_project_yml_escapes_title_with_quote() -> None:
-    from lazybridge.external_tools.report_builder.quarto.project import build_quarto_yml
-
-    yml = build_quarto_yml(formats=["html"], title='evil"\nrun: ls')
-    # The injected newline must be escaped, not literal.
-    assert "\nrun: ls" not in yml
-    assert "\\n" in yml
-    # The injected double-quote must be escaped, not literal-then-rest-of-line.
-    assert '"evil\\"' in yml
-
-
-def test_quarto_project_yml_escapes_author_with_backslash() -> None:
-    from lazybridge.external_tools.report_builder.quarto.project import build_quarto_yml
-
-    yml = build_quarto_yml(formats=["html"], author='C:\\Users\\evil"')
-    assert '"C:\\\\Users\\\\evil\\""' in yml
-
-
-# ---------------------------------------------------------------------------
-# 3.3 — section_renderer input_root sandboxing
-# ---------------------------------------------------------------------------
-
-
-def test_render_chart_section_rejects_path_outside_input_root(tmp_path: Path) -> None:
-    from lazybridge.external_tools.report_builder.schemas import ChartSection
-    from lazybridge.external_tools.report_builder.section_renderer import render_chart_section
-
-    inside = tmp_path / "ok.png"
-    outside = tmp_path / ".." / "evil.png"
-    inside.write_bytes(b"\x89PNG\r\n\x1a\n")  # minimal PNG magic
-
-    section = ChartSection(type="chart", path=str(outside.resolve()), title="x")
-
-    with pytest.raises(ValueError, match="outside the allowed input root"):
-        render_chart_section(section, input_root=tmp_path)
-
-
-def test_render_chart_section_allows_path_inside_input_root(tmp_path: Path) -> None:
-    from lazybridge.external_tools.report_builder.schemas import ChartSection
-    from lazybridge.external_tools.report_builder.section_renderer import render_chart_section
-
-    inside = tmp_path / "ok.png"
-    inside.write_bytes(b"\x89PNG\r\n\x1a\n")
-    section = ChartSection(type="chart", path=str(inside), title="x")
-
-    html = render_chart_section(section, input_root=tmp_path)
-    assert "<figure" in html
-
-
-def test_render_chart_section_no_input_root_keeps_old_behaviour(tmp_path: Path) -> None:
-    """Backwards compat: when input_root=None, no sandbox check is applied."""
-    from lazybridge.external_tools.report_builder.schemas import ChartSection
-    from lazybridge.external_tools.report_builder.section_renderer import render_chart_section
-
-    p = tmp_path / "x.png"
-    p.write_bytes(b"\x89PNG\r\n\x1a\n")
-    section = ChartSection(type="chart", path=str(p), title="x")
-    html = render_chart_section(section)  # no input_root
-    assert "<figure" in html
-
-
-def test_sections_to_html_threads_input_root_through(tmp_path: Path) -> None:
-    from lazybridge.external_tools.report_builder.schemas import ChartSection
-    from lazybridge.external_tools.report_builder.section_renderer import sections_to_html
-
-    outside = tmp_path / ".." / "evil.png"
-    section = ChartSection(type="chart", path=str(outside.resolve()), title="x")
-
-    with pytest.raises(ValueError, match="outside the allowed input root"):
-        sections_to_html([section], input_root=tmp_path)
-
+# Moved to the sibling lazybridge-reports repo as part of the 0.7.9 →
+# 0.9.0 extraction.  These tests live next to the code they cover.
 
 # ---------------------------------------------------------------------------
 # 3.4 — tool_schema branches for stdlib types
@@ -195,27 +124,8 @@ def test_tool_schema_path_emits_string() -> None:
 # ---------------------------------------------------------------------------
 # 3.5 — templates escape meta.*
 # ---------------------------------------------------------------------------
-
-
-def test_templates_escape_meta_fields() -> None:
-    """Every ``{{ meta.<scalar> }}`` render must go through the ``|e`` filter.
-
-    We only assert on tokens the template *actually emits* — different
-    templates render different subsets of ``meta.*``, so the test reads
-    each file and checks the fields it actually uses.
-    """
-    pkg = Path(__file__).resolve().parents[2] / "lazybridge" / "external_tools" / "report_builder" / "templates"
-    fields = ("meta.theme", "meta.template", "meta.generated_at")
-    for tmpl in (pkg / "executive_summary.html.j2", pkg / "data_snapshot.html.j2"):
-        text = tmpl.read_text(encoding="utf-8")
-        for field in fields:
-            # Only assert when the template actually emits this field —
-            # if it doesn't render the token at all, there's nothing to escape.
-            if f"{{{{ {field} " in text or f"{{{{ {field}}}" in text or f"{{{{ {field}|" in text:
-                assert f"{{{{ {field}|e }}}}" in text or f"{{{{ {field} | e }}}}" in text, (
-                    f"{tmpl.name} renders {field} without |e"
-                )
-
+# Moved to the sibling lazybridge-reports repo with the rest of the
+# template rendering surface.
 
 # ---------------------------------------------------------------------------
 # 3.6 — strict-mode docstring note

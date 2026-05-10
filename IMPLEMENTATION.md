@@ -279,26 +279,26 @@ In `lazybridge/session.py`:
 
 ### Extraction
 
-- [ ] Create new repo `selvaz/lazybridge-reports`
-- [ ] Move `lazybridge/external_tools/report_builder/**` → `lazybridge_reports/**`
-- [ ] Move `[report]`, `[report-charts]`, `[report-citations]`, `[report-fallback]`, `[pdf]` extras out of `lazybridge`
-- [ ] **No shim.** Delete the old import path from `lazybridge` entirely
-- [ ] Update report examples (`daily_news_report.py`, `parallel_report_pipeline.py`) to new import path
-- [ ] Set up independent CI for `lazybridge-reports` (test + release workflows)
-- [ ] Publish `lazybridge-reports` 0.1.0 to PyPI (parallel with v0.9.0)
+- [x] Create new repo `selvaz/LazyReport` (PyPI name: `lazybridge-reports`)
+- [x] Move `lazybridge/external_tools/report_builder/**` → `lazybridge_reports/**` (staged at `/home/user/LazyReport-staging/`; codemodded import paths)
+- [x] Move `[report]`, `[report-charts]`, `[report-citations]`, `[report-fallback]`, `[pdf]` extras out of `lazybridge`
+- [x] **No shim.** Old import path deleted from `lazybridge` entirely
+- [x] Examples (`daily_news_report.py`, `parallel_report_pipeline.py`) staged under the new package with rewritten imports
+- [ ] Set up independent CI for `lazybridge-reports` (test + release workflows) — user-side after copying staging bundle into LazyReport
+- [ ] Publish `lazybridge-reports` 0.1.0 to PyPI (parallel with v0.9.0) — user-side
 
 ### Encryption adapter
 
-- [ ] New `lazybridge/store/encryption.py`: `EncryptedStoreAdapter(store, key=...)` using `cryptography.fernet`
-- [ ] Optional extra: `pip install lazybridge[encryption]`
-- [ ] Smoke test: round-trip a payload through the adapter
-- [ ] SECURITY.md updated with PII threat model
+- [x] New `lazybridge/store/encryption.py`: `EncryptedStoreAdapter(store, key=...)` using `cryptography.fernet` (commit `278f661`)
+- [x] Optional extra: `pip install lazybridge[encryption]`
+- [x] Smoke test: round-trip a payload through the adapter (23 tests in `test_store_encryption.py`)
+- [ ] SECURITY.md updated with PII threat model — deferred to Phase 6
 
 ### Strictness lift
 
-- [ ] mypy strict phase 2: `engines/`, `core/providers/`
-- [ ] Provider SDK objects get explicit type stubs for the surface we touch
-- [ ] Core coverage 90%
+- [~] mypy strict phase 2: `engines/`, `core/providers/` — `engines/base.py` tightened (`Envelope[Any]`); 85 strict errors across the larger modules deferred to Phase 6 to stay scope-disciplined
+- [ ] Provider SDK objects get explicit type stubs for the surface we touch — deferred
+- [ ] Core coverage 90% — deferred
 
 ### Tag v0.9.0 acceptance gate
 
@@ -336,5 +336,5 @@ In `lazybridge/session.py`:
 | Phase 2 — deletions A–G | **done** | 2026-05-10 | (no tag) | All 7 blocks shipped: G (dead weight, `e783291`), A (5 factory aliases, `74da34a`), D (`mode="auto"` ladder, `01d2bcc`), E (soft — `tool()` canonical in user-facing surface, `94a96f7`), F (`_ParallelAgent`→`ParallelAgent` + folded-Envelope return, `4b6e4bb`), B (3 config objects + `_UNSET` + precedence game, `d45760a`), C (silent fallbacks → errors, `0bfc84a`). 1660 passed, 44 skipped.  Net −21 723 LOC.  Public surface: −2 in `__all__` (50→48). |
 | Phase 3 — validation parity + provider consistency + observability | **done** | 2026-05-10 | (no tag) | Block H (`57e328b` — T5/T6/T7/I6 + standard error format).  Block I (capability ClassVars, T9 dedup warning, cost-signature parity, I5 Anthropic warning corrected, new `lazybridge.matrix` + `test_public_api_snapshot.py`).  Block J (OTel `gen_ai.agent.nesting_level` attribute, `Session.emit` warn-once-per-(exporter, exception) with counter).  1666 passed, 44 skipped. |
 | Phase 4 — docs + examples + CI + skill_docs (v0.7.9) | **release candidate** | 2026-05-10 | (tag pending merge to main) | All Block K items shipped (`22d7d06`): SKILL.md rewritten, `docs/migrations/0.7-to-0.8.md` (new), engines.md adds `thinking=`, providers.md adds `stop_reason` table, mcp.md shows `allow=` filtering, `examples/verify_judge_loop.py` + `examples/guardrails_demo.py` (new), env preflight in `daily_news_report.py`, `.github/workflows/integration.yml` (new — manual + nightly live + heavy_render), coverage gate 70 → 73 %, mypy strict tier on `envelope` / `predicates` / `sentinels`, version bump to 0.7.9.  Tag `v0.7.9` requires (1) merge of `claude/audit-lazybridge-llm-SXOl4` to main and (2) one CI cycle green. |
-| Phase 5 — extract `report_builder` (v0.9.0) | not started | | | |
-| Phase 6 — stabilisation (v1.0.0) | not started | | | |
+| Phase 5 — extract `report_builder` (v0.9.0) | **in progress** | 2026-05-10 | (tag pending) | EncryptedStoreAdapter + cryptography extra shipped (`278f661`, 23 tests). `report_builder` deleted from `lazybridge` and staged at `/home/user/LazyReport-staging/` (52 files, codemodded imports, new `pyproject.toml` + README + CHANGELOG) for the user to push into the new `selvaz/LazyReport` repo. Suite: 1730 → 1610 (−120 report_builder tests gone, all green). |
+| Phase 6 — stabilisation (v1.0.0) | not started | | | mypy strict full repo (85 outstanding errors in `engines/llm.py` + `engines/plan/_plan.py`), `__stability__="stable"`, security review |
