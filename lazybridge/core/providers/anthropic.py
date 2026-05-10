@@ -454,9 +454,16 @@ class AnthropicProvider(BaseProvider):
             if request.thinking.budget_tokens is not None:
                 import warnings
 
+                # I5 (audit) — the previous message said "Use 'effort' instead"
+                # but Opus 4.7 only accepts the ``display`` knob; ``effort`` is
+                # not a valid parameter for adaptive-thinking models.  Surface
+                # what's actually supported.
                 warnings.warn(
-                    f"ThinkingConfig.budget_tokens is ignored for model '{model}'. "
-                    "Use 'effort' instead (adaptive thinking only).",
+                    f"ThinkingConfig.budget_tokens is ignored for model {model!r} "
+                    f"(adaptive thinking only — token budget is server-managed).  "
+                    f"Set ``ThinkingConfig.display`` to ``'omitted'`` if you want "
+                    f"to hide thinking output; there is no token-budget knob for "
+                    f"this model family.",
                     DeprecationWarning,
                     stacklevel=4,
                 )

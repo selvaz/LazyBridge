@@ -127,6 +127,23 @@ class BaseProvider(ABC):
     Unsupported tools requested by the user are filtered and warned —
     or raised, when ``strict_native_tools=True`` is set on construction."""
 
+    # Phase-3 Block I: declarative capability flags.  Subclasses override
+    # these when they don't support a feature; the defaults are the common
+    # case (every provider in this repo today supports all three).  Used
+    # by ``lazybridge.matrix`` (planned) and by per-provider preflight
+    # checks that need to refuse a request the SDK can't fulfil.
+
+    supports_streaming: bool = True
+    """Does this provider expose ``stream(...)`` / ``astream(...)``?"""
+
+    supports_structured_output: bool = True
+    """Does this provider accept ``request.structured_output`` (Pydantic
+    model or JSON-schema dict)?"""
+
+    supports_thinking: bool = True
+    """Does this provider produce a ``thinking`` field on the response (or
+    ``reasoning_tokens`` / ``thoughts_token_count`` on usage)?"""
+
     strict_native_tools: bool = False
     """When True, requesting an unsupported :class:`NativeTool` raises
     :class:`UnsupportedNativeToolError` instead of warning-and-dropping.
@@ -415,19 +432,30 @@ class BaseProvider(ABC):
             warnings.warn(msg, UserWarning, stacklevel=3)
         return supported_list
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float | None:
         """Return estimated cost in USD, or ``None`` if unknown.
 
-        Override to enable cost tracking in ``CompletionResponse.usage.cost_usd``::
+        Override to enable cost tracking in ``CompletionResponse.usage.cost_usd``.
+
+        ``cached_input_tokens`` is the subset of ``input_tokens`` served from
+        the provider's prompt cache.  Override callers that don't model
+        cache pricing can ignore the parameter (it defaults to 0)::
 
             _PRICES = {"my-model-v1": (0.50, 1.50)}  # ($/1M input, $/1M output)
 
-            def _compute_cost(self, model, input_tokens, output_tokens):
+            def _compute_cost(self, model, input_tokens, output_tokens, cached_input_tokens=0):
                 for key, (inp, out) in self._PRICES.items():
                     if key in model:
                         return (input_tokens * inp + output_tokens * out) / 1_000_000
                 return None
         """
+        del cached_input_tokens  # base default ignores cache pricing
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
