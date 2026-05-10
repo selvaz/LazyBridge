@@ -64,7 +64,7 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated
 
-from lazybridge import Agent, LLMEngine, NativeTool, Plan, Session, Step, Store, Tool, from_parallel_all
+from lazybridge import Agent, LLMEngine, NativeTool, Plan, Session, Step, Store, from_parallel_all, tool
 from lazybridge.external_tools.report_builder import report_tools
 
 # ---------------------------------------------------------------------------
@@ -211,8 +211,8 @@ def search_wikimedia_image(
         return {"error": True, "message": "Image download: too many retries"}
 
 
-fetch_image_tool = Tool(fetch_image, name="fetch_image")
-wikimedia_image_tool = Tool(search_wikimedia_image, name="search_wikimedia_image")
+fetch_image_tool = tool(fetch_image, name="fetch_image")
+wikimedia_image_tool = tool(search_wikimedia_image, name="search_wikimedia_image")
 
 # ---------------------------------------------------------------------------
 # save_markdown tool
@@ -233,7 +233,7 @@ def save_markdown(
     return {"saved": True, "path": str(path)}
 
 
-save_md_tool = Tool(save_markdown, name="save_markdown")
+save_md_tool = tool(save_markdown, name="save_markdown")
 
 # ---------------------------------------------------------------------------
 # Discovery agent  — cheap, finds top N headlines with brief context
@@ -619,9 +619,9 @@ def _make_designer_tools(output_dir: Path) -> list[Tool]:
         return {"patched": True, "index": index, "path": str(p)}
 
     return [
-        Tool(inject_designer_css, name="inject_designer_css"),
-        Tool(extract_html_sections, name="extract_html_sections"),
-        Tool(patch_html_section, name="patch_html_section"),
+        tool(inject_designer_css, name="inject_designer_css"),
+        tool(extract_html_sections, name="extract_html_sections"),
+        tool(patch_html_section, name="patch_html_section"),
     ]
 
 
