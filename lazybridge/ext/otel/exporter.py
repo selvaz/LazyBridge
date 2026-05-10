@@ -25,9 +25,12 @@ the core-vs-ext split (see ``docs/guides/core-vs-ext.md``).
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # OpenTelemetry GenAI Semantic Conventions — attribute names
@@ -162,16 +165,16 @@ class OTelExporter:
         if error is not None:
             try:
                 entry.span.set_status(trace.Status(trace.StatusCode.ERROR, error))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.warning("OTel set_status failed for span %s: %s", key, exc)
         try:
             ot_context.detach(entry.detach_token)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("OTel context.detach failed for span %s: %s", key, exc)
         try:
             entry.span.end()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("OTel span.end failed for span %s: %s", key, exc)
         return entry.span
 
     # ------------------------------------------------------------------

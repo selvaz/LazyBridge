@@ -899,13 +899,16 @@ def test_plan_serialization_preserves_step_attributes():
     assert s.context == "extra context"
 
 
-def test_plan_serialization_unknown_sentinel_kind_falls_back_to_from_prev():
-    """An unknown ``kind`` in a serialised sentinel ref defaults to
-    ``from_prev`` rather than raising — graceful forward compatibility."""
+def test_plan_serialization_unknown_sentinel_kind_raises():
+    """Regression for B7: an unknown ``kind`` in a serialised sentinel ref
+    must raise ``ValueError`` (not silently downgrade to ``from_prev``).
+    Silent fallback was masking typos and stale serialisations."""
+    import pytest
+
     from lazybridge.engines.plan import _sentinel_from_ref
 
-    result = _sentinel_from_ref({"kind": "from_unknown_future_thing"})
-    assert result.__class__.__name__ == "_FromPrev"
+    with pytest.raises(ValueError, match="unknown kind="):
+        _sentinel_from_ref({"kind": "from_unknown_future_thing"})
 
 
 def test_plan_serialization_none_ref_is_from_prev():

@@ -108,7 +108,22 @@ def make_blackboard_planner(
         state["results"][task_index] = result_summary.strip()
         return _show()
 
-    return Agent(
+    def _reset_state() -> None:
+        # Regression: B9 — closure state was never reset between runs, so a
+        # planner Agent invoked twice in one session saw the prior plan.
+        # Resetting on every Agent.run/arun invocation is the simplest fix
+        # that stays compatible with the tools' closure binding.
+        state["reasoning"] = ""
+        state["tasks"] = []
+        state["done"] = []
+        state["results"] = []
+
+    class _BlackboardAgent(Agent):
+        async def run(self, task, *, images=None, audio=None):  # type: ignore[override]
+            _reset_state()
+            return await super().run(task, images=images, audio=audio)
+
+    return _BlackboardAgent(
         engine=LLMEngine(model, system=system or BLACKBOARD_PLANNER_GUIDANCE),
         tools=[*agents, Tool(set_plan), Tool(get_plan), Tool(mark_done)],
         name=name,
