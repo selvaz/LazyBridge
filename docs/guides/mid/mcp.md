@@ -108,10 +108,14 @@ from lazybridge.ext.mcp import MCP
 
 
 # 1) Spawn a stdio MCP server (subprocess) and use its tools.
+#    Best practice: restrict the surface with ``allow=`` (or ``deny=``)
+#    instead of exposing every tool the subprocess advertises.  Omitting
+#    both triggers a one-shot UserWarning at construction time.
 fs = MCP.stdio(
     "fs",
     command="npx",
     args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+    allow=["fs.list_*", "fs.read_*"],   # read-only slice; deny writes implicitly
 )
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),

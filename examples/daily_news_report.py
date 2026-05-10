@@ -64,7 +64,7 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated
 
-from lazybridge import Agent, LLMEngine, NativeTool, Plan, Session, Step, Store, from_parallel_all, tool
+from lazybridge import Agent, LLMEngine, NativeTool, Plan, Session, Step, Store, Tool, from_parallel_all, tool
 from lazybridge.external_tools.report_builder import report_tools
 
 # ---------------------------------------------------------------------------
@@ -741,7 +741,42 @@ def build_pipeline(n_stories: int = 5, depth: str = "standard") -> Agent:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
+def _preflight_env() -> None:
+    """Fail fast with concrete install / API-key guidance when the
+    environment isn't set up.  Without this, the first LLM call
+    surfaces a cryptic 401 several minutes into the run.
+    """
+    import os
+    import sys
+
+    required_keys = {
+        "ANTHROPIC_API_KEY": "anthropic",  # extra to install if missing
+        "OPENAI_API_KEY": "openai",
+        "GOOGLE_API_KEY": "google",
+        "DEEPSEEK_API_KEY": "deepseek",
+    }
+    missing = [k for k in required_keys if not os.environ.get(k)]
+    if missing:
+        extras = ",".join(sorted({required_keys[k] for k in missing}))
+        keys_pretty = ", ".join(f"${k}" for k in missing)
+        print(
+            f"\nMissing environment variable(s) for this example: {keys_pretty}\n"
+            f"\nThe daily-news pipeline spreads token-per-minute rate limits across all four\n"
+            f"providers, so it needs every key set even though each region uses one provider.\n"
+            f"\nFix:\n"
+            f"  1. pip install 'lazybridge[{extras},report]'\n"
+            f"  2. export ANTHROPIC_API_KEY=sk-ant-...\n"
+            f"     export OPENAI_API_KEY=sk-...\n"
+            f"     export GOOGLE_API_KEY=...\n"
+            f"     export DEEPSEEK_API_KEY=sk-...\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 if __name__ == "__main__":
+    _preflight_env()
     parser = argparse.ArgumentParser(description="Daily Global News Report pipeline")
     parser.add_argument("--stories", type=int, default=5, help="Number of stories per region (default: 5)")
     parser.add_argument(

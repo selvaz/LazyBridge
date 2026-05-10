@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.7.0"
+version = "0.8.0"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -139,6 +139,21 @@ disallow_untyped_defs = false
 check_untyped_defs = false
 ignore_missing_imports = true
 
+# Phase-4 strict tier — the framework's user-facing core.  These
+# modules are stable and small enough to type-check strictly without
+# blocking other work.  The rest of the codebase remains in the
+# permissive default tier; subsequent releases tighten one module at
+# a time.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.envelope",
+    "lazybridge.predicates",
+    "lazybridge.sentinels",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------
@@ -166,9 +181,10 @@ omit = [
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
-# first-class.  Pre-1.0: 70%; raise in increments toward 80% as we
-# backfill provider-streaming + HIL paths.
-fail_under = 70
+# first-class.  0.8.0: 73 % (current is ~75 %; the 85 % target stays
+# as a Phase 5/6 goal after we backfill provider-streaming and HIL
+# paths and finish the ``report_builder`` extraction).
+fail_under = 73
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
