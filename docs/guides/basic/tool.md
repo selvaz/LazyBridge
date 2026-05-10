@@ -39,6 +39,26 @@ For the public `tool(...)` factory and `agent.as_tool(...)` method —
 both are sugar with non-trivial differences — see
 [Canonical vs sugar](../../concepts/canonical-vs-sugar.md).
 
+## `tools=` is **not** `native_tools=`
+
+Two parameters, two runtimes — don't conflate them:
+
+| Parameter | Who executes the tool | What goes in it |
+|---|---|---|
+| `tools=[...]` | **LazyBridge runtime** (this process) | Python callables, sub-`Agent`s, `MCP*` servers, `Tool` instances |
+| `native_tools=[...]` | **The LLM provider's servers** | `NativeTool` enum values (e.g. `NativeTool.WEB_SEARCH`) |
+
+`native_tools` is for server-side tools the provider implements
+itself — Anthropic web search, OpenAI image generation, Google
+grounding, etc. Dangerous server-side tools
+(`NativeTool.CODE_EXECUTION`, `NativeTool.COMPUTER_USE`) additionally
+require `allow_dangerous_native_tools=True` on the `Agent` — a
+deliberately noisy opt-in, since the executor is no longer in your
+process. See [Reference → Providers](../../reference/providers.md)
+for the per-provider native-tool support matrix.
+
+The rest of this page documents `tools=` only.
+
 ## Synopsis
 
 LazyBridge accepts six things in `tools=[...]` and normalises them all

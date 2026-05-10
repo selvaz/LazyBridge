@@ -57,6 +57,42 @@ def test_read_missing_key_returns_default(adapter: EncryptedStoreAdapter):
     assert adapter.read("absent") is None
 
 
+def test_pydantic_model_round_trips_as_json_shape(adapter: EncryptedStoreAdapter):
+    """Codex P2 regression: ``_encrypt`` must route values through
+    ``_to_jsonable`` so Pydantic models serialise as their JSON shape,
+    not as ``repr()`` strings via ``default=str``.  Without the
+    ``_to_jsonable`` hop the round-trip returned ``"x=1 name='hello'"``
+    instead of ``{"x": 1, "name": "hello"}``."""
+    pytest.importorskip("pydantic")
+    from pydantic import BaseModel
+
+    class M(BaseModel):
+        x: int
+        name: str
+
+    adapter.write("pyd", M(x=1, name="hello"))
+    out = adapter.read("pyd")
+    assert out == {"x": 1, "name": "hello"}
+
+
+def test_pydantic_model_compare_and_swap_works_through_adapter(adapter: EncryptedStoreAdapter):
+    """The same Codex P2 fallout for CAS: comparing against the
+    plaintext shape must succeed when the user passes either the model
+    instance OR the equivalent dict.  Both round-trip to the same JSON
+    shape, so equality holds across the adapter boundary."""
+    pytest.importorskip("pydantic")
+    from pydantic import BaseModel
+
+    class M(BaseModel):
+        x: int
+
+    adapter.write("cfg", M(x=1))
+    # The stored value is the JSON-shape dict; CAS against the model
+    # (which normalises to the same dict) must succeed.
+    assert adapter.compare_and_swap("cfg", expected=M(x=1), new=M(x=2)) is True
+    assert adapter.read("cfg") == {"x": 2}
+
+
 # ---------------------------------------------------------------------------
 # The inner Store never sees plaintext
 # ---------------------------------------------------------------------------
