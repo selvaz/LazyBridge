@@ -32,7 +32,7 @@ _logger = logging.getLogger(__name__)
 try:
     import openai as _openai
 except ImportError:
-    _openai = None
+    _openai = None  # type: ignore[assignment]
 
 # Reasoning models that use `reasoning_effort` instead of `temperature`
 _REASONING_MODELS = frozenset(

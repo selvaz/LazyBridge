@@ -24,7 +24,7 @@ from lazybridge.core.types import (
 try:
     import anthropic as _anthropic
 except ImportError:
-    _anthropic = None
+    _anthropic = None  # type: ignore[assignment]
 
 
 # Maps NativeTool enum → Anthropic tool type strings

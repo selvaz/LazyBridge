@@ -59,8 +59,8 @@ try:
     from google import genai as _genai
     from google.genai import types as _gtypes
 except Exception:
-    _genai = None
-    _gtypes = None
+    _genai = None  # type: ignore[assignment]
+    _gtypes = None  # type: ignore[assignment]
 
 _logger = logging.getLogger(__name__)
 
@@ -366,7 +366,7 @@ class GoogleProvider(BaseProvider):
                 _gtypes.FunctionDeclaration(
                     name=t.name,
                     description=t.description,
-                    parameters=t.parameters,
+                    parameters=t.parameters,  # type: ignore[arg-type]
                 )
             )
         return decls
@@ -489,7 +489,7 @@ class GoogleProvider(BaseProvider):
                 "xhigh": "high",
                 "max": "high",
             }.get(request.thinking.effort, "high")
-            return _gtypes.ThinkingConfig(thinking_level=level)
+            return _gtypes.ThinkingConfig(thinking_level=level)  # type: ignore[arg-type]
         # budget=-1 → model decides automatically; 0 → no thinking
         budget = request.thinking.budget_tokens if request.thinking.budget_tokens is not None else -1
         return _gtypes.ThinkingConfig(thinking_budget=budget)
@@ -540,7 +540,7 @@ class GoogleProvider(BaseProvider):
         if has_native_search and has_custom_tools:
             try:
                 kwargs["tool_config"] = _gtypes.ToolConfig(
-                    function_calling_config=_gtypes.FunctionCallingConfig(
+                    function_calling_config=_gtypes.FunctionCallingConfig(  # type: ignore[call-arg]
                         include_server_side_tool_invocations=True,
                     )
                 )
@@ -801,7 +801,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         stream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            last_candidate = last_chunk.candidates[0]
+            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
@@ -902,7 +902,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         astream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            last_candidate = last_chunk.candidates[0]
+            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""

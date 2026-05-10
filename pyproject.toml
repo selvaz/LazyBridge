@@ -161,10 +161,25 @@ warn_unused_ignores = true
 #     mypy lazybridge/engines/ lazybridge/core/providers/ --strict
 #
 # to validate this tier in isolation.
+# Strict tier — provider modules have conditional optional-SDK
+# imports whose ``# type: ignore`` directives are necessary in CI
+# (SDK installed) but appear unused locally (SDK absent).
+# ``warn_unused_ignores`` is intentionally NOT enabled here.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.core.providers.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_return_any = true
+
+# Strict tier — modules with no optional-SDK boundary.  These can
+# have ``warn_unused_ignores`` on without the local-vs-CI mismatch.
 [[tool.mypy.overrides]]
 module = [
     "lazybridge.engines.*",
-    "lazybridge.core.providers.*",
     "lazybridge.core.types",
     "lazybridge.core.tool_schema",
 ]
