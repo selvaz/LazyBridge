@@ -92,29 +92,29 @@ build extra structure or return different types. Read the
 | Sugar | Canonical | Differences |
 |---|---|---|
 | `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias. |
-| `Agent.from_model("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias of `Agent("model", …)`. |
-| `Agent.from_engine(engine, **kw)` | `Agent(engine=engine, **kw)` | Pure alias. |
+| `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias of `Agent("model", …)`. |
+| `Agent(engine=engine, **kw)` | `Agent(engine=engine, **kw)` | Pure alias. |
 | `Agent.from_provider("anthropic", tier="top", **kw)` | `Agent(engine=LLMEngine("top", provider="anthropic"), **kw)` | **Not pure sugar** — uses tier-alias model strings (`super_cheap`/`cheap`/`medium`/`expensive`/`top`) resolved via the provider's tier map. Use when you want freshest-in-tier without pinning a date-stamped name. |
 
 **Build an Agent with a Plan engine**
 
 | Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent.from_plan(*steps, store=…, checkpoint_key=…, resume=…, **kw)` | `Agent(engine=Plan(*steps, store=…, checkpoint_key=…, resume=…), **kw)` | Pure alias; forwards Plan kwargs (`max_iterations`, `store`, `checkpoint_key`, `resume`, `on_concurrent`) to a freshly-built `Plan`. |
+| `Agent(engine=Plan(*steps, store=…, checkpoint_key=…, resume=…, **kw))` | `Agent(engine=Plan(*steps, store=…, checkpoint_key=…, resume=…), **kw)` | Pure alias; forwards Plan kwargs (`max_iterations`, `store`, `checkpoint_key`, `resume`, `on_concurrent`) to a freshly-built `Plan`. |
 
 **Compose agents — sequential**
 
 | Sugar | Canonical | Differences |
 |---|---|---|
 | `Agent.chain(a, b)` | `Agent(engine=Plan(Step(target=a, name=a.name), Step(target=b, name=b.name)), name="chain")` | **Not pure alias** — builds the `Plan`+`Step` graph for you. Targets are the agents themselves (no `tools=` needed; `Plan` dispatches `Agent` targets via `target.run()` directly). |
-| `Agent.from_chain(a, b)` | Identical to `Agent.chain(a, b)` | Pure alias of `.chain`. |
+| `Agent.chain(a, b)` | Identical to `Agent.chain(a, b)` | Pure alias of `.chain`. |
 
 **Compose agents — parallel fan-out**
 
 | Sugar | Canonical | Differences |
 |---|---|---|
 | `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]`. Closest from-primitives form is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
-| `Agent.from_parallel(*agents, …)` | Identical to `Agent.parallel(...)` | Pure alias of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional. |
+| `Agent.parallel(*agents, …)` | Identical to `Agent.parallel(...)` | Pure alias of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional. |
 
 **Build an Agent with a HIL engine**
 
@@ -277,7 +277,7 @@ print(pipeline("Topic: AI agents 2026").text())
 
 `Step("name")` references a sub-agent by its `name=`. Plans are validated
 at construction — forward references, duplicate names, and unknown
-targets raise `PlanCompileError` before any LLM call. `Agent.from_plan(*steps)`
+targets raise `PlanCompileError` before any LLM call. `Agent(engine=Plan(*steps))`
 is sugar for the explicit form above.
 
 ### Sentinels — wiring data between steps
@@ -389,8 +389,8 @@ their own.
 - **Defining a JSON tool schema by hand** when a Python function
   exists. The signature path is the default and covers >95% of real
   callables.
-- **Hiding the engine behind sugar.** `Agent.from_model(...)`, the
-  string-positional `Agent("claude-opus-4-7")`, and `Agent.from_engine(...)`
+- **Hiding the engine behind sugar.** `Agent(...)`, the
+  string-positional `Agent("claude-opus-4-7")`, and `Agent(engine=...)`
   all save a line of code at the cost of hiding which engine the agent
   actually runs. Lead with `Agent(engine=LLMEngine("..."), ...)`,
   especially in tutorials and code reviews.

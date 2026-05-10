@@ -61,7 +61,7 @@ def test_plan_parallel_steps_actually_run_concurrently():
     )
 
     t0 = time.monotonic()
-    Agent.from_engine(plan)("x")
+    Agent(engine=plan)("x")
     elapsed = time.monotonic() - t0
 
     # Parallel: one step's wall-time, plus a little overhead.
@@ -91,7 +91,7 @@ def test_plan_parallel_group_followed_by_sequential_join():
         Step(branch_b, name="b", parallel=True),
         Step(join, name="join"),
     )
-    env = Agent.from_engine(plan)("hi")
+    env = Agent(engine=plan)("hi")
 
     # Both branches ran, join ran exactly once and after both.
     assert "a" in order and "b" in order
@@ -114,7 +114,7 @@ def test_plan_parallel_branch_error_fails_the_plan():
         Step(ok, name="ok", parallel=True),
         Step(boom, name="boom", parallel=True),
     )
-    env = Agent.from_engine(plan)("x")
+    env = Agent(engine=plan)("x")
 
     assert not env.ok
     assert "branch failed" in env.error.message
@@ -132,7 +132,7 @@ def test_plan_sequential_still_works_after_refactor():
         return f"b:{task}"
 
     plan = Plan(Step(a, name="a"), Step(b, name="b"))
-    env = Agent.from_engine(plan)("hi")
+    env = Agent(engine=plan)("hi")
     # from_prev chain semantics — b sees a's output
     assert env.text() == "b:a:hi"
 
@@ -176,7 +176,7 @@ def test_from_prev_preserves_envelope_metadata():
         Step(producer, name="produce"),
         Step(reader, name="read", task=from_prev),
     )
-    env = Agent.from_engine(plan)("start")
+    env = Agent(engine=plan)("start")
     # reader ran — value confirms from_prev passed producer's payload along
     assert "read(" in env.text()
 
@@ -194,7 +194,7 @@ def test_from_step_preserves_envelope_metadata():
         Step(a, name="a"),
         Step(b, name="b", task=from_step("a")),
     )
-    env = Agent.from_engine(plan)("root")
+    env = Agent(engine=plan)("root")
     assert env.text() == "saw:A-output"
 
 

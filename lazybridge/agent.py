@@ -145,12 +145,17 @@ class Agent:
 
         tools=[researcher.as_tool("deep_research")]
 
-    **Factory methods** are sugar over the canonical form:
+    **Factory methods** that build real structure (not pure aliases) live on
+    the class:
 
-    - ``Agent.from_plan(*steps)``       → ``Agent(engine=Plan(*steps))``
-    - ``Agent.from_model("model")``     → ``Agent(engine=LLMEngine("model"))``
-    - ``Agent.from_chain(a, b)``        → ``Agent(engine=Plan(Step(a), Step(b)))``
-    - ``Agent.from_engine(e)``          → ``Agent(engine=e)``
+    - ``Agent.chain(a, b)`` — sequential: builds a ``Plan`` of one ``Step``
+      per agent.
+    - ``Agent.parallel(*agents)`` — scripted fan-out: returns a
+      ``ParallelAgent`` whose ``__call__`` yields one ``Envelope`` whose
+      ``.payload`` is ``list[Envelope]``.
+    - ``Agent.from_provider(provider, tier="medium")`` — resolves a tier
+      alias (``cheap`` / ``medium`` / ``top`` / …) to that provider's
+      current model.
 
     Extension engines live in :mod:`lazybridge.ext` to respect the
     core/ext import boundary::
@@ -861,29 +866,6 @@ class Agent:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_model(cls, model: str, **kwargs: Any) -> Agent:
-        """Construct an Agent backed by an LLMEngine for ``model``.
-
-        Explicit counterpart to ``Agent("claude-opus-4-7")``.  Use this
-        when you want the model-path to be unambiguous at the call site
-        (code review, static analysis, teaching material)::
-
-            Agent.from_model("claude-opus-4-7", tools=[search])
-        """
-        return cls(model, **kwargs)
-
-    @classmethod
-    def from_engine(cls, engine: Any, **kwargs: Any) -> Agent:
-        """Construct an Agent from an already-built Engine instance.
-
-        Explicit counterpart to ``Agent(engine=some_engine)``::
-
-            Agent.from_engine(Plan(Step(researcher), Step(writer)))
-            Agent.from_engine(SupervisorEngine(tools=[t], agents=[a]))
-        """
-        return cls(engine=engine, **kwargs)
-
-    @classmethod
     def from_provider(
         cls,
         provider: str,
@@ -952,114 +934,21 @@ class Agent:
         )
 
     # ------------------------------------------------------------------
-    # Unified ``from_<engine_kind>`` factories
-    # ------------------------------------------------------------------
-    #
-    # Every Agent is ``Container(engine, tools, state)``.  The engine
-    # decides HOW the agent behaves; everything else (memory, session,
-    # guard, verify, fallback, output, name) is uniform across every
-    # engine.  These factories are sugar that build the right engine
-    # and forward shared kwargs through to the unified Agent
-    # constructor.  Reading any ``Agent.from_X(...)`` call site tells
-    # you immediately which engine is in there.
-
-    @classmethod
-    def from_plan(
-        cls,
-        *steps: Any,
-        max_iterations: int = 100,
-        store: Any | None = None,
-        checkpoint_key: str | None = None,
-        resume: bool = False,
-        on_concurrent: str = "fail",
-        **kwargs: Any,
-    ) -> Agent:
-        """Construct an Agent backed by a declarative :class:`Plan`.
-
-        Explicit counterpart to ``Agent(engine=Plan(*steps, ...))``::
-
-            Agent.from_plan(
-                Step(researcher, name="search", writes="hits"),
-                Step(ranker,     name="rank",   context=from_prev),
-                Step(writer,     name="write",  context=from_step("rank")),
-                store=Store(db="run.sqlite"),
-                checkpoint_key="research",
-                resume=True,
-            )
-
-        All :class:`Plan` kwargs are accepted directly; remaining
-        ``**kwargs`` (``memory=`` / ``session=`` / ``output=`` /
-        ``verify=`` / ``fallback=`` / ``guard=`` / ``name=`` / etc.)
-        forward to the unified Agent constructor.
-        """
-        from lazybridge.engines.plan import Plan
-
-        plan = Plan(
-            *steps,
-            max_iterations=max_iterations,
-            store=store,
-            checkpoint_key=checkpoint_key,
-            resume=resume,
-            on_concurrent=on_concurrent,  # type: ignore[arg-type]
-        )
-        return cls(engine=plan, **kwargs)
-
-    @classmethod
-    def from_chain(cls, *agents: Agent, **kwargs: Any) -> Agent:
-        """Construct an Agent that runs ``agents`` sequentially (linear pipeline).
-
-        Each agent's output becomes the next agent's input.  Internally
-        wraps a :class:`Plan` of one ``Step`` per agent — the canonical
-        narrative is "linear Plan", just spelled in two characters less.
-
-        Equivalent to :meth:`Agent.chain`; the ``from_`` form is the
-        documented canonical surface so reading the call site tells you
-        immediately which engine is in there.
-        """
-        return cls.chain(*agents, **kwargs)
-
-    @classmethod
-    def from_parallel(
-        cls,
-        *agents: Agent,
-        concurrency_limit: int | None = None,
-        step_timeout: float | None = None,
-        **kwargs: Any,
-    ) -> _ParallelAgent:
-        """Construct a deterministic fan-out runner over ``agents``.
-
-        Equivalent to :meth:`Agent.parallel`.  **Note:** this is the one
-        ``from_*`` factory that does NOT return a single ``Agent``; it
-        returns a :class:`_ParallelAgent` whose ``__call__`` returns
-        ``list[Envelope]`` (one per input agent, in order).  The
-        asymmetry is intentional: this is **scripted** fan-out, not an
-        orchestrated agent — there is no single "result" to wrap into
-        one envelope.  Use ``Agent(tools=[a, b, c])`` if you want a
-        proper Agent that the engine orchestrates.
-        """
-        return cls.parallel(
-            *agents,
-            concurrency_limit=concurrency_limit,
-            step_timeout=step_timeout,
-            **kwargs,
-        )
-
-    # ------------------------------------------------------------------
     # Note on ext-engine factories
     # ------------------------------------------------------------------
     #
-    # ``Agent.from_<kind>`` factories for ext engines (Supervisor,
-    # Human, dynamic planners) intentionally do NOT live on this class —
-    # the core-vs-ext boundary (see ``docs/guides/core-vs-ext.md``)
-    # forbids ``lazybridge/`` core from importing ``lazybridge.ext.*``,
-    # even via lazy/local imports.  Use either of:
+    # Ext engines (Supervisor, Human, dynamic planners) deliberately have
+    # no factory on this class — the core-vs-ext boundary (see
+    # ``docs/guides/core-vs-ext.md``) forbids ``lazybridge/`` core from
+    # importing ``lazybridge.ext.*``, even via lazy/local imports.
+    # Two construction paths:
     #
-    # 1. The escape-hatch :meth:`from_engine` with the ext engine instance::
+    # 1. Direct: pass the ext engine instance to the canonical Agent ctor::
     #
     #        from lazybridge.ext.hil import SupervisorEngine
-    #        Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
+    #        Agent(engine=SupervisorEngine(tools=[...], agents=[...]))
     #
-    # 2. The module-level ergonomic factories shipped in each ext package::
+    # 2. Module-level ergonomic factories shipped in each ext package::
     #
     #        from lazybridge.ext.hil import supervisor_agent, human_agent
     #        supervisor_agent(tools=[...], agents=[...])

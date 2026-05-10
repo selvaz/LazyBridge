@@ -18,7 +18,7 @@ Two equivalent ways to construct a HIL agent:
 
        from lazybridge import Agent
        from lazybridge.ext.hil import SupervisorEngine
-       Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
+       Agent(engine=SupervisorEngine(tools=[...], agents=[...]))
 
 2. Module-level factory (symmetric with ``Agent.from_*`` core factories;
    accepts the same uniform Agent kwargs through ``**agent_kwargs``)::
@@ -123,7 +123,7 @@ def human_agent(
 
 
 __all__ = [
-    # Engines (compose via ``Agent.from_engine(...)``).
+    # Engines (compose via ``Agent(engine=...)``).
     "HumanEngine",
     "SupervisorEngine",
     # Module-level factories — symmetric with ``Agent.from_<kind>(...)``.

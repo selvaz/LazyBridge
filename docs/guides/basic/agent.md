@@ -42,10 +42,8 @@ result = await agent.run(task)     # async equivalent
 async for chunk in agent.stream(task): ...   # streaming form
 ```
 
-For factory and composition shortcuts (`Agent.from_model`,
-`Agent.from_engine`, `Agent.from_provider`, `Agent.from_plan`,
-`Agent.chain`, `Agent.parallel`, `Agent.from_chain`,
-`Agent.from_parallel`), see [Canonical vs sugar](../../concepts/canonical-vs-sugar.md).
+For factory and composition shortcuts (`Agent.from_provider`,
+`Agent.chain`, `Agent.parallel`), see [Canonical vs sugar](../../concepts/canonical-vs-sugar.md).
 
 ## Synopsis
 

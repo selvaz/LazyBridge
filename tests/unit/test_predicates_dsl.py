@@ -197,8 +197,8 @@ def test_when_field_empty_in_step_routes_matches_lambda_behaviour() -> None:
     # Both plans should route to apology on empty items.
     from lazybridge import Agent
 
-    Agent.from_engine(plan_dsl)("t")
-    Agent.from_engine(plan_lambda)("t")
+    Agent(engine=plan_dsl)("t")
+    Agent(engine=plan_lambda)("t")
 
     assert len(apology_dsl.calls) == len(apology_lambda.calls) == 1
     assert len(follow_dsl.calls) == len(follow_lambda.calls) == 0
@@ -222,7 +222,7 @@ def test_when_payload_escape_hatch_in_step_routes() -> None:
     plan._validate({})
     from lazybridge import Agent
 
-    Agent.from_engine(plan)("t")
+    Agent(engine=plan)("t")
     assert len(urgent.calls) == 1
 
 

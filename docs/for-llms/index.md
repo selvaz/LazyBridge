@@ -29,8 +29,8 @@ The skill teaches:
   [Canonical vs sugar](../concepts/canonical-vs-sugar.md) reference,
   embedded for offline lookup).
 - Anti-patterns: `asyncio.run(main())` wrapping, hand-written tool
-  schemas, `.text()` on structured output, `Agent.from_model`
-  boilerplate.
+  schemas, `.text()` on structured output, redundant `from_*`
+  factories (deleted in 0.8.0).
 
 ## `llms.txt` and `llms-full.txt`
 

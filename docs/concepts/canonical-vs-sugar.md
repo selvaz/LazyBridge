@@ -36,8 +36,6 @@ agent = Agent(
 | Sugar | Expands to | Differences |
 |---|---|---|
 | `Agent("claude-opus-4-7", tools=[search], name="research")` | The canonical form above | **Pure alias.** The first positional argument is interpreted as a model string and threaded through to `LLMEngine(...)` internally. Hides which engine drives the agent at the call site. |
-| `Agent.from_model("claude-opus-4-7", tools=[search], name="research")` | The canonical form above | **Pure alias.** Same internal path as the string-positional shortcut; readability preference only. |
-| `Agent.from_engine(LLMEngine("claude-opus-4-7"), tools=[search], name="research")` | The canonical form above | **Pure alias** of `Agent(engine=engine, …)`. Useful when the engine is already built elsewhere; longer than canonical otherwise. |
 | `Agent.from_provider("anthropic", tier="top", tools=[search], name="research")` | `Agent(engine=LLMEngine("top", provider="anthropic"), tools=[search], name="research")` | **Not pure sugar.** Builds an `LLMEngine` whose model string is a **tier alias** (`super_cheap` / `cheap` / `medium` / `expensive` / `top`); each provider class maps the alias to its current lineup. Use when you want "freshest model in tier X" without pinning a date-stamped name. |
 
 ---
@@ -60,9 +58,9 @@ pipeline = Agent(
 )
 ```
 
-| Sugar | Expands to | Differences |
-|---|---|---|
-| `Agent.from_plan(Step("research"), Step("write"), store=Store(db="run.sqlite"), checkpoint_key="research", resume=True, tools=[researcher, writer])` | The canonical form above | **Pure alias.** Forwards Plan's kwargs (`max_iterations`, `store`, `checkpoint_key`, `resume`, `on_concurrent`) to a freshly-built `Plan`, then builds the Agent. Saves one indentation level for one-liners. |
+No sugar — write the canonical form. Plan's kwargs (`max_iterations`,
+`store`, `checkpoint_key`, `resume`, `on_concurrent`) live on `Plan(...)`;
+Agent's kwargs (`tools=`, `session=`, `name=`, …) live on `Agent(...)`.
 
 ---
 
@@ -95,7 +93,6 @@ many agents share a single tool-map at the top level.
 | Sugar | Expands to | Differences |
 |---|---|---|
 | `Agent.chain(researcher, writer)` | Pattern A above, with `name="chain"` | **Not a pure alias** — it constructs the `Plan` + `Step` graph for you, but the result is structurally identical to canonical Pattern A. Targets are agents (not name strings); no `tools=` needed. |
-| `Agent.from_chain(researcher, writer)` | Identical to `Agent.chain(...)` | **Pure alias** of `.chain`; exists for symmetry with the other `Agent.from_*` factories. |
 
 ---
 
@@ -112,7 +109,6 @@ results = multi("Same task for everyone")   # -> list[Envelope]
 | Sugar | Expands to | Differences |
 |---|---|---|
 | `Agent.parallel(*agents, concurrency_limit=None, step_timeout=None)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`.** Returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]` (one per branch, input order). The closest from-primitives equivalent is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally. To let the **LLM** decide which branches to invoke, use `Agent(tools=[a, b, c])` instead. To run concurrent steps that **aggregate** via `from_parallel_all`, use a `Plan` parallel band (`Step("a", parallel=True)`). |
-| `Agent.from_parallel(*agents, …)` | Identical to `Agent.parallel(...)` | **Pure alias** of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional: scripted fan-out has no single envelope to wrap. |
 
 ---
 
@@ -212,7 +208,7 @@ print(result.text())
 | Situation | Reach for sugar |
 |---|---|
 | Tutorials, code reviews, the example you ship in the README | **No.** Canonical form makes the engine choice visible. |
-| Internal one-liners when the engine choice is uninteresting (`Agent.from_plan(...)` for a 3-step pipeline, `human_agent(timeout=60)` for a one-shot gate) | **Yes.** |
+| Internal one-liners when the engine choice is uninteresting (`Agent(engine=Plan(...))` for a 3-step pipeline, `human_agent(timeout=60)` for a one-shot gate) | **Yes.** |
 | Production code with structured config (the agent is built once, configured via `runtime=` / `resilience=` / `observability=`) | **No.** Canonical form composes more cleanly with config objects. |
 | When you're using a tier alias (`Agent.from_provider("anthropic", tier="top")`) | **Yes.** This is the canonical way to pin a tier without a date-stamped model name. |
 | Scripted fan-out (`Agent.parallel(...)`) | **Yes.** This *is* the canonical form — there is no `Agent`-shaped equivalent. |

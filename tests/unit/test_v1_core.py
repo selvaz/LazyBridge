@@ -25,7 +25,7 @@ from lazybridge.sentinels import (
 )
 from lazybridge.session import EventType, Session
 from lazybridge.store import Store
-from lazybridge.tools import Tool, build_tool_map, _wrap_tool
+from lazybridge.tools import Tool, _wrap_tool, build_tool_map
 
 # ============================================================
 # Step 1: Envelope

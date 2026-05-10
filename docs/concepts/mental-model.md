@@ -107,7 +107,7 @@ In this example:
 canonical shape — every example in `examples/` follows it, and every
 rung on the [progressive complexity ladder](progressive-complexity.md)
 adds to it without changing it. Shorter forms exist
-(`Agent.from_model("claude-opus-4-7")`, `Agent("claude-opus-4-7")`)
+(`Agent("claude-opus-4-7")`, `Agent("claude-opus-4-7")`)
 but they're sugar: convenient for one-liners, but they hide the engine
 choice that you'll need to configure as soon as the agent does
 anything non-trivial. Learn the canonical form first.

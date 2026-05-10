@@ -439,7 +439,7 @@ def make_plan_builder_tools(
         except _PlanToolError as e:
             return f"PLAN_REJECTED: {e}"
         try:
-            runner = Agent.from_engine(plan)  # PlanCompiler defense-in-depth.
+            runner = Agent(engine=plan)  # PlanCompiler defense-in-depth.
         except PlanCompileError as e:
             return _format_compile_error(e, registry)
         try:

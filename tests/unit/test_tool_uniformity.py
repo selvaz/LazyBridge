@@ -5,8 +5,8 @@ What we verify:
 
 * LLMEngine executes every tool call via ``asyncio.gather`` regardless
   of ``tool_choice`` — the old "parallel" mode is no longer a user-facing
-  knob.  Legacy callers passing ``tool_choice='parallel'`` get a
-  ``DeprecationWarning`` and the value is collapsed to ``'auto'``.
+  knob.  Callers passing the legacy ``tool_choice='parallel'`` value get
+  a ``ValueError`` (removed in 0.8.0; was a 0.7-era deprecation warning).
 * ``Tool.run_sync`` handles both sync and async ``func``, so an Agent
   wrapped by ``Agent.as_tool`` can be invoked through a REPL-style
   engine (SupervisorEngine) without hitting the raw coroutine.
@@ -21,7 +21,6 @@ What we verify:
 from __future__ import annotations
 
 import asyncio
-import warnings
 
 from lazybridge import (
     Agent,
@@ -38,7 +37,8 @@ from lazybridge.ext.hil import SupervisorEngine
 
 def test_llmengine_tool_choice_literal_no_longer_accepts_parallel_type():
     """The type annotation narrows the accepted literals to auto / any.
-    Runtime still tolerates 'parallel' for backward compat but warns.
+    Runtime now rejects the legacy 'parallel' value — see the test
+    immediately below.
     """
     from typing import get_args, get_type_hints
 

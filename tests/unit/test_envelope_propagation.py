@@ -246,7 +246,7 @@ def test_plan_preserves_inner_envelope_metadata_at_step_boundary():
     inner_tool = inner.as_tool("worker_tool")
 
     plan = Plan(Step(target="worker_tool", name="run_worker"))
-    runner = Agent.from_engine(plan, tools=[inner_tool])
+    runner = Agent(engine=plan, tools=[inner_tool])
 
     env = runner("start")
     # The Plan's final Envelope reflects the inner agent's metadata

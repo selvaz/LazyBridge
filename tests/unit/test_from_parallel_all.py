@@ -44,7 +44,7 @@ def test_from_parallel_all_aggregates_three_branches() -> None:
         Step(a["research"], name="meta", task="Meta HC", parallel=True),
         Step(a["writer"], name="report", task=from_parallel_all("apple")),
     )
-    env = Agent.from_engine(plan)("ignored")
+    env = Agent(engine=plan)("ignored")
 
     # Writer should have seen all three labelled sections, not just one.
     body = env.text()
@@ -63,7 +63,7 @@ def test_from_parallel_all_preserves_declared_order() -> None:
         Step(a["research"], name="c", task="C", parallel=True),
         Step(a["writer"], name="report", task=from_parallel_all("b")),
     )
-    Agent.from_engine(plan)("ignored")
+    Agent(engine=plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
     # Sections appear in declared order: b, a, c — not by completion order.
     pos_b = last.index("[b]")
@@ -81,7 +81,7 @@ def test_from_parallel_all_text_join_visible_via_env_text() -> None:
         Step(a["research"], name="y", task="Y", parallel=True),
         Step(a["writer"], name="join", task=from_parallel_all("x")),
     )
-    Agent.from_engine(plan)("ignored")
+    Agent(engine=plan)("ignored")
     env_in = a["writer"].calls[-1].env_in
     assert env_in.text() == env_in.task  # both carry the join
     assert "[x]\nFACT[X]" in env_in.text()
@@ -99,7 +99,7 @@ def test_from_parallel_all_costs_roll_up_via_history() -> None:
         Step(a["research"], name="r3", task="t3", parallel=True),
         Step(a["writer"], name="join", task=from_parallel_all("r1")),
     )
-    final = Agent.from_engine(plan)("ignored")
+    final = Agent(engine=plan)("ignored")
     # Three research calls × 10 in / 20 out / 0.01 cost roll up into the
     # final envelope's nested_* buckets (writer itself adds its own).
     assert final.metadata.nested_input_tokens >= 30
@@ -118,7 +118,7 @@ def test_from_parallel_all_only_band_when_followed_by_non_parallel() -> None:
         Step(a["research"], name="b4", task="b4", parallel=True),
         Step(a["writer"], name="join1", task=from_parallel_all("b1")),
     )
-    Agent.from_engine(plan)("ignored")
+    Agent(engine=plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
     assert "[b1]" in last and "[b2]" in last
     assert "[serial]" not in last
@@ -137,7 +137,7 @@ def test_compiler_rejects_from_parallel_all_to_unknown_step() -> None:
         Step(a["writer"], name="join", task=from_parallel_all("missing")),
     )
     with pytest.raises(PlanCompileError, match="unknown step"):
-        Agent.from_engine(plan)
+        Agent(engine=plan)
 
 
 def test_compiler_rejects_from_parallel_all_forward_reference() -> None:
@@ -147,7 +147,7 @@ def test_compiler_rejects_from_parallel_all_forward_reference() -> None:
         Step(a["research"], name="future", task="x", parallel=True),
     )
     with pytest.raises(PlanCompileError, match="not earlier"):
-        Agent.from_engine(plan)
+        Agent(engine=plan)
 
 
 def test_compiler_rejects_from_parallel_all_to_non_parallel_step() -> None:
@@ -158,7 +158,7 @@ def test_compiler_rejects_from_parallel_all_to_non_parallel_step() -> None:
         Step(a["writer"], name="join", task=from_parallel_all("not_parallel")),
     )
     with pytest.raises(PlanCompileError, match="non-parallel"):
-        Agent.from_engine(plan)
+        Agent(engine=plan)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def test_from_parallel_single_branch_unchanged() -> None:
         Step(a["research"], name="y", task="Y", parallel=True),
         Step(a["writer"], name="join", task=from_parallel("x")),
     )
-    Agent.from_engine(plan)("ignored")
+    Agent(engine=plan)("ignored")
     last = a["writer"].calls[-1].env_in.text()
     # from_parallel still single-branch: only X visible.
     assert "FACT[X]" in last
@@ -219,4 +219,4 @@ def test_compiler_rejects_from_parallel_all_to_mid_band_member() -> None:
         Step(a["writer"], name="join", task=from_parallel_all("b2")),
     )
     with pytest.raises(PlanCompileError, match="FIRST member"):
-        Agent.from_engine(plan)
+        Agent(engine=plan)

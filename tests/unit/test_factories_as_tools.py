@@ -5,7 +5,7 @@ through ``Agent`` (or the ext factories) plugs into ``tools=[...]`` of
 ANOTHER agent with identical semantics — the LLM sees a tool that
 takes a string task and returns a stringifiable result.
 
-Pre-fix gap: ``Agent.from_parallel`` returned ``_ParallelAgent``
+Pre-fix gap: ``Agent.parallel`` returned ``_ParallelAgent``
 whose ``run()`` resolved to ``list[Envelope]`` (not ``Envelope``).
 The Tool wrapper claimed ``returns_envelope=True`` but the actual
 return was a list, so the LLM's tool-result content path silently
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
-from lazybridge import Agent, Step
+from lazybridge import Agent, Plan, Step
 from lazybridge.envelope import Envelope, ErrorInfo
 from lazybridge.testing import MockAgent
 from lazybridge.tools import Tool, _wrap_tool
@@ -36,19 +36,19 @@ from lazybridge.tools import Tool, _wrap_tool
 def test_from_chain_wraps_as_tool():
     a = MockAgent("A", name="a_agent")
     b = MockAgent("B", name="b_agent")
-    chained = Agent.from_chain(a, b)
+    chained = Agent.chain(a, b)
     t = _wrap_tool(chained)
     assert isinstance(t, Tool)
 
 
-def test_from_plan_wraps_as_tool():
-    plan_agent = Agent.from_plan(Step(target=lambda task: "x", name="step1"))
+def test_plan_engine_wraps_as_tool():
+    plan_agent = Agent(engine=Plan(Step(target=lambda task: "x", name="step1")))
     t = _wrap_tool(plan_agent)
     assert isinstance(t, Tool)
 
 
-def test_from_parallel_wraps_as_tool():
-    fan = Agent.from_parallel(MockAgent("X"), MockAgent("Y"), name="fan")
+def test_parallel_wraps_as_tool():
+    fan = Agent.parallel(MockAgent("X"), MockAgent("Y"), name="fan")
     t = _wrap_tool(fan)
     assert isinstance(t, Tool)
     assert t.name == "fan"
@@ -99,7 +99,7 @@ def test_parallel_as_tool_returns_single_envelope_not_list():
     """The fix: ``as_tool()`` must fold ``list[Envelope]`` into ONE
     ``Envelope`` so the Tool contract holds.  Pre-fix, ``run()`` was a
     list and the LLM tool-result block stringified it as junk."""
-    fan = Agent.from_parallel(MockAgent("X-out"), MockAgent("Y-out"), name="fan")
+    fan = Agent.parallel(MockAgent("X-out"), MockAgent("Y-out"), name="fan")
     t = _wrap_tool(fan)
     result = asyncio.run(t.run(task="hi"))
     assert isinstance(result, Envelope)
@@ -108,7 +108,7 @@ def test_parallel_as_tool_returns_single_envelope_not_list():
 def test_parallel_as_tool_payload_is_labelled_text_join():
     """Same shape as ``Plan._aggregate_parallel_band`` — every branch
     appears as ``[name]\\n<output>`` separated by blank lines."""
-    fan = Agent.from_parallel(
+    fan = Agent.parallel(
         MockAgent("first-output", name="first"),
         MockAgent("second-output", name="second"),
         name="fan",
@@ -128,7 +128,7 @@ def test_parallel_as_tool_aggregates_nested_metadata():
     """Cost rolls up transitively — every branch's tokens / cost are
     summed into the wrapper's ``nested_*`` so an outer agent reading
     ``.metadata.nested_input_tokens`` sees the full spend."""
-    fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"), name="fan")
+    fan = Agent.parallel(MockAgent("A"), MockAgent("B"), name="fan")
     t = _wrap_tool(fan)
     env = asyncio.run(t.run(task="hi"))
     # MockAgent reports input_tokens=10 / output_tokens=20 per call.
@@ -152,7 +152,7 @@ def test_parallel_as_tool_first_error_propagates():
                 error=ErrorInfo(type="Boom", message="branch failed"),
             )
 
-    fan = Agent.from_parallel(MockAgent("ok"), _BrokenAgent(), name="fan")  # type: ignore[arg-type]
+    fan = Agent.parallel(MockAgent("ok"), _BrokenAgent(), name="fan")  # type: ignore[arg-type]
     t = _wrap_tool(fan)
     env = asyncio.run(t.run(task="hi"))
     assert env.error is not None
@@ -160,7 +160,7 @@ def test_parallel_as_tool_first_error_propagates():
 
 
 def test_parallel_as_tool_custom_name_and_description():
-    fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"))
+    fan = Agent.parallel(MockAgent("A"), MockAgent("B"))
     custom = fan.as_tool(name="my_fan", description="run my fan-out")
     assert custom.name == "my_fan"
     # The description shows up on the Tool's definition.
@@ -178,7 +178,7 @@ def test_parallel_as_tool_pluggable_into_outer_tools_list():
     legitimate tool, register it in its tool map, and not crash at
     construction.  (We don't fire a real LLM here — we just verify
     construction-time tool registration succeeds.)"""
-    fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"), name="fanout")
+    fan = Agent.parallel(MockAgent("A"), MockAgent("B"), name="fanout")
     sub = MockAgent("just-a-tool", name="aux")
 
     # Outer agent built around an LLMEngine (not invoked) — registers
@@ -194,7 +194,7 @@ def test_parallel_as_tool_definition_advertises_string_task_input():
     """The Tool's definition must advertise a ``task: str`` input —
     same shape as every other agent-as-tool.  This is what lets an
     LLM emit a tool call with a single ``task`` argument."""
-    fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"), name="fan")
+    fan = Agent.parallel(MockAgent("A"), MockAgent("B"), name="fan")
     t = _wrap_tool(fan)
     schema = t.definition().parameters
     props = schema.get("properties", {})
@@ -203,7 +203,7 @@ def test_parallel_as_tool_definition_advertises_string_task_input():
 
 # ---------------------------------------------------------------------------
 # Boundary: the underlying _ParallelAgent.run() still returns list[Envelope]
-# (so direct callers — Agent.from_parallel(a, b)("task") — keep working)
+# (so direct callers — Agent.parallel(a, b)("task") — keep working)
 # ---------------------------------------------------------------------------
 
 
@@ -212,7 +212,7 @@ def test_parallel_direct_call_still_returns_list_envelope():
     ``__call__`` still returns ``list[Envelope]`` (the documented
     asymmetry of scripted fan-out).  Pre-existing callers must not
     silently break."""
-    fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"))
+    fan = Agent.parallel(MockAgent("A"), MockAgent("B"))
     out = fan("hi")
     assert isinstance(out, list)
     assert len(out) == 2

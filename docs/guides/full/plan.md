@@ -218,4 +218,4 @@ crash-resume, fan-out runs — see the dedicated guides:
 - *Guides → Full → Checkpoint & resume* (Phase 3b) — `store=`,
   `checkpoint_key=`, `resume=True`, `on_concurrent=`.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
-  `Agent.from_plan(*steps)` vs `Agent(engine=Plan(*steps))`.
+  `Agent(engine=Plan(*steps))` vs `Agent(engine=Plan(*steps))`.

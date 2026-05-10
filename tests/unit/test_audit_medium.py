@@ -219,7 +219,7 @@ def test_graph_schema_names_supervisor_engine_in_fallback():
 def test_graph_schema_names_plan_engine_in_fallback():
     sess = Session()
     plan = Plan(Step(lambda task: "x", name="only_step"))
-    Agent.from_engine(plan, name="planner", session=sess)
+    Agent(engine=plan, name="planner", session=sess)
 
     node = sess.graph.node("planner")
     assert node is not None
