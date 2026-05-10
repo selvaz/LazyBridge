@@ -107,8 +107,7 @@ __stability__ = "alpha"
 # importable as ``from lazybridge.X import Y`` for advanced callers.
 
 # Primary surface
-from lazybridge.agent import Agent
-from lazybridge.agent import _ParallelAgent as _ParallelAgent
+from lazybridge.agent import Agent, ParallelAgent
 
 # Provider entry points
 from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError
@@ -167,6 +166,7 @@ from lazybridge.tools import Tool, ToolProvider, tool
 __all__ = [
     # Primary API
     "Agent",
+    "ParallelAgent",
     # Envelope
     "Envelope",
     # Sentinels

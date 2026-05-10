@@ -14,7 +14,7 @@ What stays:
 - ``Agent.from_provider(provider, tier=...)`` — non-trivial: resolves a
   tier alias to the provider's current model.
 - ``Agent.chain(*agents)`` — non-trivial: builds the Plan + Step graph.
-- ``Agent.parallel(*agents)`` — non-trivial: returns ``_ParallelAgent``
+- ``Agent.parallel(*agents)`` — non-trivial: returns ``ParallelAgent``
   whose ``__call__`` yields ``list[Envelope]``.
 """
 
@@ -200,14 +200,14 @@ def test_chain_returns_agent_with_plan_engine():
 
 
 def test_parallel_returns_parallel_agent():
-    """Documented asymmetry: parallel returns _ParallelAgent (whose
+    """Documented asymmetry: parallel returns ParallelAgent (whose
     __call__ yields list[Envelope]) — scripted fan-out has no single
     "result" to wrap into one envelope."""
-    from lazybridge.agent import _ParallelAgent
+    from lazybridge.agent import ParallelAgent
 
     a, b, c = _stub("a"), _stub("b"), _stub("c")
     p = Agent.parallel(a, b, c)
-    assert isinstance(p, _ParallelAgent)
+    assert isinstance(p, ParallelAgent)
     assert len(p.agents) == 3
 
 

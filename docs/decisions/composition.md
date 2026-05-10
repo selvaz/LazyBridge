@@ -14,9 +14,11 @@ Linear pipeline, output of step N becomes task of N+1?
       # sugar for Agent(engine=Plan(Step(target=a, name=a.name),
       #                              Step(target=b, name=b.name), …))
 
-Run the same task on N agents concurrently, get list[Envelope]?
+Run the same task on N agents concurrently, get the joined output?
     → Agent.parallel(a, b, c)
-      # sugar for asyncio.gather over a/b/c, returns list[Envelope]
+      # asyncio.gather over a/b/c — returns ONE Envelope whose
+      # text() is the labelled-text join.  Call .run_branches(task)
+      # (async) if you need typed per-branch list[Envelope].
 
 Let the LLM decide which sub-agent(s) to call (and when, including
 in parallel)?
@@ -44,9 +46,10 @@ or crash-resume?
 - **`Agent.chain` is sugar for a linear `Plan`.** Use it for
   one-liner sequential handoffs; reach for the explicit `Plan`
   the moment you can see a router or a parallel band coming.
-- **`Agent.parallel` returns `list[Envelope]`, not a single
-  envelope.** Feed the list to a follow-up summariser if you
-  want one aggregated answer.
+- **`Agent.parallel` returns ONE Envelope (since 0.8.0)** whose
+  `payload` is the labelled-text join of every branch.  For typed
+  per-branch access call `parallel.run_branches(task)` (async) →
+  `list[Envelope]`.
 - **`tools=[a, b, c]` is the LLM-driven path.** When the model
   emits multiple tool calls in one turn, LazyBridge dispatches
   them concurrently via `asyncio.gather` — automatic
@@ -61,7 +64,7 @@ or crash-resume?
 - [Chain](../guides/mid/chain.md) — sequential composition
   reference.
 - [Parallel](../guides/mid/parallel.md) — `Agent.parallel`
-  semantics; `_ParallelAgent` return type.
+  semantics; `ParallelAgent` return type.
 - [As tool](../guides/mid/as-tool.md) — when to pass an agent in
   `tools=[…]` directly vs `agent.as_tool("alias")`.
 - [Plan](../guides/full/plan.md) — declared orchestration with

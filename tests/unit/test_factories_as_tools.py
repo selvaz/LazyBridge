@@ -5,13 +5,13 @@ through ``Agent`` (or the ext factories) plugs into ``tools=[...]`` of
 ANOTHER agent with identical semantics — the LLM sees a tool that
 takes a string task and returns a stringifiable result.
 
-Pre-fix gap: ``Agent.parallel`` returned ``_ParallelAgent``
+Pre-fix gap: ``Agent.parallel`` returned ``ParallelAgent``
 whose ``run()`` resolved to ``list[Envelope]`` (not ``Envelope``).
 The Tool wrapper claimed ``returns_envelope=True`` but the actual
 return was a list, so the LLM's tool-result content path silently
 fell through ``str(list)`` — opaque junk in the model's context.
 
-Fix: ``_ParallelAgent.as_tool()`` folds the N branches into ONE
+Fix: ``ParallelAgent.as_tool()`` folds the N branches into ONE
 ``Envelope`` via labelled-text join (same shape as ``Plan``'s
 ``from_parallel_all`` aggregator) with transitive cost rollup and
 first-error short-circuit.
@@ -202,18 +202,27 @@ def test_parallel_as_tool_definition_advertises_string_task_input():
 
 
 # ---------------------------------------------------------------------------
-# Boundary: the underlying _ParallelAgent.run() still returns list[Envelope]
-# (so direct callers — Agent.parallel(a, b)("task") — keep working)
+# 0.8.0: ParallelAgent.__call__ now returns ONE Envelope (joined) for
+# framework-uniform composition.  Per-branch list[Envelope] is exposed
+# via the explicit ``run_branches`` async helper.
 # ---------------------------------------------------------------------------
 
 
-def test_parallel_direct_call_still_returns_list_envelope():
-    """The ``as_tool()`` wrapper folds — but the underlying runner's
-    ``__call__`` still returns ``list[Envelope]`` (the documented
-    asymmetry of scripted fan-out).  Pre-existing callers must not
-    silently break."""
+def test_parallel_direct_call_returns_joined_envelope():
+    """``ParallelAgent.__call__`` returns the same labelled-text Envelope
+    as ``as_tool()`` — same shape regardless of how the runner is invoked
+    (Tool-is-Tool uniformity)."""
+    fan = Agent.parallel(MockAgent("A", name="first"), MockAgent("B", name="second"))
+    env = fan("hi")
+    assert isinstance(env, Envelope)
+    text = env.text()
+    assert "[first]" in text and "[second]" in text
+
+
+def test_parallel_run_branches_returns_typed_list():
+    """For per-branch typed access, callers use ``run_branches()`` (async)."""
     fan = Agent.parallel(MockAgent("A"), MockAgent("B"))
-    out = fan("hi")
-    assert isinstance(out, list)
-    assert len(out) == 2
-    assert all(isinstance(e, Envelope) for e in out)
+    branches = asyncio.run(fan.run_branches("hi"))
+    assert isinstance(branches, list)
+    assert len(branches) == 2
+    assert all(isinstance(e, Envelope) for e in branches)

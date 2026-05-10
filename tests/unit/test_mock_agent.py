@@ -359,16 +359,16 @@ async def test_agent_parallel_runs_mocks_concurrently() -> None:
     import time as _t
 
     t0 = _t.perf_counter()
-    results = await par.run("same task to all")
+    branches = await par.run_branches("same task to all")
     elapsed = (_t.perf_counter() - t0) * 1000
 
-    # ``Agent.parallel`` returns ``list[Envelope]`` directly — one
-    # per input agent, in input order.  If they ran serially, elapsed
+    # ``run_branches`` is the typed per-branch entry point — one Envelope
+    # per input agent in input order.  If they ran serially, elapsed
     # would be ≥60ms; concurrent should be comfortably under 55ms even
     # with CI jitter.
-    assert isinstance(results, list) and len(results) == 2
+    assert isinstance(branches, list) and len(branches) == 2
     assert elapsed < 55, f"parallel ran serially: {elapsed}ms"
-    texts = {e.text() for e in results}
+    texts = {e.text() for e in branches}
     assert texts == {"one", "two"}
 
 

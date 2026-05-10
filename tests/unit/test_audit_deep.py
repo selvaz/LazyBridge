@@ -3,7 +3,7 @@
 One test per behaviour so a breakage points straight at the offending area.
 
   * Public ``__all__`` exposes ``GuardError`` / ``EventExporter``.
-  * ``_ParallelAgent.__call__`` uses ``asyncio.get_running_loop``
+  * ``ParallelAgent.__call__`` uses ``asyncio.get_running_loop``
     (not the deprecated ``get_event_loop``).
   * ``LLMGuard`` has real ``acheck_input`` / ``acheck_output``.
   * ``Plan`` short-circuits when a referenced upstream step errored.
@@ -32,7 +32,7 @@ import pytest
 
 import lazybridge
 from lazybridge import Agent, Envelope, GraphSchema, Store
-from lazybridge.agent import _ParallelAgent
+from lazybridge.agent import ParallelAgent
 from lazybridge.core.tool_schema import _annotation_to_schema
 from lazybridge.engines.plan import Plan, Step
 from lazybridge.graph.schema import EdgeType
@@ -58,10 +58,10 @@ def test_h1_parallel_agent_uses_get_running_loop() -> None:
     # trick a plain substring search.
     import ast
 
-    src = inspect.getsource(_ParallelAgent.__call__)
+    src = inspect.getsource(ParallelAgent.__call__)
     tree = ast.parse(src.strip())
     names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    assert "get_event_loop" not in names, "_ParallelAgent.__call__ must not use deprecated asyncio.get_event_loop"
+    assert "get_event_loop" not in names, "ParallelAgent.__call__ must not use deprecated asyncio.get_event_loop"
     assert "get_running_loop" in names
 
 

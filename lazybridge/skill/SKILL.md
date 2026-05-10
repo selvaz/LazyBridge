@@ -113,8 +113,7 @@ build extra structure or return different types. Read the
 
 | Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]`. Closest from-primitives form is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
-| `Agent.parallel(*agents, …)` | Identical to `Agent.parallel(...)` | Pure alias of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional. |
+| `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `ParallelAgent`, a sibling class whose `__call__` returns ONE `Envelope` (labelled-text join across every branch, with transitive cost rollup). For typed per-branch access call `parallel.run_branches(task)` (async) → `list[Envelope]`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
 
 **Build an Agent with a HIL engine**
 

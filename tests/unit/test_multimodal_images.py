@@ -16,7 +16,7 @@ Pins the multimodal-image contract:
   ``_VISION_CAPABLE_MODEL_PATTERNS`` table on each provider) drops
   attachments with a UserWarning by default — and raises
   :class:`UnsupportedFeatureError` when ``strict_multimodal=True``.
-* :class:`Plan` and :class:`_ParallelAgent` propagate attachments to
+* :class:`Plan` and :class:`ParallelAgent` propagate attachments to
   step 0 / every branch via :class:`Envelope`.
 * HIL surfaces (HumanEngine, SupervisorEngine) display a short
   attachment hint instead of leaking raw base64 to the terminal.
@@ -405,7 +405,7 @@ def test_plan_step_n_does_not_inherit_images_from_step_0():
 
 
 # ---------------------------------------------------------------------------
-# _ParallelAgent — fan-out preserves attachments across branches
+# ParallelAgent — fan-out preserves attachments across branches
 # ---------------------------------------------------------------------------
 
 

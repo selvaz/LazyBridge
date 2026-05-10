@@ -151,8 +151,10 @@ class Agent:
     - ``Agent.chain(a, b)`` — sequential: builds a ``Plan`` of one ``Step``
       per agent.
     - ``Agent.parallel(*agents)`` — scripted fan-out: returns a
-      ``ParallelAgent`` whose ``__call__`` yields one ``Envelope`` whose
-      ``.payload`` is ``list[Envelope]``.
+      ``ParallelAgent`` whose ``__call__`` yields one ``Envelope``
+      (labelled-text join across every branch, with transitive cost
+      rollup).  For typed per-branch ``list[Envelope]`` access call
+      ``parallel.run_branches(task)`` (async).
     - ``Agent.from_provider(provider, tier="medium")`` — resolves a tier
       alias (``cheap`` / ``medium`` / ``top`` / …) to that provider's
       current model.
@@ -911,14 +913,13 @@ class Agent:
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
         **kwargs: Any,
-    ) -> _ParallelAgent:
+    ) -> ParallelAgent:
         """Deterministic fan-out: run ``agents`` concurrently on the same task.
 
-        Returns ``list[Envelope]`` — one entry per input agent, preserving
-        order.  No LLM orchestrator mediates the call; this is just sugar
-        for ``asyncio.gather(*[a.run(task) for a in agents])`` with an
-        optional semaphore (``concurrency_limit``) and per-agent timeout
-        (``step_timeout``).
+        Returns a :class:`ParallelAgent` whose ``__call__`` produces a
+        single :class:`Envelope` — labelled-text join of every branch's
+        output, with transitive cost rollup.  For typed access to per-branch
+        envelopes call ``ParallelAgent.run_branches(task)`` (async).
 
         Use this when you **know** you want N things to happen in
         parallel.  If you want the LLM to decide whether to call agents
@@ -926,7 +927,7 @@ class Agent:
         ``tools=[...]`` on a regular ``Agent`` instead; the engine emits
         parallel tool calls automatically when the model requests them.
         """
-        return _ParallelAgent(
+        return ParallelAgent(
             agents=list(agents),
             concurrency_limit=concurrency_limit,
             step_timeout=step_timeout,
@@ -1130,17 +1131,22 @@ def _read_source(src: Any) -> str:
     return str(src)
 
 
-class _ParallelAgent:
+class ParallelAgent:
     """Deterministic fan-out over N agents — the shape behind :meth:`Agent.parallel`.
 
-    This is a **pre-scripted** parallel runner, not a parallelism
-    paradigm.  Every input agent receives the same task; their per-run
-    Envelopes are returned as a list in input order.  No orchestrator
-    LLM is involved.
+    Pre-scripted parallel runner.  Every input agent receives the same
+    task; the N branch results are folded into a single :class:`Envelope`
+    via labelled-text join — same shape as :class:`Plan`'s
+    ``from_parallel_all`` aggregator.  Cost roll-up is transitive.
+    The first non-``None`` branch error propagates as the wrapper's
+    ``error`` so downstream consumers can short-circuit.
 
     Prefer :class:`Agent` with ``tools=[...]`` when you want the engine
     (LLM, Supervisor, Plan) to decide dynamically which tools to invoke
     and when — parallel execution is automatic on that path.
+
+    Per-branch typed access: call :meth:`run_branches` (async) when you
+    need ``list[Envelope]`` rather than the joined wrapper.
     """
 
     _is_lazy_agent = True
@@ -1162,7 +1168,12 @@ class _ParallelAgent:
         self.description = description
         self.session = session
 
-    async def run(self, task: str | Envelope) -> list[Envelope]:
+    async def run_branches(self, task: str | Envelope) -> list[Envelope]:
+        """Async per-branch entry point — returns one ``Envelope`` per
+        input agent in input order.  Use this when you need typed
+        access to individual branch results; for the framework-uniform
+        single-Envelope view, use :meth:`run` or ``__call__``.
+        """
         env = Agent._to_envelope(task) if isinstance(task, str) else task
         sem = asyncio.Semaphore(self.concurrency_limit) if self.concurrency_limit else None
 
@@ -1193,7 +1204,49 @@ class _ParallelAgent:
                 out.append(Envelope.error_envelope(RuntimeError(str(r))))
         return out
 
-    def __call__(self, task: str | Envelope) -> list[Envelope]:
+    def _join_branches(self, task: str | Envelope, branches: list[Envelope]) -> Envelope:
+        """Fold N branch envelopes into ONE Envelope (labelled-text join).
+
+        Same shape as :meth:`Plan._aggregate_parallel_band`.  Used by both
+        ``run()`` / ``__call__()`` and ``as_tool()`` so direct callers and
+        tool-wrapped callers see identical output.
+        """
+        from lazybridge.envelope import EnvelopeMetadata
+
+        sections = [
+            f"[{a.name}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
+            for a, e in zip(self.agents, branches)
+        ]
+        joined = "\n\n".join(sections)
+        nested_in = sum(e.metadata.input_tokens + e.metadata.nested_input_tokens for e in branches)
+        nested_out = sum(e.metadata.output_tokens + e.metadata.nested_output_tokens for e in branches)
+        nested_cost = sum(e.metadata.cost_usd + e.metadata.nested_cost_usd for e in branches)
+        first_error = next((e.error for e in branches if e.error), None)
+        return Envelope(
+            task=task if isinstance(task, str) else task.task,
+            payload=joined,
+            metadata=EnvelopeMetadata(
+                nested_input_tokens=nested_in,
+                nested_output_tokens=nested_out,
+                nested_cost_usd=nested_cost,
+            ),
+            error=first_error,
+        )
+
+    async def run(self, task: str | Envelope) -> Envelope:
+        """Run every branch and return one folded :class:`Envelope`.
+
+        The wrapper's ``payload`` is the labelled-text join of every
+        branch's ``.text()``; ``metadata.nested_*`` rolls every branch's
+        cost up so the outer envelope reports total spend.  The first
+        non-``None`` branch error propagates as the wrapper's ``error``.
+
+        For typed per-branch access, call :meth:`run_branches`.
+        """
+        branches = await self.run_branches(task)
+        return self._join_branches(task, branches)
+
+    def __call__(self, task: str | Envelope) -> Envelope:
         # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only
         # forward-compatible detection (``get_event_loop`` is deprecated
         # under 3.12 and errors under 3.14+ when no loop is running).
@@ -1205,9 +1258,10 @@ class _ParallelAgent:
         return _run_coro_with_context(self.run(task))
 
     # ------------------------------------------------------------------
-    # Tool-is-Tool — fold the list[Envelope] into a single Envelope so
-    # this fan-out runner can be passed as a tool to another agent
-    # (like every other ``Agent`` / agent-like in LazyBridge).
+    # Tool-is-Tool — ``run()`` already returns a single Envelope so the
+    # tool wrapper just delegates.  Pre-Block-F this method duplicated
+    # the labelled-text join because ``run()`` returned ``list[Envelope]``;
+    # now both paths share ``_join_branches``.
     # ------------------------------------------------------------------
 
     def as_tool(
@@ -1217,23 +1271,10 @@ class _ParallelAgent:
     ) -> Tool:
         """Expose the fan-out runner as a single :class:`Tool`.
 
-        The N branches' ``Envelope`` results are folded into ONE
-        :class:`Envelope` whose ``payload`` is a labelled-text join —
-        same shape as :class:`Plan`'s ``from_parallel_all`` aggregator,
-        so the outer agent / model reads the output uniformly.  Cost
-        roll-up is transitive (every branch's ``input_tokens`` /
-        ``output_tokens`` / ``cost_usd`` is summed into the wrapper's
-        ``nested_*`` fields).  The first non-``None`` branch error
-        propagates as the wrapper's ``error`` so downstream can
-        short-circuit.
-
-        Without this method, ``_wrap_tool(parallel_runner)`` falls
-        through the inline shim in :func:`lazybridge.tools._agent_as_tool`
-        which assumes ``run()`` returns an ``Envelope``; the
-        ``list[Envelope]`` then leaks into the LLM's tool result block
-        as an opaque ``str(list)`` that the model can't parse.
+        Just delegates to :meth:`run` — same labelled-text Envelope as
+        every direct caller sees, so a ``ParallelAgent`` passed in
+        ``tools=[...]`` produces output identical to a hand-call.
         """
-        from lazybridge.envelope import EnvelopeMetadata
         from lazybridge.tools import Tool
 
         actual_name = name or self.name or "parallel"
@@ -1242,36 +1283,7 @@ class _ParallelAgent:
         )
 
         async def _run(task: str) -> Envelope:
-            results: list[Envelope] = await self.run(task)
-            # Labelled-text join — same shape as
-            # ``Plan._aggregate_parallel_band``.  Reading the joined
-            # text gives the consumer a structured, model-friendly
-            # view of every branch's contribution.
-            sections = [
-                f"[{a.name}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
-                for a, e in zip(self.agents, results)
-            ]
-            joined = "\n\n".join(sections)
-            # Transitive cost rollup — the outer envelope's
-            # ``nested_*`` reports the total spend of every branch
-            # (their direct + their own nested_*) so an N-deep tree
-            # of parallel-of-parallel composes cleanly.
-            nested_in = sum(e.metadata.input_tokens + e.metadata.nested_input_tokens for e in results)
-            nested_out = sum(e.metadata.output_tokens + e.metadata.nested_output_tokens for e in results)
-            nested_cost = sum(e.metadata.cost_usd + e.metadata.nested_cost_usd for e in results)
-            # First error wins so callers reading ``.error`` can detect
-            # branch failure without scanning the whole list.
-            first_error = next((e.error for e in results if e.error), None)
-            return Envelope(
-                task=task,
-                payload=joined,
-                metadata=EnvelopeMetadata(
-                    nested_input_tokens=nested_in,
-                    nested_output_tokens=nested_out,
-                    nested_cost_usd=nested_cost,
-                ),
-                error=first_error,
-            )
+            return await self.run(task)
 
         _run.__name__ = actual_name
         _run.__doc__ = actual_desc

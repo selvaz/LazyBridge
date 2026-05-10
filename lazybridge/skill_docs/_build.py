@@ -129,7 +129,7 @@ def _stale_in_skill(skill_text: str) -> list[str]:
         "CacheConfig",
         "ObservabilityConfig",
         "ResilienceConfig",
-        "_ParallelAgent",
+        "_ParallelAgent",  # 0.7-era private name; renamed → ParallelAgent in 0.8.0
         "wrap_tool",
     )
     stale: list[str] = []

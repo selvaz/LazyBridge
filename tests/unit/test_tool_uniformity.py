@@ -219,11 +219,20 @@ def test_same_tools_list_works_on_llm_and_supervisor_engines():
 
 
 def test_agent_parallel_is_deterministic_fanout():
+    """``Agent.parallel(...)("task")`` returns ONE Envelope (joined) since
+    0.8.0 — same shape as the ``as_tool()`` wrapper, so the runner composes
+    uniformly into outer agents.  For typed per-branch access, callers use
+    the explicit ``run_branches`` async helper."""
     a = Agent(engine=_EchoEngine("a"), name="a")
     b = Agent(engine=_EchoEngine("b"), name="b")
     c = Agent(engine=_EchoEngine("c"), name="c")
 
-    results = Agent.parallel(a, b, c)("hello")
-    assert len(results) == 3
-    texts = [r.text() for r in results]
-    assert texts == ["a:hello", "b:hello", "c:hello"]
+    par = Agent.parallel(a, b, c)
+    env = par("hello")
+    text = env.text()
+    # Order-preserving labelled-text join.
+    assert "[a]" in text and "[b]" in text and "[c]" in text
+    assert "a:hello" in text and "b:hello" in text and "c:hello" in text
+    # Per-branch access via run_branches.
+    branches = asyncio.run(par.run_branches("hello"))
+    assert [r.text() for r in branches] == ["a:hello", "b:hello", "c:hello"]

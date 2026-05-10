@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from lazybridge.agent import Agent, _ParallelAgent
+from lazybridge.agent import Agent, ParallelAgent
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.memory import Memory
 from lazybridge.session import EventType, Session
@@ -324,26 +324,34 @@ class TestSourcesInjection:
         assert "v1" not in (r2.context or "")
 
 
-# ── 6. _ParallelAgent semaphore fix ──────────────────────────────────────────
+# ── 6. ParallelAgent semaphore fix ──────────────────────────────────────────
 
 
 class TestParallelAgent:
-    def test_parallel_returns_list(self):
+    def test_parallel_returns_joined_envelope(self):
+        """``ParallelAgent.run()`` returns ONE Envelope (labelled-text join)
+        since 0.8.0; for typed per-branch access use ``run_branches()``."""
         a1 = _make_agent("result1", name="a1")
         a2 = _make_agent("result2", name="a2")
-        pa = _ParallelAgent([a1, a2])
-        results = asyncio.run(pa.run("task"))
-        assert len(results) == 2
-        texts = {r.text() for r in results}
+        pa = ParallelAgent([a1, a2])
+        env = asyncio.run(pa.run("task"))
+        # Joined wrapper:
+        assert "result1" in env.text()
+        assert "result2" in env.text()
+        assert "[a1]" in env.text() and "[a2]" in env.text()
+        # Typed per-branch access:
+        branches = asyncio.run(pa.run_branches("task"))
+        assert len(branches) == 2
+        texts = {r.text() for r in branches}
         assert "result1" in texts
         assert "result2" in texts
 
     def test_parallel_with_concurrency_limit(self):
         a1 = _make_agent("r1", name="a1")
         a2 = _make_agent("r2", name="a2")
-        pa = _ParallelAgent([a1, a2], concurrency_limit=1)
-        results = asyncio.run(pa.run("task"))
-        assert len(results) == 2
+        pa = ParallelAgent([a1, a2], concurrency_limit=1)
+        branches = asyncio.run(pa.run_branches("task"))
+        assert len(branches) == 2
 
     def test_parallel_error_captured_not_raised(self):
         good = _make_agent("ok", name="good")
@@ -371,10 +379,13 @@ class TestParallelAgent:
         bad.description = None
         bad.session = None
 
-        pa = _ParallelAgent([good, bad])
-        results = asyncio.run(pa.run("task"))
-        assert len(results) == 2
-        oks = [r for r in results if r.ok]
-        errs = [r for r in results if not r.ok]
+        pa = ParallelAgent([good, bad])
+        branches = asyncio.run(pa.run_branches("task"))
+        assert len(branches) == 2
+        oks = [r for r in branches if r.ok]
+        errs = [r for r in branches if not r.ok]
         assert len(oks) == 1
         assert len(errs) == 1
+        # Joined wrapper surfaces the first error so callers can short-circuit.
+        env = asyncio.run(pa.run("task"))
+        assert env.error is not None

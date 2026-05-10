@@ -108,7 +108,7 @@ results = multi("Same task for everyone")   # -> list[Envelope]
 
 | Sugar | Expands to | Differences |
 |---|---|---|
-| `Agent.parallel(*agents, concurrency_limit=None, step_timeout=None)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`.** Returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]` (one per branch, input order). The closest from-primitives equivalent is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally. To let the **LLM** decide which branches to invoke, use `Agent(tools=[a, b, c])` instead. To run concurrent steps that **aggregate** via `from_parallel_all`, use a `Plan` parallel band (`Step("a", parallel=True)`). |
+| `Agent.parallel(*agents, concurrency_limit=None, step_timeout=None)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`.** Returns `ParallelAgent`, a sibling class whose `__call__` produces ONE `Envelope` whose `payload` is the labelled-text join of every branch (`[name]\n<output>`) — same shape as `Plan`'s `from_parallel_all` aggregator, with transitive cost rollup and first-error short-circuit.  For typed per-branch access (`list[Envelope]`) call `parallel.run_branches(task)` (async).  Use this when you want every branch unconditionally; to let the **LLM** decide which branches to invoke, use `Agent(tools=[a, b, c])` instead; to run concurrent steps that **aggregate** via `from_parallel_all`, use a `Plan` parallel band (`Step("a", parallel=True)`). |
 
 ---
 

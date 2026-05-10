@@ -1,8 +1,10 @@
 # Parallel
 
 Deterministic, scripted fan-out. The same task goes to N agents
-concurrently; the result is `list[Envelope]` in input order. No
-orchestrator LLM is involved.
+concurrently. The wrapper returns ONE `Envelope` whose `text()` is the
+labelled-text join of every branch's output — same shape as `Plan`'s
+`from_parallel_all` aggregator. For typed per-branch access call
+`parallel.run_branches(task)` (async). No orchestrator LLM is involved.
 
 ## Signature
 
@@ -19,14 +21,19 @@ multi = Agent.parallel(
     session=None,
 )
 
-results = multi(task)              # list[Envelope] — one entry per input agent, order preserved
+env = multi(task)                  # ONE Envelope: text() = labelled join, payload = joined str
+print(env.text())                  # "[a]\n<a-output>\n\n[b]\n<b-output>" ...
+
+# Typed per-branch access (advanced):
+import asyncio
+branches = asyncio.run(multi.run_branches(task))   # list[Envelope] in input order
 ```
 
-`Agent.parallel(...)` returns a `_ParallelAgent` — a sibling class of
-`Agent`, **not** a regular agent. Its `__call__` returns
-`list[Envelope]`, not a single envelope. There is no canonical
-`Agent(engine=…)` equivalent: this is the canonical form for
-scripted-fan-out → list. The closest from-primitives equivalent is
+`Agent.parallel(...)` returns a `ParallelAgent` — a sibling class of
+`Agent`. Its `__call__` returns ONE folded `Envelope` (so the runner
+plugs into another agent's `tools=[...]` uniformly with every other
+agent in the framework). For the underlying `list[Envelope]`, use
+`run_branches(task)`. The closest from-primitives equivalent is
 hand-written `asyncio.gather(*[a.run(task) for a in agents])` — see
 [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) for the
 full nuance.
@@ -69,9 +76,9 @@ calls automatically when the model emits more than one in a turn.
   cannot opt one out at runtime.
 - **Conditional / routed flows.** Use `Plan` with parallel bands
   (`Step(..., parallel=True)`) plus routing, or use
-  `from_parallel_all("name")` to aggregate. `Agent.parallel`
-  returns a list; if you want concurrent steps that *aggregate*
-  into a single downstream step, use `Plan`.
+  `from_parallel_all("name")` to aggregate.  `Agent.parallel` runs
+  every branch unconditionally; if you need concurrent steps that
+  must converge in a typed downstream `Step`, use `Plan`.
 - **Anything that needs typed downstream consumption.** Each
   envelope's payload is whatever the corresponding agent produced
   — possibly several different shapes. If the next step needs a
@@ -154,35 +161,39 @@ for env in results:
 
 ## Pitfalls
 
-- **Returns `list[Envelope]`, not `Envelope`.** Treat the result as
-  a list. If you need a single answer, feed the list into a
-  summariser agent as a follow-up step.
+- **`__call__` returns ONE Envelope, not `list[Envelope]`** (since 0.8.0).
+  Read `env.text()` for the labelled-text join, or call
+  `multi.run_branches(task)` (async) for the typed list.
 - **`concurrency_limit=None` (default) fires everything at once.**
   When the underlying providers are rate-limited or your CPU /
   network is the bottleneck, set a cap.
 - **`step_timeout` returns an error envelope, not a raise.** The
   positional contract is preserved — the slot for the timed-out
   agent contains an error envelope; siblings keep their results.
-  Check `env.ok` before reading `env.text()`.
+  Check `env.ok` before reading `env.text()`.  The first non-`None`
+  branch error also propagates as the wrapper Envelope's `error`
+  so downstream consumers can short-circuit.
 - **Not LLM-directed.** If you want "the model decides whether to
   call all three", use `Agent(tools=[us, eu, asia])` instead;
   parallel tool dispatch happens automatically when the engine
   emits multiple tool calls in a single turn.
-- **No automatic aggregation.** Unlike `Plan` parallel bands +
-  `from_parallel_all`, `Agent.parallel` does not fold its outputs
-  into a single envelope. Wrap it as a tool with `multi.as_tool()`
-  if you want it to plug into another agent — the helper folds the
-  list into one envelope using a labelled-text join.
+- **Automatic aggregation since 0.8.0.** The wrapper Envelope's
+  `payload` is a labelled-text join of every branch — same shape
+  as `Plan`'s `from_parallel_all` aggregator — and `metadata.nested_*`
+  rolls every branch's cost up.  Use `as_tool()` to plug the runner
+  into another agent's `tools=[...]` list with no extra adapter.
 - **Cost rollup.** Each branch's metadata is preserved in its
-  envelope; if you also pass `session=`, the session aggregates
-  cost across all branches via `usage_summary()`.
+  envelope; the wrapper folds them into `metadata.nested_*` so
+  parallel-of-parallel composes cleanly.  Sessions aggregate cost
+  across all branches via `usage_summary()`.
 
 ## See also
 
 - [Chain](chain.md) — sequential composition; complements
   parallel.
 - [As tool](as-tool.md) — `multi.as_tool()` exposes the fan-out as
-  a single `Tool` that folds the list of envelopes into one.
+  a single `Tool` that delegates to `run()` (since 0.8.0 the
+  wrapper Envelope already carries the labelled-text join).
 - *Guides → Full → Plan* (Phase 3) — `Plan` parallel bands
   (`Step(..., parallel=True)`) and `from_parallel_all("name")`
   aggregation when concurrent steps must produce a single
