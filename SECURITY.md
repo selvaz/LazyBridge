@@ -31,13 +31,42 @@ def run_safe_cmd(command: str) -> str:
     return subprocess.check_output(ALLOWED_COMMANDS[command].split()).decode()
 ```
 
-### Store — No Encryption
+### Store — Encryption is opt-in
 
-`Store` persists data in plain text (JSON in memory or SQLite on disk). Do not store:
+The base `Store` persists data in plaintext (JSON in memory or SQLite
+on disk). For at-rest encryption use `EncryptedStoreAdapter` from the
+optional `[encryption]` extra:
+
+```bash
+pip install 'lazybridge[encryption]'
+```
+
+```python
+from cryptography.fernet import Fernet
+from lazybridge.store import Store
+from lazybridge.store.encryption import EncryptedStoreAdapter
+
+key = Fernet.generate_key()  # persist this in a KMS / sealed-secret system
+store = EncryptedStoreAdapter(Store(db="state.sqlite"), key=key)
+```
+
+The adapter uses Fernet (AES-128-CBC + HMAC-SHA256) and supports key
+rotation via `MultiFernet` semantics (`key=[new_key, old_key]`).
+
+**Threat model coverage:**
+
+- ✅ Protects against an attacker who reads `state.sqlite` off disk.
+- ❌ Does NOT protect against an attacker with live process memory —
+  in-flight values are plaintext.
+- ❌ Does NOT encrypt **keys**, `written_at`, or `agent_id` — an
+  attacker with file access still sees the access pattern.
+- ❌ Not a substitute for OS-level disk encryption — defence in depth.
+
+Without the adapter, do not store:
 
 - API keys or tokens
 - Passwords or credentials
-- PII (names, emails, phone numbers) without encryption
+- PII (names, emails, phone numbers)
 
 ### LLMGuard — Prompt Injection
 
@@ -74,21 +103,20 @@ catalogue into an Agent.  Each tool advertised by the server becomes a
 first-class `Tool` on the Agent — i.e. **anything the LLM decides to
 call will run inside your process or via the server's permissions**.
 
-The two factories use different defaults because the trust models
-differ:
+Both factories are **deny-by-default since 0.7.9** — omitting both
+`allow=` and `deny=` raises `ValueError` at construction:
 
-- **`MCP.http(...)` — deny-by-default.**  A remote server is treated
-  as untrusted: omitting `allow=` raises `ValueError` at construction
-  time.  Pass an explicit list of the tools you want the LLM to see,
-  e.g. `allow=["create_issue", "list_prs"]`, or `allow=["*"]` once
-  you have audited the catalogue.
-- **`MCP.stdio(...)` — audit-on-init.**  The subprocess is spawned by
-  your code, so the trust model is "you control the binary".  Both
-  `allow=` and `deny=` are optional; when neither is set a one-shot
-  `UserWarning` reminds you that *every* tool the subprocess
-  advertises will be visible to the LLM.  Suppress the warning by
-  passing `allow=["*"]` once you have audited the surface, or restrict
-  it with a glob (`allow=["fs.read_*"]`) or a `deny=` block list.
+- **`MCP.http(...)`** — a remote server is untrusted; the catalogue
+  could be anything.  Pass an explicit list of the tools you want
+  the LLM to see, e.g. `allow=["create_issue", "list_prs"]`, or
+  `allow=["*"]` once you have audited the catalogue.
+- **`MCP.stdio(...)`** — also deny-by-default.  Even though the
+  subprocess is spawned by your code, the pre-0.7.9 warn-and-proceed
+  default was unsafe for filesystem / git / shell MCP servers (the
+  LLM could invoke any tool the subprocess advertised).  Pass
+  `allow=["*"]` to opt every tool in explicitly after auditing, or
+  restrict with a glob (`allow=["fs.read_*"]`) or a `deny=` block
+  list.
 
 ```python
 from lazybridge.ext.mcp import MCP
@@ -112,6 +140,28 @@ not `"delete_*"`.
 `HumanEngine(ui="web")` starts an HTTP server on `localhost` only. It is not
 exposed to the network by default. Do not proxy or forward the port to external
 interfaces without adding authentication — the form accepts any POST submission.
+
+### Native provider tools — server-side execution
+
+`Agent(native_tools=[NativeTool.WEB_SEARCH, ...])` enables tools the
+**LLM provider** executes server-side, **not** LazyBridge.  Two of
+them — `NativeTool.CODE_EXECUTION` and `NativeTool.COMPUTER_USE` —
+expose attack surface so large that we require an explicit opt-in:
+
+```python
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    native_tools=[NativeTool.CODE_EXECUTION],
+    allow_dangerous_native_tools=True,  # REQUIRED for CODE_EXECUTION / COMPUTER_USE
+)
+```
+
+Omit the flag and `Agent.__init__` raises `ValueError`.  The flag is
+intentionally noisy — once enabled the model can run arbitrary
+Python (provider-sandboxed, but still arbitrary) or drive a remote
+desktop on the provider's side.  Wrap such agents in a
+`SupervisorEngine` if you need an additional human-approval gate
+before tool calls execute.
 
 ### Agent Fallback Chains
 

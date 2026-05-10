@@ -150,6 +150,46 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 warn_unused_ignores = true
 
+# Phase-6 strict tier — engines + provider adapters.  All bare
+# generics now carry explicit type args (``Envelope[Any]``,
+# ``list[Any]``, ``dict[str, Any]``), every public-ish helper has a
+# return annotation, and stale ``# type: ignore`` comments have been
+# stripped.  Strict mode catches: ``no-any-return``,
+# ``no-untyped-def``, ``type-arg``, ``unused-ignore``, and the rest
+# of the strict-mode rule set.  Run with::
+#
+#     mypy lazybridge/engines/ lazybridge/core/providers/ --strict
+#
+# to validate this tier in isolation.
+# Strict tier — provider modules have conditional optional-SDK
+# imports whose ``# type: ignore`` directives are necessary in CI
+# (SDK installed) but appear unused locally (SDK absent).
+# ``warn_unused_ignores`` is intentionally NOT enabled here.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.core.providers.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_return_any = true
+
+# Strict tier — modules with no optional-SDK boundary.  These can
+# have ``warn_unused_ignores`` on without the local-vs-CI mismatch.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.engines.*",
+    "lazybridge.core.types",
+    "lazybridge.core.tool_schema",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_return_any = true
+
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------

@@ -45,7 +45,7 @@ useful capability is a tool: a plain Python function, another agent, a
 execution).
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, LLMEngine, tool
 
 def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
@@ -53,7 +53,7 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[get_weather],
+    tools=[tool(get_weather, name="get_weather")],
 )
 ```
 

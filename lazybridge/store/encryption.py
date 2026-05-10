@@ -134,8 +134,21 @@ class EncryptedStoreAdapter:
     def _encrypt(self, value: Any) -> str:
         """Serialise ``value`` to JSON, encrypt with Fernet, return the
         prefixed token as a ``str`` so the inner Store can persist it
-        through its normal JSON path without further escaping."""
-        plaintext = json.dumps(value, default=str).encode("utf-8")
+        through its normal JSON path without further escaping.
+
+        We route through :func:`lazybridge.store._to_jsonable` first so
+        Pydantic models (and nested containers of them) are normalised
+        to their ``model_dump(mode='json')`` shape — exactly what the
+        base :class:`Store` persists.  Without this, ``default=str`` in
+        ``json.dumps`` would fall back to ``repr()`` for any non-trivial
+        object, encrypting a string like ``"x=1 name='hello'"`` instead
+        of the round-trippable JSON shape.  That breaks structured
+        outputs AND :meth:`compare_and_swap` (the plaintext we compare
+        against on read wouldn't match the value the user passed).
+        """
+        from lazybridge.store import _to_jsonable
+
+        plaintext = json.dumps(_to_jsonable(value), default=str).encode("utf-8")
         token = self._fernet.encrypt(plaintext).decode("ascii")
         return f"{_TOKEN_PREFIX}{token}"
 
@@ -261,11 +274,16 @@ def _plain_eq(a: Any, b: Any) -> bool:
     """JSON-shape equality for the plaintext path.
 
     Mirrors :func:`lazybridge.store._json_eq` semantics so the
-    adapter's CAS plays the same equality rules the base Store does.
+    adapter's CAS plays the same equality rules the base Store does:
+    a Pydantic model and the dict it round-trips to compare equal
+    (Codex P2 regression — without ``_to_jsonable`` we'd ``repr()``
+    the model and never match the persisted dict shape).
     """
+    from lazybridge.store import _to_jsonable
+
     try:
-        sa = json.dumps(a, sort_keys=True, default=str)
-        sb = json.dumps(b, sort_keys=True, default=str)
+        sa = json.dumps(_to_jsonable(a), sort_keys=True, default=str)
+        sb = json.dumps(_to_jsonable(b), sort_keys=True, default=str)
     except TypeError:
         return False
     return sa == sb

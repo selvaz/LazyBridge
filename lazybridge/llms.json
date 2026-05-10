@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schemas.lazybridge.dev/llms-v1.json",
+  "package": "lazybridge",
+  "version": "0.7.9",
+  "stability": "alpha",
+  "homepage": "https://github.com/selvaz/LazyBridge",
+  "docs": "https://selvaz.github.io/LazyBridge",
+
+  "canonical_import": "from lazybridge import Agent, LLMEngine, tool",
+
+  "canonical_patterns": {
+    "single_agent": "agent = Agent(engine=LLMEngine('claude-opus-4-7'))",
+    "agent_with_tool": "agent = Agent(engine=LLMEngine('claude-opus-4-7'), tools=[tool(get_weather, name='get_weather')])",
+    "sequential_plan": "agent = Agent(engine=Plan(Step('research'), Step('write')), tools=[research_agent, write_agent], name='pipeline')",
+    "parallel_fanout": "fan = Agent.parallel(researcher, analyst)\nenv = fan('topic')           # one Envelope\nenv.text()                      # labelled-text join across branches\nenv.payload                     # list[Envelope] for typed access",
+    "chain": "pipe = Agent.chain(researcher, writer)   # linear Plan shortcut",
+    "agent_as_tool": "tools=[other_agent]              # auto-wrapped; other_agent.name is the tool name",
+    "agent_as_tool_with_judge": "tools=[other_agent.as_tool(verify=judge_agent)]",
+    "mcp_server": "tools=[MCP.stdio('fs', command='npx', args=[...], allow=['fs.read_*'])]   # allow= REQUIRED since 0.7.9",
+    "structured_output": "agent = Agent(engine=LLMEngine('...'), output_type=MyPydanticModel)",
+    "sync_entry_point": "result = agent('do the thing'); result.text()",
+    "async_entry_point": "result = await agent.run('do the thing'); result.text()"
+  },
+
+  "envelope_contract": {
+    "text": "result.text() -> str — final assistant text",
+    "payload": "result.payload -> T — typed payload when output_type= was set; otherwise str",
+    "error": "result.error -> Exception | None — propagated runtime failure",
+    "metadata": "result.metadata.cost_usd / tokens_in / tokens_out / latency_ms etc."
+  },
+
+  "avoid": [
+    "LazyAgent — renamed to Agent in 0.7.x",
+    "LazyTool — renamed to tool() factory in 0.7.x",
+    "LazySession — renamed to Session in 0.7.x",
+    "LazyContext — replaced by sentinels / Store / Memory in 0.7.x",
+    "mode=\"auto\" — Tool.__init__ rejects this since 0.7.9; pass mode=\"signature\", \"llm\", or \"hybrid\"",
+    "Agent.from_chain / from_engine / from_model / from_plan / from_parallel — all five deleted in 0.7.9 (alias-only); use Agent(engine=...) or Agent.chain / Agent.parallel",
+    "AgentRuntimeConfig / ResilienceConfig / ObservabilityConfig — deleted in 0.7.9; pass the fields as flat kwargs on Agent(...)",
+    "tool_choice=\"parallel\" — never supported; deleted in 0.7.9",
+    "Writing JSON schemas by hand for annotated Python functions — tool() introspects type hints automatically",
+    "MCP.stdio(...) without allow= or deny= — deny-by-default since 0.7.9, raises ValueError",
+    "asyncio.run(main()) in quickstarts — Agent.__call__ auto-detects event loops",
+    "lazybridge.external_tools.report_builder — extracted to selvaz/LazyReport in 0.7.9; install lazybridge-reports separately"
+  ],
+
+  "renames": {
+    "LazyAgent": "Agent",
+    "LazyTool": "tool() factory (preferred) or Tool class",
+    "LazySession": "Session",
+    "LazyContext": "sentinels (from_step, from_prev, …) + Store + Memory",
+    "Agent.from_chain": "Agent.chain",
+    "Agent.from_parallel": "Agent.parallel",
+    "Agent.from_engine": "Agent(engine=…)",
+    "Agent.from_model": "Agent(model_or_engine, …)",
+    "Agent.from_plan": "Agent(engine=Plan(…))",
+    "_ParallelAgent": "ParallelAgent",
+    "lazybridge.external_tools.report_builder": "lazybridge_reports (sibling package, separate install)"
+  },
+
+  "tools_vs_native_tools": {
+    "tools=": "Tools the LazyBridge runtime executes locally — Python functions, sub-Agents, MCP servers, schema-backed Tool instances.",
+    "native_tools=": "Provider-side tools the LLM invokes via the vendor's native API (web search, code execution, etc.).  Pass a NativeTool enum value, e.g. native_tools=[NativeTool.WEB_SEARCH].  Dangerous tools (CODE_EXECUTION, COMPUTER_USE) require allow_dangerous_native_tools=True."
+  },
+
+  "default_model_advice": "Use Agent.from_provider('anthropic', tier='top') in quickstarts so the example stays current as providers ship new SKUs.  Pin a specific model id (e.g. 'claude-opus-4-7') only when the example tests a model-specific behaviour.",
+
+  "tier_aliases": ["super_cheap", "cheap", "medium", "expensive", "top"],
+  "providers": ["anthropic", "openai", "google", "deepseek", "litellm", "lmstudio"],
+
+  "skill_md": "https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill/SKILL.md",
+  "changelog": "https://github.com/selvaz/LazyBridge/blob/main/CHANGELOG.md"
+}

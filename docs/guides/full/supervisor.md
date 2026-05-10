@@ -10,7 +10,7 @@ engine.
 ## Signature
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, tool
 from lazybridge.ext.hil import SupervisorEngine, supervisor_agent
 
 # Canonical — Agent + SupervisorEngine
@@ -112,7 +112,7 @@ new value.
 ## Example
 
 ```python
-from lazybridge import Agent, LLMEngine, Plan, Step, Store
+from lazybridge import Agent, LLMEngine, Plan, Step, Store, tool
 from lazybridge.ext.hil import SupervisorEngine
 
 
@@ -123,7 +123,7 @@ def search_web(query: str) -> str:
 
 researcher = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[search_web],
+    tools=[tool(search_web, name="search_web")],
     name="researcher",
 )
 writer = Agent(
@@ -138,7 +138,7 @@ store.write("policy", "publish only peer-reviewed sources")
 
 supervisor = Agent(
     engine=SupervisorEngine(
-        tools=[search_web],
+        tools=[tool(search_web, name="search_web")],
         agents=[researcher],          # human can `retry researcher: <feedback>`
         store=store,                  # human can `store policy` to inspect
     ),
@@ -173,7 +173,7 @@ def scripted_input(prompt: str) -> str:
 
 supervisor_for_test = Agent(
     engine=SupervisorEngine(
-        tools=[search_web],
+        tools=[tool(search_web, name="search_web")],
         agents=[researcher],
         store=store,
         input_fn=scripted_input,
@@ -189,7 +189,7 @@ async def web_input(prompt: str) -> str:
 
 supervisor_web = Agent(
     engine=SupervisorEngine(
-        tools=[search_web],
+        tools=[tool(search_web, name="search_web")],
         agents=[researcher],
         ainput_fn=web_input,
         timeout=600,

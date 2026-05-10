@@ -58,7 +58,7 @@ signature, type hints, and docstring to build the schema the LLM sees —
 no second JSON definition required.
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, LLMEngine, tool
 
 def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
@@ -67,11 +67,17 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[get_weather],
+    tools=[tool(get_weather, name="get_weather")],
 )
 result = agent("What's the weather like in Paris right now?")
 print(result.text())
 ```
+
+> The bare-function form (`tools=[get_weather]`) is supported as a
+> convenience.  Production code should prefer the explicit
+> `tool(fn, name=...)` form: it pins the LLM-visible tool name, which
+> keeps tool-maps and plan references stable as the function name
+> evolves.
 
 The agent will decide on its own to call `get_weather("Paris")`,
 observe the result, and produce the final answer. You did not define a

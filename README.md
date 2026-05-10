@@ -62,9 +62,29 @@ for a flowchart.
 
 ## Install
 
+> **PyPI version note.** Until LazyBridge 0.7.9 is published to PyPI,
+> the 0.4.x release on PyPI exposes the **older `LazyAgent` /
+> `LazyTool` / `LazySession` API and does not match this README**.
+> Install from source while we ship 0.7.9 — or pin
+> `lazybridge>=0.7.9` once it lands:
+>
+> ```bash
+> pip install "git+https://github.com/selvaz/LazyBridge.git#egg=lazybridge[anthropic]"
+> ```
+
 ```bash
-pip install "lazybridge[anthropic]"
-# or [openai], [google], [deepseek], [litellm], [mcp], [otel], [all]
+pip install "lazybridge[anthropic]"      # post-0.7.9 once on PyPI
+# or [openai], [google], [deepseek], [litellm], [mcp], [otel], [encryption], [all]
+```
+
+Confirm you're on the modern API:
+
+```python
+import lazybridge
+assert lazybridge.__version__.startswith("0.7."), (
+    f"LazyBridge {lazybridge.__version__} is too old — this README "
+    f"requires >=0.7.9.  See https://github.com/selvaz/LazyBridge."
+)
 ```
 
 Set an API key for your provider of choice (`ANTHROPIC_API_KEY`,

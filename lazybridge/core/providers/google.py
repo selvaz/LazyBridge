@@ -59,8 +59,8 @@ try:
     from google import genai as _genai
     from google.genai import types as _gtypes
 except Exception:
-    _genai = None  # type: ignore
-    _gtypes = None  # type: ignore
+    _genai = None  # type: ignore[assignment]
+    _gtypes = None  # type: ignore[assignment]
 
 _logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class GoogleProvider(BaseProvider):
         }
     )
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs: Any) -> None:
         if _genai is None:
             raise ImportError("google-genai package not installed. Run: pip install google-genai")
         key = self.api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -540,8 +540,8 @@ class GoogleProvider(BaseProvider):
         if has_native_search and has_custom_tools:
             try:
                 kwargs["tool_config"] = _gtypes.ToolConfig(
-                    function_calling_config=_gtypes.FunctionCallingConfig(
-                        include_server_side_tool_invocations=True,  # type: ignore[call-arg]
+                    function_calling_config=_gtypes.FunctionCallingConfig(  # type: ignore[call-arg]
+                        include_server_side_tool_invocations=True,
                     )
                 )
             except Exception:
@@ -754,7 +754,7 @@ class GoogleProvider(BaseProvider):
 
         last_chunk = None
         text_accum = ""
-        tool_call_accum: dict[str, dict] = {}  # call_id → dict; deduplicates repeated parts
+        tool_call_accum: dict[str, dict[str, Any]] = {}  # call_id → dict; deduplicates repeated parts
         for chunk in self._client.models.generate_content_stream(
             model=model,
             contents=contents,
@@ -763,7 +763,7 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            candidate = chunk.candidates[0]  # type: ignore[index]
+            candidate = chunk.candidates[0]
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
@@ -856,7 +856,7 @@ class GoogleProvider(BaseProvider):
 
         last_chunk = None
         text_accum = ""
-        tool_call_accum: dict[str, dict] = {}  # call_id → dict; deduplicates repeated parts
+        tool_call_accum: dict[str, dict[str, Any]] = {}  # call_id → dict; deduplicates repeated parts
         async for chunk in await self._client.aio.models.generate_content_stream(
             model=model,
             contents=contents,
@@ -865,7 +865,7 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            candidate = chunk.candidates[0]  # type: ignore[index]
+            candidate = chunk.candidates[0]
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:

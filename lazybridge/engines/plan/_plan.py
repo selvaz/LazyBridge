@@ -182,9 +182,9 @@ class Plan:
 
     @staticmethod
     def _aggregate_nested_metadata(
-        result_env: Envelope,
+        result_env: Envelope[Any],
         history: list[StepResult],
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         """Fold every prior step's cost/tokens into ``result_env.metadata.nested_*``.
 
         The outer envelope's direct metadata (``input_tokens``,
@@ -305,7 +305,7 @@ class Plan:
             if not isinstance(env_data, dict):
                 continue
             try:
-                env: Envelope = Envelope.model_validate(env_data)
+                env: Envelope[Any] = Envelope.model_validate(env_data)
             except Exception:
                 continue
             out.append(
@@ -478,7 +478,7 @@ class Plan:
 
     async def run(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
@@ -486,7 +486,7 @@ class Plan:
         session: Session | None,
         store: Store | None = None,
         plan_state: PlanState | None = None,
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         # ``Agent.__init__`` stamps the wrapping agent's name on the engine
         # via ``engine._agent_name = self.name``.  Plan emits AGENT_START
         # and AGENT_FINISH like every other engine so replay mode (which
@@ -500,7 +500,7 @@ class Plan:
                 run_id=run_id,
             )
 
-        result_env: Envelope | None = None
+        result_env: Envelope[Any] | None = None
         error_msg: str | None = None
         try:
             result_env = await self._run_impl(
@@ -531,7 +531,7 @@ class Plan:
 
     async def _run_impl(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
@@ -541,7 +541,7 @@ class Plan:
         plan_state: PlanState | None = None,
         run_id: str,
         agent_name: str,
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         # ``run_id`` and ``agent_name`` are threaded in from ``run()`` so
         # AGENT_START/FINISH and TOOL_CALL/RESULT all share the same
         # correlation id — matches how LLMEngine and HumanEngine attach
@@ -710,7 +710,7 @@ class Plan:
                     )
                     return self._aggregate_nested_metadata(paused_env, history)
 
-                first_failure_env: Envelope | None = None
+                first_failure_env: Envelope[Any] | None = None
                 for _s, r in zip(group, raw):
                     if isinstance(r, BaseException):
                         first_failure_env = Envelope.error_envelope(r)
@@ -748,7 +748,7 @@ class Plan:
                 # Plan replay reads them correctly via ``_load_checkpoint``; only
                 # sidecar consumers reading the Store directly would observe the
                 # gap.  See ``Plan.run`` doc above for the full contract.
-                last_ok: Envelope | None = None
+                last_ok: Envelope[Any] | None = None
                 for s, r in zip(group, raw):
                     step_name = s.name or ""
                     # Type-narrow: failure-scan above already returned on
@@ -908,8 +908,8 @@ class Plan:
     async def _execute_one(
         self,
         step: Step,
-        prev_env: Envelope,
-        start_env: Envelope,
+        prev_env: Envelope[Any],
+        start_env: Envelope[Any],
         history: list[StepResult],
         kv: dict[str, Any],
         *,
@@ -918,7 +918,7 @@ class Plan:
         run_id: str,
         branch_id: str | None = None,
         agent_name: str | None = None,
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         """Resolve sentinels, build the step env, and execute the step.
 
         Returns a normalised ``Envelope``.  Does NOT mutate ``history`` /
@@ -996,12 +996,12 @@ class Plan:
     def _resolve_sentinel(
         self,
         sentinel: Sentinel | str,
-        prev: Envelope,
-        start: Envelope,
+        prev: Envelope[Any],
+        start: Envelope[Any],
         history: list[StepResult],
         kv: dict[str, Any],
         tool_map: dict[str, Any],
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         # ``from_prev`` means "the previous step's *output* becomes the next
         # step's task" — i.e. real chain semantics.  Without this promotion
         # the default behaviour was for every step to receive the original
@@ -1109,8 +1109,8 @@ class Plan:
         start_name: str,
         history: list[StepResult],
         *,
-        fallback: Envelope,
-    ) -> Envelope:
+        fallback: Envelope[Any],
+    ) -> Envelope[Any]:
         """Build a single Envelope from every consecutive parallel sibling
         starting at ``start_name`` (in declared order).
 
@@ -1148,7 +1148,7 @@ class Plan:
                 break
 
         # For each band member, pick the most recent matching history entry.
-        branch_envs: list[tuple[str, Envelope]] = []
+        branch_envs: list[tuple[str, Envelope[Any]]] = []
         for n in band_names:
             for r in reversed(history):
                 if r.step_name == n:
@@ -1176,14 +1176,14 @@ class Plan:
     async def _exec_step(
         self,
         step: Step,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tool_map: dict[str, Tool],
         session: Session | None,
         run_id: str,
         branch_id: str | None = None,
         agent_name: str | None = None,
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         if session:
             payload: dict[str, Any] = {"step": step.name, "task": env.task}
             if branch_id is not None:
@@ -1254,7 +1254,7 @@ class Plan:
 
     def _routing(
         self,
-        result_env: Envelope,
+        result_env: Envelope[Any],
         step: Step,
         step_map: dict[str, Step],
         branch_return: dict[str, str],
@@ -1346,14 +1346,14 @@ class Plan:
 
     def run_many(
         self,
-        tasks: list[str | Envelope],
+        tasks: list[str | Envelope[Any]],
         *,
         concurrency: int | None = None,
         tools: list[Any] | None = None,
         memory: Any = None,
         session: Any = None,
         output_type: type = str,
-    ) -> list[Envelope]:
+    ) -> list[Envelope[Any]]:
         """Run this Plan concurrently against ``N`` inputs; sync return.
 
         Each ``task`` is dispatched as its own ``Plan.run`` invocation
@@ -1383,7 +1383,7 @@ class Plan:
         # the worker loop so observability flows through fan-outs.
         from lazybridge.agent import _run_coro_with_context
 
-        return _run_coro_with_context(
+        result: list[Envelope[Any]] = _run_coro_with_context(
             self.arun_many(
                 tasks,
                 concurrency=concurrency,
@@ -1393,17 +1393,18 @@ class Plan:
                 output_type=output_type,
             )
         )
+        return result
 
     async def arun_many(
         self,
-        tasks: list[str | Envelope],
+        tasks: list[str | Envelope[Any]],
         *,
         concurrency: int | None = None,
         tools: list[Any] | None = None,
         memory: Any = None,
         session: Any = None,
         output_type: type = str,
-    ) -> list[Envelope]:
+    ) -> list[Envelope[Any]]:
         """Async counterpart to :meth:`run_many`.
 
         Use this directly when you're already inside an event loop and
@@ -1417,13 +1418,13 @@ class Plan:
         sem = asyncio.Semaphore(concurrency) if concurrency else None
         resolved_tools: list[Any] = tools or []
 
-        async def _one(task: str | Envelope) -> Envelope:
+        async def _one(task: str | Envelope[Any]) -> Envelope[Any]:
             # ``Envelope.from_task`` populates BOTH ``task`` and
             # ``payload`` so the first step's ``from_prev`` resolves to
             # the user's input rather than an empty string.
             env = task if isinstance(task, Envelope) else Envelope.from_task(str(task))
 
-            async def _go() -> Envelope:
+            async def _go() -> Envelope[Any]:
                 return await self.run(
                     env,
                     tools=resolved_tools,
@@ -1506,7 +1507,7 @@ class Plan:
 
     # Engine Protocol compatibility
     async def stream(
-        self, env: Envelope, *, tools: list, output_type: type, memory: Any, session: Any
+        self, env: Envelope[Any], *, tools: list[Any], output_type: type, memory: Any, session: Any
     ) -> AsyncIterator[str]:
         result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield result.text()

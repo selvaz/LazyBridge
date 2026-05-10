@@ -366,7 +366,7 @@ def _agent_as_tool(agent: Any) -> Tool:
     if hasattr(agent, "as_tool"):
         return agent.as_tool()
 
-    async def _run(task: str) -> Envelope:  # type: ignore[name-defined]
+    async def _run(task: str) -> Envelope[Any]:  # type: ignore[name-defined]
         return await agent.run(task)
 
     _run.__name__ = agent.name or "agent"

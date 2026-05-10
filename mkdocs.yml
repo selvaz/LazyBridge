@@ -195,6 +195,8 @@ nav:
       - 0.7 → 0.7.9: migrations/0.7-to-0.79.md
   - For LLM assistants:
       - Overview: for-llms/index.md
+      - Codegen contract: for-llms/codegen-contract.md
+      - Error-recovery cheat-sheet: for-llms/error-recovery.md
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
 

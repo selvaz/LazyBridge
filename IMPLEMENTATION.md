@@ -310,18 +310,18 @@ happen — Phase 6 follows directly.
 - [x] `pip install lazybridge` (clean venv) — no report deps (extras dropped from `pyproject.toml`)
 - [ ] `pip install lazybridge-reports` — both report examples run (user-side verification once LazyReport is published to PyPI)
 - [x] `EncryptedStoreAdapter` round-trip smoke green (23 tests, `test_store_encryption.py`)
-- [~] mypy strict on engines + providers — `engines/base.py` tightened; `_plan.py` + `llm.py` (85 errors) deferred to Phase 6
-- [-] Tag `v0.9.0` — superseded; Phase 6 cuts v1.0.0 directly
+- [x] mypy strict on engines + providers — all 82 errors fixed (Envelope/list/dict bare generics, 12 stale type-ignores, 7 missing annotations, 1 comparison-overlap, 2 no-any-return).  New strict tier in `pyproject.toml` covers `lazybridge.engines.*` + `lazybridge.core.providers.*` (`disallow_untyped_defs`, `disallow_any_generics`, `warn_return_any`, `warn_unused_ignores`).
+- [-] Tag `v0.9.0` — superseded; staying on 0.7.9 per user direction
 
 ---
 
-## Phase 6 — Stabilisation → tag v1.0.0 (~1 week)
+## Phase 6 — Stabilisation (no v1.0.0 cut — keeping 0.7.9 per user direction)
 
-- [ ] mypy strict full repo
-- [ ] External security review pass (or internal threat-model review against SECURITY.md)
-- [ ] `__stability__ = "stable"` in `lazybridge/__init__.py`
-- [ ] README pin guidance updated: `lazybridge>=1,<2`
-- [ ] Tag `v1.0.0`
+- [x] mypy strict on engines + providers — full strict-mode pass, 82 errors closed, new override block in pyproject.toml
+- [x] Internal threat-model review against `SECURITY.md` — refreshed MCP.stdio section for the post-0.7.9 deny-by-default contract, added `EncryptedStoreAdapter` usage + threat-model bullets, added native-tool / `allow_dangerous_native_tools` section
+- [-] `__stability__ = "stable"` — deferred; staying on 0.7.9 `alpha`
+- [-] README pin guidance `lazybridge>=1,<2` — deferred; staying on 0.7.9
+- [-] Tag `v1.0.0` — not happening on this branch
 
 ---
 
@@ -342,4 +342,4 @@ happen — Phase 6 follows directly.
 | Phase 3 — validation parity + provider consistency + observability | **done** | 2026-05-10 | (no tag) | Block H (`57e328b` — T5/T6/T7/I6 + standard error format).  Block I (capability ClassVars, T9 dedup warning, cost-signature parity, I5 Anthropic warning corrected, new `lazybridge.matrix` + `test_public_api_snapshot.py`).  Block J (OTel `gen_ai.agent.nesting_level` attribute, `Session.emit` warn-once-per-(exporter, exception) with counter).  1666 passed, 44 skipped. |
 | Phase 4 — docs + examples + CI + skill_docs (v0.7.9) | **release candidate** | 2026-05-10 | (tag pending merge to main) | All Block K items shipped (`22d7d06`): SKILL.md rewritten, `docs/migrations/0.7-to-0.79.md` (new), engines.md adds `thinking=`, providers.md adds `stop_reason` table, mcp.md shows `allow=` filtering, `examples/verify_judge_loop.py` + `examples/guardrails_demo.py` (new), env preflight in `daily_news_report.py`, `.github/workflows/integration.yml` (new — manual + nightly live + heavy_render), coverage gate 70 → 73 %, mypy strict tier on `envelope` / `predicates` / `sentinels`, version bump to 0.7.9.  Tag `v0.7.9` requires (1) merge of `claude/audit-lazybridge-llm-SXOl4` to main and (2) one CI cycle green. |
 | Phase 5 — extract `report_builder` (rolled into v0.7.9) | **done — LazyBridge side** | 2026-05-10 | (no separate tag; v0.9.0 plan obsolete) | EncryptedStoreAdapter + cryptography extra shipped (`278f661`, 23 tests). `report_builder` deleted from `lazybridge` (`59a8565`, −8499 LOC) and bundled into the staging zip the user pushed to `selvaz/LazyReport`. Suite: 1730 → 1610 (−120 report_builder tests gone, all green). User-side: configure CI on LazyReport, publish `lazybridge-reports 0.1.0` to PyPI. |
-| Phase 6 — stabilisation (v1.0.0) | not started | | | mypy strict full repo (85 outstanding errors in `engines/llm.py` + `engines/plan/_plan.py`), `__stability__="stable"`, security review |
+| Phase 6 — stabilisation (staying on 0.7.9) | **partial — strict tier + SECURITY.md done** | 2026-05-10 | (no tag, on 0.7.9) | mypy strict on `lazybridge.engines.*` + `lazybridge.core.providers.*` now in `pyproject.toml`; `SECURITY.md` refreshed (MCP.stdio deny-by-default, EncryptedStoreAdapter, native-tool opt-in).  `__stability__="stable"` / `v1.0.0` deferred per user direction (keep 0.7.9). |

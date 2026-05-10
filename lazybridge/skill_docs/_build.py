@@ -46,6 +46,10 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
         "ContentGuard",
         "GuardChain",
         "LLMGuard",
+        # Provider-routing introspection — surfaced in
+        # ``docs/for-llms/codegen-contract.md`` / ``llms.json``, not in
+        # SKILL.md (which teaches the model-string conventions narratively).
+        "PROVIDER_ALIASES",
         # Engine errors — surfaced via test snippets, not the skill body.
         "ConcurrentPlanRunError",
         "PlanPaused",

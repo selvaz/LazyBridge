@@ -28,7 +28,7 @@ import weakref as _weakref
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import Enum, StrEnum
-from typing import Any
+from typing import Any, cast
 
 from pydantic import (
     BaseModel as _BaseModel,
@@ -203,7 +203,7 @@ class _CompileInput:
         return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-def _func_source_hash(func: Callable) -> str:
+def _func_source_hash(func: Callable[..., Any]) -> str:
     """Return a 16-char hex hash of ``func``'s source code (or best fallback)."""
     try:
         src = inspect.getsource(func)
@@ -228,12 +228,12 @@ def _schema_llm_id(schema_llm: Any) -> str:
     if schema_llm is None:
         return ""
     if hasattr(schema_llm, "__qualname__"):
-        return schema_llm.__qualname__
+        return str(schema_llm.__qualname__)
     return type(schema_llm).__qualname__
 
 
 def _make_compile_input(
-    func: Callable,
+    func: Callable[..., Any],
     name: str,
     description: str,
     mode: ToolSchemaMode,
@@ -400,7 +400,7 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # NamedTuple subclass — expand to an object schema using its field annotations.
     if isinstance(annotation, type) and issubclass(annotation, tuple) and hasattr(annotation, "_fields"):
         hints = typing.get_type_hints(annotation) if hasattr(annotation, "__annotations__") else {}
-        fields: tuple[str, ...] = annotation._fields  # type: ignore[attr-defined]
+        fields: tuple[str, ...] = annotation._fields
         return {
             "type": "object",
             "properties": {f: _annotation_to_schema(hints.get(f, typing.Any)) for f in fields},
@@ -438,13 +438,13 @@ def _parse_docstring_params(doc: str) -> dict[str, str]:
     return params
 
 
-_arg_model_cache: _weakref.WeakKeyDictionary = _weakref.WeakKeyDictionary()
+_arg_model_cache: _weakref.WeakKeyDictionary[Any, Any] = _weakref.WeakKeyDictionary()
 # Serialises the check-then-set on _arg_model_cache so two concurrent
 # threads building the same tool's arg model don't race on the dict update.
 _arg_model_lock = threading.Lock()
 
 
-def _make_arg_model(func: Callable) -> type | None:
+def _make_arg_model(func: Callable[..., Any]) -> type | None:
     """Build and cache a Pydantic validation model for ``func``'s arguments.
 
     Returns None for uninspectable callables or zero-arg functions.
@@ -465,7 +465,7 @@ def _make_arg_model(func: Callable) -> type | None:
     with _arg_model_lock:
         cached = _arg_model_cache.get(func)
         if cached is not None and cached[0] == annotations_id:
-            return cached[1]
+            return cast(type, cached[1])
 
         try:
             sig = inspect.signature(func)
@@ -501,13 +501,13 @@ def _make_arg_model(func: Callable) -> type | None:
                 **fields,
             )
             _arg_model_cache[func] = (id(getattr(func, "__annotations__", None)), model)
-            return model
+            return cast(type, model)
         except (TypeError, ValueError) as exc:
             _logger.debug("Cannot build arg model for %r: %s", getattr(func, "__qualname__", func), exc)
             return None
 
 
-def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) -> dict[str, Any]:
+def _validate_and_coerce_arguments(func: Callable[..., Any], arguments: dict[str, Any]) -> dict[str, Any]:
     """Validate and coerce tool call arguments via a generated Pydantic model.
 
     Returns a coerced copy of ``arguments`` (``model_dump()`` of the validated
@@ -528,7 +528,7 @@ def _validate_and_coerce_arguments(func: Callable, arguments: dict[str, Any]) ->
         # are returned as proper Python objects instead of being recursively
         # converted to plain dicts, which would cause AttributeError when
         # the tool function tries to access model attributes.
-        return {f: getattr(validated, f) for f in type(validated).model_fields}  # type: ignore[attr-defined]
+        return {f: getattr(validated, f) for f in type(validated).model_fields}
     except _ValidationError as exc:
         errors = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
         raise ToolArgumentValidationError(f"Invalid arguments for '{func.__name__}': {errors}") from exc
@@ -595,7 +595,7 @@ def _call_schema_llm(schema_llm: Any, prompt: str, schema: type) -> Any:
 #: (canonical JSON).  Without this, nested Pydantic schemas that
 #: $defs-reference each other are deep-copied on every flatten pass.
 _FLATTEN_CACHE_MAX = 128
-_flatten_cache: dict[str, dict] = {}
+_flatten_cache: dict[str, dict[str, Any]] = {}
 _flatten_cache_order: list[str] = []
 
 
@@ -615,7 +615,7 @@ def _flatten_cache_clear() -> None:
     _flatten_cache_hits = 0
 
 
-def _flatten_refs(schema: dict) -> dict:
+def _flatten_refs(schema: dict[str, Any]) -> dict[str, Any]:
     """Inline all ``$ref`` / ``$defs`` entries in a JSON Schema, returning a flat copy.
 
     Only ``#/$defs/<Name>`` references are resolved (JSON Schema draft 7 style).
@@ -668,7 +668,7 @@ def _flatten_refs(schema: dict) -> dict:
             # what they receive without poisoning the cache.
             return copy.deepcopy(cached)
     else:
-        key = None  # type: ignore[assignment]
+        key = None
 
     def _resolve(node: Any, visited: frozenset[str]) -> Any:
         if isinstance(node, list):
@@ -1247,7 +1247,7 @@ class ToolSchemaBuilder:
 # ---------------------------------------------------------------------------
 
 
-def _get_source_or_stub(func: Callable) -> str:
+def _get_source_or_stub(func: Callable[..., Any]) -> str:
     """Return source code or a best-effort stub for ``func``."""
     try:
         return inspect.getsource(func)
@@ -1263,7 +1263,7 @@ def _get_source_or_stub(func: Callable) -> str:
         return src
 
 
-def _sig_required_params(func: Callable) -> set[str]:
+def _sig_required_params(func: Callable[..., Any]) -> set[str]:
     """Return the set of parameter names that are required (no default)."""
     try:
         sig = inspect.signature(func)
