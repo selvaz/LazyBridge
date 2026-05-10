@@ -244,7 +244,9 @@ prod("draft a one-pager on the LazyBridge audit findings")
 - **Fleet config via dict spread** — the 0.7-era ``runtime`` /
   ``resilience`` / ``observability`` configs were deleted in 0.7.9 (they
   carried a ``flat kwarg > config object > default`` precedence game
-  with a private ``_UNSET`` sentinel — an LLM trap).  Share kwargs
+  with a private ``_UNSET`` sentinel *value* — distinct from the Plan
+  ``sentinels`` module (``from_step`` / ``from_prev`` / …) and an LLM
+  trap).  Share kwargs
   across a fleet via a Python dict::
 
       PROD_DEFAULTS = dict(timeout=60, max_retries=5, cache=True, session=sess)

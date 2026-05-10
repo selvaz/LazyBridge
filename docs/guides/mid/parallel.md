@@ -129,9 +129,13 @@ multi = Agent.parallel(
     concurrency_limit=3,           # cap simultaneous in-flight calls
     step_timeout=30.0,
 )
-results = multi("AI policy news")
-for env in results:
-    print(env.metadata.model, env.text()[:100])
+env = multi("AI policy news")
+print(env.text())                       # labelled-text join across branches
+
+# For typed per-branch access (advanced):
+# branches = await multi.run_branches("AI policy news")
+# for b in branches:
+#     print(b.metadata.model, b.text()[:100])
 
 
 # 2) Aggregate into a single answer with a follow-up agent.

@@ -123,14 +123,19 @@ when you can already see a router or a parallel band coming.
 ### 5 — Parallel fan-out
 
 ```python
-multi     = Agent.parallel(researcher_a, researcher_b, researcher_c)
-envelopes = multi("Same task for everyone")   # → list[Envelope]
+multi = Agent.parallel(researcher_a, researcher_b, researcher_c)
+env = multi("Same task for everyone")   # → Envelope (labelled-text join in .text())
+# For typed per-branch access (advanced):
+# branches = await multi.run_branches("Same task for everyone")  # → list[Envelope]
 ```
 
 `Agent.parallel(...)` is composition sugar for **scripted** fan-out: the
 agents run concurrently against the same input and you get back a
-`list[Envelope]`, one per branch. Use it when you want every branch
-unconditionally and you care about each individual result.
+single `Envelope` whose `.text()` is the labelled-text join across
+branches.  For typed per-branch access call
+`await parallel.run_branches(task)` — that path returns `list[Envelope]`.
+Use it when you want every branch unconditionally and you care about
+each individual result.
 
 Use a `Plan` parallel band (rung 8) instead when you want concurrent
 steps that **aggregate** into the next step via `from_parallel_all`, or
@@ -266,8 +271,8 @@ Both are stable extension points.
 ## The runnable mapping
 
 The repository ships nine example files — one per rung you're likely to
-care about. They will become recipe pages in Phase 4 of the documentation;
-for now they are runnable from the command line.
+care about.  Most are walked through under [Recipes](../recipes/index.md);
+all are runnable directly from the command line.
 
 | Rung | Example file |
 |---|---|

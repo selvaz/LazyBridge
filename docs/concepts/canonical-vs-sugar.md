@@ -102,8 +102,9 @@ many agents share a single tool-map at the top level.
 # Canonical (no Agent-shaped equivalent — this IS the canonical form)
 from lazybridge import Agent
 
-multi   = Agent.parallel(researcher_a, researcher_b, researcher_c)
-results = multi("Same task for everyone")   # -> list[Envelope]
+multi = Agent.parallel(researcher_a, researcher_b, researcher_c)
+env = multi("Same task for everyone")   # -> Envelope (labelled-text join in .text())
+# For typed per-branch list[Envelope]: branches = await multi.run_branches(task)
 ```
 
 | Sugar | Expands to | Differences |

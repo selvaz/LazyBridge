@@ -19,6 +19,8 @@ Tool(
     description=None,              # defaults to the function's docstring
     mode="signature",              # "signature" | "llm" | "hybrid"
     schema_llm=None,               # engine for mode="llm" / "hybrid"
+    # NB: the legacy mode="auto" graceful-fallback ladder was removed
+    # in 0.7.9.  Pass an explicit mode; mode="auto" raises ValueError.
     strict=False,                  # provider-strict JSON schema validation
     returns_envelope=False,        # set automatically by agent.as_tool()
 )

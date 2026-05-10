@@ -165,6 +165,7 @@ fs = MCP.stdio(
     "fs",
     command="npx",
     args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+    allow=["fs.read_*", "fs.list_*"],   # required since 0.7.9 (deny-by-default)
     cache_tools_ttl=60.0,
 )
 agent = Agent(

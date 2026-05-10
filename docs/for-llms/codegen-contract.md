@@ -13,11 +13,13 @@ this page is the same information annotated for human review.
 - Name every reusable agent — `Agent(..., name="reviewer")` — so it
   can be referenced as a tool and so the Plan compiler can validate
   sentinels against it.
-- Wrap plain functions explicitly: `tool(fn, name="...")`. Raw
+- Wrap plain functions explicitly: `tool(fn, name="...")`.  Raw
   callables still work as a convenience, but the explicit form is
-  the canonical contract.
+  the canonical contract.  The bare `Tool(...)` constructor is
+  available for advanced use (custom-built schemas, schema-cache
+  artefacts) — **prefer the `tool()` factory** in new code.
 - Read `result.text()` for string output; `result.payload` for the
-  typed structured output when `output_type=` was set on the Agent.
+  typed structured output when `output=` was set on the Agent.
 - For freshest-model quickstarts, use
   `Agent.from_provider("anthropic", tier="top")` — the tier alias
   resolves to whichever SKU is current.
@@ -140,7 +142,7 @@ agent = Agent(
     engine=engine,
     name="my_agent",
     tools=[...],
-    output_type=...,         # optional Pydantic model for structured output
+    output=...,         # optional Pydantic model for structured output
 )
 ```
 
@@ -162,7 +164,7 @@ The shortest correct shape for each common request:
 | Sub-agent as tool | `Agent(engine=LLMEngine(...), tools=[other_agent])` (auto-wrapped) |
 | Sub-agent with verifier | `Agent(engine=LLMEngine(...), tools=[other_agent.as_tool(verify=judge)])` |
 | MCP server | `Agent(..., tools=[MCP.stdio("fs", command="npx", args=[...], allow=["fs.read_*"])])` |
-| Structured output | `Agent(engine=LLMEngine(...), output_type=Summary)` (where `Summary` is a Pydantic model) |
+| Structured output | `Agent(engine=LLMEngine(...), output=Summary)` (where `Summary` is a Pydantic model) |
 
 ## Envelope return contract
 
@@ -171,7 +173,7 @@ Every `agent(...)` returns an `Envelope[T]`:
 ```python
 result = agent("do the thing")
 result.text()             # -> str — final assistant text
-result.payload            # -> T — typed payload when output_type= was set; else str
+result.payload            # -> T — typed payload when output= was set; else str
 result.error              # -> Exception | None — propagated runtime failure
 result.metadata.cost_usd  # -> float — pipeline cost (rolls up across nested agents)
 ```

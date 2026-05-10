@@ -17,16 +17,16 @@
     "agent_as_tool": "tools=[other_agent]              # auto-wrapped; other_agent.name is the tool name",
     "agent_as_tool_with_judge": "tools=[other_agent.as_tool(verify=judge_agent)]",
     "mcp_server": "tools=[MCP.stdio('fs', command='npx', args=[...], allow=['fs.read_*'])]   # allow= REQUIRED since 0.7.9",
-    "structured_output": "agent = Agent(engine=LLMEngine('...'), output_type=MyPydanticModel)",
+    "structured_output": "agent = Agent(engine=LLMEngine('...'), output=MyPydanticModel)",
     "sync_entry_point": "result = agent('do the thing'); result.text()",
     "async_entry_point": "result = await agent.run('do the thing'); result.text()"
   },
 
   "envelope_contract": {
     "text": "result.text() -> str — final assistant text",
-    "payload": "result.payload -> T — typed payload when output_type= was set; otherwise str",
+    "payload": "result.payload -> T — typed payload when output= was set; otherwise str",
     "error": "result.error -> Exception | None — propagated runtime failure",
-    "metadata": "result.metadata.cost_usd / tokens_in / tokens_out / latency_ms etc."
+    "metadata": "result.metadata.cost_usd / input_tokens / output_tokens / latency_ms / model / provider / run_id / nested_*"
   },
 
   "avoid": [

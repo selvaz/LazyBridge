@@ -15,14 +15,23 @@ and [Guides → Advanced → Providers](../guides/advanced/providers.md)
 
 ## Provider registry surface
 
-The registry methods are class-level on `LLMEngine`. They mutate
+The registry methods are class-level on `LLMEngine`.  They mutate
 class-level tables (`_PROVIDER_ALIASES`, `_PROVIDER_RULES`,
 `_PROVIDER_DEFAULT`) and are documented under the engine class itself
 — see [Engines → LLMEngine](engines.md#lazybridge.LLMEngine) for the
-full method list. Quick reference:
+full method list.  For read-only introspection from caller code, use
+the public **`PROVIDER_ALIASES`** snapshot or
+**`LLMEngine.provider_aliases()`** (returns a fresh `dict[str, str]`
+copy of the routing aliases — safe to mutate without affecting the
+framework).
+
+::: lazybridge.PROVIDER_ALIASES
+
+Registry mutation entry points (quick reference):
 
 | Method | Effect |
 |---|---|
+| `LLMEngine.provider_aliases()` | Snapshot of the current alias map (read-only) |
 | `LLMEngine.register_provider_alias(alias, provider)` | Exact-match (case-insensitive) routing |
 | `LLMEngine.register_provider_rule(pattern, provider, *, kind="contains" | "startswith")` | Substring / prefix routing; new rules **prepend** the rule list |
 | `LLMEngine.set_default_provider(provider | None)` | Fallback when no rule matches; `None` (the 0.7.9 default) makes unknown-model strings raise ``ValueError`` instead of silently routing to Anthropic |
@@ -45,6 +54,14 @@ from lazybridge.matrix import provider_capabilities
 for name, caps in provider_capabilities().items():
     print(name, caps.streaming, caps.structured_output, caps.thinking)
 ```
+
+### `lazybridge.matrix` reference
+
+::: lazybridge.matrix.provider_capabilities
+
+::: lazybridge.matrix.native_tool_support
+
+::: lazybridge.matrix.ProviderCapabilities
 
 ## stop_reason normalisation
 
