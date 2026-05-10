@@ -637,6 +637,14 @@ class Session:
         self._redact = redact
         self._redact_on_error = redact_on_error
         self._lock = threading.Lock()
+        # Phase-3 Block J: warn-once-per-(exporter-class, exception-class).
+        # Pre-fix every emit() that hit a broken exporter spammed an
+        # identical warning, drowning real diagnostics.  Counter maps the
+        # ``(exporter_cls, exc_cls)`` pair to the number of suppressed
+        # warnings since the first emission so operators can still see
+        # the magnitude of the problem.
+        self._exporter_warned_keys: set[tuple[str, str]] = set()
+        self._exporter_warn_counts: dict[tuple[str, str], int] = {}
         self.graph = GraphSchema(session_id=self.session_id)
         if console:
             # Late import to avoid circular dependency with exporters
@@ -737,10 +745,23 @@ class Session:
             except Exception as exc:
                 import warnings
 
-                warnings.warn(
-                    f"Exporter {exp.__class__.__name__} raised {type(exc).__name__}: {exc}.",
-                    stacklevel=2,
-                )
+                # Warn-once-per-(exporter-class, exception-class).
+                # Repeated identical failures (e.g. a JsonFileExporter
+                # whose disk filled up) become a noise floor that drowns
+                # signal — emit the first one with full context, count
+                # the rest silently, and surface the total at close().
+                key = (exp.__class__.__name__, type(exc).__name__)
+                with self._lock:
+                    is_first = key not in self._exporter_warned_keys
+                    self._exporter_warn_counts[key] = self._exporter_warn_counts.get(key, 0) + 1
+                    if is_first:
+                        self._exporter_warned_keys.add(key)
+                if is_first:
+                    warnings.warn(
+                        f"Exporter {exp.__class__.__name__} raised {type(exc).__name__}: {exc}. "
+                        f"Further identical exceptions will be counted but not re-warned.",
+                        stacklevel=2,
+                    )
 
     def flush(self, timeout: float = 5.0) -> None:
         """Drain the EventLog's batched-writer queue.

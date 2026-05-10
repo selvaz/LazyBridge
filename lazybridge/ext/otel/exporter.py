@@ -210,10 +210,29 @@ class OTelExporter:
 
     def _on_agent_start(self, run_id: str, event: dict[str, Any]) -> None:
         agent_name = event.get("agent_name") or "agent"
+        # Phase-3 Block J: detect nested agents BEFORE starting the new span
+        # so the count reflects the parent depth.  An agent is "nested" when
+        # the OTel current context already carries a span — that span is the
+        # outer agent (or an outer tool span dispatched from one).  Dashboards
+        # filtering on ``gen_ai.agent.nesting_level=0`` get clean root-only
+        # views; depth-aware traces can drill into the rest.
+        from opentelemetry import trace as _trace
+
+        cur = _trace.get_current_span()
+        nesting_level = 0
+        if cur is not None and cur.get_span_context().is_valid:
+            # Walk our own registry to find how many agent-kind spans are
+            # currently open in any run.  This is exact when every run uses
+            # this exporter; cross-process nesting is not modelled here.
+            with self._lock:
+                nesting_level = sum(1 for spans in self._spans.values() if "agent" in spans)
         span = self._start_span(run_id, "agent", f"invoke_agent {agent_name}")
         self._set_attr(span, _GA_OPERATION, "invoke_agent")
         self._set_attr(span, _GA_AGENT_NAME, agent_name)
         self._set_attr(span, _LB_RUN_ID, run_id)
+        # ``gen_ai.agent.nesting_level=0`` for the root agent of a tree;
+        # 1 for an agent invoked as a tool inside it; etc.
+        self._set_attr(span, "gen_ai.agent.nesting_level", nesting_level)
         if "task" in event:
             self._set_attr(span, "gen_ai.prompt", _truncate(event["task"]))
 

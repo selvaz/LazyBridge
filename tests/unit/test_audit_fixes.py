@@ -274,9 +274,13 @@ def test_session_emit_warns_on_exporter_exception():
     assert any("_BadExporter" in m and "ValueError" in m for m in msgs), msgs
 
 
-def test_session_emit_warns_on_every_exporter_failure():
-    """Every failure from a broken exporter must produce a warning —
-    no suppression so a flapping collector stays visible in logs.
+def test_session_emit_warns_once_per_exporter_exception_pair():
+    """Phase-3 Block J: a flapping exporter no longer spams a warning per
+    event — the first identical failure surfaces with full context, the
+    rest are counted in ``_exporter_warn_counts`` but stay silent.
+
+    Pre-fix the warn-every-event behaviour drowned legitimate diagnostics
+    when a JsonFileExporter's disk filled up.
     """
 
     class _BadExporter:
@@ -291,7 +295,11 @@ def test_session_emit_warns_on_every_exporter_failure():
         sess.emit(EventType.AGENT_FINISH, {"agent_name": "x"})
 
     bad_msgs = [m for m in (str(x.message) for x in w) if "_BadExporter" in m]
-    assert len(bad_msgs) == 2
+    # ONE warning, not two: subsequent identical failures suppressed.
+    assert len(bad_msgs) == 1
+    # But both failures are counted so the magnitude stays observable.
+    counts = sess._exporter_warn_counts
+    assert counts.get(("_BadExporter", "ValueError")) == 2
 
 
 # ---------------------------------------------------------------------------
