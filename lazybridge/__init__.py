@@ -111,10 +111,12 @@ from lazybridge.agent import Agent
 from lazybridge.agent import _ParallelAgent as _ParallelAgent
 
 # Provider entry points
-from lazybridge.core.providers import BaseProvider
+from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError
 from lazybridge.core.types import (
     AgentRuntimeConfig,
+    AudioContent,
     CacheConfig,
+    ImageContent,
     NativeTool,
     ObservabilityConfig,
     ResilienceConfig,
@@ -218,6 +220,10 @@ __all__ = [
     "StructuredLogExporter",
     # Provider entry point (custom adapters)
     "BaseProvider",
+    "UnsupportedFeatureError",
+    # Multimodal content blocks
+    "ImageContent",
+    "AudioContent",
     # Shareable runtime configs
     "AgentRuntimeConfig",
     "CacheConfig",

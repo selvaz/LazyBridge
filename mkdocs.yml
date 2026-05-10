@@ -135,6 +135,7 @@ nav:
           - As tool: guides/mid/as-tool.md
           - HumanEngine: guides/mid/human-engine.md
           - MCP: guides/mid/mcp.md
+          - Multimodal: guides/mid/multimodal.md
           - Evals: guides/mid/evals.md
       - Full:
           - Plan: guides/full/plan.md

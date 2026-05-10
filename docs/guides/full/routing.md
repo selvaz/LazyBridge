@@ -223,25 +223,30 @@ plan = Agent(
              # Loop back to the writer when rejected.
              routes={"write": when.field("approved").is_(False)}),
         Step("publish", task="Final-format and publish.", context=from_step("write")),
+        # Without max_iterations, an infinite-rejection bug would loop
+        # forever. 8 attempts is a defensible upper bound for most
+        # policies; tune to your SLA.
+        max_iterations=8,
     ),
     tools=[writer, reviewer, publisher],
     store=store,
-    # Without max_iterations, an infinite-rejection bug would loop forever.
-    # 8 attempts is a defensible upper bound for most policies.
-    # max_iterations is a Plan-level kwarg.
 )
 
 
 # 4) Lambda escape hatch for one-off predicates.
+classify_hits = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    output=Hits,
+    name="classify",
+)
 plan = Agent(
     engine=Plan(
         Step("classify",
-             output=Hits,
              routes={"apology": lambda env: not env.payload.items}),
         Step("rank"),
         Step("apology"),
     ),
-    tools=[classifier, ranker, apology_agent],
+    tools=[classify_hits, ranker, apology_agent],
 )
 
 
@@ -256,15 +261,18 @@ def needs_review(env) -> bool:
     return env.payload.score < 0.5 and env.payload.topic in {"medical", "legal"}
 
 
+score_classifier = Agent(engine=LLMEngine("claude-opus-4-7"), output=Score, name="classify")
+auto_agent       = Agent(engine=LLMEngine("claude-opus-4-7"), name="auto")
+review_agent     = Agent(engine=LLMEngine("claude-opus-4-7"), name="review")
+
 plan = Agent(
     engine=Plan(
         Step("classify",
-             output=Score,
              routes={"review": needs_review}),
         Step("auto"),
         Step("review"),
     ),
-    tools=[classifier, auto_agent, review_agent],
+    tools=[score_classifier, auto_agent, review_agent],
 )
 ```
 

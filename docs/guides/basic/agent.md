@@ -149,7 +149,51 @@ editor = Agent(
 print(editor("find papers on bees and write a one-paragraph summary").text())
 
 
-# 5) Production-shape: timeout + cache + provider fallback + tracing.
+# 5) output_validator — application invariants on top of Pydantic.
+class DateRange(BaseModel):
+    start_date: str
+    end_date: str
+
+
+def chronological(payload: DateRange) -> DateRange:
+    """Re-prompt up to max_output_retries times if start > end."""
+    if payload.start_date > payload.end_date:
+        raise ValueError(
+            f"start_date ({payload.start_date}) must precede end_date ({payload.end_date})"
+        )
+    return payload
+
+
+extractor = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    output=DateRange,
+    output_validator=chronological,
+    max_output_retries=2,
+)
+
+
+# 6) Streaming — same Agent, drop down to .stream() for partial output.
+import asyncio
+from lazybridge import Agent, LLMEngine
+
+async def stream_brief() -> None:
+    agent = Agent(engine=LLMEngine("claude-opus-4-7"))
+    async for chunk in agent.stream("Outline LazyBridge in five bullets."):
+        print(chunk, end="", flush=True)
+
+asyncio.run(stream_brief())
+
+
+# 7) Cache — explicit TTL on Anthropic.
+from lazybridge import CacheConfig
+
+cached = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    cache=CacheConfig(ttl="1h"),       # "5m" (default) or "1h" on Anthropic
+)
+
+
+# 8) Production-shape: timeout + cache + provider fallback + tracing.
 fallback_agent = Agent(
     engine=LLMEngine("gpt-5"),
     tools=[search],
