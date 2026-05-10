@@ -221,6 +221,31 @@ def test_compiler_unknown_step_suggests_when_close():
     assert "Did you mean 'research'?" in str(ei.value)
 
 
+def test_compiler_unknown_tool_in_from_agent_suggests_close_match():
+    """``_suggest()`` is wired into the ``from_agent`` / ``from_memory``
+    "unknown tool" errors as well — same DX as from_step typo recovery."""
+    from lazybridge import Store, from_agent
+
+    research = MockAgent(["r-out"], name="research")
+    research.store = Store()
+    research.agent_store = research.store
+    research.returns_envelope = True
+    downstream = MockAgent(["d-out"], name="downstream")
+
+    with pytest.raises(PlanCompileError) as ei:
+        Agent(
+            engine=Plan(
+                Step("research"),
+                Step("downstream", context=from_agent("reasearch")),  # close typo
+            ),
+            tools=[research, downstream],
+            name="agent_from_agent_typo",
+        )
+    msg = str(ei.value)
+    assert "Available tools:" in msg
+    assert "Did you mean 'research'?" in msg
+
+
 # ---------------------------------------------------------------------------
 # B10 — Anonymous step referenced by from_step is rejected at compile time
 # ---------------------------------------------------------------------------
