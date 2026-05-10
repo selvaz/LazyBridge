@@ -160,7 +160,7 @@ agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search])
 
 | Sugar | Expands to | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description="Search the web.")` | `Tool(search_web, name="search", description="Search the web.", mode="auto")` | **Not pure alias.** Multi-input dispatcher: callables → `Tool(...)`, Agents → `agent.as_tool(...)`, existing Tools → passthrough or clone-with-overrides. **Default `mode="auto"` differs from `Tool(...)`'s `"signature"`**: `auto` tries `signature` then `hybrid`, only falling back to `llm` when `allow_llm_schema=True` and `schema_llm=` is supplied. |
+| `tool(search_web, name="search", description="Search the web.")` | `Tool(search_web, name="search", description="Search the web.")` | **Not pure alias.** Multi-input dispatcher: callables → `Tool(...)`, Agents → `agent.as_tool(...)`, existing Tools → passthrough or clone-with-overrides. Both default to `mode="signature"` since 0.8.0 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
 | `Tool.from_schema(name, description, parameters, func, strict=False, returns_envelope=False)` | (no callable-introspection canonical — this IS the canonical for pre-built schemas) | **Not sugar over `Tool(callable, …)`.** Used when the JSON Schema is already known (MCP servers, OpenAPI bridges, third-party tool registries). Bypasses the schema builder and sets `_definition` directly. |
 
 ---

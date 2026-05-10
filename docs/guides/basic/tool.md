@@ -208,6 +208,6 @@ weather_agent = Agent(
   the composition rule that makes all six paths uniform.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
   `tool(...)` factory, `agent.as_tool(...)`, and `Tool.from_schema(...)`
-  with their canonical equivalents and the differences between
-  `mode="auto"` (factory default) and `mode="signature"` (Tool
-  constructor default).
+  with their canonical equivalents.  Both `tool(...)` and `Tool(...)`
+  default to `mode="signature"`; `mode="hybrid"` / `mode="llm"` are
+  the explicit opt-ins for LLM-driven schema generation.

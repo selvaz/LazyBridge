@@ -127,7 +127,7 @@ build extra structure or return different types. Read the
 
 | Sugar / variant | Canonical | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). **Default `mode="auto"` differs from `Tool(...)`'s `"signature"`**: `auto` tries `signature` then `hybrid`, falling back to `llm` only when `allow_llm_schema=True` and `schema_llm=` is supplied. |
+| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). Both default to `mode="signature"` since 0.8.0 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
 | `Tool.from_schema(name, description, parameters, func, strict=…, returns_envelope=…)` | (no callable-introspection canonical) | **Not sugar over `Tool(callable, …)`** — this is the canonical form when the JSON Schema is already known (MCP, OpenAPI bridges, third-party registries). Bypasses the schema builder. |
 
 **Wrap an Agent as a Tool**
