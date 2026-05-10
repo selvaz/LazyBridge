@@ -363,9 +363,17 @@ class BaseProvider(ABC):
         per-provider tier tables are respected.
         """
         name = request.model or self.model or self.default_model
-        # Empty / None defaults to class default.
+        # Phase-2 Block C: 0.7 returned an empty string when nothing was
+        # configured, leaving the SDK to surface a cryptic provider-side
+        # error.  0.8.0 raises with concrete fix guidance.
         if not name:
-            return name
+            raise ValueError(
+                f"{type(self).__name__}: no model configured.\n"
+                f"  Pass ``model=`` on the request, the provider, or set "
+                f"``default_model`` on the class.\n"
+                f"  Available tier aliases: {sorted(self._TIER_ALIASES)} "
+                f"(or pass an explicit model id)."
+            )
         # Tier alias?  Resolve to the concrete model.
         resolved = self._TIER_ALIASES.get(name, name)
         return resolved

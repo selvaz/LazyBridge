@@ -169,18 +169,15 @@ def test_llm_guard_prompt_wraps_user_content_in_content_tags():
 # ---------------------------------------------------------------------------
 
 
-def test_llm_engine_warns_on_unknown_model_falling_back():
-    """A model string that matches no alias / rule previously routed to
-    Anthropic silently.  Must now warn so the user knows why the API
-    call explodes on an unknown model.
-    """
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        LLMEngine._infer_provider("some-unknown-llm-xyz")
+def test_llm_engine_raises_on_unknown_model():
+    """0.7 silently routed unknown model strings to ``_PROVIDER_DEFAULT``
+    (Anthropic) with a ``UserWarning``.  0.8.0 raises ``ValueError``
+    instead — typos in model names are caught at engine construction
+    rather than surfacing as cryptic provider-side errors much later."""
+    import pytest
 
-    msgs = [str(x.message) for x in w]
-    assert any("some-unknown-llm-xyz" in m for m in msgs)
-    assert any("defaulting" in m.lower() for m in msgs)
+    with pytest.raises(ValueError, match="some-unknown-llm-xyz"):
+        LLMEngine._infer_provider("some-unknown-llm-xyz")
 
 
 def test_llm_engine_known_model_does_not_warn():

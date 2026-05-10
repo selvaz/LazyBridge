@@ -45,7 +45,10 @@ def _stub_agents():
 
 def test_blackboard_state_resets_between_runs() -> None:
     sub = _stub_agents()
-    planner = make_blackboard_planner(agents=sub, model="mock")
+    # ``model="claude-opus-4-7"`` is just to satisfy LLMEngine construction
+    # (a real provider rule must match in 0.8.0); the engine is replaced
+    # immediately below so no provider call is ever made.
+    planner = make_blackboard_planner(agents=sub, model="claude-opus-4-7")
     planner.engine = _CapturingMockEngine()  # type: ignore[assignment]
 
     # Find the closure-held state via the registered tools.
@@ -65,7 +68,7 @@ def test_blackboard_state_resets_between_runs() -> None:
 
 def test_blackboard_run_does_not_carry_prior_results() -> None:
     sub = _stub_agents()
-    planner = make_blackboard_planner(agents=sub, model="mock")
+    planner = make_blackboard_planner(agents=sub, model="claude-opus-4-7")
     planner.engine = _CapturingMockEngine()  # type: ignore[assignment]
 
     set_plan_tool = planner._tool_map["set_plan"]

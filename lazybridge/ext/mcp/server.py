@@ -186,9 +186,26 @@ class MCPServer:
         full_name = f"{self._prefix}{local_name}"
         description = mcp_tool.get("description") or f"MCP tool {local_name!r}"
         parameters = mcp_tool.get("inputSchema") or {"type": "object", "properties": {}}
-        # Normalise to a JSON-Schema object root if the server gave something odd.
-        if not isinstance(parameters, dict) or parameters.get("type") != "object":
-            parameters = {"type": "object", "properties": {}}
+        # Phase-2 Block C: 0.7 silently coerced any non-``object`` root
+        # (array / union / string) to an empty object schema, which then
+        # appeared to the LLM as a tool with no parameters — silent loss
+        # of the actual call surface.  0.8.0 raises so the MCP server
+        # author or namespacing config can be fixed.
+        if not isinstance(parameters, dict):
+            raise ValueError(
+                f"MCP server {self.name!r}: tool {local_name!r} has a non-dict inputSchema "
+                f"({type(parameters).__name__}).  Update the MCP server to emit a JSON-Schema "
+                f"``object`` root, or ``deny=[{full_name!r}]`` if this tool is intentionally "
+                f"unsupported."
+            )
+        if parameters.get("type") != "object":
+            raise ValueError(
+                f"MCP server {self.name!r}: tool {local_name!r} has inputSchema with "
+                f"type={parameters.get('type')!r}; LazyBridge requires a JSON-Schema "
+                f"``object`` root for argument-by-name LLM calling.  Wrap the "
+                f"non-object schema in an object envelope, or ``deny=[{full_name!r}]`` "
+                f"to skip this tool."
+            )
 
         async def _call(**kwargs: Any) -> Any:
             await self.aconnect()

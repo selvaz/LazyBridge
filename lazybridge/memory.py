@@ -123,6 +123,21 @@ class Memory:
         self._summarizer = summarizer
         if summarizer_timeout is not None and summarizer_timeout <= 0:
             raise ValueError(f"summarizer_timeout must be > 0 or None, got {summarizer_timeout!r}")
+        # Phase-2 Block C: warn on too-tight timeouts.  The summariser
+        # spawns a worker thread + JSON serialisation + LLM round-trip;
+        # values under 5 s typically time out on every call (silent
+        # always-fail trap).
+        if summarizer_timeout is not None and summarizer_timeout < 5.0:
+            import warnings as _warnings
+
+            _warnings.warn(
+                f"Memory(summarizer_timeout={summarizer_timeout!r}): values under 5.0 s often "
+                f"trigger a timeout on every summariser invocation (worker-thread setup + LLM "
+                f"round-trip).  Consider 30.0 s (the production default) unless you have data "
+                f"showing your summariser is reliably faster.",
+                UserWarning,
+                stacklevel=2,
+            )
         self.summarizer_timeout = summarizer_timeout
         # Guard against overlapping summariser calls when ``add()`` is
         # invoked concurrently.  Only one compression runs at a time;

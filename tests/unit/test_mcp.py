@@ -15,7 +15,6 @@ import pytest
 from lazybridge import Agent
 from lazybridge.ext.mcp import MCP, MCPServer
 from lazybridge.ext.mcp.transports import _Transport
-from lazybridge.testing import MockAgent
 
 # ---------------------------------------------------------------------------
 # Fake transport — captures call_tool invocations; configurable tool list.
@@ -133,8 +132,10 @@ def test_as_tools_caches_after_first_call() -> None:
 
 
 def test_agent_tools_argument_accepts_mcp_server_directly() -> None:
+    # 0.8.0 raises on unknown model strings, so use a real one (we don't
+    # actually call the engine — only inspect the constructed tool map).
     agent = Agent(
-        engine=MockAgent.__name__,  # placeholder; we won't run
+        engine="claude-opus-4-7",
         tools=[MCP.from_transport("fs", FakeTransport())],
     )
     expected = {"fs.list_directory", "fs.read_file", "fs.delete_file"}
