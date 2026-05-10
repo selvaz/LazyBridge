@@ -49,13 +49,13 @@ def test_llmengine_tool_choice_literal_no_longer_accepts_parallel_type():
     assert accepted == {"auto", "any"}
 
 
-def test_llmengine_accepts_parallel_legacy_with_deprecation_warning():
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        eng = LLMEngine("claude-opus-4-7", tool_choice="parallel")  # type: ignore[arg-type]
-    assert eng.tool_choice == "auto"
-    assert any(issubclass(x.category, DeprecationWarning) for x in w)
-    assert any("parallel" in str(x.message).lower() for x in w)
+def test_llmengine_rejects_parallel_legacy_value():
+    """``tool_choice='parallel'`` was removed in 0.8.0; the constructor now
+    raises ``ValueError`` instead of silently downgrading to ``'auto'``."""
+    import pytest
+
+    with pytest.raises(ValueError, match="removed"):
+        LLMEngine("claude-opus-4-7", tool_choice="parallel")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +150,7 @@ def test_nested_agent_of_agent_of_function_runs_uniformly():
     outer = Agent(engine=_EchoEngine("outer"), tools=[middle], name="outer")
 
     env = outer("x")
-    # outer's engine delegates to its single tool (middle.as_tool via wrap_tool);
+    # outer's engine delegates to its single tool (middle.as_tool via _wrap_tool);
     # middle's engine delegates to its single tool (leaf);
     # leaf returns 'leaf(x)'.
     assert env.text() == "outer:middle:leaf(x)"

@@ -418,16 +418,20 @@ def test_version_matches_distribution_metadata() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_choice_parallel_deprecation_names_sunset_version() -> None:
-    import warnings
+def test_tool_choice_parallel_now_raises() -> None:
+    """``tool_choice='parallel'`` was deprecated in 0.7 and removed in 0.8.
+
+    Concurrent tool execution is the default and can no longer be opted
+    out of; passing the legacy value must surface as a ``ValueError``
+    naming the replacement (rather than silently degrading to ``"auto"``).
+    """
+    import pytest
 
     from lazybridge.engines.llm import LLMEngine
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
+    with pytest.raises(ValueError) as ei:
         LLMEngine(model="claude-3-haiku", provider="anthropic", tool_choice="parallel")  # type: ignore[arg-type]
 
-    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    assert deprecations, "expected a DeprecationWarning"
-    msg = str(deprecations[0].message)
-    assert "1.0" in msg or "removed in" in msg
+    msg = str(ei.value)
+    assert "removed" in msg
+    assert "auto" in msg or "any" in msg

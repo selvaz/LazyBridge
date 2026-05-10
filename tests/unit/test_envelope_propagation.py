@@ -12,7 +12,7 @@ What's verified here:
   accidental ``"Envelope(task=…)"`` garbage leaking into LLM tool
   results or REPL output.
 * ``Tool.returns_envelope`` flag is set automatically by
-  ``agent.as_tool()`` and by ``wrap_tool(agent)``.
+  ``agent.as_tool()`` and by ``_wrap_tool(agent)``.
 * An Envelope-returning tool's metadata accumulates in the outer
   Envelope's ``nested_input_tokens`` / ``nested_output_tokens`` /
   ``nested_cost_usd`` buckets in LLMEngine (simulated model loop).
@@ -86,13 +86,13 @@ def test_agent_as_tool_sets_returns_envelope_true():
 
 
 def test_wrap_tool_on_agent_sets_returns_envelope_true():
-    """Passing an Agent into tools=[...] goes through wrap_tool, which
+    """Passing an Agent into tools=[...] goes through _wrap_tool, which
     must set the flag automatically so engines preserve the Envelope.
     """
-    from lazybridge.tools import wrap_tool
+    from lazybridge.tools import _wrap_tool
 
     a = Agent("claude-opus-4-7", name="nested")
-    t = wrap_tool(a)
+    t = _wrap_tool(a)
     assert t.returns_envelope is True
 
 

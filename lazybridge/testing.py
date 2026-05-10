@@ -108,7 +108,7 @@ class MockAgent:
     Designed for testing **pipeline composition and data transmission**
     without touching a real provider.  Drop-in compatible with:
 
-    * ``Agent(..., tools=[mock])`` — wrapped via ``wrap_tool`` using the
+    * ``Agent(..., tools=[mock])`` — wrapped via ``_wrap_tool`` using the
       ``_is_lazy_agent`` duck-type marker; nested Envelope metadata rolls
       up through the tool boundary.
     * ``Plan(Step(target=mock, ...))`` — PlanEngine detects
@@ -173,7 +173,7 @@ class MockAgent:
         assert env.metadata.input_tokens + env.metadata.output_tokens > 0
     """
 
-    _is_lazy_agent = True  # recognised by wrap_tool() and PlanEngine
+    _is_lazy_agent = True  # recognised by _wrap_tool() and PlanEngine
 
     def __init__(
         self,

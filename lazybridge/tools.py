@@ -61,7 +61,7 @@ class Tool:
         #: plain Python value.  Engines aware of this hint will preserve
         #: the inner envelope's metadata (tokens / cost / error) when
         #: aggregating results from a turn's tool calls.  The flag is
-        #: set automatically by ``wrap_tool`` for Agents wrapped via
+        #: set automatically by ``_wrap_tool`` for Agents wrapped via
         #: ``agent.as_tool()``.
         self.returns_envelope = returns_envelope
         #: Live reference to the source agent's Memory, set by ``agent.as_tool()``.
@@ -426,8 +426,13 @@ def tool(
     raise TypeError(f"tool() cannot wrap {type(obj).__name__!r}")
 
 
-def wrap_tool(obj: Any) -> Tool:
+def _wrap_tool(obj: Any) -> Tool:
     """Convert a raw callable or Agent into a Tool. Returns Tool unchanged.
+
+    Internal helper — public callers use ``tool()`` (which accepts the same
+    inputs and dispatches by type) or pass objects directly to
+    ``Agent(tools=[...])`` (which calls this function via
+    :func:`build_tool_map`).
 
     Agent-likes are recognised by the duck-typed ``_is_lazy_agent`` marker so
     test doubles (``lazybridge.testing.MockAgent``) and custom Agent-compatible
@@ -479,7 +484,7 @@ def build_tool_map(
     """Wrap and index tools by name.
 
     Items in ``tools`` may be:
-      - a callable / Agent / :class:`Tool` (wrapped via :func:`wrap_tool`);
+      - a callable / Agent / :class:`Tool` (wrapped via :func:`_wrap_tool`);
       - a **tool provider** — any object with ``_is_lazy_tool_provider = True``
         and an ``as_tools() -> list[Tool]`` method.  The provider is expanded
         into its constituent tools.  This is how, e.g., an MCP server lands
@@ -502,7 +507,7 @@ def build_tool_map(
         if getattr(t, "_is_lazy_tool_provider", False):
             expanded = list(t.as_tools())
         else:
-            expanded = [wrap_tool(t)]
+            expanded = [_wrap_tool(t)]
         for wrapped in expanded:
             if wrapped.name in result:
                 if collision_policy == "raise":

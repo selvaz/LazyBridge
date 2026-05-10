@@ -160,7 +160,7 @@ class Agent:
         Agent(engine=SupervisorEngine(tools=[...]))
     """
 
-    _is_lazy_agent = True  # recognised by wrap_tool()
+    _is_lazy_agent = True  # recognised by _wrap_tool()
 
     def __init__(
         self,
@@ -1338,7 +1338,7 @@ class _ParallelAgent:
         propagates as the wrapper's ``error`` so downstream can
         short-circuit.
 
-        Without this method, ``wrap_tool(parallel_runner)`` falls
+        Without this method, ``_wrap_tool(parallel_runner)`` falls
         through the inline shim in :func:`lazybridge.tools._agent_as_tool`
         which assumes ``run()`` returns an ``Envelope``; the
         ``list[Envelope]`` then leaks into the LLM's tool result block

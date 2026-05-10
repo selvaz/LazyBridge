@@ -26,10 +26,10 @@ import asyncio
 from lazybridge import Agent, Step
 from lazybridge.envelope import Envelope, ErrorInfo
 from lazybridge.testing import MockAgent
-from lazybridge.tools import Tool, wrap_tool
+from lazybridge.tools import Tool, _wrap_tool
 
 # ---------------------------------------------------------------------------
-# Every factory's result wraps cleanly via wrap_tool()
+# Every factory's result wraps cleanly via _wrap_tool()
 # ---------------------------------------------------------------------------
 
 
@@ -37,19 +37,19 @@ def test_from_chain_wraps_as_tool():
     a = MockAgent("A", name="a_agent")
     b = MockAgent("B", name="b_agent")
     chained = Agent.from_chain(a, b)
-    t = wrap_tool(chained)
+    t = _wrap_tool(chained)
     assert isinstance(t, Tool)
 
 
 def test_from_plan_wraps_as_tool():
     plan_agent = Agent.from_plan(Step(target=lambda task: "x", name="step1"))
-    t = wrap_tool(plan_agent)
+    t = _wrap_tool(plan_agent)
     assert isinstance(t, Tool)
 
 
 def test_from_parallel_wraps_as_tool():
     fan = Agent.from_parallel(MockAgent("X"), MockAgent("Y"), name="fan")
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     assert isinstance(t, Tool)
     assert t.name == "fan"
 
@@ -58,7 +58,7 @@ def test_supervisor_agent_wraps_as_tool():
     from lazybridge.ext.hil import supervisor_agent
 
     sup = supervisor_agent(tools=[], agents=[], name="sup")
-    t = wrap_tool(sup)
+    t = _wrap_tool(sup)
     assert isinstance(t, Tool)
 
 
@@ -66,7 +66,7 @@ def test_human_agent_wraps_as_tool():
     from lazybridge.ext.hil import human_agent
 
     hu = human_agent(timeout=1.0, name="approve")
-    t = wrap_tool(hu)
+    t = _wrap_tool(hu)
     assert isinstance(t, Tool)
 
 
@@ -75,7 +75,7 @@ def test_orchestrator_agent_wraps_as_tool():
 
     sub = MockAgent("sub-out", name="sub")
     orch = orchestrator_agent(agents=[sub])
-    t = wrap_tool(orch)
+    t = _wrap_tool(orch)
     assert isinstance(t, Tool)
     assert t.name == "planner"
 
@@ -85,7 +85,7 @@ def test_blackboard_orchestrator_agent_wraps_as_tool():
 
     sub = MockAgent("sub-out", name="sub")
     bb = blackboard_orchestrator_agent(agents=[sub])
-    t = wrap_tool(bb)
+    t = _wrap_tool(bb)
     assert isinstance(t, Tool)
     assert t.name == "blackboard_planner"
 
@@ -100,7 +100,7 @@ def test_parallel_as_tool_returns_single_envelope_not_list():
     ``Envelope`` so the Tool contract holds.  Pre-fix, ``run()`` was a
     list and the LLM tool-result block stringified it as junk."""
     fan = Agent.from_parallel(MockAgent("X-out"), MockAgent("Y-out"), name="fan")
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     result = asyncio.run(t.run(task="hi"))
     assert isinstance(result, Envelope)
 
@@ -113,7 +113,7 @@ def test_parallel_as_tool_payload_is_labelled_text_join():
         MockAgent("second-output", name="second"),
         name="fan",
     )
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     env = asyncio.run(t.run(task="hi"))
     text = env.text()
     assert "[first]" in text
@@ -129,7 +129,7 @@ def test_parallel_as_tool_aggregates_nested_metadata():
     summed into the wrapper's ``nested_*`` so an outer agent reading
     ``.metadata.nested_input_tokens`` sees the full spend."""
     fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"), name="fan")
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     env = asyncio.run(t.run(task="hi"))
     # MockAgent reports input_tokens=10 / output_tokens=20 per call.
     assert env.metadata.nested_input_tokens == 20
@@ -153,7 +153,7 @@ def test_parallel_as_tool_first_error_propagates():
             )
 
     fan = Agent.from_parallel(MockAgent("ok"), _BrokenAgent(), name="fan")  # type: ignore[arg-type]
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     env = asyncio.run(t.run(task="hi"))
     assert env.error is not None
     assert env.error.type == "Boom"
@@ -182,7 +182,7 @@ def test_parallel_as_tool_pluggable_into_outer_tools_list():
     sub = MockAgent("just-a-tool", name="aux")
 
     # Outer agent built around an LLMEngine (not invoked) — registers
-    # both ``fan`` and ``sub`` in its tool map.  If wrap_tool fails on
+    # both ``fan`` and ``sub`` in its tool map.  If _wrap_tool fails on
     # ``fan``, this construction would crash.
     outer = Agent("claude-opus-4-7", tools=[fan, sub])
     tool_names = {t.name for t in outer._tool_map.values()}
@@ -195,7 +195,7 @@ def test_parallel_as_tool_definition_advertises_string_task_input():
     same shape as every other agent-as-tool.  This is what lets an
     LLM emit a tool call with a single ``task`` argument."""
     fan = Agent.from_parallel(MockAgent("A"), MockAgent("B"), name="fan")
-    t = wrap_tool(fan)
+    t = _wrap_tool(fan)
     schema = t.definition().parameters
     props = schema.get("properties", {})
     assert "task" in props, f"expected 'task' parameter on the parallel tool, got {list(props)}"

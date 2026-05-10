@@ -206,20 +206,16 @@ class LLMEngine:
         # provider stream — when the consumer pauses, the producer
         # naturally pauses on ``await sink.put()``.
         self.stream_buffer = stream_buffer
-        # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
-        # with a deprecation warning. The framework no longer has a
-        # separate "parallel mode" — tool calls are always executed via
-        # asyncio.gather when the model emits more than one in a turn.
+        # ``tool_choice="parallel"`` was deprecated in 0.7.0 and removed in
+        # 0.8.0.  Concurrent tool execution is the default and cannot be
+        # disabled; the model decides how many tools to call per turn and
+        # they run via asyncio.gather.
         if tool_choice == "parallel":
-            warnings.warn(
-                "LLMEngine(tool_choice='parallel') is deprecated since "
-                "lazybridge 0.7.0 and will be removed in 1.0.  "
+            raise ValueError(
+                "LLMEngine(tool_choice='parallel') was removed in 0.8.0.  "
                 "Concurrent tool execution is now the default and cannot be "
-                "disabled; drop the argument (or use 'auto'/'any').",
-                DeprecationWarning,
-                stacklevel=2,
+                "disabled; drop the argument (or use 'auto' / 'any')."
             )
-            tool_choice = "auto"
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system

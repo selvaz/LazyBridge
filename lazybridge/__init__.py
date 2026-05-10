@@ -101,7 +101,7 @@ __stability__ = "alpha"
 
 # Public API.  Symbols a user constructs, passes as a kwarg, or catches as
 # an exception are re-exported from this top-level module.  Internals
-# (provider request/response types, dispatcher helpers like wrap_tool /
+# (provider request/response types, dispatcher helpers like _wrap_tool /
 # build_tool_map, attribute-only types like EnvelopeMetadata / StoreEntry,
 # rarely-subclassed Protocols) live under their submodules and stay
 # importable as ``from lazybridge.X import Y`` for advanced callers.

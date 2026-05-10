@@ -141,7 +141,7 @@ def test_direct_agent_tool_uses_agent_name():
 def test_direct_agent_tool_returns_envelope_true():
     child = Agent(name="research", engine=_FakeEngine())
     Agent(name="parent", engine=_FakeEngine(), tools=[child])
-    # wrap_tool routes through as_tool() which sets returns_envelope=True
+    # _wrap_tool routes through as_tool() which sets returns_envelope=True
     # Build independently to verify
     t = tool(child)
     assert t.returns_envelope is True

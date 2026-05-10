@@ -1,9 +1,9 @@
 """Skill-doc drift check.
 
-Phase-1 minimum-viable rebuild of the original tier-fragment pipeline.
-The Phase-4 plan is to either fully restore the fragment-based generator
-(see ``Old doc/lazybridge/skill_docs/_build.py``) or formally retire it
-in favour of the hand-maintained ``lazybridge/skill/SKILL.md``.
+Minimum-viable check around the hand-maintained
+``lazybridge/skill/SKILL.md``.  Earlier alpha shipped a fragment-based
+generator that wrote tier files (``01_basic.md`` … ``04_advanced.md``);
+that pipeline was retired in 0.8.0 in favour of one curated SKILL.md.
 
 Until then, ``--check`` enforces three light invariants that catch the
 practical drift modes we care about:

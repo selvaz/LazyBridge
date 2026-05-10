@@ -8,7 +8,7 @@ Covers:
 * All response value types (Envelope / ErrorInfo / Exception / scalar).
 * Recording + assertion helpers.
 * Drop-in composition:
-    - ``Agent(tools=[mock])``   (via wrap_tool)
+    - ``Agent(tools=[mock])``   (via _wrap_tool)
     - ``Plan(Step(target=mock))``
     - ``mock.as_tool()``
     - ``Agent.chain(a, b)``     (sequential)
@@ -267,14 +267,14 @@ async def test_as_tool_returns_functional_tool_with_envelope_flag() -> None:
 async def test_wrap_tool_accepts_mock_agent_via_duck_type() -> None:
     """Regression: duck-typed _is_lazy_agent check in tools.wrap_tool.
 
-    Before the v1 loosening, wrap_tool required ``isinstance(obj, Agent)``
+    Before the v1 loosening, _wrap_tool required ``isinstance(obj, Agent)``
     so MockAgent would silently fall through to the plain-callable path,
     losing returns_envelope=True and breaking nested-metadata roll-up.
     """
-    from lazybridge.tools import wrap_tool
+    from lazybridge.tools import _wrap_tool
 
     m = MockAgent("out", name="ducky")
-    tool = wrap_tool(m)
+    tool = _wrap_tool(m)
     assert tool.returns_envelope is True
     assert tool.name == "ducky"
 
@@ -447,9 +447,9 @@ async def test_nested_metadata_rolls_up_through_as_tool_boundary() -> None:
         default_cost_usd=0.005,
     )
     # Hand-drive the wrap-and-invoke path without spinning an LLM.
-    from lazybridge.tools import wrap_tool
+    from lazybridge.tools import _wrap_tool
 
-    tool = wrap_tool(inner)
+    tool = _wrap_tool(inner)
     env = await tool.run(task="please")
 
     # Tool.run returns the inner Envelope verbatim — the outer engine

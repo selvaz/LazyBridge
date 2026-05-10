@@ -189,7 +189,7 @@ prompt path.
   return `Envelope.error_envelope(exc)`.
 - **The engine receives a normalised `list[Tool]`.** Do not assume
   the agent's internal `_tool_map` shape is available, do not
-  re-wrap functions, do not call `wrap_tool` yourself. Treat
+  re-wrap functions, do not call `_wrap_tool` yourself. Treat
   `tools` as a flat list of `Tool` instances ready to invoke.
 - **`store` and `plan_state` kwargs.** Even if your engine doesn't
   use them, declare them in `run`'s signature with default `None`
