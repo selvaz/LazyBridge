@@ -67,12 +67,10 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
         # Multimodal types — taught via examples, not by name.
         "ImageContent",
         "AudioContent",
-        # Phase-2 deletion targets — once removed from __all__ the
-        # missing-symbol check stops applying anyway.
-        "AgentRuntimeConfig",
+        # CacheConfig — kept in 0.8.0 (carries real semantic value), but
+        # the canonical entry path is the bool ``cache=True`` flag, so
+        # SKILL.md doesn't need to teach the dataclass directly.
         "CacheConfig",
-        "ObservabilityConfig",
-        "ResilienceConfig",
         # Testing helper — referenced in tests, not the skill.
         "MockAgent",
     }

@@ -39,6 +39,7 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 
 ## Configuration & testing
 
-- [Runtime configs & testing](configs.md) — `AgentRuntimeConfig`,
-  `ResilienceConfig`, `ObservabilityConfig`, `CacheConfig`,
-  `MockAgent`.
+- [Runtime configs & testing](configs.md) — `CacheConfig` (kept) and
+  `MockAgent`.  The 0.7-era ``AgentRuntimeConfig`` /
+  ``ResilienceConfig`` / ``ObservabilityConfig`` were deleted in 0.8.0;
+  fleet config uses a flat-kwarg dict spread now.

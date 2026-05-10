@@ -453,54 +453,25 @@ class CacheConfig:
 _UNSET: Any = object()
 
 
-@dataclass
-class ResilienceConfig:
-    """Bundle of reliability / performance knobs shareable across Agents.
-
-    Wraps the resilience kwargs on ``Agent`` so a fleet of agents in a
-    production pipeline can share a single retry / timeout / cache
-    policy instead of copy-pasting seven kwargs at every call site.
-
-    Flat ``Agent`` kwargs still win when both are passed — the config
-    is the default, an explicit kwarg is the override.
-    """
-
-    timeout: float | None = None
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    cache: bool | CacheConfig = False
-    max_output_retries: int = 2
-    output_validator: Any = None  # Callable[[Any], Any] | None
-    #: Forward-ref to ``Agent`` — typed ``Any`` to avoid a circular import.
-    #: Actual validation happens inside ``Agent.__init__``.
-    fallback: Any = None
-
-
-@dataclass
-class ObservabilityConfig:
-    """Bundle of identity / tracing knobs shareable across Agents.
-
-    ``session`` is the single biggest win: binding a fleet of agents to
-    the same ``Session`` in one object beats threading it through every
-    constructor call.
-    """
-
-    verbose: bool = False
-    session: Any = None  # Session | None
-    name: str | None = None
-    description: str | None = None
-
-
-@dataclass
-class AgentRuntimeConfig:
-    """Composite — carries both resilience and observability.
-
-    Convenience for configuration injection: one object passed to every
-    ``Agent`` in a factory instead of two.
-    """
-
-    resilience: ResilienceConfig | None = None
-    observability: ObservabilityConfig | None = None
+# ---------------------------------------------------------------------------
+# Removed in 0.8.0 (deletion-led simplification): ``ResilienceConfig``,
+# ``ObservabilityConfig``, ``AgentRuntimeConfig``.
+#
+# These wrapper-of-flat-kwargs configs existed to bundle Agent kwargs into
+# a single shareable object across a fleet, with a precedence game:
+# ``flat kwarg > config object > default``.  The precedence required a
+# private ``_UNSET`` sentinel on every kwarg to distinguish "user passed
+# None" from "user omitted the kwarg" — a documented LLM trap.
+#
+# Fleet management now uses a Python dict spread::
+#
+#     PROD_DEFAULTS = dict(timeout=60, max_retries=5, max_output_retries=2,
+#                          cache=True, verbose=False, session=sess)
+#     Agent(**PROD_DEFAULTS, engine=LLMEngine("model"), name="agent-X")
+#
+# ``CacheConfig`` is intentionally kept — it carries real semantic value
+# (``enabled``, ``ttl``) consumed inside ``LLMEngine``.
+# ---------------------------------------------------------------------------
 
 
 #: Provider-agnostic meta-keywords accepted as ``tool_choice``.  Anything

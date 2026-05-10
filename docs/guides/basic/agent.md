@@ -24,9 +24,6 @@ agent = Agent(
     max_verify=3,                  # retries when verify=...
     native_tools=None,             # list[NativeTool | str] — provider-hosted tools
     allow_dangerous_native_tools=False,  # security gate: opt-in for CODE_EXECUTION / COMPUTER_USE
-    runtime=None,                  # AgentRuntimeConfig (groups resilience + observability)
-    resilience=None,               # ResilienceConfig — retries / timeout / cache / fallback
-    observability=None,            # ObservabilityConfig — session / verbose / name / description
     output_validator=None,         # callable validator over the payload
     max_output_retries=2,          # retries on output validation failure
     timeout=None,                  # total deadline for the run (seconds)
@@ -99,7 +96,6 @@ pipeline — only the `engine=` argument changes.
 
 ```python
 from lazybridge import Agent, LLMEngine, Session
-from lazybridge.core.types import ResilienceConfig
 from pydantic import BaseModel
 
 
@@ -245,10 +241,14 @@ prod("draft a one-pager on the LazyBridge audit findings")
   and a single graph view of the whole tree — pass an explicit
   `session=None` on a sub-agent only when you genuinely want it
   invisible.
-- **`runtime=` / `resilience=` / `observability=` precedence** — flat
-  kwargs win over config-object fields. `Agent(resilience=cfg,
-  timeout=30.0)` uses `cfg`'s retries / cache / fallback but
-  overrides its timeout.
+- **Fleet config via dict spread** — the 0.7-era ``runtime`` /
+  ``resilience`` / ``observability`` configs were deleted in 0.8.0 (they
+  carried a ``flat kwarg > config object > default`` precedence game
+  with a private ``_UNSET`` sentinel — an LLM trap).  Share kwargs
+  across a fleet via a Python dict::
+
+      PROD_DEFAULTS = dict(timeout=60, max_retries=5, cache=True, session=sess)
+      Agent(**PROD_DEFAULTS, engine=LLMEngine("model"), name="agent-X")
 
 ## See also
 

@@ -6,76 +6,8 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from typing import Any, cast
 
-from lazybridge.core.types import AgentRuntimeConfig, ObservabilityConfig, ResilienceConfig
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
-
-#: Private sentinel — distinguishes "caller omitted the flat kwarg" from
-#: "caller explicitly passed its default value".  When a flat kwarg is the
-#: sentinel, values from ``resilience=`` / ``observability=`` / ``runtime=``
-#: fill in; an explicit value (including the documented default) wins.
-_UNSET: Any = object()
-
-
-#: Documented default + source-config attribute for every runtime knob
-#: routed through ``_resolve_runtime_kwargs``.  Each entry is
-#: ``(default, source)`` where ``source`` is ``"resilience"`` or
-#: ``"observability"``.  Centralising this table avoids the eleven
-#: hand-written ``if x is _UNSET:`` blocks we used to have inline in
-#: ``Agent.__init__`` and gives us one place to register a new knob.
-_RUNTIME_KNOB_DEFAULTS: dict[str, tuple[Any, str]] = {
-    # Resilience — wraps retries / timeout / cache / fallback / output
-    # retry knobs into a single shareable object across an agent fleet.
-    "timeout": (None, "resilience"),
-    "max_retries": (3, "resilience"),
-    "retry_delay": (1.0, "resilience"),
-    "cache": (False, "resilience"),
-    "max_output_retries": (2, "resilience"),
-    "output_validator": (None, "resilience"),
-    "fallback": (None, "resilience"),
-    # Observability — session / verbose / identity.
-    "verbose": (False, "observability"),
-    "session": (None, "observability"),
-    "name": (None, "observability"),
-    "description": (None, "observability"),
-}
-
-
-def _resolve_runtime_kwargs(
-    *,
-    runtime: AgentRuntimeConfig | None,
-    resilience: ResilienceConfig | None,
-    observability: ObservabilityConfig | None,
-    flat: dict[str, Any],
-) -> dict[str, Any]:
-    """Merge precedence ``flat kwarg > config object > default``.
-
-    Each ``flat`` value is either a real user-supplied value or the
-    private :data:`_UNSET` sentinel.  When sentinel, the value falls
-    through to ``resilience``/``observability`` (taken from the
-    explicit kwarg if provided, otherwise from ``runtime``), and from
-    there to the documented default in :data:`_RUNTIME_KNOB_DEFAULTS`.
-
-    Pure function — no side effects, no logging, no warnings — so it's
-    trivially testable in isolation from ``Agent.__init__``.
-
-    Returns
-    -------
-    dict[str, Any]
-        Same keys as :data:`_RUNTIME_KNOB_DEFAULTS`; values resolved.
-    """
-    res = resilience if resilience is not None else (runtime.resilience if runtime else None)
-    obs = observability if observability is not None else (runtime.observability if runtime else None)
-    sources = {"resilience": res, "observability": obs}
-
-    resolved: dict[str, Any] = {}
-    for key, (default, src_name) in _RUNTIME_KNOB_DEFAULTS.items():
-        v = flat.get(key, _UNSET)
-        if v is _UNSET:
-            src_obj = sources[src_name]
-            v = getattr(src_obj, key, default) if src_obj is not None else default
-        resolved[key] = v
-    return resolved
 
 
 class Agent:
@@ -180,10 +112,10 @@ class Agent:
         guard: Any | None = None,
         verify: Agent | None = None,
         max_verify: int = 3,
-        name: str | None = _UNSET,
-        description: str | None = _UNSET,
-        session: Any | None = _UNSET,
-        verbose: bool = _UNSET,  # type: ignore[assignment]
+        name: str | None = None,
+        description: str | None = None,
+        session: Any | None = None,
+        verbose: bool = False,
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
@@ -197,94 +129,36 @@ class Agent:
         # to gate the pre-built engine path so callers can't silently bypass
         # the LLMEngine.__init__ check by passing engine= separately.
         allow_dangerous_native_tools: bool = False,
-        # Structured alternatives to the flat resilience / observability
-        # kwargs below.  Precedence: flat kwarg > config object > default.
-        # ``Agent(resilience=cfg, timeout=30.0)`` uses the config's
-        # retries/cache but overrides its timeout.
-        runtime: AgentRuntimeConfig | None = None,
-        resilience: ResilienceConfig | None = None,
-        observability: ObservabilityConfig | None = None,
-        # --- Resilience kwargs (also reachable via resilience=...) ---
+        # --- Resilience kwargs ---
         # Optional post-parse validator.  Runs on the structured ``payload``
         # after schema validation; may raise ValueError to force a
         # retry-with-feedback loop (up to ``max_output_retries``).
-        output_validator: Callable[[Any], Any] | None = _UNSET,
-        max_output_retries: int = _UNSET,  # type: ignore[assignment]
-        # Total deadline (seconds) for ``run()``.  Applied at the
-        # top-level Agent boundary so a hung tool, runaway tool loop,
-        # or slow provider can't block a caller forever.  ``None``
-        # disables the deadline (backwards-compatible default).
-        timeout: float | None = _UNSET,
-        # Convenience shortcuts for provider retry/backoff — forwarded to
-        # LLMEngine when the engine is auto-created from a model string.
-        # Ignored when ``engine=`` is supplied explicitly (use LLMEngine
-        # directly to configure retries on a pre-built engine).
-        max_retries: int = _UNSET,  # type: ignore[assignment]
-        retry_delay: float = _UNSET,  # type: ignore[assignment]
+        output_validator: Callable[[Any], Any] | None = None,
+        max_output_retries: int = 2,
+        # Total deadline (seconds) for ``run()``.  ``None`` disables.
+        timeout: float | None = None,
+        # Provider retry/backoff — forwarded to LLMEngine when the engine
+        # is auto-created from a model string.  Ignored when ``engine=``
+        # is supplied explicitly (configure on ``LLMEngine`` directly).
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
         # Fallback agent tried when the primary engine returns an error.
-        # Useful for provider redundancy: Agent("claude-opus-4-7", fallback=Agent("gpt-4o")).
-        # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
-        # same envelope, so it should be configured with compatible output= / tools=.
-        fallback: Agent | None = _UNSET,
+        # ``Agent("claude-opus-4-7", fallback=Agent("gpt-4o"))``.
+        fallback: Agent | None = None,
         # Prompt caching — when True, marks the static prefix (system
         # prompt + tools) as cacheable so providers that support it
         # (Anthropic today; OpenAI/DeepSeek auto-cache; Google uses a
         # different API) serve cache hits at ~10% of input token cost.
-        # Forwarded to LLMEngine when the engine is auto-created from a
-        # model string.  Ignored when ``engine=`` is supplied explicitly
-        # (configure ``LLMEngine(cache=...)`` directly in that case).
-        # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
-        cache: bool | Any = _UNSET,
+        # Pass a ``CacheConfig(ttl="1h")`` instance for the longer
+        # Anthropic TTL.  Forwarded to LLMEngine when the engine is
+        # auto-created.  Ignored when ``engine=`` is supplied explicitly
+        # (configure ``LLMEngine(cache=...)`` directly).
+        cache: bool | Any = False,
     ) -> None:
-        # Compute _name_explicit BEFORE _resolve_runtime_kwargs so we preserve
-        # the distinction between "user chose a name" and "name fell from model
-        # default".  After resolution the two are indistinguishable.
-        _flat_name_given = name is not _UNSET and name is not None and str(name).strip() != ""
-        _obs_name_given = False
-        _obs_src = (
-            observability
-            if observability is not None
-            else (getattr(runtime, "observability", None) if runtime is not None else None)
-        )
-        if _obs_src is not None:
-            _obs_name_val = getattr(_obs_src, "name", None)
-            if _obs_name_val is not None and str(_obs_name_val).strip() != "":
-                _obs_name_given = True
-        _name_explicit_flag: bool = _flat_name_given or _obs_name_given
-
-        # Merge config objects into flat kwargs via the centralised
-        # precedence helper.  See ``_resolve_runtime_kwargs`` for the
-        # contract; the table-driven approach keeps this block
-        # constant-size as we add new shareable knobs.
-        _resolved = _resolve_runtime_kwargs(
-            runtime=runtime,
-            resilience=resilience,
-            observability=observability,
-            flat={
-                "timeout": timeout,
-                "max_retries": max_retries,
-                "retry_delay": retry_delay,
-                "cache": cache,
-                "max_output_retries": max_output_retries,
-                "output_validator": output_validator,
-                "fallback": fallback,
-                "verbose": verbose,
-                "session": session,
-                "name": name,
-                "description": description,
-            },
-        )
-        timeout = _resolved["timeout"]
-        max_retries = _resolved["max_retries"]
-        retry_delay = _resolved["retry_delay"]
-        cache = _resolved["cache"]
-        max_output_retries = _resolved["max_output_retries"]
-        output_validator = _resolved["output_validator"]
-        fallback = _resolved["fallback"]
-        verbose = _resolved["verbose"]
-        session = _resolved["session"]
-        name = _resolved["name"]
-        description = _resolved["description"]
+        # ``name`` is "explicit" when the caller supplied a real string
+        # value (not None / blank).  Used downstream to require a name
+        # when the agent is later passed in ``tools=[...]``.
+        _name_explicit_flag: bool = name is not None and str(name).strip() != ""
         from lazybridge.engines.llm import LLMEngine
 
         # Canonical: Agent(engine=LLMEngine(...)) or Agent(engine=Plan(...))
@@ -371,9 +245,9 @@ class Agent:
                 fb = getattr(fb, "fallback", None)
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
-        #: True when the caller supplied an explicit ``name=`` (or an
-        #: ``ObservabilityConfig.name``).  False when the name was derived
-        #: from the model string or left as the ``"agent"`` default.
+        #: True when the caller supplied an explicit ``name=``.  False
+        #: when the name was derived from the model string or left as
+        #: the ``"agent"`` default.
         #: Used by ``build_tool_map`` and the ``tool()`` factory to require
         #: an explicit identity before an Agent is used as a sub-agent tool.
         self._name_explicit: bool = _name_explicit_flag

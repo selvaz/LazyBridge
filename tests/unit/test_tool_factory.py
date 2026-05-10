@@ -113,12 +113,13 @@ def test_name_explicit_false_when_only_model_string():
     assert a._name_explicit is False
 
 
-def test_name_explicit_true_with_observability_config():
-    from lazybridge.core.types import ObservabilityConfig
-
-    obs = ObservabilityConfig(name="obs-agent")
-    a = Agent(engine=_FakeEngine(), observability=obs)
+def test_name_explicit_true_with_explicit_kwarg():
+    """``ObservabilityConfig`` was deleted in 0.8.0; the canonical way to
+    name an agent is the flat ``name=`` kwarg.  This test locks the
+    explicit-name flag against the post-0.8.0 surface."""
+    a = Agent(engine=_FakeEngine(), name="obs-agent")
     assert a._name_explicit is True
+    assert a.name == "obs-agent"
 
 
 # ---------------------------------------------------------------------------

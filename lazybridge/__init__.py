@@ -112,13 +112,10 @@ from lazybridge.agent import Agent, ParallelAgent
 # Provider entry points
 from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError
 from lazybridge.core.types import (
-    AgentRuntimeConfig,
     AudioContent,
     CacheConfig,
     ImageContent,
     NativeTool,
-    ObservabilityConfig,
-    ResilienceConfig,
 )
 
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
@@ -224,11 +221,8 @@ __all__ = [
     # Multimodal content blocks
     "ImageContent",
     "AudioContent",
-    # Shareable runtime configs
-    "AgentRuntimeConfig",
+    # Cache configuration (kept — internal repr for LLMEngine cache)
     "CacheConfig",
-    "ObservabilityConfig",
-    "ResilienceConfig",
     # Testing
     "MockAgent",
 ]
