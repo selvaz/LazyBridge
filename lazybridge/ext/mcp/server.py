@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import time
-import warnings
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -259,24 +258,24 @@ class MCP:
     ) -> MCPServer:
         """Build an MCP server bound to a stdio (subprocess) transport.
 
-        Unlike :meth:`http`, ``allow=`` is **not required** here: stdio
-        servers are subprocesses you spawn yourself, so the trust model
-        is "you control what runs".  When neither ``allow=`` nor
-        ``deny=`` is given a one-shot ``UserWarning`` is emitted as a
-        gentle reminder that *every* tool the subprocess advertises
-        will be visible to the LLM — pass ``allow=["*"]`` to silence
-        the warning once you've audited the surface.
+        ``allow=`` (or ``deny=``) is **required** since 0.7.9 — same
+        deny-by-default posture as :meth:`http`.  The 0.7-era warn-and-
+        proceed default exposed every advertised tool to the LLM
+        silently; that's a non-trivial blast radius for filesystem /
+        git / shell MCP servers, so we now fail at construction.  Pass
+        ``allow=["*"]`` to opt every advertised tool in explicitly
+        after auditing the surface.
         """
         if allow is None and deny is None:
-            warnings.warn(
-                f"MCP.stdio({name!r}, command={command!r}) was called without an "
-                "explicit allow= or deny= list, so every tool the subprocess "
-                "advertises will be exposed to the LLM.  This is fine when you "
-                "fully control the subprocess, but pass allow=['tool_a', ...] "
-                "to restrict the surface, allow=['*'] to opt in explicitly, or "
-                "deny=['dangerous_*'] to block specific patterns.",
-                UserWarning,
-                stacklevel=2,
+            raise ValueError(
+                f"MCP.stdio({name!r}, command={command!r}) requires an explicit\n"
+                f"  allow=[...] or deny=[...] filter (deny-by-default since 0.7.9).\n"
+                f"  Pass allow=['*'] to opt every advertised tool in after auditing\n"
+                f"  the surface, or pass an explicit allow / deny list of fnmatch\n"
+                f"  globs (e.g. allow=['fs.read_*', 'fs.list_*']).\n"
+                f"  The 0.7-era warn-and-proceed default was unsafe for filesystem /\n"
+                f"  git / shell MCP servers — the LLM could invoke any tool the\n"
+                f"  subprocess advertised."
             )
         from lazybridge.ext.mcp.transports import StdioTransport
 

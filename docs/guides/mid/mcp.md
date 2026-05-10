@@ -22,8 +22,8 @@ MCP.stdio(
     env=None,                      # dict[str, str]
     namespace=True,                # prepend "<name>." to each MCP tool name
     prefix=None,                   # custom prefix instead of the server name
-    allow=None,                    # iterable of fnmatch globs against namespaced names
-    deny=None,                     # iterable of fnmatch globs
+    allow=None,                    # REQUIRED — iterable of fnmatch globs; deny-by-default
+    deny=None,                     # OR an explicit deny list; one of allow/deny must be set
     cache_tools_ttl=60.0,          # tool-list cache lifetime in seconds; None = never expire
 )
 
@@ -173,14 +173,12 @@ async def use_fs():
 
 ## Pitfalls
 
-- **`MCP.http` is deny-by-default.** Omitting `allow=` raises
-  `ValueError`. Remote servers are untrusted by default — pass
-  `allow=["*"]` only after auditing the catalogue.
-- **`MCP.stdio` is audit-on-init.** When both `allow=` and `deny=`
-  are omitted you get a one-shot `UserWarning` reminding you that
-  every tool the subprocess advertises is exposed to the LLM. Pass
-  `allow=["*"]` after auditing to silence the warning, or restrict
-  with a glob.
+- **Both `MCP.http` and `MCP.stdio` are deny-by-default.** Omitting
+  both `allow=` and `deny=` raises `ValueError` at construction
+  (since 0.7.9 — the pre-fix `stdio` default warned and proceeded,
+  which was unsafe for filesystem / git / shell MCP servers).  Pass
+  `allow=["*"]` only after auditing the advertised tool surface,
+  or restrict with a glob list.
 - **Namespaced names in glob patterns.** `allow=` / `deny=` match
   the *full* namespaced name. Write `"github.delete_*"`, not
   `"delete_*"` — the latter never matches when `namespace=True`.

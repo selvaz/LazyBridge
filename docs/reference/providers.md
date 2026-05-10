@@ -27,6 +27,18 @@ full method list. Quick reference:
 | `LLMEngine.register_provider_rule(pattern, provider, *, kind="contains" | "startswith")` | Substring / prefix routing; new rules **prepend** the rule list |
 | `LLMEngine.set_default_provider(provider | None)` | Fallback when no rule matches; `None` (the 0.7.9 default) makes unknown-model strings raise ``ValueError`` instead of silently routing to Anthropic |
 
+## Capability matrix
+
+<!-- PROVIDER_CAPABILITY_TABLE -->
+
+The table above is generated at docs build time from
+[`lazybridge.matrix.provider_capabilities()`](../reference/matrix.md)
+which in turn reads the ``ClassVar`` flags on each provider class.
+Update the matrix by editing the provider's ``supports_streaming``
+/ ``supports_structured_output`` / ``supports_thinking`` /
+``supported_native_tools`` declarations — the table re-renders on the
+next ``mkdocs build``.
+
 ## stop_reason normalisation
 
 Each provider exposes its own raw finish-reason vocabulary; LazyBridge

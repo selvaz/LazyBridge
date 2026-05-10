@@ -197,3 +197,13 @@ nav:
       - Overview: for-llms/index.md
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
+
+# ---------------------------------------------------------------------------
+# Build-time hooks — generated content
+# ---------------------------------------------------------------------------
+# `mkdocs_provider_table` replaces the `<!-- PROVIDER_CAPABILITY_TABLE -->`
+# marker on any page with a freshly-rendered support matrix sourced from
+# `lazybridge.matrix.provider_capabilities()`.  Keeps README / providers
+# docs from drifting when a provider classvar changes.
+hooks:
+  - tools/mkdocs_provider_table.py

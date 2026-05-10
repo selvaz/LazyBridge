@@ -56,7 +56,9 @@ agent = Agent(
         tool(plain_function, name="custom", strict=True),  # 2. function + overrides via factory
         other_agent,                                 # 3. sub-agent (auto-wrapped)
         other_agent.as_tool(verify=judge),           # 4. sub-agent + judge/retry
-        MCP.stdio("fs", "npx", ["@modelcontextprotocol/server-filesystem", "."]),  # 5. MCPServer
+        MCP.stdio("fs", command="npx",
+                  args=["@modelcontextprotocol/server-filesystem", "."],
+                  allow=["fs.read_*", "fs.list_*"]),  # 5. MCPServer (allow= required)
         *read_docs_tools(),                          # 6. external_tools kit (list[Tool])
     ],
 )
