@@ -46,6 +46,7 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 from lazybridge.core.types import (
     CompletionRequest,
@@ -202,8 +203,8 @@ class BaseProvider(ABC):
         model: str | None = None,
         *,
         strict_native_tools: bool | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialise the provider.
 
         Parameters
@@ -235,7 +236,7 @@ class BaseProvider(ABC):
             self.strict_native_tools = bool(strict_native_tools)
         self._init_client(**kwargs)
 
-    def _init_client(self, **kwargs) -> None:  # noqa: B027
+    def _init_client(self, **kwargs: Any) -> None:  # noqa: B027
         """Initialise the provider SDK client.
 
         Override this to create your SDK client and store it on ``self``::

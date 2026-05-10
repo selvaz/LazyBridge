@@ -115,7 +115,8 @@ def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
         _validate_step_name(name, context="from_parallel_all sentinel")
         return from_parallel_all(name)
     if kind == "literal":
-        return ref["value"]
+        value = ref["value"]
+        return value if isinstance(value, str) else str(value)
     raise ValueError(
         f"Plan sentinel deserialisation: unknown kind={kind!r} in ref={ref!r}. "
         f"Expected one of: from_prev, from_start, from_step, from_parallel, "

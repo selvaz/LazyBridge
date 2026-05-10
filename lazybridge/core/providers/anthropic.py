@@ -24,7 +24,7 @@ from lazybridge.core.types import (
 try:
     import anthropic as _anthropic
 except ImportError:
-    _anthropic = None  # type: ignore
+    _anthropic = None
 
 
 # Maps NativeTool enum → Anthropic tool type strings
@@ -217,7 +217,7 @@ class AnthropicProvider(BaseProvider):
             return 8_192
         return 8_192
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs: Any) -> None:
         # Validate caller-supplied override knobs FIRST — even if the SDK
         # isn't installed (so the constructor will fail on the next
         # check), surfacing a typo'd key here helps a user diagnose
@@ -244,7 +244,7 @@ class AnthropicProvider(BaseProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _messages_to_anthropic(self, request: CompletionRequest) -> list[dict]:
+    def _messages_to_anthropic(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Convert unified Messages to Anthropic format."""
         result: list[dict[str, Any]] = []
         for msg in request.messages:
@@ -345,7 +345,7 @@ class AnthropicProvider(BaseProvider):
                 return msg.to_text()
         return None
 
-    def _build_tools(self, request: CompletionRequest) -> list[dict]:
+    def _build_tools(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Build tool definitions list for Anthropic API."""
         tools = []
         for t in request.tools:
@@ -442,7 +442,7 @@ class AnthropicProvider(BaseProvider):
     def _beta_kwargs(self, betas: list[str]) -> dict[str, Any]:
         return {"betas": betas} if betas else {}
 
-    def _build_thinking(self, request: CompletionRequest) -> dict | None:
+    def _build_thinking(self, request: CompletionRequest) -> dict[str, Any] | None:
         if not request.thinking or not request.thinking.enabled:
             return None
         model = self._resolve_model(request)

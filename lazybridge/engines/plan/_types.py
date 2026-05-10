@@ -164,7 +164,7 @@ class Step:
 @dataclass
 class StepResult:
     step_name: str
-    envelope: Envelope
+    envelope: Envelope[Any]
     ts: float = field(default_factory=time.time)
 
 

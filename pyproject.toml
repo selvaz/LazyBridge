@@ -150,6 +150,29 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 warn_unused_ignores = true
 
+# Phase-6 strict tier — engines + provider adapters.  All bare
+# generics now carry explicit type args (``Envelope[Any]``,
+# ``list[Any]``, ``dict[str, Any]``), every public-ish helper has a
+# return annotation, and stale ``# type: ignore`` comments have been
+# stripped.  Strict mode catches: ``no-any-return``,
+# ``no-untyped-def``, ``type-arg``, ``unused-ignore``, and the rest
+# of the strict-mode rule set.  Run with::
+#
+#     mypy lazybridge/engines/ lazybridge/core/providers/ --strict
+#
+# to validate this tier in isolation.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.engines.*",
+    "lazybridge.core.providers.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_return_any = true
+
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------

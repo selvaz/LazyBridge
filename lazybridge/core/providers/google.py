@@ -59,8 +59,8 @@ try:
     from google import genai as _genai
     from google.genai import types as _gtypes
 except Exception:
-    _genai = None  # type: ignore
-    _gtypes = None  # type: ignore
+    _genai = None
+    _gtypes = None
 
 _logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class GoogleProvider(BaseProvider):
         }
     )
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs: Any) -> None:
         if _genai is None:
             raise ImportError("google-genai package not installed. Run: pip install google-genai")
         key = self.api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -366,7 +366,7 @@ class GoogleProvider(BaseProvider):
                 _gtypes.FunctionDeclaration(
                     name=t.name,
                     description=t.description,
-                    parameters=t.parameters,  # type: ignore[arg-type]
+                    parameters=t.parameters,
                 )
             )
         return decls
@@ -489,7 +489,7 @@ class GoogleProvider(BaseProvider):
                 "xhigh": "high",
                 "max": "high",
             }.get(request.thinking.effort, "high")
-            return _gtypes.ThinkingConfig(thinking_level=level)  # type: ignore[arg-type]
+            return _gtypes.ThinkingConfig(thinking_level=level)
         # budget=-1 → model decides automatically; 0 → no thinking
         budget = request.thinking.budget_tokens if request.thinking.budget_tokens is not None else -1
         return _gtypes.ThinkingConfig(thinking_budget=budget)
@@ -541,7 +541,7 @@ class GoogleProvider(BaseProvider):
             try:
                 kwargs["tool_config"] = _gtypes.ToolConfig(
                     function_calling_config=_gtypes.FunctionCallingConfig(
-                        include_server_side_tool_invocations=True,  # type: ignore[call-arg]
+                        include_server_side_tool_invocations=True,
                     )
                 )
             except Exception:
@@ -754,7 +754,7 @@ class GoogleProvider(BaseProvider):
 
         last_chunk = None
         text_accum = ""
-        tool_call_accum: dict[str, dict] = {}  # call_id → dict; deduplicates repeated parts
+        tool_call_accum: dict[str, dict[str, Any]] = {}  # call_id → dict; deduplicates repeated parts
         for chunk in self._client.models.generate_content_stream(
             model=model,
             contents=contents,
@@ -763,7 +763,7 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            candidate = chunk.candidates[0]  # type: ignore[index]
+            candidate = chunk.candidates[0]
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
@@ -801,7 +801,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         stream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
+            last_candidate = last_chunk.candidates[0]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""
@@ -856,7 +856,7 @@ class GoogleProvider(BaseProvider):
 
         last_chunk = None
         text_accum = ""
-        tool_call_accum: dict[str, dict] = {}  # call_id → dict; deduplicates repeated parts
+        tool_call_accum: dict[str, dict[str, Any]] = {}  # call_id → dict; deduplicates repeated parts
         async for chunk in await self._client.aio.models.generate_content_stream(
             model=model,
             contents=contents,
@@ -865,7 +865,7 @@ class GoogleProvider(BaseProvider):
             last_chunk = chunk
             if not chunk.candidates:
                 continue
-            candidate = chunk.candidates[0]  # type: ignore[index]
+            candidate = chunk.candidates[0]
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
@@ -902,7 +902,7 @@ class GoogleProvider(BaseProvider):
         search_entry_point: str | None = None
         astream_stop_reason = "end_turn"
         if last_chunk is not None and getattr(last_chunk, "candidates", None):
-            last_candidate = last_chunk.candidates[0]  # type: ignore[index]
+            last_candidate = last_chunk.candidates[0]
             grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(last_candidate)
             _fr = getattr(last_candidate, "finish_reason", None)
             _fr_name = getattr(_fr, "name", str(_fr)) if _fr is not None else ""

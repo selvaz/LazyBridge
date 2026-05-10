@@ -8,7 +8,7 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.executor import Executor
 from lazybridge.core.types import (
@@ -209,8 +209,11 @@ class LLMEngine:
         # ``tool_choice="parallel"`` was deprecated in 0.7.0 and removed in
         # 0.7.9.  Concurrent tool execution is the default and cannot be
         # disabled; the model decides how many tools to call per turn and
-        # they run via asyncio.gather.
-        if tool_choice == "parallel":
+        # they run via asyncio.gather.  Defensive runtime check for the
+        # JSON-deserialisation case (the Literal annotation already covers
+        # static callers); cast through Any so mypy --strict doesn't flag
+        # the comparison as non-overlapping.
+        if cast(Any, tool_choice) == "parallel":
             raise ValueError(
                 "LLMEngine(tool_choice='parallel') was removed in 0.7.9.  "
                 "Concurrent tool execution is now the default and cannot be "
@@ -453,7 +456,7 @@ class LLMEngine:
 
     async def run(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
@@ -461,7 +464,7 @@ class LLMEngine:
         session: Session | None,
         store: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
         plan_state: Any | None = None,  # accepted-and-ignored — Plan checkpoint surface
-    ) -> Envelope:
+    ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
         agent_name = getattr(self, "_agent_name", "agent")
@@ -512,7 +515,7 @@ class LLMEngine:
     # Multimodal user-message construction
     # ------------------------------------------------------------------
 
-    def _build_user_content(self, task_text: str, env: Envelope) -> str | list[Any]:
+    def _build_user_content(self, task_text: str, env: Envelope[Any]) -> str | list[Any]:
         """Build the user-message content payload for ``env``.
 
         Returns either:
@@ -633,7 +636,7 @@ class LLMEngine:
 
     async def _loop(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
@@ -642,7 +645,7 @@ class LLMEngine:
         run_id: str,
         # When truthy, yield str tokens instead of building Envelope
         _stream_sink: asyncio.Queue[str | None] | None = None,
-    ) -> Envelope:
+    ) -> Envelope[Any]:
 
         from lazybridge.core.types import TextContent, ThinkingConfig, ToolResultContent, ToolUseContent
 
@@ -1082,7 +1085,7 @@ class LLMEngine:
 
     async def stream(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,

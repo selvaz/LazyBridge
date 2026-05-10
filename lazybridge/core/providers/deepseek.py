@@ -125,7 +125,7 @@ class DeepSeekProvider(OpenAIProvider):
             return 64_000
         return 8_000
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs: Any) -> None:
         import os
 
         try:
@@ -166,7 +166,7 @@ class DeepSeekProvider(OpenAIProvider):
             UserWarning,
             stacklevel=4,
         )
-        self._structured_drop_warned = True  # type: ignore[attr-defined]
+        self._structured_drop_warned = True
 
     def _is_reasoning_model(self, model: str) -> bool:
         return model in _REASONING_MODELS
@@ -193,7 +193,7 @@ class DeepSeekProvider(OpenAIProvider):
                 )
         return request
 
-    def _apply_thinking_params(self, params: dict, model: str, request: CompletionRequest) -> None:
+    def _apply_thinking_params(self, params: dict[str, Any], model: str, request: CompletionRequest) -> None:
         """Mutate params in-place to control thinking mode on V4 models.
 
         deepseek-v4-flash and deepseek-v4-pro activate thinking by default
@@ -219,7 +219,7 @@ class DeepSeekProvider(OpenAIProvider):
     # Override: extract reasoning_content from DeepSeek responses
     # ------------------------------------------------------------------
 
-    def _parse_deepseek_chat_response(self, response, model: str) -> CompletionResponse:
+    def _parse_deepseek_chat_response(self, response: Any, model: str) -> CompletionResponse:
         if not response.choices:
             _logger.warning("DeepSeek response has no choices (content filter, quota, or API error).")
             usage = UsageStats(
@@ -266,7 +266,7 @@ class DeepSeekProvider(OpenAIProvider):
         )
 
     @staticmethod
-    def _ensure_json_word_in_prompt(params: dict, schema: Any = None) -> None:
+    def _ensure_json_word_in_prompt(params: dict[str, Any], schema: Any = None) -> None:
         """DeepSeek requires the literal word 'json' somewhere in the prompt
         when response_format=json_object is used, or the API returns 400.
         Also injects the expected JSON schema so the model produces the right shape.
@@ -285,7 +285,7 @@ class DeepSeekProvider(OpenAIProvider):
                 schema_str = str(schema)
             instruction = f"Respond with a valid JSON object matching this schema exactly:\n```json\n{schema_str}\n```"
         else:
-            messages: list[dict] = params.get("messages", [])
+            messages: list[dict[str, Any]] = params.get("messages", [])
             has_json = any("json" in str(m.get("content", "")).lower() for m in messages)
             if has_json:
                 return
@@ -353,7 +353,7 @@ class DeepSeekProvider(OpenAIProvider):
         self._apply_thinking_params(params, model, request)
 
         text_accum = ""
-        tool_call_accum: dict[int, dict] = {}
+        tool_call_accum: dict[int, dict[str, Any]] = {}
         for chunk in self._client.chat.completions.create(**params):
             choice = chunk.choices[0] if chunk.choices else None
             if choice:
@@ -450,7 +450,7 @@ class DeepSeekProvider(OpenAIProvider):
         self._apply_thinking_params(params, model, request)
 
         text_accum = ""
-        tool_call_accum: dict[int, dict] = {}
+        tool_call_accum: dict[int, dict[str, Any]] = {}
         async for chunk in await self._async_client.chat.completions.create(**params):
             choice = chunk.choices[0] if chunk.choices else None
             if choice:

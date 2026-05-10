@@ -32,7 +32,7 @@ _logger = logging.getLogger(__name__)
 try:
     import openai as _openai
 except ImportError:
-    _openai = None  # type: ignore
+    _openai = None
 
 # Reasoning models that use `reasoning_effort` instead of `temperature`
 _REASONING_MODELS = frozenset(
@@ -58,7 +58,7 @@ _REASONING_MODELS = frozenset(
 # Responses-API shapes if you need them today; first-class wiring is a
 # separate task that has to introduce a richer ``NativeToolConfig``
 # type.
-_RESPONSES_NATIVE_MAP: dict[NativeTool, dict] = {
+_RESPONSES_NATIVE_MAP: dict[NativeTool, dict[str, Any]] = {
     NativeTool.WEB_SEARCH: {"type": "web_search_preview"},
     NativeTool.CODE_EXECUTION: {"type": "code_interpreter"},
     NativeTool.FILE_SEARCH: {"type": "file_search"},
@@ -271,7 +271,7 @@ class OpenAIProvider(BaseProvider):
             return 100_000  # o1, o1-pro, o3, o3-mini, o4-mini
         return 16_384
 
-    def _init_client(self, **kwargs) -> None:
+    def _init_client(self, **kwargs: Any) -> None:
         if _openai is None:
             raise ImportError("openai package not installed. Run: pip install openai")
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
@@ -318,7 +318,7 @@ class OpenAIProvider(BaseProvider):
                 return usage
         return usage
 
-    def _messages_to_openai(self, request: CompletionRequest) -> list[dict]:
+    def _messages_to_openai(self, request: CompletionRequest) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         # Prepend system prompt as system message if provided
         if request.system:
@@ -438,7 +438,7 @@ class OpenAIProvider(BaseProvider):
                     )
         return messages
 
-    def _build_function_tools(self, request: CompletionRequest) -> list[dict]:
+    def _build_function_tools(self, request: CompletionRequest) -> list[dict[str, Any]]:
         tools = []
         for t in request.tools:
             tool_def: dict[str, Any] = {
@@ -492,7 +492,7 @@ class OpenAIProvider(BaseProvider):
 
         return params
 
-    def _messages_to_responses_input(self, request: CompletionRequest) -> list[dict]:
+    def _messages_to_responses_input(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Convert conversation history to Responses API input format.
 
         The Responses API uses a flat list where tool calls and results are
@@ -522,7 +522,7 @@ class OpenAIProvider(BaseProvider):
                 items.append({"role": msg.role.value, "content": msg.content})
                 continue
 
-            text_parts: list[dict] = []
+            text_parts: list[dict[str, Any]] = []
             for block in msg.content:
                 if isinstance(block, TextContent):
                     text_parts.append({"type": "input_text", "text": block.text})
@@ -599,7 +599,7 @@ class OpenAIProvider(BaseProvider):
         model = self._resolve_model(request)
         native = self._check_native_tools(request.native_tools)
 
-        tools: list[dict] = [_RESPONSES_NATIVE_MAP[nt] for nt in native]
+        tools: list[dict[str, Any]] = [_RESPONSES_NATIVE_MAP[nt] for nt in native]
         # User-defined function tools (flattened format required by Responses API)
         for t in request.tools:
             tools.append(
@@ -760,7 +760,7 @@ class OpenAIProvider(BaseProvider):
         return sources
 
     @staticmethod
-    def _responses_stop_reason(response: Any, tool_calls: list) -> str:
+    def _responses_stop_reason(response: Any, tool_calls: list[Any]) -> str:
         """Map OpenAI Responses API status/stop fields to a normalised stop_reason."""
         if tool_calls:
             return "tool_use"
@@ -771,7 +771,7 @@ class OpenAIProvider(BaseProvider):
             return "error"
         return "end_turn"
 
-    def _stream_responses_api(self, params: dict) -> Iterator[StreamChunk]:
+    def _stream_responses_api(self, params: dict[str, Any]) -> Iterator[StreamChunk]:
         """Stream from the Responses API with parsing of official event types."""
         fc_names: dict[str, str] = {}  # call_id → function name
         fc_args: dict[str, str] = {}  # call_id → accumulated args JSON string
@@ -839,7 +839,7 @@ class OpenAIProvider(BaseProvider):
             grounding_sources=grounding_sources,
         )
 
-    async def _astream_responses_api(self, params: dict) -> AsyncIterator[StreamChunk]:
+    async def _astream_responses_api(self, params: dict[str, Any]) -> AsyncIterator[StreamChunk]:
         """Async version of _stream_responses_api."""
         fc_names: dict[str, str] = {}
         fc_args: dict[str, str] = {}
@@ -989,7 +989,7 @@ class OpenAIProvider(BaseProvider):
             params["response_format"] = {"type": "json_object"}
 
         text_accum = ""
-        tool_call_accum: dict[int, dict] = {}
+        tool_call_accum: dict[int, dict[str, Any]] = {}
         final_chunk: StreamChunk | None = None
         final_usage: UsageStats | None = None
 
@@ -999,8 +999,8 @@ class OpenAIProvider(BaseProvider):
             # delta, but reconnect / multi-choice responses can emit the
             # same id under different indices — merge the ``args`` in
             # that case so we don't invent phantom duplicate calls.
-            by_id: dict[str, dict] = {}
-            ordered: list[dict] = []
+            by_id: dict[str, dict[str, Any]] = {}
+            ordered: list[dict[str, Any]] = []
             for v in tool_call_accum.values():
                 key = v["id"] or f"__idx_{id(v)}"
                 if key in by_id:
@@ -1133,7 +1133,7 @@ class OpenAIProvider(BaseProvider):
             params["response_format"] = {"type": "json_object"}
 
         text_accum = ""
-        tool_call_accum: dict[int, dict] = {}
+        tool_call_accum: dict[int, dict[str, Any]] = {}
         final_chunk: StreamChunk | None = None
         final_usage: UsageStats | None = None
         async for chunk in await self._async_client.chat.completions.create(**params):
