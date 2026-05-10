@@ -9,12 +9,12 @@ doesn't host or implement them.
 ## Signature
 
 ```python
-from lazybridge import Agent, LLMEngine, NativeTool
+from lazybridge import Agent, LLMEngine, NativeTool, tool
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
     native_tools=[NativeTool.WEB_SEARCH, NativeTool.CODE_EXECUTION],
-    tools=[my_function],           # native and custom tools coexist
+    tools=[tool(my_function, name="my_function")],   # native + custom coexist
 )
 ```
 

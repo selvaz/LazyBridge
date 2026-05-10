@@ -363,6 +363,19 @@ class LLMEngine:
         cls._PROVIDER_DEFAULT = provider
 
     @classmethod
+    def provider_aliases(cls) -> dict[str, str]:
+        """Return a snapshot of the current model-string → provider alias map.
+
+        Callers that need to validate a user-supplied model string (or
+        document the accepted aliases) should read from this dict
+        rather than reach into ``_PROVIDER_ALIASES`` directly — the
+        return value is a fresh copy, so accidental mutation can't
+        affect the framework's routing.  The set is also surfaced in
+        :data:`lazybridge.PROVIDER_ALIASES` for top-level convenience.
+        """
+        return dict(cls._PROVIDER_ALIASES)
+
+    @classmethod
     def register_provider_alias(cls, alias: str, provider: str) -> None:
         """Register an exact-match model-string → provider alias.
 

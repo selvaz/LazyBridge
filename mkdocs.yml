@@ -196,6 +196,7 @@ nav:
   - For LLM assistants:
       - Overview: for-llms/index.md
       - Codegen contract: for-llms/codegen-contract.md
+      - Error-recovery cheat-sheet: for-llms/error-recovery.md
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
 

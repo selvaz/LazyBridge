@@ -95,6 +95,59 @@ native = Agent(
 )
 ```
 
+## Extension import map
+
+LazyBridge's framework extensions live under `lazybridge.ext.*`; the
+top-level package only re-exports core primitives. Reach for these
+imports when you need the corresponding capability:
+
+| Capability | Import |
+|---|---|
+| Human-in-the-loop CLI / web UI | `from lazybridge.ext.hil import HumanEngine, human_agent` |
+| Supervisor pattern | `from lazybridge.ext.hil import SupervisorEngine, supervisor_agent` |
+| MCP servers (stdio / HTTP) | `from lazybridge.ext.mcp import MCP` |
+| OpenTelemetry exporter | `from lazybridge.ext.otel import OTelExporter` |
+| Eval harness | `from lazybridge.ext.evals import EvalSuite, EvalCase, llm_judge` |
+| Live visualizer | `from lazybridge.ext.viz import Visualizer` |
+| Blackboard planner | `from lazybridge.ext.planners import BlackboardPlanner` |
+| HTTP gateway (`lazybridge serve`) | `from lazybridge.ext.gateway import build_app` |
+
+Reporting (`lazybridge_reports.*`) lives in the sibling package
+[lazybridge-reports](https://github.com/selvaz/LazyReport) — install
+separately, do **not** look for it under `lazybridge.external_tools`.
+
+## Production-safe defaults
+
+Copy-paste this snippet whenever you need bounded behaviour. Each
+knob has a sensible default; explicit values make the agent
+resistant to runaway requests, infinite tool loops, and silent stream
+stalls:
+
+```python
+from lazybridge import Agent, LLMEngine
+
+engine = LLMEngine(
+    "claude-opus-4-7",
+    max_turns=8,             # cap the inner LLM/tool loop
+    max_retries=3,           # transient-error retries (exponential backoff)
+    request_timeout=60,      # whole-request wall clock (seconds)
+    tool_timeout=30,         # per-tool wall clock (seconds)
+    max_parallel_tools=4,    # bound on concurrent tool calls
+    stream_idle_timeout=90,  # raise StreamStallError if no token in 90s
+)
+
+agent = Agent(
+    engine=engine,
+    name="my_agent",
+    tools=[...],
+    output_type=...,         # optional Pydantic model for structured output
+)
+```
+
+For provider-side dangerous tools (`CODE_EXECUTION`, `COMPUTER_USE`)
+also pass `allow_dangerous_native_tools=True` on the Agent — the flag
+is intentionally noisy.
+
 ## Canonical patterns
 
 The shortest correct shape for each common request:

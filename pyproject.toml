@@ -165,6 +165,8 @@ warn_unused_ignores = true
 module = [
     "lazybridge.engines.*",
     "lazybridge.core.providers.*",
+    "lazybridge.core.types",
+    "lazybridge.core.tool_schema",
 ]
 disallow_untyped_defs = true
 check_untyped_defs = true

@@ -121,6 +121,15 @@ from lazybridge.core.types import (
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
 # live under ``lazybridge.ext.{hil,evals,otel}``).
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
+
+#: Snapshot of the model-string → provider routing aliases recognised
+#: by ``LLMEngine`` at import time.  Documenting the canonical surface
+#: at the top level so callers (and LLM assistants) can validate a
+#: user-supplied alias without reaching into the engine internals.
+#: For runtime extension use ``LLMEngine.register_provider_alias`` /
+#: ``LLMEngine.provider_aliases()`` instead — this constant is a
+#: snapshot, not a live view.
+PROVIDER_ALIASES: dict[str, str] = LLMEngine.provider_aliases()
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
     Plan,
@@ -198,6 +207,7 @@ __all__ = [
     "LLMGuard",
     # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
     "LLMEngine",
+    "PROVIDER_ALIASES",
     "Plan",
     "Step",
     "ConcurrentPlanRunError",

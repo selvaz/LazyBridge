@@ -11,6 +11,26 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
+# Bootstrap preflight — fail fast on a missing dev dependency.
+#
+# ~30% of the LazyBridge suite is ``async def`` tests under
+# ``asyncio_mode = "auto"``.  Without ``pytest-asyncio`` installed those
+# tests collect successfully but every one fails with the cryptic
+# "async def functions are not natively supported" message — easy to
+# misread as a framework bug.  The preflight gives a one-line install
+# hint instead.
+try:
+    import pytest_asyncio  # noqa: F401
+except ImportError as _e:  # pragma: no cover — only fires when the dev install is partial
+    raise RuntimeError(
+        "LazyBridge tests require ``pytest-asyncio``.\n"
+        "  Install it via the test extra:\n"
+        "    pip install -e '.[test]'   # or [test,all] for full coverage\n"
+        "  (The project's ``[test]`` extra declares pytest-asyncio>=0.23 — "
+        "your environment is missing it.)"
+    ) from _e
+
+# ---------------------------------------------------------------------------
 # Google provider stub
 #
 # google-genai imports google.auth.crypt.es which loads a Rust extension that
