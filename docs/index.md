@@ -49,29 +49,37 @@ mental model is the same.
   [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md),
   [Envelope](guides/basic/envelope.md),
   [Native tools](guides/basic/native-tools.md).
-- **Guides → Mid** — `Memory`, `Store`, `Session`, `Guards`,
-  `verify=`, `chain` / `parallel` / `as_tool`, `HumanEngine`,
-  `MCP`, `Multimodal`, `Evals` (twelve pages).
-- **Guides → Full** — `Plan`, `Step`, `Sentinels`, `Routing`,
-  `Parallel plan steps`, `Checkpoint & resume`, `Exporters`,
-  `GraphSchema`, `SupervisorEngine` (nine pages).
-- **Guides → Advanced** — `Engine` protocol, `BaseProvider`,
-  `Providers` catalogue, `Plan serialization`, `OpenTelemetry`,
-  `Visualizer` (six pages).
+- **Guides → Mid** — twelve pages on real-app concerns:
+  [Memory](guides/mid/memory.md), [Store](guides/mid/store.md),
+  [Session](guides/mid/session.md), [Guards](guides/mid/guards.md),
+  [verify=](guides/mid/verify.md), [Chain](guides/mid/chain.md),
+  [Parallel](guides/mid/parallel.md), [As tool](guides/mid/as-tool.md),
+  [HumanEngine](guides/mid/human-engine.md), [MCP](guides/mid/mcp.md),
+  [Multimodal](guides/mid/multimodal.md), [Evals](guides/mid/evals.md).
+- **Guides → Full** — nine pages on production pipelines:
+  [Plan](guides/full/plan.md), [Step](guides/full/step.md),
+  [Sentinels](guides/full/sentinels.md), [Routing](guides/full/routing.md),
+  [Parallel plan steps](guides/full/parallel-plan-steps.md),
+  [Checkpoint & resume](guides/full/checkpoint.md),
+  [Exporters](guides/full/exporters.md),
+  [GraphSchema](guides/full/graph-schema.md),
+  [SupervisorEngine](guides/full/supervisor.md).
+- **Guides → Advanced** — seven pages on the extension surface:
+  [Engine protocol](guides/advanced/engine-protocol.md),
+  [BaseProvider](guides/advanced/base-provider.md),
+  [Providers catalogue](guides/advanced/providers.md),
+  [External tool gateway](guides/advanced/external-tools.md),
+  [Plan serialization](guides/advanced/plan-serialize.md),
+  [OpenTelemetry](guides/advanced/otel.md),
+  [Visualizer](guides/advanced/visualizer.md).
 - [**Recipes**](recipes/index.md) — twelve runnable examples
   from the `examples/` directory, embedded verbatim.
 - [**Decisions**](decisions/index.md) — nine "which one do I
   use?" decision trees with quick-reference tables.
-- [**Errors**](errors.md) — cause → diagnosis → fix table for
-  every framework exception and `Envelope.error.type` value.
-- [**Recipes**](recipes/index.md) — twelve runnable examples from
-  `examples/`, embedded verbatim.
-- [**Decisions**](decisions/index.md) — nine "which one do I use?"
-  decision trees with quick-reference tables.
 - [**Reference**](reference/index.md) — auto-generated API surface
   for every public symbol, organised by category.
-- [**Errors**](errors.md) — cause → diagnosis → fix table for every
-  framework exception.
+- [**Errors**](errors.md) — cause → diagnosis → fix table for
+  every framework exception and `Envelope.error.type` value.
 - [**For LLM assistants**](for-llms/index.md) — Claude Skill install,
   `/llms.txt` index, and `/llms-full.txt` corpus dump.
 
