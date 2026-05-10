@@ -26,7 +26,7 @@ class Engine(Protocol):
 
     async def run(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
@@ -34,11 +34,11 @@ class Engine(Protocol):
         session: Session | None,
         store: Any | None = None,
         plan_state: Any | None = None,
-    ) -> Envelope: ...
+    ) -> Envelope[Any]: ...
 
     async def stream(
         self,
-        env: Envelope,
+        env: Envelope[Any],
         *,
         tools: list[Tool],
         output_type: type,
