@@ -36,6 +36,7 @@ def _imports_into_core(path: pathlib.Path) -> list[tuple[int, str]]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
         pytest.fail(f"{path} has a syntax error: {exc}")
+        return []  # unreachable — pytest.fail raises; appeases static analysers.
 
     offences: list[tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -75,7 +76,6 @@ def test_extensions_never_import_from_core_internals() -> None:
             "Import boundary violation: ext / external_tools may not "
             "import from internal lazybridge.core.* submodules. Use the "
             "public API (``from lazybridge import X``) instead "
-            "(see docs/guides/core-vs-ext.md, rule #2). Found:\n"
-            + "\n".join(failures)
+            "(see docs/guides/core-vs-ext.md, rule #2). Found:\n" + "\n".join(failures)
         )
         pytest.fail(msg)

@@ -41,6 +41,7 @@ def _imports_from_extensions(path: pathlib.Path) -> list[tuple[int, str]]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as e:
         pytest.fail(f"{path} has a syntax error: {e}")
+        return []  # unreachable — pytest.fail raises; appeases static analysers.
 
     offences: list[tuple[int, str]] = []
 
