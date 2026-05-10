@@ -36,6 +36,25 @@ jobs:
       - name: Build site (strict)
         run: mkdocs build --strict
 
+      - name: Assert llms.txt + llms-full.txt are non-empty
+        # The "for LLM assistants" pitch hinges on these two artifacts
+        # existing and being current.  mkdocs-llmstxt generates them
+        # silently — without an assertion a regression would ship to
+        # GitHub Pages with empty files and no build failure.
+        # 1024-byte floor catches truly-empty / single-line drift while
+        # leaving room for content reorganisation.
+        run: |
+          for f in site/llms.txt site/llms-full.txt; do
+            if [ ! -s "$f" ]; then
+              echo "::error::$f missing or empty"; exit 1
+            fi
+            size=$(stat -c %s "$f")
+            if [ "$size" -lt 1024 ]; then
+              echo "::error::$f is suspiciously small ($size bytes < 1024)"; exit 1
+            fi
+            echo "$f: $size bytes"
+          done
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:

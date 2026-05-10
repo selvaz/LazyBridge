@@ -25,7 +25,7 @@ from lazybridge.sentinels import (
 )
 from lazybridge.session import EventType, Session
 from lazybridge.store import Store
-from lazybridge.tools import Tool, build_tool_map, wrap_tool
+from lazybridge.tools import Tool, _wrap_tool, build_tool_map
 
 # ============================================================
 # Step 1: Envelope
@@ -159,7 +159,7 @@ class TestTool:
         def fn(x: str) -> str:
             return x
 
-        wrapped = wrap_tool(fn)
+        wrapped = _wrap_tool(fn)
         assert isinstance(wrapped, Tool)
         assert wrapped.name == "fn"
 
@@ -168,7 +168,7 @@ class TestTool:
             return x
 
         t = Tool(fn)
-        assert wrap_tool(t) is t
+        assert _wrap_tool(t) is t
 
     def test_build_tool_map(self):
         def alpha(x: str) -> str:

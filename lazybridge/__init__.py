@@ -92,34 +92,30 @@ try:
     try:
         __version__ = _dist_version("lazybridge")
     except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
-        __version__ = "0.7.0"
+        __version__ = "0.7.9"
     del _dist_version, PackageNotFoundError
 except ImportError:  # pragma: no cover — Python < 3.8, not supported
-    __version__ = "0.7.0"
+    __version__ = "0.7.9"
 
 __stability__ = "alpha"
 
 # Public API.  Symbols a user constructs, passes as a kwarg, or catches as
 # an exception are re-exported from this top-level module.  Internals
-# (provider request/response types, dispatcher helpers like wrap_tool /
+# (provider request/response types, dispatcher helpers like _wrap_tool /
 # build_tool_map, attribute-only types like EnvelopeMetadata / StoreEntry,
 # rarely-subclassed Protocols) live under their submodules and stay
 # importable as ``from lazybridge.X import Y`` for advanced callers.
 
 # Primary surface
-from lazybridge.agent import Agent
-from lazybridge.agent import _ParallelAgent as _ParallelAgent
+from lazybridge.agent import Agent, ParallelAgent
 
 # Provider entry points
 from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError
 from lazybridge.core.types import (
-    AgentRuntimeConfig,
     AudioContent,
     CacheConfig,
     ImageContent,
     NativeTool,
-    ObservabilityConfig,
-    ResilienceConfig,
 )
 
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
@@ -167,6 +163,7 @@ from lazybridge.tools import Tool, ToolProvider, tool
 __all__ = [
     # Primary API
     "Agent",
+    "ParallelAgent",
     # Envelope
     "Envelope",
     # Sentinels
@@ -224,11 +221,8 @@ __all__ = [
     # Multimodal content blocks
     "ImageContent",
     "AudioContent",
-    # Shareable runtime configs
-    "AgentRuntimeConfig",
+    # Cache configuration (kept — internal repr for LLMEngine cache)
     "CacheConfig",
-    "ObservabilityConfig",
-    "ResilienceConfig",
     # Testing
     "MockAgent",
 ]

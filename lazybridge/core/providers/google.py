@@ -128,7 +128,19 @@ class GoogleProvider(BaseProvider):
         "gemini-2.0-flash": ["gemini-1.5-flash"],  # deprecated fallback chain
     }
 
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    def _compute_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float | None:
+        # Phase-3 Block I: signature parity with Anthropic / OpenAI / DeepSeek.
+        # Gemini's prompt-cache pricing isn't modelled here yet (the SDK
+        # surfaces ``cached_content_token_count`` separately); the parameter
+        # is accepted for polymorphic call-sites but ignored — cost still
+        # represents the uncached upper bound.
+        del cached_input_tokens
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
@@ -383,6 +395,20 @@ class GoogleProvider(BaseProvider):
         tools = []
         native = self._check_native_tools(request.native_tools)
 
+        # Phase-3 Block I, T9 — Google treats ``WEB_SEARCH`` and
+        # ``GOOGLE_SEARCH`` as aliases (the API only accepts ONE grounding
+        # tool).  Warn when both are present so the user knows the duplicate
+        # is silently collapsing rather than activating two distinct tools.
+        if NativeTool.WEB_SEARCH in native and NativeTool.GOOGLE_SEARCH in native:
+            import warnings as _warnings
+
+            _warnings.warn(
+                "GoogleProvider: ``WEB_SEARCH`` and ``GOOGLE_SEARCH`` are aliases for the "
+                "same grounding tool — passing both has no extra effect.  Drop one of the "
+                "two from ``native_tools=[...]`` to silence this warning.",
+                UserWarning,
+                stacklevel=3,
+            )
         google_search_requested = any(nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native)
         google_maps_requested = NativeTool.GOOGLE_MAPS in native
 

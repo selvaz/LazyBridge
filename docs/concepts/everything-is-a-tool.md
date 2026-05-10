@@ -39,7 +39,7 @@ Because every capability is a tool, you can compose at every level.
                             ▼  agent.as_tool("search", ...)
                           tool ──────────► added to a higher-level Agent
                                                 │
-                                                ▼  Agent.from_plan(...).as_tool(...)
+                                                ▼  Agent(engine=Plan(...)).as_tool(...)
                                               tool ──────────► added to a top-level orchestrator
 ```
 

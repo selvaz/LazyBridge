@@ -116,7 +116,13 @@ def _sentinel_from_ref(ref: dict[str, Any] | None) -> Sentinel | str:
         return from_parallel_all(name)
     if kind == "literal":
         return ref["value"]
-    return from_prev
+    raise ValueError(
+        f"Plan sentinel deserialisation: unknown kind={kind!r} in ref={ref!r}. "
+        f"Expected one of: from_prev, from_start, from_step, from_parallel, "
+        f"from_parallel_all, literal. "
+        f"Fix: regenerate the serialised Plan with a current LazyBridge version, "
+        f"or correct the 'kind' field manually."
+    )
 
 
 def _validate_step_name(name: str, *, context: str = "") -> None:

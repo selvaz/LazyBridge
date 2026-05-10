@@ -16,7 +16,7 @@ Pins the multimodal-image contract:
   ``_VISION_CAPABLE_MODEL_PATTERNS`` table on each provider) drops
   attachments with a UserWarning by default — and raises
   :class:`UnsupportedFeatureError` when ``strict_multimodal=True``.
-* :class:`Plan` and :class:`_ParallelAgent` propagate attachments to
+* :class:`Plan` and :class:`ParallelAgent` propagate attachments to
   step 0 / every branch via :class:`Envelope`.
 * HIL surfaces (HumanEngine, SupervisorEngine) display a short
   attachment hint instead of leaking raw base64 to the terminal.
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from lazybridge import Agent, Step
+from lazybridge import Agent, Plan, Step
 from lazybridge.core.types import (
     AudioContent,
     ImageContent,
@@ -366,7 +366,7 @@ def test_plan_step_0_receives_images():
             return Envelope(task=str(task), payload="captured")
 
     a = Capturing("out", name="cap")
-    plan = Agent.from_plan(Step(target=a, name="s0"))
+    plan = Agent(engine=Plan(Step(target=a, name="s0")), name="_t_205")
     img = ImageContent.from_url("https://x.com/cat.png")
     plan(Envelope(task="describe", images=[img]))
 
@@ -390,9 +390,12 @@ def test_plan_step_n_does_not_inherit_images_from_step_0():
 
     s0 = Capturing("first", name="s0")
     s1 = Capturing("second", name="s1")
-    plan = Agent.from_plan(
-        Step(target=s0, name="s0"),
-        Step(target=s1, name="s1"),
+    plan = Agent(
+        engine=Plan(
+            Step(target=s0, name="s0"),
+            Step(target=s1, name="s1"),
+        ),
+        name="_t_206",
     )
     plan(Envelope(task="describe", images=[ImageContent.from_url("https://x.com/a.png")]))
 
@@ -403,7 +406,7 @@ def test_plan_step_n_does_not_inherit_images_from_step_0():
 
 
 # ---------------------------------------------------------------------------
-# _ParallelAgent — fan-out preserves attachments across branches
+# ParallelAgent — fan-out preserves attachments across branches
 # ---------------------------------------------------------------------------
 
 
@@ -416,7 +419,7 @@ def test_parallel_branches_each_receive_the_same_image():
                 sees.append(task.images)
             return Envelope(task=str(task), payload="ok")
 
-    fan = Agent.from_parallel(Capturing("A", name="a"), Capturing("B", name="b"))
+    fan = Agent.parallel(Capturing("A", name="a"), Capturing("B", name="b"))
     fan(Envelope(task="describe", images=[ImageContent.from_url("https://x.com/y.png")]))
 
     assert len(sees) == 2

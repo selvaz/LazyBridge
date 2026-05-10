@@ -5,7 +5,7 @@ Why this is the cleanest "planner builds a plan" pattern in LazyBridge
 - The planner returns a ``PlanSpec`` (Pydantic). No free-form text to parse.
 - ``materialize()`` turns the spec into a real ``Plan(Step(...), ...)`` with
   live agents bound to step targets. ``PlanCompiler`` validates the DAG when
-  the Plan is wrapped by ``Agent.from_engine(plan)`` — broken DAGs (forward
+  the Plan is wrapped by ``Agent(engine=plan)`` — broken DAGs (forward
   ``from_step`` references, unknown step names, duplicates) surface as
   ``PlanCompileError`` *before* any LLM call.
 - ``Step(parallel=True)`` runs siblings concurrently. No asyncio loop in user
@@ -196,7 +196,7 @@ def solve(query: str, *, replan: bool = False, max_rounds: int = 5) -> str:
         plan = materialize(spec)  # ← compile-time validated
         print(f"materialised plan with {len(spec.steps)} step(s); running…")
 
-        result = Agent.from_engine(plan)(query).text()
+        result = Agent(engine=plan)(query).text()
         history.append(result)
 
         if not replan:

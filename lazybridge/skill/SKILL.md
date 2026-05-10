@@ -91,30 +91,42 @@ build extra structure or return different types. Read the
 
 | Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias. |
-| `Agent.from_model("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | Pure alias of `Agent("model", …)`. |
-| `Agent.from_engine(engine, **kw)` | `Agent(engine=engine, **kw)` | Pure alias. |
+| `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | **Pure alias.** First positional arg is interpreted as a model string and threaded into ``LLMEngine(...)``.  Hides which engine drives the agent at the call site; canonical form is preferred in tutorials and code reviews. |
 | `Agent.from_provider("anthropic", tier="top", **kw)` | `Agent(engine=LLMEngine("top", provider="anthropic"), **kw)` | **Not pure sugar** — uses tier-alias model strings (`super_cheap`/`cheap`/`medium`/`expensive`/`top`) resolved via the provider's tier map. Use when you want freshest-in-tier without pinning a date-stamped name. |
 
 **Build an Agent with a Plan engine**
 
-| Sugar | Canonical | Differences |
-|---|---|---|
-| `Agent.from_plan(*steps, store=…, checkpoint_key=…, resume=…, **kw)` | `Agent(engine=Plan(*steps, store=…, checkpoint_key=…, resume=…), **kw)` | Pure alias; forwards Plan kwargs (`max_iterations`, `store`, `checkpoint_key`, `resume`, `on_concurrent`) to a freshly-built `Plan`. |
+No sugar — write the canonical form.  Plan kwargs (`max_iterations`,
+`store`, `checkpoint_key`, `resume`, `on_concurrent`) live on
+``Plan(...)``; Agent kwargs (``tools=``, ``session=``, ``name=``, …)
+live on ``Agent(...)``.  The 0.7-era ``Agent.from_plan`` was deleted
+in 0.7.9.
+
+```python
+pipeline = Agent(
+    engine=Plan(
+        Step("research"),
+        Step("write"),
+        store=Store(db="run.sqlite"),
+        checkpoint_key="research",
+        resume=True,
+    ),
+    tools=[researcher, writer],
+    name="pipeline",
+)
+```
 
 **Compose agents — sequential**
 
 | Sugar | Canonical | Differences |
 |---|---|---|
 | `Agent.chain(a, b)` | `Agent(engine=Plan(Step(target=a, name=a.name), Step(target=b, name=b.name)), name="chain")` | **Not pure alias** — builds the `Plan`+`Step` graph for you. Targets are the agents themselves (no `tools=` needed; `Plan` dispatches `Agent` targets via `target.run()` directly). |
-| `Agent.from_chain(a, b)` | Identical to `Agent.chain(a, b)` | Pure alias of `.chain`. |
 
 **Compose agents — parallel fan-out**
 
 | Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `_ParallelAgent`, a sibling class whose `__call__` returns `list[Envelope]`. Closest from-primitives form is hand-written `asyncio.gather(*[a.run(task) for a in agents])`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
-| `Agent.from_parallel(*agents, …)` | Identical to `Agent.parallel(...)` | Pure alias of `.parallel`. Same `_ParallelAgent` return — the asymmetry with the other `from_*` factories is intentional. |
+| `Agent.parallel(*agents, concurrency_limit=…, step_timeout=…)` | (no `Agent`-shaped equivalent) | **Not sugar over `Agent`** — returns `ParallelAgent`, a sibling class whose `__call__` returns ONE `Envelope` (labelled-text join across every branch, with transitive cost rollup). For typed per-branch access call `parallel.run_branches(task)` (async) → `list[Envelope]`. Use this when you want every branch unconditionally; use `Agent(tools=[a, b, c])` to let the LLM decide; use a `Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps must aggregate via `from_parallel_all`. |
 
 **Build an Agent with a HIL engine**
 
@@ -127,7 +139,7 @@ build extra structure or return different types. Read the
 
 | Sugar / variant | Canonical | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). **Default `mode="auto"` differs from `Tool(...)`'s `"signature"`**: `auto` tries `signature` then `hybrid`, falling back to `llm` only when `allow_llm_schema=True` and `schema_llm=` is supplied. |
+| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). Both default to `mode="signature"` since 0.7.9 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
 | `Tool.from_schema(name, description, parameters, func, strict=…, returns_envelope=…)` | (no callable-introspection canonical) | **Not sugar over `Tool(callable, …)`** — this is the canonical form when the JSON Schema is already known (MCP, OpenAPI bridges, third-party registries). Bypasses the schema builder. |
 
 **Wrap an Agent as a Tool**
@@ -150,6 +162,21 @@ Default model in examples: `claude-opus-4-7`. When a user is learning,
 err on the side of the longer canonical form — even if a one-liner
 works, the canonical version teaches the shape they will need at every
 later rung.
+
+**Default-model fallback** — when `claude-opus-4-7` is sunset (or any
+date-pinned model id stops resolving), reach for the **tier alias**
+path instead of guessing the next model id:
+
+```python
+# Always-current "best in tier" — tracks the provider's lineup
+agent = Agent.from_provider("anthropic", tier="top")
+```
+
+Tier strings: `super_cheap` / `cheap` / `medium` / `expensive` / `top`.
+This is the **only** non-pure-alias `from_*` factory left after 0.7.9;
+the deleted ones (`from_model` / `from_engine` / `from_chain` /
+`from_plan` / `from_parallel`) were just renames of the canonical
+`Agent(engine=...)` ctor and are gone for good.
 
 Full reference with worked examples for each row:
 <https://selvaz.github.io/LazyBridge/concepts/canonical-vs-sugar/>.
@@ -232,10 +259,14 @@ For a *purely* linear handoff with no other plan features,
 `Agent.chain(researcher, writer)` is sugar for exactly the form above —
 reach for it when you want a one-liner.
 
-For **scripted** fan-out where you want every branch and a
-`list[Envelope]` back, use `Agent.parallel(a, b, c)`. Use a `Plan`
-parallel band (`Step("a", parallel=True)`) when concurrent steps need to
-aggregate via `from_parallel_all`, and put the candidates in
+For **scripted** fan-out, use `Agent.parallel(a, b, c)`. The runner's
+`__call__` returns ONE `Envelope` whose `.text()` is a labelled-text
+join across every branch — same shape as `Plan`'s `from_parallel_all`
+aggregator, with transitive cost rollup in `metadata.nested_*` and
+first-error short-circuit in `.error`. For typed per-branch access
+call `parallel.run_branches(task)` (async) → `list[Envelope]`. Use a
+`Plan` parallel band (`Step("a", parallel=True)`) when concurrent steps
+need to aggregate via `from_parallel_all`, and put the candidates in
 `tools=[...]` when you want the **LLM** to decide which sub-agent to
 dispatch instead of running all of them.
 
@@ -277,7 +308,7 @@ print(pipeline("Topic: AI agents 2026").text())
 
 `Step("name")` references a sub-agent by its `name=`. Plans are validated
 at construction — forward references, duplicate names, and unknown
-targets raise `PlanCompileError` before any LLM call. `Agent.from_plan(*steps)`
+targets raise `PlanCompileError` before any LLM call. `Agent(engine=Plan(*steps))`
 is sugar for the explicit form above.
 
 ### Sentinels — wiring data between steps
@@ -389,8 +420,8 @@ their own.
 - **Defining a JSON tool schema by hand** when a Python function
   exists. The signature path is the default and covers >95% of real
   callables.
-- **Hiding the engine behind sugar.** `Agent.from_model(...)`, the
-  string-positional `Agent("claude-opus-4-7")`, and `Agent.from_engine(...)`
+- **Hiding the engine behind sugar.** `Agent(...)`, the
+  string-positional `Agent("claude-opus-4-7")`, and `Agent(engine=...)`
   all save a line of code at the cost of hiding which engine the agent
   actually runs. Lead with `Agent(engine=LLMEngine("..."), ...)`,
   especially in tutorials and code reviews.
@@ -409,6 +440,21 @@ their own.
 - **Importing private names** (`_`-prefixed) or anything from
   `lazybridge.core.*` directly. The public surface is `lazybridge.*` and
   `lazybridge.ext.*` only.
+- **Reaching for a deleted-in-0.7.9 factory.** `Agent.from_model` /
+  `Agent.from_engine` / `Agent.from_chain` / `Agent.from_plan` /
+  `Agent.from_parallel` were pure-alias renames of the canonical
+  `Agent(engine=...)` ctor and are gone in 0.7.9. The `Agent.from_*`
+  shape that survives is **only** `Agent.from_provider(provider, tier=...)`,
+  which is non-trivial (resolves a tier alias to the provider's current
+  model). Use the canonical ctor for everything else.
+- **Iterating `Agent.parallel(...)("task")` as a list.** Since 0.7.9 the
+  call returns ONE `Envelope` (joined branches in `.text()`); for the
+  typed list, call `parallel.run_branches(task)` (async).
+- **Passing `runtime=` / `resilience=` / `observability=` / a config
+  object to `Agent`.** The three wrapper-of-flat-kwargs configs were
+  deleted in 0.7.9 along with the `_UNSET` precedence game. Pass flat
+  kwargs (`timeout=...`, `max_retries=...`, `session=...`, `name=...`)
+  directly, or share a fleet default via `**PROD_DEFAULTS`.
 
 ## Where to read more
 

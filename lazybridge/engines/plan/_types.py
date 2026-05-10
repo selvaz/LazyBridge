@@ -133,6 +133,12 @@ class Step:
     routes_by: str | None = None
     after_branches: str | None = None
 
+    # Internal flag — True when ``name`` is the opaque ``_anon_<id>``
+    # fallback (target has no string / callable / .name source).
+    # PlanCompiler uses it to forbid sentinels / routes that reference
+    # the step, since an LLM cannot meaningfully produce that name.
+    _name_is_opaque: bool = field(default=False, repr=False, compare=False)
+
     def __post_init__(self) -> None:
         if self.name is None:
             if isinstance(self.target, str):
@@ -142,7 +148,12 @@ class Step:
             elif hasattr(self.target, "name"):
                 self.name = self.target.name
             else:
-                self.name = str(id(self.target))
+                # No usable name source — fall back to id() but mark the
+                # step so the compiler raises if any other step references
+                # this name (the auto-generated id is opaque to anyone
+                # writing or reading the Plan).
+                self.name = f"_anon_{id(self.target):x}"
+                self._name_is_opaque = True
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 
-from lazybridge import Agent, LLMEngine, Session, Tool
+from lazybridge import Agent, LLMEngine, Session, tool
 from lazybridge.ext.viz import Visualizer
 
 DB = "examples/viz_demo.db"
@@ -40,13 +40,13 @@ def main() -> None:
 
     researcher = Agent(
         engine=LLMEngine("claude-haiku-4-5", system="Find facts. Cite sources."),
-        tools=[Tool(search)],
+        tools=[tool(search, name="search")],
         name="researcher",
         session=sess,
     )
     analyst = Agent(
         engine=LLMEngine("claude-haiku-4-5", system="Summarise findings."),
-        tools=[Tool(summarise)],
+        tools=[tool(summarise, name="summarise")],
         name="analyst",
         session=sess,
     )

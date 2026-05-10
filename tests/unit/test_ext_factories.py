@@ -166,7 +166,7 @@ def test_supervisor_via_factory_and_from_engine_match():
     from lazybridge.ext.hil import SupervisorEngine, supervisor_agent
 
     by_factory = supervisor_agent(tools=[], agents=[])
-    by_engine = Agent.from_engine(SupervisorEngine(tools=[], agents=[]))
+    by_engine = Agent(engine=SupervisorEngine(tools=[], agents=[]), name="_t_40")
 
     assert type(by_factory.engine) is type(by_engine.engine)
 
@@ -175,7 +175,7 @@ def test_human_via_factory_and_from_engine_match():
     from lazybridge.ext.hil import HumanEngine, human_agent
 
     by_factory = human_agent(timeout=1.0)
-    by_engine = Agent.from_engine(HumanEngine(timeout=1.0))
+    by_engine = Agent(engine=HumanEngine(timeout=1.0), name="_t_41")
 
     assert type(by_factory.engine) is type(by_engine.engine)
 
@@ -195,7 +195,7 @@ def test_ext_factories_intentionally_not_on_agent_core(name):
         f"Agent.{name} should NOT exist on the core Agent class.  "
         f"Use the ext-side factory in lazybridge.ext.hil / "
         f"lazybridge.ext.planners or wrap the engine via "
-        f"Agent.from_engine(...)."
+        f"Agent(engine=...)."
     )
 
 

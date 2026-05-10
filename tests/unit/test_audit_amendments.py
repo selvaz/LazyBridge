@@ -54,11 +54,13 @@ def _restore_provider_defaults():
 
 
 def test_strict_routing_raises_on_unknown_model(_restore_provider_defaults):
-    """set_default_provider(None) turns unknown-model fallback into ValueError."""
+    """0.7.9 raises on unknown model by default.  ``set_default_provider``
+    is now a way to OPT IN to the legacy 0.7 silent-fallback behaviour
+    (rare; we keep the API for power users)."""
     from lazybridge.engines.llm import LLMEngine
 
     LLMEngine.set_default_provider(None)
-    with pytest.raises(ValueError, match="No provider rule matches"):
+    with pytest.raises(ValueError, match="grok-2"):
         LLMEngine._infer_provider("grok-2")
 
 

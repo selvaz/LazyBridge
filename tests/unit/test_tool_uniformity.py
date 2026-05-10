@@ -5,8 +5,8 @@ What we verify:
 
 * LLMEngine executes every tool call via ``asyncio.gather`` regardless
   of ``tool_choice`` — the old "parallel" mode is no longer a user-facing
-  knob.  Legacy callers passing ``tool_choice='parallel'`` get a
-  ``DeprecationWarning`` and the value is collapsed to ``'auto'``.
+  knob.  Callers passing the legacy ``tool_choice='parallel'`` value get
+  a ``ValueError`` (removed in 0.7.9; was a 0.7-era deprecation warning).
 * ``Tool.run_sync`` handles both sync and async ``func``, so an Agent
   wrapped by ``Agent.as_tool`` can be invoked through a REPL-style
   engine (SupervisorEngine) without hitting the raw coroutine.
@@ -21,7 +21,6 @@ What we verify:
 from __future__ import annotations
 
 import asyncio
-import warnings
 
 from lazybridge import (
     Agent,
@@ -38,7 +37,8 @@ from lazybridge.ext.hil import SupervisorEngine
 
 def test_llmengine_tool_choice_literal_no_longer_accepts_parallel_type():
     """The type annotation narrows the accepted literals to auto / any.
-    Runtime still tolerates 'parallel' for backward compat but warns.
+    Runtime now rejects the legacy 'parallel' value — see the test
+    immediately below.
     """
     from typing import get_args, get_type_hints
 
@@ -49,13 +49,13 @@ def test_llmengine_tool_choice_literal_no_longer_accepts_parallel_type():
     assert accepted == {"auto", "any"}
 
 
-def test_llmengine_accepts_parallel_legacy_with_deprecation_warning():
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        eng = LLMEngine("claude-opus-4-7", tool_choice="parallel")  # type: ignore[arg-type]
-    assert eng.tool_choice == "auto"
-    assert any(issubclass(x.category, DeprecationWarning) for x in w)
-    assert any("parallel" in str(x.message).lower() for x in w)
+def test_llmengine_rejects_parallel_legacy_value():
+    """``tool_choice='parallel'`` was removed in 0.7.9; the constructor now
+    raises ``ValueError`` instead of silently downgrading to ``'auto'``."""
+    import pytest
+
+    with pytest.raises(ValueError, match="removed"):
+        LLMEngine("claude-opus-4-7", tool_choice="parallel")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +150,7 @@ def test_nested_agent_of_agent_of_function_runs_uniformly():
     outer = Agent(engine=_EchoEngine("outer"), tools=[middle], name="outer")
 
     env = outer("x")
-    # outer's engine delegates to its single tool (middle.as_tool via wrap_tool);
+    # outer's engine delegates to its single tool (middle.as_tool via _wrap_tool);
     # middle's engine delegates to its single tool (leaf);
     # leaf returns 'leaf(x)'.
     assert env.text() == "outer:middle:leaf(x)"
@@ -219,11 +219,20 @@ def test_same_tools_list_works_on_llm_and_supervisor_engines():
 
 
 def test_agent_parallel_is_deterministic_fanout():
+    """``Agent.parallel(...)("task")`` returns ONE Envelope (joined) since
+    0.7.9 — same shape as the ``as_tool()`` wrapper, so the runner composes
+    uniformly into outer agents.  For typed per-branch access, callers use
+    the explicit ``run_branches`` async helper."""
     a = Agent(engine=_EchoEngine("a"), name="a")
     b = Agent(engine=_EchoEngine("b"), name="b")
     c = Agent(engine=_EchoEngine("c"), name="c")
 
-    results = Agent.parallel(a, b, c)("hello")
-    assert len(results) == 3
-    texts = [r.text() for r in results]
-    assert texts == ["a:hello", "b:hello", "c:hello"]
+    par = Agent.parallel(a, b, c)
+    env = par("hello")
+    text = env.text()
+    # Order-preserving labelled-text join.
+    assert "[a]" in text and "[b]" in text and "[c]" in text
+    assert "a:hello" in text and "b:hello" in text and "c:hello" in text
+    # Per-branch access via run_branches.
+    branches = asyncio.run(par.run_branches("hello"))
+    assert [r.text() for r in branches] == ["a:hello", "b:hello", "c:hello"]

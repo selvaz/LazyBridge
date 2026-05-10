@@ -79,7 +79,21 @@ class Envelope(BaseModel, Generic[T]):
             return self.payload
         if isinstance(self.payload, BaseModel):
             return self.payload.model_dump_json()
-        return json.dumps(self.payload, default=str)
+        # Phase-2 Block C: 0.7 silently fell through to
+        # ``json.dumps(payload, default=str)`` — for unknown types this
+        # produced ``str(payload)`` which is typically ``"<Foo object
+        # at 0x...>"`` (the audit's T10 trap).  0.7.9 raises ``TypeError``
+        # so the caller's intent is explicit.  JSON-serialisable shapes
+        # (lists, dicts, ints, floats, bools) still work.
+        try:
+            return json.dumps(self.payload)
+        except TypeError as exc:
+            raise TypeError(
+                f"Envelope.text(): payload of type {type(self.payload).__name__!r} is not "
+                f"JSON-serialisable.  Wrap your custom class in a Pydantic model "
+                f"(``output=MyModel``), or call ``str(env.payload)`` explicitly if you "
+                f"want the legacy ``str()`` fallback."
+            ) from exc
 
     def __str__(self) -> str:
         """Stringification falls through to :meth:`text`.

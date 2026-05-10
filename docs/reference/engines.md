@@ -26,6 +26,7 @@ miss in the auto-generated signature below. Quick reference:
 | `stream_idle_timeout` | `90.0` | Idle gap between streaming chunks before `StreamStallError`; `None` disables (one-shot warning) |
 | `stream_buffer` | `64` | Bounded queue for streaming producers. Must be ≥1 |
 | `allow_dangerous_native_tools` | `False` | Security gate for `CODE_EXECUTION` / `COMPUTER_USE`; opt-in required |
+| `thinking` | `False` / `ThinkingConfig` | Extended-thinking opt-in.  Anthropic Opus 4.6+ / Claude 4.7 use adaptive thinking (server-managed budget; pass `display="omitted"` to hide thoughts).  OpenAI `o1`/`o3`/`o4`/`gpt-5` and Gemini 2.5+ surface `reasoning_tokens` automatically; passing a `ThinkingConfig(effort=...)` is forwarded where the provider supports it.  See provider-capability matrix in `lazybridge.matrix`. |
 | `strict_multimodal` | `False` | Raise `UnsupportedFeatureError` when the model doesn't support an attachment modality |
 
 `strict_native_tools` is **not** an `LLMEngine` knob — it lives on

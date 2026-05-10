@@ -1,19 +1,34 @@
 # Runtime configs & testing
 
-The four config dataclasses group repeated kwargs across many
-`Agent(...)` constructions; precedence is **flat kwarg > config
-object > documented default** (see
-[Guides → Basic → Agent](../guides/basic/agent.md) pitfalls).
-`MockAgent` is the deterministic test double for code that contains
-an `Agent`.
+The 0.7-era ``AgentRuntimeConfig`` / ``ResilienceConfig`` /
+``ObservabilityConfig`` wrapper-of-flat-kwargs configs were deleted in
+0.7.9 — they bundled flat kwargs into shareable objects with a
+``flat kwarg > config object > default`` precedence game that required
+a private ``_UNSET`` sentinel on every kwarg (a documented LLM trap,
+T14 in the audit).
 
-## Runtime config objects
+For fleet management, use a Python dict spread:
 
-::: lazybridge.AgentRuntimeConfig
+```python
+PROD_DEFAULTS = dict(
+    timeout=60,
+    max_retries=5,
+    max_output_retries=2,
+    cache=True,
+    verbose=False,
+    session=session,
+)
 
-::: lazybridge.ResilienceConfig
+researcher = Agent(**PROD_DEFAULTS, engine=LLMEngine("model"), name="research")
+writer     = Agent(**PROD_DEFAULTS, engine=LLMEngine("model"), name="write")
+```
 
-::: lazybridge.ObservabilityConfig
+Same end-user value, no precedence-game complexity, no sentinel.
+
+## Cache config (kept)
+
+``CacheConfig`` is intentionally kept — it carries real semantic
+value (``enabled``, ``ttl``) consumed inside ``LLMEngine``.
 
 ::: lazybridge.CacheConfig
 

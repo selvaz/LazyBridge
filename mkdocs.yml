@@ -165,8 +165,6 @@ nav:
       - Agent builds a plan: recipes/agent-builds-plan.md
       - Blackboard planner: recipes/blackboard-planner.md
       - Dynamic re-planning: recipes/dynamic-replanning.md
-      - Parallel report: recipes/parallel-report.md
-      - Daily news: recipes/daily-news.md
       - Live visualization: recipes/live-visualization.md
       - Visualization mock: recipes/visualization-mock.md
   - Decisions:
@@ -193,7 +191,19 @@ nav:
       - Custom providers: reference/providers.md
       - Configs & testing: reference/configs.md
   - Errors: errors.md
+  - Migrations:
+      - 0.7 → 0.7.9: migrations/0.7-to-0.79.md
   - For LLM assistants:
       - Overview: for-llms/index.md
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
+
+# ---------------------------------------------------------------------------
+# Build-time hooks — generated content
+# ---------------------------------------------------------------------------
+# `mkdocs_provider_table` replaces the `<!-- PROVIDER_CAPABILITY_TABLE -->`
+# marker on any page with a freshly-rendered support matrix sourced from
+# `lazybridge.matrix.provider_capabilities()`.  Keeps README / providers
+# docs from drifting when a provider classvar changes.
+hooks:
+  - tools/mkdocs_provider_table.py

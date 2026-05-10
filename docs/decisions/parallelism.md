@@ -57,7 +57,7 @@ Want declared concurrent branches inside a typed workflow?
 ## See also
 
 - [Parallel](../guides/mid/parallel.md) — `Agent.parallel`
-  reference (returns `_ParallelAgent`, not `Agent`).
+  reference (returns `ParallelAgent`, not `Agent`).
 - [Parallel plan steps](../guides/full/parallel-plan-steps.md)
   — band semantics, `from_parallel_all`, atomicity rules.
 - [Composition decision](composition.md) — which composition

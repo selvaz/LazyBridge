@@ -22,7 +22,7 @@ import pytest
 
 from lazybridge.engines.llm import LLMEngine, ToolTimeoutError
 from lazybridge.session import EventType, Session
-from lazybridge.tools import Tool, wrap_tool
+from lazybridge.tools import Tool, _wrap_tool
 
 # ---------------------------------------------------------------------------
 # EventType is wired up
@@ -55,7 +55,7 @@ async def test_run_tool_emits_tool_timeout_event_on_timeout():
         await asyncio.sleep(0.5)
         return "never"
 
-    tool = wrap_tool(_slow)
+    tool = _wrap_tool(_slow)
     tool_map = {"slow": tool}
 
     class _ToolCall:
@@ -239,7 +239,7 @@ async def test_genuine_exception_still_emits_tool_error():
     async def _bad():
         raise ValueError("boom")
 
-    tool = wrap_tool(_bad)
+    tool = _wrap_tool(_bad)
     tool_map = {"bad": tool}
 
     class _ToolCall:

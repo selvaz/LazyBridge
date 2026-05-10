@@ -22,6 +22,7 @@ Carved out of the old monolithic ``plan.py`` (W3.1).
 
 from __future__ import annotations
 
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_origin, get_type_hints
 
 from lazybridge.engines.plan._types import PlanCompileError, Step
@@ -38,6 +39,19 @@ from lazybridge.sentinels import (
 
 if TYPE_CHECKING:
     from lazybridge.tools import Tool
+
+
+def _suggest(name: str, known: list[str]) -> str:
+    """Return ``  Did you mean 'X'?`` (with leading spaces) for a misspelled
+    reference, or an empty string when nothing close enough exists.
+
+    Used uniformly by sentinel-target validation to turn ``unknown step`` /
+    ``unknown tool`` errors into one-shot LLM-fixable messages.
+    """
+    matches = get_close_matches(name, known, n=1, cutoff=0.6)
+    if matches:
+        return f"  Did you mean {matches[0]!r}?"
+    return ""
 
 
 def _extract_literal_string_values(annotation: Any) -> list[str]:
@@ -97,6 +111,32 @@ class PlanCompiler:
         pos: dict[str, int] = {cast("str", s.name): i for i, s in enumerate(steps)}
         # Position-keyed parallel flag for from_parallel_all band-start checks.
         is_parallel: dict[str, bool] = {cast("str", s.name): bool(s.parallel) for s in steps}
+        # Position-keyed flag for steps whose name is the opaque ``_anon_<id>``
+        # fallback — references to these names would type-check (the name does
+        # exist) but are unintelligible to a code-generating LLM, so the
+        # compiler rejects them upfront.
+        opaque_names: set[str] = {cast("str", s.name) for s in steps if getattr(s, "_name_is_opaque", False)}
+
+        # Phase-3 Block H, T5 — parallel-band membership.  Each contiguous
+        # run of ``parallel=True`` steps is one band; sentinels inside a
+        # band may NOT reference siblings in the same band because the
+        # branches start from a pre-band snapshot of the kv/history.  Map
+        # each step name to its band id (or ``None`` for non-parallel
+        # steps); two steps share a band when their ids match and aren't
+        # ``None``.
+        band_of: dict[str, int | None] = {}
+        _band_id = 0
+        _in_band = False
+        for s in steps:
+            sname = cast("str", s.name)
+            if s.parallel:
+                if not _in_band:
+                    _band_id += 1
+                    _in_band = True
+                band_of[sname] = _band_id
+            else:
+                _in_band = False
+                band_of[sname] = None
 
         for i, step in enumerate(steps):
             # Tool exists
@@ -145,15 +185,69 @@ class PlanCompiler:
             # treat them identically for compile-time forward-ref checks
             # so a typo in either form fails fast at construction rather
             # than degrading to a runtime warnings.warn fallback.
-            if isinstance(step.task, (_FromStep, _FromParallel)) and step.task.name not in pos:
-                raise PlanCompileError(
-                    f"Step {step.name!r}: task=from_step({step.task.name!r}) references unknown step."
-                )
-            for n, ctx_item in enumerate(context_items):
-                if isinstance(ctx_item, (_FromStep, _FromParallel)) and ctx_item.name not in pos:
+            known_steps = [n for n in pos if n not in opaque_names]
+            # T5 — detect "from_step references a sibling in the same parallel
+            # band".  Branches start from a pre-band snapshot, so siblings
+            # are invisible to one another.  Compute the violation predicate
+            # inline (no closure over the for-loop step / my_band).
+            my_band = band_of.get(cast("str", step.name))
+            in_band = step.parallel and my_band is not None
+
+            def _same_band(target_name: str, my_band: int | None = my_band, in_band: bool = in_band) -> bool:
+                if not in_band:
+                    return False
+                target_band = band_of.get(target_name)
+                return target_band is not None and target_band == my_band
+
+            if isinstance(step.task, (_FromStep, _FromParallel)):
+                if step.task.name in opaque_names:
                     raise PlanCompileError(
-                        f"Step {step.name!r}: context[{n}]=from_step({ctx_item.name!r}) references unknown step."
+                        f"Step {step.name!r} (#{i}) — task=from_step({step.task.name!r}) references an "
+                        f"auto-named step (target had no name source — fell back to id()).\n"
+                        f"  Defined steps you can reference: {known_steps}.\n"
+                        f"  Fix: pass an explicit name= to the referenced Step, or use a target "
+                        f"that has a __name__ / .name attribute."
                     )
+                if step.task.name not in pos:
+                    raise PlanCompileError(
+                        f"Step {step.name!r} (#{i}) — task=from_step({step.task.name!r}) references unknown step.\n"
+                        f"  Defined steps: {known_steps}.{_suggest(step.task.name, known_steps)}\n"
+                        f"  Fix: replace the typo, or reorder the Plan so the target step runs first."
+                    )
+                if _same_band(step.task.name):
+                    raise PlanCompileError(
+                        f"Step {step.name!r} (#{i}) — task=from_step({step.task.name!r}) references a "
+                        f"sibling inside the same parallel band.\n"
+                        f"  Parallel branches start from a pre-band snapshot of history, so they cannot\n"
+                        f"  read from one another at runtime — the call would silently fall back to the\n"
+                        f"  start envelope.\n"
+                        f"  Fix: move the dependency outside the band, OR aggregate the band's outputs\n"
+                        f"  via ``from_parallel_all('<first-band-step>')`` in a step AFTER the band."
+                    )
+            for n, ctx_item in enumerate(context_items):
+                if isinstance(ctx_item, (_FromStep, _FromParallel)):
+                    if ctx_item.name in opaque_names:
+                        raise PlanCompileError(
+                            f"Step {step.name!r} (#{i}) — context[{n}]=from_step({ctx_item.name!r}) references an "
+                            f"auto-named step (target had no name source — fell back to id()).\n"
+                            f"  Defined steps you can reference: {known_steps}.\n"
+                            f"  Fix: pass an explicit name= to the referenced Step."
+                        )
+                    if ctx_item.name not in pos:
+                        raise PlanCompileError(
+                            f"Step {step.name!r} (#{i}) — context[{n}]=from_step({ctx_item.name!r}) references unknown step.\n"
+                            f"  Defined steps: {known_steps}.{_suggest(ctx_item.name, known_steps)}\n"
+                            f"  Fix: replace the typo, or reorder the Plan so the target step runs first."
+                        )
+                    if _same_band(ctx_item.name):
+                        raise PlanCompileError(
+                            f"Step {step.name!r} (#{i}) — context[{n}]=from_step({ctx_item.name!r}) references "
+                            f"a sibling inside the same parallel band.\n"
+                            f"  Parallel branches start from a pre-band snapshot, so they cannot read from\n"
+                            f"  one another at runtime — the call would silently fall back to the start envelope.\n"
+                            f"  Fix: move the dependency outside the band, OR aggregate via\n"
+                            f"  ``from_parallel_all('<first-band-step>')`` in a step AFTER the band."
+                        )
             # … and that step must come *before* this one.  A ``from_step``
             # to a future step quietly degrades to the start envelope at
             # runtime, which looks like success but isn't.
@@ -181,10 +275,11 @@ class PlanCompiler:
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromAgent):
                     if sentinel.name not in tool_map:
+                        known_tools = sorted(tool_map)
                         raise PlanCompileError(
                             f"Step {step.name!r}: {slot}=from_agent({sentinel.name!r}) "
-                            f"references tool {sentinel.name!r} which is not in the tool map.  "
-                            f"Available tools: {sorted(tool_map)}."
+                            f"references tool {sentinel.name!r} which is not in the tool map.\n"
+                            f"  Available tools: {known_tools}.{_suggest(sentinel.name, known_tools)}"
                         )
                     tool = tool_map[sentinel.name]
                     if not getattr(tool, "returns_envelope", False):
@@ -206,17 +301,22 @@ class PlanCompiler:
             for slot, sentinel in all_sentinels:
                 if isinstance(sentinel, _FromMemory):
                     if sentinel.name not in tool_map:
+                        known_tools = sorted(tool_map)
                         raise PlanCompileError(
                             f"Step {step.name!r}: {slot}=from_memory({sentinel.name!r}) "
-                            f"references tool {sentinel.name!r} which is not in the tool map.  "
-                            f"Available tools: {sorted(tool_map)}."
+                            f"references tool {sentinel.name!r} which is not in the tool map.\n"
+                            f"  Available tools: {known_tools}.{_suggest(sentinel.name, known_tools)}"
                         )
                     tool = tool_map[sentinel.name]
-                    if not getattr(tool, "agent_memory", None):
+                    # I6: existence check, not truthiness — an empty Memory
+                    # object is legitimate (it's just empty history at the
+                    # moment), and we want from_memory() to read from it
+                    # silently rather than fail at compile time.
+                    if not hasattr(tool, "agent_memory") or getattr(tool, "agent_memory", None) is None:
                         raise PlanCompileError(
-                            f"Step {step.name!r}: {slot}=from_memory({sentinel.name!r}) "
-                            f"requires the '{sentinel.name}' agent to have memory= attached.  "
-                            f"Add memory=Memory(...) when constructing that agent."
+                            f"Step {step.name!r} (#{i}) — {slot}=from_memory({sentinel.name!r}) "
+                            f"requires the '{sentinel.name}' agent to have memory= attached.\n"
+                            f"  Fix: add ``memory=Memory(...)`` when constructing that agent."
                         )
 
             # from_parallel_all: same forward-ref guard plus the band-start

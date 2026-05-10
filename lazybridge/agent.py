@@ -6,76 +6,8 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from typing import Any, cast
 
-from lazybridge.core.types import AgentRuntimeConfig, ObservabilityConfig, ResilienceConfig
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
-
-#: Private sentinel — distinguishes "caller omitted the flat kwarg" from
-#: "caller explicitly passed its default value".  When a flat kwarg is the
-#: sentinel, values from ``resilience=`` / ``observability=`` / ``runtime=``
-#: fill in; an explicit value (including the documented default) wins.
-_UNSET: Any = object()
-
-
-#: Documented default + source-config attribute for every runtime knob
-#: routed through ``_resolve_runtime_kwargs``.  Each entry is
-#: ``(default, source)`` where ``source`` is ``"resilience"`` or
-#: ``"observability"``.  Centralising this table avoids the eleven
-#: hand-written ``if x is _UNSET:`` blocks we used to have inline in
-#: ``Agent.__init__`` and gives us one place to register a new knob.
-_RUNTIME_KNOB_DEFAULTS: dict[str, tuple[Any, str]] = {
-    # Resilience — wraps retries / timeout / cache / fallback / output
-    # retry knobs into a single shareable object across an agent fleet.
-    "timeout": (None, "resilience"),
-    "max_retries": (3, "resilience"),
-    "retry_delay": (1.0, "resilience"),
-    "cache": (False, "resilience"),
-    "max_output_retries": (2, "resilience"),
-    "output_validator": (None, "resilience"),
-    "fallback": (None, "resilience"),
-    # Observability — session / verbose / identity.
-    "verbose": (False, "observability"),
-    "session": (None, "observability"),
-    "name": (None, "observability"),
-    "description": (None, "observability"),
-}
-
-
-def _resolve_runtime_kwargs(
-    *,
-    runtime: AgentRuntimeConfig | None,
-    resilience: ResilienceConfig | None,
-    observability: ObservabilityConfig | None,
-    flat: dict[str, Any],
-) -> dict[str, Any]:
-    """Merge precedence ``flat kwarg > config object > default``.
-
-    Each ``flat`` value is either a real user-supplied value or the
-    private :data:`_UNSET` sentinel.  When sentinel, the value falls
-    through to ``resilience``/``observability`` (taken from the
-    explicit kwarg if provided, otherwise from ``runtime``), and from
-    there to the documented default in :data:`_RUNTIME_KNOB_DEFAULTS`.
-
-    Pure function — no side effects, no logging, no warnings — so it's
-    trivially testable in isolation from ``Agent.__init__``.
-
-    Returns
-    -------
-    dict[str, Any]
-        Same keys as :data:`_RUNTIME_KNOB_DEFAULTS`; values resolved.
-    """
-    res = resilience if resilience is not None else (runtime.resilience if runtime else None)
-    obs = observability if observability is not None else (runtime.observability if runtime else None)
-    sources = {"resilience": res, "observability": obs}
-
-    resolved: dict[str, Any] = {}
-    for key, (default, src_name) in _RUNTIME_KNOB_DEFAULTS.items():
-        v = flat.get(key, _UNSET)
-        if v is _UNSET:
-            src_obj = sources[src_name]
-            v = getattr(src_obj, key, default) if src_obj is not None else default
-        resolved[key] = v
-    return resolved
 
 
 class Agent:
@@ -145,12 +77,19 @@ class Agent:
 
         tools=[researcher.as_tool("deep_research")]
 
-    **Factory methods** are sugar over the canonical form:
+    **Factory methods** that build real structure (not pure aliases) live on
+    the class:
 
-    - ``Agent.from_plan(*steps)``       → ``Agent(engine=Plan(*steps))``
-    - ``Agent.from_model("model")``     → ``Agent(engine=LLMEngine("model"))``
-    - ``Agent.from_chain(a, b)``        → ``Agent(engine=Plan(Step(a), Step(b)))``
-    - ``Agent.from_engine(e)``          → ``Agent(engine=e)``
+    - ``Agent.chain(a, b)`` — sequential: builds a ``Plan`` of one ``Step``
+      per agent.
+    - ``Agent.parallel(*agents)`` — scripted fan-out: returns a
+      ``ParallelAgent`` whose ``__call__`` yields one ``Envelope``
+      (labelled-text join across every branch, with transitive cost
+      rollup).  For typed per-branch ``list[Envelope]`` access call
+      ``parallel.run_branches(task)`` (async).
+    - ``Agent.from_provider(provider, tier="medium")`` — resolves a tier
+      alias (``cheap`` / ``medium`` / ``top`` / …) to that provider's
+      current model.
 
     Extension engines live in :mod:`lazybridge.ext` to respect the
     core/ext import boundary::
@@ -160,7 +99,7 @@ class Agent:
         Agent(engine=SupervisorEngine(tools=[...]))
     """
 
-    _is_lazy_agent = True  # recognised by wrap_tool()
+    _is_lazy_agent = True  # recognised by _wrap_tool()
 
     def __init__(
         self,
@@ -173,10 +112,10 @@ class Agent:
         guard: Any | None = None,
         verify: Agent | None = None,
         max_verify: int = 3,
-        name: str | None = _UNSET,
-        description: str | None = _UNSET,
-        session: Any | None = _UNSET,
-        verbose: bool = _UNSET,  # type: ignore[assignment]
+        name: str | None = None,
+        description: str | None = None,
+        session: Any | None = None,
+        verbose: bool = False,
         # Convenience: pass provider + model separately
         # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
         model: str | None = None,
@@ -190,95 +129,52 @@ class Agent:
         # to gate the pre-built engine path so callers can't silently bypass
         # the LLMEngine.__init__ check by passing engine= separately.
         allow_dangerous_native_tools: bool = False,
-        # Structured alternatives to the flat resilience / observability
-        # kwargs below.  Precedence: flat kwarg > config object > default.
-        # ``Agent(resilience=cfg, timeout=30.0)`` uses the config's
-        # retries/cache but overrides its timeout.
-        runtime: AgentRuntimeConfig | None = None,
-        resilience: ResilienceConfig | None = None,
-        observability: ObservabilityConfig | None = None,
-        # --- Resilience kwargs (also reachable via resilience=...) ---
+        # --- Resilience kwargs ---
         # Optional post-parse validator.  Runs on the structured ``payload``
         # after schema validation; may raise ValueError to force a
         # retry-with-feedback loop (up to ``max_output_retries``).
-        output_validator: Callable[[Any], Any] | None = _UNSET,
-        max_output_retries: int = _UNSET,  # type: ignore[assignment]
-        # Total deadline (seconds) for ``run()``.  Applied at the
-        # top-level Agent boundary so a hung tool, runaway tool loop,
-        # or slow provider can't block a caller forever.  ``None``
-        # disables the deadline (backwards-compatible default).
-        timeout: float | None = _UNSET,
-        # Convenience shortcuts for provider retry/backoff — forwarded to
-        # LLMEngine when the engine is auto-created from a model string.
-        # Ignored when ``engine=`` is supplied explicitly (use LLMEngine
-        # directly to configure retries on a pre-built engine).
-        max_retries: int = _UNSET,  # type: ignore[assignment]
-        retry_delay: float = _UNSET,  # type: ignore[assignment]
+        output_validator: Callable[[Any], Any] | None = None,
+        max_output_retries: int = 2,
+        # Total deadline (seconds) for ``run()``.  ``None`` disables.
+        timeout: float | None = None,
+        # Provider retry/backoff — forwarded to LLMEngine when the engine
+        # is auto-created from a model string.  Ignored when ``engine=``
+        # is supplied explicitly (configure on ``LLMEngine`` directly).
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
         # Fallback agent tried when the primary engine returns an error.
-        # Useful for provider redundancy: Agent("claude-opus-4-7", fallback=Agent("gpt-4o")).
-        # The fallback runs its own full pipeline (tools, memory, guard, etc.) on the
-        # same envelope, so it should be configured with compatible output= / tools=.
-        fallback: Agent | None = _UNSET,
+        # ``Agent("claude-opus-4-7", fallback=Agent("gpt-4o"))``.
+        fallback: Agent | None = None,
         # Prompt caching — when True, marks the static prefix (system
         # prompt + tools) as cacheable so providers that support it
         # (Anthropic today; OpenAI/DeepSeek auto-cache; Google uses a
         # different API) serve cache hits at ~10% of input token cost.
-        # Forwarded to LLMEngine when the engine is auto-created from a
-        # model string.  Ignored when ``engine=`` is supplied explicitly
-        # (configure ``LLMEngine(cache=...)`` directly in that case).
-        # Pass a ``CacheConfig(ttl="1h")`` for the longer Anthropic TTL.
-        cache: bool | Any = _UNSET,
+        # Pass a ``CacheConfig(ttl="1h")`` instance for the longer
+        # Anthropic TTL.  Forwarded to LLMEngine when the engine is
+        # auto-created.  Ignored when ``engine=`` is supplied explicitly
+        # (configure ``LLMEngine(cache=...)`` directly).
+        cache: bool | Any = False,
     ) -> None:
-        # Compute _name_explicit BEFORE _resolve_runtime_kwargs so we preserve
-        # the distinction between "user chose a name" and "name fell from model
-        # default".  After resolution the two are indistinguishable.
-        _flat_name_given = name is not _UNSET and name is not None and str(name).strip() != ""
-        _obs_name_given = False
-        _obs_src = (
-            observability
-            if observability is not None
-            else (getattr(runtime, "observability", None) if runtime is not None else None)
-        )
-        if _obs_src is not None:
-            _obs_name_val = getattr(_obs_src, "name", None)
-            if _obs_name_val is not None and str(_obs_name_val).strip() != "":
-                _obs_name_given = True
-        _name_explicit_flag: bool = _flat_name_given or _obs_name_given
-
-        # Merge config objects into flat kwargs via the centralised
-        # precedence helper.  See ``_resolve_runtime_kwargs`` for the
-        # contract; the table-driven approach keeps this block
-        # constant-size as we add new shareable knobs.
-        _resolved = _resolve_runtime_kwargs(
-            runtime=runtime,
-            resilience=resilience,
-            observability=observability,
-            flat={
-                "timeout": timeout,
-                "max_retries": max_retries,
-                "retry_delay": retry_delay,
-                "cache": cache,
-                "max_output_retries": max_output_retries,
-                "output_validator": output_validator,
-                "fallback": fallback,
-                "verbose": verbose,
-                "session": session,
-                "name": name,
-                "description": description,
-            },
-        )
-        timeout = _resolved["timeout"]
-        max_retries = _resolved["max_retries"]
-        retry_delay = _resolved["retry_delay"]
-        cache = _resolved["cache"]
-        max_output_retries = _resolved["max_output_retries"]
-        output_validator = _resolved["output_validator"]
-        fallback = _resolved["fallback"]
-        verbose = _resolved["verbose"]
-        session = _resolved["session"]
-        name = _resolved["name"]
-        description = _resolved["description"]
+        # ``name`` is "explicit" when the caller supplied a real string
+        # value (not None / blank).  Used downstream to require a name
+        # when the agent is later passed in ``tools=[...]``.
+        _name_explicit_flag: bool = name is not None and str(name).strip() != ""
         from lazybridge.engines.llm import LLMEngine
+
+        # Phase-3 Block H, T6 — ``model=`` is only meaningful on the LLM-engine
+        # construction path (engine is None or a model-string).  Passing both
+        # ``model=`` and a non-string ``engine=`` was silently dropped pre-0.8;
+        # 0.7.9 raises so the typo / misconfiguration is visible.
+        if model is not None and engine is not None and not isinstance(engine, str):
+            raise ValueError(
+                f"Agent(model={model!r}, engine={type(engine).__name__}(...)): "
+                f"the ``model=`` kwarg is only consumed when ``engine=None`` or "
+                f"``engine=<model_string>`` (in which case Agent auto-builds an "
+                f"``LLMEngine``).  When you pass a pre-built engine, configure "
+                f"the model on that engine itself.\n"
+                f"  Fix: drop ``model=`` (engine controls the model), or pass "
+                f"the model string directly: ``Agent({model!r}, ...)``."
+            )
 
         # Canonical: Agent(engine=LLMEngine(...)) or Agent(engine=Plan(...))
         # Sugar:     Agent("claude-opus-4-7") → engine is a model string → auto-builds LLMEngine
@@ -295,6 +191,22 @@ class Agent:
             )
         else:
             self.engine = engine
+            # Phase-3 Block H, T7 — when the engine isn't an LLM (Plan,
+            # SupervisorEngine, HumanEngine, custom), the auto-name fallback
+            # to the engine's ``model`` attribute (or to the literal
+            # ``"agent"`` placeholder) silently produces ambiguous names that
+            # collide once the agent is used as a tool or referenced by a
+            # ``Step``.  Require ``name=`` upfront so the failure is at the
+            # construction point rather than at first composition.
+            if not _name_explicit_flag and not hasattr(self.engine, "model"):
+                engine_kind = type(self.engine).__name__
+                raise ValueError(
+                    f"Agent(engine={engine_kind}(...)) requires an explicit ``name=``.\n"
+                    f"  Engines other than ``LLMEngine`` have no ``.model`` attribute to derive\n"
+                    f"  a default name from, so the agent would silently get the placeholder\n"
+                    f"  ``'agent'`` and collide the moment another agent is built or composed.\n"
+                    f"  Fix: pass ``name=`` (e.g. ``Agent(engine={engine_kind}(...), name='pipeline')``)."
+                )
 
         # If the caller passed native_tools but also supplied a pre-built
         # engine, push the list onto the engine if it has the attribute.
@@ -356,7 +268,8 @@ class Agent:
         self.max_verify = max_verify
         self.fallback = fallback
         if self.fallback is not None:
-            seen, fb = {id(self)}, self.fallback
+            seen: set[int] = {id(self)}
+            fb: Agent | None = self.fallback
             while fb is not None:
                 if id(fb) in seen:
                     raise ValueError("fallback= chain contains a cycle. Check your Agent(fallback=...) configuration.")
@@ -364,9 +277,9 @@ class Agent:
                 fb = getattr(fb, "fallback", None)
         self.name: str = str(name or getattr(self.engine, "model", None) or "agent")
         self.description = description
-        #: True when the caller supplied an explicit ``name=`` (or an
-        #: ``ObservabilityConfig.name``).  False when the name was derived
-        #: from the model string or left as the ``"agent"`` default.
+        #: True when the caller supplied an explicit ``name=``.  False
+        #: when the name was derived from the model string or left as
+        #: the ``"agent"`` default.
         #: Used by ``build_tool_map`` and the ``tool()`` factory to require
         #: an explicit identity before an Agent is used as a sub-agent tool.
         self._name_explicit: bool = _name_explicit_flag
@@ -861,29 +774,6 @@ class Agent:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_model(cls, model: str, **kwargs: Any) -> Agent:
-        """Construct an Agent backed by an LLMEngine for ``model``.
-
-        Explicit counterpart to ``Agent("claude-opus-4-7")``.  Use this
-        when you want the model-path to be unambiguous at the call site
-        (code review, static analysis, teaching material)::
-
-            Agent.from_model("claude-opus-4-7", tools=[search])
-        """
-        return cls(model, **kwargs)
-
-    @classmethod
-    def from_engine(cls, engine: Any, **kwargs: Any) -> Agent:
-        """Construct an Agent from an already-built Engine instance.
-
-        Explicit counterpart to ``Agent(engine=some_engine)``::
-
-            Agent.from_engine(Plan(Step(researcher), Step(writer)))
-            Agent.from_engine(SupervisorEngine(tools=[t], agents=[a]))
-        """
-        return cls(engine=engine, **kwargs)
-
-    @classmethod
     def from_provider(
         cls,
         provider: str,
@@ -929,14 +819,13 @@ class Agent:
         concurrency_limit: int | None = None,
         step_timeout: float | None = None,
         **kwargs: Any,
-    ) -> _ParallelAgent:
+    ) -> ParallelAgent:
         """Deterministic fan-out: run ``agents`` concurrently on the same task.
 
-        Returns ``list[Envelope]`` — one entry per input agent, preserving
-        order.  No LLM orchestrator mediates the call; this is just sugar
-        for ``asyncio.gather(*[a.run(task) for a in agents])`` with an
-        optional semaphore (``concurrency_limit``) and per-agent timeout
-        (``step_timeout``).
+        Returns a :class:`ParallelAgent` whose ``__call__`` produces a
+        single :class:`Envelope` — labelled-text join of every branch's
+        output, with transitive cost rollup.  For typed access to per-branch
+        envelopes call ``ParallelAgent.run_branches(task)`` (async).
 
         Use this when you **know** you want N things to happen in
         parallel.  If you want the LLM to decide whether to call agents
@@ -944,101 +833,8 @@ class Agent:
         ``tools=[...]`` on a regular ``Agent`` instead; the engine emits
         parallel tool calls automatically when the model requests them.
         """
-        return _ParallelAgent(
+        return ParallelAgent(
             agents=list(agents),
-            concurrency_limit=concurrency_limit,
-            step_timeout=step_timeout,
-            **kwargs,
-        )
-
-    # ------------------------------------------------------------------
-    # Unified ``from_<engine_kind>`` factories
-    # ------------------------------------------------------------------
-    #
-    # Every Agent is ``Container(engine, tools, state)``.  The engine
-    # decides HOW the agent behaves; everything else (memory, session,
-    # guard, verify, fallback, output, name) is uniform across every
-    # engine.  These factories are sugar that build the right engine
-    # and forward shared kwargs through to the unified Agent
-    # constructor.  Reading any ``Agent.from_X(...)`` call site tells
-    # you immediately which engine is in there.
-
-    @classmethod
-    def from_plan(
-        cls,
-        *steps: Any,
-        max_iterations: int = 100,
-        store: Any | None = None,
-        checkpoint_key: str | None = None,
-        resume: bool = False,
-        on_concurrent: str = "fail",
-        **kwargs: Any,
-    ) -> Agent:
-        """Construct an Agent backed by a declarative :class:`Plan`.
-
-        Explicit counterpart to ``Agent(engine=Plan(*steps, ...))``::
-
-            Agent.from_plan(
-                Step(researcher, name="search", writes="hits"),
-                Step(ranker,     name="rank",   context=from_prev),
-                Step(writer,     name="write",  context=from_step("rank")),
-                store=Store(db="run.sqlite"),
-                checkpoint_key="research",
-                resume=True,
-            )
-
-        All :class:`Plan` kwargs are accepted directly; remaining
-        ``**kwargs`` (``memory=`` / ``session=`` / ``output=`` /
-        ``verify=`` / ``fallback=`` / ``guard=`` / ``name=`` / etc.)
-        forward to the unified Agent constructor.
-        """
-        from lazybridge.engines.plan import Plan
-
-        plan = Plan(
-            *steps,
-            max_iterations=max_iterations,
-            store=store,
-            checkpoint_key=checkpoint_key,
-            resume=resume,
-            on_concurrent=on_concurrent,  # type: ignore[arg-type]
-        )
-        return cls(engine=plan, **kwargs)
-
-    @classmethod
-    def from_chain(cls, *agents: Agent, **kwargs: Any) -> Agent:
-        """Construct an Agent that runs ``agents`` sequentially (linear pipeline).
-
-        Each agent's output becomes the next agent's input.  Internally
-        wraps a :class:`Plan` of one ``Step`` per agent — the canonical
-        narrative is "linear Plan", just spelled in two characters less.
-
-        Equivalent to :meth:`Agent.chain`; the ``from_`` form is the
-        documented canonical surface so reading the call site tells you
-        immediately which engine is in there.
-        """
-        return cls.chain(*agents, **kwargs)
-
-    @classmethod
-    def from_parallel(
-        cls,
-        *agents: Agent,
-        concurrency_limit: int | None = None,
-        step_timeout: float | None = None,
-        **kwargs: Any,
-    ) -> _ParallelAgent:
-        """Construct a deterministic fan-out runner over ``agents``.
-
-        Equivalent to :meth:`Agent.parallel`.  **Note:** this is the one
-        ``from_*`` factory that does NOT return a single ``Agent``; it
-        returns a :class:`_ParallelAgent` whose ``__call__`` returns
-        ``list[Envelope]`` (one per input agent, in order).  The
-        asymmetry is intentional: this is **scripted** fan-out, not an
-        orchestrated agent — there is no single "result" to wrap into
-        one envelope.  Use ``Agent(tools=[a, b, c])`` if you want a
-        proper Agent that the engine orchestrates.
-        """
-        return cls.parallel(
-            *agents,
             concurrency_limit=concurrency_limit,
             step_timeout=step_timeout,
             **kwargs,
@@ -1048,18 +844,18 @@ class Agent:
     # Note on ext-engine factories
     # ------------------------------------------------------------------
     #
-    # ``Agent.from_<kind>`` factories for ext engines (Supervisor,
-    # Human, dynamic planners) intentionally do NOT live on this class —
-    # the core-vs-ext boundary (see ``docs/guides/core-vs-ext.md``)
-    # forbids ``lazybridge/`` core from importing ``lazybridge.ext.*``,
-    # even via lazy/local imports.  Use either of:
+    # Ext engines (Supervisor, Human, dynamic planners) deliberately have
+    # no factory on this class — the core-vs-ext boundary (see
+    # ``docs/guides/core-vs-ext.md``) forbids ``lazybridge/`` core from
+    # importing ``lazybridge.ext.*``, even via lazy/local imports.
+    # Two construction paths:
     #
-    # 1. The escape-hatch :meth:`from_engine` with the ext engine instance::
+    # 1. Direct: pass the ext engine instance to the canonical Agent ctor::
     #
     #        from lazybridge.ext.hil import SupervisorEngine
-    #        Agent.from_engine(SupervisorEngine(tools=[...], agents=[...]))
+    #        Agent(engine=SupervisorEngine(tools=[...], agents=[...]))
     #
-    # 2. The module-level ergonomic factories shipped in each ext package::
+    # 2. Module-level ergonomic factories shipped in each ext package::
     #
     #        from lazybridge.ext.hil import supervisor_agent, human_agent
     #        supervisor_agent(tools=[...], agents=[...])
@@ -1241,17 +1037,22 @@ def _read_source(src: Any) -> str:
     return str(src)
 
 
-class _ParallelAgent:
+class ParallelAgent:
     """Deterministic fan-out over N agents — the shape behind :meth:`Agent.parallel`.
 
-    This is a **pre-scripted** parallel runner, not a parallelism
-    paradigm.  Every input agent receives the same task; their per-run
-    Envelopes are returned as a list in input order.  No orchestrator
-    LLM is involved.
+    Pre-scripted parallel runner.  Every input agent receives the same
+    task; the N branch results are folded into a single :class:`Envelope`
+    via labelled-text join — same shape as :class:`Plan`'s
+    ``from_parallel_all`` aggregator.  Cost roll-up is transitive.
+    The first non-``None`` branch error propagates as the wrapper's
+    ``error`` so downstream consumers can short-circuit.
 
     Prefer :class:`Agent` with ``tools=[...]`` when you want the engine
     (LLM, Supervisor, Plan) to decide dynamically which tools to invoke
     and when — parallel execution is automatic on that path.
+
+    Per-branch typed access: call :meth:`run_branches` (async) when you
+    need ``list[Envelope]`` rather than the joined wrapper.
     """
 
     _is_lazy_agent = True
@@ -1273,7 +1074,12 @@ class _ParallelAgent:
         self.description = description
         self.session = session
 
-    async def run(self, task: str | Envelope) -> list[Envelope]:
+    async def run_branches(self, task: str | Envelope) -> list[Envelope]:
+        """Async per-branch entry point — returns one ``Envelope`` per
+        input agent in input order.  Use this when you need typed
+        access to individual branch results; for the framework-uniform
+        single-Envelope view, use :meth:`run` or ``__call__``.
+        """
         env = Agent._to_envelope(task) if isinstance(task, str) else task
         sem = asyncio.Semaphore(self.concurrency_limit) if self.concurrency_limit else None
 
@@ -1304,7 +1110,49 @@ class _ParallelAgent:
                 out.append(Envelope.error_envelope(RuntimeError(str(r))))
         return out
 
-    def __call__(self, task: str | Envelope) -> list[Envelope]:
+    def _join_branches(self, task: str | Envelope, branches: list[Envelope]) -> Envelope:
+        """Fold N branch envelopes into ONE Envelope (labelled-text join).
+
+        Same shape as :meth:`Plan._aggregate_parallel_band`.  Used by both
+        ``run()`` / ``__call__()`` and ``as_tool()`` so direct callers and
+        tool-wrapped callers see identical output.
+        """
+        from lazybridge.envelope import EnvelopeMetadata
+
+        sections = [
+            f"[{a.name}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
+            for a, e in zip(self.agents, branches)
+        ]
+        joined = "\n\n".join(sections)
+        nested_in = sum(e.metadata.input_tokens + e.metadata.nested_input_tokens for e in branches)
+        nested_out = sum(e.metadata.output_tokens + e.metadata.nested_output_tokens for e in branches)
+        nested_cost = sum(e.metadata.cost_usd + e.metadata.nested_cost_usd for e in branches)
+        first_error = next((e.error for e in branches if e.error), None)
+        return Envelope(
+            task=task if isinstance(task, str) else task.task,
+            payload=joined,
+            metadata=EnvelopeMetadata(
+                nested_input_tokens=nested_in,
+                nested_output_tokens=nested_out,
+                nested_cost_usd=nested_cost,
+            ),
+            error=first_error,
+        )
+
+    async def run(self, task: str | Envelope) -> Envelope:
+        """Run every branch and return one folded :class:`Envelope`.
+
+        The wrapper's ``payload`` is the labelled-text join of every
+        branch's ``.text()``; ``metadata.nested_*`` rolls every branch's
+        cost up so the outer envelope reports total spend.  The first
+        non-``None`` branch error propagates as the wrapper's ``error``.
+
+        For typed per-branch access, call :meth:`run_branches`.
+        """
+        branches = await self.run_branches(task)
+        return self._join_branches(task, branches)
+
+    def __call__(self, task: str | Envelope) -> Envelope:
         # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only
         # forward-compatible detection (``get_event_loop`` is deprecated
         # under 3.12 and errors under 3.14+ when no loop is running).
@@ -1316,9 +1164,10 @@ class _ParallelAgent:
         return _run_coro_with_context(self.run(task))
 
     # ------------------------------------------------------------------
-    # Tool-is-Tool — fold the list[Envelope] into a single Envelope so
-    # this fan-out runner can be passed as a tool to another agent
-    # (like every other ``Agent`` / agent-like in LazyBridge).
+    # Tool-is-Tool — ``run()`` already returns a single Envelope so the
+    # tool wrapper just delegates.  Pre-Block-F this method duplicated
+    # the labelled-text join because ``run()`` returned ``list[Envelope]``;
+    # now both paths share ``_join_branches``.
     # ------------------------------------------------------------------
 
     def as_tool(
@@ -1328,23 +1177,10 @@ class _ParallelAgent:
     ) -> Tool:
         """Expose the fan-out runner as a single :class:`Tool`.
 
-        The N branches' ``Envelope`` results are folded into ONE
-        :class:`Envelope` whose ``payload`` is a labelled-text join —
-        same shape as :class:`Plan`'s ``from_parallel_all`` aggregator,
-        so the outer agent / model reads the output uniformly.  Cost
-        roll-up is transitive (every branch's ``input_tokens`` /
-        ``output_tokens`` / ``cost_usd`` is summed into the wrapper's
-        ``nested_*`` fields).  The first non-``None`` branch error
-        propagates as the wrapper's ``error`` so downstream can
-        short-circuit.
-
-        Without this method, ``wrap_tool(parallel_runner)`` falls
-        through the inline shim in :func:`lazybridge.tools._agent_as_tool`
-        which assumes ``run()`` returns an ``Envelope``; the
-        ``list[Envelope]`` then leaks into the LLM's tool result block
-        as an opaque ``str(list)`` that the model can't parse.
+        Just delegates to :meth:`run` — same labelled-text Envelope as
+        every direct caller sees, so a ``ParallelAgent`` passed in
+        ``tools=[...]`` produces output identical to a hand-call.
         """
-        from lazybridge.envelope import EnvelopeMetadata
         from lazybridge.tools import Tool
 
         actual_name = name or self.name or "parallel"
@@ -1353,36 +1189,7 @@ class _ParallelAgent:
         )
 
         async def _run(task: str) -> Envelope:
-            results: list[Envelope] = await self.run(task)
-            # Labelled-text join — same shape as
-            # ``Plan._aggregate_parallel_band``.  Reading the joined
-            # text gives the consumer a structured, model-friendly
-            # view of every branch's contribution.
-            sections = [
-                f"[{a.name}]\n{e.text() if not e.error else f'(error) {e.error.message}'}"
-                for a, e in zip(self.agents, results)
-            ]
-            joined = "\n\n".join(sections)
-            # Transitive cost rollup — the outer envelope's
-            # ``nested_*`` reports the total spend of every branch
-            # (their direct + their own nested_*) so an N-deep tree
-            # of parallel-of-parallel composes cleanly.
-            nested_in = sum(e.metadata.input_tokens + e.metadata.nested_input_tokens for e in results)
-            nested_out = sum(e.metadata.output_tokens + e.metadata.nested_output_tokens for e in results)
-            nested_cost = sum(e.metadata.cost_usd + e.metadata.nested_cost_usd for e in results)
-            # First error wins so callers reading ``.error`` can detect
-            # branch failure without scanning the whole list.
-            first_error = next((e.error for e in results if e.error), None)
-            return Envelope(
-                task=task,
-                payload=joined,
-                metadata=EnvelopeMetadata(
-                    nested_input_tokens=nested_in,
-                    nested_output_tokens=nested_out,
-                    nested_cost_usd=nested_cost,
-                ),
-                error=first_error,
-            )
+            return await self.run(task)
 
         _run.__name__ = actual_name
         _run.__doc__ = actual_desc

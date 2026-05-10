@@ -6,6 +6,181 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.9] — 2026-05-10 — simplification release
+
+The headline change: **deletion-led simplification**.  The framework
+had no users yet, so we ship breaking changes without deprecation
+paths or shims.  Net public surface change: −2 in
+``lazybridge.__all__`` (50 → 48), 5 deleted ``Agent.from_*`` class
+methods, 9 silent-fallback paths converted to explicit errors, and
+the entire ``report_builder`` subsystem extracted to its own repo.
+Zero new public concept.
+
+The single LLM-friendliness lever is consistency: one canonical
+form per concept, errors always raise, no opt-in modes.
+
+See ``docs/migrations/0.7-to-0.79.md`` for per-deletion before/after
+codemod snippets.
+
+### Breaking — extraction
+
+- **``lazybridge.external_tools.report_builder`` extracted** to the
+  sibling repo
+  [``selvaz/LazyReport``](https://github.com/selvaz/LazyReport)
+  (PyPI: ``lazybridge-reports``).  Every import path
+  ``lazybridge.external_tools.report_builder.*`` is gone — replace
+  with ``lazybridge_reports.*`` after installing the new package.
+  The five optional extras ``[report]``, ``[report-charts]``,
+  ``[report-citations]``, ``[report-fallback]``, ``[pdf]`` are
+  gone from ``lazybridge``'s ``pyproject.toml``; their replacements
+  live as ``lazybridge-reports[charts,citations,fallback,pdf]``.
+  No shim — there is no fallback import path.
+- **New optional extra**: ``[encryption]`` →
+  ``cryptography>=42,<46`` for the new
+  ``lazybridge.store.encryption.EncryptedStoreAdapter`` (Fernet
+  at-rest encryption for ``Store`` values, with ``MultiFernet``
+  key rotation).
+
+### Breaking — deletions
+
+- **5 ``Agent.from_*`` factories deleted**: ``from_model``,
+  ``from_engine``, ``from_chain``, ``from_plan``, ``from_parallel``.
+  All five were pure-alias forwarders (verified by audit).  Use the
+  canonical ``Agent(engine=...)`` ctor or the kept-because-non-trivial
+  factories (``Agent.chain``, ``Agent.parallel``,
+  ``Agent.from_provider``).
+- **3 config dataclasses deleted**: ``AgentRuntimeConfig``,
+  ``ResilienceConfig``, ``ObservabilityConfig``.  These were
+  wrapper-of-flat-kwargs configs whose only behaviour was a
+  ``flat kwarg > config object > default`` precedence merge that
+  required a private ``_UNSET`` sentinel on every kwarg.  The
+  precedence game and ``_UNSET`` are gone with them.  ``CacheConfig``
+  is **kept** — it carries real semantic value (``enabled`` /
+  ``ttl``) consumed by ``LLMEngine``.
+- **``mode="auto"`` graceful-fallback ladder removed** from
+  ``Tool`` / ``tool()``.  Both default to ``mode="signature"`` now;
+  pass ``mode="hybrid"`` or ``mode="llm"`` plus ``schema_llm=`` to
+  opt into LLM-driven schema generation.  Passing
+  ``mode="auto"`` raises ``ValueError``.
+- **``_ParallelAgent`` renamed to ``ParallelAgent``** and its return
+  contract changed.  ``ParallelAgent.__call__`` and ``run()`` now
+  return ONE ``Envelope`` whose ``.payload`` is the labelled-text
+  join across every branch (with transitive cost rollup in
+  ``metadata.nested_*`` and first-error short-circuit in
+  ``.error``) — restoring the framework invariant that every Agent
+  returns ``Envelope``.  For typed per-branch ``list[Envelope]``,
+  call the new ``run_branches(task)`` async helper.
+- **``wrap_tool`` made private** (``_wrap_tool``).  Use the public
+  ``tool(...)`` factory instead.
+- **``LLMEngine(tool_choice="parallel")`` raises ``ValueError``**
+  (was a 0.7-era ``DeprecationWarning`` that downgraded to ``"auto"``).
+  Concurrent tool execution is the default and not configurable.
+- **``Old doc/`` directory deleted** (1.2 MB, zero references).
+- **``pythonpath = ["lazybridge"]`` removed** from ``pyproject.toml``
+  (unused).
+
+### Breaking — silent fallbacks → explicit errors
+
+- ``from_step("typo")`` / ``from_parallel("typo")`` no longer warn +
+  fall back to the start envelope — they raise ``PlanRuntimeError``
+  with the actual step history and a typo-aware "Did you mean?" hint.
+- ``LLMEngine`` with an unknown model raises ``ValueError`` instead of
+  silently routing to Anthropic.  Set
+  ``LLMEngine.set_default_provider("...")`` for the legacy behaviour.
+- MCP server emitting a non-``object`` ``inputSchema`` raises
+  ``ValueError`` (was silently coerced to an empty parameter set).
+- ``Envelope.text()`` on a non-JSON-serialisable payload raises
+  ``TypeError`` (was ``str(payload)`` fallback).
+- ``Memory(summarizer_timeout < 5.0)`` warns at construction
+  (timeout almost always fires for typical summariser shapes).
+- ``BaseProvider._resolve_model`` raises ``ValueError`` when nothing
+  is configured (was empty string fallback).
+- ``Agent(engine=<non-LLM>)`` requires an explicit ``name=`` (was
+  silently named ``"agent"`` and collided when used as a tool).
+- ``Agent(model=..., engine=<non-LLM>)`` raises ``ValueError`` (was
+  silently dropped).
+
+### Added
+
+- **``lazybridge.matrix``** — declarative provider-capability lookup.
+  ``provider_capabilities()`` and ``native_tool_support()`` aggregate
+  the per-provider ``ClassVar`` flags into a single typed dict for
+  docs / introspection / capability-aware error messages.
+- **``BaseProvider`` capability ``ClassVar`` flags**:
+  ``supports_streaming`` / ``supports_structured_output`` /
+  ``supports_thinking``.  Subclasses override when a backend doesn't.
+- **Standard error-message format** — every ``PlanCompileError`` /
+  ``PlanRuntimeError`` / ``UnsupportedFeatureError`` follows::
+
+      Step '<name>' (#<pos>) — <slot>=<sentinel> <reason>.
+        <context, e.g. ``Defined steps: [...].``>
+        Did you mean '<close>'?  (when applicable)
+        Fix: <concrete action>.
+
+- **OTel ``gen_ai.agent.nesting_level`` attribute** on agent spans —
+  dashboards filtering on ``=0`` get clean root-only views.
+- **``Session.emit`` exporter-exception dedup** — warn-once per
+  ``(exporter class, exception class)`` pair with a count of
+  suppressed identical failures.
+- **``test_public_api_snapshot.py``** — pins ``lazybridge.__all__``
+  and locks the deleted-in-0.7.9 names as permanently gone.
+
+### Fixed (bug fixes from Phase 1)
+
+- B1: DeepSeek provider — defensively rebuild ``params['messages']``
+  rather than mutating in place.
+- B2: Anthropic ``_compute_cost`` accepts ``cached_input_tokens=0``
+  and applies the standard 10% cache-read rate; cost telemetry was
+  over-counted on cached calls pre-fix.
+- B4: Anthropic provider warns on URL-source ``AudioContent`` (was
+  silently dropped).
+- B6: Plan compiler typo-aware "Did you mean?" suggestions on
+  ``from_step`` / ``from_agent`` / ``from_memory`` unknown-target
+  errors.
+- B7: Plan serialisation raises ``ValueError`` on unknown sentinel
+  ``kind`` (was silently fallback to ``from_prev``).
+- B8: OTel exporter logs SDK exceptions at WARNING (was swallowed).
+- B9: Blackboard planner closure state resets per ``run()`` call
+  (was leaking between successive runs).
+- B10: Plan compiler rejects sentinels referencing auto-named
+  ``_anon_<id>`` steps (LLMs cannot meaningfully produce that name).
+- B11: Plan resume replays Store sidecar writes from the checkpoint
+  ``kv`` so external consumers see complete state after a crash in
+  the checkpoint→Store-write window.
+- I5: Anthropic adaptive-thinking warning corrected for Opus 4.7
+  (pre-fix said "use 'effort'" but Opus 4.7 only accepts ``display``).
+
+### Documentation
+
+- ``SKILL.md`` rewritten for the 0.7.9 surface; canonical Plan
+  block, default-model fallback advice via ``from_provider(tier=...)``,
+  anti-pattern entries for every deletion.
+- ``docs/migrations/0.7-to-0.79.md`` (new) — per-deletion before/after
+  snippets and a TL;DR table.
+- ``docs/reference/configs.md`` rewritten — only ``CacheConfig``
+  remains documented; rest of file explains the deletion.
+- ``docs/reference/engines.md`` adds the ``thinking=`` knob.
+- ``docs/reference/providers.md`` adds the ``stop_reason``
+  normalisation table (Google ``MAX_TOKENS`` mapping fix).
+- ``docs/guides/mid/parallel.md`` rewritten for the new
+  single-Envelope return contract.
+- ``docs/guides/mid/mcp.md`` example now shows ``allow=`` filtering
+  as best practice.
+- ``examples/verify_judge_loop.py`` (new), ``examples/guardrails_demo.py``
+  (new), env preflight in ``examples/daily_news_report.py``.
+
+### Tooling
+
+- ``lazybridge.skill_docs._build`` recovered + wired into the
+  ``test.yml`` typecheck job (drift gate that asserts every
+  public symbol in ``__all__`` is mentioned in SKILL.md).
+- ``docs.yml`` asserts ``site/llms.txt`` and ``site/llms-full.txt``
+  are non-empty (≥1 KB) after ``mkdocs build --strict``.
+- Top-level ``permissions: contents: read`` added to
+  ``.github/workflows/test.yml`` (least-privilege baseline).
+
+---
+
 ## [Unreleased] — 2026-05-05 — bug-fix and routing hardening
 
 ### Breaking

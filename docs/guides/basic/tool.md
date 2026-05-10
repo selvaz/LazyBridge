@@ -45,7 +45,7 @@ LazyBridge accepts six things in `tools=[...]` and normalises them all
 to `Tool` instances at construction time:
 
 ```python
-from lazybridge import Agent, LLMEngine, Tool
+from lazybridge import Agent, LLMEngine, Tool, tool
 from lazybridge.ext.mcp import MCP
 from lazybridge.external_tools.read_docs import read_docs_tools
 
@@ -53,20 +53,25 @@ agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
     tools=[
         plain_function,                              # 1. plain Python function
-        Tool(plain_function, strict=True),           # 2. function + override
+        tool(plain_function, name="custom", strict=True),  # 2. function + overrides via factory
         other_agent,                                 # 3. sub-agent (auto-wrapped)
         other_agent.as_tool(verify=judge),           # 4. sub-agent + judge/retry
-        MCP.stdio("fs", "npx", ["@modelcontextprotocol/server-filesystem", "."]),  # 5. MCPServer
+        MCP.stdio("fs", command="npx",
+                  args=["@modelcontextprotocol/server-filesystem", "."],
+                  allow=["fs.read_*", "fs.list_*"]),  # 5. MCPServer (allow= required)
         *read_docs_tools(),                          # 6. external_tools kit (list[Tool])
     ],
 )
 ```
 
 The common case is **path 1**: drop the function in. Type hints +
-docstring drive the JSON schema. Reach for `Tool(...)` only when you
-need to override the name / description / strictness / mode; reach for
-`Tool.from_schema(...)` only when you already have a JSON schema (MCP,
-OpenAPI, third-party registry).
+docstring drive the JSON schema. Reach for `tool(fn, name=..., ...)`
+when you need to override the name / description / strictness / mode;
+reach for `Tool.from_schema(...)` when you already have a JSON schema
+(MCP, OpenAPI, third-party registry). The bare `Tool(...)` constructor
+is still public for advanced use cases (e.g. typing annotations,
+isinstance checks) but the `tool()` factory is the canonical form
+for new code.
 
 ## When to construct a Tool explicitly
 
@@ -118,7 +123,7 @@ print(result.text())
 
 
 # 2) Function + explicit configuration — override the name and turn on strict.
-calc_tool = Tool(
+calc_tool = tool(
     calculate,
     name="calc",
     description="Evaluate an arithmetic expression and return the numeric result.",
@@ -208,6 +213,6 @@ weather_agent = Agent(
   the composition rule that makes all six paths uniform.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
   `tool(...)` factory, `agent.as_tool(...)`, and `Tool.from_schema(...)`
-  with their canonical equivalents and the differences between
-  `mode="auto"` (factory default) and `mode="signature"` (Tool
-  constructor default).
+  with their canonical equivalents.  Both `tool(...)` and `Tool(...)`
+  default to `mode="signature"`; `mode="hybrid"` / `mode="llm"` are
+  the explicit opt-ins for LLM-driven schema generation.

@@ -66,10 +66,10 @@ The implicit form (`tools=[other_agent]`) covers (1). When you need
   judge's feedback. Use this for high-stakes outputs where the
   parent agent should not see "first try, possibly wrong" results.
 - **You want to expose `Agent.parallel(...)` as a single tool.**
-  The `_ParallelAgent` returned by `Agent.parallel(...)` has its
-  own `as_tool()` that folds the `list[Envelope]` into one
-  envelope (labelled-text join), so the outer agent reads it
-  uniformly.
+  The `ParallelAgent` returned by `Agent.parallel(...)` already
+  returns ONE Envelope from `__call__` / `run` since 0.7.9; its
+  `as_tool()` just delegates so the outer agent reads the same
+  labelled-text join the runner produces directly.
 
 ## When NOT to use it
 
@@ -146,7 +146,7 @@ result = orchestrator("write a paragraph on bee population trends")
 print(result.text())
 
 
-# 4) Parallel fan-out as a single tool — folds list[Envelope] into one envelope.
+# 4) Parallel fan-out as a single tool — wrapper Envelope already carries the join.
 fan_out = Agent.parallel(researcher_us, researcher_eu, researcher_asia)
 orchestrator = Agent(
     engine=LLMEngine("claude-opus-4-7"),

@@ -76,10 +76,11 @@ Loading the skill makes Claude follow these rules when editing
 LazyBridge code:
 
 - **Canonical form first.** `Agent(engine=LLMEngine("model"), …)`
-  with each constructor argument on its own line. Sugar
-  (`Agent("model")`, `Agent.from_model`, `Agent.from_engine`) only
-  in places where it's the right tool — and always with a
-  one-line "use this when …" comment.
+  with each constructor argument on its own line. The string-positional
+  shortcut `Agent("model")` is a pure alias; everything else (deleted
+  in 0.7.9: `Agent.from_model`, `Agent.from_engine`, `Agent.from_chain`,
+  `Agent.from_plan`, `Agent.from_parallel`) is now part of the canonical
+  ctor surface — write `Agent(engine=Plan(...))` directly.
 - **No `asyncio.run(main())` wrapping.** The canonical call is
   `agent(task)`. Async forms (`await agent.run(task)`) only when
   the caller is already async.
@@ -115,7 +116,7 @@ pipeline = Agent(
 ```
 
 A vanilla Claude (no skill) might produce
-`Agent.from_plan(...)` or `Agent("model", ...)` — useful but not
+`Agent(engine=Plan(...))` or `Agent("model", ...)` — useful but not
 the canonical form.
 
 ## Updating

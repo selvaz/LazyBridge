@@ -36,7 +36,7 @@ each argument on its own line: it's what every example in `examples/`
 uses, and it's what you'll extend the moment you need to configure the
 engine (`system=`, `max_turns=`, `thinking=`, …).
 
-Shorter forms exist (`Agent.from_model("claude-opus-4-7")` and the
+Shorter forms exist (`Agent("claude-opus-4-7")` and the
 string-positional shortcut `Agent("claude-opus-4-7")`) but they're
 sugar — they save a line at the cost of hiding which engine the agent
 actually runs. Stick to the canonical form while you're learning;

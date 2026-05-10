@@ -79,9 +79,9 @@ class SupervisorEngine:
         # Tool-is-Tool: accept plain functions and Agents too, not just Tool
         # instances.  Matches the contract of ``Agent(tools=[...])`` so the
         # same tools list can be handed to either surface.
-        from lazybridge.tools import wrap_tool
+        from lazybridge.tools import _wrap_tool
 
-        wrapped = [wrap_tool(t) for t in (tools or [])]
+        wrapped = [_wrap_tool(t) for t in (tools or [])]
         self._tools = {t.name: t for t in wrapped}
         self._agents = {getattr(a, "name", f"agent-{i}"): a for i, a in enumerate(agents or [])}
         self._store = store

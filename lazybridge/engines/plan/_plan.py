@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-import warnings
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -577,6 +576,17 @@ class Plan:
             # checkpoints (no ``history`` key) degrade to an empty
             # in-memory history — same behaviour as pre-W1.3, no crash.
             history.extend(self._payload_to_history(checkpoint.get("history") or []))
+            # Replay Store sidecar writes for any step that completed but
+            # whose durable write was lost in the checkpoint→Store gap on
+            # the prior run.  Idempotent: writing the same value is a no-op
+            # for any sane Store backend.  Closes the "external consumers
+            # see incomplete state" failure mode.
+            effective_store = store if store is not None else self.store
+            if effective_store is not None:
+                completed_set = set(completed)
+                for step_def in self.steps:
+                    if step_def.name in completed_set and step_def.writes and step_def.writes in kv:
+                        effective_store.write(step_def.writes, kv[step_def.writes])
 
         # Resume from checkpoint if available
         current_name: str | None
@@ -1031,13 +1041,21 @@ class Plan:
                         metadata=e.metadata,
                         error=e.error,
                     )
-            warnings.warn(
-                f"from_step({sentinel.name!r}) found no matching step in history; "
-                "falling back to the original input. Check that the step name matches "
-                "an earlier Step in this Plan.",
-                stacklevel=4,
+            # Compile-time validation already rejects ``from_step`` whose
+            # target isn't a Step name; getting here means the named step
+            # exists in the Plan but didn't run (routing skipped it, or
+            # the run is mid-band on a not-yet-completed parallel sibling).
+            # Either way, falling back to ``start`` would silently mask
+            # the misconfigured wiring — raise instead.
+            known = sorted({r.step_name for r in history})
+            raise PlanRuntimeError(
+                f"from_step({sentinel.name!r}) found no matching step in this run's history.\n"
+                f"  History so far: {known}.\n"
+                f"  Likely cause: the named step was skipped by routing, or you're inside a\n"
+                f"  parallel band trying to read from a sibling that hasn't completed.\n"
+                f"  Fix: reorder the Plan so the referenced step runs before this one, or use\n"
+                f"  ``from_parallel_all`` to aggregate parallel siblings after the band."
             )
-            return start
         if isinstance(sentinel, _FromParallel):
             for r in reversed(history):
                 if r.step_name == sentinel.name:
@@ -1051,13 +1069,12 @@ class Plan:
                         metadata=e.metadata,
                         error=e.error,
                     )
-            warnings.warn(
-                f"from_parallel({sentinel.name!r}) found no matching step in history; "
-                "falling back to the original input. Check that the step name matches "
-                "an earlier parallel Step in this Plan.",
-                stacklevel=4,
+            known = sorted({r.step_name for r in history})
+            raise PlanRuntimeError(
+                f"from_parallel({sentinel.name!r}) found no matching step in this run's history.\n"
+                f"  History so far: {known}.\n"
+                f"  Fix: reorder the Plan so the referenced parallel step runs before this one."
             )
-            return start
         if isinstance(sentinel, _FromParallelAll):
             return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
         if isinstance(sentinel, _FromMemory):

@@ -206,20 +206,16 @@ class LLMEngine:
         # provider stream — when the consumer pauses, the producer
         # naturally pauses on ``await sink.put()``.
         self.stream_buffer = stream_buffer
-        # Backward-compat: accept ``"parallel"`` but collapse to ``"auto"``
-        # with a deprecation warning. The framework no longer has a
-        # separate "parallel mode" — tool calls are always executed via
-        # asyncio.gather when the model emits more than one in a turn.
+        # ``tool_choice="parallel"`` was deprecated in 0.7.0 and removed in
+        # 0.7.9.  Concurrent tool execution is the default and cannot be
+        # disabled; the model decides how many tools to call per turn and
+        # they run via asyncio.gather.
         if tool_choice == "parallel":
-            warnings.warn(
-                "LLMEngine(tool_choice='parallel') is deprecated since "
-                "lazybridge 0.7.0 and will be removed in 1.0.  "
+            raise ValueError(
+                "LLMEngine(tool_choice='parallel') was removed in 0.7.9.  "
                 "Concurrent tool execution is now the default and cannot be "
-                "disabled; drop the argument (or use 'auto'/'any').",
-                DeprecationWarning,
-                stacklevel=2,
+                "disabled; drop the argument (or use 'auto' / 'any')."
             )
-            tool_choice = "auto"
         self.tool_choice = tool_choice
         self.temperature = temperature
         self.system = system
@@ -325,7 +321,12 @@ class LLMEngine:
     #: silently get routed to Anthropic and fail with a cryptic API-side
     #: error.  Set to ``None`` in a subclass to disable the fallback and
     #: raise ``ValueError`` instead.
-    _PROVIDER_DEFAULT: str | None = "anthropic"
+    # Phase-2 Block C: 0.7 silently fell back to ``"anthropic"`` when a
+    # model string didn't match any rule — a documented LLM trap (T?
+    # in the audit). 0.7.9 raises ``ValueError`` on no-match.  Set this
+    # back to a string only on a subclass when you genuinely want
+    # silent default routing.
+    _PROVIDER_DEFAULT: str | None = None
 
     #: Serialises mutations to ``_PROVIDER_ALIASES`` / ``_PROVIDER_RULES``.
     #: Both registration helpers do read-then-write on a class attribute;
@@ -408,17 +409,21 @@ class LLMEngine:
                 return provider
             if kind == "startswith" and m.startswith(pattern):
                 return provider
-        # Nothing matched — warn loudly rather than silently route to
-        # the default provider.  Raising would break the "no-config
-        # Agent('some-model')" ergonomic, so we stick with a warning
-        # and let the provider surface its own "unknown model" error.
+        # Nothing matched — fail fast.  0.7 silently routed to the
+        # ``_PROVIDER_DEFAULT`` (Anthropic), which made typos pass type
+        # checks and surface as cryptic provider-side errors much later.
         if cls._PROVIDER_DEFAULT is None:
+            known_providers = sorted({p for _, _, p in cls._PROVIDER_RULES})
             raise ValueError(
-                f"No provider rule matches model {model!r} and no default is "
-                f"configured. Register a rule via "
-                f"LLMEngine.register_provider_rule(...) or set "
-                f"_PROVIDER_DEFAULT on a subclass."
+                f"Unknown model {model!r}: no provider rule matches.\n"
+                f"  Known providers: {known_providers}.\n"
+                f"  Fix: pass ``provider=`` explicitly (e.g. "
+                f"``LLMEngine({model!r}, provider='anthropic')``), or register a\n"
+                f"  rule via ``LLMEngine.register_provider_rule({model!r}, <provider>)``."
             )
+        # Subclasses that opt back into the 0.7 silent-default behaviour
+        # by setting ``_PROVIDER_DEFAULT = '<provider>'`` still need a
+        # warning so the misconfiguration is visible in logs.
         import warnings
 
         warnings.warn(

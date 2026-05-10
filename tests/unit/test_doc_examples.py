@@ -258,7 +258,7 @@ def test_plan_guide_typed_handoffs():
         Step(writer, name="write", input=Ranked),
         Step(apology, name="empty"),
     )
-    Agent.from_engine(plan)
+    Agent(engine=plan, name="_test_agent_24")
 
 
 def test_plan_guide_on_concurrent_fork():

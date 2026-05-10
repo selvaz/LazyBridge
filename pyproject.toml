@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.7.0"
+version = "0.7.9"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -37,22 +37,18 @@ deepseek  = ["openai>=1.70.0,<3.0.0"]
 litellm   = ["litellm>=1.40.0,<2.0.0"]
 yaml      = ["pyyaml>=6.0,<7.0"]
 tools     = ["pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0"]
-report    = ["markdown>=3.5,<4.0", "bleach>=6.0,<7.0", "jinja2>=3.0,<4.0"]
-pdf       = ["weasyprint>=62.0,<69.0"]
-# Fragment-based reporting subsystem (additive over [report]).
-# report-charts: vl-convert-python — pure-Rust Vega-Lite renderer (no Node, no
-# Chrome, no display server) + Plotly for opt-in interactive charts.  kaleido
-# is intentionally omitted — it pulls a system Chrome and is the sharp edge
-# of the Plotly raster path; users opt in explicitly when they need it.
-report-charts    = ["vl-convert-python>=1.0,<2.0", "plotly>=5.20,<7.0"]
-# report-citations: Crossref enrichment via habanero, pure-Python CSL renderer
-# fallback when Pandoc citeproc isn't reachable, httpx for OpenAlex.
-report-citations = ["habanero>=1.2,<3.0", "citeproc-py>=0.7,<1.0", "httpx>=0.25,<1.0"]
-# report-fallback: pure-Python rendering when the Quarto CLI isn't installed.
-# pypandoc shells out to `pandoc`; python-docx handles surgical post-process.
-report-fallback  = ["weasyprint>=62.0,<69.0", "pypandoc>=1.13,<2.0", "python-docx>=1.0,<2.0"]
+# Reporting subsystem extracted to the sibling lazybridge-reports
+# package in 0.7.9 (see https://github.com/selvaz/LazyReport).  The
+# old [report], [pdf], [report-charts], [report-citations], and
+# [report-fallback] extras live there now — install via
+# ``pip install 'lazybridge-reports[charts,citations,fallback]'``.
 otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
 mcp       = ["mcp>=1.0,<2.0"]
+# At-rest encryption for Store values via EncryptedStoreAdapter.  Pulls
+# ``cryptography`` (Fernet = AES-128-CBC + HMAC-SHA256, key rotation via
+# MultiFernet).  Opt-in because cryptography is a C-extension; the rest
+# of LazyBridge stays pure-Python by default.
+encryption = ["cryptography>=42,<46"]
 # ``pydantic`` is a runtime dependency but tests import it directly
 # (fixtures, dataclass coercion, schema validation).  Including it in
 # the [test] extra makes ``pip install -e '.[test]'`` a one-step
@@ -64,7 +60,7 @@ docs      = [
     "mkdocs-llmstxt>=0.3,<1.0",
     "pymdown-extensions>=10.0,<11.0",
 ]
-all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0", "markdown>=3.5,<4.0", "bleach>=6.0,<7.0", "jinja2>=3.0,<4.0", "weasyprint>=62.0,<69.0", "vl-convert-python>=1.0,<2.0", "plotly>=5.20,<7.0", "habanero>=1.2,<3.0", "citeproc-py>=0.7,<1.0", "httpx>=0.25,<1.0", "pypandoc>=1.13,<2.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "mcp>=1.0,<2.0"]
+all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "mcp>=1.0,<2.0", "cryptography>=42,<46"]
 
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
@@ -88,7 +84,6 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["lazybridge"]
 testpaths  = ["tests"]
 asyncio_mode = "auto"
 addopts = "-m 'not live and not heavy_render'"
@@ -140,6 +135,21 @@ disallow_untyped_defs = false
 check_untyped_defs = false
 ignore_missing_imports = true
 
+# Phase-4 strict tier — the framework's user-facing core.  These
+# modules are stable and small enough to type-check strictly without
+# blocking other work.  The rest of the codebase remains in the
+# permissive default tier; subsequent releases tighten one module at
+# a time.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.envelope",
+    "lazybridge.predicates",
+    "lazybridge.sentinels",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------
@@ -153,13 +163,7 @@ source = ["lazybridge"]
 # lightweight tests in the default suite; heavy render paths that need
 # optional deps (WeasyPrint, Quarto binary, Chrome) remain excluded.
 omit = [
-    # Heavy render back-ends that need optional system deps (WeasyPrint,
-    # Quarto binary, Chrome) — exercised by opt-in smoke tests only.
-    "lazybridge/external_tools/report_builder/exporters/quarto.py",
-    "lazybridge/external_tools/report_builder/quarto/detect.py",
-    "lazybridge/external_tools/report_builder/quarto/project.py",
-    "lazybridge/external_tools/report_builder/charts/*",
-    "lazybridge/external_tools/report_builder/citations.py",
+    # Domain tool kits gated behind optional extras.
     "lazybridge/external_tools/doc_skills/*",
     "lazybridge/external_tools/read_docs/*",
 ]
@@ -167,9 +171,11 @@ omit = [
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
-# first-class.  Pre-1.0: 70%; raise in increments toward 80% as we
-# backfill provider-streaming + HIL paths.
-fail_under = 70
+# first-class.  0.7.9: 73 % (current is ~75 %; the 85 % target stays
+# as a Phase 6 goal after we backfill provider-streaming and HIL
+# paths.  The ``report_builder`` extraction (Phase 5, done) already
+# trimmed several heavy modules out of the omit list.
+fail_under = 73
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

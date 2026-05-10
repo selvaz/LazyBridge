@@ -269,6 +269,13 @@ class LiteLLMProvider(BaseProvider):
     #: Callers that need those should use a native provider.
     supported_native_tools = frozenset()
 
+    # LiteLLM normalises to the OpenAI wire shape, so streaming + structured
+    # output via JSON schema work for any backend that accepts them.
+    # Thinking is highly model-dependent (only some Anthropic / Gemini
+    # routes pipe ``reasoning_content`` through); we declare ``False`` so
+    # capability-aware callers know not to assume the field exists.
+    supports_thinking: bool = False
+
     # LiteLLM forwards images / audio through the OpenAI wire shape;
     # whether the eventual backend honours them depends on which
     # provider the model id resolves to.  We take the optimistic stance

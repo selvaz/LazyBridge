@@ -105,14 +105,14 @@ def test_startswith_rule_is_honoured(restore_provider_rules):
 
 
 def test_agent_from_model_uses_llm_engine():
-    ag = Agent.from_model("claude-opus-4-7", name="x")
+    ag = Agent("claude-opus-4-7", name="x")
     assert ag.engine.__class__.__name__ == "LLMEngine"
     assert ag.engine.model == "claude-opus-4-7"
 
 
 def test_agent_from_engine_accepts_plan():
     plan = Plan(Step(lambda task: "out", name="s1"))
-    ag = Agent.from_engine(plan, name="planned")
+    ag = Agent(engine=plan, name="planned")
     assert ag.engine is plan
     assert ag.name == "planned"
 
@@ -222,7 +222,7 @@ def test_plan_round_trip_executes_correctly_after_reload():
     blob = plan.to_dict()
     restored = Plan.from_dict(blob, registry={"producer": producer, "consumer": consumer})
 
-    out = Agent.from_engine(restored)("hello")
+    out = Agent(engine=restored, name="_test_agent_18")("hello")
     assert out.payload == "consumed(produced:hello)"
 
 

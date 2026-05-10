@@ -47,7 +47,7 @@ print(result.text())
 
 `Agent(engine=...)` with each argument on its own line is the
 canonical shape — every rung from here on adds to it without changing
-it. Shorter forms (`Agent.from_model("claude-opus-4-7")` and the
+it. Shorter forms (`Agent("claude-opus-4-7")` and the
 string-positional shortcut `Agent("claude-opus-4-7")`) are sugar:
 convenient for one-liners, but they hide the engine choice you'll need
 to configure as soon as the agent does anything non-trivial. Learn the
@@ -277,8 +277,7 @@ for now they are runnable from the command line.
 | 7 | `examples/patterns/plan_tool.py` |
 | 7-8 | `examples/patterns/agent_builds_plan.py` |
 | 7-8 | `examples/patterns/dynamic_planner.py` |
-| 8 | `examples/parallel_report_pipeline.py` |
-| 8-11 | `examples/daily_news_report.py` |
+| 8-11 | reporting examples — moved to the [LazyReport](https://github.com/selvaz/LazyReport) sibling repo (`pip install lazybridge-reports`) |
 | 11 | `examples/viz_demo.py` |
 
 ## The anti-pattern worth naming

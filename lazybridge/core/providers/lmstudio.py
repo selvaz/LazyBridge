@@ -158,6 +158,14 @@ class LMStudioProvider(OpenAIProvider):
     #: warning rather than a silent 404 from the local server.
     supported_native_tools: frozenset[NativeTool] = frozenset()
 
+    # LM Studio passes through whatever local model is loaded; whether
+    # structured-output parsing or thinking output works is a function of
+    # the weights, not the provider.  Stay optimistic on streaming / structured
+    # (most local models accept JSON-schema constrained generation via
+    # llama.cpp grammars), but flag thinking as ``False`` since the local
+    # endpoint doesn't surface a ``reasoning_tokens`` field uniformly.
+    supports_thinking: bool = False
+
     # LM Studio routes any model the user has loaded — vision and audio
     # capability depend entirely on which weights are downloaded.  We
     # take the optimistic stance and report ``True`` so callers can pass

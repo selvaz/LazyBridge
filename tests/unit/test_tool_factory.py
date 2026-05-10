@@ -103,6 +103,8 @@ def test_name_explicit_true_when_name_kwarg_given():
 
 
 def test_name_explicit_false_when_no_name_given():
+    # ``_FakeEngine`` has ``model = "fake"``, so the auto-name fallback fires
+    # (the agent gets ``name="fake"``) and the explicit-flag stays False.
     a = Agent(engine=_FakeEngine())
     assert a._name_explicit is False
 
@@ -113,12 +115,13 @@ def test_name_explicit_false_when_only_model_string():
     assert a._name_explicit is False
 
 
-def test_name_explicit_true_with_observability_config():
-    from lazybridge.core.types import ObservabilityConfig
-
-    obs = ObservabilityConfig(name="obs-agent")
-    a = Agent(engine=_FakeEngine(), observability=obs)
+def test_name_explicit_true_with_explicit_kwarg():
+    """``ObservabilityConfig`` was deleted in 0.7.9; the canonical way to
+    name an agent is the flat ``name=`` kwarg.  This test locks the
+    explicit-name flag against the post-0.7.9 surface."""
+    a = Agent(engine=_FakeEngine(), name="obs-agent")
     assert a._name_explicit is True
+    assert a.name == "obs-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +130,7 @@ def test_name_explicit_true_with_observability_config():
 
 
 def test_direct_agent_tool_requires_explicit_name():
-    child = Agent(engine=_FakeEngine())  # no name=
+    child = Agent(engine=_FakeEngine())  # no name=, _name_explicit stays False
     with pytest.raises(ValueError, match="explicit name"):
         Agent(name="parent", engine=_FakeEngine(), tools=[child])
 
@@ -141,7 +144,7 @@ def test_direct_agent_tool_uses_agent_name():
 def test_direct_agent_tool_returns_envelope_true():
     child = Agent(name="research", engine=_FakeEngine())
     Agent(name="parent", engine=_FakeEngine(), tools=[child])
-    # wrap_tool routes through as_tool() which sets returns_envelope=True
+    # _wrap_tool routes through as_tool() which sets returns_envelope=True
     # Build independently to verify
     t = tool(child)
     assert t.returns_envelope is True
@@ -280,111 +283,27 @@ def test_graph_schema_direct_agent_edge_label_is_agent_name():
 
 
 # ---------------------------------------------------------------------------
-# 10. mode="auto" schema resolution
+# 10. mode="signature" is the only default; "auto" was removed in 0.7.9
 # ---------------------------------------------------------------------------
 
 
-def test_tool_auto_signature_success():
-    t = tool(_fn, name="fn", mode="auto")
-    assert t.name == "fn"
+def test_tool_default_mode_is_signature():
+    """``tool()`` and ``Tool()`` both default to ``mode="signature"``.
+    The ``"auto"`` ladder (with its silent under-description fallback)
+    was removed in 0.7.9 — callers wanting LLM-enriched schemas must
+    pass ``mode="hybrid"`` or ``mode="llm"`` explicitly."""
+    t = tool(_fn, name="fn")
     assert t.mode == "signature"
 
 
-def test_tool_auto_does_not_use_llm_without_opt_in(monkeypatch):
-    """_resolve_auto_tool must not invoke LLM paths when allow_llm_schema=False
-    and schema_llm is None — even if signature schema is poor quality."""
-    import lazybridge.tools as _tools
+def test_tool_factory_rejects_legacy_auto_mode():
+    """``mode="auto"`` was removed in 0.7.9 — passing it must surface
+    as a typing-time / runtime error rather than silently downgrading."""
+    import pytest
 
-    llm_called = {"count": 0}
-
-    def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
-        # Simulate signature success but enrichment needed, no LLM opt-in.
-        assert not allow_llm_schema, "LLM used without opt-in"
-        assert schema_llm is None, "schema_llm leaked through"
-        # Return a minimal sig tool (no LLM call)
-        return _tools.Tool(func, name=name, description=description, mode="signature")
-
-    monkeypatch.setattr(_tools, "_resolve_auto_tool", _patched)
-
-    def _untyped(x):
-        pass
-
-    t = tool(_untyped, name="fn")
-    assert llm_called["count"] == 0
-    assert t.name == "fn"
-
-
-def test_tool_auto_uses_llm_with_opt_in(monkeypatch):
-    """With allow_llm_schema=True, _resolve_auto_tool receives the opt-in flag."""
-    import lazybridge.tools as _tools
-
-    received = {}
-
-    def _patched(func, name, description, schema_llm, strict, allow_llm_schema):
-        received["allow_llm_schema"] = allow_llm_schema
-        # Return sig_tool to avoid needing a real schema_llm engine
-        return _tools.Tool(func, name=name, description=description, mode="signature")
-
-    monkeypatch.setattr(_tools, "_resolve_auto_tool", _patched)
-
-    def _untyped(x):
-        pass
-
-    tool(_untyped, name="fn", allow_llm_schema=True)
-    assert received.get("allow_llm_schema") is True
-
-
-# ---------------------------------------------------------------------------
-# 11. _schema_needs_enrichment helper
-# ---------------------------------------------------------------------------
-
-
-def test_schema_needs_enrichment_false_when_fully_described():
-    """A typed, documented function should not need enrichment."""
-    from lazybridge.core.types import ToolDefinition
-    from lazybridge.tools import _schema_needs_enrichment
-
-    defn = ToolDefinition(
-        name="search",
-        description="Search the web for information.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The search query."},
-            },
-            "required": ["query"],
-        },
-    )
-    assert _schema_needs_enrichment(defn) is False
-
-
-def test_schema_needs_enrichment_true_when_param_lacks_description():
-    from lazybridge.core.types import ToolDefinition
-    from lazybridge.tools import _schema_needs_enrichment
-
-    defn = ToolDefinition(
-        name="search",
-        description="Search the web.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string"},  # no description
-            },
-        },
-    )
-    assert _schema_needs_enrichment(defn) is True
-
-
-def test_schema_needs_enrichment_true_when_no_tool_description():
-    from lazybridge.core.types import ToolDefinition
-    from lazybridge.tools import _schema_needs_enrichment
-
-    defn = ToolDefinition(
-        name="search",
-        description="",
-        parameters={"type": "object", "properties": {}},
-    )
-    assert _schema_needs_enrichment(defn) is True
+    with pytest.raises((TypeError, ValueError)):
+        # mode="auto" is no longer accepted; Tool() validates the literal.
+        tool(_fn, name="fn", mode="auto")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +363,8 @@ def test_tool_clone_can_enable_strict():
 
 
 # ---------------------------------------------------------------------------
-# 14. mode="auto" end-to-end with fake schema_llm
+# 14. mode="hybrid" / mode="llm" still work — they're now the explicit
+#     ways to opt into LLM-driven schema generation (auto is gone).
 # ---------------------------------------------------------------------------
 
 
@@ -453,50 +373,29 @@ def _underdescribed(x):
     pass
 
 
-def test_auto_with_schema_llm_selects_hybrid_for_underdescribed_schema():
-    """When a function has no docstring/types and schema_llm is provided,
-    _resolve_auto_tool must pick hybrid (not llm, not plain signature)."""
-    from lazybridge.tools import _resolve_auto_tool
-
+def test_explicit_hybrid_mode_calls_schema_llm():
+    """``mode="hybrid"`` (signature + LLM-enriched descriptions) is now the
+    only way to get LLM enrichment — there is no implicit auto-upgrade."""
     calls: list[str] = []
 
     def fake_llm(prompt: str) -> dict:
         calls.append(prompt)
-        # _LLMEnrichment shape expected by hybrid mode
         return {
             "description": "Enriched tool description.",
             "param_descriptions": {"x": "The x input parameter."},
         }
 
-    result = _resolve_auto_tool(
-        _underdescribed,
-        name="fn",
-        description=None,
-        schema_llm=fake_llm,
-        strict=False,
-        allow_llm_schema=False,
-    )
-
+    result = tool(_underdescribed, name="fn", mode="hybrid", schema_llm=fake_llm)
     assert result.mode == "hybrid"
-    # fake_llm was called exactly once (hybrid enrichment call)
-    assert len(calls) == 1
     defn = result.definition()
     assert "Enriched" in defn.description
+    assert len(calls) == 1
 
 
-def test_auto_with_allow_llm_schema_selects_llm_when_hybrid_fails():
-    """When hybrid fails (LLM raises for the enrichment call) and
-    allow_llm_schema=True, _resolve_auto_tool must fall back to llm mode."""
-    from lazybridge.tools import _resolve_auto_tool
-
-    call_count = [0]
+def test_explicit_llm_mode_calls_schema_llm_for_full_schema():
+    """``mode="llm"`` builds the full schema from the LLM — no fallback ladder."""
 
     def fake_llm(prompt: str) -> dict:
-        call_count[0] += 1
-        if call_count[0] == 1:
-            # First call: hybrid enrichment — simulate failure
-            raise RuntimeError("hybrid LLM unavailable")
-        # Second call: full LLM schema — _LLMToolSchema shape
         return {
             "name": "fn",
             "description": "LLM-generated full description.",
@@ -505,16 +404,7 @@ def test_auto_with_allow_llm_schema_selects_llm_when_hybrid_fails():
             },
         }
 
-    result = _resolve_auto_tool(
-        _underdescribed,
-        name="fn",
-        description=None,
-        schema_llm=fake_llm,
-        strict=False,
-        allow_llm_schema=True,
-    )
-
+    result = tool(_underdescribed, name="fn", mode="llm", schema_llm=fake_llm)
     assert result.mode == "llm"
-    assert call_count[0] == 2  # hybrid attempt + llm attempt
     defn = result.definition()
     assert "LLM-generated" in defn.description
