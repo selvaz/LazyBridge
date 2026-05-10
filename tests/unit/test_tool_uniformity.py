@@ -6,7 +6,7 @@ What we verify:
 * LLMEngine executes every tool call via ``asyncio.gather`` regardless
   of ``tool_choice`` — the old "parallel" mode is no longer a user-facing
   knob.  Callers passing the legacy ``tool_choice='parallel'`` value get
-  a ``ValueError`` (removed in 0.8.0; was a 0.7-era deprecation warning).
+  a ``ValueError`` (removed in 0.7.9; was a 0.7-era deprecation warning).
 * ``Tool.run_sync`` handles both sync and async ``func``, so an Agent
   wrapped by ``Agent.as_tool`` can be invoked through a REPL-style
   engine (SupervisorEngine) without hitting the raw coroutine.
@@ -50,7 +50,7 @@ def test_llmengine_tool_choice_literal_no_longer_accepts_parallel_type():
 
 
 def test_llmengine_rejects_parallel_legacy_value():
-    """``tool_choice='parallel'`` was removed in 0.8.0; the constructor now
+    """``tool_choice='parallel'`` was removed in 0.7.9; the constructor now
     raises ``ValueError`` instead of silently downgrading to ``'auto'``."""
     import pytest
 
@@ -220,7 +220,7 @@ def test_same_tools_list_works_on_llm_and_supervisor_engines():
 
 def test_agent_parallel_is_deterministic_fanout():
     """``Agent.parallel(...)("task")`` returns ONE Envelope (joined) since
-    0.8.0 — same shape as the ``as_tool()`` wrapper, so the runner composes
+    0.7.9 — same shape as the ``as_tool()`` wrapper, so the runner composes
     uniformly into outer agents.  For typed per-branch access, callers use
     the explicit ``run_branches`` async helper."""
     a = Agent(engine=_EchoEngine("a"), name="a")

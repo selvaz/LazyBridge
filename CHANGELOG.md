@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.8.0] — 2026-05-10 — simplification release
+## [0.7.9] — 2026-05-10 — simplification release
 
 The headline change: **deletion-led simplification**.  The framework
 had no users yet, so we ship breaking changes without deprecation
@@ -103,7 +103,7 @@ codemod snippets.
   ``(exporter class, exception class)`` pair with a count of
   suppressed identical failures.
 - **``test_public_api_snapshot.py``** — pins ``lazybridge.__all__``
-  and locks the deleted-in-0.8.0 names as permanently gone.
+  and locks the deleted-in-0.7.9 names as permanently gone.
 
 ### Fixed (bug fixes from Phase 1)
 
@@ -132,7 +132,7 @@ codemod snippets.
 
 ### Documentation
 
-- ``SKILL.md`` rewritten for the 0.8.0 surface; canonical Plan
+- ``SKILL.md`` rewritten for the 0.7.9 surface; canonical Plan
   block, default-model fallback advice via ``from_provider(tier=...)``,
   anti-pattern entries for every deletion.
 - ``docs/migrations/0.7-to-0.8.md`` (new) — per-deletion before/after

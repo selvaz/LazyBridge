@@ -164,7 +164,7 @@ class Agent:
         # Phase-3 Block H, T6 — ``model=`` is only meaningful on the LLM-engine
         # construction path (engine is None or a model-string).  Passing both
         # ``model=`` and a non-string ``engine=`` was silently dropped pre-0.8;
-        # 0.8.0 raises so the typo / misconfiguration is visible.
+        # 0.7.9 raises so the typo / misconfiguration is visible.
         if model is not None and engine is not None and not isinstance(engine, str):
             raise ValueError(
                 f"Agent(model={model!r}, engine={type(engine).__name__}(...)): "

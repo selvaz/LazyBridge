@@ -52,13 +52,13 @@ class Tool:
         agent_store: Any | None = None,
     ) -> None:
         if mode not in ("signature", "llm", "hybrid"):
-            # ``"auto"`` was the 0.7-era default — removed in 0.8.0.
+            # ``"auto"`` was the 0.7-era default — removed in 0.7.9.
             # Reject it eagerly so the failure surfaces at construction
             # time, not lazily at the first ``definition()`` call.
             raise ValueError(
                 f"Tool(mode={mode!r}) is invalid.  Accepted values: "
                 f"'signature' (default), 'hybrid', 'llm'.  "
-                f"The legacy 'auto' value was removed in 0.8.0; pass "
+                f"The legacy 'auto' value was removed in 0.7.9; pass "
                 f"'hybrid' or 'llm' explicitly to opt into LLM-driven "
                 f"schema generation."
             )

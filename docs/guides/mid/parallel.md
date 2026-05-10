@@ -161,7 +161,7 @@ for env in results:
 
 ## Pitfalls
 
-- **`__call__` returns ONE Envelope, not `list[Envelope]`** (since 0.8.0).
+- **`__call__` returns ONE Envelope, not `list[Envelope]`** (since 0.7.9).
   Read `env.text()` for the labelled-text join, or call
   `multi.run_branches(task)` (async) for the typed list.
 - **`concurrency_limit=None` (default) fires everything at once.**
@@ -177,7 +177,7 @@ for env in results:
   call all three", use `Agent(tools=[us, eu, asia])` instead;
   parallel tool dispatch happens automatically when the engine
   emits multiple tool calls in a single turn.
-- **Automatic aggregation since 0.8.0.** The wrapper Envelope's
+- **Automatic aggregation since 0.7.9.** The wrapper Envelope's
   `payload` is a labelled-text join of every branch — same shape
   as `Plan`'s `from_parallel_all` aggregator — and `metadata.nested_*`
   rolls every branch's cost up.  Use `as_tool()` to plug the runner
@@ -192,7 +192,7 @@ for env in results:
 - [Chain](chain.md) — sequential composition; complements
   parallel.
 - [As tool](as-tool.md) — `multi.as_tool()` exposes the fan-out as
-  a single `Tool` that delegates to `run()` (since 0.8.0 the
+  a single `Tool` that delegates to `run()` (since 0.7.9 the
   wrapper Envelope already carries the labelled-text join).
 - *Guides → Full → Plan* (Phase 3) — `Plan` parallel bands
   (`Step(..., parallel=True)`) and `from_parallel_all("name")`

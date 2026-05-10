@@ -242,7 +242,7 @@ prod("draft a one-pager on the LazyBridge audit findings")
   `session=None` on a sub-agent only when you genuinely want it
   invisible.
 - **Fleet config via dict spread** — the 0.7-era ``runtime`` /
-  ``resilience`` / ``observability`` configs were deleted in 0.8.0 (they
+  ``resilience`` / ``observability`` configs were deleted in 0.7.9 (they
   carried a ``flat kwarg > config object > default`` precedence game
   with a private ``_UNSET`` sentinel — an LLM trap).  Share kwargs
   across a fleet via a Python dict::

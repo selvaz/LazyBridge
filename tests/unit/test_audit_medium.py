@@ -171,7 +171,7 @@ def test_llm_guard_prompt_wraps_user_content_in_content_tags():
 
 def test_llm_engine_raises_on_unknown_model():
     """0.7 silently routed unknown model strings to ``_PROVIDER_DEFAULT``
-    (Anthropic) with a ``UserWarning``.  0.8.0 raises ``ValueError``
+    (Anthropic) with a ``UserWarning``.  0.7.9 raises ``ValueError``
     instead — typos in model names are caught at engine construction
     rather than surfacing as cryptic provider-side errors much later."""
     import pytest

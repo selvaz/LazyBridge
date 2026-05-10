@@ -454,7 +454,7 @@ _UNSET: Any = object()
 
 
 # ---------------------------------------------------------------------------
-# Removed in 0.8.0 (deletion-led simplification): ``ResilienceConfig``,
+# Removed in 0.7.9 (deletion-led simplification): ``ResilienceConfig``,
 # ``ObservabilityConfig``, ``AgentRuntimeConfig``.
 #
 # These wrapper-of-flat-kwargs configs existed to bundle Agent kwargs into

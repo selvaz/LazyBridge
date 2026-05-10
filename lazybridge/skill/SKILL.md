@@ -100,7 +100,7 @@ No sugar — write the canonical form.  Plan kwargs (`max_iterations`,
 `store`, `checkpoint_key`, `resume`, `on_concurrent`) live on
 ``Plan(...)``; Agent kwargs (``tools=``, ``session=``, ``name=``, …)
 live on ``Agent(...)``.  The 0.7-era ``Agent.from_plan`` was deleted
-in 0.8.0.
+in 0.7.9.
 
 ```python
 pipeline = Agent(
@@ -139,7 +139,7 @@ pipeline = Agent(
 
 | Sugar / variant | Canonical | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). Both default to `mode="signature"` since 0.8.0 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
+| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). Both default to `mode="signature"` since 0.7.9 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
 | `Tool.from_schema(name, description, parameters, func, strict=…, returns_envelope=…)` | (no callable-introspection canonical) | **Not sugar over `Tool(callable, …)`** — this is the canonical form when the JSON Schema is already known (MCP, OpenAPI bridges, third-party registries). Bypasses the schema builder. |
 
 **Wrap an Agent as a Tool**
@@ -173,7 +173,7 @@ agent = Agent.from_provider("anthropic", tier="top")
 ```
 
 Tier strings: `super_cheap` / `cheap` / `medium` / `expensive` / `top`.
-This is the **only** non-pure-alias `from_*` factory left after 0.8.0;
+This is the **only** non-pure-alias `from_*` factory left after 0.7.9;
 the deleted ones (`from_model` / `from_engine` / `from_chain` /
 `from_plan` / `from_parallel`) were just renames of the canonical
 `Agent(engine=...)` ctor and are gone for good.
@@ -440,19 +440,19 @@ their own.
 - **Importing private names** (`_`-prefixed) or anything from
   `lazybridge.core.*` directly. The public surface is `lazybridge.*` and
   `lazybridge.ext.*` only.
-- **Reaching for a deleted-in-0.8.0 factory.** `Agent.from_model` /
+- **Reaching for a deleted-in-0.7.9 factory.** `Agent.from_model` /
   `Agent.from_engine` / `Agent.from_chain` / `Agent.from_plan` /
   `Agent.from_parallel` were pure-alias renames of the canonical
-  `Agent(engine=...)` ctor and are gone in 0.8.0. The `Agent.from_*`
+  `Agent(engine=...)` ctor and are gone in 0.7.9. The `Agent.from_*`
   shape that survives is **only** `Agent.from_provider(provider, tier=...)`,
   which is non-trivial (resolves a tier alias to the provider's current
   model). Use the canonical ctor for everything else.
-- **Iterating `Agent.parallel(...)("task")` as a list.** Since 0.8.0 the
+- **Iterating `Agent.parallel(...)("task")` as a list.** Since 0.7.9 the
   call returns ONE `Envelope` (joined branches in `.text()`); for the
   typed list, call `parallel.run_branches(task)` (async).
 - **Passing `runtime=` / `resilience=` / `observability=` / a config
   object to `Agent`.** The three wrapper-of-flat-kwargs configs were
-  deleted in 0.8.0 along with the `_UNSET` precedence game. Pass flat
+  deleted in 0.7.9 along with the `_UNSET` precedence game. Pass flat
   kwargs (`timeout=...`, `max_retries=...`, `session=...`, `name=...`)
   directly, or share a fleet default via `**PROD_DEFAULTS`.
 

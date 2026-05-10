@@ -1,8 +1,8 @@
-"""Agent constructor / factory surface (post-0.8.0 simplification).
+"""Agent constructor / factory surface (post-0.7.9 simplification).
 
 Every Agent is ``Container(engine, tools, state)``.  The engine decides
 HOW the agent behaves; everything else (memory, session, guard, verify,
-fallback, output, name) is uniform across every engine.  0.8.0 deleted
+fallback, output, name) is uniform across every engine.  0.7.9 deleted
 the five pure-alias factories (``from_model`` / ``from_engine`` /
 ``from_plan`` / ``from_chain`` / ``from_parallel``) — anything that
 just renamed the canonical form is gone.
@@ -62,11 +62,11 @@ def test_factory_is_classmethod_on_agent(method):
     ["from_model", "from_engine", "from_plan", "from_chain", "from_parallel"],
 )
 def test_deleted_factories_are_actually_gone(removed):
-    """0.8.0 removed five pure-alias factories.  The deletion is part of the
+    """0.7.9 removed five pure-alias factories.  The deletion is part of the
     LLM-friendliness contract — sugar that just renames the canonical form
     is more concept for an LLM to learn, not less."""
     assert not hasattr(Agent, removed), (
-        f"Agent.{removed} was deleted in 0.8.0; use the canonical form (see docs/concepts/canonical-vs-sugar.md)."
+        f"Agent.{removed} was deleted in 0.7.9; use the canonical form (see docs/concepts/canonical-vs-sugar.md)."
     )
 
 

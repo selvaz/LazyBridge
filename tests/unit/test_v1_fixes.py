@@ -330,7 +330,7 @@ class TestSourcesInjection:
 class TestParallelAgent:
     def test_parallel_returns_joined_envelope(self):
         """``ParallelAgent.run()`` returns ONE Envelope (labelled-text join)
-        since 0.8.0; for typed per-branch access use ``run_branches()``."""
+        since 0.7.9; for typed per-branch access use ``run_branches()``."""
         a1 = _make_agent("result1", name="a1")
         a2 = _make_agent("result2", name="a2")
         pa = ParallelAgent([a1, a2])

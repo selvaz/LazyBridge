@@ -46,7 +46,7 @@ def _stub_agents():
 def test_blackboard_state_resets_between_runs() -> None:
     sub = _stub_agents()
     # ``model="claude-opus-4-7"`` is just to satisfy LLMEngine construction
-    # (a real provider rule must match in 0.8.0); the engine is replaced
+    # (a real provider rule must match in 0.7.9); the engine is replaced
     # immediately below so no provider call is ever made.
     planner = make_blackboard_planner(agents=sub, model="claude-opus-4-7")
     planner.engine = _CapturingMockEngine()  # type: ignore[assignment]

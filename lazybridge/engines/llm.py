@@ -207,12 +207,12 @@ class LLMEngine:
         # naturally pauses on ``await sink.put()``.
         self.stream_buffer = stream_buffer
         # ``tool_choice="parallel"`` was deprecated in 0.7.0 and removed in
-        # 0.8.0.  Concurrent tool execution is the default and cannot be
+        # 0.7.9.  Concurrent tool execution is the default and cannot be
         # disabled; the model decides how many tools to call per turn and
         # they run via asyncio.gather.
         if tool_choice == "parallel":
             raise ValueError(
-                "LLMEngine(tool_choice='parallel') was removed in 0.8.0.  "
+                "LLMEngine(tool_choice='parallel') was removed in 0.7.9.  "
                 "Concurrent tool execution is now the default and cannot be "
                 "disabled; drop the argument (or use 'auto' / 'any')."
             )
@@ -323,7 +323,7 @@ class LLMEngine:
     #: raise ``ValueError`` instead.
     # Phase-2 Block C: 0.7 silently fell back to ``"anthropic"`` when a
     # model string didn't match any rule — a documented LLM trap (T?
-    # in the audit). 0.8.0 raises ``ValueError`` on no-match.  Set this
+    # in the audit). 0.7.9 raises ``ValueError`` on no-match.  Set this
     # back to a string only on a subclass when you genuinely want
     # silent default routing.
     _PROVIDER_DEFAULT: str | None = None

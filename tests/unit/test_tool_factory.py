@@ -116,9 +116,9 @@ def test_name_explicit_false_when_only_model_string():
 
 
 def test_name_explicit_true_with_explicit_kwarg():
-    """``ObservabilityConfig`` was deleted in 0.8.0; the canonical way to
+    """``ObservabilityConfig`` was deleted in 0.7.9; the canonical way to
     name an agent is the flat ``name=`` kwarg.  This test locks the
-    explicit-name flag against the post-0.8.0 surface."""
+    explicit-name flag against the post-0.7.9 surface."""
     a = Agent(engine=_FakeEngine(), name="obs-agent")
     assert a._name_explicit is True
     assert a.name == "obs-agent"
@@ -283,21 +283,21 @@ def test_graph_schema_direct_agent_edge_label_is_agent_name():
 
 
 # ---------------------------------------------------------------------------
-# 10. mode="signature" is the only default; "auto" was removed in 0.8.0
+# 10. mode="signature" is the only default; "auto" was removed in 0.7.9
 # ---------------------------------------------------------------------------
 
 
 def test_tool_default_mode_is_signature():
     """``tool()`` and ``Tool()`` both default to ``mode="signature"``.
     The ``"auto"`` ladder (with its silent under-description fallback)
-    was removed in 0.8.0 — callers wanting LLM-enriched schemas must
+    was removed in 0.7.9 — callers wanting LLM-enriched schemas must
     pass ``mode="hybrid"`` or ``mode="llm"`` explicitly."""
     t = tool(_fn, name="fn")
     assert t.mode == "signature"
 
 
 def test_tool_factory_rejects_legacy_auto_mode():
-    """``mode="auto"`` was removed in 0.8.0 — passing it must surface
+    """``mode="auto"`` was removed in 0.7.9 — passing it must surface
     as a typing-time / runtime error rather than silently downgrading."""
     import pytest
 

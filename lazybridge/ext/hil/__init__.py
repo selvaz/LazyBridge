@@ -91,7 +91,7 @@ def supervisor_agent(
         timeout=timeout,
         default=default,
     )
-    # 0.8.0 requires explicit name= on non-LLM engines.  ``supervisor_agent``
+    # 0.7.9 requires explicit name= on non-LLM engines.  ``supervisor_agent``
     # is the one-line ergonomic factory — give it a sensible default
     # (``"supervisor"``) when the caller didn't pass one.  An explicit
     # ``name=`` in ``agent_kwargs`` still wins.
@@ -124,7 +124,7 @@ def human_agent(
     from lazybridge import Agent
 
     engine = HumanEngine(timeout=timeout, ui=ui, default=default)
-    # 0.8.0 requires explicit name= on non-LLM engines.  Supply the
+    # 0.7.9 requires explicit name= on non-LLM engines.  Supply the
     # canonical default for the human-input factory; explicit ``name=``
     # in ``agent_kwargs`` wins.
     agent_kwargs.setdefault("name", "human")

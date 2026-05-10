@@ -1,4 +1,4 @@
-"""Phase-1 regression tests for the deletion-led 0.8.0 cleanup.
+"""Phase-1 regression tests for the deletion-led 0.7.9 cleanup.
 
 Each test locks one of the bug fixes from
 ``/root/.claude/plans/puoi-verificare-anche-questo-partitioned-marshmallow.md``.

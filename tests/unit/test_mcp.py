@@ -132,7 +132,7 @@ def test_as_tools_caches_after_first_call() -> None:
 
 
 def test_agent_tools_argument_accepts_mcp_server_directly() -> None:
-    # 0.8.0 raises on unknown model strings, so use a real one (we don't
+    # 0.7.9 raises on unknown model strings, so use a real one (we don't
     # actually call the engine — only inspect the constructed tool map).
     agent = Agent(
         engine="claude-opus-4-7",

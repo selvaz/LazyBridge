@@ -2,7 +2,7 @@
 
 The 0.7-era ``AgentRuntimeConfig`` / ``ResilienceConfig`` /
 ``ObservabilityConfig`` wrapper-of-flat-kwargs configs were deleted in
-0.8.0 — they bundled flat kwargs into shareable objects with a
+0.7.9 — they bundled flat kwargs into shareable objects with a
 ``flat kwarg > config object > default`` precedence game that required
 a private ``_UNSET`` sentinel on every kwarg (a documented LLM trap,
 T14 in the audit).

@@ -82,7 +82,7 @@ class Envelope(BaseModel, Generic[T]):
         # Phase-2 Block C: 0.7 silently fell through to
         # ``json.dumps(payload, default=str)`` — for unknown types this
         # produced ``str(payload)`` which is typically ``"<Foo object
-        # at 0x...>"`` (the audit's T10 trap).  0.8.0 raises ``TypeError``
+        # at 0x...>"`` (the audit's T10 trap).  0.7.9 raises ``TypeError``
         # so the caller's intent is explicit.  JSON-serialisable shapes
         # (lists, dicts, ints, floats, bools) still work.
         try:

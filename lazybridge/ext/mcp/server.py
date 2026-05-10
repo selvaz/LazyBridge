@@ -189,7 +189,7 @@ class MCPServer:
         # Phase-2 Block C: 0.7 silently coerced any non-``object`` root
         # (array / union / string) to an empty object schema, which then
         # appeared to the LLM as a tool with no parameters — silent loss
-        # of the actual call surface.  0.8.0 raises so the MCP server
+        # of the actual call surface.  0.7.9 raises so the MCP server
         # author or namespacing config can be fixed.
         if not isinstance(parameters, dict):
             raise ValueError(

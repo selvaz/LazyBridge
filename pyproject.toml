@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.8.0"
+version = "0.7.9"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -181,7 +181,7 @@ omit = [
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
-# first-class.  0.8.0: 73 % (current is ~75 %; the 85 % target stays
+# first-class.  0.7.9: 73 % (current is ~75 %; the 85 % target stays
 # as a Phase 5/6 goal after we backfill provider-streaming and HIL
 # paths and finish the ``report_builder`` extraction).
 fail_under = 73

@@ -46,7 +46,7 @@ or crash-resume?
 - **`Agent.chain` is sugar for a linear `Plan`.** Use it for
   one-liner sequential handoffs; reach for the explicit `Plan`
   the moment you can see a router or a parallel band coming.
-- **`Agent.parallel` returns ONE Envelope (since 0.8.0)** whose
+- **`Agent.parallel` returns ONE Envelope (since 0.7.9)** whose
   `payload` is the labelled-text join of every branch.  For typed
   per-branch access call `parallel.run_branches(task)` (async) →
   `list[Envelope]`.

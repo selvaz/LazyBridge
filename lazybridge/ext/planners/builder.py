@@ -439,7 +439,7 @@ def make_plan_builder_tools(
         except _PlanToolError as e:
             return f"PLAN_REJECTED: {e}"
         try:
-            # 0.8.0 requires explicit name= on non-LLM engines; this throw-away
+            # 0.7.9 requires explicit name= on non-LLM engines; this throw-away
             # runner only exists to materialise + execute the plan once, so any
             # stable identifier suffices.
             runner = Agent(engine=plan, name=f"_planner_runner_{plan_id}")  # PlanCompiler defense-in-depth.

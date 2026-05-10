@@ -382,7 +382,7 @@ class BaseProvider(ABC):
         name = request.model or self.model or self.default_model
         # Phase-2 Block C: 0.7 returned an empty string when nothing was
         # configured, leaving the SDK to surface a cryptic provider-side
-        # error.  0.8.0 raises with concrete fix guidance.
+        # error.  0.7.9 raises with concrete fix guidance.
         if not name:
             raise ValueError(
                 f"{type(self).__name__}: no model configured.\n"

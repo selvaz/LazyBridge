@@ -25,7 +25,7 @@ full method list. Quick reference:
 |---|---|
 | `LLMEngine.register_provider_alias(alias, provider)` | Exact-match (case-insensitive) routing |
 | `LLMEngine.register_provider_rule(pattern, provider, *, kind="contains" | "startswith")` | Substring / prefix routing; new rules **prepend** the rule list |
-| `LLMEngine.set_default_provider(provider | None)` | Fallback when no rule matches; `None` (the 0.8.0 default) makes unknown-model strings raise ``ValueError`` instead of silently routing to Anthropic |
+| `LLMEngine.set_default_provider(provider | None)` | Fallback when no rule matches; `None` (the 0.7.9 default) makes unknown-model strings raise ``ValueError`` instead of silently routing to Anthropic |
 
 ## stop_reason normalisation
 
@@ -40,7 +40,7 @@ loops can decide identically across providers.  Notable mappings:
 | Google | ``STOP`` / ``MAX_TOKENS`` / ``SAFETY`` / ``RECITATION`` / ``BLOCKLIST`` | ``end_turn`` / ``max_tokens`` / ``error`` (the bucket for non-stop terminations) |
 | DeepSeek | passes through OpenAI shape | as OpenAI |
 
-The Google ``MAX_TOKENS`` mapping is fixed in 0.8.0 — pre-fix it was
+The Google ``MAX_TOKENS`` mapping is fixed in 0.7.9 — pre-fix it was
 returned as the literal string and broke loops that branched on
 ``stop_reason == "max_tokens"``.  Inspect ``Envelope.metadata.stop_reason``
 to read the normalised value.

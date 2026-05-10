@@ -30,7 +30,7 @@ The skill teaches:
   embedded for offline lookup).
 - Anti-patterns: `asyncio.run(main())` wrapping, hand-written tool
   schemas, `.text()` on structured output, redundant `from_*`
-  factories (deleted in 0.8.0).
+  factories (deleted in 0.7.9).
 
 ## `llms.txt` and `llms-full.txt`
 

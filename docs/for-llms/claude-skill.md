@@ -78,7 +78,7 @@ LazyBridge code:
 - **Canonical form first.** `Agent(engine=LLMEngine("model"), …)`
   with each constructor argument on its own line. The string-positional
   shortcut `Agent("model")` is a pure alias; everything else (deleted
-  in 0.8.0: `Agent.from_model`, `Agent.from_engine`, `Agent.from_chain`,
+  in 0.7.9: `Agent.from_model`, `Agent.from_engine`, `Agent.from_chain`,
   `Agent.from_plan`, `Agent.from_parallel`) is now part of the canonical
   ctor surface — write `Agent(engine=Plan(...))` directly.
 - **No `asyncio.run(main())` wrapping.** The canonical call is

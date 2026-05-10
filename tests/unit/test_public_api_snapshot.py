@@ -3,7 +3,7 @@
 
 1. Adding a new public symbol requires an explicit update here (forces
    a SKILL.md / docs review at the same time).
-2. Deleted-in-0.8.0 names cannot silently come back.
+2. Deleted-in-0.7.9 names cannot silently come back.
 3. ``__all__`` and the actual module namespace stay in sync (every
    listed name resolves to a real attribute).
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import lazybridge
 
-# The authoritative post-0.8.0 public surface.  Sorted for diff-friendly
+# The authoritative post-0.7.9 public surface.  Sorted for diff-friendly
 # updates; keep it in lockstep with ``lazybridge/__init__.py::__all__``.
 _EXPECTED: frozenset[str] = frozenset(
     {
@@ -137,7 +137,7 @@ def test_every_all_entry_is_actually_importable():
 
 
 def test_deleted_module_level_symbols_stay_gone():
-    """0.8.0 removed three module-level config classes and the underscore
+    """0.7.9 removed three module-level config classes and the underscore
     alias of ``ParallelAgent`` and ``wrap_tool``.  Resurrecting any of
     them silently would re-introduce the LLM traps the deletions closed."""
     module_level_deletions = {
@@ -149,21 +149,21 @@ def test_deleted_module_level_symbols_stay_gone():
     }
     leaked = [name for name in module_level_deletions if hasattr(lazybridge, name)]
     assert not leaked, (
-        f"Deleted-in-0.8.0 symbol(s) re-appeared in lazybridge.*: {leaked}.\n"
+        f"Deleted-in-0.7.9 symbol(s) re-appeared in lazybridge.*: {leaked}.\n"
         f"If the resurrection is intentional, document it in SKILL.md and\n"
         f"the migration guide before un-pinning this test."
     )
 
 
 def test_deleted_agent_factory_methods_stay_gone():
-    """Five pure-alias ``Agent.from_*`` factories were deleted in 0.8.0.
+    """Five pure-alias ``Agent.from_*`` factories were deleted in 0.7.9.
     A change that re-adds any of them undoes Block A's simplification."""
     from lazybridge import Agent
 
     factory_deletions = {"from_model", "from_engine", "from_plan", "from_chain", "from_parallel"}
     leaked = [m for m in factory_deletions if hasattr(Agent, m)]
     assert not leaked, (
-        f"Deleted-in-0.8.0 Agent.from_* method(s) re-appeared: {leaked}.\n"
+        f"Deleted-in-0.7.9 Agent.from_* method(s) re-appeared: {leaked}.\n"
         f"If intentional, update test_public_api_snapshot.py::_DELETED_IN_0_8."
     )
 

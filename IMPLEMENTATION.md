@@ -234,7 +234,7 @@ In `lazybridge/session.py`:
 
 ---
 
-## Phase 4 — Docs + examples + CI + skill_docs → tag v0.8.0 (~0.5 week)
+## Phase 4 — Docs + examples + CI + skill_docs → tag v0.7.9 (~0.5 week)
 
 ### Docs
 
@@ -247,7 +247,7 @@ In `lazybridge/session.py`:
 - [ ] `docs/decisions/composition.md`: alias migration note
 - [ ] `docs/reference/providers.md`: Google `finish_reason` normalization
 - [ ] `Agent` class docstring reconciled with `__init__`
-- [ ] `CHANGELOG.md`: 0.8.0 entry summarising the simplification (deletions, what raises now)
+- [ ] `CHANGELOG.md`: 0.7.9 entry summarising the simplification (deletions, what raises now)
 
 ### Examples
 
@@ -262,7 +262,7 @@ In `lazybridge/session.py`:
 - [ ] `pyproject.toml`: external_tools omit list updated; their gate at 60%
 - [ ] mypy `strict = true` for `agent.py`, `tools.py`, `envelope.py`, `sentinels.py`, `predicates.py` (Phase-1 strict surface)
 
-### Tag v0.8.0 acceptance gate
+### Tag v0.7.9 acceptance gate
 
 - [ ] All Phase 1–4 items completed
 - [ ] `python -m lazybridge.skill_docs._build --check` exits 0
@@ -271,7 +271,7 @@ In `lazybridge/session.py`:
 - [ ] SKILL.md regenerated; canonical surface only
 - [ ] Coverage: core ≥85%, total ≥75%
 - [ ] Public symbol count drop measurable: `python -c "import lazybridge; print(len(lazybridge.__all__))"` lower than 0.7.0
-- [ ] Tag `v0.8.0`; release workflow publishes via OIDC
+- [ ] Tag `v0.7.9`; release workflow publishes via OIDC
 
 ---
 
@@ -335,6 +335,6 @@ In `lazybridge/session.py`:
 | Phase 1 — bugs + tests + CI hygiene | **done** | 2026-05-10 | (no tag) | B1, B2, B4, B6, B10, B11, B12 fixed; B3 + B5 verified false positives; B7-B9 done in prior session.  12 new regression tests in `test_audit_phase1_regressions.py`.  Commits `f6c9d00` + `ed71280`. |
 | Phase 2 — deletions A–G | **done** | 2026-05-10 | (no tag) | All 7 blocks shipped: G (dead weight, `e783291`), A (5 factory aliases, `74da34a`), D (`mode="auto"` ladder, `01d2bcc`), E (soft — `tool()` canonical in user-facing surface, `94a96f7`), F (`_ParallelAgent`→`ParallelAgent` + folded-Envelope return, `4b6e4bb`), B (3 config objects + `_UNSET` + precedence game, `d45760a`), C (silent fallbacks → errors, `0bfc84a`). 1660 passed, 44 skipped.  Net −21 723 LOC.  Public surface: −2 in `__all__` (50→48). |
 | Phase 3 — validation parity + provider consistency + observability | **done** | 2026-05-10 | (no tag) | Block H (`57e328b` — T5/T6/T7/I6 + standard error format).  Block I (capability ClassVars, T9 dedup warning, cost-signature parity, I5 Anthropic warning corrected, new `lazybridge.matrix` + `test_public_api_snapshot.py`).  Block J (OTel `gen_ai.agent.nesting_level` attribute, `Session.emit` warn-once-per-(exporter, exception) with counter).  1666 passed, 44 skipped. |
-| Phase 4 — docs + examples + CI + skill_docs (v0.8.0) | **release candidate** | 2026-05-10 | (tag pending merge to main) | All Block K items shipped (`22d7d06`): SKILL.md rewritten, `docs/migrations/0.7-to-0.8.md` (new), engines.md adds `thinking=`, providers.md adds `stop_reason` table, mcp.md shows `allow=` filtering, `examples/verify_judge_loop.py` + `examples/guardrails_demo.py` (new), env preflight in `daily_news_report.py`, `.github/workflows/integration.yml` (new — manual + nightly live + heavy_render), coverage gate 70 → 73 %, mypy strict tier on `envelope` / `predicates` / `sentinels`, version bump to 0.8.0.  Tag `v0.8.0` requires (1) merge of `claude/audit-lazybridge-llm-SXOl4` to main and (2) one CI cycle green. |
+| Phase 4 — docs + examples + CI + skill_docs (v0.7.9) | **release candidate** | 2026-05-10 | (tag pending merge to main) | All Block K items shipped (`22d7d06`): SKILL.md rewritten, `docs/migrations/0.7-to-0.8.md` (new), engines.md adds `thinking=`, providers.md adds `stop_reason` table, mcp.md shows `allow=` filtering, `examples/verify_judge_loop.py` + `examples/guardrails_demo.py` (new), env preflight in `daily_news_report.py`, `.github/workflows/integration.yml` (new — manual + nightly live + heavy_render), coverage gate 70 → 73 %, mypy strict tier on `envelope` / `predicates` / `sentinels`, version bump to 0.7.9.  Tag `v0.7.9` requires (1) merge of `claude/audit-lazybridge-llm-SXOl4` to main and (2) one CI cycle green. |
 | Phase 5 — extract `report_builder` (v0.9.0) | not started | | | |
 | Phase 6 — stabilisation (v1.0.0) | not started | | | |

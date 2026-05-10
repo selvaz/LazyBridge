@@ -3,7 +3,7 @@
 Minimum-viable check around the hand-maintained
 ``lazybridge/skill/SKILL.md``.  Earlier alpha shipped a fragment-based
 generator that wrote tier files (``01_basic.md`` … ``04_advanced.md``);
-that pipeline was retired in 0.8.0 in favour of one curated SKILL.md.
+that pipeline was retired in 0.7.9 in favour of one curated SKILL.md.
 
 Until then, ``--check`` enforces three light invariants that catch the
 practical drift modes we care about:
@@ -67,7 +67,7 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
         # Multimodal types — taught via examples, not by name.
         "ImageContent",
         "AudioContent",
-        # CacheConfig — kept in 0.8.0 (carries real semantic value), but
+        # CacheConfig — kept in 0.7.9 (carries real semantic value), but
         # the canonical entry path is the bool ``cache=True`` flag, so
         # SKILL.md doesn't need to teach the dataclass directly.
         "CacheConfig",
@@ -127,7 +127,7 @@ def _stale_in_skill(skill_text: str) -> list[str]:
         "CacheConfig",
         "ObservabilityConfig",
         "ResilienceConfig",
-        "_ParallelAgent",  # 0.7-era private name; renamed → ParallelAgent in 0.8.0
+        "_ParallelAgent",  # 0.7-era private name; renamed → ParallelAgent in 0.7.9
         "wrap_tool",
     )
     stale: list[str] = []

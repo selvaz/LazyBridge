@@ -202,7 +202,7 @@ def test_parallel_as_tool_definition_advertises_string_task_input():
 
 
 # ---------------------------------------------------------------------------
-# 0.8.0: ParallelAgent.__call__ now returns ONE Envelope (joined) for
+# 0.7.9: ParallelAgent.__call__ now returns ONE Envelope (joined) for
 # framework-uniform composition.  Per-branch list[Envelope] is exposed
 # via the explicit ``run_branches`` async helper.
 # ---------------------------------------------------------------------------

@@ -67,7 +67,7 @@ The implicit form (`tools=[other_agent]`) covers (1). When you need
   parent agent should not see "first try, possibly wrong" results.
 - **You want to expose `Agent.parallel(...)` as a single tool.**
   The `ParallelAgent` returned by `Agent.parallel(...)` already
-  returns ONE Envelope from `__call__` / `run` since 0.8.0; its
+  returns ONE Envelope from `__call__` / `run` since 0.7.9; its
   `as_tool()` just delegates so the outer agent reads the same
   labelled-text join the runner produces directly.
 

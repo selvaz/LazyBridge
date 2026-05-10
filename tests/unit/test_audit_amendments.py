@@ -54,7 +54,7 @@ def _restore_provider_defaults():
 
 
 def test_strict_routing_raises_on_unknown_model(_restore_provider_defaults):
-    """0.8.0 raises on unknown model by default.  ``set_default_provider``
+    """0.7.9 raises on unknown model by default.  ``set_default_provider``
     is now a way to OPT IN to the legacy 0.7 silent-fallback behaviour
     (rare; we keep the API for power users)."""
     from lazybridge.engines.llm import LLMEngine
