@@ -19,7 +19,7 @@ Zero new public concept.
 The single LLM-friendliness lever is consistency: one canonical
 form per concept, errors always raise, no opt-in modes.
 
-See ``docs/migrations/0.7-to-0.8.md`` for per-deletion before/after
+See ``docs/migrations/0.7-to-0.79.md`` for per-deletion before/after
 codemod snippets.
 
 ### Breaking — extraction
@@ -155,7 +155,7 @@ codemod snippets.
 - ``SKILL.md`` rewritten for the 0.7.9 surface; canonical Plan
   block, default-model fallback advice via ``from_provider(tier=...)``,
   anti-pattern entries for every deletion.
-- ``docs/migrations/0.7-to-0.8.md`` (new) — per-deletion before/after
+- ``docs/migrations/0.7-to-0.79.md`` (new) — per-deletion before/after
   snippets and a TL;DR table.
 - ``docs/reference/configs.md`` rewritten — only ``CacheConfig``
   remains documented; rest of file explains the deletion.

@@ -32,12 +32,19 @@ full method list. Quick reference:
 <!-- PROVIDER_CAPABILITY_TABLE -->
 
 The table above is generated at docs build time from
-[`lazybridge.matrix.provider_capabilities()`](../reference/matrix.md)
-which in turn reads the ``ClassVar`` flags on each provider class.
-Update the matrix by editing the provider's ``supports_streaming``
-/ ``supports_structured_output`` / ``supports_thinking`` /
-``supported_native_tools`` declarations — the table re-renders on the
-next ``mkdocs build``.
+``lazybridge.matrix.provider_capabilities()`` which in turn reads the
+``ClassVar`` flags on each provider class.  Update the matrix by
+editing the provider's ``supports_streaming`` /
+``supports_structured_output`` / ``supports_thinking`` /
+``supported_native_tools`` declarations — the table re-renders on
+the next ``mkdocs build``.
+
+```python
+from lazybridge.matrix import provider_capabilities
+
+for name, caps in provider_capabilities().items():
+    print(name, caps.streaming, caps.structured_output, caps.thinking)
+```
 
 ## stop_reason normalisation
 

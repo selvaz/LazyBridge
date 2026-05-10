@@ -29,12 +29,13 @@ single agent → tools → composition → planning → production.
 - [Blackboard planner](blackboard-planner.md) — `examples/patterns/blackboard_planner.py`
 - [Dynamic re-planning](dynamic-replanning.md) — `examples/patterns/dynamic_planner.py`
 
-## Production pipelines
+## Reporting
 
-The HTML/PDF reporting recipes moved with the rest of the report
-builder to the sibling [LazyReport](https://github.com/selvaz/LazyReport)
-repository in 0.7.9. Install it with `pip install lazybridge-reports`
-and follow the recipes there.
+The HTML/PDF reporting recipes moved to the sibling
+[LazyReport](https://github.com/selvaz/LazyReport) repository in 0.7.9.
+Install with `pip install lazybridge-reports` and follow the recipes
+there — the rest of LazyBridge stays installable without WeasyPrint /
+Quarto / Pandoc.
 
 ## Observability
 

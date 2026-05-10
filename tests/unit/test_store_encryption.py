@@ -20,10 +20,10 @@ from __future__ import annotations
 import pytest
 
 cryptography = pytest.importorskip("cryptography.fernet")
-from cryptography.fernet import Fernet  # noqa: E402
+from cryptography.fernet import Fernet, InvalidToken
 
-from lazybridge.store import Store, StoreEntry  # noqa: E402
-from lazybridge.store.encryption import EncryptedStoreAdapter  # noqa: E402
+from lazybridge.store import Store, StoreEntry
+from lazybridge.store.encryption import EncryptedStoreAdapter
 
 
 @pytest.fixture
@@ -121,9 +121,11 @@ def test_multi_fernet_key_rotation_decrypts_old_and_new(fresh_key: bytes):
     assert new_only.read("k") == "new-value"
 
     # A reader holding only the old key can no longer decrypt — the
-    # new write is invisible to them.
+    # new write is invisible to them.  Fernet raises InvalidToken
+    # specifically; we pin it so a future cipher-swap surfaces the
+    # behaviour change instead of silently passing.
     old_only = EncryptedStoreAdapter(Store_inner, key=old)
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidToken):
         old_only.read("k")
 
 

@@ -172,8 +172,9 @@ omit = [
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
 # first-class.  0.7.9: 73 % (current is ~75 %; the 85 % target stays
-# as a Phase 5/6 goal after we backfill provider-streaming and HIL
-# paths and finish the ``report_builder`` extraction).
+# as a Phase 6 goal after we backfill provider-streaming and HIL
+# paths.  The ``report_builder`` extraction (Phase 5, done) already
+# trimmed several heavy modules out of the omit list.
 fail_under = 73
 show_missing = true
 exclude_lines = [

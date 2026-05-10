@@ -191,6 +191,8 @@ nav:
       - Custom providers: reference/providers.md
       - Configs & testing: reference/configs.md
   - Errors: errors.md
+  - Migrations:
+      - 0.7 → 0.7.9: migrations/0.7-to-0.79.md
   - For LLM assistants:
       - Overview: for-llms/index.md
       - Claude Skill install: for-llms/claude-skill.md

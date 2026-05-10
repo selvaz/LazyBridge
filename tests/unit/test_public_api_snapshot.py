@@ -90,7 +90,7 @@ _EXPECTED: frozenset[str] = frozenset(
 
 # 0.7-era names that must stay deleted.  If any of these become accessible
 # again, the deletion has been undone — fail loudly.
-_DELETED_IN_0_8: frozenset[str] = frozenset(
+_DELETED_IN_0_7_9: frozenset[str] = frozenset(
     {
         # Pure-alias factories on Agent (not module-level, but caught by
         # ``hasattr(Agent, name)`` below).
@@ -164,7 +164,7 @@ def test_deleted_agent_factory_methods_stay_gone():
     leaked = [m for m in factory_deletions if hasattr(Agent, m)]
     assert not leaked, (
         f"Deleted-in-0.7.9 Agent.from_* method(s) re-appeared: {leaked}.\n"
-        f"If intentional, update test_public_api_snapshot.py::_DELETED_IN_0_8."
+        f"If intentional, update test_public_api_snapshot.py::_DELETED_IN_0_7_9."
     )
 
 
