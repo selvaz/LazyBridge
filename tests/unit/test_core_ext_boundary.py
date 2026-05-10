@@ -6,8 +6,8 @@ otherwise core stability becomes hostage to extension velocity, and
 circular imports become possible.
 
 The reverse rule (extensions never reaching into ``lazybridge.core.*``
-internals) is enforced separately by ``tools/check_ext_imports.py`` in
-CI.
+internals) is enforced separately by
+``tests/unit/test_ext_core_boundary.py``.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ def _imports_from_extensions(path: pathlib.Path) -> list[tuple[int, str]]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as e:
         pytest.fail(f"{path} has a syntax error: {e}")
+        return []  # unreachable — pytest.fail raises; appeases static analysers.
 
     offences: list[tuple[int, str]] = []
 
