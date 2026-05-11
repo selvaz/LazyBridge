@@ -1,5 +1,5 @@
 // Right-side panel: tabs for "Node" (agent card), "Event" (payload),
-// "Store" (live key-value snapshot), and "Session" (event log DB inspector).
+// and "Store" (live key-value snapshot).
 
 import { state, on } from "/static/state.js";
 import { renderJSON } from "/static/json-tree.js";

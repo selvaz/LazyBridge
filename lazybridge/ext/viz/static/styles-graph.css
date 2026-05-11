@@ -240,6 +240,39 @@
 #canvas .node.store .store-cap-bot { fill: rgba(20, 55, 35, 0.80); }
 #canvas .node.store .node-label { fill: var(--accent-store); font-weight: 700; font-size: 10px; }
 
+/* ---- E / T / S trio indicators (agent nodes) --------------------------- */
+
+#canvas .node-trio-e {
+  fill: var(--accent-agent);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.85;
+}
+#canvas .node-trio-t {
+  fill: var(--accent-tool);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.85;
+}
+#canvas .node-trio-s {
+  fill: var(--accent-store);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.85;
+}
+
 /* ---- Error flash -------------------------------------------------------- */
 
 #canvas .node.error .box-front,

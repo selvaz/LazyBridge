@@ -202,6 +202,7 @@ function _gesture(ev, { replay = false } = {}) {
         ensureStoreEdge(agent, "__STORE__", "store_write");
         pulse(agent, "__STORE__", COLOR.store);
         emit("storeProvenanceChanged");
+        refreshNodeLabels(); // update S: count on agent node
       }
       refreshStore();
       break;

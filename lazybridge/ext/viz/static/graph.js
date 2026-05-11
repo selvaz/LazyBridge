@@ -24,6 +24,8 @@ import { spawnPulse } from "/static/graph-pulse.js";
 const NODE_R = 22;
 const BOX    = { w: 60, h: 32, d: 10 };
 const AGENT_COLL_R = BOX.w / 2 + BOX.d + 14;
+// Y offset for the engine/tools/state trio strip below each agent node
+const DY_TRIO = BOX.h / 2 + BOX.d + 38;
 
 const HEX_PATH = (() => {
   const pts = Array.from({ length: 6 }, (_, i) => {
@@ -446,9 +448,10 @@ function redraw() {
   enter.filter(d => d.type === "agent").append("text").attr("class", "node-task")
     .attr("dy", BOX.h / 2 + BOX.d + 27).text("");
 
-  // Context sources (agents only) — e.g. "ctx: researcher_a, store"
-  enter.filter(d => d.type === "agent").append("text").attr("class", "node-ctx")
-    .attr("dy", BOX.h / 2 + BOX.d + 38).text(d => _ctxLabel(d.id));
+  // Engine / Tools / State trio indicators (agents only)
+  enter.filter(d => d.type === "agent").append("text").attr("class", "node-trio-e").attr("x", -22).attr("dy", DY_TRIO).text("");
+  enter.filter(d => d.type === "agent").append("text").attr("class", "node-trio-t").attr("x",   0).attr("dy", DY_TRIO).text("");
+  enter.filter(d => d.type === "agent").append("text").attr("class", "node-trio-s").attr("x",  22).attr("dy", DY_TRIO).text("");
 
   // IO node sub-label (click hint)
   enter.filter(d => d.type === "io").append("text").attr("class", "node-sub io-hint")
@@ -466,7 +469,7 @@ function redraw() {
   // IO role class (for CSS)
   nodeSel.attr("data-role", d => d._role || null);
   // Refresh dynamic text
-  nodeSel.select(".node-ctx").text(d => _ctxLabel(d.id));
+  _refreshTrio(nodeSel);
   nodeSel.select(".node-task").text(d => {
     const t = state.agentTasks.get(d.name) || state.agentTasks.get(d.id) || "";
     return trunc(t, 24);
@@ -496,32 +499,36 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n - 1) + "…" : (s
 function sublabel(n) {
   if (n.type === "tool") return "tool";
   if (n.type === "router") return "router";
-  return n.model ? trunc(n.model, 18) : (n.provider || "");
+  // Show engine type as primary identity; fall back to model name
+  const eng = n.engine_type || (n.model ? "LLM" : "");
+  return eng ? trunc(eng, 9) : (n.provider || "");
 }
 function css(s) { return String(s).replace(/(["\\])/g, "\\$1"); }
 
-// Returns "ctx: A, B" for context sources feeding into nodeId
-function _ctxLabel(nodeId) {
-  const sources = state.links
-    .filter(l => {
-      const t = idOf(l.target);
-      return t === nodeId && (l.kind === "context" || l.kind === "router");
-    })
-    .map(l => {
-      const src = idOf(l.source);
-      return state.nodes.find(n => n.id === src)?.name || src;
-    });
-  return sources.length ? "ctx: " + sources.map(s => trunc(s, 10)).join(", ") : "";
+// Update the E/T/S trio text elements for all rendered agent nodes.
+function _refreshTrio(sel) {
+  sel.select(".node-trio-e").text(d => {
+    const eng = d.engine_type || (d.model ? "LLM" : "");
+    return eng ? trunc(eng, 5) : "";
+  });
+  sel.select(".node-trio-t").text(d => {
+    const n = (d.tools || []).length;
+    return n ? `T:${n}` : "";
+  });
+  sel.select(".node-trio-s").text(d => {
+    const n = [...state.storeProvenance.entries()].filter(([, v]) => v.agent === d.name).length;
+    return n ? `S:${n}` : "";
+  });
 }
 
-// Update task + ctx text on all rendered agent nodes.
+// Update task + E/T/S trio text on all rendered agent nodes.
 export function refreshNodeLabels() {
   if (!nodeSel) return;
   nodeSel.select(".node-task").text(d => {
     const t = state.agentTasks.get(d.name) || state.agentTasks.get(d.id) || "";
     return trunc(t, 24);
   });
-  nodeSel.select(".node-ctx").text(d => _ctxLabel(d.id));
+  _refreshTrio(nodeSel);
 }
 
 // ---- Animation API ----------------------------------------------------------
