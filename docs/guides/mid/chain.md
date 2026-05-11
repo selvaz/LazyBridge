@@ -88,16 +88,16 @@ def search(query: str) -> str:
 
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[search],
     name="researcher",
 )
 editor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="editor",
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="writer",
 )
 

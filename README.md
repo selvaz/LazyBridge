@@ -95,7 +95,7 @@ Set an API key for your provider of choice (`ANTHROPIC_API_KEY`,
 ### 1 · Function becomes a tool, auto-schema
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, LLMEngine, tool
 
 
 def get_weather(city: str) -> str:
@@ -105,14 +105,17 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[get_weather],
+    tools=[tool(get_weather, name="get_weather")],
 )
 result = agent("what's the weather in Rome and Paris?")
 print(result.text())
 ```
 
 No decorators, no JSON schemas. Type hints + docstring become the tool's
-LLM-facing schema automatically. See
+LLM-facing schema automatically.  The explicit `tool(fn, name=...)`
+factory pins the LLM-visible name so refactors don't break tool-maps
+or plan references; the bare-callable form `tools=[get_weather]` works
+too (backward-compatible auto-wrap). See
 [Guides → Basic → Tool](https://selvaz.github.io/LazyBridge/guides/basic/tool/).
 
 ### 2 · Native tools (no code at all)
@@ -188,7 +191,7 @@ store = Store(db="pipeline.sqlite")
 
 researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="search")
 ranker     = Agent(engine=LLMEngine("claude-opus-4-7"), name="rank")
-writer     = Agent(engine=LLMEngine("gpt-4o"),          name="write")
+writer     = Agent(engine=LLMEngine("gpt-5.4-mini"),          name="write")
 
 pipeline = Agent(
     engine=Plan(

@@ -101,7 +101,7 @@ from pydantic import BaseModel
 
 # 1) Minimal agent.
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
 )
 result = agent("hello")
 print(result.text())
@@ -113,7 +113,7 @@ def search(query: str) -> str:
     return "..."
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[search],
     name="research",
 )
@@ -126,7 +126,7 @@ class Summary(BaseModel):
     bullets: list[str]
 
 summariser = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     output=Summary,
 )
 result = summariser("Summarise LazyBridge in three bullets.")
@@ -136,7 +136,7 @@ print(result.payload.bullets)
 
 # 4) Tool-is-Tool composition (Agents wrap Agents).
 editor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[researcher],            # researcher.name="research" becomes the tool name
     name="editor",
 )
@@ -159,7 +159,7 @@ def chronological(payload: DateRange) -> DateRange:
 
 
 extractor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     output=DateRange,
     output_validator=chronological,
     max_output_retries=2,
@@ -171,7 +171,7 @@ import asyncio
 from lazybridge import Agent, LLMEngine
 
 async def stream_brief() -> None:
-    agent = Agent(engine=LLMEngine("claude-opus-4-7"))
+    agent = Agent(engine=LLMEngine("claude-haiku-4-5"))
     async for chunk in agent.stream("Outline LazyBridge in five bullets."):
         print(chunk, end="", flush=True)
 
@@ -182,7 +182,7 @@ asyncio.run(stream_brief())
 from lazybridge import CacheConfig
 
 cached = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     cache=CacheConfig(ttl="1h"),       # "5m" (default) or "1h" on Anthropic
 )
 
@@ -194,7 +194,7 @@ fallback_agent = Agent(
     name="fallback",
 )
 prod = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[search],
     timeout=30.0,
     cache=True,

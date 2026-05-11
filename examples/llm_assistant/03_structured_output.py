@@ -1,5 +1,7 @@
-"""Structured output via Pydantic — ``output_type=`` gives ``result.payload``
-the typed shape the agent should return.
+"""Structured output via Pydantic — ``Agent(output=MyModel)`` gives
+``result.payload`` the typed shape the agent should return.  (The Engine
+protocol surfaces the same value internally as ``output_type``, but the
+public ``Agent`` kwarg is ``output=``.)
 """
 
 from __future__ import annotations

@@ -99,7 +99,7 @@ def search(query: str) -> str:
 
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[search],
     name="senior_researcher_v2",
 )
@@ -114,14 +114,14 @@ judge = Agent(
 
 # 1) Implicit — pass the agent directly. Tool name = "senior_researcher_v2".
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[researcher],
 )
 
 
 # 2) Explicit alias — tool name "research", source agent name unchanged.
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[
         researcher.as_tool(
             name="research",
@@ -133,7 +133,7 @@ orchestrator = Agent(
 
 # 3) Verified call — judge gates every research invocation, up to two attempts.
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[
         researcher.as_tool(
             name="research",
@@ -149,7 +149,7 @@ print(result.text())
 # 4) Parallel fan-out as a single tool — wrapper Envelope already carries the join.
 fan_out = Agent.parallel(researcher_us, researcher_eu, researcher_asia)
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[fan_out.as_tool(name="multi_region_research")],
 )
 ```

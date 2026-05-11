@@ -123,16 +123,16 @@ def search_web(query: str) -> str:
 
 
 searcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[tool(search_web, name="search_web")],
     name="search",
 )
 ranker = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="rank",
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="write",
 )
 

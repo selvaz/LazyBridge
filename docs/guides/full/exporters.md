@@ -150,7 +150,7 @@ def alert_pagerduty(event: dict) -> None:
 # 1) Dev — single console exporter, blocking emit.
 sess = Session(console=True)
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     session=sess,
 )
 agent("hello")
@@ -174,8 +174,8 @@ sess = Session(
     ],
 )
 
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="research")
-writer = Agent(engine=LLMEngine("gpt-4o"), name="write")
+researcher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="research")
+writer = Agent(engine=LLMEngine("gpt-5.4-mini"), name="write")
 pipeline = Agent.chain(researcher, writer, session=sess)
 pipeline("AI trends")
 

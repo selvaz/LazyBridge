@@ -27,19 +27,19 @@ def multiply(a: float, b: float) -> float:
 
 def main() -> None:
     research = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Look up facts via web_search."),
+        engine=LLMEngine("claude-haiku-4-5", system="Look up facts via web_search."),
         tools=[web_search],
         name="research",
         description="Web lookups for current facts. No math.",
     )
     math = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Solve arithmetic with add/multiply."),
+        engine=LLMEngine("claude-haiku-4-5", system="Solve arithmetic with add/multiply."),
         tools=[add, multiply],
         name="math",
         description="Arithmetic (add, multiply). No facts.",
     )
     writer = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Synthesise prior results into prose."),
+        engine=LLMEngine("claude-haiku-4-5", system="Synthesise prior results into prose."),
         name="writer",
         description="Turns prior results into a short paragraph.",
     )

@@ -123,11 +123,11 @@ if result.payload.approved:
 
 # 2) Inside a pipeline — draft → review → finalise.
 drafter = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="drafter",
 )
 finaliser = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="finaliser",
 )
 

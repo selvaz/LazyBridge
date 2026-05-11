@@ -144,7 +144,7 @@ guard = GuardChain(
 
 
 bot = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     guard=guard,
     name="bot",
 )
@@ -165,7 +165,7 @@ def redact_phone_numbers(text: str) -> GuardAction:
 
 
 sanitiser = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     guard=ContentGuard(output_fn=redact_phone_numbers),
 )
 ```

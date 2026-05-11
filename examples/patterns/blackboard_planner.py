@@ -22,19 +22,19 @@ def add(a: float, b: float) -> float:
 
 def main() -> None:
     research = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Look up facts via web_search."),
+        engine=LLMEngine("gemini-3-flash-preview", system="Look up facts via web_search."),
         tools=[web_search],
         name="research",
         description="Web lookups. No math.",
     )
     math = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Solve arithmetic with add."),
+        engine=LLMEngine("gemini-3-flash-preview", system="Solve arithmetic with add."),
         tools=[add],
         name="math",
         description="Arithmetic only.",
     )
     writer = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="Synthesise prior results into prose."),
+        engine=LLMEngine("gemini-3-flash-preview", system="Synthesise prior results into prose."),
         name="writer",
         description="Turns prior results into a short paragraph.",
     )

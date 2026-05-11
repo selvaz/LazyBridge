@@ -118,7 +118,7 @@ fs = MCP.stdio(
     allow=["fs.list_*", "fs.read_*"],   # read-only slice; deny writes implicitly
 )
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[fs],
 )
 result = agent("Read README.md and summarise the install steps")
@@ -132,7 +132,7 @@ def estimate_cost(plan: str) -> float:
 
 
 planner = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[fs, estimate_cost],
     name="planner",
 )
@@ -165,7 +165,7 @@ fs.invalidate_tools_cache()
 async def use_fs():
     async with MCP.stdio("fs", command="...") as fs:
         agent = Agent(
-            engine=LLMEngine("claude-opus-4-7"),
+            engine=LLMEngine("claude-haiku-4-5"),
             tools=[fs],
         )
         await agent.run("…")

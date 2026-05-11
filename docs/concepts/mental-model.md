@@ -52,7 +52,7 @@ def get_weather(city: str) -> str:
     ...
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[tool(get_weather, name="get_weather")],
 )
 ```
@@ -91,7 +91,7 @@ structured information without relying on fragile free-form text passing.
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
 )
 result = agent("Explain LazyBridge in one sentence.")
 print(result.text())
@@ -99,7 +99,7 @@ print(result.text())
 
 In this example:
 
-- The **engine** is `LLMEngine("claude-opus-4-7")`.
+- The **engine** is `LLMEngine("gpt-5.4-mini")`.
 - There are no **tools**.
 - The only **state** is the result `Envelope`.
 
@@ -107,7 +107,7 @@ In this example:
 canonical shape — every example in `examples/` follows it, and every
 rung on the [progressive complexity ladder](progressive-complexity.md)
 adds to it without changing it. Shorter forms exist
-(`Agent("claude-opus-4-7")`, `Agent("claude-opus-4-7")`)
+(`Agent("gpt-5.4-mini")`, `Agent("gpt-5.4-mini")`)
 but they're sugar: convenient for one-liners, but they hide the engine
 choice that you'll need to configure as soon as the agent does
 anything non-trivial. Learn the canonical form first.

@@ -162,7 +162,8 @@ assert isinstance(EchoEngine(), Engine)
 
 
 # Plug into Agent — same surface as any built-in engine.
-agent = Agent(engine=EchoEngine())
+# Non-LLM engines require an explicit ``name=`` (T7 since 0.7.9).
+agent = Agent(engine=EchoEngine(), name="echo")
 result = agent("hello")
 print(result.text())   # "echo:hello"
 ```

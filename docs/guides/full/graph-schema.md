@@ -125,12 +125,12 @@ sess = Session()
 
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="researcher",
     session=sess,
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="writer",
     session=sess,
 )
@@ -138,7 +138,7 @@ writer = Agent(
 
 # 1) The orchestrator's tools=[...] auto-registers as_tool edges.
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="orchestrator",
     tools=[researcher, writer],
     session=sess,

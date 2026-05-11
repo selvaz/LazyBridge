@@ -39,7 +39,7 @@ already know. Nothing rewinds.
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
 )
 result = agent("Hello")
 print(result.text())
@@ -47,8 +47,8 @@ print(result.text())
 
 `Agent(engine=...)` with each argument on its own line is the
 canonical shape — every rung from here on adds to it without changing
-it. Shorter forms (`Agent("claude-opus-4-7")` and the
-string-positional shortcut `Agent("claude-opus-4-7")`) are sugar:
+it. Shorter forms (`Agent("claude-haiku-4-5")` and the
+string-positional shortcut `Agent("claude-haiku-4-5")`) are sugar:
 convenient for one-liners, but they hide the engine choice you'll need
 to configure as soon as the agent does anything non-trivial. Learn the
 canonical form first; reach for sugar only when you can already write
@@ -58,7 +58,7 @@ the canonical version from memory.
 
 ```python
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[tool(get_weather, name="get_weather")],
 )
 result = agent("What's the weather in Paris?")
@@ -79,7 +79,7 @@ class Summary(BaseModel):
     bullets: list[str]
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     output=Summary,
 )
 result = agent("Summarise the news")
@@ -95,12 +95,12 @@ against the model and re-prompts on validation errors.
 from lazybridge import Agent, LLMEngine, Plan, Step
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="research",
     tools=[web_search],
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="write",
 )
 
@@ -146,7 +146,7 @@ when you want the **LLM** to decide which sub-agent to call.
 
 ```python
 supervisor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[researcher],   # researcher's name= becomes the tool name
 )
 ```
@@ -180,22 +180,83 @@ so broken references fail fast, before any LLM call.
 
 ### 8 — Parallel band + routing
 
+These are **two distinct patterns** that look superficially alike;
+keep them separated until you know you want both.
+
+#### 8a — Exclusive routing with a rejoin point
+
+`triage` picks **one** of `legal` / `technical`; the chosen step
+runs, then control jumps straight to `reply` because triage
+declared `after_branches="reply"`.  Without `after_branches`,
+control would fall through to the next declared step in linear
+order and **both** branches would still run — see the
+[`routes_by` reference](../guides/full/routing.md) for the full
+semantics.
+
 ```python
-from lazybridge import Plan, Step
+from typing import Literal
+
+from pydantic import BaseModel
+
+from lazybridge import Agent, Plan, Step
+
+
+# routes_by="field" requires the step's output= to be a Pydantic
+# model with that field declared as ``Literal[...]`` (or
+# ``Literal[...] | None``).  Both the routing Step AND the agent
+# answering it must carry ``output=Triage`` so the payload exposes
+# ``.category``.
+class Triage(BaseModel):
+    category: Literal["legal", "technical"]
+
 
 pipeline = Agent(
     engine=Plan(
-        Step("triage", routes_by="category"),
-        Step("legal",     parallel=True),
-        Step("technical", parallel=True),
-        Step("reply"),
+        Step("triage",
+             output=Triage,
+             routes_by="category",
+             after_branches="reply"),
+        Step("legal"),                                  # one of these runs
+        Step("technical"),                              # (routes_by picks one)
+        Step("reply"),                                  # rejoin point
     ),
-    tools=[triage, legal, technical, write_reply],
+    tools=[triage, legal, technical, write_reply],     # triage agent has output=Triage too
+    name="exclusive_routing",                           # required for non-LLM engines
 )
 ```
 
-A parallel band runs concurrently; a router dispatches based on a
-structured field of the previous step's payload.
+Execution order when `triage.payload.category == "legal"`:
+`triage → legal → reply`.  `technical` does not run.
+
+#### 8b — Parallel band fanning into a join step
+
+No router; `legal` and `technical` run **concurrently** (the
+contiguous `parallel=True` band is gathered into a single
+``asyncio.gather``); `reply` then sees both outputs aggregated via
+`from_parallel_all("legal")`.
+
+```python
+from lazybridge import Agent, Plan, Step, from_parallel_all
+
+pipeline = Agent(
+    engine=Plan(
+        Step("triage"),
+        Step("legal",     parallel=True),
+        Step("technical", parallel=True),
+        Step("reply", context=from_parallel_all("legal")),   # aggregates the band
+    ),
+    tools=[triage, legal, technical, write_reply],
+    name="parallel_band",
+)
+```
+
+Execution order: `triage → (legal ∥ technical) → reply`.
+
+Mixing routing with `parallel=True` on the routed targets is
+intentionally allowed but **not what most users want** — routing
+disables the band gather semantics for the routed step.  Pick one of
+the two patterns above first; only combine when you really need
+both.
 
 ### 9 — Checkpoint + resume
 
@@ -253,7 +314,7 @@ from lazybridge import Agent, LLMEngine, Session, JsonFileExporter
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     session=session,
 )
 ```

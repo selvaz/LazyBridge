@@ -5,11 +5,10 @@ functions, deterministic plans, humans, and external tools under one uniform
 model: **everything is a tool.**
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent
 
-agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-)
+# Tier alias works across all 4 providers: anthropic / openai / google / deepseek.
+agent = Agent.from_provider("anthropic", tier="cheap")
 result = agent("What's the capital of France?")
 print(result.text())
 ```

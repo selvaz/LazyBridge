@@ -134,7 +134,7 @@ sess = Session(
     exporters=[OTelExporter(endpoint="http://otelcol:4318")],
 )
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     session=sess,
 )
 agent("hello")
@@ -157,7 +157,7 @@ def test_agent_emits_spans():
     )
 
     agent = Agent(
-        engine=LLMEngine("claude-opus-4-7"),
+        engine=LLMEngine("claude-haiku-4-5"),
         session=sess,
     )
     agent("test prompt")

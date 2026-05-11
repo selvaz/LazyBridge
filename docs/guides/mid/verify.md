@@ -16,7 +16,7 @@ the right tool for the policy.
 
 # 1. Agent-level — final output gate
 Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     verify=judge_agent,            # Agent or Callable[[str], Any]
     max_verify=3,                  # max attempts; default 3, must be >= 1
 )
@@ -33,7 +33,7 @@ agent.as_tool(
 Plan(
     Step(
         target=Agent(
-            engine=LLMEngine("claude-opus-4-7"),
+            engine=LLMEngine("claude-haiku-4-5"),
             verify=judge_agent,
             max_verify=3,
             name="summarise",
@@ -126,7 +126,7 @@ judge = Agent(
 
 # 1) Agent-level — final output gated, up to 2 attempts.
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     verify=judge,
     max_verify=2,
     name="writer",
@@ -138,11 +138,11 @@ print(result.text())
 # 2) Tool-level (Option B) — every call of synthesizer is gated;
 #    the orchestrator's other tools run unchecked.
 synthesizer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="synthesizer",
 )
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[
         synthesizer.as_tool(
             name="synth",
@@ -155,15 +155,15 @@ orchestrator = Agent(
 
 # 3) Plan-level — only the summarise step is gated.
 fetcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="fetch",
 )
 publisher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="publish",
 )
 summariser = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     verify=judge,
     max_verify=2,
     name="summarise",
@@ -183,7 +183,7 @@ def at_least_three_lines(output: str) -> bool:
     return output.count("\n") >= 2
 
 short_writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     verify=at_least_three_lines,
     max_verify=2,
 )

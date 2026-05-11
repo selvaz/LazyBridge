@@ -58,7 +58,7 @@ def multiply(a: float, b: float) -> float:
 
 research_agent = Agent(
     engine=LLMEngine(
-        "claude-opus-4-7",
+        "deepseek-v4-flash",
         system="You look up current facts via web_search. You do not do math.",
     ),
     tools=[web_search],
@@ -67,7 +67,7 @@ research_agent = Agent(
 
 math_agent = Agent(
     engine=LLMEngine(
-        "claude-opus-4-7",
+        "deepseek-v4-flash",
         system="You solve arithmetic with the add/multiply tools. One tool at a time.",
     ),
     tools=[add, multiply],
@@ -76,7 +76,7 @@ math_agent = Agent(
 
 writer_agent = Agent(
     engine=LLMEngine(
-        "claude-opus-4-7",
+        "deepseek-v4-flash",
         system="You synthesise prior results into clear prose. No new facts.",
     ),
     name="writer",
@@ -134,7 +134,7 @@ Rules:
 
 
 planner = Agent(
-    engine=LLMEngine("claude-opus-4-7", system=PLANNER_SYSTEM),
+    engine=LLMEngine("deepseek-v4-flash", system=PLANNER_SYSTEM),
     output=PlanRound,
     name="planner",
 )
@@ -184,7 +184,13 @@ async def solve(query: str, max_rounds: int = 5) -> str:
     history: list[tuple[Task, str]] = []
     for round_num in range(1, max_rounds + 1):
         plan_env = await planner.run(_format_history(query, history))
-        plan: PlanRound = plan_env.payload
+        plan: PlanRound | None = plan_env.payload
+        if plan is None:
+            # Provider returned no structured payload (typical when the
+            # ANTHROPIC_API_KEY env var is missing — the request errored
+            # and the envelope's ``.error`` carries the exception).
+            err = plan_env.error or RuntimeError("planner returned no payload")
+            return f"planner unavailable: {type(err).__name__}: {err}"
 
         print(f"\n=== round {round_num} ===")
         print(f"reasoning: {plan.reasoning}")

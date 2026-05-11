@@ -18,7 +18,7 @@ into a single concept.
 | Another `Agent` | Pass it directly: `Agent(tools=[other_agent])`. Its `name=` becomes the tool name. | Hierarchical / supervisor patterns |
 | The same agent under a different name | `other_agent.as_tool("alias")` | When you want a different surface name than `other_agent.name` |
 | A `Plan` | `Agent(engine=Plan(...), name="...")` then pass that agent in `tools=[...]` | Reusable deterministic pipelines |
-| A provider-native capability | `Agent(engine=LLMEngine("claude-opus-4-7"), native_tools=["web_search"])`; the `NativeTool` enum (`NativeTool.CODE_EXECUTION`, …) when you want IDE autocompletion | Provider-side, no code |
+| A provider-native capability | `Agent(engine=LLMEngine("claude-haiku-4-5"), native_tools=["web_search"])`; the `NativeTool` enum (`NativeTool.CODE_EXECUTION`, …) when you want IDE autocompletion | Provider-side, no code |
 | An MCP server | `MCP.stdio(...)` or `MCP.http(...)` passed in `tools=[...]` | External tool ecosystems |
 | A pre-built JSON schema | `Tool.from_schema(name, description, parameters, func)` | OpenAPI bridges, third-party registries |
 
@@ -49,12 +49,12 @@ A short illustration:
 from lazybridge import Agent, LLMEngine
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="research",
     tools=[web_search, fetch_url],
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[researcher],
 )
 ```
