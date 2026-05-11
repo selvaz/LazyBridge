@@ -262,9 +262,7 @@ def test_rung7_viz(model_capable: str, sess: Session, viz_open: bool, tmp_path) 
     assert env.text(), "writer returned empty output"
 
     events = sess.events.query()
-    assert len(events) > 4, (
-        f"Expected >4 events, got {len(events)}: {[e['event_type'] for e in events]}"
-    )
+    assert len(events) > 4, f"Expected >4 events, got {len(events)}: {[e['event_type'] for e in events]}"
     event_types = {e["event_type"] for e in events}
     assert "agent_start" in event_types
     assert "agent_finish" in event_types

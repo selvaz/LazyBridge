@@ -49,15 +49,16 @@ from lazybridge.ext.viz import Visualizer
 # Configurazione
 # ---------------------------------------------------------------------------
 
-MODEL_CHEAP   = os.getenv("LB_LIVE_MODEL",         "claude-haiku-4-5")
+MODEL_CHEAP = os.getenv("LB_LIVE_MODEL", "claude-haiku-4-5")
 MODEL_CAPABLE = os.getenv("LB_LIVE_MODEL_CAPABLE", "claude-haiku-4-5")
 
 # True = apre il browser per ogni rung (utile in sessioni di debug interattive)
-VIZ_OPEN = False
+VIZ_OPEN = True
 
 # Spyder/IPython: nest_asyncio evita "Event loop is closed" da httpx cleanup
 try:
     import nest_asyncio
+
     nest_asyncio.apply()
 except ImportError:
     pass
@@ -67,17 +68,18 @@ except ImportError:
 # Helper: ogni rung parte con Session + Visualizer già avviato
 # ---------------------------------------------------------------------------
 
+
 @contextmanager
 def _rung(label: str):
     """Context manager per ogni rung: Session + Visualizer + cleanup automatico."""
     tmp = Path(tempfile.mkdtemp())
     sess = Session(db=str(tmp / "live.db"), console=True)
     with Visualizer(sess, auto_open=VIZ_OPEN) as viz:
-        print(f"\n{'─'*60}")
+        print(f"\n{'─' * 60}")
         print(f"  {label}")
         print(f"  viz  → {viz.url}")
         print(f"  db   → {tmp / 'live.db'}")
-        print(f"{'─'*60}")
+        print(f"{'─' * 60}")
         yield sess, tmp
     sess.close()
 
@@ -110,6 +112,7 @@ with _rung("Rung 1 — single agent") as (sess, tmp):
 # %% Rung 2 — agent with tool
 # Verifica: tool schema, dispatch, result injection, eventi tool_call/tool_result
 with _rung("Rung 2 — agent with tool") as (sess, tmp):
+
     def multiply(a: int, b: int) -> int:
         """Multiply two integers."""
         return a * b
@@ -125,7 +128,7 @@ with _rung("Rung 2 — agent with tool") as (sess, tmp):
     assert "42" in env.text(), f"Got: {env.text()!r}"
 
     event_types = [e["event_type"] for e in sess.events.query()]
-    assert "tool_call"   in event_types, f"No tool_call: {event_types}"
+    assert "tool_call" in event_types, f"No tool_call: {event_types}"
     assert "tool_result" in event_types, f"No tool_result: {event_types}"
 
     print(f"✓ text   : {env.text()!r}")
@@ -135,6 +138,7 @@ with _rung("Rung 2 — agent with tool") as (sess, tmp):
 # %% Rung 3 — structured output
 # Verifica: Pydantic output parsing, payload tipizzato
 with _rung("Rung 3 — structured output") as (sess, tmp):
+
     class Coords(BaseModel):
         x: int
         y: int
@@ -181,7 +185,7 @@ with _rung("Rung 4 — sequential Plan") as (sess, tmp):
     assert "42" in env.text(), f"Got: {env.text()!r}"
 
     event_types = [e["event_type"] for e in sess.events.query()]
-    assert "agent_start"  in event_types
+    assert "agent_start" in event_types
     assert "agent_finish" in event_types
     assert len(event_types) >= 4
 
@@ -195,23 +199,26 @@ with _rung("Rung 4 — sequential Plan") as (sess, tmp):
 with _rung("Rung 5 — parallel steps") as (sess, tmp):
     ra = Agent(
         engine=LLMEngine(MODEL_CAPABLE, system="Follow the task instruction exactly."),
-        name="ra", session=sess,
+        name="ra",
+        session=sess,
     )
     rb = Agent(
         engine=LLMEngine(MODEL_CAPABLE, system="Follow the task instruction exactly."),
-        name="rb", session=sess,
+        name="rb",
+        session=sess,
     )
     merger = Agent(
         engine=LLMEngine(
             MODEL_CAPABLE,
             system="You receive labeled results from two agents. List what each agent returned.",
         ),
-        name="merger", session=sess,
+        name="merger",
+        session=sess,
     )
     pipeline = Agent(
         engine=Plan(
-            Step("ra",     task="Reply with exactly one word: ALPHA", parallel=True),
-            Step("rb",     task="Reply with exactly one word: BETA",  parallel=True),
+            Step("ra", task="Reply with exactly one word: ALPHA", parallel=True),
+            Step("rb", task="Reply with exactly one word: BETA", parallel=True),
             Step("merger", task=from_parallel_all("ra")),
         ),
         tools=[ra, rb, merger],
@@ -223,14 +230,14 @@ with _rung("Rung 5 — parallel steps") as (sess, tmp):
     assert env.text(), "merger returned empty"
 
     events = sess.events.query()
-    tool_results  = [e for e in events if e["event_type"] == "tool_result"]
+    tool_results = [e for e in events if e["event_type"] == "tool_result"]
     branch_results = {
         e["payload"].get("branch_id"): e["payload"].get("result", "")
         for e in tool_results
         if e["payload"].get("branch_id") in ("ra", "rb")
     }
-    assert "ra" in branch_results, f"No result from branch ra"
-    assert "rb" in branch_results, f"No result from branch rb"
+    assert "ra" in branch_results, "No result from branch ra"
+    assert "rb" in branch_results, "No result from branch rb"
 
     print(f"✓ ra output : {branch_results['ra'][:60]!r}")
     print(f"  rb output : {branch_results['rb'][:60]!r}")
@@ -257,9 +264,7 @@ with _rung("Rung 6 — agent as tool") as (sess, tmp):
     )
     env = outer("Translate 'hello' to French using the translator tool.")
 
-    assert any(w in env.text().lower() for w in ["bonjour", "salut", "allô"]), (
-        f"Got: {env.text()!r}"
-    )
+    assert any(w in env.text().lower() for w in ["bonjour", "salut", "allô"]), f"Got: {env.text()!r}"
 
     print(f"✓ translation : {env.text()!r}")
     print(f"  total tokens: {env.metadata.input_tokens}in / {env.metadata.output_tokens}out")
@@ -268,6 +273,7 @@ with _rung("Rung 6 — agent as tool") as (sess, tmp):
 # %% Rung 7 — Agent.chain + Visualizer (replay after run)
 # Verifica: Visualizer lifecycle, SSE, graph schema, event log, replay constructor
 with _rung("Rung 7 — chain + Visualizer") as (sess, tmp):
+
     def web_search(query: str) -> str:
         """Search the web and return a short summary."""
         time.sleep(0.2)
@@ -288,9 +294,9 @@ with _rung("Rung 7 — chain + Visualizer") as (sess, tmp):
 
     assert env.text(), "writer returned empty"
 
-    events     = sess.events.query()
+    events = sess.events.query()
     event_types = {e["event_type"] for e in events}
-    assert "agent_start"  in event_types
+    assert "agent_start" in event_types
     assert "agent_finish" in event_types
     assert len(events) > 4
 
@@ -344,10 +350,7 @@ with _rung("Rung 8 — from_step + from_start") as (sess, tmp):
     assert env.text(), "distil returned empty"
 
     events = sess.events.query()
-    starts = [
-        e for e in events
-        if e["event_type"] == "agent_start" and e["payload"].get("agent_name") == "distil"
-    ]
+    starts = [e for e in events if e["event_type"] == "agent_start" and e["payload"].get("agent_name") == "distil"]
     assert starts, "distil non è stato avviato"
     distil_task = starts[0]["payload"].get("task", "")
     assert distil_task != TOPIC, "from_step non ha risolto: distil ha ricevuto il task originale invariato"
@@ -366,8 +369,8 @@ with _rung("Rung 8 — from_step + from_start") as (sess, tmp):
 # %% Rung 9 — Store + checkpoint (crash-resume)
 # Verifica che un Plan con Store salti gli step già completati al secondo run
 with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
-    db_path  = str(tmp / "checkpoint.db")
-    store    = Store(db=db_path)
+    db_path = str(tmp / "checkpoint.db")
+    store = Store(db=db_path)
     _call_log: list[str] = []
 
     def tracked_fetch(topic: str) -> str:
@@ -394,8 +397,10 @@ with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
     _CKPT_KEY = "rung9_pipeline"
     pipeline = Agent(
         engine=Plan(
-            Step("fetcher"), Step("writer2", task=from_prev),
-            store=store, checkpoint_key=_CKPT_KEY,
+            Step("fetcher"),
+            Step("writer2", task=from_prev),
+            store=store,
+            checkpoint_key=_CKPT_KEY,
         ),
         tools=[fetcher, writer2],
         store=store,
@@ -410,7 +415,7 @@ with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
 
     # Secondo run: stesso DB + resume=True → fetcher saltato dal checkpoint
     sess2 = Session(db=str(tmp / "live2.db"), console=False)
-    store2  = Store(db=db_path)
+    store2 = Store(db=db_path)
     fetcher2 = Agent(
         engine=LLMEngine(MODEL_CAPABLE, system="Use tracked_fetch to get facts, then summarise."),
         tools=[Tool.wrap(tracked_fetch, name="tracked_fetch")],
@@ -426,8 +431,11 @@ with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
     )
     pipeline2 = Agent(
         engine=Plan(
-            Step("fetcher"), Step("writer2", task=from_prev),
-            store=store2, checkpoint_key=_CKPT_KEY, resume=True,
+            Step("fetcher"),
+            Step("writer2", task=from_prev),
+            store=store2,
+            checkpoint_key=_CKPT_KEY,
+            resume=True,
         ),
         tools=[fetcher2, writer3],
         store=store2,
@@ -438,9 +446,7 @@ with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
     calls_run2 = len(_call_log)
     sess2.close()
 
-    assert calls_run2 == calls_run1, (
-        f"tracked_fetch ri-eseguito! run1={calls_run1} → run2={calls_run2}"
-    )
+    assert calls_run2 == calls_run1, f"tracked_fetch ri-eseguito! run1={calls_run1} → run2={calls_run2}"
 
     print(f"✓ run1 output  : {env1.text()[:80]!r}")
     print(f"  run2 output  : {env2.text()[:80]!r}")
@@ -450,6 +456,7 @@ with _rung("Rung 9 — Store checkpoint") as (sess, tmp):
 # %% Rung 10 — routes_by (structured routing via Literal field)
 # Il classifier produce un output strutturato il cui campo Literal guida il routing
 with _rung("Rung 10 — routes_by routing") as (sess, tmp):
+
     class SentimentDecision(BaseModel):
         sentiment: Literal["positive", "negative"]
         brief: str
@@ -499,11 +506,7 @@ with _rung("Rung 10 — routes_by routing") as (sess, tmp):
     assert env_pos.text(), "routing pipeline vuota"
 
     events = sess.events.query()
-    agent_names_ran = {
-        e["payload"].get("agent_name")
-        for e in events
-        if e["event_type"] == "agent_finish"
-    }
+    agent_names_ran = {e["payload"].get("agent_name") for e in events if e["event_type"] == "agent_finish"}
     assert "negative" not in agent_names_ran, (
         f"negative non doveva girare per un review positivo! agents ran: {agent_names_ran}"
     )
@@ -533,7 +536,7 @@ with _rung("Rung 11 — Memory multi-turn") as (sess, tmp):
     )
 
     env_t1 = assistant("My favourite colour is ultramarine blue. Just say 'Got it'.")
-    assert env_t1.text(), f"t1 vuoto"
+    assert env_t1.text(), "t1 vuoto"
 
     env_t2 = assistant("What colour did I just mention?")
     assert any(w in env_t2.text().lower() for w in ["ultramarine", "blue"]), (
@@ -548,7 +551,7 @@ with _rung("Rung 11 — Memory multi-turn") as (sess, tmp):
 # Run 1 → researcher raccoglie dati, output salvato in Store
 # Run 2 → writer legge quell'output via from_agent("researcher")
 with _rung("Rung 12 — from_agent sentinel") as (sess, tmp):
-    db_fa      = str(tmp / "agent_store.db")
+    db_fa = str(tmp / "agent_store.db")
     shared_store = Store(db=db_fa)
 
     researcher_fa = Agent(
@@ -594,7 +597,7 @@ with _rung("Rung 12 — from_agent sentinel") as (sess, tmp):
 # %% Rung 13 — multi-provider
 # Stesso task su provider diversi (skip automatico se API key non impostata)
 with _rung("Rung 13 — multi-provider") as (sess, tmp):
-    TEST_OPENAI   = bool(os.getenv("OPENAI_API_KEY"))
+    TEST_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
     TEST_DEEPSEEK = bool(os.getenv("DEEPSEEK_API_KEY"))
 
     PROVIDERS = [("Anthropic", MODEL_CAPABLE)]
@@ -615,15 +618,15 @@ with _rung("Rung 13 — multi-provider") as (sess, tmp):
         env_p = agent_p(TASK)
         assert env_p.text(), f"{label}: risposta vuota"
         results[label] = {
-            "text":    env_p.text(),
-            "in":      env_p.metadata.input_tokens,
-            "out":     env_p.metadata.output_tokens,
-            "cost":    env_p.metadata.cost_usd,
-            "ms":      env_p.metadata.latency_ms,
+            "text": env_p.text(),
+            "in": env_p.metadata.input_tokens,
+            "out": env_p.metadata.output_tokens,
+            "cost": env_p.metadata.cost_usd,
+            "ms": env_p.metadata.latency_ms,
         }
 
     print(f"✓ {'Provider':<12} {'Answer':<35} {'tok_in':>6} {'tok_out':>7} {'cost':>10} {'ms':>7}")
-    print(f"  {'─'*75}")
+    print(f"  {'─' * 75}")
     for lbl, r in results.items():
         print(f"  {lbl:<12} {r['text'][:33]:<35} {r['in']:>6} {r['out']:>7} ${r['cost']:>8.6f} {r['ms']:>7.0f}")
     if not TEST_OPENAI:
