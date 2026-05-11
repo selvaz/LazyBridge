@@ -11,8 +11,8 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 
 ## Tools
 
-- [Tool family](tools.md) — `Tool`, the `tool(...)` factory,
-  `ToolProvider` protocol, `NativeTool` enum.
+- [Tool family](tools.md) — `Tool` + the `Tool.wrap()` classmethod
+  factory, the `ToolProvider` protocol, `NativeTool` enum.
 
 ## State
 

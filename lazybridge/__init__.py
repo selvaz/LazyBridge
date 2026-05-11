@@ -2,22 +2,22 @@
 
 Every Agent has the same shape.  Only the engine changes::
 
-    from lazybridge import Agent, LLMEngine, Plan, Step, Session, tool, from_step
+    from lazybridge import Agent, LLMEngine, Plan, Step, Session, Tool, from_step
 
     # --- Wrap Python functions as tools with explicit names ---
 
-    search = tool(search_web, name="search", description="Search the web.")
+    search = Tool.wrap(search_web, name="search", description="Search the web.")
 
     # --- Build sub-agents with explicit names ---
 
     researcher = Agent(
         name="research",
-        engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
+        engine=LLMEngine("claude-haiku-4-5", system="You are a research expert."),
         tools=[search],
     )
     writer = Agent(
         name="write",
-        engine=LLMEngine("gpt-4o", system="You are a concise technical writer."),
+        engine=LLMEngine("gpt-5.4-mini", system="You are a concise technical writer."),
     )
 
     # --- Deterministic orchestrator: Plan engine ---
@@ -58,13 +58,21 @@ connects every part of the system::
     from_agent("research")      →  reads last stored output of "research" (cross-run) ✓
     from_memory("research")     →  reads live memory of "research" ✓
 
-**tool() factory** — the canonical way to wrap a Python function::
+**Tool.wrap classmethod** — the canonical way to wrap a Python function::
 
-    search = tool(search_web, name="search", description="...")
+    search = Tool.wrap(search_web, name="search", description="...")
 
-``name`` is required; it becomes the stable key in the tool map.  Raw
-callables in ``tools=[fn]`` still work for backward compatibility, but
-the factory is the preferred form in new code.
+``Tool.wrap`` is an alternative constructor on the :class:`Tool` class
+(same idiom as :meth:`dict.fromkeys` or :meth:`Path.cwd`).  It accepts
+a callable, an :class:`Agent`, or an existing :class:`Tool` and
+dispatches to the right wrapping path.  ``name`` is required for
+callables and becomes the stable key in the tool map.  Raw callables
+in ``tools=[fn]`` still work for backward compatibility, but
+``Tool.wrap`` is the preferred form in new code.
+
+The module-level :func:`tool` (lowercase) is a backwards-compat alias
+that simply calls ``Tool.wrap``; it stays indefinitely so existing
+imports keep working, but new code should reach for ``Tool.wrap``.
 
 **Advanced alias / backward compat** — ``.as_tool("alias")`` remains
 available when you need a name different from the agent's own::
@@ -184,8 +192,8 @@ __all__ = [
     "from_memory",
     "from_agent",
     # Tools
-    "tool",
     "Tool",
+    "tool",
     "ToolProvider",
     # Native tools (provider-hosted, e.g. web search)
     "NativeTool",

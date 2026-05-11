@@ -59,7 +59,7 @@ the canonical version from memory.
 ```python
 agent = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
-    tools=[tool(get_weather, name="get_weather")],
+    tools=[Tool.wrap(get_weather, name="get_weather")],
 )
 result = agent("What's the weather in Paris?")
 print(result.text())

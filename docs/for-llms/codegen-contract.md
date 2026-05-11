@@ -8,16 +8,16 @@ this page is the same information annotated for human review.
 
 ## Always
 
-- Import from the top level: `from lazybridge import Agent, LLMEngine, tool`.
+- Import from the top level: `from lazybridge import Agent, LLMEngine, Tool`.
 - Construct agents canonically: `Agent(engine=LLMEngine("..."))`.
 - Name every reusable agent — `Agent(..., name="reviewer")` — so it
   can be referenced as a tool and so the Plan compiler can validate
   sentinels against it.
-- Wrap plain functions explicitly: `tool(fn, name="...")`.  Raw
+- Wrap plain functions explicitly: `Tool.wrap(fn, name="...")`.  Raw
   callables still work as a convenience, but the explicit form is
   the canonical contract.  The bare `Tool(...)` constructor is
   available for advanced use (custom-built schemas, schema-cache
-  artefacts) — **prefer the `tool()` factory** in new code.
+  artefacts) — **prefer the `Tool.wrap()` factory** in new code.
 - Read `result.text()` for string output; `result.payload` for the
   typed structured output when `output=` was set on the Agent.
 - For freshest-model quickstarts, use
@@ -28,9 +28,9 @@ this page is the same information annotated for human review.
 
 - Don't use `LazyAgent`, `LazyTool`, `LazySession`, or
   `LazyContext` — those are the 0.4-era names; current API is
-  `Agent`, `tool()` / `Tool`, `Session`, and the
+  `Agent`, `Tool.wrap()` / `Tool`, `Session`, and the
   sentinels/`Store`/`Memory` triple.
-- Don't pass `mode="auto"` to `tool()` or `Tool(...)` — the
+- Don't pass `mode="auto"` to `Tool.wrap()` or `Tool(...)` — the
   graceful-fallback ladder was deleted in 0.7.9. Choose
   `mode="signature"` (introspect type hints, default),
   `mode="llm"` (delegate the schema to an LLM), or `mode="hybrid"`
@@ -42,7 +42,7 @@ this page is the same information annotated for human review.
 - Don't pass `tool_choice="parallel"` — never supported, removed
   from the public ladder in 0.7.9.
 - Don't write JSON schemas by hand for annotated Python functions.
-  `tool()` introspects type hints; if the introspection misses a
+  `Tool.wrap()` introspects type hints; if the introspection misses a
   detail, override it with `mode="hybrid"` rather than rebuilding
   the schema manually.
 - Don't call `MCP.stdio(...)` without `allow=` or `deny=` — it's
@@ -76,7 +76,7 @@ LazyBridge has that the operator understands the trust boundary.
 Side-by-side example (same task, two runtimes):
 
 ```python
-from lazybridge import Agent, LLMEngine, tool
+from lazybridge import Agent, LLMEngine, Tool
 
 # LazyBridge-executed web search via your own function.
 def search_web(query: str) -> str:
@@ -85,7 +85,7 @@ def search_web(query: str) -> str:
 
 local = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[tool(search_web, name="search_web")],
+    tools=[Tool.wrap(search_web, name="search_web")],
 )
 
 # Provider-executed web search via Anthropic's server-side tool.
@@ -157,7 +157,7 @@ The shortest correct shape for each common request:
 | Request | Code |
 |---|---|
 | One agent | `agent = Agent(engine=LLMEngine("claude-opus-4-7"))` |
-| Agent + function tool | `agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[tool(get_weather, name="get_weather")])` |
+| Agent + function tool | `agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[Tool.wrap(get_weather, name="get_weather")])` |
 | Sequential plan | `Agent(engine=Plan(Step("research"), Step("write")), tools=[research, write], name="pipe")` |
 | Parallel fan-out | `fan = Agent.parallel(researcher, analyst); env = fan("topic")` |
 | Linear chain | `pipe = Agent.chain(researcher, writer)` |
