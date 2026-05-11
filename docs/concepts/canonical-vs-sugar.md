@@ -27,7 +27,7 @@ The shape used in every "Canonical" block below is the same one
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[search],
     name="research",
 )
@@ -35,7 +35,7 @@ agent = Agent(
 
 | Sugar | Expands to | Differences |
 |---|---|---|
-| `Agent("claude-opus-4-7", tools=[search], name="research")` | The canonical form above | **Pure alias.** The first positional argument is interpreted as a model string and threaded through to `LLMEngine(...)` internally. Hides which engine drives the agent at the call site. |
+| `Agent("claude-haiku-4-5", tools=[search], name="research")` | The canonical form above | **Pure alias.** The first positional argument is interpreted as a model string and threaded through to `LLMEngine(...)` internally. Hides which engine drives the agent at the call site. |
 | `Agent.from_provider("anthropic", tier="top", tools=[search], name="research")` | `Agent(engine=LLMEngine("top", provider="anthropic"), tools=[search], name="research")` | **Not pure sugar.** Builds an `LLMEngine` whose model string is a **tier alias** (`super_cheap` / `cheap` / `medium` / `expensive` / `top`); each provider class maps the alias to its current lineup. Use when you want "freshest model in tier X" without pinning a date-stamped name. |
 
 ---
@@ -148,7 +148,7 @@ repl = Agent(
 from lazybridge import tool
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[tool(search_web, name="search_web")],
 )
 
@@ -156,7 +156,7 @@ agent = Agent(
 # ``Tool(search_web, name=search_web.__name__)``.  Convenient for
 # one-shot scripts; prefer the explicit form in production.
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[search_web],
 )
 
@@ -170,7 +170,7 @@ search = Tool(
     description="Search the web for the query.",
     mode="signature",
 )
-agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search])
+agent = Agent(engine=LLMEngine("claude-haiku-4-5"), tools=[search])
 ```
 
 | Sugar | Expands to | Differences |
@@ -185,12 +185,12 @@ agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search])
 ```python
 # Canonical — the agent's own name= becomes the tool name
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="research",
     tools=[search],
 )
 orchestrator = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[researcher],          # <-- pass the agent directly
 )
 ```

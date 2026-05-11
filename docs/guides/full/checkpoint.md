@@ -152,10 +152,10 @@ def load_warehouse(clean: str) -> None:
     pass
 
 
-extract = Agent(engine=LLMEngine("claude-opus-4-7"), name="extract")
-transform = Agent(engine=LLMEngine("claude-opus-4-7"), name="transform")
-validate = Agent(engine=LLMEngine("claude-opus-4-7"), name="validate", output=ValidationReport)
-load = Agent(engine=LLMEngine("claude-opus-4-7"), name="load")
+extract = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="extract")
+transform = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="transform")
+validate = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="validate", output=ValidationReport)
+load = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="load")
 
 
 # 1) Crash-resume across runs.

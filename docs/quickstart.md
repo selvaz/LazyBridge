@@ -21,16 +21,32 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## 2. Your first agent
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent
 
-agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-)
+# Tier alias — picks "whatever provider X considers cheap-tier right
+# now".  Survives model-SKU renames without docs drift.  Works with
+# any of: anthropic / openai / google / deepseek.
+agent = Agent.from_provider("anthropic", tier="cheap")
 result = agent("Explain LazyBridge in one sentence.")
 print(result.text())
 ```
 
-That's a complete, runnable program — no `asyncio.run`, no event loop,
+Prefer **tier aliases** in first-contact code.  When you need to pin
+a specific model (for reproducibility, multimodal features, or
+provider-specific behaviour), use the explicit form:
+
+```python
+from lazybridge import Agent, LLMEngine
+
+# Pin a specific SKU when you need it.  Cheap-tier models across
+# providers (Jan 2026): claude-haiku-4-5, gpt-5.4-mini, gpt-4o-mini,
+# gemini-3-flash-preview, deepseek-v4-flash.
+agent = Agent(engine=LLMEngine("claude-haiku-4-5"))
+result = agent("Explain LazyBridge in one sentence.")
+print(result.text())
+```
+
+Both are complete, runnable programs — no `asyncio.run`, no event loop,
 no `@tool` decorators. The canonical shape is `Agent(engine=...)` with
 each argument on its own line: it's what every example in `examples/`
 uses, and it's what you'll extend the moment you need to configure the

@@ -88,7 +88,7 @@ chat_memory = Memory(
     max_tokens=3000,
 )
 chat = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     memory=chat_memory,
     name="chat",
 )
@@ -116,7 +116,7 @@ high_fidelity_memory = Memory(
 
 # 3) Sharing live conversation across agents — chat writes, judge reads.
 chat = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     memory=chat_memory,
     name="chat",
 )

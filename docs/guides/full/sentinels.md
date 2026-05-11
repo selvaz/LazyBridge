@@ -122,18 +122,18 @@ mem = Memory(strategy="summary")
 # Researcher with memory + store — feeds both `from_memory` and
 # `from_agent` references downstream.
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     memory=mem,
     store=store,
     name="research",
 )
 fact_checker = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     store=store,
     name="fact_check",
 )
 writer = Agent(
-    engine=LLMEngine("gpt-4o"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="write",
 )
 
@@ -164,11 +164,11 @@ class Brief(BaseModel):
 
 
 policy_loader = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="policy",
 )
 synthesiser = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="synth",
     output=Brief,
 )
@@ -193,7 +193,7 @@ plan2 = Agent(
 # 3) from_agent across runs — read what the researcher produced
 #    in a previous Plan execution.
 standalone = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     tools=[researcher],
     store=store,
 )

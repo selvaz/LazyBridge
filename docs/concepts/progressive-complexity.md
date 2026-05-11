@@ -39,7 +39,7 @@ already know. Nothing rewinds.
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
 )
 result = agent("Hello")
 print(result.text())
@@ -47,8 +47,8 @@ print(result.text())
 
 `Agent(engine=...)` with each argument on its own line is the
 canonical shape — every rung from here on adds to it without changing
-it. Shorter forms (`Agent("claude-opus-4-7")` and the
-string-positional shortcut `Agent("claude-opus-4-7")`) are sugar:
+it. Shorter forms (`Agent("claude-haiku-4-5")` and the
+string-positional shortcut `Agent("claude-haiku-4-5")`) are sugar:
 convenient for one-liners, but they hide the engine choice you'll need
 to configure as soon as the agent does anything non-trivial. Learn the
 canonical form first; reach for sugar only when you can already write
@@ -58,7 +58,7 @@ the canonical version from memory.
 
 ```python
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[tool(get_weather, name="get_weather")],
 )
 result = agent("What's the weather in Paris?")
@@ -79,7 +79,7 @@ class Summary(BaseModel):
     bullets: list[str]
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     output=Summary,
 )
 result = agent("Summarise the news")
@@ -95,12 +95,12 @@ against the model and re-prompts on validation errors.
 from lazybridge import Agent, LLMEngine, Plan, Step
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="research",
     tools=[web_search],
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     name="write",
 )
 
@@ -146,7 +146,7 @@ when you want the **LLM** to decide which sub-agent to call.
 
 ```python
 supervisor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     tools=[researcher],   # researcher's name= becomes the tool name
 )
 ```
@@ -297,7 +297,7 @@ from lazybridge import Agent, LLMEngine, Session, JsonFileExporter
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-haiku-4-5"),
     session=session,
 )
 ```

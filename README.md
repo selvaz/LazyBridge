@@ -191,7 +191,7 @@ store = Store(db="pipeline.sqlite")
 
 researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="search")
 ranker     = Agent(engine=LLMEngine("claude-opus-4-7"), name="rank")
-writer     = Agent(engine=LLMEngine("gpt-4o"),          name="write")
+writer     = Agent(engine=LLMEngine("gpt-5.4-mini"),          name="write")
 
 pipeline = Agent(
     engine=Plan(

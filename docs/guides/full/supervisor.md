@@ -122,12 +122,12 @@ def search_web(query: str) -> str:
 
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[tool(search_web, name="search_web")],
     name="researcher",
 )
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="writer",
 )
 

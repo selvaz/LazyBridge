@@ -45,17 +45,17 @@ def multiply(a: float, b: float) -> float:
 
 
 research_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7", system="Look up facts via web_search."),
+    engine=LLMEngine("gpt-5.4-mini", system="Look up facts via web_search."),
     tools=[web_search],
     name="research",
 )
 math_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7", system="Solve arithmetic with add/multiply."),
+    engine=LLMEngine("gpt-5.4-mini", system="Solve arithmetic with add/multiply."),
     tools=[add, multiply],
     name="math",
 )
 writer_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7", system="Synthesise prior results into prose."),
+    engine=LLMEngine("gpt-5.4-mini", system="Synthesise prior results into prose."),
     name="writer",
 )
 
@@ -125,7 +125,7 @@ Rules:
 
 
 planner = Agent(
-    engine=LLMEngine("claude-opus-4-7", system=PLANNER_SYSTEM),
+    engine=LLMEngine("gpt-5.4-mini", system=PLANNER_SYSTEM),
     output=PlanSpec,
     name="planner",
 )

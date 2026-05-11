@@ -33,7 +33,7 @@ def check_weather(location: str) -> str:
 
 def main() -> None:
     agent = Agent(
-        engine=LLMEngine("claude-opus-4-7", system="You are a helpful assistant"),
+        engine=LLMEngine("gpt-5.4-mini", system="You are a helpful assistant"),
         tools=[check_weather],
         verbose=True,
     )

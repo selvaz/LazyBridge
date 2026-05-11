@@ -72,7 +72,7 @@ from lazybridge.ext.mcp import MCP
 from lazybridge.external_tools.read_docs import read_docs_tools
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[
         plain_function,                              # 1. plain Python function
         tool(plain_function, name="custom", strict=True),  # 2. function + overrides via factory
@@ -137,7 +137,7 @@ def calculate(expression: str) -> float:
     return eval(expression)  # noqa: S307  (trusted inputs only)
 
 calc_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[calculate],
 )
 result = calc_agent("what is 17 * 23?")
@@ -152,7 +152,7 @@ calc_tool = tool(
     strict=True,
 )
 strict_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[calc_tool],
 )
 
@@ -167,7 +167,7 @@ def search(input: SearchInput) -> list[str]:
     return [f"https://example.com/{input.query}/{i}" for i in range(input.limit)]
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[search],
 )
 
@@ -193,7 +193,7 @@ weather_tool = Tool.from_schema(
     func=weather_dispatch,
 )
 weather_agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     tools=[weather_tool],
 )
 ```

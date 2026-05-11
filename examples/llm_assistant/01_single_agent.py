@@ -2,7 +2,7 @@
 
 ```python
 from lazybridge import Agent, LLMEngine
-agent = Agent(engine=LLMEngine("claude-opus-4-7"))
+agent = Agent(engine=LLMEngine("claude-haiku-4-5"))
 result = agent("hello world")
 result.text()
 ```

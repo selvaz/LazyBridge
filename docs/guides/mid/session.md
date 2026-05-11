@@ -111,7 +111,7 @@ from lazybridge.session import EventType
 # 1) Dev-mode tracing — one flag.
 sess = Session(console=True)
 chat = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     session=sess,
     name="chat",
 )
@@ -136,11 +136,11 @@ sess = Session(
 )
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="research",
 )
 writer = Agent(
-    engine=LLMEngine("gpt-4o"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="write",
 )
 pipeline = Agent.chain(researcher, writer, session=sess)

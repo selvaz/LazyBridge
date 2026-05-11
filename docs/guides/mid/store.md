@@ -97,12 +97,12 @@ store = Store(db="research.sqlite")
 
 # 1) Plan step writes a result via Step(writes=).
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     store=store,                       # required for from_agent later
     name="research",
 )
 writer = Agent(
-    engine=LLMEngine("gpt-4o"),
+    engine=LLMEngine("gpt-5.4-mini"),
     name="write",
 )
 
@@ -128,7 +128,7 @@ print(store.read("__agent_output__:research"))
 #    IMPORTANT: store= must be on the SOURCE AGENT (researcher), not
 #    just the pipeline.
 editor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     name="edit",
 )
 plan_with_handoff = Agent(
@@ -143,7 +143,7 @@ plan_with_handoff("Topic: bees")
 
 # 4) Agent with sources=[store] sees the live store on every call.
 monitor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     sources=[store],
 )
 print(monitor("what's the current state?").text())

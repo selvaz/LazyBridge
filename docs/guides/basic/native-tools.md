@@ -109,7 +109,7 @@ analyst("cross-reference report.md against current web consensus")
 
 # 3) String aliases — same effect as the enum.
 gpt_search = Agent(
-    engine=LLMEngine("gpt-4o"),
+    engine=LLMEngine("gpt-5.4-mini"),
     native_tools=["web_search"],
 )
 gpt_search("latest stable Python release?")

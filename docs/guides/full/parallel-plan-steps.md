@@ -119,10 +119,10 @@ def search_google(query: str) -> str:
     return "..."
 
 
-anthropic_search = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search_anthropic], name="search_a")
-openai_search = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search_openai], name="search_o")
-google_search = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[search_google], name="search_g")
-synthesiser = Agent(engine=LLMEngine("claude-opus-4-7"), name="synth")
+anthropic_search = Agent(engine=LLMEngine("deepseek-v4-flash"), tools=[search_anthropic], name="search_a")
+openai_search = Agent(engine=LLMEngine("deepseek-v4-flash"), tools=[search_openai], name="search_o")
+google_search = Agent(engine=LLMEngine("deepseek-v4-flash"), tools=[search_google], name="search_g")
+synthesiser = Agent(engine=LLMEngine("deepseek-v4-flash"), name="synth")
 
 
 # 1) Three branches → join with explicit per-branch sentinels.

@@ -167,8 +167,8 @@ with open("plan.json") as f:
     loaded = json.load(f)
 
 
-writer = Agent(engine=LLMEngine("claude-opus-4-7"), name="write")
-apologiser = Agent(engine=LLMEngine("claude-opus-4-7"), name="apology")
+writer = Agent(engine=LLMEngine("gemini-3-flash-preview"), name="write")
+apologiser = Agent(engine=LLMEngine("gemini-3-flash-preview"), name="apology")
 
 
 plan_reloaded = Plan.from_dict(

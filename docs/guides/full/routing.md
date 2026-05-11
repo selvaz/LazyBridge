@@ -147,10 +147,10 @@ class Hits(BaseModel):
     items: list[str]
 
 
-searcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="search")
-ranker = Agent(engine=LLMEngine("claude-opus-4-7"), name="rank")
-writer = Agent(engine=LLMEngine("claude-opus-4-7"), name="write")
-apology_agent = Agent(engine=LLMEngine("claude-opus-4-7"), name="apology")
+searcher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="search")
+ranker = Agent(engine=LLMEngine("gpt-5.4-mini"), name="rank")
+writer = Agent(engine=LLMEngine("gpt-5.4-mini"), name="write")
+apology_agent = Agent(engine=LLMEngine("gpt-5.4-mini"), name="apology")
 
 
 plan = Agent(
@@ -174,11 +174,11 @@ class Triage(BaseModel):
     severity: Literal["urgent", "normal", "spam"] | None = None
 
 
-classifier = Agent(engine=LLMEngine("claude-opus-4-7"), name="classify", output=Triage)
-escalator  = Agent(engine=LLMEngine("claude-opus-4-7"), name="urgent")
-triager    = Agent(engine=LLMEngine("claude-opus-4-7"), name="normal")
-closer     = Agent(engine=LLMEngine("claude-opus-4-7"), name="spam")
-archiver   = Agent(engine=LLMEngine("claude-opus-4-7"), name="archive")
+classifier = Agent(engine=LLMEngine("gpt-5.4-mini"), name="classify", output=Triage)
+escalator  = Agent(engine=LLMEngine("gpt-5.4-mini"), name="urgent")
+triager    = Agent(engine=LLMEngine("gpt-5.4-mini"), name="normal")
+closer     = Agent(engine=LLMEngine("gpt-5.4-mini"), name="spam")
+archiver   = Agent(engine=LLMEngine("gpt-5.4-mini"), name="archive")
 
 
 plan = Agent(
@@ -202,8 +202,8 @@ class Verdict(BaseModel):
     approved: bool
 
 
-reviewer  = Agent(engine=LLMEngine("claude-opus-4-7"), name="review")
-publisher = Agent(engine=LLMEngine("claude-opus-4-7"), name="publish")
+reviewer  = Agent(engine=LLMEngine("gpt-5.4-mini"), name="review")
+publisher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="publish")
 
 
 store = Store()
@@ -235,7 +235,7 @@ plan = Agent(
 
 # 4) Lambda escape hatch for one-off predicates.
 classify_hits = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gpt-5.4-mini"),
     output=Hits,
     name="classify",
 )
@@ -261,9 +261,9 @@ def needs_review(env) -> bool:
     return env.payload.score < 0.5 and env.payload.topic in {"medical", "legal"}
 
 
-score_classifier = Agent(engine=LLMEngine("claude-opus-4-7"), output=Score, name="classify")
-auto_agent       = Agent(engine=LLMEngine("claude-opus-4-7"), name="auto")
-review_agent     = Agent(engine=LLMEngine("claude-opus-4-7"), name="review")
+score_classifier = Agent(engine=LLMEngine("gpt-5.4-mini"), output=Score, name="classify")
+auto_agent       = Agent(engine=LLMEngine("gpt-5.4-mini"), name="auto")
+review_agent     = Agent(engine=LLMEngine("gpt-5.4-mini"), name="review")
 
 plan = Agent(
     engine=Plan(

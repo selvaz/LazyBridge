@@ -113,7 +113,7 @@ class Article(BaseModel):
 
 # Constructing an Agent with structured output narrows Envelope.payload.
 writer = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("gemini-3-flash-preview"),
     output=Article,
 )
 
