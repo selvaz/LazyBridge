@@ -194,16 +194,33 @@ order and **both** branches would still run — see the
 semantics.
 
 ```python
+from typing import Literal
+
+from pydantic import BaseModel
+
 from lazybridge import Agent, Plan, Step
+
+
+# routes_by="field" requires the step's output= to be a Pydantic
+# model with that field declared as ``Literal[...]`` (or
+# ``Literal[...] | None``).  Both the routing Step AND the agent
+# answering it must carry ``output=Triage`` so the payload exposes
+# ``.category``.
+class Triage(BaseModel):
+    category: Literal["legal", "technical"]
+
 
 pipeline = Agent(
     engine=Plan(
-        Step("triage", routes_by="category", after_branches="reply"),
+        Step("triage",
+             output=Triage,
+             routes_by="category",
+             after_branches="reply"),
         Step("legal"),                                  # one of these runs
         Step("technical"),                              # (routes_by picks one)
         Step("reply"),                                  # rejoin point
     ),
-    tools=[triage, legal, technical, write_reply],
+    tools=[triage, legal, technical, write_reply],     # triage agent has output=Triage too
     name="exclusive_routing",                           # required for non-LLM engines
 )
 ```
