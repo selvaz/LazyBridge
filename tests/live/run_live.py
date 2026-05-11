@@ -61,7 +61,8 @@ try:
 
     nest_asyncio.apply()
 except ImportError:
-    pass
+    # Dipendenza opzionale: continuiamo senza patch dell'event loop.
+    print("nest_asyncio non disponibile: esecuzione senza patch dell'event loop.")
 
 
 # ---------------------------------------------------------------------------
