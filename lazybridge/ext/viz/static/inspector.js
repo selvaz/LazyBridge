@@ -1,11 +1,12 @@
 // Right-side panel: tabs for "Node" (agent card), "Event" (payload),
-// and "Store" (live key-value snapshot).
+// "Store" (live key-value snapshot), and "Session" (event log DB inspector).
 
 import { state, on } from "/static/state.js";
 import { renderJSON } from "/static/json-tree.js";
 
 let root, body;
 let activeTab = "event";
+let sessionFilter = new Set();
 
 export function initInspector() {
   root = document.getElementById("inspector");
@@ -14,6 +15,7 @@ export function initInspector() {
       <div class="tab" data-tab="node">Node</div>
       <div class="tab active" data-tab="event">Event <span class="badge" id="evt-badge">0</span></div>
       <div class="tab" data-tab="store">Store <span class="badge" id="store-badge">0</span></div>
+      <div class="tab" data-tab="session">Session <span class="badge" id="session-badge">0</span></div>
     </div>
     <div class="body" id="inspector-body">
       <div class="placeholder">Click a node or select an event from the timeline.</div>
@@ -25,10 +27,13 @@ export function initInspector() {
   }
 
   on("eventArrived", () => {
-    document.getElementById("evt-badge").textContent = state.events.length;
+    const n = state.events.length;
+    document.getElementById("evt-badge").textContent = n;
+    document.getElementById("session-badge").textContent = n;
     if (state.selectedSeq === null && activeTab === "event") {
       renderEvent(state.events[state.events.length - 1]);
     }
+    if (activeTab === "session") renderSession();
   });
   on("select", (seq) => {
     if (activeTab === "event") renderEvent(state.byId.get(seq));
@@ -78,6 +83,8 @@ function switchTab(t) {
     renderEvent(state.byId.get(state.selectedSeq) || state.events[state.events.length - 1]);
   } else if (t === "store") {
     renderStore();
+  } else if (t === "session") {
+    renderSession();
   } else if (t === "node") {
     if (!state.selectedNode) {
       body.innerHTML = `<div class="placeholder">Click any node on the graph.</div>`;
@@ -441,6 +448,80 @@ function renderStore() {
       <div class="meta">${valStr.length} chars</div>
       <pre class="val">${escapeHtml(valStr.length > 4000 ? valStr.slice(0, 4000) + "…" : valStr)}</pre>`;
     body.appendChild(div);
+  }
+}
+
+// ---- Session tab (event log as DB inspector) ----------------------------
+
+function _evtClass(type) {
+  if (!type) return "";
+  if (type === "tool_error") return "error";
+  if (type.startsWith("tool")) return "tool";
+  if (type.startsWith("agent")) return "agent";
+  if (type.startsWith("model")) return "model";
+  return "";
+}
+
+function renderSession() {
+  const events = state.events;
+  if (!events.length) {
+    body.innerHTML = `<div class="placeholder">No events yet.</div>`;
+    return;
+  }
+
+  const types = [...new Set(events.map(e => e.event_type))].sort();
+  const visible = sessionFilter.size
+    ? events.filter(e => !sessionFilter.has(e.event_type))
+    : events;
+
+  body.innerHTML = `
+    <div class="session-filter" id="session-filter">
+      ${types.map(t => {
+        const cls = _evtClass(t);
+        const off  = sessionFilter.has(t) ? " off" : "";
+        return `<span class="sf-pill${off} cls-${cls}" data-type="${escapeHtml(t)}">${escapeHtml(t)}</span>`;
+      }).join("")}
+    </div>
+    <div class="session-count">${visible.length} / ${events.length} events</div>
+    <div class="session-list" id="session-list"></div>`;
+
+  for (const pill of body.querySelectorAll(".sf-pill")) {
+    pill.addEventListener("click", () => {
+      const t = pill.dataset.type;
+      if (sessionFilter.has(t)) sessionFilter.delete(t);
+      else sessionFilter.add(t);
+      renderSession();
+    });
+  }
+
+  const list = document.getElementById("session-list");
+  for (const ev of visible) {
+    const cls = _evtClass(ev.event_type);
+    const ts  = ev.ts ? new Date(ev.ts * 1000).toLocaleTimeString() : "";
+    const row = document.createElement("div");
+    row.className = "session-row";
+    row.innerHTML = `
+      <div class="sr-header cls-${cls}">
+        <span class="sr-type cls-${cls}">${escapeHtml(ev.event_type || "?")}</span>
+        ${ev.agent_name ? `<span class="sr-agent">${escapeHtml(ev.agent_name)}</span>` : ""}
+        <span class="sr-meta">#${ev._seq ?? ""} ${ts}</span>
+        <span class="sr-chevron">▸</span>
+      </div>`;
+    row.addEventListener("click", () => {
+      const existing = row.querySelector(".sr-payload");
+      if (existing) {
+        existing.remove();
+        row.querySelector(".sr-chevron").textContent = "▸";
+        return;
+      }
+      const div = document.createElement("div");
+      div.className = "sr-payload";
+      const { _seq, event_type, session_id, ...rest } = ev;
+      renderJSON(rest, div);
+      row.appendChild(div);
+      row.querySelector(".sr-chevron").textContent = "▾";
+    });
+    list.appendChild(row);
   }
 }
 

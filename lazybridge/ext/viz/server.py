@@ -73,6 +73,9 @@ _MIME = {
     ".js": "application/javascript; charset=utf-8",
     ".svg": "image/svg+xml",
     ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".ico": "image/x-icon",
 }
 
 # Server-level keep-alive cadence for SSE. Browsers close idle
