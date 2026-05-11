@@ -182,7 +182,13 @@ def solve(query: str, *, replan: bool = False, max_rounds: int = 5) -> str:
     """Execute one Plan. If replan=True, loop until the planner sets done=true."""
     history: list[str] = []
     for round_num in range(1, max_rounds + 1):
-        spec: PlanSpec = planner(_format_with_history(query, history)).payload
+        env = planner(_format_with_history(query, history))
+        spec: PlanSpec | None = env.payload
+        if spec is None:
+            # Typical when ``ANTHROPIC_API_KEY`` is missing — the
+            # request errored and the typed payload is None.
+            err = env.error or RuntimeError("planner returned no payload")
+            return f"planner unavailable: {type(err).__name__}: {err}"
         print(f"\n=== plan round {round_num} ===")
         print("reasoning:", spec.reasoning)
 

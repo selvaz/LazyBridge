@@ -184,7 +184,13 @@ async def solve(query: str, max_rounds: int = 5) -> str:
     history: list[tuple[Task, str]] = []
     for round_num in range(1, max_rounds + 1):
         plan_env = await planner.run(_format_history(query, history))
-        plan: PlanRound = plan_env.payload
+        plan: PlanRound | None = plan_env.payload
+        if plan is None:
+            # Provider returned no structured payload (typical when the
+            # ANTHROPIC_API_KEY env var is missing — the request errored
+            # and the envelope's ``.error`` carries the exception).
+            err = plan_env.error or RuntimeError("planner returned no payload")
+            return f"planner unavailable: {type(err).__name__}: {err}"
 
         print(f"\n=== round {round_num} ===")
         print(f"reasoning: {plan.reasoning}")

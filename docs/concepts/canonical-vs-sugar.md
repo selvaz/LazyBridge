@@ -141,13 +141,27 @@ repl = Agent(
 ## 6. Wrap a callable as a Tool
 
 ```python
-# Canonical (most common — pass the bare function)
+# Canonical — explicit ``tool()`` factory pins the LLM-visible name
+# even if the function is renamed, keeping tool-maps and plan
+# references stable across refactors.  This is the form the framework
+# docstring (lazybridge/__init__.py) flags as canonical.
+from lazybridge import tool
+
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[search_web],          # auto-wrapped with Tool(search_web, name=search_web.__name__)
+    tools=[tool(search_web, name="search_web")],
 )
 
-# Canonical (explicit, when you want mode= / strict= / a custom name)
+# Sugar — bare callable.  Backward-compatible; auto-wrapped with
+# ``Tool(search_web, name=search_web.__name__)``.  Convenient for
+# one-shot scripts; prefer the explicit form in production.
+agent = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    tools=[search_web],
+)
+
+# Advanced — direct ``Tool`` constructor when you need ``mode=`` /
+# ``strict=`` / ``schema_llm=`` / a custom name.
 from lazybridge import Tool
 
 search = Tool(

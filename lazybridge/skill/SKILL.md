@@ -70,7 +70,7 @@ agent = Agent(
     engine=LLMEngine("model-id"),
     tools=[...],
     name="...",
-    ...
+    # ... other kwargs here
 )
 result = agent(task)
 print(result.text())
@@ -384,8 +384,20 @@ agent.
 from lazybridge import Agent, LLMEngine
 from lazybridge.ext.mcp import MCP
 
-fs   = MCP.stdio("fs",  "npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-http = MCP.http("docs", "https://example.com/mcp")
+# command / args / allow are keyword-only on MCP.stdio.
+# allow= (or deny=) is REQUIRED since 0.7.9 — deny-by-default for
+# both stdio and http; omitting them raises ValueError.
+fs = MCP.stdio(
+    "fs",
+    command="npx",
+    args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    allow=["fs.read_*", "fs.list_*"],
+)
+http = MCP.http(
+    "docs",
+    "https://example.com/mcp",
+    allow=["docs.search_*"],
+)
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
