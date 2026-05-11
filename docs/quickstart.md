@@ -76,7 +76,9 @@ print(result.text())
 > The bare-function form (`tools=[get_weather]`) is supported as a
 > convenience.  Production code should prefer the explicit
 > `tool(fn, name=...)` form: it pins the LLM-visible tool name, which
-> keeps tool-maps and plan references stable as the function name
+> keeps the agent's **tool-map** (the `name → Tool` lookup the LLM
+> uses to dispatch a call) and plan-step references stable as the
+> function name
 > evolves.
 
 The agent will decide on its own to call `get_weather("Paris")`,

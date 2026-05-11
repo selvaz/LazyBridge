@@ -17,6 +17,10 @@ Plan(
     checkpoint_key,                # required — unique key per run identity
     resume=False,                  # True → pick up at the failed step
     on_concurrent="fail",          # "fail" | "fork"
+    max_iterations=100,            # safety valve — caps routing loops;
+                                   # the resumed run continues the counter
+                                   # from the checkpoint, so a resumed
+                                   # router can't silently exceed it.
 )
 
 

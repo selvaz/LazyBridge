@@ -59,7 +59,7 @@ or crash-resume?
   `Agent.parallel`; an `Agent.parallel` branch can itself contain
   a `Plan`. The unit at every level is the same `Agent`.
 
-## See also
+## See also: scripted composition
 
 - [Chain](../guides/mid/chain.md) — sequential composition
   reference.

@@ -22,7 +22,7 @@ This page gathers the most common shapes for quick LLM lookup.
 | `ValueError: EncryptedStoreAdapter: stored value is not an lb-enc-v1 token` | Adapter pointed at a plaintext Store (mixed-mode reads are unsafe) | Either decrypt+re-encrypt the legacy rows, or unwrap the adapter to read them |
 | `StreamStallError: no token in 90s` | Provider stream went silent past ``stream_idle_timeout`` | Lower the timeout, or wrap the call in retry logic, or switch to non-streaming |
 | `ToolTimeoutError: tool X exceeded 30s` | Tool wall-clock exceeded ``tool_timeout`` | Raise the timeout on the ``LLMEngine``, or make the tool faster |
-| `RuntimeError: async def functions are not natively supported` | ``pytest-asyncio`` not installed in the test env | ``pip install -e '.[test]'`` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)) |
+| `RuntimeError: async def functions are not natively supported` | ``pytest-asyncio`` not installed in the test env | ``pip install -e '.[test]'`` (see [CONTRIBUTING.md](https://github.com/selvaz/LazyBridge/blob/main/CONTRIBUTING.md)) |
 | `ModuleNotFoundError: lazybridge.external_tools.report_builder` | Reporting moved to ``selvaz/LazyReport`` in 0.7.9 | ``pip install lazybridge-reports``, then ``import lazybridge_reports`` |
 | `ImportError: EncryptedStoreAdapter requires 'cryptography'` | Opt-in extra not installed | ``pip install 'lazybridge[encryption]'`` |
 | `PackageNotFoundError: lazybridge` reads as version 0.7.0 | Stale dev install + new source tree | ``pip install -e .`` to refresh the editable install's metadata |
@@ -32,7 +32,7 @@ This page gathers the most common shapes for quick LLM lookup.
 1. Read the bottom of the error message verbatim — the four-part body
    ends with a literal **fix snippet**, often the exact replacement
    line of code.
-2. Cross-reference the symbol against [`lazybridge/llms.json`](../../lazybridge/llms.json) — the
+2. Cross-reference the symbol against [`lazybridge/llms.json`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json) — the
    ``avoid`` list and ``renames`` map cover every 0.7.9 deletion.
 3. If the symbol is from a 0.4-era import path
    (``LazyAgent``/``LazyTool``/``LazySession``/``LazyContext``), see

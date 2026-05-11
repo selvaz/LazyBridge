@@ -108,9 +108,9 @@ from lazybridge.ext.mcp import MCP
 
 
 # 1) Spawn a stdio MCP server (subprocess) and use its tools.
-#    Best practice: restrict the surface with ``allow=`` (or ``deny=``)
-#    instead of exposing every tool the subprocess advertises.  Omitting
-#    both triggers a one-shot UserWarning at construction time.
+#    ``allow=`` (or ``deny=``) is REQUIRED since 0.7.9 — deny-by-default.
+#    Omitting both raises ``ValueError`` at construction so the LLM never
+#    silently sees an unaudited filesystem / git / shell tool surface.
 fs = MCP.stdio(
     "fs",
     command="npx",
@@ -203,8 +203,8 @@ async def use_fs():
   more common choice for tools you author yourself.
 - [Native tools](../basic/native-tools.md) — provider-hosted
   capabilities (web search, code exec); not MCP.
-- *Recipes → MCP* (Phase 4) — long-form walkthrough with the
-  filesystem and GitHub MCP servers.
+- [`examples/llm_assistant/05_mcp_allowlisted.py`](https://github.com/selvaz/LazyBridge/blob/main/examples/llm_assistant/05_mcp_allowlisted.py)
+  — runnable allowlist-pattern walkthrough.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
   `Tool.from_schema` is what backs every MCP-discovered tool, and
   is its own canonical form (not sugar over `Tool(callable, …)`).

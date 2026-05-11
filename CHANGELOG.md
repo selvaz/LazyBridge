@@ -10,8 +10,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 The headline change: **deletion-led simplification**.  The framework
 had no users yet, so we ship breaking changes without deprecation
-paths or shims.  Net public surface change: −2 in
-``lazybridge.__all__`` (50 → 48), 5 deleted ``Agent.from_*`` class
+paths or shims.  Net public surface change: −1 in
+``lazybridge.__all__`` (50 → 49), 5 deleted ``Agent.from_*`` class
 methods, 9 silent-fallback paths converted to explicit errors, and
 the entire ``report_builder`` subsystem extracted to its own repo.
 Zero new public concept.
