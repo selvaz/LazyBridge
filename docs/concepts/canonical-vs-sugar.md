@@ -141,15 +141,15 @@ repl = Agent(
 ## 6. Wrap a callable as a Tool
 
 ```python
-# Canonical — explicit ``tool()`` factory pins the LLM-visible name
+# Canonical — explicit ``Tool.wrap()`` factory pins the LLM-visible name
 # even if the function is renamed, keeping tool-maps and plan
 # references stable across refactors.  This is the form the framework
 # docstring (lazybridge/__init__.py) flags as canonical.
-from lazybridge import tool
+from lazybridge import Tool
 
 agent = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
-    tools=[tool(search_web, name="search_web")],
+    tools=[Tool.wrap(search_web, name="search_web")],
 )
 
 # Sugar — bare callable.  Backward-compatible; auto-wrapped with
@@ -173,9 +173,10 @@ search = Tool(
 agent = Agent(engine=LLMEngine("claude-haiku-4-5"), tools=[search])
 ```
 
-| Sugar | Expands to | Differences |
+| Sugar / variant | Canonical | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description="Search the web.")` | `Tool(search_web, name="search", description="Search the web.")` | **Not pure alias.** Multi-input dispatcher: callables → `Tool(...)`, Agents → `agent.as_tool(...)`, existing Tools → passthrough or clone-with-overrides. Both default to `mode="signature"` since 0.7.9 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
+| `tools=[search_web]` (bare callable) | `Tool.wrap(search_web, name=search_web.__name__)` | **Backward-compatible auto-wrap.** Build-time, when the agent constructs its tool-map.  Convenient for one-shot scripts; refactor-fragile because the LLM-visible tool name is whatever `__name__` happens to be — rename the function and every plan reference / tool-map key changes silently. |
+| `tool(search_web, name="search")` (lowercase) | `Tool.wrap(search_web, name="search")` | **Pure alias.** The module-level `lazybridge.tool` is a thin shim that calls `Tool.wrap` — kept indefinitely so existing imports work.  New code should reach for `Tool.wrap` so the factory sits next to the constructor on the class. |
 | `Tool.from_schema(name, description, parameters, func, strict=False, returns_envelope=False)` | (no callable-introspection canonical — this IS the canonical for pre-built schemas) | **Not sugar over `Tool(callable, …)`.** Used when the JSON Schema is already known (MCP servers, OpenAPI bridges, third-party tool registries). Bypasses the schema builder and sets `_definition` directly. |
 
 ---
@@ -198,7 +199,7 @@ orchestrator = Agent(
 | Sugar | Expands to | Differences |
 |---|---|---|
 | `researcher.as_tool("deep_research")` | A `Tool` whose `func` calls `researcher.run` and whose `name` is the alias | **Not pure alias.** Use when you want a **different surface name** than the agent's own `name=`, or when wrapping a duck-typed agent that doesn't have an explicit `name=`. Also takes `verify=` / `max_verify=` to wrap the call in a judge/retry loop — a feature `tools=[researcher]` does **not** expose. |
-| `tool(researcher, name="deep_research")` | Equivalent to `researcher.as_tool("deep_research")` | **Pure alias** of `as_tool` for agent-like inputs. Useful when you're building a tool list programmatically (single dispatcher for callables, agents, and Tools). |
+| `Tool.wrap(researcher, name="deep_research")` | Equivalent to `researcher.as_tool("deep_research")` | **Pure alias** of `as_tool` for agent-like inputs. Useful when you're building a tool list programmatically (single dispatcher for callables, agents, and Tools). |
 
 ---
 

@@ -31,6 +31,11 @@ class ToolProvider(Protocol):
     def as_tools(self) -> list[Tool]: ...
 
 
+#: Sentinel distinguishing "caller omitted strict=" from "caller passed strict=False".
+#: Needed so ``Tool.wrap(base, strict=False)`` can override a base with ``strict=True``.
+_UNSET_BOOL: Any = object()
+
+
 class Tool:
     """Wraps any Python callable as an LLM-accessible tool.
 
@@ -196,10 +201,130 @@ class Tool:
     def __repr__(self) -> str:
         return f"Tool({self.name!r})"
 
+    @classmethod
+    def wrap(
+        cls,
+        obj: Any,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        mode: Literal["signature", "hybrid", "llm"] = "signature",
+        schema_llm: Any | None = None,
+        strict: bool = _UNSET_BOOL,  # type: ignore[assignment]
+    ) -> Tool:
+        """Canonical multi-input factory — accepts a callable, an Agent, or an
+        existing :class:`Tool`, and returns a properly wrapped ``Tool``.
 
-#: Sentinel distinguishing "caller omitted strict=" from "caller passed strict=False".
-#: Needed so ``tool(base, strict=False)`` can override a base with ``strict=True``.
-_UNSET_BOOL: Any = object()
+        **For Python functions** — ``name`` is required so Plan steps, tool
+        maps, and LLM calls all share the same stable identifier::
+
+            search = Tool.wrap(search_web, name="search", description="Search the web.")
+            researcher = Agent(name="research", engine=LLMEngine(...), tools=[search])
+
+        **For Agents** — the canonical path is ``tools=[agent]`` directly;
+        ``Tool.wrap`` is useful when you need a local alias::
+
+            Tool.wrap(researcher, name="deep_research")
+
+        **For existing Tools** — returns the object unchanged (no overrides) or
+        clones it with the specified overrides (non-mutating)::
+
+            search_v2 = Tool.wrap(search, name="web_search")
+
+        Parameters
+        ----------
+        obj:
+            A callable, :class:`Agent`, or existing :class:`Tool` to wrap.
+        name:
+            Required for callables.  Optional alias for agents and Tools.
+        description:
+            Human-readable description forwarded to the LLM.
+        mode:
+            Schema generation mode.  ``"signature"`` (default) introspects the
+            function signature and docstring deterministically.  Pass
+            ``"hybrid"`` (signature + LLM-enriched descriptions) or ``"llm"``
+            (full LLM-inferred schema) explicitly when the signature alone
+            is insufficient — both require ``schema_llm=`` to be set.
+        schema_llm:
+            Engine used when ``mode="hybrid"`` or ``mode="llm"``.
+        strict:
+            Enable JSON Schema strict mode.
+
+        Notes
+        -----
+        Module-level :func:`tool` is a thin alias for backwards compatibility
+        and is kept indefinitely; new code should prefer ``Tool.wrap``.
+        """
+        # ── Case 1: already a Tool ──────────────────────────────────────────
+        if isinstance(obj, Tool):
+            has_overrides = (
+                name is not None
+                or description is not None
+                or mode != "signature"
+                or schema_llm is not None
+                or strict is not _UNSET_BOOL
+            )
+            if not has_overrides:
+                return obj
+            return cls(
+                obj.func,
+                name=name if name is not None else obj.name,
+                description=description if description is not None else obj.description,
+                mode=mode if mode != "signature" else obj.mode,
+                schema_llm=schema_llm if schema_llm is not None else obj.schema_llm,
+                strict=obj.strict if strict is _UNSET_BOOL else bool(strict),
+                returns_envelope=obj.returns_envelope,
+                agent_memory=obj.agent_memory,
+                agent_store=obj.agent_store,
+            )
+
+        # ── Case 2: Agent-like ──────────────────────────────────────────────
+        if getattr(obj, "_is_lazy_agent", False):
+            # An explicit alias passed here is always accepted.
+            # Without an alias, the agent must have _name_explicit=True.
+            if name is None and getattr(obj, "_name_explicit", True) is False:
+                # Only reject real Agent instances that set _name_explicit=False.
+                # Duck-typed agents (MockAgent, custom subclasses) default to True.
+                agent_name = getattr(obj, "name", repr(obj))
+                raise ValueError(
+                    f"Agent used as a tool must have an explicit name=...\n"
+                    f"The agent currently has name={agent_name!r} "
+                    f"(derived from the model or left as the default).\n\n"
+                    f"Set an explicit name:\n"
+                    f'    Agent(name="research", engine=LLMEngine(...))\n\n'
+                    f"Or pass an alias to the factory:\n"
+                    f'    Tool.wrap(agent, name="research")'
+                )
+            effective_name = name or getattr(obj, "name", None)
+            if not effective_name or not str(effective_name).strip():
+                raise ValueError(
+                    "Agent used as a tool must have an explicit name=...\n"
+                    "Example:\n"
+                    '    Agent(name="research", engine=LLMEngine(...))'
+                )
+            if hasattr(obj, "as_tool"):
+                return obj.as_tool(effective_name, description=description)
+            return _agent_as_tool_named(obj, effective_name, description)
+
+        # ── Case 3: plain callable ──────────────────────────────────────────
+        if callable(obj):
+            if name is None:
+                fn_name = getattr(obj, "__name__", repr(obj))
+                raise ValueError(
+                    f"Tool.wrap() requires an explicit name=... for callables.\n"
+                    f'Example: Tool.wrap({fn_name!r}, name="{fn_name}")'
+                )
+            strict_val = False if strict is _UNSET_BOOL else bool(strict)  # type: ignore[arg-type]
+            return cls(
+                obj,
+                name=name,
+                description=description,
+                mode=mode,
+                schema_llm=schema_llm,
+                strict=strict_val,
+            )
+
+        raise TypeError(f"Tool.wrap() cannot wrap {type(obj).__name__!r}")
 
 
 def _agent_as_tool_named(agent: Any, name: str, description: str | None) -> Tool:
@@ -223,112 +348,23 @@ def tool(
     schema_llm: Any | None = None,
     strict: bool = _UNSET_BOOL,  # type: ignore[assignment]
 ) -> Tool:
-    """Public factory — the canonical way to create a :class:`Tool`.
+    """Backwards-compatibility alias for :meth:`Tool.wrap`.
 
-    **For Python functions** — ``name`` is required so that Plan steps,
-    tool maps, and LLM calls all share the same stable identifier::
-
-        search = tool(search_web, name="search", description="Search the web.")
-        researcher = Agent(name="research", engine=LLMEngine(...), tools=[search])
-
-    **For Agents** — the canonical path is ``tools=[agent]`` directly; the
-    factory is useful when you need a local alias::
-
-        tool(researcher, name="deep_research")
-
-    **For existing Tools** — returns the object unchanged (no overrides) or
-    clones it with the specified overrides (non-mutating)::
-
-        search_v2 = tool(search, name="web_search")  # clone with new name
-
-    Parameters
-    ----------
-    obj:
-        A callable, :class:`Agent`, or :class:`Tool` to wrap.
-    name:
-        Required for callables.  Optional alias for agents and Tools.
-    description:
-        Human-readable description forwarded to the LLM.
-    mode:
-        Schema generation mode.  ``"signature"`` (default) introspects the
-        function signature and docstring deterministically.  Pass
-        ``"hybrid"`` (signature + LLM-enriched descriptions) or ``"llm"``
-        (full LLM-inferred schema) explicitly when the signature alone
-        is insufficient — both require ``schema_llm=`` to be set.
-    schema_llm:
-        Engine used when ``mode="hybrid"`` or ``mode="llm"``.
-    strict:
-        Enable JSON Schema strict mode.
+    New code should call ``Tool.wrap(obj, name=...)`` — it lives on the class
+    alongside the explicit constructor, mirroring Python stdlib factories
+    like :meth:`dict.fromkeys` and :meth:`datetime.datetime.fromisoformat`.
+    The lowercase :func:`tool` is kept indefinitely so existing imports
+    (``from lazybridge import tool``) continue to work; no deprecation
+    timer is set.
     """
-    # ── Case 1: already a Tool ──────────────────────────────────────────
-    if isinstance(obj, Tool):
-        has_overrides = (
-            name is not None
-            or description is not None
-            or mode != "signature"
-            or schema_llm is not None
-            or strict is not _UNSET_BOOL
-        )
-        if not has_overrides:
-            return obj
-        return Tool(
-            obj.func,
-            name=name if name is not None else obj.name,
-            description=description if description is not None else obj.description,
-            mode=mode if mode != "signature" else obj.mode,
-            schema_llm=schema_llm if schema_llm is not None else obj.schema_llm,
-            strict=obj.strict if strict is _UNSET_BOOL else bool(strict),
-            returns_envelope=obj.returns_envelope,
-            agent_memory=obj.agent_memory,
-            agent_store=obj.agent_store,
-        )
-
-    # ── Case 2: Agent-like ──────────────────────────────────────────────
-    if getattr(obj, "_is_lazy_agent", False):
-        # An explicit alias passed here is always accepted.
-        # Without an alias, the agent must have _name_explicit=True.
-        if name is None and getattr(obj, "_name_explicit", True) is False:
-            # Only reject real Agent instances that set _name_explicit=False.
-            # Duck-typed agents (MockAgent, custom subclasses) default to True.
-            agent_name = getattr(obj, "name", repr(obj))
-            raise ValueError(
-                f"Agent used as a tool must have an explicit name=...\n"
-                f"The agent currently has name={agent_name!r} "
-                f"(derived from the model or left as the default).\n\n"
-                f"Set an explicit name:\n"
-                f'    Agent(name="research", engine=LLMEngine(...))\n\n'
-                f"Or pass an alias to the factory:\n"
-                f'    tool(agent, name="research")'
-            )
-        effective_name = name or getattr(obj, "name", None)
-        if not effective_name or not str(effective_name).strip():
-            raise ValueError(
-                "Agent used as a tool must have an explicit name=...\n"
-                "Example:\n"
-                '    Agent(name="research", engine=LLMEngine(...))'
-            )
-        if hasattr(obj, "as_tool"):
-            return obj.as_tool(effective_name, description=description)
-        return _agent_as_tool_named(obj, effective_name, description)
-
-    # ── Case 3: plain callable ──────────────────────────────────────────
-    if callable(obj):
-        if name is None:
-            fn_name = getattr(obj, "__name__", repr(obj))
-            raise ValueError(
-                f'tool() requires an explicit name=... for callables.\nExample: tool({fn_name!r}, name="{fn_name}")'
-            )
-        strict_val = False if strict is _UNSET_BOOL else bool(strict)  # type: ignore[arg-type]
-        return Tool(
-            obj,
-            name=name,
-            description=description,
-            mode=mode,
-            schema_llm=schema_llm,
-            strict=strict_val,
-        )
-
-    raise TypeError(f"tool() cannot wrap {type(obj).__name__!r}")
+    return Tool.wrap(
+        obj,
+        name=name,
+        description=description,
+        mode=mode,
+        schema_llm=schema_llm,
+        strict=strict,
+    )
 
 
 def _wrap_tool(obj: Any) -> Tool:

@@ -14,7 +14,7 @@ into a single concept.
 | Source | How | Where it lives |
 |---|---|---|
 | A Python function | Pass it directly to `Agent(tools=[...])` | Your code |
-| Any callable | Wrap with `Tool(...)` or `tool(callable, name=...)` | Your code |
+| Any callable | Wrap with `Tool(...)` or `Tool.wrap(callable, name=...)` | Your code |
 | Another `Agent` | Pass it directly: `Agent(tools=[other_agent])`. Its `name=` becomes the tool name. | Hierarchical / supervisor patterns |
 | The same agent under a different name | `other_agent.as_tool("alias")` | When you want a different surface name than `other_agent.name` |
 | A `Plan` | `Agent(engine=Plan(...), name="...")` then pass that agent in `tools=[...]` | Reusable deterministic pipelines |

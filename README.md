@@ -95,7 +95,7 @@ Set an API key for your provider of choice (`ANTHROPIC_API_KEY`,
 ### 1 · Function becomes a tool, auto-schema
 
 ```python
-from lazybridge import Agent, LLMEngine, tool
+from lazybridge import Agent, LLMEngine, Tool
 
 
 def get_weather(city: str) -> str:
@@ -105,14 +105,14 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     engine=LLMEngine("claude-opus-4-7"),
-    tools=[tool(get_weather, name="get_weather")],
+    tools=[Tool.wrap(get_weather, name="get_weather")],
 )
 result = agent("what's the weather in Rome and Paris?")
 print(result.text())
 ```
 
 No decorators, no JSON schemas. Type hints + docstring become the tool's
-LLM-facing schema automatically.  The explicit `tool(fn, name=...)`
+LLM-facing schema automatically.  The explicit `Tool.wrap(fn, name=...)`
 factory pins the LLM-visible name so refactors don't break tool-maps
 or plan references; the bare-callable form `tools=[get_weather]` works
 too (backward-compatible auto-wrap). See

@@ -8,7 +8,7 @@ fail before any LLM call. Pass it to an `Agent` like any other engine.
 ## Signature
 
 ```python
-from lazybridge import Agent, Plan, Step, Store, tool
+from lazybridge import Agent, Plan, Step, Store, Tool
 
 Plan(
     *steps,                        # one or more Step instances
@@ -106,7 +106,7 @@ you need any of:
 ```python
 from pydantic import BaseModel
 
-from lazybridge import Agent, LLMEngine, Plan, Step, Store, from_prev, from_step, tool
+from lazybridge import Agent, LLMEngine, Plan, Step, Store, from_prev, from_step, Tool
 
 
 class Hits(BaseModel):
@@ -124,7 +124,7 @@ def search_web(query: str) -> str:
 
 searcher = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
-    tools=[tool(search_web, name="search_web")],
+    tools=[Tool.wrap(search_web, name="search_web")],
     name="search",
 )
 ranker = Agent(

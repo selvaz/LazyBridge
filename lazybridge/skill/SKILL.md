@@ -139,7 +139,8 @@ pipeline = Agent(
 
 | Sugar / variant | Canonical | Differences |
 |---|---|---|
-| `tool(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone). Both default to `mode="signature"` since 0.7.9 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
+| `Tool.wrap(search_web, name="search", description=…)` | `Tool(search_web, name="search", description=…, mode="signature")` | **Not pure alias.** Multi-input dispatcher classmethod (callable → Tool, Agent → `as_tool`, Tool → passthrough/clone) — same idiom as `dict.fromkeys` / `Path.cwd`. Both default to `mode="signature"` since 0.7.9 (the `"auto"` graceful-fallback ladder was removed — opt into LLM enrichment by passing `mode="hybrid"` or `mode="llm"` plus `schema_llm=`). |
+| `tool(search_web, …)` (lowercase) | `Tool.wrap(search_web, …)` | Backwards-compat alias for `Tool.wrap`; kept indefinitely so existing imports work. New code should prefer the classmethod. |
 | `Tool.from_schema(name, description, parameters, func, strict=…, returns_envelope=…)` | (no callable-introspection canonical) | **Not sugar over `Tool(callable, …)`** — this is the canonical form when the JSON Schema is already known (MCP, OpenAPI bridges, third-party registries). Bypasses the schema builder. |
 
 **Wrap an Agent as a Tool**
@@ -148,7 +149,7 @@ pipeline = Agent(
 |---|---|---|
 | `tools=[other_agent]` (in another agent) | (this is itself the canonical) | The agent's `name=` becomes the surface tool name. |
 | `researcher.as_tool("deep_research")` | A `Tool` whose `func` calls `researcher.run` | **Not pure alias.** Use to **rename** (different surface name than `researcher.name`) or to attach a `verify=` / `max_verify=` judge-and-retry loop — a feature `tools=[researcher]` does **not** expose. |
-| `tool(researcher, name="deep_research")` | Identical to `researcher.as_tool("deep_research")` | Pure alias of `as_tool` for agent-like inputs. |
+| `Tool.wrap(researcher, name="deep_research")` | Identical to `researcher.as_tool("deep_research")` | Pure alias of `as_tool` for agent-like inputs (also dispatches callables and Tools through the same factory). |
 
 **Call an Agent**
 
