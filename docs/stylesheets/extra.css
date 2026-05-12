@@ -1,11 +1,34 @@
 /* --------------------------------------------------------------------- */
-/* LazyBridge — sidebar nav refinement only.                              */
+/* LazyBridge — primary palette override + sidebar nav refinement.        */
 /*                                                                        */
-/* Single intentional override on Material's default theme: tighten the   */
-/* sidebar typography (smaller section titles in uppercase, slightly      */
-/* smaller link text, semibold weight on the active item). Everything     */
-/* else inherits Material defaults so theme upgrades stay clean.          */
+/* Two intentional overrides on Material's default theme:                 */
+/*                                                                        */
+/*   1. Primary blue shifted from Material Blue 500 (#2196F3) to          */
+/*      Material Blue 800 (#1565C0).  All three Material primary tones    */
+/*      (light / main / dark) are reset together so every element that    */
+/*      derives from --md-primary-fg-color* — header, tab row, mobile     */
+/*      sidebar heading, sidebar active link, TOC active link, prose      */
+/*      hyperlinks (.md-typeset a), code-block left accent, button        */
+/*      hover, footer link — shifts in lock-step.                         */
+/*                                                                        */
+/*      Accent stays at amber (set in mkdocs.yml palette.accent), so      */
+/*      the tab-underline highlight and search-result focus ring are      */
+/*      unchanged.                                                        */
+/*                                                                        */
+/*   2. Sidebar typography tweak: smaller section titles in uppercase,    */
+/*      slightly smaller link text, semibold weight on the active item.   */
+/*                                                                        */
+/* Pure CSS-variable overrides — no class-selector hacks, no template     */
+/* overrides — so mkdocs-material upgrades stay clean.                    */
 /* --------------------------------------------------------------------- */
+
+[data-md-color-primary="blue"] {
+  --md-primary-fg-color:        #1565c0;   /* Material Blue 800 */
+  --md-primary-fg-color--light: #1976d2;   /* Material Blue 700 */
+  --md-primary-fg-color--dark:  #0d47a1;   /* Material Blue 900 */
+}
+
+/* Sidebar nav typography ------------------------------------------------ */
 
 .md-nav__title {
   font-size: 0.7rem;
