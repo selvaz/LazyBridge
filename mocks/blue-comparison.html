@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LazyBridge — blue palette comparison</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f5f5;
+    color: #212121;
+  }
+  code, pre { font-family: 'Roboto Mono', 'SF Mono', Monaco, monospace; }
+
+  /* page intro */
+  .intro {
+    max-width: 1100px; margin: 32px auto 24px; padding: 0 24px;
+    color: #424242;
+  }
+  .intro h1 {
+    font-size: 28px; font-weight: 500; margin: 0 0 8px;
+  }
+  .intro p { margin: 0; font-size: 15px; line-height: 1.55; color: #616161; }
+  .intro code { background: #fff; padding: 1px 6px; border-radius: 3px; border: 1px solid #e0e0e0; }
+
+  /* swatch card */
+  .swatch {
+    max-width: 1100px; margin: 40px auto;
+    background: white;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px #e0e0e0;
+  }
+  .swatch-label {
+    padding: 12px 20px;
+    background: #fafafa;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  .swatch-label .name {
+    font-size: 15px; font-weight: 500;
+  }
+  .swatch-label .hex {
+    font-family: 'Roboto Mono', monospace; font-size: 13px;
+    padding: 2px 8px; border-radius: 3px; color: white; font-weight: 500;
+  }
+  .swatch-label .meta {
+    margin-left: auto; font-size: 13px; color: #757575;
+  }
+
+  /* simulated Material header */
+  .mat-header {
+    color: white;
+    padding: 0;
+  }
+  .mat-header-row {
+    height: 48px;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 16px;
+  }
+  .mat-header-row .menu { font-size: 18px; opacity: 0.9; }
+  .mat-header-row .title {
+    font-size: 17px; font-weight: 500; letter-spacing: 0.01em;
+  }
+  .mat-header-row .search {
+    flex: 1; max-width: 420px;
+    height: 30px; padding: 0 12px;
+    background: rgba(255,255,255,0.14);
+    border-radius: 3px;
+    display: flex; align-items: center;
+    font-size: 13px;
+    color: rgba(255,255,255,0.78);
+  }
+  .mat-header-row .right { margin-left: auto; display: flex; gap: 12px; opacity: 0.9; font-size: 13px; }
+  .mat-tabs {
+    height: 48px;
+    display: flex; gap: 0; align-items: stretch;
+    padding: 0 16px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .mat-tabs a {
+    display: flex; align-items: center;
+    padding: 0 16px; height: 100%;
+    color: rgba(255,255,255,0.82);
+    font-size: 14px; font-weight: 500;
+    text-decoration: none;
+    border-bottom: 3px solid transparent;
+  }
+  .mat-tabs a.active {
+    color: white;
+    border-bottom-color: #ffb300; /* amber accent */
+  }
+
+  /* content sample */
+  .content {
+    padding: 28px 32px 32px;
+    display: grid; grid-template-columns: 220px 1fr; gap: 32px;
+  }
+  .sidebar {
+    border-right: 1px solid #eeeeee;
+    padding-right: 16px;
+    font-size: 13.5px;
+    color: #616161;
+  }
+  .sidebar .group-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #9e9e9e;
+    margin: 8px 0 6px;
+  }
+  .sidebar a {
+    display: block; padding: 4px 0;
+    text-decoration: none; color: #616161;
+  }
+  .sidebar a.active {
+    font-weight: 600;
+  }
+
+  .main h2 {
+    font-size: 22px; font-weight: 500;
+    margin: 0 0 8px; color: #212121;
+  }
+  .main p { font-size: 14.5px; line-height: 1.6; color: #424242; margin: 0 0 16px; }
+  .main p code {
+    background: #eceff1; padding: 1px 5px; border-radius: 3px;
+    font-size: 0.92em;
+  }
+  .main .codeblock {
+    background: #f5f5f5;
+    border-left: 3px solid var(--lb-blue);
+    border-radius: 3px;
+    padding: 14px 18px;
+    font-size: 13px; line-height: 1.55;
+    color: #263238;
+    overflow-x: auto;
+    margin: 0 0 16px;
+  }
+  .main .codeblock .kw  { color: #6f42c1; }
+  .main .codeblock .fn  { color: #005cc5; }
+  .main .codeblock .str { color: #d73a49; }
+  .main .codeblock .cls { color: #d73a49; }
+
+  .main a.btn {
+    display: inline-flex; align-items: center;
+    padding: 6px 16px;
+    color: white;
+    text-decoration: none;
+    border-radius: 3px;
+    font-size: 13.5px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  /* current = baseline */
+  .baseline { --lb-blue: #2196f3; --lb-blue-dark: #1976d2; }
+  .baseline .mat-header { background: var(--lb-blue); }
+  .baseline .sidebar a.active { color: var(--lb-blue-dark); }
+  .baseline .main a.btn { background: var(--lb-blue-dark); }
+  .baseline .swatch-label .hex { background: var(--lb-blue-dark); }
+
+  .a { --lb-blue: #1565c0; --lb-blue-dark: #0d47a1; }
+  .a .mat-header { background: var(--lb-blue); }
+  .a .sidebar a.active { color: var(--lb-blue-dark); }
+  .a .main a.btn { background: var(--lb-blue); }
+  .a .swatch-label .hex { background: var(--lb-blue-dark); }
+
+  .b { --lb-blue: #1d4ed8; --lb-blue-dark: #1e3a8a; }
+  .b .mat-header { background: var(--lb-blue); }
+  .b .sidebar a.active { color: var(--lb-blue-dark); }
+  .b .main a.btn { background: var(--lb-blue); }
+  .b .swatch-label .hex { background: var(--lb-blue-dark); }
+
+  .c { --lb-blue: #0052cc; --lb-blue-dark: #003d99; }
+  .c .mat-header { background: var(--lb-blue); }
+  .c .sidebar a.active { color: var(--lb-blue-dark); }
+  .c .main a.btn { background: var(--lb-blue); }
+  .c .swatch-label .hex { background: var(--lb-blue-dark); }
+
+  @media (max-width: 720px) {
+    .content { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .mat-header-row .search { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="intro">
+  <h1>Blue palette comparison</h1>
+  <p>
+    Tre alternative al blu Material di default (<code>#2196F3</code>, baseline qui sotto). Tutte più <strong>scure</strong> e più <strong>sature/vive</strong>. Scorri e dimmi quale ti convince — poi cambio solo le CSS vars di <code>extra.css</code> in <code>--md-primary-fg-color</code> e basta.
+  </p>
+</div>
+
+<!-- Baseline -->
+<div class="swatch baseline">
+  <div class="swatch-label">
+    <span class="name">Baseline (attuale)</span>
+    <span class="hex">#2196F3</span>
+    <span class="meta">Material Blue 500 — quello che vedi ora su lazybridge.com</span>
+  </div>
+  <div class="mat-header">
+    <div class="mat-header-row">
+      <span class="menu">☰</span>
+      <span class="title">LazyBridge</span>
+      <span class="search">Search</span>
+      <span class="right">GitHub · ☾</span>
+    </div>
+    <div class="mat-tabs">
+      <a href="#" class="active">Home</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Concepts</a>
+      <a href="#">Guides</a>
+      <a href="#">Reference</a>
+    </div>
+  </div>
+  <div class="content">
+    <div class="sidebar">
+      <div class="group-title">Getting started</div>
+      <a href="#" class="active">Overview</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Install</a>
+    </div>
+    <div class="main">
+      <h2>LazyBridge</h2>
+      <p>Zero-boilerplate Python framework. The composition <code>Engine + Tools + State</code> everywhere.</p>
+      <div class="codeblock"><span class="kw">from</span> lazybridge <span class="kw">import</span> Agent, LLMEngine
+
+agent = <span class="cls">Agent</span>(engine=<span class="cls">LLMEngine</span>(<span class="str">"claude-opus-4-7"</span>))
+<span class="fn">print</span>(agent(<span class="str">"hello"</span>).<span class="fn">text</span>())</div>
+      <a href="#" class="btn">Get started</a>
+    </div>
+  </div>
+</div>
+
+<!-- Mock A -->
+<div class="swatch a">
+  <div class="swatch-label">
+    <span class="name">A · Material Blue 800</span>
+    <span class="hex">#1565C0</span>
+    <span class="meta">Stesso "famiglia" del blu attuale ma due step più scuro. Cambio minimo, sicuro.</span>
+  </div>
+  <div class="mat-header">
+    <div class="mat-header-row">
+      <span class="menu">☰</span>
+      <span class="title">LazyBridge</span>
+      <span class="search">Search</span>
+      <span class="right">GitHub · ☾</span>
+    </div>
+    <div class="mat-tabs">
+      <a href="#" class="active">Home</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Concepts</a>
+      <a href="#">Guides</a>
+      <a href="#">Reference</a>
+    </div>
+  </div>
+  <div class="content">
+    <div class="sidebar">
+      <div class="group-title">Getting started</div>
+      <a href="#" class="active">Overview</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Install</a>
+    </div>
+    <div class="main">
+      <h2>LazyBridge</h2>
+      <p>Zero-boilerplate Python framework. The composition <code>Engine + Tools + State</code> everywhere.</p>
+      <div class="codeblock"><span class="kw">from</span> lazybridge <span class="kw">import</span> Agent, LLMEngine
+
+agent = <span class="cls">Agent</span>(engine=<span class="cls">LLMEngine</span>(<span class="str">"claude-opus-4-7"</span>))
+<span class="fn">print</span>(agent(<span class="str">"hello"</span>).<span class="fn">text</span>())</div>
+      <a href="#" class="btn">Get started</a>
+    </div>
+  </div>
+</div>
+
+<!-- Mock B -->
+<div class="swatch b">
+  <div class="swatch-label">
+    <span class="name">B · Royal / Tailwind Blue 700</span>
+    <span class="hex">#1D4ED8</span>
+    <span class="meta">"Electric royal". Lascia un po' il cyan-vibe di Material e va verso il blu pieno. Look moderno tech.</span>
+  </div>
+  <div class="mat-header">
+    <div class="mat-header-row">
+      <span class="menu">☰</span>
+      <span class="title">LazyBridge</span>
+      <span class="search">Search</span>
+      <span class="right">GitHub · ☾</span>
+    </div>
+    <div class="mat-tabs">
+      <a href="#" class="active">Home</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Concepts</a>
+      <a href="#">Guides</a>
+      <a href="#">Reference</a>
+    </div>
+  </div>
+  <div class="content">
+    <div class="sidebar">
+      <div class="group-title">Getting started</div>
+      <a href="#" class="active">Overview</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Install</a>
+    </div>
+    <div class="main">
+      <h2>LazyBridge</h2>
+      <p>Zero-boilerplate Python framework. The composition <code>Engine + Tools + State</code> everywhere.</p>
+      <div class="codeblock"><span class="kw">from</span> lazybridge <span class="kw">import</span> Agent, LLMEngine
+
+agent = <span class="cls">Agent</span>(engine=<span class="cls">LLMEngine</span>(<span class="str">"claude-opus-4-7"</span>))
+<span class="fn">print</span>(agent(<span class="str">"hello"</span>).<span class="fn">text</span>())</div>
+      <a href="#" class="btn">Get started</a>
+    </div>
+  </div>
+</div>
+
+<!-- Mock C -->
+<div class="swatch c">
+  <div class="swatch-label">
+    <span class="name">C · Atlassian / Linear vivid</span>
+    <span class="hex">#0052CC</span>
+    <span class="meta">Il più "elettrico" dei tre. Più scuro e più saturo. Personalità marcata, può sembrare "corporate".</span>
+  </div>
+  <div class="mat-header">
+    <div class="mat-header-row">
+      <span class="menu">☰</span>
+      <span class="title">LazyBridge</span>
+      <span class="search">Search</span>
+      <span class="right">GitHub · ☾</span>
+    </div>
+    <div class="mat-tabs">
+      <a href="#" class="active">Home</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Concepts</a>
+      <a href="#">Guides</a>
+      <a href="#">Reference</a>
+    </div>
+  </div>
+  <div class="content">
+    <div class="sidebar">
+      <div class="group-title">Getting started</div>
+      <a href="#" class="active">Overview</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Install</a>
+    </div>
+    <div class="main">
+      <h2>LazyBridge</h2>
+      <p>Zero-boilerplate Python framework. The composition <code>Engine + Tools + State</code> everywhere.</p>
+      <div class="codeblock"><span class="kw">from</span> lazybridge <span class="kw">import</span> Agent, LLMEngine
+
+agent = <span class="cls">Agent</span>(engine=<span class="cls">LLMEngine</span>(<span class="str">"claude-opus-4-7"</span>))
+<span class="fn">print</span>(agent(<span class="str">"hello"</span>).<span class="fn">text</span>())</div>
+      <a href="#" class="btn">Get started</a>
+    </div>
+  </div>
+</div>
+
+<div class="intro" style="margin-bottom: 64px;">
+  <p style="font-size: 13px;">
+    Tutti e tre sono <strong>compatibili con il setup attuale</strong>: applico via override del CSS var <code>--md-primary-fg-color</code> in <code>docs/stylesheets/extra.css</code>, 2 righe di codice, zero altri cambi.
+  </p>
+</div>
+
+</body>
+</html>
