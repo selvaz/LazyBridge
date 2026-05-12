@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LazyBridge — restyle mock (Stripe-style)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:            #ffffff;
+    --bg-subtle:     #f6f9fc;
+    --bg-deep:       #0a2540;
+    --text:          #0a2540;
+    --text-muted:    #425466;
+    --text-faint:    #697386;
+    --border:        #e3e8ee;
+    --border-strong: #cfd7df;
+    --brand:         #635bff;
+    --brand-hover:   #4f46e5;
+    --brand-soft:    #efeeff;
+    --amber:         #ffb300;
+    --green:         #00d4b1;
+    --code-bg:       #0a2540;
+    --code-bg-2:     #14305c;
+    --code-text:     #e3e8ee;
+    --code-comment:  #7393b3;
+    --code-string:   #ffb300;
+    --code-keyword:  #a78bfa;
+    --code-fn:       #5fcad0;
+    --code-num:      #ff6fbf;
+    --radius:        8px;
+    --radius-lg:     12px;
+    --shadow-sm:     0 1px 2px rgba(10, 37, 64, 0.04), 0 0 0 1px var(--border);
+    --shadow-md:     0 4px 12px rgba(10, 37, 64, 0.06), 0 0 0 1px var(--border);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: 'JetBrains Mono', 'SF Mono', Monaco, Consolas, monospace; }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { color: var(--brand-hover); }
+
+  /* ---------- Header ---------- */
+  header.top {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  header.top .inner {
+    max-width: 1200px; margin: 0 auto;
+    height: 64px; padding: 0 24px;
+    display: flex; align-items: center; gap: 32px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 17px; letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--brand) 0%, #8b5cf6 100%);
+    display: grid; place-items: center;
+    color: white; font-weight: 700; font-size: 14px;
+    box-shadow: 0 1px 2px rgba(99,91,255,0.4);
+  }
+  nav.primary { display: flex; gap: 4px; }
+  nav.primary a {
+    color: var(--text-muted); font-weight: 500; font-size: 14px;
+    padding: 8px 12px; border-radius: 6px;
+  }
+  nav.primary a:hover { color: var(--text); background: var(--bg-subtle); }
+  nav.primary a.active { color: var(--brand); background: var(--brand-soft); }
+  .search-pill {
+    flex: 1; max-width: 320px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-faint); font-size: 13px;
+    background: var(--bg-subtle);
+  }
+  .search-pill .kbd {
+    margin-left: auto;
+    padding: 2px 6px; font-size: 11px; font-weight: 500;
+    background: white; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-faint);
+  }
+  .header-right { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+  .gh-link {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .gh-link:hover { color: var(--text); border-color: var(--border-strong); }
+
+  /* ---------- Hero ---------- */
+  section.hero {
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(ellipse 800px 400px at 80% -20%, rgba(99,91,255,0.08), transparent 60%),
+      radial-gradient(ellipse 600px 300px at 10% 100%, rgba(255,179,0,0.06), transparent 60%),
+      var(--bg);
+  }
+  .hero-inner {
+    max-width: 1200px; margin: 0 auto; padding: 88px 24px 96px;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: 64px; align-items: center;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px;
+    background: var(--brand-soft); color: var(--brand);
+    border-radius: 999px; font-size: 13px; font-weight: 500;
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+  h1.hero-title {
+    margin: 18px 0 16px;
+    font-size: 56px; line-height: 1.05;
+    font-weight: 600; letter-spacing: -0.025em;
+    color: var(--text);
+  }
+  h1.hero-title em {
+    font-style: normal;
+    background: linear-gradient(135deg, var(--brand), #8b5cf6 60%, var(--brand));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero-sub {
+    font-size: 19px; line-height: 1.55; color: var(--text-muted);
+    max-width: 540px; margin: 0 0 32px;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 18px; border-radius: 8px;
+    font-size: 15px; font-weight: 500; line-height: 1;
+    border: 1px solid transparent; cursor: pointer;
+    transition: all 120ms ease;
+  }
+  .btn-primary { background: var(--brand); color: white; }
+  .btn-primary:hover { background: var(--brand-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,91,255,0.3); }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border-strong); }
+  .btn-ghost:hover { background: var(--bg-subtle); border-color: var(--text-faint); }
+  .meta-row {
+    display: flex; gap: 24px; margin-top: 32px;
+    font-size: 13px; color: var(--text-faint);
+  }
+  .meta-row strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- Hero code block ---------- */
+  .code-card {
+    background: var(--code-bg);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 20px 60px -20px rgba(10,37,64,0.4),
+      0 0 0 1px rgba(99,91,255,0.15);
+    overflow: hidden;
+  }
+  .code-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 12px; color: var(--code-comment);
+  }
+  .code-head .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.12); }
+  .code-head .lang {
+    margin-left: auto; padding: 2px 8px;
+    background: rgba(99,91,255,0.15); color: #a78bfa;
+    border-radius: 4px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .code-head .copy {
+    margin-left: 8px; padding: 4px 8px;
+    background: rgba(255,255,255,0.06); color: var(--code-text);
+    border-radius: 4px; font-size: 11px;
+    border: 1px solid rgba(255,255,255,0.08);
+    cursor: pointer;
+  }
+  pre.code-body {
+    margin: 0; padding: 20px 24px;
+    font-size: 14px; line-height: 1.65;
+    color: var(--code-text);
+    overflow-x: auto;
+  }
+  .tk-kw { color: var(--code-keyword); }
+  .tk-fn { color: var(--code-fn); }
+  .tk-str { color: var(--code-string); }
+  .tk-cm { color: var(--code-comment); font-style: italic; }
+  .tk-num { color: var(--code-num); }
+  .tk-cls { color: #5fcad0; }
+
+  /* ---------- Tier section ---------- */
+  section.tiers { padding: 96px 24px; background: var(--bg-subtle); border-bottom: 1px solid var(--border); }
+  .tiers-inner { max-width: 1200px; margin: 0 auto; }
+  .section-eyebrow {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.06em;
+    color: var(--brand); text-transform: uppercase;
+  }
+  h2.section-title {
+    margin: 8px 0 12px;
+    font-size: 36px; font-weight: 600; letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .section-lede { font-size: 17px; color: var(--text-muted); max-width: 640px; margin-bottom: 48px; }
+  .tier-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .tier-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    transition: all 150ms ease;
+  }
+  .tier-card:hover {
+    border-color: var(--brand); transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(10,37,64,0.08);
+  }
+  .tier-badge {
+    display: inline-block; padding: 3px 9px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; border-radius: 4px;
+  }
+  .tier-card.basic    .tier-badge { background: #e0f2fe; color: #0369a1; }
+  .tier-card.mid      .tier-badge { background: #f3e8ff; color: #6b21a8; }
+  .tier-card.full     .tier-badge { background: #fef3c7; color: #92400e; }
+  .tier-card.advanced .tier-badge { background: #fee2e2; color: #991b1b; }
+  .tier-card h3 { margin: 16px 0 6px; font-size: 18px; font-weight: 600; }
+  .tier-card p { margin: 0 0 16px; font-size: 14px; color: var(--text-muted); line-height: 1.55; }
+  .tier-imports {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text-faint); line-height: 1.7;
+  }
+  .tier-imports .sym { color: var(--text); font-weight: 500; }
+
+  /* ---------- Worked example: Stripe split ---------- */
+  section.worked { padding: 96px 24px; border-bottom: 1px solid var(--border); }
+  .worked-inner { max-width: 1200px; margin: 0 auto; }
+  .worked-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 64px; align-items: start;
+  }
+  .worked-prose h3 { margin: 0 0 12px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+  .worked-prose p  { color: var(--text-muted); font-size: 16px; line-height: 1.65; margin: 0 0 16px; }
+  .worked-prose ul { padding-left: 0; list-style: none; margin: 16px 0 0; }
+  .worked-prose ul li {
+    position: relative; padding: 8px 0 8px 28px;
+    font-size: 14px; color: var(--text-muted);
+    border-top: 1px solid var(--border);
+  }
+  .worked-prose ul li:last-child { border-bottom: 1px solid var(--border); }
+  .worked-prose ul li::before {
+    content: ""; position: absolute; left: 4px; top: 50%;
+    width: 14px; height: 14px; transform: translateY(-50%);
+    background: var(--brand-soft);
+    border-radius: 50%;
+  }
+  .worked-prose ul li::after {
+    content: ""; position: absolute; left: 8px; top: 50%;
+    width: 6px; height: 6px; transform: translateY(-50%);
+    background: var(--brand); border-radius: 50%;
+  }
+  .worked-code { position: sticky; top: 96px; }
+
+  /* ---------- Table ---------- */
+  section.table-section { padding: 96px 24px; background: var(--bg-subtle); border-bottom: 1px solid var(--border); }
+  .table-inner { max-width: 1200px; margin: 0 auto; }
+  table.api {
+    width: 100%; border-collapse: collapse; margin-top: 32px;
+    background: white; border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  table.api th {
+    text-align: left; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--text-faint); padding: 14px 20px;
+    background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+  }
+  table.api td { padding: 16px 20px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.api tr:last-child td { border-bottom: none; }
+  table.api td.mono { color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  table.api td.desc { color: var(--text-muted); }
+  .method-tag {
+    display: inline-block; padding: 3px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .method-tag.engine { background: #efeeff; color: var(--brand); }
+  .method-tag.tool   { background: #e0fdf4; color: #00795b; }
+  .method-tag.state  { background: #fef3c7; color: #92400e; }
+
+  /* ---------- Footer ---------- */
+  footer.bot {
+    background: var(--bg-deep); color: #aab7c4;
+    padding: 64px 24px 32px;
+  }
+  footer.bot .inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 48px; }
+  footer.bot h4 { color: white; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px; }
+  footer.bot ul { list-style: none; padding: 0; margin: 0; }
+  footer.bot li { padding: 4px 0; }
+  footer.bot a { color: #aab7c4; font-size: 14px; }
+  footer.bot a:hover { color: white; }
+  footer.bot .tagline { color: #8898aa; font-size: 14px; max-width: 280px; line-height: 1.6; }
+  footer.bot .colophon { margin-top: 48px; padding-top: 32px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 13px; color: #697386; }
+
+  /* ---------- Annotations ---------- */
+  .mock-banner {
+    background: #fef3c7; border-bottom: 1px solid #fcd34d;
+    color: #78350f; font-size: 13px; padding: 8px 24px; text-align: center;
+  }
+  .mock-banner code { background: rgba(120,53,15,0.1); padding: 1px 6px; border-radius: 3px; }
+
+  @media (max-width: 960px) {
+    .hero-inner, .worked-row, .tier-grid, footer.bot .inner { grid-template-columns: 1fr; gap: 40px; }
+    h1.hero-title { font-size: 40px; }
+    nav.primary, .search-pill, .gh-link span { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mock-banner">
+  Mock — open in browser to preview. To wire in for real: drop the CSS into <code>docs/stylesheets/extra.css</code> and reference via <code>extra_css:</code> in <code>mkdocs.yml</code>.
+</div>
+
+<header class="top">
+  <div class="inner">
+    <div class="brand">
+      <div class="brand-mark">L</div>
+      LazyBridge
+    </div>
+    <nav class="primary">
+      <a href="#" class="active">Docs</a>
+      <a href="#">Recipes</a>
+      <a href="#">Reference</a>
+      <a href="#">For LLMs</a>
+    </nav>
+    <div class="header-right">
+      <div class="search-pill">
+        <span>Search the docs…</span>
+        <span class="kbd">⌘K</span>
+      </div>
+      <a class="gh-link" href="#"><span>GitHub</span> ↗</a>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <div>
+      <span class="pill"><span class="dot"></span> v0.7.9 · alpha</span>
+      <h1 class="hero-title">Zero-boilerplate <em>LLM agents</em> in Python.</h1>
+      <p class="hero-sub">
+        One <code>Agent</code> class, swappable engines, and one tool contract — Python
+        functions, other agents, MCP servers, and full pipelines all compose through
+        <code>tools=[…]</code>.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#">Quickstart →</a>
+        <a class="btn btn-ghost" href="#">View on GitHub</a>
+      </div>
+      <div class="meta-row">
+        <span><strong>5</strong> providers</span>
+        <span><strong>MCP</strong> first-class</span>
+        <span><strong>OTel</strong> out of the box</span>
+      </div>
+    </div>
+
+    <div class="code-card">
+      <div class="code-head">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="lang">Python</span>
+        <span class="copy">Copy</span>
+      </div>
+<pre class="code-body"><span class="tk-kw">from</span> lazybridge <span class="tk-kw">import</span> Agent, LLMEngine
+
+agent = <span class="tk-cls">Agent</span>(
+    engine=<span class="tk-cls">LLMEngine</span>(<span class="tk-str">"claude-opus-4-7"</span>),
+)
+result = <span class="tk-fn">agent</span>(<span class="tk-str">"hello"</span>)
+<span class="tk-fn">print</span>(result.<span class="tk-fn">text</span>())
+
+<span class="tk-cm"># That's the whole surface when you start.</span>
+<span class="tk-cm"># It grows only when your problem grows.</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="tiers">
+  <div class="tiers-inner">
+    <div class="section-eyebrow">Progressive complexity</div>
+    <h2 class="section-title">Pick your tier — every level is additive.</h2>
+    <p class="section-lede">
+      LazyBridge grows with you. Start with a one-shot agent on the Basic tier;
+      add Memory, MCP, and human-in-the-loop on Mid; reach for typed Plans and
+      checkpoints on Full. Same <code>Agent</code> shape throughout.
+    </p>
+
+    <div class="tier-grid">
+      <div class="tier-card basic">
+        <span class="tier-badge">Basic</span>
+        <h3>Get an agent calling tools</h3>
+        <p>One-shot agents, tool-calling, native provider tools.</p>
+        <div class="tier-imports">
+          <span class="sym">Agent</span> · <span class="sym">LLMEngine</span> · <span class="sym">Tool</span> · <span class="sym">NativeTool</span> · <span class="sym">Envelope</span>
+        </div>
+      </div>
+      <div class="tier-card mid">
+        <span class="tier-badge">Mid</span>
+        <h3>Real apps with state &amp; control</h3>
+        <p>Memory, tracing, guardrails, composition, MCP servers, evals.</p>
+        <div class="tier-imports">
+          <span class="sym">Memory</span> · <span class="sym">Store</span> · <span class="sym">Session</span> · <span class="sym">Guard*</span> · <span class="sym">verify=</span> · <span class="sym">MCP</span>
+        </div>
+      </div>
+      <div class="tier-card full">
+        <span class="tier-badge">Full</span>
+        <h3>Production pipelines</h3>
+        <p>Typed hand-offs, routing, crash resume, OTel exporters.</p>
+        <div class="tier-imports">
+          <span class="sym">Plan</span> · <span class="sym">Step</span> · <span class="sym">sentinels</span> · <span class="sym">SupervisorEngine</span> · <span class="sym">checkpoint</span>
+        </div>
+      </div>
+      <div class="tier-card advanced">
+        <span class="tier-badge">Advanced</span>
+        <h3>Extend the framework</h3>
+        <p>Custom providers, custom engines, OTel internals, visualizer.</p>
+        <div class="tier-imports">
+          <span class="sym">BaseProvider</span> · <span class="sym">Plan.to_dict</span> · <span class="sym">custom engines</span> · <span class="sym">OpenTelemetry</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="worked">
+  <div class="worked-inner">
+    <div class="section-eyebrow">Worked example</div>
+    <h2 class="section-title">Function becomes a tool, auto-schema.</h2>
+    <p class="section-lede">
+      No decorators, no JSON schemas. Type hints + docstring become the tool's
+      LLM-facing schema automatically. The explicit factory pins the LLM-visible
+      name so refactors don't break tool-maps.
+    </p>
+
+    <div class="worked-row">
+      <div class="worked-prose">
+        <h3>What's happening</h3>
+        <p>
+          The <code>Tool.wrap(fn, name=…)</code> factory introspects the Python
+          callable to produce a JSON schema the LLM understands. The bare-callable
+          form <code>tools=[get_weather]</code> works too — backward-compatible
+          auto-wrap.
+        </p>
+        <ul>
+          <li>Tool name is pinned, so refactors don't break tool-maps.</li>
+          <li>Schema is generated from type hints — no hand-written JSON.</li>
+          <li>Docstring becomes the tool description for the LLM.</li>
+          <li>Async detection is automatic; both sync and async functions wrap.</li>
+        </ul>
+      </div>
+
+      <div class="worked-code code-card">
+        <div class="code-head">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="lang">Python</span>
+          <span class="copy">Copy</span>
+        </div>
+<pre class="code-body"><span class="tk-kw">from</span> lazybridge <span class="tk-kw">import</span> Agent, LLMEngine, Tool
+
+
+<span class="tk-kw">def</span> <span class="tk-fn">get_weather</span>(city: <span class="tk-cls">str</span>) -&gt; <span class="tk-cls">str</span>:
+    <span class="tk-str">"""Return current temperature and conditions for ``city``."""</span>
+    <span class="tk-kw">return</span> <span class="tk-str">f"{city}: 22°C, sunny"</span>
+
+
+agent = <span class="tk-cls">Agent</span>(
+    engine=<span class="tk-cls">LLMEngine</span>(<span class="tk-str">"claude-opus-4-7"</span>),
+    tools=[Tool.<span class="tk-fn">wrap</span>(get_weather, name=<span class="tk-str">"get_weather"</span>)],
+)
+result = <span class="tk-fn">agent</span>(<span class="tk-str">"what's the weather in Rome and Paris?"</span>)
+<span class="tk-fn">print</span>(result.<span class="tk-fn">text</span>())
+
+<span class="tk-cm"># Parallelism is emergent: when the model emits two tool</span>
+<span class="tk-cm"># calls in one turn they run via asyncio.gather.</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="table-section">
+  <div class="table-inner">
+    <div class="section-eyebrow">Reference</div>
+    <h2 class="section-title">Core primitives at a glance.</h2>
+    <p class="section-lede">
+      Every LazyBridge program is built from three categories of object.
+      Stable across tiers — only the engine changes.
+    </p>
+
+    <table class="api">
+      <thead>
+        <tr>
+          <th style="width:80px">Kind</th>
+          <th>Symbol</th>
+          <th>What it is</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="method-tag engine">ENGINE</span></td>
+          <td class="mono">LLMEngine</td>
+          <td class="desc">An LLM call loop. Tool-aware, optionally streaming, retries on transient errors.</td>
+        </tr>
+        <tr>
+          <td><span class="method-tag engine">ENGINE</span></td>
+          <td class="mono">Plan</td>
+          <td class="desc">Deterministic DAG of <code>Step</code>s. Validates at construction, resumes on crash.</td>
+        </tr>
+        <tr>
+          <td><span class="method-tag tool">TOOL</span></td>
+          <td class="mono">Tool.wrap(fn)</td>
+          <td class="desc">Lift any Python callable into a tool. Schema inferred from type hints.</td>
+        </tr>
+        <tr>
+          <td><span class="method-tag tool">TOOL</span></td>
+          <td class="mono">MCP.stdio / MCP.http</td>
+          <td class="desc">Mount an MCP server as a tool catalogue. Deny-by-default since 0.7.9.</td>
+        </tr>
+        <tr>
+          <td><span class="method-tag state">STATE</span></td>
+          <td class="mono">Memory · Store · Session</td>
+          <td class="desc">In-prompt history, durable blackboard, and event bus + observability.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="bot">
+  <div class="inner">
+    <div>
+      <div class="brand" style="color: white;">
+        <div class="brand-mark">L</div>
+        LazyBridge
+      </div>
+      <p class="tagline" style="margin-top: 16px;">
+        Zero-boilerplate, multi-provider Python framework for LLM agents.
+        Engine + Tools + State, everything is a tool.
+      </p>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="#">Quickstart</a></li>
+        <li><a href="#">Concepts</a></li>
+        <li><a href="#">Guides</a></li>
+        <li><a href="#">Recipes</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="#">API</a></li>
+        <li><a href="#">Engines</a></li>
+        <li><a href="#">Errors</a></li>
+        <li><a href="#">Migrations</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Community</h4>
+      <ul>
+        <li><a href="#">GitHub</a></li>
+        <li><a href="#">PyPI</a></li>
+        <li><a href="#">Changelog</a></li>
+        <li><a href="#">Security</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="inner colophon">
+    © 2026 Marco Selvatici · Apache-2.0
+  </div>
+</footer>
+
+</body>
+</html>
