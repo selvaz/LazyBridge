@@ -12,18 +12,23 @@ strict: true
 theme:
   name: material
   language: en
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: deep purple
-      accent: amber
+      primary: blue
+      accent: blue
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: deep purple
-      accent: amber
+      primary: blue
+      accent: blue
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -109,6 +114,9 @@ extra:
       link: https://github.com/selvaz/LazyBridge
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lazybridge/
+
+extra_css:
+  - stylesheets/extra.css
 
 nav:
   - Home: index.md
