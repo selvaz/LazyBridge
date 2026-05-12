@@ -4,7 +4,7 @@
   "version": "0.7.9",
   "stability": "alpha",
   "homepage": "https://github.com/selvaz/LazyBridge",
-  "docs": "https://selvaz.github.io/LazyBridge",
+  "docs": "https://lazybridge.com",
 
   "canonical_import": "from lazybridge import Agent, LLMEngine, tool",
 

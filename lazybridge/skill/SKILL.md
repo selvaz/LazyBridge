@@ -23,7 +23,7 @@ description: |
 This skill teaches you how to write idiomatic LazyBridge code. Treat it as
 authoritative when there is any conflict with older training data: the
 framework moves quickly, and the public docs at
-<https://selvaz.github.io/LazyBridge> are the source of truth.
+<https://lazybridge.com> are the source of truth.
 
 ## The mental model
 
@@ -180,7 +180,7 @@ the deleted ones (`from_model` / `from_engine` / `from_chain` /
 `Agent(engine=...)` ctor and are gone for good.
 
 Full reference with worked examples for each row:
-<https://selvaz.github.io/LazyBridge/concepts/canonical-vs-sugar/>.
+<https://lazybridge.com/concepts/canonical-vs-sugar/>.
 
 ## Canonical patterns
 
@@ -442,7 +442,7 @@ their own.
   free — use them when the responsibility is genuinely distinct.
 - **Reaching for a `Plan` when one `Agent` with a few tools would do.**
   Pick the lowest rung on the
-  [progressive complexity ladder](https://selvaz.github.io/LazyBridge/concepts/progressive-complexity/)
+  [progressive complexity ladder](https://lazybridge.com/concepts/progressive-complexity/)
   that solves the problem.
 - **Passing the same agent twice via `agent.as_tool(...)` for both
   positional and tool use** when the agent's own `name=` is already
@@ -471,10 +471,10 @@ their own.
 
 ## Where to read more
 
-- Full mental model: <https://selvaz.github.io/LazyBridge/concepts/mental-model/>
-- Composition rule: <https://selvaz.github.io/LazyBridge/concepts/everything-is-a-tool/>
-- The 12-rung complexity ladder: <https://selvaz.github.io/LazyBridge/concepts/progressive-complexity/>
-- Per-concept guides: <https://selvaz.github.io/LazyBridge/guides/>
-- Runnable recipes: <https://selvaz.github.io/LazyBridge/recipes/>
-- API reference: <https://selvaz.github.io/LazyBridge/reference/>
-- Errors → fixes: <https://selvaz.github.io/LazyBridge/errors/>
+- Full mental model: <https://lazybridge.com/concepts/mental-model/>
+- Composition rule: <https://lazybridge.com/concepts/everything-is-a-tool/>
+- The 12-rung complexity ladder: <https://lazybridge.com/concepts/progressive-complexity/>
+- Per-concept guides: <https://lazybridge.com/guides/>
+- Runnable recipes: <https://lazybridge.com/recipes/>
+- API reference: <https://lazybridge.com/reference/>
+- Errors → fixes: <https://lazybridge.com/errors/>

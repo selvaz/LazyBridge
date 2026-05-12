@@ -9,8 +9,8 @@ LazyBridge generates two artefacts at build time:
 
 | URL | Contents | Use |
 |---|---|---|
-| <https://selvaz.github.io/LazyBridge/llms.txt> | Index — every doc page grouped by section | Tools that resolve linked pages on demand |
-| <https://selvaz.github.io/LazyBridge/llms-full.txt> | Whole corpus concatenated (~10K lines, ~400 KB) | Long-context models that take the corpus directly into the prompt |
+| <https://lazybridge.com/llms.txt> | Index — every doc page grouped by section | Tools that resolve linked pages on demand |
+| <https://lazybridge.com/llms-full.txt> | Whole corpus concatenated (~10K lines, ~400 KB) | Long-context models that take the corpus directly into the prompt |
 
 ## Format
 
@@ -39,15 +39,15 @@ Example (excerpt — full version at the URL above):
 
 ## Concepts
 
-- [Mental model](https://selvaz.github.io/LazyBridge/concepts/mental-model/)
-- [Everything is a tool](https://selvaz.github.io/LazyBridge/concepts/everything-is-a-tool/)
-- [Progressive complexity](https://selvaz.github.io/LazyBridge/concepts/progressive-complexity/)
-- [Canonical vs sugar](https://selvaz.github.io/LazyBridge/concepts/canonical-vs-sugar/)
+- [Mental model](https://lazybridge.com/concepts/mental-model/)
+- [Everything is a tool](https://lazybridge.com/concepts/everything-is-a-tool/)
+- [Progressive complexity](https://lazybridge.com/concepts/progressive-complexity/)
+- [Canonical vs sugar](https://lazybridge.com/concepts/canonical-vs-sugar/)
 
 ## Guides
 
-- [Agent](https://selvaz.github.io/LazyBridge/guides/basic/agent/)
-- [Tool](https://selvaz.github.io/LazyBridge/guides/basic/tool/)
+- [Agent](https://lazybridge.com/guides/basic/agent/)
+- [Tool](https://lazybridge.com/guides/basic/tool/)
 - ...
 ```
 
