@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LazyBridge — Material blue restyle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:            #ffffff;
+    --bg-subtle:     #f5f7fa;
+    --bg-sidebar:    #fafbfc;
+    --bg-code:       #f1f3f5;
+    --text:          #1c2025;
+    --text-muted:    #5b6470;
+    --text-faint:    #8b95a3;
+    --border:        #e4e7eb;
+    --border-strong: #cfd5dc;
+    --brand:         #1976d2;       /* Material Blue 700 — primary */
+    --brand-hover:   #1565c0;
+    --brand-light:   #e3f2fd;
+    --brand-deep:    #0d47a1;
+    --accent:        #ffb300;       /* Material Amber 600 — accent kept */
+    --shadow-sm:     0 1px 2px rgba(28, 32, 37, 0.04);
+    --shadow-md:     0 2px 4px rgba(28, 32, 37, 0.06), 0 0 0 1px var(--border);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px; line-height: 1.6;
+    color: var(--text); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: 'Roboto Mono', 'SF Mono', Monaco, Consolas, monospace; }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { color: var(--brand-hover); text-decoration: underline; }
+
+  /* ---------- Top bar ---------- */
+  header.topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--brand);
+    color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+  }
+  .topbar-row {
+    max-width: 1400px; margin: 0 auto;
+    display: flex; align-items: center; gap: 24px;
+    padding: 0 24px; height: 56px;
+  }
+  .brand-link {
+    display: flex; align-items: center; gap: 8px;
+    color: white; font-weight: 500; font-size: 17px;
+    text-decoration: none;
+  }
+  .brand-link img { height: 32px; width: auto; display: block; background: white; border-radius: 4px; padding: 2px 4px; }
+  .search {
+    flex: 1; max-width: 480px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    background: rgba(255,255,255,0.14);
+    border-radius: 4px;
+    color: rgba(255,255,255,0.85);
+    font-size: 14px;
+  }
+  .search .kbd { margin-left: auto; padding: 1px 6px; background: rgba(255,255,255,0.16); border-radius: 3px; font-size: 11px; }
+  .top-actions { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: 50%; color: white;
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: rgba(255,255,255,0.12); }
+
+  /* ---------- Tab bar ---------- */
+  .tab-row {
+    background: var(--brand);
+    color: white;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+  }
+  .tab-inner {
+    max-width: 1400px; margin: 0 auto;
+    padding: 0 24px;
+    display: flex; gap: 4px; align-items: end;
+    height: 48px;
+  }
+  .tab-inner a {
+    display: flex; align-items: center;
+    height: 100%; padding: 0 16px;
+    color: rgba(255,255,255,0.85);
+    font-weight: 500; font-size: 14px;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+  }
+  .tab-inner a:hover { color: white; background: rgba(255,255,255,0.06); }
+  .tab-inner a.active { color: white; border-bottom-color: var(--accent); }
+
+  /* ---------- Layout: sidebar + content + toc ---------- */
+  .layout {
+    max-width: 1400px; margin: 0 auto;
+    display: grid; grid-template-columns: 244px minmax(0, 1fr) 240px;
+    gap: 32px; padding: 24px;
+  }
+  aside.sidebar {
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    padding: 16px 12px 24px;
+    align-self: start;
+    position: sticky; top: 120px;
+    max-height: calc(100vh - 132px);
+    overflow-y: auto;
+  }
+  .nav-group { margin-bottom: 18px; }
+  .nav-group h6 {
+    margin: 8px 12px 6px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    color: var(--text-faint); letter-spacing: 0.06em;
+  }
+  .nav-group a {
+    display: block; padding: 6px 12px; border-radius: 4px;
+    font-size: 14px; color: var(--text-muted);
+    text-decoration: none;
+  }
+  .nav-group a:hover { background: var(--brand-light); color: var(--brand-hover); }
+  .nav-group a.active {
+    background: var(--brand-light); color: var(--brand);
+    font-weight: 500; border-left: 3px solid var(--brand); padding-left: 9px;
+  }
+  .nav-group a.sub { padding-left: 24px; font-size: 13.5px; }
+
+  /* ---------- Main content ---------- */
+  main.content { min-width: 0; }
+  .breadcrumb {
+    font-size: 13px; color: var(--text-faint); margin-bottom: 12px;
+  }
+  .breadcrumb a { color: var(--text-muted); text-decoration: none; }
+  h1.page-title {
+    margin: 0 0 12px;
+    font-size: 32px; font-weight: 400; letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .lede { font-size: 17px; color: var(--text-muted); line-height: 1.55; margin-bottom: 32px; }
+  h2.section {
+    margin: 40px 0 12px; padding-top: 12px;
+    font-size: 24px; font-weight: 500; color: var(--text);
+    border-top: 1px solid var(--border);
+  }
+  h3 { margin: 24px 0 8px; font-size: 18px; font-weight: 500; }
+  p { margin: 0 0 14px; }
+  ul, ol { padding-left: 22px; margin: 0 0 16px; }
+  li { margin-bottom: 6px; }
+
+  /* inline code */
+  p code, li code, td code {
+    background: var(--bg-code);
+    padding: 1px 6px; border-radius: 3px;
+    font-size: 13px; color: var(--brand-deep);
+  }
+
+  /* fenced code */
+  .code-block {
+    background: var(--bg-code);
+    border-radius: 4px;
+    border-left: 3px solid var(--brand);
+    margin: 16px 0;
+    overflow: hidden;
+  }
+  .code-head {
+    display: flex; align-items: center;
+    padding: 6px 14px;
+    background: rgba(25,118,210,0.06);
+    border-bottom: 1px solid rgba(25,118,210,0.12);
+    font-size: 12px; color: var(--text-muted);
+    font-family: 'Roboto Mono', monospace;
+  }
+  .code-head .copy { margin-left: auto; cursor: pointer; color: var(--text-faint); }
+  .code-block pre {
+    margin: 0; padding: 16px;
+    font-size: 13.5px; line-height: 1.6;
+    overflow-x: auto;
+  }
+  .tk-kw  { color: #6f42c1; }   /* keyword — purple but minimal usage */
+  .tk-fn  { color: #005cc5; }
+  .tk-str { color: #032f62; }
+  .tk-cm  { color: #6a737d; font-style: italic; }
+  .tk-cls { color: #d73a49; }
+
+  /* admonition (Material-like) */
+  .admonition {
+    margin: 20px 0;
+    border-left: 4px solid var(--brand);
+    border-radius: 4px;
+    background: var(--brand-light);
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+  .admonition .title {
+    font-weight: 700; font-size: 13px; color: var(--brand-deep);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+
+  /* tables */
+  table.docs {
+    width: 100%; border-collapse: collapse;
+    margin: 16px 0; font-size: 14px;
+  }
+  table.docs th {
+    text-align: left; padding: 10px 14px;
+    background: var(--bg-subtle);
+    border-bottom: 2px solid var(--border);
+    font-weight: 500; font-size: 13px;
+  }
+  table.docs td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+
+  /* ---------- Right TOC ---------- */
+  aside.toc {
+    align-self: start; position: sticky; top: 120px;
+    padding: 16px 0;
+    font-size: 13px;
+  }
+  aside.toc h6 {
+    margin: 0 0 8px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+  aside.toc a {
+    display: block; padding: 4px 12px;
+    color: var(--text-muted); text-decoration: none;
+    border-left: 2px solid var(--border);
+  }
+  aside.toc a:hover { color: var(--brand); border-left-color: var(--brand); }
+  aside.toc a.active { color: var(--brand); border-left-color: var(--brand); font-weight: 500; }
+
+  /* ---------- Footer ---------- */
+  footer.bot {
+    background: var(--bg-sidebar);
+    border-top: 1px solid var(--border);
+    padding: 32px 24px;
+    color: var(--text-muted); font-size: 13px;
+    text-align: center;
+  }
+  footer.bot a { margin: 0 8px; }
+
+  /* ---------- Mock banner ---------- */
+  .mock-banner {
+    background: #fff3cd; border-bottom: 1px solid #ffe69c;
+    color: #664d03; font-size: 13px; padding: 7px 24px; text-align: center;
+  }
+  .mock-banner code { background: rgba(102,77,3,0.1); padding: 1px 5px; border-radius: 3px; }
+
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 240px minmax(0, 1fr); }
+    aside.toc { display: none; }
+  }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+    aside.sidebar { display: none; }
+    .search, .tab-row { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mock-banner">
+  Mock A — Material theme, blue palette (Material Blue 700 <code>#1976D2</code>).
+  Same density and structure as the current site; only color tokens change.
+</div>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <a class="brand-link" href="#">
+      <img src="lazybridge-logo.png" alt="LazyBridge" />
+    </a>
+    <div class="search">
+      <span>Search…</span>
+      <span class="kbd">/</span>
+    </div>
+    <div class="top-actions">
+      <div class="icon-btn" title="GitHub">⌧</div>
+      <div class="icon-btn" title="Theme">☾</div>
+    </div>
+  </div>
+  <div class="tab-row">
+    <div class="tab-inner">
+      <a href="#" class="active">Home</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Concepts</a>
+      <a href="#">Guides</a>
+      <a href="#">Recipes</a>
+      <a href="#">Decisions</a>
+      <a href="#">Reference</a>
+      <a href="#">Errors</a>
+      <a href="#">For LLMs</a>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="nav-group">
+      <h6>Getting started</h6>
+      <a href="#" class="active">Overview</a>
+      <a href="#">Quickstart</a>
+      <a href="#">Install</a>
+    </div>
+    <div class="nav-group">
+      <h6>Concepts</h6>
+      <a href="#">Mental model</a>
+      <a href="#">Everything is a tool</a>
+      <a href="#">Progressive complexity</a>
+      <a href="#">Canonical vs sugar</a>
+    </div>
+    <div class="nav-group">
+      <h6>Guides — Basic</h6>
+      <a href="#">Agent</a>
+      <a href="#">Tool</a>
+      <a href="#">Envelope</a>
+      <a href="#">Native tools</a>
+    </div>
+    <div class="nav-group">
+      <h6>Guides — Mid</h6>
+      <a href="#">Memory</a>
+      <a href="#">Store</a>
+      <a href="#">Session</a>
+      <a href="#">Guards</a>
+      <a href="#">verify=</a>
+      <a href="#">Chain</a>
+      <a href="#">Parallel</a>
+      <a href="#">MCP</a>
+    </div>
+    <div class="nav-group">
+      <h6>Guides — Full</h6>
+      <a href="#">Plan</a>
+      <a href="#">Step</a>
+      <a href="#">Sentinels</a>
+      <a href="#">Routing</a>
+      <a href="#">Checkpoint</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="breadcrumb"><a href="#">Docs</a> › Overview</div>
+
+    <h1 class="page-title">LazyBridge</h1>
+    <p class="lede">
+      Zero-boilerplate, multi-provider Python framework for LLM agents.
+      One <code>Agent</code> class, swappable engines, and one tool contract —
+      plain Python functions, other agents, MCP servers, and full pipelines all
+      compose through <code>tools=[…]</code>.
+    </p>
+
+    <div class="code-block">
+      <div class="code-head">
+        <span>python</span>
+        <span class="copy">📋</span>
+      </div>
+<pre><span class="tk-kw">from</span> lazybridge <span class="tk-kw">import</span> Agent, LLMEngine
+
+agent = <span class="tk-cls">Agent</span>(
+    engine=<span class="tk-cls">LLMEngine</span>(<span class="tk-str">"claude-opus-4-7"</span>),
+)
+result = <span class="tk-fn">agent</span>(<span class="tk-str">"hello"</span>)
+<span class="tk-fn">print</span>(result.<span class="tk-fn">text</span>())</pre>
+    </div>
+
+    <p>
+      That's the whole surface when you start. It grows only when your problem
+      grows. Parallelism is automatic when the engine emits N tool calls in a
+      turn; deterministic when you declare it.
+    </p>
+
+    <div class="admonition">
+      <div class="title">Note · v0.7.9</div>
+      Until 0.7.9 is published to PyPI, install from source with
+      <code>pip install "git+https://github.com/selvaz/LazyBridge.git#egg=lazybridge[anthropic]"</code>.
+    </div>
+
+    <h2 class="section">The mental model</h2>
+    <p>
+      Every <code>Agent</code> is the composition <code>Engine + Tools + State</code>:
+    </p>
+    <ul>
+      <li><strong>Engine</strong> — what decides next. <code>LLMEngine</code> is the common case; swap for <code>Plan</code>, <code>HumanEngine</code>, or <code>SupervisorEngine</code>.</li>
+      <li><strong>Tools</strong> — anything the agent can invoke. Functions, other agents, MCP servers, native provider tools.</li>
+      <li><strong>State</strong> — <code>Memory</code> (in-prompt history), <code>Store</code> (durable blackboard), <code>Session</code> (event bus).</li>
+    </ul>
+
+    <h2 class="section">Pick your tier</h2>
+    <p>LazyBridge grows with you — every tier is additive.</p>
+
+    <table class="docs">
+      <thead>
+        <tr><th>Tier</th><th>For</th><th>Key imports</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="#">Basic</a></td>
+          <td>one-shot or tool-calling agents</td>
+          <td><code>Agent · LLMEngine · Tool · NativeTool · Envelope</code></td>
+        </tr>
+        <tr>
+          <td><a href="#">Mid</a></td>
+          <td>real apps with memory, tracing, guardrails, composition</td>
+          <td><code>Memory · Store · Session · Guard* · verify= · MCP</code></td>
+        </tr>
+        <tr>
+          <td><a href="#">Full</a></td>
+          <td>production pipelines: typed hand-offs, routing, resume, OTel</td>
+          <td><code>Plan · Step · sentinels · SupervisorEngine · checkpoint</code></td>
+        </tr>
+        <tr>
+          <td><a href="#">Advanced</a></td>
+          <td>extending the framework</td>
+          <td><code>BaseProvider · Plan.to_dict · custom engines · OpenTelemetry</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">Function becomes a tool, auto-schema</h2>
+    <p>No decorators, no JSON schemas. Type hints + docstring become the tool's LLM-facing schema automatically.</p>
+
+    <div class="code-block">
+      <div class="code-head">
+        <span>python</span>
+        <span class="copy">📋</span>
+      </div>
+<pre><span class="tk-kw">from</span> lazybridge <span class="tk-kw">import</span> Agent, LLMEngine, Tool
+
+
+<span class="tk-kw">def</span> <span class="tk-fn">get_weather</span>(city: <span class="tk-cls">str</span>) -&gt; <span class="tk-cls">str</span>:
+    <span class="tk-str">"""Return current temperature and conditions for ``city``."""</span>
+    <span class="tk-kw">return</span> <span class="tk-str">f"{city}: 22°C, sunny"</span>
+
+
+agent = <span class="tk-cls">Agent</span>(
+    engine=<span class="tk-cls">LLMEngine</span>(<span class="tk-str">"claude-opus-4-7"</span>),
+    tools=[Tool.<span class="tk-fn">wrap</span>(get_weather, name=<span class="tk-str">"get_weather"</span>)],
+)
+result = <span class="tk-fn">agent</span>(<span class="tk-str">"what's the weather in Rome and Paris?"</span>)
+<span class="tk-fn">print</span>(result.<span class="tk-fn">text</span>())</pre>
+    </div>
+
+  </main>
+
+  <aside class="toc">
+    <h6>On this page</h6>
+    <a href="#" class="active">Overview</a>
+    <a href="#">The mental model</a>
+    <a href="#">Pick your tier</a>
+    <a href="#">Function becomes a tool</a>
+    <a href="#">Native tools</a>
+    <a href="#">MCP servers</a>
+    <a href="#">Deterministic plans</a>
+  </aside>
+
+</div>
+
+<footer class="bot">
+  © 2026 Marco Selvatici · Apache-2.0 ·
+  <a href="#">GitHub</a> ·
+  <a href="#">PyPI</a> ·
+  <a href="#">Changelog</a>
+</footer>
+
+</body>
+</html>
