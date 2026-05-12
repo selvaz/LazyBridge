@@ -1,0 +1,359 @@
+/* --------------------------------------------------------------------- */
+/* LazyBridge — Anthropic-style editorial restyle, cobalt-blue palette.   */
+/* Pure CSS overrides on Material's CSS variables and class hooks; no     */
+/* template overrides, so mkdocs-material upgrades stay clean.            */
+/* --------------------------------------------------------------------- */
+
+/* Serif headings — not supported by Material's theme.font (one text font  */
+/* only), so loaded here.                                                  */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600;700&display=swap');
+
+/* ---------- Palette + tokens ----------------------------------------- */
+
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        #1e40af;   /* cobalt */
+  --md-primary-fg-color--light: #2563eb;
+  --md-primary-fg-color--dark:  #1e3a8a;
+  --md-primary-bg-color:        #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+
+  --md-accent-fg-color:             #2563eb;
+  --md-accent-fg-color--transparent: rgba(37, 99, 235, 0.1);
+  --md-accent-bg-color:             #ffffff;
+
+  --md-default-bg-color:        #fbfaf7;   /* warm off-white */
+  --md-default-fg-color:        #1a1c20;
+  --md-default-fg-color--light: #4d525c;
+  --md-default-fg-color--lighter: #767c87;
+  --md-default-fg-color--lightest: #a8adb6;
+
+  --md-footer-bg-color:       #1a1c20;
+  --md-footer-bg-color--dark: #14161a;
+
+  --lb-warm-border:        #e9e5dc;
+  --lb-warm-border-strong: #d5d1c7;
+  --lb-warm-bg-subtle:     #f5f3ee;
+  --lb-warm-bg-code-inline:#f3f1ec;
+  --lb-code-bg:            #1d2436;
+  --lb-code-border:        #2a3349;
+  --lb-code-head-bg:       #232b40;
+  --lb-serif: 'Source Serif Pro', 'Charter', 'Iowan Old Style', Georgia, serif;
+}
+
+/* Soft warm bg for the main canvas. Material paints `.md-main` on top of  */
+/* `body`; both get the warm tone so there's no seam.                      */
+body,
+.md-main,
+.md-container { background-color: var(--md-default-bg-color); }
+
+/* ---------- Typography ----------------------------------------------- */
+
+.md-typeset {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+  font-family: var(--lb-serif);
+  letter-spacing: -0.01em;
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}
+
+.md-typeset h1 {
+  font-size: 2.5rem;
+  line-height: 1.15;
+  font-weight: 600;
+  margin: 0 0 1.25rem;
+}
+
+.md-typeset h2 {
+  font-size: 1.85rem;
+  line-height: 1.25;
+  margin-top: 3.25rem;
+}
+
+.md-typeset h3 {
+  font-size: 1.35rem;
+  margin-top: 2rem;
+}
+
+.md-typeset h4 { font-size: 1.1rem; }
+
+/* Lede paragraph — the first <p> after H1 (or after a leading short
+   intro block) is auto-stylised as a magazine standfirst. */
+.md-typeset h1 + p {
+  font-family: var(--lb-serif);
+  font-size: 1.25rem;
+  line-height: 1.55;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 2.5rem;
+}
+
+.md-typeset p { margin: 0 0 1.1rem; }
+
+/* ---------- Inline + block code -------------------------------------- */
+
+.md-typeset code,
+.md-typeset kbd {
+  background: var(--lb-warm-bg-code-inline);
+  color: var(--md-primary-fg-color);
+  border: 1px solid var(--lb-warm-border);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+/* Block code — dark editorial slab. */
+.md-typeset pre {
+  background: var(--lb-code-bg);
+  border-radius: 10px;
+  border: 1px solid var(--lb-code-border);
+  padding: 0;
+}
+
+.md-typeset pre > code,
+.md-typeset .highlight pre,
+.md-typeset .highlight code {
+  background: transparent;
+  border: none;
+  color: #dbe2f1;
+  padding: 1rem 1.25rem;
+}
+
+.md-typeset .highlight {
+  background: var(--lb-code-bg);
+  border-radius: 10px;
+  border: 1px solid var(--lb-code-border);
+  overflow: hidden;
+}
+
+/* Pygments tweaks — keep Material's class names. */
+.md-typeset .highlight .k,
+.md-typeset .highlight .kn,
+.md-typeset .highlight .kc,
+.md-typeset .highlight .kd,
+.md-typeset .highlight .kr        { color: #93c5fd; }   /* keyword */
+.md-typeset .highlight .nf,
+.md-typeset .highlight .nb        { color: #67e8f9; }   /* function */
+.md-typeset .highlight .s,
+.md-typeset .highlight .s1,
+.md-typeset .highlight .s2,
+.md-typeset .highlight .sb,
+.md-typeset .highlight .sx,
+.md-typeset .highlight .sd        { color: #fde68a; }   /* string */
+.md-typeset .highlight .c,
+.md-typeset .highlight .c1,
+.md-typeset .highlight .cm,
+.md-typeset .highlight .ch        { color: #8a9ab8; font-style: italic; }
+.md-typeset .highlight .nc,
+.md-typeset .highlight .nn        { color: #c4b5fd; }
+.md-typeset .highlight .mi,
+.md-typeset .highlight .mf,
+.md-typeset .highlight .mh,
+.md-typeset .highlight .mo        { color: #ff6fbf; }
+.md-typeset .highlight .o,
+.md-typeset .highlight .ow        { color: #dbe2f1; }
+.md-typeset .highlight .nv,
+.md-typeset .highlight .vc,
+.md-typeset .highlight .vg        { color: #dbe2f1; }
+.md-typeset .highlight .nd        { color: #fde68a; }
+
+/* Code-block copy button — keep it visible on the dark surface. */
+.md-clipboard {
+  color: rgba(255, 255, 255, 0.45);
+}
+.md-clipboard:hover { color: rgba(255, 255, 255, 0.85); }
+
+/* ---------- Sidebar nav ---------------------------------------------- */
+
+.md-nav__title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--lighter);
+}
+
+.md-nav__link {
+  font-size: 0.875rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-nav__link:hover,
+.md-nav__link:focus {
+  color: var(--md-default-fg-color);
+}
+
+.md-nav__link--active,
+.md-nav__item--active > .md-nav__link {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+/* ---------- Top header ----------------------------------------------- */
+
+.md-header {
+  background-color: rgba(251, 250, 247, 0.92);
+  backdrop-filter: saturate(180%) blur(10px);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  color: var(--md-default-fg-color);
+  border-bottom: 1px solid var(--lb-warm-border);
+  box-shadow: none;
+}
+
+.md-header[data-md-state="shadow"] {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.md-header__title,
+.md-header__topic { color: var(--md-default-fg-color); }
+
+.md-header__button.md-logo {
+  margin: 0.4rem 0.4rem 0.4rem 0;
+}
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 2.2rem;
+  width: auto;
+}
+
+/* Search — pill on warm surface. */
+.md-search__form {
+  background: #ffffff;
+  border: 1px solid var(--lb-warm-border);
+  border-radius: 999px;
+  box-shadow: none;
+}
+.md-search__input {
+  color: var(--md-default-fg-color);
+}
+.md-search__input::placeholder {
+  color: var(--md-default-fg-color--lighter);
+}
+
+/* ---------- Tab row (top-level sections) ----------------------------- */
+
+.md-tabs {
+  background-color: rgba(251, 250, 247, 0.92);
+  color: var(--md-default-fg-color);
+  border-bottom: 1px solid var(--lb-warm-border);
+}
+
+.md-tabs__link {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.875rem;
+  font-weight: 500;
+  opacity: 1;
+}
+
+.md-tabs__link:hover { color: var(--md-default-fg-color); }
+
+.md-tabs__link--active {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+/* ---------- Tables --------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+  border: none;
+  font-size: 0.9rem;
+  background: transparent;
+}
+
+.md-typeset table:not([class]) th {
+  background: transparent;
+  border-bottom: 1.5px solid var(--lb-warm-border-strong);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--md-default-fg-color--lighter);
+  padding: 0.7rem 1rem;
+}
+
+.md-typeset table:not([class]) td {
+  border-bottom: 1px solid var(--lb-warm-border);
+  padding: 0.75rem 1rem;
+  vertical-align: top;
+}
+
+/* ---------- Admonitions / details ------------------------------------ */
+
+.md-typeset .admonition,
+.md-typeset details {
+  background: #ffffff;
+  border: 1px solid var(--lb-warm-border);
+  border-left: 3px solid var(--md-primary-fg-color);
+  border-radius: 6px;
+  font-size: 0.92rem;
+  box-shadow: none;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: transparent;
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset .admonition-title::before,
+.md-typeset summary::before { background-color: var(--md-primary-fg-color); }
+
+/* ---------- Buttons -------------------------------------------------- */
+
+.md-typeset .md-button {
+  background: var(--md-primary-fg-color);
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  font-weight: 500;
+  padding: 0.55rem 1.2rem;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+.md-typeset .md-button:hover {
+  background: var(--md-primary-fg-color--dark);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.md-typeset .md-button--secondary {
+  background: transparent;
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--lb-warm-border-strong);
+}
+.md-typeset .md-button--secondary:hover {
+  background: var(--lb-warm-bg-subtle);
+  color: var(--md-default-fg-color);
+}
+
+/* ---------- Misc / polish -------------------------------------------- */
+
+/* Wider readable canvas. */
+.md-grid { max-width: 76rem; }
+
+/* Subtle hairline under page title block. */
+.md-typeset h1 + p::after {
+  content: "";
+  display: block;
+  margin-top: 1.5rem;
+  border-bottom: 1px solid var(--lb-warm-border);
+}
+
+/* Reduce visual weight of breadcrumb separators if present. */
+.md-typeset hr {
+  border: none;
+  border-top: 1px solid var(--lb-warm-border);
+  margin: 2.5rem 0;
+}
+
+/* Footer copyright text colour on dark surface. */
+.md-footer-meta__inner,
+.md-footer-meta .md-footer-copyright { color: rgba(255, 255, 255, 0.55); }
