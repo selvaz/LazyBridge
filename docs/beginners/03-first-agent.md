@@ -287,36 +287,33 @@ What you still own: retry on validation failure (the `.parse()` helper raises if
 the model deviates from the schema), provider-specific error handling, switching
 to a different provider means rewriting the call.
 
-### Anthropic (tool-call workaround)
-
-Anthropic has no native "give me a Pydantic object" endpoint. The canonical
-pattern is forcing a tool call with the schema as its input:
+### Anthropic (`.parse()` helper)
 
 ```python
-import anthropic
-from pydantic import BaseModel
+from anthropic import Anthropic
 
-client = anthropic.Anthropic()
+client = Anthropic()
 
-response = client.messages.create(
+response = client.messages.parse(
     model="claude-haiku-4-5",
     max_tokens=256,
-    tools=[{
-        "name": "record_capital_info",
-        "description": "Record capital city info.",
-        "input_schema": CapitalInfo.model_json_schema(),   # generate the schema
-    }],
-    tool_choice={"type": "tool", "name": "record_capital_info"},
     messages=[{"role": "user", "content": "What is the capital of France?"}],
+    output_format=CapitalInfo,           # Anthropic-specific kwarg
 )
 
-# Find the tool_use block in response.content and validate manually
-tool_block = next(b for b in response.content if b.type == "tool_use")
-info: CapitalInfo = CapitalInfo.model_validate(tool_block.input)
+info: CapitalInfo = response.parsed_output
 ```
 
-What you still own: writing the synthetic tool, the `tool_choice` boilerplate,
-finding the right content block, manual `model_validate()`, retry-on-failure.
+What you still own: retry on validation failure, provider-specific error handling,
+switching to a different provider means rewriting the call.
+
+!!! note "Tool-call workaround is no longer canonical"
+    Before native structured output landed in the Anthropic SDK, the pattern was to
+    force a tool call with the schema as its input and parse the `tool_use` block
+    by hand (~13 lines of boilerplate). Many older tutorials still teach that.
+    If you see a `tool_choice={"type": "tool", ...}` example with manual
+    `model_validate()`, it's pre-`.parse()` code — use `messages.parse()` /
+    `output_format=` instead.
 
 ### Gemini
 
@@ -361,9 +358,9 @@ model string and that's it.
 
 | | OpenAI Responses | Anthropic | Gemini | LazyBridge |
 |---|:---:|:---:|:---:|:---:|
-| Lines to set up | ~7 | ~13 | ~9 | **2** |
-| Manual schema generation | hidden | yes (`.model_json_schema()`) | hidden | hidden |
-| Manual response parsing | no (`.parse()`) | yes | no (`.parsed`) | no (`.payload`) |
+| Lines to set up | ~7 | ~7 | ~9 | **2** |
+| Manual schema generation | hidden | hidden | hidden | hidden |
+| Manual response parsing | no (`.parse()`) | no (`.parse()`) | no (`.parsed`) | no (`.payload`) |
 | Built-in validation retry | no | no | no | **yes** |
 | Provider switch | rewrite call | rewrite call | rewrite call | change one string |
 
