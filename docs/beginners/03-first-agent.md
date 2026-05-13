@@ -1,11 +1,22 @@
 # Step 3: Your first agent
 
-In Step 2 you called an LLM once. That's already useful — but it's still just a wrapper
-around a single API call. In this step you'll learn what makes an `Agent` an *agent*,
-and why every result is wrapped in an `Envelope`.
+In Step 2 you saw the same task in four shapes — three raw SDKs and
+LazyBridge — to compare boilerplate. This step zooms in on **the
+LazyBridge side**: what an `Agent` actually is, what it returns, and
+how to give it the capabilities you'll keep reaching for (a persistent
+persona, observability, structured output, a stable name).
 
-We'll build the same agent four times, adding one capability at a time, so each new
-concept appears next to working code.
+We'll build the same agent four times, adding one capability at a time,
+so each new concept appears next to working code.
+
+!!! note "On 'agent' definitions"
+    Step 1 defined an *agent* informally as "LLM + tools + a loop". In
+    LazyBridge the **class** `Agent` is broader: it's the standard
+    container for any LLM-powered task — tools optional. The "tools
+    loop" only kicks in when you actually pass `tools=[...]` (Step 4).
+    Everything in this step uses an `Agent` *without* tools and still
+    benefits from the framework (typed output, observability,
+    verification, multi-agent composition).
 
 ---
 

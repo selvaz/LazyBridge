@@ -139,6 +139,16 @@ Agent loop:
 The framework (LazyBridge in our case) runs this loop: call the LLM, check if it
 wants to use a tool, run the tool, feed the result back, repeat until done.
 
+!!! note "On the word 'agent'"
+    Across the literature, "agent" sometimes means strictly *"LLM + tools
+    + a loop"* (the diagram above) and sometimes means *"anything LLM-powered
+    you'd call repeatedly"*. LazyBridge's `Agent` class is the latter — the
+    standard container — and the tool-loop only fires when you pass
+    `tools=`. Step 3 builds an `Agent` *without* tools (the simpler
+    shape); Step 4 adds them and the loop turns on. So the picture above
+    is what you'll *eventually* see — Step 3 is the necessary foundation
+    first.
+
 ---
 
 ## Summary

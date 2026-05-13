@@ -1,15 +1,18 @@
 # Step 4: Giving your agent tools
 
-The agent in Step 3 was already useful — but it could only produce text. Ask it
-"What's the weather in Rome right now?" and it will either guess or politely
-admit it doesn't know.
+The agent in Step 3 was already useful — typed output, retries, a stable
+persona — but it could only produce **text**. Ask it "What's the weather
+in Rome right now?" and it will either guess or politely admit it has no
+way to find out.
 
-A **tool** is the missing piece. With tools, the LLM can call functions in *your*
-code: look things up, run computations, hit APIs, write to a database. The LLM
-stops being just a generator and becomes an *actor*.
+A **tool** unlocks that. With tools, the LLM can call functions in *your*
+code: look things up, run computations, hit APIs, write to a database.
+The agent can now **do things in the world**, not just talk about them.
 
-This is the step that turns LazyBridge from "a nice SDK wrapper" into something
-the older frameworks (LangChain, CrewAI) built whole products around.
+This is what Step 1 sketched as "LLM + tools + a loop" — and the
+"loop" mental model only fires once tools are present (it's the
+turn-by-turn dispatch you're about to see). Step 3 built the
+single-turn skeleton; this step adds the missing capability.
 
 ---
 
