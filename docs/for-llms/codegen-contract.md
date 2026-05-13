@@ -76,7 +76,7 @@ LazyBridge has that the operator understands the trust boundary.
 Side-by-side example (same task, two runtimes):
 
 ```python
-from lazybridge import Agent, LLMEngine, Tool
+from lazybridge import Agent, LLMEngine, NativeTool, Tool
 
 # LazyBridge-executed web search via your own function.
 def search_web(query: str) -> str:
@@ -89,8 +89,6 @@ local = Agent(
 )
 
 # Provider-executed web search via Anthropic's server-side tool.
-from lazybridge.core.types import NativeTool
-
 native = Agent(
     engine=LLMEngine("claude-opus-4-7"),
     native_tools=[NativeTool.WEB_SEARCH],

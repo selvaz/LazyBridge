@@ -78,6 +78,7 @@ _EXPECTED: frozenset[str] = frozenset(
         # Provider entry point (custom adapters)
         "BaseProvider",
         "UnsupportedFeatureError",
+        "UnsupportedNativeToolError",
         # Multimodal content blocks
         "ImageContent",
         "AudioContent",

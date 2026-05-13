@@ -68,6 +68,7 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
         # Provider extension — advanced; covered by docs/reference.
         "BaseProvider",
         "UnsupportedFeatureError",
+        "UnsupportedNativeToolError",
         # Multimodal types — taught via examples, not by name.
         "ImageContent",
         "AudioContent",

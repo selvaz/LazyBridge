@@ -118,7 +118,7 @@ __stability__ = "alpha"
 from lazybridge.agent import Agent, ParallelAgent
 
 # Provider entry points
-from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError
+from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError, UnsupportedNativeToolError
 from lazybridge.core.types import (
     AudioContent,
     CacheConfig,
@@ -236,6 +236,7 @@ __all__ = [
     # Provider entry point (custom adapters)
     "BaseProvider",
     "UnsupportedFeatureError",
+    "UnsupportedNativeToolError",
     # Multimodal content blocks
     "ImageContent",
     "AudioContent",
