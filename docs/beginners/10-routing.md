@@ -40,58 +40,101 @@ Three things `chain` can't do:
 The general form:
 
 ```python
-Step("step_name", routes={"target_step": predicate})
+Step("step_name",
+     routes={"target_step": predicate},        # branch table
+     after_branches="rejoin_step")             # ← WHERE the Plan resumes after the branch
 ```
 
-`predicate` is a callable `Envelope -> bool`. After `step_name` runs, the
-Plan evaluates each predicate in declaration order; the first one that
-returns `True` makes the Plan **jump** to that target step.
+Two parameters, one rule each:
 
-A minimal example — retry a search if it returned nothing:
+- **`routes={...}`** — a mapping `{step_name: predicate}`. After
+  `step_name` runs, predicates are evaluated in declared order; the
+  first one returning `True` makes the Plan **jump** to that target
+  step.
+- **`after_branches="..."`** — the step the Plan jumps to once the
+  routed-to branch completes. Without this, control falls through
+  linearly from the routed-to step's position, which is almost never
+  what you want (we'll show why in the next section).
+
+**Always specify where the Plan resumes.** A predicate that doesn't fire
+also has to land somewhere — for predicate-based routing this means
+covering every case explicitly, so the routing decision is exhaustive.
+
+A minimal example — branch on whether the search found anything, and
+always finish on a logging step:
 
 ```python
-from lazybridge import Agent, LLMEngine, Plan, Step
+from pydantic import BaseModel
+from lazybridge import Agent, LLMEngine, Plan, Step, when
 
 
-def web_search(query: str) -> list[str]:
-    """Return a list of result snippets (empty if nothing matched)."""
-    return []   # stub — pretend nothing was found
+class SearchResult(BaseModel):
+    found: bool
+    items: list[str] = []
+
+
+def web_search(query: str) -> SearchResult:
+    """Stub — pretend the search returned nothing."""
+    return SearchResult(found=False, items=[])
 
 
 searcher = Agent(
     engine=LLMEngine("claude-haiku-4-5", system="..."),
     tools=[web_search],
-    output=list[str],                                # typed output
+    output=SearchResult,
     name="searcher",
 )
+reporter = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                  system="Summarise the search hits."),
+                 name="reporter")
+apology  = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                  system="Politely say nothing was found."),
+                 name="apology")
+log_outcome = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                     system="Emit one line of metrics."),
+                    name="log_outcome")
 
-apology = Agent(
-    engine=LLMEngine("claude-haiku-4-5",
-                     system="Politely tell the user no results were found."),
-    name="apology",
-)
-
-reporter = Agent(
-    engine=LLMEngine("claude-haiku-4-5",
-                     system="Summarise the search results."),
-    name="reporter",
-)
 
 pipeline = Agent(
     engine=Plan(
-        Step("searcher", routes={"apology": lambda env: not env.payload}),
-        Step("reporter"),                            # default fall-through target
-        Step("apology"),                             # only runs when routed here
+        Step("searcher",
+             routes={
+                 "reporter": when.field("found").is_(True),       # success branch
+                 "apology":  when.field("found").is_(False),      # failure branch
+             },
+             after_branches="log_outcome"),     # every branch lands here
+        Step("reporter"),
+        Step("apology"),
+        Step("log_outcome"),                    # rejoin terminal — always runs
     ),
-    tools=[searcher, reporter, apology],
+    tools=[searcher, reporter, apology, log_outcome],
     name="pipeline",
 )
 
 print(pipeline("rare-historical-event-from-2026").text())
 ```
 
-Read aloud: *"after searcher runs, if its payload is empty, jump to
-apology — otherwise fall through to reporter."*
+Read aloud — for each outcome, *what runs and in what order*:
+
+| `searcher` result | Path |
+|---|---|
+| `found=True`  | `searcher` → `reporter` → `log_outcome` → end |
+| `found=False` | `searcher` → `apology`  → `log_outcome` → end |
+
+Both paths run exactly **two steps after `searcher`**, in the same shape:
+the routed-to branch, then the rejoin terminal. No surprise extras.
+
+!!! warning "Don't write 'half' routing"
+    The temptation is to write just `routes={"apology": when.field("found").is_(False)}`
+    and rely on linear fall-through for the success case. **That's
+    broken.** When the predicate doesn't fire, the Plan walks linearly
+    through every step between the routing step and the end — including
+    your `apology` step, which then *also* runs on success. The next
+    section spells out exactly why.
+
+    Rule of thumb: every routing step needs (1) routes that cover all
+    cases, AND (2) `after_branches=` pointing at a step *after* every
+    branch in the declared order.
 
 ---
 
@@ -132,33 +175,53 @@ twice.
 
 !!! danger "Routing is a *detour*, not a *replacement*"
     When a route fires, the Plan jumps to the target step and runs it.
-    Then execution **resumes from the next declared step after the
-    original routing step** — *not* after the routed-to step. The
-    branches you "didn't take" still run.
+    After the target finishes, the Plan walks forward through whatever
+    comes **after the *target*** in the declared step list — *not* after
+    the routing step. The branches you "didn't take" that happen to sit
+    later in the list will still run.
 
 Concrete example. Naive routing:
 
 ```python
-# WRONG for triage — the urgent / normal / spam branches all still run
+# WRONG for triage — extra branches still run depending on which one was picked
 Plan(
     Step("classifier", routes_by="severity"),    # picks "urgent"
     Step("urgent"),     # ← runs (routed here)
-    Step("normal"),     # ← runs anyway (detour resumes here)
-    Step("spam"),       # ← runs anyway
+    Step("normal"),     # ← runs after urgent (linear from urgent's position)
+    Step("spam"),       # ← runs after normal
 )
 ```
 
-What happens at runtime:
+What happens at runtime when `classifier` picks `"urgent"`:
 
-1. `classifier` runs, picks `"urgent"`
+1. `classifier` runs, `routes_by="severity"` reads `"urgent"` off the
+   typed output, Plan returns `"urgent"` as the next step
 2. Plan jumps to `urgent`, runs it
-3. Plan resumes from the **next declared step after classifier**, which
-   is `urgent` — but it just ran, so it moves on to `normal`
+3. After `urgent` finishes, Plan asks "what's next?". `urgent` itself
+   has no `routes=` / `routes_by=`, and there's no rejoin marker, so
+   the Plan **falls through to linear progression from `urgent`'s
+   declared position** — and the next declared step after `urgent` is
+   `normal`
 4. `normal` runs (you paid for it)
-5. `spam` runs (you paid for that too)
+5. `spam` runs (linear after `normal`)
 
-You wanted *one* branch; you got *all three*. Costs 3× what you expected,
+You wanted *one* branch; you got *three*. Costs 3× what you expected,
 and the final output is `spam`'s, not `urgent`'s.
+
+!!! note "The trap is asymmetric — it depends on which branch fires"
+    Same plan, same wiring, different outcomes purely based on the
+    classifier's choice:
+
+    | `classifier` picks | What actually runs |
+    |---|---|
+    | `"urgent"` | `classifier` → `urgent` → `normal` → `spam` (3 branches!) |
+    | `"normal"` | `classifier` → `normal` → `spam` (2 branches) |
+    | `"spam"`   | `classifier` → `spam` (correct — 1 branch) |
+
+    The plan happens to do the right thing **only when the model picks
+    the *last* declared branch**. Anything else over-runs. Don't try to
+    paper over this by reordering branches by priority — use
+    `after_branches=`.
 
 The fix is one parameter — `after_branches=` — which converts routing
 from a detour into an **exclusive branch with a guaranteed rejoin point**.
