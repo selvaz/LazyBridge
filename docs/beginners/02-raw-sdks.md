@@ -29,7 +29,7 @@ advantage.
 
 ---
 
-## Option A — OpenAI SDK
+## Option A — OpenAI SDK (Responses API)
 
 ```bash
 pip install openai
@@ -41,34 +41,35 @@ from openai import OpenAI
 
 client = OpenAI()                          # reads OPENAI_API_KEY from env
 
-response = client.chat.completions.create(
+response = client.responses.create(
     model="gpt-5.4-mini",
-    messages=[
-        {
-            "role": "system",
-            "content": "You are a concise technical writer.",
-        },
-        {
-            "role": "user",
-            "content": f"Summarise this in exactly 3 bullet points:\n\n{TEXT}",
-        },
-    ],
-    max_tokens=256,
+    instructions="You are a concise technical writer.",
+    input=f"Summarise this in exactly 3 bullet points:\n\n{TEXT}",
+    max_output_tokens=256,
     temperature=0.3,
 )
 
-summary = response.choices[0].message.content
+summary = response.output_text             # convenience accessor
 print(summary)
 ```
 
 **What you have to manage yourself:**
 
-- Constructing the messages list by hand every time
-- Extracting the text from `response.choices[0].message.content`
+- `input=` accepts a string for one-shot calls, but for a multi-turn conversation you
+  switch to a list of message dicts (`[{"role": "user", "content": "..."}, ...]`) — two
+  different shapes in the same parameter
+- Stateful conversations require either replaying the full history every call, or
+  threading `previous_response_id` between calls — your responsibility either way
 - Handling `RateLimitError`, `APIConnectionError`, timeouts — no built-in retry
 - If you want the model to call a function, you must write a JSON schema by hand and
-  parse `response.choices[0].message.tool_calls` yourself
-- If you want streaming, you rewrite the whole call with `stream=True` and iterate chunks
+  parse the `tool_call` items out of `response.output` yourself
+- If you want streaming, you rewrite the whole call with `stream=True` and iterate events
+
+!!! note "Responses API vs Chat Completions"
+    OpenAI's `responses.create()` is the recommended endpoint as of 2025 — it
+    supports stateful conversations, built-in tools (web search, code interpreter),
+    and structured output natively. The older `chat.completions.create()` still
+    works for legacy code, but new projects should default to Responses.
 
 ---
 
