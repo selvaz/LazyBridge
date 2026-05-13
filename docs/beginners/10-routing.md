@@ -127,16 +127,41 @@ plain lambda — the DSL doesn't force itself on you.
 
 ## The detour trap — and `after_branches`
 
-The single most important thing to understand about routes:
+This is the **single most counter-intuitive thing about routing**. Read it
+twice.
 
-!!! warning "Routing is a *detour*, not a *replacement*"
-    By default, after the routed-to step runs, execution **resumes from the
-    next declared step after the original routing step** — not after the
-    routed-to step. The branches you *didn't* take will still run.
+!!! danger "Routing is a *detour*, not a *replacement*"
+    When a route fires, the Plan jumps to the target step and runs it.
+    Then execution **resumes from the next declared step after the
+    original routing step** — *not* after the routed-to step. The
+    branches you "didn't take" still run.
 
-That's almost never what you want for triage-style routing. The fix is the
-`after_branches=` parameter: it converts routing from a detour into an
-**exclusive branch with a rejoin point**.
+Concrete example. Naive routing:
+
+```python
+# WRONG for triage — the urgent / normal / spam branches all still run
+Plan(
+    Step("classifier", routes_by="severity"),    # picks "urgent"
+    Step("urgent"),     # ← runs (routed here)
+    Step("normal"),     # ← runs anyway (detour resumes here)
+    Step("spam"),       # ← runs anyway
+)
+```
+
+What happens at runtime:
+
+1. `classifier` runs, picks `"urgent"`
+2. Plan jumps to `urgent`, runs it
+3. Plan resumes from the **next declared step after classifier**, which
+   is `urgent` — but it just ran, so it moves on to `normal`
+4. `normal` runs (you paid for it)
+5. `spam` runs (you paid for that too)
+
+You wanted *one* branch; you got *all three*. Costs 3× what you expected,
+and the final output is `spam`'s, not `urgent`'s.
+
+The fix is one parameter — `after_branches=` — which converts routing
+from a detour into an **exclusive branch with a guaranteed rejoin point**.
 
 The triage example, done right:
 
@@ -243,6 +268,7 @@ pipeline = Agent(
              routes={"writer": when.field("decision").equals("revise")}),
         # If decision == "accept", flows through to publisher
         Step("publisher"),
+        max_iterations=5,                     # ← cap the loop; default 25
     ),
     tools=[writer, critic, publisher],
     name="pipeline",
@@ -250,8 +276,12 @@ pipeline = Agent(
 ```
 
 There's no special "loop" primitive — a loop is *just a route back*.
-LazyBridge protects you from infinite loops via `Plan(max_iterations=N)`
-(default 25). Set it lower during development to fail fast.
+
+The `max_iterations=` parameter on `Plan` is the safety net: it caps how
+many step executions can run in total before the Plan gives up with a
+`MaxIterationsExceeded` error envelope. Default is 25; **always set it
+explicitly lower during development** (e.g. `max_iterations=5`) so a
+runaway critic loop fails in seconds, not minutes.
 
 `verify=` (Step 6) covers the *most common* "write → critique → revise"
 case with less ceremony; reach for routing loops when the critic needs to
