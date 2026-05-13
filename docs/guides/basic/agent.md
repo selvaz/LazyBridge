@@ -14,10 +14,12 @@ agent = Agent(
     tools=[...],                   # callables, Tools, Agents, ToolProviders
     output=str,                    # str (default) or a Pydantic model class
     memory=None,                   # Memory instance for conversation continuity
+    store=None,                    # Store instance for cross-run / cross-agent state persistence
     session=None,                  # Session for event tracking + observability
     name=None,                     # surface name (used as a tool name when this Agent is composed)
     description=None,              # human-readable description (LLM-facing when used as a tool)
     verbose=False,                 # print turn-by-turn updates to stdout
+    model=None,                    # convenience: tier alias or model ID when engine= is a provider string
     sources=(),                    # static documents prepended to every turn
     guard=None,                    # Guard / GuardChain — input/output filtering
     verify=None,                   # Agent or callable — judge-and-retry loop
