@@ -116,36 +116,49 @@ It costs you:
 
 ---
 
-## The feature matrix
+## The feature matrix at a glance
 
-Where each framework lands on the dimensions you'd actually weigh:
+The eight dimensions most projects actually weigh when choosing:
 
 | Dimension | LangGraph | CrewAI | LazyBridge |
 |---|---|---|---|
 | Core abstraction | Graph (nodes + edges + state) | Crew (agents + tasks + process) | Agent (engine + tools + state) |
 | Multi-provider | via `langchain_*` adapters | via underlying SDK | **built-in (one string)** |
-| Simple call | ~10 lines (StateGraph) | ~12 lines (Agent + Task + Crew) | **3 lines** |
-| Tools | manual schema + ToolNode | `@tool` decorator | **type hints + docstring** |
 | Structured output | manual State plumbing | task `expected_output=` | **`output=PydanticModel`** |
-| Sequential pipeline | linear `add_edge` graph | `Process.sequential` | **`Agent.chain`** |
-| Parallel fan-out | `Send` + reducer State | drop to `asyncio.gather` | **`Agent.parallel`** |
-| Conditional routing | `add_conditional_edges` | none — plain Python | **`routes=` / `routes_by=`** |
-| Compile-time validation | yes (StateGraph compile) | partial | yes (Plan compile) |
 | Cross-model verify | manual loop | manual loop | **`verify=judge_agent`** |
-| Human-in-the-loop | `interrupt()` + checkpointer | `human_input=True` | **`HumanEngine` / `human_agent`** |
-| Sub-agent as a tool | wrap a node | hierarchical process | **`tools=[other_agent]`** |
-| Built-in checkpointing | yes (multiple backends) | no | yes (Plan checkpoint) |
-| Streaming | yes (rich modes) | partial | yes (`agent.stream`) |
-| Built-in OTel | via LangSmith | no | yes (`OTelExporter`) |
-| MCP server tools | via tooling layer | via custom | **built-in (`MCP.stdio`)** |
-| Provider-native tools (web search, code exec) | per-provider plumbing | limited | **built-in (`NativeTool.*`)** |
-| Ecosystem | very large (LangChain) | medium | small (focused) |
-| Maturity | high | medium-high | early but stable |
+| Sub-agent composition | wrap a node | hierarchical process | **`tools=[other_agent]` / chain / parallel** |
+| Conditional routing | `add_conditional_edges` | none — plain Python | **`routes=` / `routes_by=`** |
+| Human-in-the-loop | `interrupt()` + checkpointer | `human_input=True` (terminal only) | **`HumanEngine` (terminal/web/custom)** |
 | Dependencies | langchain-core + N adapters | crewai + langchain-tools | **stdlib + pydantic + httpx** |
+
+??? tip "Twelve more dimensions, for the curious"
+
+    Compile-time validation, built-in checkpointing, streaming, built-in
+    OTel, MCP server tools, provider-native tools (web search /
+    code-exec), parallel fan-out, sequential pipeline expression, tools
+    schema generation, simple-call line count, ecosystem size, maturity:
+
+    | Dimension | LangGraph | CrewAI | LazyBridge |
+    |---|---|---|---|
+    | Simple call | ~10 lines (StateGraph) | ~12 lines (Agent + Task + Crew) | **3 lines** |
+    | Tools (schema) | manual schema + ToolNode | `@tool` decorator | **type hints + docstring** |
+    | Sequential pipeline | linear `add_edge` graph | `Process.sequential` | **`Agent.chain`** |
+    | Parallel fan-out | `Send` + reducer State | drop to `asyncio.gather` | **`Agent.parallel`** |
+    | Compile-time validation | yes (StateGraph compile) | partial | yes (Plan compile) |
+    | Built-in checkpointing | yes (multiple backends) | no | yes (Plan checkpoint) |
+    | Streaming | yes (rich modes) | partial | yes (`agent.stream`) |
+    | Built-in OTel | via LangSmith | no | yes (`OTelExporter`) |
+    | MCP server tools | via tooling layer | via custom | **built-in (`MCP.stdio`)** |
+    | Native tools (web search etc.) | per-provider plumbing | limited | **built-in (`NativeTool.*`)** |
+    | Ecosystem | very large (LangChain) | medium | small (focused) |
+    | Maturity | high | medium-high | early but stable |
+
+For most decisions, the eight dimensions above are enough. The decision
+tree below is a faster route to "which one" than the matrix.
 
 ---
 
-## Same task, three frameworks — concept count
+## Same task, three frameworks — concept count *(simple linear pipeline)*
 
 The classic three-step pipeline (research → write → edit) one last time,
 counting the **distinct concepts** a beginner has to learn:
@@ -156,14 +169,20 @@ counting the **distinct concepts** a beginner has to learn:
 | Required concepts | StateGraph, TypedDict, add_messages, Annotated reducer, nodes, edges, START, END, compile, invoke, state['messages'] plumbing | Agent, role, goal, backstory, Task, description, expected_output, context, Crew, process | Agent, LLMEngine, chain |
 | Total concept count | ~11 | ~10 | **3** |
 
-This isn't about lines of code — it's about how many things a new reader
-has to load into their head before they can change anything. For the same
-3-stage pipeline, LangGraph and CrewAI each expose ~10 concepts;
-LazyBridge exposes 3.
+!!! note "What this count means"
+    This isn't about lines of code — it's about how many things a new
+    reader has to load into their head before they can change anything.
 
-LangGraph and CrewAI earn the extra concept count when the pipeline is
-non-trivial. For *most* real-world pipelines, the surface area gap stays
-roughly constant.
+    **The numbers above are for a 3-stage *linear* pipeline.** For a
+    branching workflow with routing, parallel bands, and HIL, every
+    framework expands — LangGraph adds reducers and conditional edges,
+    CrewAI adds Process flavours and custom hooks, LazyBridge adds
+    `routes_by=` / `after_branches=` / `Plan` / `HumanEngine`. The
+    *gap* tends to stay roughly constant; LazyBridge doesn't stay at
+    "3 concepts" as you grow.
+
+    LangGraph and CrewAI **earn the extra concept count** on
+    non-trivial graphs — they're not paying for nothing.
 
 ---
 
