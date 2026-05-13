@@ -13,13 +13,16 @@ understand *why* every piece exists.
 ## What you'll learn
 
 ```
-Step 1 → What is an LLM and how does an API call actually work?
-Step 2 → What does raw SDK code look like? (OpenAI / Anthropic / Gemini)
-Step 3 → Your first LazyBridge agent — every line explained
-Step 4 → Giving your agent tools (so it can actually do things)
-Step 5 → Multiple agents working together
-Step 6 → LazyBridge vs LangGraph vs CrewAI — which one for what
-Step 7 → Where to go next
+Step 1  → What is an LLM and how does an API call actually work?
+Step 2  → What does raw SDK code look like? (OpenAI / Anthropic / Gemini)
+Step 3  → Your first LazyBridge agent — every line explained
+Step 4  → Giving your agent tools (so it can actually do things)
+Step 5  → Why multi-agent + sub-agent as a tool (the flexible pattern)
+Step 6  → Sequential pipelines with Agent.chain
+Step 7  → Parallel work with Agent.parallel
+Step 8  → Explicit DAGs with Plan & sentinels
+Step 9  → LazyBridge vs LangGraph vs CrewAI — which one for what
+Step 10 → Where to go next
 ```
 
 Each step builds on the previous one. Skip ahead if you already know a topic,

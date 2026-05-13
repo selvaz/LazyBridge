@@ -122,9 +122,12 @@ nav:
       - "Step 2: Raw SDKs compared": beginners/02-raw-sdks.md
       - "Step 3: Your first agent": beginners/03-first-agent.md
       - "Step 4: Giving your agent tools": beginners/04-tools.md
-      - "Step 5: Multiple agents": beginners/05-multi-agent.md
-      - "Step 6: LazyBridge vs LangGraph vs CrewAI": beginners/06-vs-frameworks.md
-      - "Step 7: Where to go next": beginners/07-next-steps.md
+      - "Step 5: Why multi-agent + sub-agent as tool": beginners/05-multi-agent.md
+      - "Step 6: Sequential pipelines (Agent.chain)": beginners/06-chain.md
+      - "Step 7: Parallel work (Agent.parallel)": beginners/07-parallel.md
+      - "Step 8: Explicit DAGs (Plan & sentinels)": beginners/08-plan.md
+      - "Step 9: LazyBridge vs LangGraph vs CrewAI": beginners/09-vs-frameworks.md
+      - "Step 10: Where to go next": beginners/10-next-steps.md
   - Concepts:
       - Mental model: concepts/mental-model.md
       - Everything is a tool: concepts/everything-is-a-tool.md
