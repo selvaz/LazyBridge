@@ -93,6 +93,38 @@ The same envelope shape you've seen from a single agent — just N of them.
 
 ---
 
+## Before the next example — `Agent.parallel` vs parallel tool calls
+
+This is the single most common source of confusion in this step. Read it
+now, before the bigger example below.
+
+The LLM can *already* emit parallel tool calls. You saw it in Step 4 —
+the weather agent fetched Rome and Tokyo concurrently in a single turn.
+So when you pass three sub-agents as `tools=[a, b, c]`, the model may
+choose to call all three at once, *or* just one, *or* none. **The model
+decides.**
+
+`Agent.parallel(a, b, c)` is the *opposite*: **you decide**, at
+composition time, that all three run on every call. No model in the
+middle, no skipping.
+
+| | `Agent.parallel(a, b, c)` | `tools=[a, b, c]` on a regular Agent |
+|---|---|---|
+| Who decides to fan out? | **You** — always runs every branch | **The LLM** — picks at runtime, may skip branches |
+| Cost predictability | Predictable: N branches always | Variable: depends on the model's plan |
+| Same input to each branch? | Yes (identical) | LLM crafts each tool call's arguments |
+| Use when | "I know I want all of these" | "Let the model figure out what's needed" |
+
+**Rule of thumb:** if you want all N branches *every time*, use
+`Agent.parallel`. If the right subset depends on the query, expose them
+as `tools=` on an orchestrating agent and let the model decide.
+
+The example below uses `Agent.parallel` because we *want* every search
+backend hit on every query — we're trying to get coverage, not be smart
+about which one to ask.
+
+---
+
 ## A concrete use case — multi-source search
 
 A common production shape: fan a query out across several search backends and
@@ -197,35 +229,6 @@ Parallel saves time but not cost. With four branches:
 Parallel is the right choice when you'd otherwise wait on the same wall clock
 *N* times. It's the wrong choice when stage N+1 *needs* stage N's output —
 that's `chain`.
-
----
-
-## When to use `Agent.parallel` vs parallel tool calls
-
-A subtle point that catches everyone once. The model can already emit
-parallel tool calls (you saw this in Step 4 — the weather example asked for
-Rome and Tokyo at the same time):
-
-```python
-agent = Agent(
-    engine=LLMEngine("claude-haiku-4-5"),
-    tools=[anthropic_search, openai_search, google_search],   # sub-agents as tools
-)
-agent("How does each provider implement structured output?")
-```
-
-LazyBridge runs those calls concurrently when the model emits them. So what's
-the difference?
-
-| | `Agent.parallel` | `tools=[a, b, c]` on a regular agent |
-|---|---|---|
-| Who decides to fan out? | **You** — always runs every branch | **The LLM** — picks at runtime, may skip branches |
-| Cost predictability | Predictable: N branches always | Variable: depends on the model's plan |
-| Use when | "I know I want all of these" | "Let the model figure out what's needed" |
-
-**Rule of thumb:** if you want N branches *every time*, use `Agent.parallel`.
-If the right subset depends on the query, expose them as `tools=` on an
-orchestrating agent.
 
 ---
 
