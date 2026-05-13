@@ -22,9 +22,10 @@ Step 6  → Cross-model verification with verify=  (let Claude judge GPT)
 Step 7  → Sequential pipelines with Agent.chain
 Step 8  → Parallel work with Agent.parallel
 Step 9  → Explicit DAGs with Plan & sentinels
-Step 10 → Human in the loop with HumanEngine
-Step 11 → LazyBridge vs LangGraph vs CrewAI — which one for what
-Step 12 → Where to go next
+Step 10 → Routing — conditional branching on outputs
+Step 11 → Human in the loop with HumanEngine
+Step 12 → LazyBridge vs LangGraph vs CrewAI — which one for what
+Step 13 → Where to go next
 ```
 
 Each step builds on the previous one. Skip ahead if you already know a topic,
