@@ -93,6 +93,17 @@ print(pipeline("rare-historical-event-from-2026").text())
 Read aloud: *"after searcher runs, if its payload is empty, jump to
 apology — otherwise fall through to reporter."*
 
+!!! info "Why this works without `after_branches=`"
+    Notice **`apology` is the last declared step**. That's not
+    decorative — it's load-bearing. When routing to `apology` fires,
+    `apology` runs and then the Plan walks forward from `apology`'s
+    declared position. Since there's nothing after it, the Plan ends.
+
+    Try moving `apology` *before* `reporter` in the list and the
+    pipeline will run `reporter` too — on empty results — which is
+    almost certainly not what you want. The next section explains why,
+    and how `after_branches=` fixes it for any step order.
+
 ---
 
 ## The `when` DSL — predicates without lambdas
@@ -132,33 +143,53 @@ twice.
 
 !!! danger "Routing is a *detour*, not a *replacement*"
     When a route fires, the Plan jumps to the target step and runs it.
-    Then execution **resumes from the next declared step after the
-    original routing step** — *not* after the routed-to step. The
-    branches you "didn't take" still run.
+    After the target finishes, the Plan walks forward through whatever
+    comes **after the *target*** in the declared step list — *not* after
+    the routing step. The branches you "didn't take" that happen to sit
+    later in the list will still run.
 
 Concrete example. Naive routing:
 
 ```python
-# WRONG for triage — the urgent / normal / spam branches all still run
+# WRONG for triage — extra branches still run depending on which one was picked
 Plan(
     Step("classifier", routes_by="severity"),    # picks "urgent"
     Step("urgent"),     # ← runs (routed here)
-    Step("normal"),     # ← runs anyway (detour resumes here)
-    Step("spam"),       # ← runs anyway
+    Step("normal"),     # ← runs after urgent (linear from urgent's position)
+    Step("spam"),       # ← runs after normal
 )
 ```
 
-What happens at runtime:
+What happens at runtime when `classifier` picks `"urgent"`:
 
-1. `classifier` runs, picks `"urgent"`
+1. `classifier` runs, `routes_by="severity"` reads `"urgent"` off the
+   typed output, Plan returns `"urgent"` as the next step
 2. Plan jumps to `urgent`, runs it
-3. Plan resumes from the **next declared step after classifier**, which
-   is `urgent` — but it just ran, so it moves on to `normal`
+3. After `urgent` finishes, Plan asks "what's next?". `urgent` itself
+   has no `routes=` / `routes_by=`, and there's no rejoin marker, so
+   the Plan **falls through to linear progression from `urgent`'s
+   declared position** — and the next declared step after `urgent` is
+   `normal`
 4. `normal` runs (you paid for it)
-5. `spam` runs (you paid for that too)
+5. `spam` runs (linear after `normal`)
 
-You wanted *one* branch; you got *all three*. Costs 3× what you expected,
+You wanted *one* branch; you got *three*. Costs 3× what you expected,
 and the final output is `spam`'s, not `urgent`'s.
+
+!!! note "The trap is asymmetric — it depends on which branch fires"
+    Same plan, same wiring, different outcomes purely based on the
+    classifier's choice:
+
+    | `classifier` picks | What actually runs |
+    |---|---|
+    | `"urgent"` | `classifier` → `urgent` → `normal` → `spam` (3 branches!) |
+    | `"normal"` | `classifier` → `normal` → `spam` (2 branches) |
+    | `"spam"`   | `classifier` → `spam` (correct — 1 branch) |
+
+    The plan happens to do the right thing **only when the model picks
+    the *last* declared branch**. Anything else over-runs. Don't try to
+    paper over this by reordering branches by priority — use
+    `after_branches=`.
 
 The fix is one parameter — `after_branches=` — which converts routing
 from a detour into an **exclusive branch with a guaranteed rejoin point**.
