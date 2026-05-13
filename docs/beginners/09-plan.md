@@ -1,5 +1,15 @@
 # Step 9: Explicit DAGs with `Plan` & sentinels
 
+!!! warning "Slow down here"
+    This is the steepest jump in the tutorial. Up to Step 8 every primitive
+    treated **one piece of input + one piece of output per agent**. `Plan`
+    asks you to think about workflows as **explicit data wiring** — which
+    arrow goes where, named at construction time. The mental model
+    changes; the syntax doesn't get harder.
+
+    If you've been only reading, switch to running the examples on this
+    page. It pays off.
+
 `Agent.chain` (Step 7) is great when stage N+1 needs *exactly* stage N's
 output, and nothing else. But the moment a stage needs *more than that* —
 the original user query *plus* the previous draft, or the output of a
@@ -16,13 +26,36 @@ covers advanced features (branching, parallel bands, checkpoints, resume).
 
 ---
 
-## When `chain` isn't enough
+## The moment `chain` fails
 
-Take a familiar example: a writer that needs to consult research **and**
-remember the original user question.
+Picture a real task: *answer the user's question using research the agent
+fetches itself*. With `Agent.chain(researcher, writer)` you'd write:
 
-With `chain`, the writer sees only the researcher's output. The original
-question gets lost:
+```python
+# chain attempt — looks fine until you try it
+pipeline = Agent.chain(researcher, writer)
+pipeline("Why are GPUs better than CPUs for training neural networks?")
+```
+
+Walk through what the `writer` actually sees on its turn:
+
+```text
+[stage 1: researcher]
+  user:      Why are GPUs better than CPUs for training neural networks?
+  assistant: - Massive parallel ALUs ...
+             - High memory bandwidth ...
+             - Tensor-core hardware ...
+
+[stage 2: writer]
+  user:      - Massive parallel ALUs ...   ← all the writer sees
+             - High memory bandwidth ...
+             - Tensor-core hardware ...
+  assistant: GPUs feature massive parallel ALUs and high bandwidth memory ...
+             (a description of the bullets, not an answer to the question)
+```
+
+The writer has lost the original question. It only sees the previous
+stage's output — the data flow that `chain` defines:
 
 ```
 USER QUERY ──► researcher ──► research_bullets ──► writer
@@ -30,9 +63,10 @@ USER QUERY ──► researcher ──► research_bullets ──► writer
                                        Where is the user query?  ✗
 ```
 
-You can work around this with prompt engineering ("the user asked X — your
-input below is the research...") but it's clunky and the model can lose
-track. The clean fix is a Plan with two **explicit data flows**:
+You can hack around this in the writer's system prompt ("treat the input
+as research findings; you'll need to remember what was asked"), but
+that's fragile. The clean fix is a workflow with **two arrows feeding the
+writer** — the user query *and* the research:
 
 ```
 USER QUERY ──┬──► researcher ──► research_bullets ──┐
@@ -40,8 +74,8 @@ USER QUERY ──┬──► researcher ──► research_bullets ──┐
              └──────────── (original) ─────────► writer
 ```
 
-Two arrows feeding the writer. That shape doesn't fit `chain` — it fits
-`Plan`.
+That shape doesn't fit `chain` — `chain` only knows one arrow per stage.
+It fits `Plan`.
 
 ---
 
@@ -63,53 +97,81 @@ pipeline = Agent(
 )
 ```
 
-This is **literally what `Agent.chain(researcher, writer)` does internally** —
-`chain` is just sugar over a linear Plan. The interesting bits start once
-you have *more than one* data flow to wire.
+This is literally what `Agent.chain(researcher, writer)` does internally —
+`chain` is sugar over a linear Plan. The interesting bits start when you
+have *more than one* data flow to wire (the case the chain just failed
+on).
 
 Notice three things:
 
-- **`Step("researcher")`** names the step. The name must match an agent in
-  `tools=[...]` (or you pass `target=agent` directly).
+- **`Step("researcher")`** names the step. The name must match an agent
+  in `tools=[...]` (or you pass `target=agent` directly).
 - **`tools=[researcher, writer]`** on the outer Agent is the *registry*
-  Plan steps look up. Same `tools=` you've seen since Step 4 — agents are
-  tools.
-- **`task=from_prev`** says "the task for this step is the previous step's
-  output". `from_prev` is your first sentinel.
+  Plan steps look up. Same `tools=` you've seen since Step 4 — agents
+  are tools.
+- **`task=from_prev`** says "the task for this step is the previous
+  step's output". `from_prev` is your first sentinel.
 
 ---
 
-## Sentinels — the data flow markers
+## Sentinels — answer three questions per step
 
-Sentinels are tiny, type-safe markers that say *where* a step's input comes
-from. They're imported from the top-level `lazybridge` namespace.
+Sentinels are tiny, type-safe markers that say *where* a step's input
+comes from. They're imported from the top-level `lazybridge` namespace.
 
-The four you'll use most:
+Don't memorise a tabular taxonomy. For every step in a Plan, just answer
+these three questions:
 
-| Sentinel | What it returns | Example |
+**1. What's the *main task* this step receives?**
+This becomes the user-message the step's agent sees. Default: the
+previous step's output. Possible answers:
+
+- `from_prev` — the immediately previous step's output *(default)*
+- `from_start` — the original task that entered the Plan
+- `from_step("name")` — a *specific* earlier step's output (not
+  necessarily the previous one)
+
+**2. Does it need *extra context* from somewhere else?**
+This is sent alongside the task. Default: nothing. Same vocabulary as
+question 1, plus the option to pass a list to combine multiple sources:
+
+- `context=from_step("researcher")`
+- `context=[from_step("researcher"), from_step("auditor")]`
+
+**3. Is the data from this run, or from a *previous* run?**
+Almost always "this run" — leave this alone until you need it. If you
+need cross-run data:
+
+- `from_agent("name")` — that agent's last persisted output (requires a
+  `Store`)
+- `from_memory("name")` — that agent's live conversation memory
+
+That's it. Three questions, four sentinels you'll use 95% of the time
+(`from_prev`, `from_start`, `from_step`, plus occasional `from_agent`).
+
+| Sentinel | What it returns | Where you'll see it |
 |---|---|---|
-| `from_prev` | The output of the **immediately preceding** step | `task=from_prev` |
-| `from_step("name")` | The output of a **specific named** earlier step | `context=from_step("researcher")` |
-| `from_start` | The **original task** that entered the Plan | `task=from_start` |
-| `from_agent("name")` | The agent's **last persisted output** (cross-run, needs a `Store`) | Advanced — see Guides |
+| `from_prev` | Immediately previous step's output | `task=from_prev` — the default, often omitted |
+| `from_step("name")` | A specific named earlier step's output | `task=` or `context=` for any non-default flow |
+| `from_start` | The original task that entered the Plan | Step needs the *user's query*, not a derived one |
+| `from_agent("name")` | An agent's last persisted output (cross-run) | Long-lived workflows with a `Store` |
 
-Sentinels don't carry data — they're *references*. The Plan compiler reads
-them at construction time and validates them against the step names you've
-declared. If you typo a name (`from_step("researcer")`) the Plan raises a
-`PlanCompileError` immediately — not at runtime, not three minutes into a
-billing run.
+Sentinels don't carry data — they're *references*. The Plan compiler
+reads them at construction time and validates them against the step
+names you've declared. If you typo a name (`from_step("researcer")`)
+the Plan raises a `PlanCompileError` immediately — not at runtime, not
+three minutes into a billing run.
 
 ---
 
 ## Two channels per step — `task=` vs `context=`
 
-This is the part that makes Plan *do something chain can't*. Each `Step`
-takes up to two data inputs:
+The two questions above map to two parameters on `Step`:
 
 ```python
 Step("writer",
-     task=from_start,                  # the user message the writer will see
-     context=from_step("researcher"))  # extra info appended/system-attached
+     task=from_start,                  # answer to Q1: the user message
+     context=from_step("researcher"))  # answer to Q2: extra info alongside
 ```
 
 | Channel | Conceptually | Default |
