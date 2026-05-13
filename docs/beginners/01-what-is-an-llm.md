@@ -74,6 +74,11 @@ Why does this matter? Because:
 | `gemini-3-flash-preview` | 1 M tokens | cheap |
 | `claude-opus-4-7` | 200 K tokens | expensive |
 
+!!! tip "Don't memorise these"
+    In LazyBridge you'll usually pick a **tier** (`cheap` / `medium` /
+    `top`), not a specific model id. The provider resolves the tier to its
+    current best SKU. Step 3 introduces this.
+
 ### 2. Messages (the conversation format)
 
 Every API call passes a list of **messages**. Each message has a `role` and `content`:

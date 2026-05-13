@@ -32,6 +32,64 @@ That last point matters more than it looks. Let's unpack it.
 
 ---
 
+## Don't pick a model — pick a tier
+
+You don't have to memorise model names. LazyBridge has a small set of
+**tier aliases** that each provider maps to its current best SKU. Use them
+in everyday code; pin a specific model string only when an example tests a
+model-specific behaviour.
+
+```python
+from lazybridge import Agent
+
+agent = Agent.from_provider("anthropic", tier="top")           # smartest Anthropic model
+result = agent("What is the capital of France?")
+print(result.text())
+```
+
+`Agent.from_provider` is shorthand for `Agent(engine=LLMEngine(<resolved-model>))`.
+The tier name expands at construction time — *and stays current as
+providers ship new SKUs*. You don't rewrite your code when Anthropic
+releases the next Opus.
+
+The five tier aliases, ordered cheapest → smartest:
+
+| Tier | Use when | Anthropic | OpenAI | Google | DeepSeek |
+|---|---|---|---|---|---|
+| `super_cheap` | High-volume classification, simple extraction | (uses `cheap`) | `gpt-5.4-nano` | (uses `cheap`) | `deepseek-v4-flash` |
+| `cheap` | Tools dispatch, summaries, drafts | `claude-haiku-4-5` | `gpt-5.4-nano` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
+| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-haiku-4-5` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
+| `expensive` | Complex reasoning, long-context work | `claude-opus-4-7` | `gpt-5.4` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+| `top` | Best available — production-critical, hard problems | `claude-opus-4-7` | `gpt-5.4-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+
+Use them like this:
+
+```python
+draft_agent  = Agent.from_provider("anthropic", tier="cheap")    # bulk drafts
+final_agent  = Agent.from_provider("anthropic", tier="top")      # final pass
+multi_model  = Agent.from_provider("openai",    tier="medium")   # one-string swap to OpenAI
+```
+
+!!! tip "When to pin a specific model id"
+    Tier aliases follow each provider's current SKU. **Pin** a specific
+    model string (e.g. `"claude-opus-4-7"`) only when:
+
+    - You're writing a recipe that needs reproducible behaviour for a
+      specific model
+    - You're testing a model-specific feature (e.g. extended thinking on
+      `claude-opus-4-7`)
+    - Compliance / audit requires a frozen model id
+
+    For everything else — *especially your own everyday code* — use
+    `tier=`. It's the beginner-friendly default and the production-friendly
+    one too.
+
+In the rest of this tutorial we'll mix both forms: tier aliases for code
+you'd write daily, pinned model strings when the example illustrates a
+specific point.
+
+---
+
 ## What `result` actually is — the Envelope
 
 `agent(...)` does not return a plain string. It returns an **`Envelope`** — an object
@@ -368,7 +426,8 @@ model string and that's it.
 
 | Concept | Syntax | What it gives you |
 |---|---|---|
-| Build an agent | `Agent(engine=LLMEngine("..."))` | A callable LLM wrapper |
+| Build an agent (pinned model) | `Agent(engine=LLMEngine("..."))` | Use when you need a specific SKU |
+| Build an agent (tier) | `Agent.from_provider("anthropic", tier="top")` | Beginner-friendly; stays current as providers ship new SKUs |
 | System prompt | `LLMEngine("...", system="...")` | Stable persona / rules |
 | Run it | `agent(prompt)` | Returns an `Envelope` |
 | Get the text | `result.text()` | Final assistant string |
