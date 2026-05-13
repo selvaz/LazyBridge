@@ -116,6 +116,15 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - For Beginners:
+      - Start here: beginners/index.md
+      - "Step 1: What is an LLM?": beginners/01-what-is-an-llm.md
+      - "Step 2: Raw SDKs compared": beginners/02-raw-sdks.md
+      - "Step 3: Your first agent": beginners/03-first-agent.md
+      - "Step 4: Giving your agent tools": beginners/04-tools.md
+      - "Step 5: Multiple agents": beginners/05-multi-agent.md
+      - "Step 6: LazyBridge vs LangGraph vs CrewAI": beginners/06-vs-frameworks.md
+      - "Step 7: Where to go next": beginners/07-next-steps.md
   - Concepts:
       - Mental model: concepts/mental-model.md
       - Everything is a tool: concepts/everything-is-a-tool.md
