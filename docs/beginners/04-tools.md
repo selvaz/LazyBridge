@@ -163,6 +163,127 @@ You never wrote a routing rule.
 
 ---
 
+## Provider-hosted tools — no function to write
+
+Everything above involved **you** writing a Python function. But some
+tools don't need that — modern LLM providers ship built-in capabilities
+their own infrastructure runs for you. **Web search** is the killer one:
+no API key for a search backend, no rate-limit handling, no scraping
+logic. You ask, the model searches, you get an answer with citations.
+
+LazyBridge exposes these as **`native_tools=`**:
+
+```python
+from lazybridge import Agent, LLMEngine, NativeTool
+
+researcher = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    native_tools=[NativeTool.WEB_SEARCH],     # ← provider runs the search
+    name="researcher",
+)
+
+print(researcher("What were the major AI agent framework releases in 2026?").text())
+```
+
+That's the whole feature. No `def search_web(...)` to write, no API
+account to sign up for, no JSON to parse. The model decides when to
+search, the provider runs the search, and the results are folded back
+into the conversation automatically — exactly like a regular tool call,
+but the *whole* round-trip happens server-side.
+
+### `tools=` vs `native_tools=` — the two channels
+
+| | `tools=[fn]` | `native_tools=[NativeTool.X]` |
+|---|---|---|
+| Who runs the code | **LazyBridge** runs it in your process | The **provider** runs it server-side |
+| Examples | your Python functions, sub-agents, MCP servers | `WEB_SEARCH`, `CODE_EXECUTION`, `COMPUTER_USE` |
+| Cost | LLM tokens only | LLM tokens **+** provider's per-use fee for the native tool |
+| Use when | you control the action; need custom logic | the provider already does it well — no point reimplementing |
+
+You can pass **both** — `tools=[your_fns]` and `native_tools=[...]` —
+on the same agent. The model picks whichever fits each step.
+
+### Dangerous native tools
+
+Some natively-hosted tools (`CODE_EXECUTION`, `COMPUTER_USE`) can run
+arbitrary code or click around a browser. LazyBridge requires an
+explicit opt-in:
+
+```python
+analyst = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    native_tools=[NativeTool.CODE_EXECUTION],
+    allow_dangerous_native_tools=True,        # ← intentional, noisy flag
+)
+```
+
+Without `allow_dangerous_native_tools=True`, constructing the agent
+raises a `ValueError`. The flag is intentionally annoying — it's the
+only signal you understand that the model can now execute arbitrary
+Python in a sandbox.
+
+`WEB_SEARCH` is **not** dangerous and doesn't need the flag.
+
+### A tiny "plug and play" pipeline
+
+Native tools really shine inside a chain. Pair a search-equipped
+researcher with a plain summariser and you have a one-line news pipeline:
+
+```python
+from lazybridge import Agent, LLMEngine, NativeTool
+
+researcher = Agent(
+    engine=LLMEngine(
+        "claude-opus-4-7",
+        system="Look up current information via web search. "
+               "Return 5-8 bullet points with source URLs.",
+    ),
+    native_tools=[NativeTool.WEB_SEARCH],
+    name="researcher",
+)
+
+summariser = Agent(
+    engine=LLMEngine(
+        "claude-haiku-4-5",
+        system="Write a tight one-paragraph briefing (80-120 words) "
+               "from the research bullets. Keep the source links.",
+    ),
+    name="summariser",
+)
+
+briefing_pipeline = Agent.chain(researcher, summariser)
+
+print(briefing_pipeline("AI agent framework releases this week").text())
+```
+
+What you didn't write:
+
+- Search backend integration (no Serper / Tavily / Google CSE setup)
+- Result parsing, deduplication, citation threading
+- Retry on rate-limits
+- A tool definition, a tool schema, a tool dispatch loop
+
+What's still yours:
+
+- The system prompts (the rules the agents follow)
+- The pipeline shape (you decided two stages)
+- The cost — `WEB_SEARCH` adds a per-search fee on top of normal token
+  costs; check your provider's pricing
+
+This pattern — **native web search in a chain** — covers a surprising
+range of practical tasks: market research, competitive monitoring,
+fact-checked drafts, "what's the current state of X" workflows. We'll
+return to it in Step 7 when we cover `Agent.chain` formally.
+
+!!! tip "What other native tools exist?"
+    `NativeTool.WEB_SEARCH` is the most widely supported one (Anthropic,
+    OpenAI, Google all offer it). Others (`CODE_EXECUTION`,
+    `COMPUTER_USE`, `FILE_SEARCH`, `IMAGE_GENERATION`) vary by
+    provider. See [Native tools guide](../guides/basic/native-tools.md)
+    for the current provider-by-provider matrix.
+
+---
+
 ## Explicit control — `Tool.wrap`
 
 The raw-function form is the fast path. When you need control — a clearer
@@ -523,6 +644,8 @@ properly in Step 5.
 | Define a tool | A normal Python function with type hints + docstring | Auto-generated schema |
 | Wire it up | `Agent(..., tools=[my_function])` | The LLM can call it |
 | Multiple tools | `tools=[a, b, c]` | Model picks which to call |
+| Provider-hosted tool | `native_tools=[NativeTool.WEB_SEARCH]` | Zero-code search, code-exec etc. — provider runs it |
+| Dangerous native tool | `allow_dangerous_native_tools=True` | Opt-in for `CODE_EXECUTION` / `COMPUTER_USE` |
 | Explicit metadata | `Tool.wrap(fn, name=..., description=...)` | Override for clarity |
 | Trace the loop | `Agent(..., verbose=True)` | See each tool call live |
 | Cap the loop | `LLMEngine(..., max_turns=N)` | Prevent runaway calls |
