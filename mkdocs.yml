@@ -123,11 +123,13 @@ nav:
       - "Step 3: Your first agent": beginners/03-first-agent.md
       - "Step 4: Giving your agent tools": beginners/04-tools.md
       - "Step 5: Why multi-agent + sub-agent as tool": beginners/05-multi-agent.md
-      - "Step 6: Sequential pipelines (Agent.chain)": beginners/06-chain.md
-      - "Step 7: Parallel work (Agent.parallel)": beginners/07-parallel.md
-      - "Step 8: Explicit DAGs (Plan & sentinels)": beginners/08-plan.md
-      - "Step 9: LazyBridge vs LangGraph vs CrewAI": beginners/09-vs-frameworks.md
-      - "Step 10: Where to go next": beginners/10-next-steps.md
+      - "Step 6: Cross-model verification (verify=)": beginners/06-verify.md
+      - "Step 7: Sequential pipelines (Agent.chain)": beginners/07-chain.md
+      - "Step 8: Parallel work (Agent.parallel)": beginners/08-parallel.md
+      - "Step 9: Explicit DAGs (Plan & sentinels)": beginners/09-plan.md
+      - "Step 10: Human in the loop (HumanEngine)": beginners/10-human-engine.md
+      - "Step 11: LazyBridge vs LangGraph vs CrewAI": beginners/11-vs-frameworks.md
+      - "Step 12: Where to go next": beginners/12-next-steps.md
   - Concepts:
       - Mental model: concepts/mental-model.md
       - Everything is a tool: concepts/everything-is-a-tool.md

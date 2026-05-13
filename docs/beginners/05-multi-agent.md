@@ -221,7 +221,11 @@ Use it when **the right sequence depends on the input**.
 
 When the sequence is *always the same* — research, then write, then polish —
 you don't want the parent paying tokens to "decide" the same routing every
-time. That's what `Agent.chain` is for — Step 6.
+time. That's what `Agent.chain` is for, coming up in Step 7.
+
+But first: there's a more powerful use of sub-agents that LazyBridge makes
+trivial — **using a different LLM as a judge** to verify the primary agent's
+output. That's Step 6.
 
 ---
 
@@ -234,11 +238,11 @@ time. That's what `Agent.chain` is for — Step 6.
 | Cost rollup | `env.metadata.cost_usd` | Aggregate across all nested agents |
 | Trace | `verbose=True` | Nested indented log of every delegation |
 
-You've got the **flexible** composition primitive. Next we tackle the
-**deterministic** one — for the workflows that don't change shape.
+You've got the **flexible** composition primitive. Next: using a second agent
+not as a tool, but as a **judge** — cross-model verification.
 
 ---
 
-[**Step 6: Sequential pipelines with `Agent.chain` →**](06-chain.md){ .md-button .md-button--primary }
+[**Step 6: Cross-model verification with `verify=` →**](06-verify.md){ .md-button .md-button--primary }
 
 [← Step 4: Giving your agent tools](04-tools.md){ .md-button }

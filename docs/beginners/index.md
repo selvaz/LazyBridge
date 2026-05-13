@@ -18,11 +18,13 @@ Step 2  → What does raw SDK code look like? (OpenAI / Anthropic / Gemini)
 Step 3  → Your first LazyBridge agent — every line explained
 Step 4  → Giving your agent tools (so it can actually do things)
 Step 5  → Why multi-agent + sub-agent as a tool (the flexible pattern)
-Step 6  → Sequential pipelines with Agent.chain
-Step 7  → Parallel work with Agent.parallel
-Step 8  → Explicit DAGs with Plan & sentinels
-Step 9  → LazyBridge vs LangGraph vs CrewAI — which one for what
-Step 10 → Where to go next
+Step 6  → Cross-model verification with verify=  (let Claude judge GPT)
+Step 7  → Sequential pipelines with Agent.chain
+Step 8  → Parallel work with Agent.parallel
+Step 9  → Explicit DAGs with Plan & sentinels
+Step 10 → Human in the loop with HumanEngine
+Step 11 → LazyBridge vs LangGraph vs CrewAI — which one for what
+Step 12 → Where to go next
 ```
 
 Each step builds on the previous one. Skip ahead if you already know a topic,
