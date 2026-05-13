@@ -249,7 +249,125 @@ Blade Runner 2049 — 9/10
 
 ---
 
-## Summary
+## Structured output — raw SDKs vs LazyBridge
+
+Since structured output is one of the biggest practical wins, here's the same
+`CapitalInfo` task with each major SDK so you can see what LazyBridge actually
+spares you.
+
+The Pydantic model is identical across all four:
+
+```python
+from pydantic import BaseModel, Field
+
+class CapitalInfo(BaseModel):
+    city: str
+    country: str
+    population_millions: float = Field(..., description="Approximate, in millions")
+```
+
+### OpenAI (Responses API, `.parse()` helper)
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+response = client.responses.parse(
+    model="gpt-5.4-mini",
+    instructions="Return capital info.",
+    input="What is the capital of France?",
+    text_format=CapitalInfo,            # OpenAI-specific kwarg
+)
+
+info: CapitalInfo = response.output_parsed
+```
+
+What you still own: retry on validation failure (the `.parse()` helper raises if
+the model deviates from the schema), provider-specific error handling, switching
+to a different provider means rewriting the call.
+
+### Anthropic (tool-call workaround)
+
+Anthropic has no native "give me a Pydantic object" endpoint. The canonical
+pattern is forcing a tool call with the schema as its input:
+
+```python
+import anthropic
+from pydantic import BaseModel
+
+client = anthropic.Anthropic()
+
+response = client.messages.create(
+    model="claude-haiku-4-5",
+    max_tokens=256,
+    tools=[{
+        "name": "record_capital_info",
+        "description": "Record capital city info.",
+        "input_schema": CapitalInfo.model_json_schema(),   # generate the schema
+    }],
+    tool_choice={"type": "tool", "name": "record_capital_info"},
+    messages=[{"role": "user", "content": "What is the capital of France?"}],
+)
+
+# Find the tool_use block in response.content and validate manually
+tool_block = next(b for b in response.content if b.type == "tool_use")
+info: CapitalInfo = CapitalInfo.model_validate(tool_block.input)
+```
+
+What you still own: writing the synthetic tool, the `tool_choice` boilerplate,
+finding the right content block, manual `model_validate()`, retry-on-failure.
+
+### Gemini
+
+Gemini does have native structured output via `response_schema=`:
+
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client()
+
+response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents="What is the capital of France?",
+    config=types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=CapitalInfo,
+    ),
+)
+
+info: CapitalInfo = response.parsed
+```
+
+What you still own: the `config=` object, the mime-type string, switching providers
+means rewriting the call.
+
+### LazyBridge
+
+```python
+from lazybridge import Agent, LLMEngine
+
+agent = Agent(engine=LLMEngine("claude-haiku-4-5"), output=CapitalInfo)
+info: CapitalInfo = agent("What is the capital of France?").payload
+```
+
+One kwarg: `output=CapitalInfo`. Provider auto-routed; retry on validation
+failure happens automatically (default `max_output_retries=2`); the *same code*
+works on Claude, GPT, Gemini, DeepSeek, or any custom provider — change the
+model string and that's it.
+
+### Side-by-side cost
+
+| | OpenAI Responses | Anthropic | Gemini | LazyBridge |
+|---|:---:|:---:|:---:|:---:|
+| Lines to set up | ~7 | ~13 | ~9 | **2** |
+| Manual schema generation | hidden | yes (`.model_json_schema()`) | hidden | hidden |
+| Manual response parsing | no (`.parse()`) | yes | no (`.parsed`) | no (`.payload`) |
+| Built-in validation retry | no | no | no | **yes** |
+| Provider switch | rewrite call | rewrite call | rewrite call | change one string |
+
+
 
 | Concept | Syntax | What it gives you |
 |---|---|---|
