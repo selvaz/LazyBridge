@@ -160,51 +160,37 @@ export ANTHROPIC_API_KEY="sk-ant-..."    # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, LLMEngine
 
-summary = Agent("claude-haiku-4-5")(
-    f"As a concise technical writer, summarise this in 3 bullet points:\n\n{TEXT}"
-).text()
-
+agent = Agent(engine=LLMEngine("claude-haiku-4-5", system="You are a concise technical writer."))
+summary = agent(f"Summarise this in exactly 3 bullet points:\n\n{TEXT}").text()
 print(summary)
 ```
 
-Three logical lines. That's it.
+Three lines. That's it.
 
 **Switch to OpenAI? Change one string:**
 
 ```python
-Agent("gpt-5.4-mini")(prompt).text()
+agent = Agent(engine=LLMEngine("gpt-5.4-mini", system="You are a concise technical writer."))
 ```
 
 **Switch to Gemini:**
 
 ```python
-Agent("gemini-3-flash-preview")(prompt).text()
+agent = Agent(engine=LLMEngine("gemini-3-flash-preview", system="You are a concise technical writer."))
 ```
 
 The rest of your code stays identical.
 
-!!! tip "Reading the one-liner"
-    `Agent("claude-haiku-4-5")` builds an agent. The second `(...)` immediately
-    *calls* that agent with a prompt — same syntax as calling any Python function.
-    `.text()` extracts the final string from the result envelope.
+!!! tip "Reading the call"
+    `Agent(engine=LLMEngine(...))` is the canonical form. `LLMEngine` wraps the model
+    + its config (`system=`, `max_turns=`, `temperature=`, ...). `Agent` adds the
+    runtime around it: tool dispatch, retries, observability.
 
-    The string shortcut expands to `Agent(engine=LLMEngine("claude-haiku-4-5"))` —
-    use the explicit form when you need a persistent `system=` prompt, `max_turns=`,
-    or other engine config:
-
-    ```python
-    from lazybridge import Agent, LLMEngine
-
-    agent = Agent(engine=LLMEngine(
-        "claude-haiku-4-5",
-        system="You are a concise technical writer.",
-    ))
-    summary = agent("Summarise this in 3 bullet points: ...").text()
-    ```
-
-    Both forms produce the same kind of agent — pick whichever reads better.
+    Calling `agent(prompt)` runs the agent; `.text()` extracts the final string from
+    the result envelope. (The envelope also carries cost, tokens, latency, and any
+    typed payload — see Step 3.)
 
 ---
 
