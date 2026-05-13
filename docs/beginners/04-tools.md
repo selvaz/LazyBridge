@@ -234,6 +234,213 @@ prevents runaway tool-calling if the model gets confused.
 
 ---
 
+## The same tool — across SDKs
+
+Every SDK supports tool calling. Here's the **exact same `get_weather` example**
+written end-to-end with each one, so you can see the real cost of the abstraction
+you're paying for. Expand each card to read the code.
+
+??? example "OpenAI SDK (Responses API)"
+
+    ```python
+    import json
+    from openai import OpenAI
+
+    client = OpenAI()
+
+    tools = [{
+        "type": "function",
+        "name": "get_weather",
+        "description": "Return the current weather forecast for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }]
+
+    def get_weather(city: str) -> str:
+        return f"In {city} the weather is 22°C and sunny."
+
+    messages = [{"role": "user", "content": "What's the weather in Rome?"}]
+    response = client.responses.create(
+        model="gpt-5.4-mini",
+        input=messages,
+        tools=tools,
+    )
+
+    # Manual loop until the model stops asking for tools
+    while True:
+        tool_calls = [item for item in response.output if item.type == "function_call"]
+        if not tool_calls:
+            break
+        for call in tool_calls:
+            args = json.loads(call.arguments)
+            result = get_weather(**args)
+            messages.append({
+                "type": "function_call_output",
+                "call_id": call.call_id,
+                "output": result,
+            })
+        response = client.responses.create(
+            model="gpt-5.4-mini",
+            input=messages,
+            tools=tools,
+        )
+
+    print(response.output_text)
+    ```
+
+    You own: writing the schema, parsing arguments, the loop, terminating
+    correctly, parallel tool calls if the model emits them.
+
+??? example "Anthropic SDK"
+
+    ```python
+    from anthropic import Anthropic
+
+    client = Anthropic()
+
+    tools = [{
+        "name": "get_weather",
+        "description": "Return the current weather forecast for a city.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }]
+
+    def get_weather(city: str) -> str:
+        return f"In {city} the weather is 22°C and sunny."
+
+    messages = [{"role": "user", "content": "What's the weather in Rome?"}]
+
+    response = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        tools=tools,
+        messages=messages,
+    )
+
+    while response.stop_reason == "tool_use":
+        # Append the assistant turn (carries tool_use blocks)
+        messages.append({"role": "assistant", "content": response.content})
+        # Run each requested tool and build the user-side tool_result reply
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = get_weather(**block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+        messages.append({"role": "user", "content": tool_results})
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1024,
+            tools=tools,
+            messages=messages,
+        )
+
+    # Final assistant text (last text block of the final turn)
+    print(next(b.text for b in response.content if b.type == "text"))
+    ```
+
+    You own: writing `input_schema`, threading the `tool_use_id` correctly,
+    constructing the `tool_result` reply in Anthropic's specific block format,
+    detecting `stop_reason == "tool_use"` as the loop condition.
+
+??? example "Google Gemini SDK (Automatic Function Calling)"
+
+    Gemini's Python SDK has an "automatic function calling" mode that runs the
+    loop for you — closer to LazyBridge for the simple case, still
+    provider-locked.
+
+    ```python
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client()
+
+    def get_weather(city: str) -> str:
+        """Return the current weather forecast for a city."""
+        return f"In {city} the weather is 22°C and sunny."
+
+    chat = client.chats.create(
+        model="gemini-2.0-flash",
+        config=types.GenerateContentConfig(
+            tools=[get_weather],
+            system_instruction="You are a helpful assistant.",
+        ),
+    )
+
+    response = chat.send_message("What's the weather in Rome?")
+    print(response.text)
+    ```
+
+    AFC mode handles the loop. Limitations: parallel-call support depends on
+    the model SKU; you still have to manage `config=` shape, and switching
+    providers means rewriting everything.
+
+??? example "LangGraph (`create_react_agent`)"
+
+    ```python
+    from langchain_core.tools import tool
+    from langchain_anthropic import ChatAnthropic
+    from langgraph.prebuilt import create_react_agent
+
+    @tool
+    def get_weather(city: str) -> str:
+        """Return the current weather forecast for a city."""
+        return f"In {city} the weather is 22°C and sunny."
+
+    model = ChatAnthropic(model="claude-haiku-4-5")
+
+    agent = create_react_agent(
+        model,
+        tools=[get_weather],
+        prompt="You are a helpful assistant.",
+    )
+
+    result = agent.invoke({
+        "messages": [{"role": "user", "content": "What's the weather in Rome?"}],
+    })
+
+    # Final answer is the last message in the chain
+    print(result["messages"][-1].content)
+    ```
+
+    Reads cleanly for the happy path. The cost: you opt into the entire LangChain
+    object hierarchy (`@tool` decorator, `ChatAnthropic` adapter, `messages` dict
+    schema, `result["messages"][-1].content` plucking, plus every transitive
+    LangChain dependency). Customising the loop or the state means descending
+    into LangGraph's `StateGraph` API.
+
+??? example "LazyBridge (for comparison)"
+
+    ```python
+    from lazybridge import Agent, LLMEngine
+
+    def get_weather(city: str) -> str:
+        """Return the current weather forecast for a city."""
+        return f"In {city} the weather is 22°C and sunny."
+
+    agent = Agent(
+        engine=LLMEngine("claude-haiku-4-5", system="You are a helpful assistant."),
+        tools=[get_weather],
+    )
+
+    print(agent("What's the weather in Rome?").text())
+    ```
+
+    Type-hinted function + `tools=[fn]`. The loop, schema generation, tool
+    dispatch, and parallel tool calls are built in. Swap to `gpt-5.4-mini` or
+    `gemini-3-flash-preview` by changing one string.
+
+---
+
 ## What you skip vs raw SDKs
 
 Every raw SDK supports tool calling — but it's *manual*. Here's what the same
