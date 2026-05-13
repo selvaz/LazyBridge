@@ -160,32 +160,51 @@ export ANTHROPIC_API_KEY="sk-ant-..."    # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent
 
-agent = Agent(
-    engine=LLMEngine(
-        "claude-haiku-4-5",
-        system="You are a concise technical writer.",
-    )
-)
+summary = Agent("claude-haiku-4-5")(
+    f"As a concise technical writer, summarise this in 3 bullet points:\n\n{TEXT}"
+).text()
 
-summary = agent(f"Summarise this in exactly 3 bullet points:\n\n{TEXT}").text()
 print(summary)
 ```
 
-Same result. **Switch to OpenAI? Change one string:**
+Three logical lines. That's it.
+
+**Switch to OpenAI? Change one string:**
 
 ```python
-engine=LLMEngine("gpt-5.4-mini", system="You are a concise technical writer.")
+Agent("gpt-5.4-mini")(prompt).text()
 ```
 
 **Switch to Gemini:**
 
 ```python
-engine=LLMEngine("gemini-3-flash-preview", system="You are a concise technical writer.")
+Agent("gemini-3-flash-preview")(prompt).text()
 ```
 
 The rest of your code stays identical.
+
+!!! tip "Reading the one-liner"
+    `Agent("claude-haiku-4-5")` builds an agent. The second `(...)` immediately
+    *calls* that agent with a prompt — same syntax as calling any Python function.
+    `.text()` extracts the final string from the result envelope.
+
+    The string shortcut expands to `Agent(engine=LLMEngine("claude-haiku-4-5"))` —
+    use the explicit form when you need a persistent `system=` prompt, `max_turns=`,
+    or other engine config:
+
+    ```python
+    from lazybridge import Agent, LLMEngine
+
+    agent = Agent(engine=LLMEngine(
+        "claude-haiku-4-5",
+        system="You are a concise technical writer.",
+    ))
+    summary = agent("Summarise this in 3 bullet points: ...").text()
+    ```
+
+    Both forms produce the same kind of agent — pick whichever reads better.
 
 ---
 
@@ -193,7 +212,7 @@ The rest of your code stays identical.
 
 | | OpenAI SDK | Anthropic SDK | Gemini SDK | LazyBridge |
 |---|:---:|:---:|:---:|:---:|
-| Lines of code (simple call) | ~15 | ~15 | ~15 | **6** |
+| Lines of code (simple call) | ~15 | ~15 | ~15 | **3** |
 | Unified response shape | ✗ | ✗ | ✗ | ✓ `.text()` |
 | Provider switch = 1 string | ✗ | ✗ | ✗ | ✓ |
 | Retry on transient errors | ✗ | ✗ | ✗ | ✓ built-in |
