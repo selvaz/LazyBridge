@@ -256,43 +256,45 @@ you're paying for. Expand each card to read the code.
             "type": "object",
             "properties": {"city": {"type": "string"}},
             "required": ["city"],
+            "additionalProperties": False,
         },
+        "strict": True,
     }]
 
     def get_weather(city: str) -> str:
         return f"In {city} the weather is 22°C and sunny."
 
-    messages = [{"role": "user", "content": "What's the weather in Rome?"}]
+    # First call — model may emit one or more function_call items
     response = client.responses.create(
         model="gpt-5.4-mini",
-        input=messages,
+        input="What's the weather in Rome?",
         tools=tools,
     )
 
-    # Manual loop until the model stops asking for tools
-    while True:
-        tool_calls = [item for item in response.output if item.type == "function_call"]
-        if not tool_calls:
-            break
-        for call in tool_calls:
-            args = json.loads(call.arguments)
-            result = get_weather(**args)
-            messages.append({
-                "type": "function_call_output",
-                "call_id": call.call_id,
-                "output": result,
-            })
+    # If the model asked for a tool, run it and submit the result
+    function_calls = [item for item in response.output if item.type == "function_call"]
+    if function_calls:
+        results = [{
+            "type": "function_call_output",
+            "call_id": call.call_id,
+            "output": get_weather(**json.loads(call.arguments)),
+        } for call in function_calls]
+
         response = client.responses.create(
             model="gpt-5.4-mini",
-            input=messages,
+            previous_response_id=response.id,    # threads the conversation
+            input=results,
             tools=tools,
         )
 
     print(response.output_text)
     ```
 
-    You own: writing the schema, parsing arguments, the loop, terminating
-    correctly, parallel tool calls if the model emits them.
+    You own: writing the JSON schema, parsing `call.arguments`, building the
+    `function_call_output` item shape, threading `previous_response_id`. For
+    multi-step flows where the model calls another tool after seeing the
+    result, wrap the conditional in a `while` until no more `function_call`
+    items appear.
 
 ??? example "Anthropic SDK"
 
@@ -323,20 +325,19 @@ you're paying for. Expand each card to read the code.
         messages=messages,
     )
 
-    while response.stop_reason == "tool_use":
-        # Append the assistant turn (carries tool_use blocks)
-        messages.append({"role": "assistant", "content": response.content})
-        # Run each requested tool and build the user-side tool_result reply
+    # If the model asked for a tool, run it and submit the result
+    if response.stop_reason == "tool_use":
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                result = get_weather(**block.input)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": result,
+                    "content": get_weather(**block.input),
                 })
+        messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
+
         response = client.messages.create(
             model="claude-haiku-4-5",
             max_tokens=1024,
@@ -344,13 +345,13 @@ you're paying for. Expand each card to read the code.
             messages=messages,
         )
 
-    # Final assistant text (last text block of the final turn)
     print(next(b.text for b in response.content if b.type == "text"))
     ```
 
     You own: writing `input_schema`, threading the `tool_use_id` correctly,
     constructing the `tool_result` reply in Anthropic's specific block format,
-    detecting `stop_reason == "tool_use"` as the loop condition.
+    detecting `stop_reason == "tool_use"` and re-invoking until the model
+    stops asking for tools (loop the `if` for multi-step flows).
 
 ??? example "Google Gemini SDK (Automatic Function Calling)"
 
@@ -384,39 +385,59 @@ you're paying for. Expand each card to read the code.
     the model SKU; you still have to manage `config=` shape, and switching
     providers means rewriting everything.
 
-??? example "LangGraph (`create_react_agent`)"
+??? example "LangGraph (vanilla `StateGraph`)"
+
+    A canonical LangGraph tool-calling agent without the `create_react_agent`
+    prebuilt. You define the state, the LLM node, and the tool node yourself,
+    and wire the conditional edges:
 
     ```python
+    from typing import Annotated
+    from typing_extensions import TypedDict
+
     from langchain_core.tools import tool
     from langchain_anthropic import ChatAnthropic
-    from langgraph.prebuilt import create_react_agent
+    from langgraph.graph import StateGraph, START, END
+    from langgraph.graph.message import add_messages
+    from langgraph.prebuilt import ToolNode, tools_condition
+
+
+    class State(TypedDict):
+        messages: Annotated[list, add_messages]
+
 
     @tool
     def get_weather(city: str) -> str:
         """Return the current weather forecast for a city."""
         return f"In {city} the weather is 22°C and sunny."
 
-    model = ChatAnthropic(model="claude-haiku-4-5")
 
-    agent = create_react_agent(
-        model,
-        tools=[get_weather],
-        prompt="You are a helpful assistant.",
-    )
+    tools = [get_weather]
+    llm = ChatAnthropic(model="claude-haiku-4-5").bind_tools(tools)
 
-    result = agent.invoke({
+
+    def chatbot(state: State):
+        return {"messages": [llm.invoke(state["messages"])]}
+
+
+    builder = StateGraph(State)
+    builder.add_node("chatbot", chatbot)
+    builder.add_node("tools", ToolNode(tools=tools))
+    builder.add_conditional_edges("chatbot", tools_condition)
+    builder.add_edge("tools", "chatbot")
+    builder.add_edge(START, "chatbot")
+    graph = builder.compile()
+
+    result = graph.invoke({
         "messages": [{"role": "user", "content": "What's the weather in Rome?"}],
     })
-
-    # Final answer is the last message in the chain
     print(result["messages"][-1].content)
     ```
 
-    Reads cleanly for the happy path. The cost: you opt into the entire LangChain
-    object hierarchy (`@tool` decorator, `ChatAnthropic` adapter, `messages` dict
-    schema, `result["messages"][-1].content` plucking, plus every transitive
-    LangChain dependency). Customising the loop or the state means descending
-    into LangGraph's `StateGraph` API.
+    The cost: you opt into a typed `State` schema, the LangChain wrapper for
+    Anthropic, the `@tool` decorator from `langchain_core`, two prebuilt
+    helpers (`ToolNode`, `tools_condition`), and the explicit `StateGraph`
+    wiring. Powerful for non-trivial flows; heavy for a one-tool agent.
 
 ??? example "LazyBridge (for comparison)"
 
