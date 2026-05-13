@@ -67,17 +67,22 @@ Why does this matter? Because:
 - **There's a limit.** Every model has a **context window** — the maximum number of
   tokens it can process in one call. Go over it and the API returns an error.
 
-| Model | Context window | Rough cost (input) |
+| Model | Context window | Rough input price |
 |---|---|---|
-| `claude-haiku-4-5` | 200 K tokens | very cheap |
-| `gpt-5.4-mini` | 128 K tokens | cheap |
-| `gemini-3-flash-preview` | 1 M tokens | cheap |
-| `claude-opus-4-7` | 200 K tokens | expensive |
+| `claude-haiku-4-5` | 200 K tokens | $ |
+| `gpt-5.4-mini` | 128 K tokens | $ |
+| `gemini-3-flash-preview` | 1 M tokens | $ |
+| `claude-opus-4-7` | 200 K tokens | $$$ |
 
-!!! tip "Don't memorise these"
-    In LazyBridge you'll usually pick a **tier** (`cheap` / `medium` /
-    `top`), not a specific model id. The provider resolves the tier to its
-    current best SKU. Step 3 introduces this.
+(One `$` ≈ sub-dollar per million input tokens; `$$$` ≈ tens of dollars per
+million. Each provider publishes exact prices on its pricing page.)
+
+!!! tip "Don't memorise model ids — pick a *tier* instead"
+    In LazyBridge you'll usually pick a **tier alias** (`super_cheap` /
+    `cheap` / `medium` / `expensive` / `top`), not a specific model id.
+    The provider resolves the alias to its current best SKU automatically.
+    Step 3 introduces this — for now just know the table above is a
+    snapshot, not a memorisation target.
 
 ### 2. Messages (the conversation format)
 

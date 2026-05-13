@@ -67,11 +67,31 @@ The five tier aliases, ordered cheapest → smartest:
 
 | Tier | Use when | Anthropic | OpenAI | Google | DeepSeek |
 |---|---|---|---|---|---|
-| `super_cheap` | High-volume classification, simple extraction | (uses `cheap`) | `gpt-5.4-nano` | (uses `cheap`) | `deepseek-v4-flash` |
-| `cheap` | Tools dispatch, summaries, drafts | `claude-haiku-4-5` | `gpt-5.4-nano` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
-| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-haiku-4-5` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
-| `expensive` | Complex reasoning, long-context work | `claude-opus-4-7` | `gpt-5.4` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
-| `top` | Best available — production-critical, hard problems | `claude-opus-4-7` | `gpt-5.4-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+| `super_cheap` | High-volume classification, simple extraction (legacy SKUs) | `claude-3-haiku` | `gpt-4o-mini` | `gemini-2.5-flash-lite` | `deepseek-v4-flash` |
+| `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-5.4-nano` | `gemini-3.1-flash-lite-preview` | `deepseek-v4-flash` |
+| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
+| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-4-6` | `gpt-5.5` | `gemini-2.5-pro` | `deepseek-v4-pro` |
+| `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-opus-4-7` | `gpt-5.5-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+
+!!! note "How to read the table"
+    - **`top` vs `expensive`** are *both* the provider's flagship class —
+      `top` is whatever's newest (often a preview / extended-reasoning
+      variant), `expensive` is the stable GA-class flagship one notch
+      down. Pick `expensive` for production unless you specifically
+      want `top`'s extra reasoning capacity.
+    - **`medium`** is the default for `from_provider(...)` and the
+      sensible starting point for agent work.
+    - **`super_cheap`** points at *legacy* SKUs (Claude 3 Haiku,
+      GPT-4o-mini, Gemini 2.5 Flash-Lite) — kept around for backwards
+      compatibility and pricing-floor workloads. For new code, prefer
+      `cheap`.
+    - **DeepSeek collapses tiers** to just two SKUs
+      (`deepseek-v4-flash` and `deepseek-v4-pro`); the API is the same
+      so you can write provider-agnostic code without worrying about
+      gaps in the lineup.
+    - Mappings change as providers ship new models — this table is a
+      snapshot. The single source of truth is each provider class's
+      `_TIER_ALIASES` in `lazybridge/core/providers/<provider>.py`.
 
 Use them like this:
 
