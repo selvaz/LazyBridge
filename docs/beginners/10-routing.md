@@ -40,69 +40,101 @@ Three things `chain` can't do:
 The general form:
 
 ```python
-Step("step_name", routes={"target_step": predicate})
+Step("step_name",
+     routes={"target_step": predicate},        # branch table
+     after_branches="rejoin_step")             # ← WHERE the Plan resumes after the branch
 ```
 
-`predicate` is a callable `Envelope -> bool`. After `step_name` runs, the
-Plan evaluates each predicate in declaration order; the first one that
-returns `True` makes the Plan **jump** to that target step.
+Two parameters, one rule each:
 
-A minimal example — retry a search if it returned nothing:
+- **`routes={...}`** — a mapping `{step_name: predicate}`. After
+  `step_name` runs, predicates are evaluated in declared order; the
+  first one returning `True` makes the Plan **jump** to that target
+  step.
+- **`after_branches="..."`** — the step the Plan jumps to once the
+  routed-to branch completes. Without this, control falls through
+  linearly from the routed-to step's position, which is almost never
+  what you want (we'll show why in the next section).
+
+**Always specify where the Plan resumes.** A predicate that doesn't fire
+also has to land somewhere — for predicate-based routing this means
+covering every case explicitly, so the routing decision is exhaustive.
+
+A minimal example — branch on whether the search found anything, and
+always finish on a logging step:
 
 ```python
-from lazybridge import Agent, LLMEngine, Plan, Step
+from pydantic import BaseModel
+from lazybridge import Agent, LLMEngine, Plan, Step, when
 
 
-def web_search(query: str) -> list[str]:
-    """Return a list of result snippets (empty if nothing matched)."""
-    return []   # stub — pretend nothing was found
+class SearchResult(BaseModel):
+    found: bool
+    items: list[str] = []
+
+
+def web_search(query: str) -> SearchResult:
+    """Stub — pretend the search returned nothing."""
+    return SearchResult(found=False, items=[])
 
 
 searcher = Agent(
     engine=LLMEngine("claude-haiku-4-5", system="..."),
     tools=[web_search],
-    output=list[str],                                # typed output
+    output=SearchResult,
     name="searcher",
 )
+reporter = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                  system="Summarise the search hits."),
+                 name="reporter")
+apology  = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                  system="Politely say nothing was found."),
+                 name="apology")
+log_outcome = Agent(engine=LLMEngine("claude-haiku-4-5",
+                                     system="Emit one line of metrics."),
+                    name="log_outcome")
 
-apology = Agent(
-    engine=LLMEngine("claude-haiku-4-5",
-                     system="Politely tell the user no results were found."),
-    name="apology",
-)
-
-reporter = Agent(
-    engine=LLMEngine("claude-haiku-4-5",
-                     system="Summarise the search results."),
-    name="reporter",
-)
 
 pipeline = Agent(
     engine=Plan(
-        Step("searcher", routes={"apology": lambda env: not env.payload}),
-        Step("reporter"),                            # default fall-through target
-        Step("apology"),                             # only runs when routed here
+        Step("searcher",
+             routes={
+                 "reporter": when.field("found").is_(True),       # success branch
+                 "apology":  when.field("found").is_(False),      # failure branch
+             },
+             after_branches="log_outcome"),     # every branch lands here
+        Step("reporter"),
+        Step("apology"),
+        Step("log_outcome"),                    # rejoin terminal — always runs
     ),
-    tools=[searcher, reporter, apology],
+    tools=[searcher, reporter, apology, log_outcome],
     name="pipeline",
 )
 
 print(pipeline("rare-historical-event-from-2026").text())
 ```
 
-Read aloud: *"after searcher runs, if its payload is empty, jump to
-apology — otherwise fall through to reporter."*
+Read aloud — for each outcome, *what runs and in what order*:
 
-!!! info "Why this works without `after_branches=`"
-    Notice **`apology` is the last declared step**. That's not
-    decorative — it's load-bearing. When routing to `apology` fires,
-    `apology` runs and then the Plan walks forward from `apology`'s
-    declared position. Since there's nothing after it, the Plan ends.
+| `searcher` result | Path |
+|---|---|
+| `found=True`  | `searcher` → `reporter` → `log_outcome` → end |
+| `found=False` | `searcher` → `apology`  → `log_outcome` → end |
 
-    Try moving `apology` *before* `reporter` in the list and the
-    pipeline will run `reporter` too — on empty results — which is
-    almost certainly not what you want. The next section explains why,
-    and how `after_branches=` fixes it for any step order.
+Both paths run exactly **two steps after `searcher`**, in the same shape:
+the routed-to branch, then the rejoin terminal. No surprise extras.
+
+!!! warning "Don't write 'half' routing"
+    The temptation is to write just `routes={"apology": when.field("found").is_(False)}`
+    and rely on linear fall-through for the success case. **That's
+    broken.** When the predicate doesn't fire, the Plan walks linearly
+    through every step between the routing step and the end — including
+    your `apology` step, which then *also* runs on success. The next
+    section spells out exactly why.
+
+    Rule of thumb: every routing step needs (1) routes that cover all
+    cases, AND (2) `after_branches=` pointing at a step *after* every
+    branch in the declared order.
 
 ---
 

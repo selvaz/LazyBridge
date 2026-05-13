@@ -99,12 +99,20 @@ declared steps between the routing step and the rejoin point are
 skipped; execution continues at `step_name` after the chosen branch
 completes.
 
-| Pattern | When to use |
-|---|---|
-| **Terminal early-out** | Put the routed-to step *last* in the declared list; after it runs, linear progression has nowhere left to go → Plan ends. |
-| **Mid-pipeline detour** | Route to a step in the middle; after it runs, the pipeline continues from there. |
-| **Loop / self-correction** | Route back to an earlier step; the loop exits once the predicate stops firing. `max_iterations` is the safety net. |
-| **Exclusive branch with rejoin** | Set `after_branches="<rejoin>"` so siblings are skipped; execution always resumes at the named rejoin step. |
+| Pattern | When to use | Resume behaviour |
+|---|---|---|
+| **Exclusive branch with rejoin** *(default for forward routing)* | Predicates cover all outcomes; `after_branches="<rejoin>"` set | Routed branch runs, then jumps to `<rejoin>`; sibling branches are skipped |
+| **Skip optional middle step** | Single forward predicate, routed-to step is the *last* declared *and* serves as the rejoin for the non-routed path too | Routed: jumps over optional steps to the last step. Non-routed: linear, runs intermediate steps, then the last step. Both end at the same place. |
+| **Loop / self-correction** | Backwards route to an earlier step; no `after_branches=` | Route fires → run earlier step → linear walks forward from there until the predicate stops firing. `max_iterations` is the safety net. |
+
+!!! danger "Don't use a single forward predicate without a rejoin"
+    `routes={"X": predicate}` with no `after_branches=` and `X` not at
+    the end of the declared list is **always a bug**. When the predicate
+    doesn't fire, control falls through linearly and runs *every* step
+    between the routing step and the end — including `X` itself. Either
+    cover every outcome with explicit predicates plus `after_branches=`,
+    or use the "Skip optional middle step" pattern where `X` is genuinely
+    the last step.
 
 ## When to use which form
 
@@ -143,29 +151,41 @@ from lazybridge import Agent, LLMEngine, Plan, Step, Store, from_prev, from_star
 
 
 # 1) Form A (predicate map) — empty-search early-out via the when DSL.
+#
+# The routes table covers BOTH outcomes (when.empty() AND when.not_empty())
+# so linear fall-through never fires.  after_branches="log_outcome"
+# guarantees every chosen branch ends at the same rejoin point.  For
+# multi-step branches (e.g. rank → write), wrap them in a nested Plan
+# and pass it as a single Step's target — see the routing.md "Detour vs.
+# exclusive branch" section.
 class Hits(BaseModel):
     items: list[str]
 
 
-searcher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="search")
-ranker = Agent(engine=LLMEngine("gpt-5.4-mini"), name="rank")
-writer = Agent(engine=LLMEngine("gpt-5.4-mini"), name="write")
+searcher      = Agent(engine=LLMEngine("gpt-5.4-mini"), name="search", output=Hits)
+writer        = Agent(engine=LLMEngine("gpt-5.4-mini"), name="write")
 apology_agent = Agent(engine=LLMEngine("gpt-5.4-mini"), name="apology")
+log_outcome   = Agent(engine=LLMEngine("gpt-5.4-mini"), name="log_outcome")
 
 
 plan = Agent(
     engine=Plan(
         Step("search",
              output=Hits,
-             # Branch table: when items is empty, route to "apology"
-             # instead of falling through to "rank".
-             routes={"apology": when.field("items").empty()}),
-        Step("rank",        task="Rank these search hits."),
-        Step("write",       task="Write a 200-word brief.", context=from_step("rank")),
-        Step("apology",     task="Apologise; suggest broader terms."),  # last → terminal
+             routes={
+                 "apology": when.field("items").empty(),       # empty hits
+                 "write":   when.field("items").not_empty(),   # has hits
+             },
+             after_branches="log_outcome"),         # every branch lands here
+        Step("write",       task="Write a 200-word brief from the search hits."),
+        Step("apology",     task="Apologise; suggest broader terms."),
+        Step("log_outcome", task="Emit one line of metrics for this run."),
     ),
-    tools=[searcher, ranker, writer, apology_agent],
+    tools=[searcher, writer, apology_agent, log_outcome],
 )
+# Execution shapes (verified against _routing()):
+#   items=[] (empty):    search → apology → log_outcome
+#   items=[...] (some):  search → write → log_outcome
 
 
 # 2) Form B (routes_by) — LLM-decided triage with exclusive branching.
@@ -233,24 +253,28 @@ plan = Agent(
 )
 
 
-# 4) Lambda escape hatch for one-off predicates.
-classify_hits = Agent(
-    engine=LLMEngine("gpt-5.4-mini"),
-    output=Hits,
-    name="classify",
-)
+# 4) Lambda escape hatch for one-off predicates — still covers BOTH branches
+#    and uses after_branches.  Lambdas don't change the safety contract.
 plan = Agent(
     engine=Plan(
         Step("classify",
-             routes={"apology": lambda env: not env.payload.items}),
-        Step("rank"),
-        Step("apology"),
+             output=Hits,
+             routes={
+                 "apology": lambda env: not env.payload.items,
+                 "rank":    lambda env: bool(env.payload.items),
+             },
+             after_branches="log_outcome"),
+        Step("rank",        task="Rank the search hits."),
+        Step("apology",     task="Apologise; suggest broader terms."),
+        Step("log_outcome", task="Emit metrics."),
     ),
-    tools=[classify_hits, ranker, apology_agent],
+    tools=[searcher, writer, apology_agent, log_outcome],
 )
 
 
-# 5) Custom predicate function for multi-field combinators.
+# 5) Custom predicate function for multi-field combinators — paired with its
+#    explicit complement so coverage is exhaustive.  Skip-on-no-match is a
+#    bug, not a shorthand.
 class Score(BaseModel):
     score: float
     topic: str
@@ -261,23 +285,46 @@ def needs_review(env) -> bool:
     return env.payload.score < 0.5 and env.payload.topic in {"medical", "legal"}
 
 
+def safe_to_auto(env) -> bool:
+    """Catch-all complement of needs_review."""
+    return not needs_review(env)
+
+
 score_classifier = Agent(engine=LLMEngine("gpt-5.4-mini"), output=Score, name="classify")
 auto_agent       = Agent(engine=LLMEngine("gpt-5.4-mini"), name="auto")
 review_agent     = Agent(engine=LLMEngine("gpt-5.4-mini"), name="review")
+audit_agent      = Agent(engine=LLMEngine("gpt-5.4-mini"), name="audit")
 
 plan = Agent(
     engine=Plan(
         Step("classify",
-             routes={"review": needs_review}),
+             routes={
+                 "review": needs_review,
+                 "auto":   safe_to_auto,
+             },
+             after_branches="audit"),
         Step("auto"),
         Step("review"),
+        Step("audit"),     # rejoin terminal — always runs
     ),
-    tools=[score_classifier, auto_agent, review_agent],
+    tools=[score_classifier, auto_agent, review_agent, audit_agent],
 )
 ```
 
 ## Pitfalls
 
+- **The detour trap — single-predicate forward routing.** The
+  single most common bug. `routes={"X": predicate}` only fires
+  *when the predicate is True*. When it's False, the Plan falls
+  through linearly and runs every declared step between the routing
+  step and the end — *including the step you thought was reachable
+  only via routing*. Symptoms: the "branch-only" step runs even on
+  the success path, and the final output comes from the wrong step.
+  Fixes (in order of preference): (1) cover every outcome explicitly
+  with multiple predicates plus `after_branches="<rejoin>"`; (2) use
+  `routes_by="field"` with an exhaustive `Literal[...]` output; (3)
+  use the "skip optional middle step" pattern where the routed-to
+  step is genuinely the last in declared order.
 - **`routes_by` requires `output=` to be a Pydantic model with the
   named field as `Literal[...]` (or `Literal[...] | None`).**
   Anything else fails at construction. The compiler also verifies
