@@ -130,7 +130,7 @@ from google.genai import types
 client = genai.Client()                   # reads GEMINI_API_KEY from env
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     config=types.GenerateContentConfig(
         system_instruction="You are a concise technical writer.",
         max_output_tokens=256,

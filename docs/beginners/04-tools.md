@@ -311,6 +311,7 @@ you're paying for. Expand each card to read the code.
             "properties": {"city": {"type": "string"}},
             "required": ["city"],
         },
+        "strict": True,        # guarantees schema conformance (recommended)
     }]
 
     def get_weather(city: str) -> str:
@@ -369,21 +370,22 @@ you're paying for. Expand each card to read the code.
         """Return the current weather forecast for a city."""
         return f"In {city} the weather is 22°C and sunny."
 
-    chat = client.chats.create(
-        model="gemini-2.0-flash",
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents="What's the weather in Rome?",
         config=types.GenerateContentConfig(
             tools=[get_weather],
             system_instruction="You are a helpful assistant.",
         ),
     )
 
-    response = chat.send_message("What's the weather in Rome?")
     print(response.text)
     ```
 
     AFC mode handles the loop. Limitations: parallel-call support depends on
-    the model SKU; you still have to manage `config=` shape, and switching
-    providers means rewriting everything.
+    the model SKU; you still have to manage the `config=` shape; switching
+    providers means rewriting everything. For multi-turn conversations use
+    `client.chats.create(...)` instead — `generate_content` is the one-shot path.
 
 ??? example "LangGraph (vanilla `StateGraph`)"
 

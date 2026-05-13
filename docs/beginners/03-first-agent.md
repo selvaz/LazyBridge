@@ -326,7 +326,7 @@ from google.genai import types
 client = genai.Client()
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     contents="What is the capital of France?",
     config=types.GenerateContentConfig(
         response_mime_type="application/json",
