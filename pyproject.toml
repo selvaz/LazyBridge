@@ -211,11 +211,11 @@ omit = [
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
-# first-class.  0.7.9: 73 % (current is ~75 %; the 85 % target stays
-# as a Phase 6 goal after we backfill provider-streaming and HIL
-# paths.  The ``report_builder`` extraction (Phase 5, done) already
-# trimmed several heavy modules out of the omit list.
-fail_under = 73
+# first-class.  0.7.9: floor raised to 75 % (current is ~75 %; the
+# 85 % target stays as a Phase 6 goal after we backfill provider-
+# streaming and HIL paths).  Bump the floor by 1 % whenever a release
+# clears the previous bar so regressions surface.
+fail_under = 75
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

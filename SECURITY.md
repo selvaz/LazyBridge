@@ -17,10 +17,13 @@ the arguments, that is a code-execution surface.
 ```python
 # DANGEROUS — LLM-controlled path argument
 import subprocess
+
+from lazybridge import Agent, LLMEngine
+
 def run_cmd(cmd: str) -> str:
     return subprocess.check_output(cmd, shell=True).decode()
 
-agent = Agent("anthropic", tools=[run_cmd])  # DO NOT DO THIS
+agent = Agent(engine=LLMEngine("claude-haiku-4-5"), tools=[run_cmd])  # DO NOT DO THIS
 
 # SAFER — whitelist valid operations instead of passing raw commands
 ALLOWED_COMMANDS = {"status": "git status", "log": "git log --oneline -5"}
@@ -90,7 +93,7 @@ in source code or commit them to version control.
 
 ```python
 # Good — reads from ANTHROPIC_API_KEY env var
-agent = Agent("anthropic")
+agent = Agent.from_provider("anthropic", tier="cheap")
 
 # Bad — key in code
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."  # don't do this

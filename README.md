@@ -1,5 +1,11 @@
 # LazyBridge
 
+[![tests](https://github.com/selvaz/LazyBridge/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/selvaz/LazyBridge/actions/workflows/test.yml)
+[![docs](https://github.com/selvaz/LazyBridge/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/selvaz/LazyBridge/actions/workflows/docs.yml)
+[![CodeQL](https://github.com/selvaz/LazyBridge/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/selvaz/LazyBridge/actions/workflows/codeql.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 > **Status: alpha (0.7.x).** API is intentionally fluid pre-1.0 — see
 > [CHANGELOG](CHANGELOG.md) for breaking changes between minor releases .
 > Pin a minor (`lazybridge>=0.7,<0.8`) in production until 1.0.

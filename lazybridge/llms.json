@@ -1,5 +1,4 @@
 {
-  "$schema": "https://schemas.lazybridge.dev/llms-v1.json",
   "package": "lazybridge",
   "version": "0.7.9",
   "stability": "alpha",

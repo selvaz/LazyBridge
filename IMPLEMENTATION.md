@@ -1,10 +1,14 @@
 # LazyBridge — Implementation tracking (0.7.0 → 1.0)
 
+> **Scope.** This file is a **forward-looking roadmap and audit
+> tracker**, not a release log.  For shipped changes per version
+> see [`CHANGELOG.md`](CHANGELOG.md) (the source of truth).  Items
+> here may be done, in flight, or yet to start; the checkbox state
+> below is best-effort and may lag the actual code.
+>
 > **Status legend.** `[ ]` open · `[~]` in progress · `[x]` done · `[-]` skipped (with reason).
 >
 > **Update protocol.** Each PR ticks at least one checkbox. PR description references the section heading. When a phase's acceptance gate passes, tag the release.
->
-> **Strategic plan**: see `/root/.claude/plans/puoi-verificare-anche-questo-partitioned-marshmallow.md` (planning artifact).
 
 ## Strategic frame
 

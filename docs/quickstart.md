@@ -52,12 +52,16 @@ each argument on its own line: it's what every example in `examples/`
 uses, and it's what you'll extend the moment you need to configure the
 engine (`system=`, `max_turns=`, `thinking=`, …).
 
-Shorter forms exist (`Agent("claude-opus-4-7")` and the
-string-positional shortcut `Agent("claude-opus-4-7")`) but they're
-sugar — they save a line at the cost of hiding which engine the agent
-actually runs. Stick to the canonical form while you're learning;
-reach for sugar only after you can write the canonical version from
+A shorter form exists — `Agent("claude-opus-4-7")` is a positional
+shortcut for `Agent(engine=LLMEngine("claude-opus-4-7"))`.  It saves
+a line at the cost of hiding which engine drives the agent at the
+call site.  Stick to the canonical form while you're learning; reach
+for the shortcut only after you can write the canonical version from
 memory.
+
+(The bare-provider-name form `Agent("anthropic")` was removed in
+0.7.9.x because it left the model id ambiguous at request time — use
+`Agent.from_provider("anthropic", tier="…")` for tier-alias selection.)
 
 Calling `agent(task)` returns an `Envelope` — LazyBridge's typed
 result wrapper that carries the payload, token / cost metadata, error

@@ -13,7 +13,7 @@ Quick start::
 
     meta = build_skill(["./docs", "./reference"], "my-project")
     tools = skill_tools(skill_dir=meta["skill_dir"])
-    resp = Agent("anthropic", tools=tools)("How does X work?")
+    resp = Agent.from_provider("anthropic", tier="medium", tools=tools)("How does X work?")
 
 No extra dependencies required beyond the standard library.
 """

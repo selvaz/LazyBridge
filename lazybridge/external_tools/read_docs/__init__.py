@@ -11,7 +11,7 @@ Quick start::
     from lazybridge.external_tools.read_docs import read_docs_tools
     from lazybridge import Agent
 
-    agent = Agent("anthropic", tools=read_docs_tools())
+    agent = Agent.from_provider("anthropic", tier="medium", tools=read_docs_tools())
     resp = agent("Read /path/to/reports and summarise the Q4 outlook.")
 
 Optional dependencies::

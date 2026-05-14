@@ -116,8 +116,14 @@ class Agent:
         description: str | None = None,
         session: Any | None = None,
         verbose: bool = False,
-        # Convenience: pass provider + model separately
-        # Agent("anthropic", model="top") or Agent("anthropic", model="claude-opus-4-7")
+        # Convenience: pin a specific model id via ``model=`` on the
+        # auto-LLMEngine path.  Only consumed when ``engine=None`` or
+        # ``engine=<model_string>``; passing ``model=`` alongside a
+        # pre-built engine raises (see the model-vs-engine check below).
+        # For tier-alias model selection use ``Agent.from_provider(
+        # "anthropic", tier="top")`` — the bare-provider-name shortcut
+        # ``Agent("anthropic", ...)`` was removed in 0.7.9.x because it
+        # left the model id ambiguous at request time.
         model: str | None = None,
         # Provider-native server-side tools (WEB_SEARCH, CODE_EXECUTION, …).
         # Accepted directly on Agent as a shortcut for
