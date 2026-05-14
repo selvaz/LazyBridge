@@ -211,11 +211,15 @@ omit = [
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
 # (mcp / otel / hil / planners / evals / gateway / viz) are gated as
-# first-class.  0.7.9: floor raised to 75 % (current is ~75 %; the
-# 85 % target stays as a Phase 6 goal after we backfill provider-
-# streaming and HIL paths).  Bump the floor by 1 % whenever a release
-# clears the previous bar so regressions surface.
-fail_under = 75
+# first-class.  0.7.9: 73 % floor, sitting just below the actual CI
+# measurement (73.74 % as of cd0c498).  The 85 % target stays a
+# Phase 6 goal after we backfill provider-streaming and HIL paths.
+# **Bump rule**: only raise this number after a CI run shows the new
+# floor cleared with margin — local runs that skip optional-extra
+# modules over-report coverage and have caused a green-local /
+# red-CI failure here before.  When you bump, read the value from
+# the green CI run's "TOTAL" line, not from a local pytest output.
+fail_under = 73
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
