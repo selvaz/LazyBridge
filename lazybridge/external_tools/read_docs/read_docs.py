@@ -16,7 +16,7 @@ Usage — as a Tool:
     from lazybridge.external_tools.read_docs import read_folder_docs
 
     docs_tool = Tool(read_folder_docs)
-    resp = Agent("anthropic", tools=[docs_tool])(
+    resp = Agent.from_provider("anthropic", tier="medium", tools=[docs_tool])(
         "Summarise all PDFs in /reports",
     )
 

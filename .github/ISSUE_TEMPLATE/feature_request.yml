@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose an API addition or behaviour change.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        LazyBridge is pre-1.0 (`alpha`).  We're aggressive about
+        adding small primitives and conservative about adding new
+        layers of abstraction.  Before filing, check whether your
+        use case is already covered by composition of existing
+        primitives — `Agent.chain` / `Agent.parallel` / `Plan` /
+        `Step` / sentinels / `Store` / `Memory`.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today (or what is awkward to express)?  Concrete example > generic concern.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: The smallest possible addition — ideally a method signature, kwarg, or sentinel — that solves the problem.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Why doesn't an existing primitive solve this?  What did you try?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer should this live in?
+      description: See `docs/guides/core-vs-ext.md`.
+      options:
+        - core (universal Engine/Tools/State primitive)
+        - ext (optional dependency or cross-cutting concern)
+        - external_tools (domain example)
+        - not sure
+    validations:
+      required: true

@@ -51,15 +51,24 @@ jobs:
         run: ruff format --check lazybridge/ tests/
 
   typecheck:
-    name: type check
+    name: type check (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Run the type check against both the ``requires-python`` floor
+    # (3.11) and our recommended runtime (3.12).  The strict-tier
+    # overrides in ``pyproject.toml`` can flag rules differently
+    # between Python versions; pinning both surfaces the drift before
+    # users hit it.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -74,6 +83,9 @@ jobs:
         # Asserts lazybridge/skill/SKILL.md exists, is non-empty, and
         # references every public symbol the skill is expected to teach.
         # See lazybridge/skill_docs/_build.py for the gate semantics.
+        # Only runs once (on 3.12) because the gate doesn't depend on
+        # the Python version.
+        if: matrix.python-version == '3.12'
         run: python -m lazybridge.skill_docs._build --check
 
   unit:

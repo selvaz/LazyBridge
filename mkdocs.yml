@@ -104,6 +104,12 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
+  # Static version chip in the site header.  Bumped manually on each
+  # release in lock-step with ``pyproject.toml``.  When ``mike`` is
+  # wired up for multi-version docs, set ``provider: mike`` here and
+  # drop the manual ``default``.
+  version:
+    default: "0.7.9"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
@@ -166,6 +172,7 @@ nav:
           - GraphSchema: guides/full/graph-schema.md
           - SupervisorEngine: guides/full/supervisor.md
       - Advanced:
+          - Core vs Ext boundary: guides/core-vs-ext.md
           - Engine protocol: guides/advanced/engine-protocol.md
           - BaseProvider: guides/advanced/base-provider.md
           - Providers: guides/advanced/providers.md
@@ -209,8 +216,10 @@ nav:
       - Custom providers: reference/providers.md
       - Configs & testing: reference/configs.md
   - Errors: errors.md
+  - Changelog: changelog.md
   - Migrations:
       - 0.7 → 0.7.9: migrations/0.7-to-0.79.md
+      - 1.0 → 0.7 (version reset): migrations/1.0-to-0.7.md
   - For LLM assistants:
       - Overview: for-llms/index.md
       - Codegen contract: for-llms/codegen-contract.md

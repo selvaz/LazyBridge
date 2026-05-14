@@ -262,6 +262,26 @@ class LLMEngine:
         # _infer_provider can't route on its own).  Falls back to the
         # inference heuristic on the model string.
         self.provider = provider or self._infer_provider(model)
+        # Bare-provider-alias guard.  ``LLMEngine("anthropic")`` resolves
+        # the provider correctly but leaves ``model="anthropic"`` as the
+        # literal request payload, which every real API rejects several
+        # RTTs later with a cryptic "unknown model" error.  The canonical
+        # forms — ``LLMEngine("claude-opus-4-7")`` for a pinned SKU,
+        # ``Agent.from_provider("anthropic", tier="medium")`` for a tier
+        # alias — already cover both intents.  Only fires when ``provider=``
+        # was inferred (not passed explicitly): ``Agent.from_provider``
+        # passes ``provider="anthropic"`` alongside ``model="medium"``,
+        # which is a legitimate tier-alias path and stays allowed.
+        if provider is None and model in self._PROVIDER_ALIASES and self._PROVIDER_ALIASES[model] == model:
+            raise ValueError(
+                f"LLMEngine({model!r}) is ambiguous: {model!r} is a provider name, "
+                f"not a model id.  At request time the provider would be asked for the "
+                f"literal model {model!r} and reject it.\n"
+                f"  Fix (tier alias — tracks the provider's lineup):\n"
+                f'      Agent.from_provider({model!r}, tier="medium")\n'
+                f"  Fix (pinned model id):\n"
+                f'      Agent(engine=LLMEngine("<model-id>"))   # e.g. "claude-opus-4-7"'
+            )
 
     # Provider name aliases accepted as the model argument
     _PROVIDER_NAMES = {

@@ -42,9 +42,12 @@ Both are auto-generated at build time from the
   grouped by section (Concepts / Guides / Recipes / Decisions /
   Reference / Errors). Tools that follow the convention discover
   the corpus from this single URL.
-- `llms-full.txt` is the **whole corpus concatenated** —
-  ~10 thousand lines, ~400 KB. Paste it into a long-context model
-  when you don't have a tool that resolves `llms.txt` for you.
+- `llms-full.txt` is the **whole corpus concatenated** — currently in
+  the 10-15k-line / 500-800 KB range and growing with each release.
+  Paste it into a long-context model when you don't have a tool that
+  resolves `llms.txt` for you.  Treat the size as a lower bound; if
+  your model has a 128k-token window you'll fit comfortably, anything
+  smaller and you should prefer the per-page `llms.txt` resolution path.
 
 See [llms.txt explained](llms-txt.md) for the format spec, who's
 adopting it, and what to expect when an assistant fetches it.

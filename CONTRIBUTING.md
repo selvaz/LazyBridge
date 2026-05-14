@@ -30,7 +30,7 @@ python -m pip install -e '.[docs]'
 
 | Command | Closes which CI job |
 |---|---|
-| `pytest` | unit tests (1610+ in 0.7.9) |
+| `pytest` | unit tests (1500+ in 0.7.9 — run `pytest --collect-only -q \| tail -1` for the live count) |
 | `python -m ruff check lazybridge tests` | lint |
 | `python -m ruff format --check lazybridge tests` | format |
 | `python -m mypy lazybridge` | type-check (default + Phase-4/6 strict tiers) |

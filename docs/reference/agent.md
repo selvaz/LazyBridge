@@ -15,9 +15,13 @@ config dataclasses, `_ParallelAgent`), see the
 
 ## Multimodal content blocks
 
-For mixed-modality inputs (text + image + audio) use these typed
-content blocks inside `Envelope.from_messages(...)`.  Narrative
-coverage lives in [Guides → Mid → Multimodal](../guides/mid/multimodal.md).
+For mixed-modality inputs (text + image + audio), pass `images=` and
+`audio=` kwargs on `agent(...)`, `await agent.run(...)`, or
+`async for chunk in agent.stream(...)`.  Bare URL strings, `Path`
+objects, raw `bytes`, and `dict` payloads are coerced into the typed
+blocks below automatically — use these constructors directly only when
+you need to override the auto-detected MIME type.  Narrative coverage
+lives in [Guides → Mid → Multimodal](../guides/mid/multimodal.md).
 
 ::: lazybridge.ImageContent
 

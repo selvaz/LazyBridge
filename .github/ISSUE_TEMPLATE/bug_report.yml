@@ -1,0 +1,78 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug.  Two things make
+        triage 10x faster: a minimal reproducer and the exact version
+        you're running.  If the bug is a security issue, please use
+        the disclosure path in `SECURITY.md` instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: LazyBridge version
+      description: Output of `python -c "import lazybridge; print(lazybridge.__version__)"`
+      placeholder: "0.7.9"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`
+      placeholder: "3.12.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider involved (if any)
+      multiple: false
+      options:
+        - "n/a — pure framework bug"
+        - anthropic
+        - openai
+        - google
+        - deepseek
+        - litellm
+        - lmstudio
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: The behaviour the docs / type hints / error message led you to expect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Include the full exception type and message if applicable.  Redact API keys.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: A self-contained script (or pytest snippet) that triggers the bug.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, related issues, workarounds you've tried.
+    validations:
+      required: false

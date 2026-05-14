@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://lazybridge.com
+    about: API reference, guides, recipes, decisions, errors page.
+  - name: Security disclosure
+    url: https://github.com/selvaz/LazyBridge/blob/main/SECURITY.md
+    about: Please follow the disclosure path here for security issues — not the public issue tracker.

@@ -71,8 +71,8 @@ mental model is the same.
   [Plan serialization](guides/advanced/plan-serialize.md),
   [OpenTelemetry](guides/advanced/otel.md),
   [Visualizer](guides/advanced/visualizer.md).
-- [**Recipes**](recipes/index.md) — twelve runnable examples
-  from the `examples/` directory, embedded verbatim.
+- [**Recipes**](recipes/index.md) — runnable examples from the
+  `examples/` directory, embedded verbatim.
 - [**Decisions**](decisions/index.md) — nine "which one do I
   use?" decision trees with quick-reference tables.
 - [**Reference**](reference/index.md) — auto-generated API surface

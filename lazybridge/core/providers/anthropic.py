@@ -108,8 +108,8 @@ class AnthropicProvider(BaseProvider):
 
     default_model = "claude-sonnet-4-6"
 
-    # Tier aliases — ``Agent("anthropic", model="top")`` resolves here.
-    # Update this table when new models ship.
+    # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
+    # resolves here.  Update this table when new models ship.
     _TIER_ALIASES = {
         "top": "claude-opus-4-7",
         "expensive": "claude-opus-4-6",  # second tier, same quality family as top

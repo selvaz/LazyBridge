@@ -10,7 +10,7 @@ LazyBridge generates two artefacts at build time:
 | URL | Contents | Use |
 |---|---|---|
 | <https://lazybridge.com/llms.txt> | Index — every doc page grouped by section | Tools that resolve linked pages on demand |
-| <https://lazybridge.com/llms-full.txt> | Whole corpus concatenated (~10K lines, ~400 KB) | Long-context models that take the corpus directly into the prompt |
+| <https://lazybridge.com/llms-full.txt> | Whole corpus concatenated (10-15K lines, 500-800 KB and growing) | Long-context models that take the corpus directly into the prompt |
 
 ## Format
 
@@ -101,9 +101,11 @@ always current with the published site.
 
 ## Caveats
 
-- **`llms-full.txt` is large.** ~400 KB at the time of writing.
-  Some 8K-context models can't ingest it directly; either chunk
-  it or use the per-page index.
+- **`llms-full.txt` is large.** Currently in the 500-800 KB range
+  and growing each release; expect ~150-220k tokens after
+  tokenisation.  Comfortable on 200K+ context models, infeasible
+  on 8K-32K window models — either chunk it or fall back to the
+  per-page index.
 - **The format is best-effort.** Not every consumer respects
   the `## Optional` section convention or the "skip H1 narrative"
   hint. When in doubt, fetch the regular HTML pages.

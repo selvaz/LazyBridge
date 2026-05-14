@@ -358,10 +358,10 @@ class BaseProvider(ABC):
 
     #: Tier aliases.  Each provider populates this with the concrete
     #: model it considers "top"/"expensive"/"medium"/"cheap"/
-    #: "super_cheap" so users can write ``Agent("anthropic",
-    #: model="cheap")`` without hard-coding preview / date-pinned names.
-    #: A string not in this dict is treated as a literal model name
-    #: (passthrough).
+    #: "super_cheap" so users can write ``Agent.from_provider(
+    #: "anthropic", tier="cheap")`` without hard-coding preview /
+    #: date-pinned names.  A string not in this dict is treated as a
+    #: literal model name (passthrough).
     _TIER_ALIASES: dict[str, str] = {}
 
     #: Optional fallback chain.  If a concrete model in the key is
