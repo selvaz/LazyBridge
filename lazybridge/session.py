@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re as _re
 import sqlite3
 import threading
 import time
@@ -80,6 +81,108 @@ def _redact_walk(node: Any) -> Any:
         except Exception:
             return repr(node)
     return node
+
+
+# ---------------------------------------------------------------------------
+# Default-safe secret redaction
+# ---------------------------------------------------------------------------
+#
+# Wired in as the Session default so model snippets, tool results, and
+# error strings can't silently leak well-formed provider keys / OAuth
+# tokens via the event log or exporters.  Patterns are high-precision
+# only — every entry matches a documented prefix-and-length shape from a
+# major provider, so false positives on real model output are rare.
+# Entropy heuristics (e.g. "any 32+ char base64 string") are deliberately
+# excluded: long hashes, UUIDs, and embeddings are legitimate payload
+# content that operators routinely log.
+#
+# Out of scope here: generic PII (emails, phone numbers, SSNs).  Those
+# are high false-positive risk on legitimate customer-support / CRM
+# payloads.  Callers that need PII redaction should compose their own
+# redactor on top of ``redact_secrets`` and pass it as ``redact=``.
+
+#: Ordered list of (label, compiled_regex).  Order matters when patterns
+#: overlap — JWT is checked before generic "Bearer .*" so we keep the
+#: more specific label.  Each pattern matches the *value* portion only;
+#: prefixes that include a literal keyword (``Bearer `` / ``Basic ``) are
+#: captured separately so the keyword stays visible in the redacted form.
+_SECRET_PATTERNS: list[tuple[str, _re.Pattern[str]]] = [
+    # JWT (header.payload.signature, base64url, dot-separated, each part >= 4 chars)
+    ("jwt", _re.compile(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}")),
+    # OpenAI / Anthropic-style keys: ``sk-...`` and ``sk-ant-...``
+    ("openai-style-key", _re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}")),
+    # Stripe live/test keys
+    ("stripe-key", _re.compile(r"\b(?:pk|sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}")),
+    # GitHub PATs / OAuth / user tokens
+    ("github-token", _re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}")),
+    # Google API keys (39 chars, ``AIza`` prefix)
+    ("google-api-key", _re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    # Slack tokens (xoxb / xoxp / xoxa / xoxr / xoxs)
+    ("slack-token", _re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    # Authorization: Bearer <token>  /  Authorization: Basic <token>
+    # Keep the keyword visible so operators can see a credential was
+    # present in the payload.  Token must be at least 8 chars to avoid
+    # matching prose like "Bearer of bad news".
+    ("bearer", _re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}")),
+]
+
+
+def _bearer_replacer(m: _re.Match[str]) -> str:
+    """Preserve the Bearer/Basic keyword while stripping its token."""
+    return f"{m.group(1)} <redacted:bearer>"
+
+
+def _redact_secrets_in_string(s: str) -> str:
+    for label, pat in _SECRET_PATTERNS:
+        if label == "bearer":
+            s = pat.sub(_bearer_replacer, s)
+        else:
+            s = pat.sub(f"<redacted:{label}>", s)
+    return s
+
+
+def _redact_secrets_walk(node: Any) -> Any:
+    if isinstance(node, str):
+        return _redact_secrets_in_string(node)
+    if isinstance(node, dict):
+        return {k: _redact_secrets_walk(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_redact_secrets_walk(x) for x in node]
+    if isinstance(node, tuple):
+        return tuple(_redact_secrets_walk(x) for x in node)
+    if hasattr(node, "__dataclass_fields__"):
+        from dataclasses import asdict
+
+        try:
+            return _redact_secrets_walk(asdict(node))
+        except Exception:
+            return repr(node)
+    return node
+
+
+def redact_secrets(payload: dict[str, Any]) -> dict[str, Any]:
+    """Mask well-known credential shapes inside a Session event payload.
+
+    Walks every string value in ``payload`` and replaces high-precision
+    secret patterns (JWTs, OpenAI/Anthropic ``sk-`` keys, Stripe keys,
+    GitHub PATs, Google API keys, Slack tokens, HTTP ``Bearer``/``Basic``
+    authorization values) with ``<redacted:<label>>`` markers.  Keys,
+    structural fields, and any string that doesn't match a known pattern
+    pass through untouched.
+
+    This is the Session default redactor (see
+    :class:`Session` ``unsafe_log_payloads``).  It is intentionally
+    *narrow*: prefix-anchored patterns only, no entropy heuristics, no
+    PII.  Callers that need broader redaction should compose on top and
+    pass the composed callable via ``redact=``.
+    """
+    return _redact_secrets_walk(payload)
+
+
+# Sentinel for ``Session(redact=...)``.  ``None`` is a valid explicit
+# value (user opted out of redaction), so we need a third state for
+# "argument wasn't passed at all → use the default secret redactor".
+_REDACT_UNSET: Any = object()
 
 
 class EventType(StrEnum):
@@ -562,8 +665,9 @@ class Session:
         *,
         db: str | None = None,
         exporters: list[Any] | None = None,
-        redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        redact: Callable[[dict[str, Any]], dict[str, Any]] | None | Any = _REDACT_UNSET,
         redact_on_error: Literal["fallback", "strict"] = "strict",
+        unsafe_log_payloads: bool = False,
         console: bool = False,
         batched: bool = False,
         batch_size: int = 100,
@@ -615,6 +719,18 @@ class Session:
         event rather than persisting it unredacted.  Pass
         ``redact_on_error="fallback"`` to keep the unredacted event
         flowing when redaction fails (lower fidelity, but lossless).
+
+        Default-safe secret redaction
+        -----------------------------
+        When ``redact`` is not passed, Session defaults to
+        :func:`redact_secrets` so well-known credential shapes
+        (``sk-...``, ``ghp_...``, ``AIza...``, JWTs, ``Bearer ...``
+        etc.) are stripped from every event payload before it hits the
+        EventLog or any exporter.  Pass ``redact=None`` to opt out for
+        a single Session, or ``unsafe_log_payloads=True`` for the same
+        effect with a more searchable construction-site keyword.
+        Passing your own ``redact=callable`` always wins — Session
+        will not stack the default in front of a user redactor.
         """
         if redact_on_error not in ("fallback", "strict"):
             raise ValueError(
@@ -622,6 +738,16 @@ class Session:
                 f"'fallback' (warn + pass through) or 'strict' (warn + "
                 f"drop event)."
             )
+        # Resolve the redactor.  Three valid input states:
+        #   * not passed              → default to redact_secrets (safe)
+        #   * redact=None             → explicit opt-out, no redaction
+        #   * redact=callable         → user supplies their own
+        # ``unsafe_log_payloads=True`` is the searchable alias for
+        # explicit opt-out and only applies when no redactor was given.
+        if redact is _REDACT_UNSET:
+            self._redact = None if unsafe_log_payloads else redact_secrets
+        else:
+            self._redact = redact  # type: ignore[assignment]
         self.session_id = str(uuid.uuid4())
         self.events = EventLog(
             self.session_id,
@@ -634,7 +760,8 @@ class Session:
             critical_events=critical_events,
         )
         self._exporters: list[Any] = list(exporters or [])
-        self._redact = redact
+        # ``self._redact`` was resolved above based on the
+        # _REDACT_UNSET sentinel + ``unsafe_log_payloads``.
         self._redact_on_error = redact_on_error
         self._lock = threading.Lock()
         # Phase-3 Block J: warn-once-per-(exporter-class, exception-class).

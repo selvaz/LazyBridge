@@ -1222,13 +1222,19 @@ class Plan:
                 # Agent as step
                 result_env = await target.run(env)
             elif callable(target):
-                # Raw callable
+                # Raw callable.  Sync targets are dispatched to the default
+                # executor so blocking I/O / CPU work in a user-supplied
+                # function does not stall the event loop.  This mirrors the
+                # contract Tool.run() (lazybridge/tools.py) already
+                # enforces for tools registered via ``Tool(fn)``.
                 import asyncio as _asyncio
 
+                arg = env.task or env.text()
                 if _asyncio.iscoroutinefunction(target):
-                    raw = await target(env.task or env.text())
+                    raw = await target(arg)
                 else:
-                    raw = target(env.task or env.text())
+                    loop = _asyncio.get_running_loop()
+                    raw = await loop.run_in_executor(None, target, arg)
                 result_env = Envelope(task=env.task, payload=raw)
             else:
                 raise RuntimeError(f"Cannot execute step target: {target!r}")
