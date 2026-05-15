@@ -192,6 +192,51 @@ def test_migration_guide_0_to_0_79_plan_pattern_runs():
 
 
 # ---------------------------------------------------------------------------
+# Nested-pipelines guide — the parallel-bands-of-sub-pipelines snippet
+# ---------------------------------------------------------------------------
+
+
+def test_nested_pipelines_parallel_bands_snippet_constructs_and_runs():
+    """``docs/guides/full/nested-pipelines.md`` shows a horizontal
+    composition: three sub-pipelines run as parallel bands of an outer
+    Plan, joined via ``from_parallel_all``.  An earlier draft passed
+    ``target=`` twice to ``Step`` and would have raised at construction;
+    this test pins the corrected shape so the same regression can't
+    slip past review again.
+    """
+    from lazybridge import from_parallel_all
+
+    def make_research_pipeline(name: str, source_agent):
+        summarise_agent = MockAgent(["sum"], name="summarise")
+        return Agent(
+            engine=Plan(
+                Step(target=source_agent, name="search"),
+                Step("summarise"),
+            ),
+            tools=[summarise_agent],
+            name=name,
+        )
+
+    web = make_research_pipeline("web", MockAgent(["w-hits"], name="web_search"))
+    academic = make_research_pipeline("academic", MockAgent(["a-hits"], name="academic_search"))
+    internal = make_research_pipeline("internal", MockAgent(["i-hits"], name="internal_search"))
+    synthesiser = MockAgent(["brief"], name="synthesise")
+
+    pipeline = Agent(
+        engine=Plan(
+            Step("web", parallel=True),
+            Step("academic", parallel=True),
+            Step("internal", parallel=True),
+            Step("synthesise", context=from_parallel_all("web")),
+        ),
+        tools=[web, academic, internal, synthesiser],
+        name="multi_source_brief",
+    )
+    env = pipeline("topic")
+    assert isinstance(env, Envelope)
+
+
+# ---------------------------------------------------------------------------
 # Negative path — deleted-in-0.7.9 shapes must NOT silently work
 # ---------------------------------------------------------------------------
 

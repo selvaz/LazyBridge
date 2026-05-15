@@ -107,12 +107,18 @@ from lazybridge import Agent, LLMEngine, Plan, Step, from_parallel_all
 
 # Three independent research pipelines, each a Plan of its own.
 def make_research_pipeline(name: str, source_agent: Agent) -> Agent:
+    summarise_agent = Agent(engine=LLMEngine("claude-haiku-4-5"), name="summarise")
     return Agent(
         engine=Plan(
-            Step("search", target=source_agent),
+            # Step.target is positional — pass the agent object as ``target=``
+            # and override the in-plan name to "search" so the sub-pipeline
+            # has stable step names regardless of which source agent it wraps.
+            Step(target=source_agent, name="search"),
+            # String target → tool-map lookup; ``summarise_agent`` is in
+            # ``tools=[...]`` below under its own ``name="summarise"``.
             Step("summarise"),
         ),
-        tools=[source_agent, Agent(engine=LLMEngine("claude-haiku-4-5"), name="summarise")],
+        tools=[summarise_agent],
         name=name,
     )
 
