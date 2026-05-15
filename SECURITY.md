@@ -34,6 +34,55 @@ def run_safe_cmd(command: str) -> str:
     return subprocess.check_output(ALLOWED_COMMANDS[command].split()).decode()
 ```
 
+### Session — Default-safe secret redaction
+
+`Session` records model snippets, tool results, errors, and HIL
+decisions in its `EventLog` and forwards them to every exporter
+(console, JSON file, OpenTelemetry, etc.).  Without redaction, any
+provider API key, OAuth token, or `Bearer` header that ends up in a
+tool's return value or in an LLM response would land in the log.
+
+**Default behaviour (since 0.7.9):** `Session()` wires
+`lazybridge.session.redact_secrets` automatically.  It masks
+well-known credential shapes in every payload before it reaches the
+EventLog or any exporter:
+
+- OpenAI / Anthropic-style keys (`sk-...`, `sk-ant-...`)
+- Stripe live & test keys (`pk_live_`, `sk_test_`, `rk_live_`)
+- GitHub PATs / OAuth (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`)
+- Google API keys (`AIza` + 35 chars)
+- Slack tokens (`xoxb-` / `xoxp-` / `xoxa-` / `xoxr-` / `xoxs-`)
+- JWTs (`eyJ...` header / payload / signature)
+- HTTP `Authorization: Bearer ...` / `Basic ...` headers
+
+```python
+from lazybridge import Session
+
+sess = Session()           # default: redact_secrets is on
+sess = Session(redact=my_callable)   # your redactor replaces the default
+sess = Session(unsafe_log_payloads=True)  # opt out, log raw payloads
+sess = Session(redact=None)               # same effect as unsafe_log_payloads
+```
+
+**Scope and limits:**
+
+- ✅ Catches well-formed credentials that match a documented prefix
+  shape from a major provider.
+- ❌ Does **not** redact PII (emails, phone numbers, SSNs, addresses).
+  Compose your own redactor on top of `redact_secrets` if you need that.
+- ❌ Does **not** redact custom credential schemes or randomly-generated
+  tokens with no recognisable prefix.  Add patterns by writing a wrapper:
+  `redact = lambda p: my_extra(redact_secrets(p))`.
+- ❌ Does **not** apply to data your tools or sub-agents *return to the
+  caller* — only to event payloads.  Encrypt at-rest persistence via
+  `EncryptedStoreAdapter` (below); never log raw secrets that flow
+  outside Session.
+
+If your redactor raises or returns a non-dict, `redact_on_error`
+governs the failure mode: `"strict"` (default) drops the event so
+unredacted data never leaves the bus; `"fallback"` warns once and
+records the original payload.
+
 ### Store — Encryption is opt-in
 
 The base `Store` persists data in plaintext (JSON in memory or SQLite

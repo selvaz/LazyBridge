@@ -104,3 +104,33 @@ mental model is the same.
   and OpenTelemetry mean you can always see what happened and why.
 
 LazyBridge is meant to feel like a bridge, not a cage.
+
+## Maturity
+
+LazyBridge 0.7.9 is on PyPI as **Alpha** (`Development Status :: 3` in
+PyPI metadata, `lazybridge.__stability__ = "alpha"`).  The public API
+is stable enough that breaking changes go through the migration guides
+under [`docs/migrations/`](migrations/0.7-to-0.79.md), but production
+hardening is uneven by subsystem.  The labels below describe the
+state of each feature area in this release.
+
+| Subsystem | Status | Notes |
+|---|---|---|
+| `Agent`, `LLMEngine`, `Tool`, `Envelope` | **Stable** | Public surface, exercised by every test path. |
+| `Plan`, `Step`, sentinels, routing | **Stable** | Compiler validates at construction; serialisation supported. |
+| `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
+| `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled (`redact_secrets`). |
+| Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters are stable; model/price tables drift with provider releases. |
+| MCP server integration | **Alpha** | Deny-by-default tool allow-list; spec coverage tracked in changelog. |
+| Native tools (`NativeTool`) | **Alpha** | Provider-hosted capabilities (web search, code interpreter). Surface area changes when providers add new tools. |
+| `Checkpoint` / `resume`  | **Alpha** | Internal-state atomic across parallel `Plan` bands; *external* side-effect rollback is not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)). |
+| Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Alpha** | Behaviour is stable; default rule libraries are still growing. |
+| `HumanEngine`, `SupervisorEngine` | **Alpha** | Public API stable; UX polish continues. |
+| Evals (`lazybridge.ext.evals`) | **Experimental** | Scoring helpers are stable; the runner API may consolidate before 1.0. |
+| Visualizer (`lazybridge.ext.viz`) | **Experimental** | Useful for debugging; not part of the runtime path. |
+| Provider model fallback chains (`_FALLBACKS`) | **Planned** | Data tables exist; the retry path that consumes them is not implemented yet. |
+| Automatic PII redaction | **Planned** | Default redactor masks credential shapes only.  Compose your own for emails / phone numbers / SSNs. |
+
+The roadmap toward a 1.0 stable surface is to lift each Alpha row to
+Stable, ship the Planned items where the design is settled, and either
+implement or remove the experimental modules based on user feedback.
