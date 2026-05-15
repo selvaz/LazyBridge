@@ -1227,14 +1227,24 @@ class Plan:
                 # function does not stall the event loop.  This mirrors the
                 # contract Tool.run() (lazybridge/tools.py) already
                 # enforces for tools registered via ``Tool(fn)``.
+                #
+                # ``contextvars.copy_context().run`` propagates the
+                # caller's contextvars into the executor thread so
+                # request IDs, OpenTelemetry spans, and any other
+                # context-local observability set on the calling
+                # coroutine remain visible inside ``target``.  Without
+                # this wrap, the default executor's empty thread
+                # context silently drops those values.
                 import asyncio as _asyncio
+                import contextvars as _contextvars
 
                 arg = env.task or env.text()
                 if _asyncio.iscoroutinefunction(target):
                     raw = await target(arg)
                 else:
                     loop = _asyncio.get_running_loop()
-                    raw = await loop.run_in_executor(None, target, arg)
+                    ctx = _contextvars.copy_context()
+                    raw = await loop.run_in_executor(None, ctx.run, target, arg)
                 result_env = Envelope(task=env.task, payload=raw)
             else:
                 raise RuntimeError(f"Cannot execute step target: {target!r}")

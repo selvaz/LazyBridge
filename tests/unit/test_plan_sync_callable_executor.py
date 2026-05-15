@@ -7,15 +7,23 @@ loop, including the Session emitter and concurrent agent rungs.
 
 After the fix in ``lazybridge/engines/plan/_plan.py``, sync raw
 callables are dispatched to the default executor via
-``loop.run_in_executor(None, target, arg)``.  This test pins that
-contract by running a Plan step whose target sleeps synchronously for
-a short interval while a sentinel coroutine ticks on the same loop —
-the sentinel must keep progressing during the sleep.
+``loop.run_in_executor(None, ctx.run, target, arg)``.  The
+``contextvars.copy_context()`` wrap is part of the contract: any
+context-local state the caller set (request ID, OpenTelemetry trace
+context, etc.) must survive the offload — the executor thread's
+default empty context silently drops them otherwise.
+
+This file pins both contracts:
+
+1. Sync targets must not stall the event loop (sentinel-tick test).
+2. Sync targets must observe the caller's contextvars
+   (request-id propagation test).
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import time
 
 import pytest
@@ -54,7 +62,10 @@ async def test_sync_raw_callable_does_not_block_event_loop() -> None:
         env = await agent.run("payload")
     finally:
         stop.set()
-        await sentinel_task
+        # Assign so CodeQL's py/ineffectual-statement doesn't flag the
+        # bare await — the drain has real side effects (raises any
+        # sentinel exception, prevents pending-task warnings).
+        _ = await sentinel_task
 
     assert "slept-for:payload" in env.text()
     # The blocking sync target sleeps 200ms; the sentinel ticks every
@@ -76,3 +87,34 @@ async def test_async_raw_callable_still_awaited_natively() -> None:
     agent = Agent(engine=plan, name="t")
     env = await agent.run("payload")
     assert "async:payload" in env.text()
+
+
+# A module-level ContextVar so the captured context survives across
+# the Plan → Step → executor hop without lexical capture.
+_REQUEST_ID: contextvars.ContextVar[str] = contextvars.ContextVar("test_request_id", default="<unset>")
+
+
+def _read_request_id_sync(_task: str) -> str:
+    """Synchronous target that reads ``_REQUEST_ID`` from contextvars.
+
+    If the executor wrapper drops contextvars, this returns the default
+    sentinel ``<unset>`` and the assertion below catches the regression.
+    """
+    return _REQUEST_ID.get()
+
+
+@pytest.mark.asyncio
+async def test_sync_callable_observes_caller_contextvars() -> None:
+    plan = Plan(Step(target=_read_request_id_sync, name="read_ctx"))
+    agent = Agent(engine=plan, name="t")
+
+    token = _REQUEST_ID.set("req-abc-123")
+    try:
+        env = await agent.run("payload")
+    finally:
+        _REQUEST_ID.reset(token)
+
+    # The contextvars.copy_context().run wrap is what makes this work;
+    # without it the executor's empty thread-context returns the
+    # ContextVar default ("<unset>").
+    assert "req-abc-123" in env.text()
