@@ -57,7 +57,7 @@ jobs:
             echo "::warning::$KEY_NAME not set — skipping live tests for ${{ matrix.provider }}"
             exit 0
           fi
-          pytest tests/unit/ -m live -v --tb=short
+          pytest tests/live/ -m live -v --tb=short
 
   # The ``heavy_render`` job moved to the sibling ``selvaz/LazyReport``
   # repository in 0.7.9 along with the ``report_builder`` subsystem.

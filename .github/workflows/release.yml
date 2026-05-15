@@ -12,15 +12,108 @@ name: release
 #
 # Until that link exists in PyPI the publish step is a no-op (the
 # action exits cleanly without an OIDC token).
+#
+# Gating: the ``build`` job depends on ``lint``, ``typecheck``, ``unit``,
+# and ``docs`` so a tagged commit cannot publish unless the same checks
+# that run on PRs (.github/workflows/test.yml + docs.yml) pass on the
+# exact tagged SHA.  Without those ``needs:`` a hotfix tag could ship
+# broken artefacts even though main is red.
 
 on:
   push:
     tags:
       - "v*.*.*"
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    name: lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: ruff check lazybridge/ tests/
+
+      - name: Format check
+        run: ruff format --check lazybridge/ tests/
+
+  typecheck:
+    name: type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[anthropic,openai,google,test]"
+          pip install mypy types-Markdown types-bleach
+
+      - name: Typecheck
+        run: mypy lazybridge/
+
+      - name: Skill-doc drift check
+        run: python -m lazybridge.skill_docs._build --check
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[anthropic,openai,google,test]"
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short
+
+  docs:
+    name: docs build (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install LazyBridge + docs extras
+        run: pip install -e ".[docs]"
+
+      - name: Build site (strict)
+        run: mkdocs build --strict
+
   build:
     name: build sdist + wheel
+    needs: [lint, typecheck, unit, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
