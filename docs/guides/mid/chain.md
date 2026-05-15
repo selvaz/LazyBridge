@@ -156,6 +156,10 @@ print(result.text())
 - [Parallel](parallel.md) — fan-out instead of sequence.
 - [As tool](as-tool.md) — wrapping an agent (or a chain) as a tool
   for an outer agent that decides when to invoke it.
+- [Nested pipelines](../full/nested-pipelines.md) — when a chain
+  isn't enough: Plan-of-Plans, parallel bands of sub-pipelines,
+  and LLM-decided dispatch over sub-pipelines (horizontal
+  composition beyond the linear case).
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) — the
   full table mapping `Agent.chain` and friends to their canonical
   `Plan(...)` equivalents.

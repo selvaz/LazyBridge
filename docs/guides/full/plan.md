@@ -213,6 +213,9 @@ crash-resume, fan-out runs — see the dedicated guides:
 - [Routing](routing.md) — `routes={...}` predicate map and
   `routes_by="field"` LLM-decided dispatch, plus `when` DSL.
 - [Chain](../mid/chain.md) — the sugar for the linear case.
+- [Nested pipelines](nested-pipelines.md) — Plan-of-Plans,
+  parallel bands of sub-pipelines, and LLM-decided dispatch over
+  sub-pipelines (the horizontal counterpart to this page).
 - *Guides → Full → Parallel plan steps* (Phase 3b) — `parallel=True`
   bands and `from_parallel_all` aggregation.
 - *Guides → Full → Checkpoint & resume* (Phase 3b) — `store=`,

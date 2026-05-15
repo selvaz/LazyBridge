@@ -29,6 +29,13 @@ single agent → tools → composition → planning → production.
 - [Blackboard planner](blackboard-planner.md) — `examples/patterns/blackboard_planner.py`
 - [Dynamic re-planning](dynamic-replanning.md) — `examples/patterns/dynamic_planner.py`
 
+## Composition shapes
+
+- [Nested pipelines (horizontal)](../guides/full/nested-pipelines.md)
+  — Plan-of-Plans, parallel bands of sub-pipelines, and LLM-decided
+  dispatch over sub-pipelines.  Companion to the vertical
+  `chain` / `Plan` recipes above.
+
 ## Reporting
 
 The HTML/PDF reporting recipes moved to the sibling

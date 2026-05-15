@@ -195,6 +195,11 @@ for env in results:
 
 - [Chain](chain.md) — sequential composition; complements
   parallel.
+- [Nested pipelines](../full/nested-pipelines.md) — parallel bands
+  of **sub-pipelines** (not just single agents) with
+  `from_parallel_all(...)` aggregation, plus the choice between
+  `Agent.parallel(...)`, `parallel=True` plan bands, and
+  LLM-decided dispatch over sub-pipelines.
 - [As tool](as-tool.md) — `multi.as_tool()` exposes the fan-out as
   a single `Tool` that delegates to `run()` (since 0.7.9 the
   wrapper Envelope already carries the labelled-text join).
