@@ -44,7 +44,10 @@ this page is the same information annotated for human review.
 - Don't write JSON schemas by hand for annotated Python functions.
   `Tool.wrap()` introspects type hints; if the introspection misses a
   detail, override it with `mode="hybrid"` rather than rebuilding
-  the schema manually.
+  the schema manually.  See
+  [Guides → Basic → Tool → Schema modes](../guides/basic/tool.md#schema-modes-signature-hybrid-llm)
+  for when each mode is appropriate and the cost / determinism
+  trade-offs.
 - Don't call `MCP.stdio(...)` without `allow=` or `deny=` — it's
   deny-by-default since 0.7.9 and will raise `ValueError`. Pass
   `allow=["*"]` after auditing the surface, or a glob list like

@@ -95,6 +95,180 @@ is still public for advanced use cases (e.g. typing annotations,
 isinstance checks) but the `Tool.wrap()` factory is the canonical form
 for new code.
 
+## Schema modes — `signature`, `hybrid`, `llm`
+
+Every `Tool` carries a JSON Schema that the LLM uses to call it.
+The schema is built once on first use and cached for the lifetime
+of the process (an `ArtifactStore` interface lets you persist the
+cache across runs if you need to).  The **mode** controls how that
+schema is generated.
+
+| Mode | What's inspected | Extra LLM call? | Determinism | Use when |
+|---|---|---:|:---:|---|
+| `"signature"` (default) | Type hints + docstring of `func` | no | full | The function already has type hints and a useful docstring |
+| `"hybrid"` | Signature for types + an LLM for parameter descriptions | one, on first build | high — types are fixed, only descriptions vary | Types exist but docstrings are sparse / outdated / wrong |
+| `"llm"` | The function's source code (or stub), interpreted by an LLM | one, on first build | medium — both types and descriptions come from the model | Legacy code with no annotations, `**kwargs`-only signatures, third-party callables you can't modify |
+
+Both `hybrid` and `llm` modes require `schema_llm=<engine>` — usually
+a cheap-tier LLM dedicated to schema work — and emit a one-shot
+warning if the model returns an empty or under-specified result.
+
+### `signature` — the canonical default
+
+```python
+from lazybridge import Tool
+
+def get_weather(city: str, units: str = "c") -> str:
+    """Return current weather for ``city``.
+
+    Args:
+        city: City name (e.g. "Paris").
+        units: "c" for Celsius (default) or "f" for Fahrenheit.
+    """
+    ...
+
+tool = Tool.wrap(get_weather, name="get_weather")
+```
+
+The generated schema (abbreviated):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":  {"type": "string", "description": "City name (e.g. \"Paris\")."},
+    "units": {"type": "string", "description": "\"c\" for Celsius (default) or \"f\" for Fahrenheit.", "default": "c"}
+  },
+  "required": ["city"]
+}
+```
+
+This is deterministic and free.  Reach for the other modes only when
+this one can't produce a useful schema.
+
+### `hybrid` — types from signature, descriptions from an LLM
+
+The signature has the truth about parameter types and which are
+required.  The LLM only fills in the **descriptions** — the parts
+the LLM sees when it's deciding whether and how to call the tool.
+
+```python
+from lazybridge import LLMEngine, Tool
+
+schema_llm = LLMEngine("claude-haiku-4-5")  # cheap-tier; runs once per tool
+
+def get_weather(city: str, units: str = "c") -> str:
+    # Docstring is missing or unhelpful.
+    ...
+
+tool = Tool.wrap(
+    get_weather,
+    name="get_weather",
+    mode="hybrid",
+    schema_llm=schema_llm,
+)
+```
+
+Resulting schema: same `{"type": "string"}` types as the signature
+path, but `"description"` fields now come from the LLM analysing
+the function source.  Required-vs-optional is **still** decided by
+the signature (the `units: str = "c"` default keeps it optional).
+
+When to prefer `hybrid` over `signature`:
+
+- You inherited a function whose docstring lies about the parameters.
+- The team is migrating to type-hinted code and isn't ready to
+  re-document every helper.
+- You want consistent LLM-facing descriptions across a large tool kit
+  without hand-writing each one.
+
+When **not** to use it:
+
+- You're shipping a security-sensitive tool.  An LLM-generated
+  description could understate the risk (e.g. describe a shell-exec
+  tool as "runs a command") and bias the model toward calling it.
+  Keep `mode="signature"` and own the description.
+
+### `llm` — full LLM-inferred schema
+
+The signature has no useful information — `def legacy(**kwargs)`,
+an undocumented third-party callable, or a function defined inside
+a `lambda` you can't annotate.  Hand the source (or a stub) to an
+LLM and let it produce the whole tool definition.
+
+```python
+from lazybridge import LLMEngine, Tool
+
+schema_llm = LLMEngine("claude-haiku-4-5")
+
+def legacy_lookup(*args, **kwargs):
+    """Best-effort lookup against the v1 reporting API.  Accepts
+    a record id and an optional output format.  Returns a JSON
+    string."""
+    ...
+
+tool = Tool.wrap(
+    legacy_lookup,
+    name="legacy_lookup",
+    mode="llm",
+    schema_llm=schema_llm,
+)
+```
+
+The framework keeps two invariants the LLM cannot break:
+
+1. **Required parameters come from the signature first.** If the
+   signature says a parameter has no default, it stays required even
+   if the LLM forgot it.  A `UserWarning` is logged if the LLM omits
+   a signature-required parameter.
+2. **Strict mode still applies.**  Passing `strict=True` adds
+   `"additionalProperties": false` to the generated schema regardless
+   of what the LLM produced.
+
+Calibrate your expectations: this mode is the **slowest** to bootstrap
+(one extra LLM round-trip on first use), the **least deterministic**
+across runs, and the only mode that can produce a schema the function
+can't actually accept (e.g. an extra parameter the LLM invented).
+Production use cases should treat it as a one-off migration tool —
+once it generates a schema that works, copy the result into
+`Tool.from_schema(...)` and pin it.
+
+### Caching
+
+All three modes cache the built schema per `Tool` instance for the
+lifetime of the process.  For cross-process persistence — e.g. so a
+serverless function doesn't pay the LLM-bootstrap cost on every cold
+start — pass an `ArtifactStore` to the tool builder; the
+`InMemoryArtifactStore` is the in-process default, and the protocol
+is small enough to back with Redis / SQLite / S3 in two methods
+(`get` / `put`).  See `lazybridge/core/tool_schema.py` for the
+protocol and the in-memory reference implementation.
+
+### Pinning the result
+
+Once an `llm`/`hybrid` mode produces a schema you're happy with,
+copy the generated JSON into a `Tool.from_schema(...)` call and
+remove the `schema_llm=` dependency.  This is the canonical pattern
+for moving from "discover the schema" to "ship the schema":
+
+```python
+weather_tool = Tool.from_schema(
+    name="get_weather",
+    description="Return current weather for a city.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "City name."},
+            "units": {"type": "string", "enum": ["c", "f"], "default": "c"},
+        },
+        "required": ["city"],
+    },
+    func=get_weather,
+)
+```
+
+Now the tool is deterministic, free to load, and reviewable in a PR.
+
 ## When to construct a Tool explicitly
 
 - **You need a different name than `func.__name__`.** Useful for
