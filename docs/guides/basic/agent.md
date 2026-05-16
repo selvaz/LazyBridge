@@ -41,6 +41,17 @@ result = await agent.run(task)     # async equivalent
 async for chunk in agent.stream(task): ...   # streaming form
 ```
 
+!!! warning "Use `await agent.run(...)` inside async runtimes"
+    The sync form `agent(task)` is safe in scripts, notebooks, and
+    plain Python REPLs.  When called from inside a *running* event
+    loop — FastAPI / Starlette / aiohttp request handlers, async
+    workers, Jupyter cells that are already inside an `await` — it
+    detects the loop and dispatches the underlying coroutine onto a
+    worker thread, then blocks the caller until that thread finishes.
+    The bridge keeps notebook ergonomics intact, but inside an async
+    server it stalls the calling task and burns a thread for every
+    request.  Prefer `await agent.run(task)` directly in async code.
+
 For factory and composition shortcuts (`Agent.from_provider`,
 `Agent.chain`, `Agent.parallel`), see [Canonical vs sugar](../../concepts/canonical-vs-sugar.md).
 

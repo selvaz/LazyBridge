@@ -366,9 +366,18 @@ class BaseProvider(ABC):
 
     #: Optional fallback chain.  If a concrete model in the key is
     #: unavailable (provider returns 404 / "model not found"), the
-    #: provider should try each model in the list in order.  Wiring
-    #: into a retry path is per-provider and not yet active; the tables
-    #: are populated so the data is ready when that path lands.
+    #: provider *would* try each model in the list in order.
+    #:
+    #: .. warning::
+    #:
+    #:    **Not implemented.**  ``_FALLBACKS`` is currently dead data:
+    #:    no code path reads it at runtime.  The provider price-table
+    #:    and tier-alias tests (``tests/unit/test_provider_static_paths.py``)
+    #:    keep the structure honest so the data is ready when a retry
+    #:    path lands, but users should not rely on automatic fallback
+    #:    today.  An explicit ``model=`` argument or wrapping
+    #:    ``Agent.run(...)`` in your own try/except is the only
+    #:    supported resilience pattern in 0.7.9.
     _FALLBACKS: dict[str, list[str]] = {}
 
     def _resolve_model(self, request: CompletionRequest) -> str:

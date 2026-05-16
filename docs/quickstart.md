@@ -71,6 +71,14 @@ If you'd rather drive things asynchronously, every agent also exposes
 `await agent.run(task)` and an `async for chunk in agent.stream(task)`
 streaming form. The sync call shown above is the canonical entry point.
 
+!!! warning "Inside FastAPI / aiohttp / async workers, use `await agent.run(...)`"
+    `agent(task)` detects an already-running event loop and dispatches
+    the coroutine onto a worker thread, blocking the caller until the
+    thread finishes.  That keeps notebook ergonomics working but
+    stalls async-request handlers and burns one thread per call.
+    Use `await agent.run(task)` directly when you're already inside a
+    loop.
+
 ## 3. Add a tool
 
 A tool is just a normal Python function. LazyBridge inspects the

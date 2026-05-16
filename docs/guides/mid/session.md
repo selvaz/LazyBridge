@@ -15,8 +15,10 @@ Session(
     *,
     db=None,                       # None = in-memory SQLite (lost at close)
     exporters=None,                # list[EventExporter]; None = []
-    redact=None,                   # callable[dict] -> dict applied to every payload
+    # Redaction
+    redact=...,                    # default: redact_secrets — sk-/ghp-/Bearer/JWT/etc. masked
     redact_on_error="strict",      # "strict" (drop on redact failure) | "fallback" (warn + record raw)
+    unsafe_log_payloads=False,     # set True to disable default secret redaction; redact=None has same effect
     console=False,                 # convenience: append a ConsoleExporter
     # Batched-writer (opt-in) — emit() becomes non-blocking
     batched=False,
@@ -84,7 +86,12 @@ view shows the whole tree, the cost rollup includes every child.
 - **PII / sensitive-data scrubbing.** Pass a `redact=` callable that
   rewrites payloads before they reach exporters; the default
   `redact_on_error="strict"` fails closed if the redactor itself
-  errors.
+  errors.  By default Session already runs
+  `redact_secrets` — well-known credential shapes (`sk-...`,
+  `ghp_...`, `AIza...`, JWT, `Bearer ...`) are stripped from every
+  event payload before it leaves the bus.  Set
+  `unsafe_log_payloads=True` (or `redact=None`) to disable it; pass
+  your own `redact=` to replace it.
 
 ## When NOT to use it
 
@@ -192,6 +199,14 @@ sess.add_exporter(OTelExporter(endpoint="http://otelcol:4318"))
   redactor raises or returns a non-dict. Use `"fallback"` only when
   you want the unredacted payload as a backup; the trade-off is the
   potential to log raw PII.
+- **Default secret redaction is on.**  `Session()` with no `redact=`
+  argument wires `redact_secrets` which masks `sk-...` /
+  `ghp_...` / `AIza...` / JWT / `Bearer ...` shapes in payload
+  strings.  It does *not* mask emails, phone numbers, or other PII —
+  compose your own redactor on top if you need that.  Disable
+  entirely with `unsafe_log_payloads=True` (or `redact=None`); pass
+  your own `redact=` to replace it (LazyBridge does not stack the
+  default in front of a user redactor).
 - **Nested agents inherit `session=`** unless they pass their own.
   This is what gives you transitive cost rollup; pass an explicit
   `session=None` on a sub-agent only when you genuinely want it

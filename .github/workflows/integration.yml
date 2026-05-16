@@ -27,13 +27,36 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # ``include:`` carries the provider's cheap-tier model into the
+      # job env via ``LB_LIVE_MODEL`` / ``LB_LIVE_MODEL_CAPABLE``.  The
+      # live fixtures (tests/live/conftest.py) read those env vars and
+      # default to ``claude-haiku-4-5`` if unset — so the non-Anthropic
+      # matrix entries would otherwise hit the Anthropic API while
+      # only the matrix-provider's key is in scope.  Concrete model
+      # ids come from each provider's ``_TIER_ALIASES["cheap"]`` in
+      # lazybridge/core/providers/*.py; keep them in sync when a
+      # provider rotates its cheap model.
       matrix:
-        provider: ["anthropic", "openai", "google", "deepseek"]
+        include:
+          - provider: anthropic
+            cheap_model: claude-haiku-4-5
+            capable_model: claude-sonnet-4-6
+          - provider: openai
+            cheap_model: gpt-5.4-nano
+            capable_model: gpt-5.4-mini
+          - provider: google
+            cheap_model: gemini-3.1-flash-lite-preview
+            capable_model: gemini-3.1-flash-lite-preview
+          - provider: deepseek
+            cheap_model: deepseek-v4-flash
+            capable_model: deepseek-v4-flash
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LB_LIVE_MODEL: ${{ matrix.cheap_model }}
+      LB_LIVE_MODEL_CAPABLE: ${{ matrix.capable_model }}
     steps:
       - uses: actions/checkout@v6
 
@@ -57,7 +80,7 @@ jobs:
             echo "::warning::$KEY_NAME not set — skipping live tests for ${{ matrix.provider }}"
             exit 0
           fi
-          pytest tests/unit/ -m live -v --tb=short
+          pytest tests/live/ -m live -v --tb=short
 
   # The ``heavy_render`` job moved to the sibling ``selvaz/LazyReport``
   # repository in 0.7.9 along with the ``report_builder`` subsystem.
