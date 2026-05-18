@@ -346,6 +346,155 @@ class TestPersistentWebUI:
 
 
 # =============================================================================
+# Non-blocking GET — thinking page when no form is ready
+# =============================================================================
+
+
+def _get(port: int) -> tuple[int, str]:
+    import urllib.request
+
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp:
+        return resp.status, resp.read().decode()
+
+
+class TestThinkingPage:
+    @pytest.mark.asyncio
+    async def test_get_returns_thinking_page_when_no_form_ready(self):
+        """A GET that arrives between turns must NOT block the browser;
+        it must return immediately with the auto-refreshing "thinking"
+        placeholder so the user sees feedback during agent processing.
+        """
+        from lazybridge.ext.hil.human import _build_thinking_page
+
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            # Start a prompt to bring the server up, then submit POST to
+            # clear ``_html_ready`` so subsequent GETs hit the
+            # "no form ready" path.
+            task = asyncio.create_task(ui.prompt("first", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None:
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._url is not None
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _post_form(port, {"response": "first answer"})
+            )
+            await asyncio.wait_for(task, timeout=5)
+            # POST cleared ``_html_ready`` — the next GET should NOT
+            # block (used to wait up to 3600s).  Time it to confirm.
+            assert not ui._html_ready.is_set()
+
+            t0 = time.monotonic()
+            status, body = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _get(port)
+            )
+            elapsed = time.monotonic() - t0
+            assert status == 200
+            # Must return promptly (<<1s) instead of long-polling.
+            assert elapsed < 1.0, f"GET took {elapsed:.2f}s — should be non-blocking"
+            # Body is the thinking page, not a form.
+            thinking_marker = "Agent is thinking" if "Agent is thinking" in _build_thinking_page() else "thinking"
+            assert thinking_marker in body
+            assert "<textarea" not in body
+            # Meta-refresh is what drives the browser to retry — without
+            # it the spinner would freeze forever.
+            assert 'http-equiv="refresh"' in body
+        finally:
+            ui.close()
+
+    @pytest.mark.asyncio
+    async def test_get_returns_form_when_form_is_ready(self):
+        """When ``prompt()`` has just published a form, GET serves THAT
+        form (not the thinking page).
+        """
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            task = asyncio.create_task(ui.prompt("the real question", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None and ui._html_ready.is_set():
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._html_ready.is_set()
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+
+            status, body = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _get(port)
+            )
+            assert status == 200
+            assert "the real question" in body
+            assert "<textarea" in body
+            # Tear down via POST so the task completes.
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _post_form(port, {"response": "x"})
+            )
+            await asyncio.wait_for(task, timeout=5)
+        finally:
+            ui.close()
+
+
+# =============================================================================
+# HumanEngine env.error surfacing — symmetric with env.context
+# =============================================================================
+
+
+class TestHumanEngineErrorSurfacing:
+    @pytest.mark.asyncio
+    async def test_upstream_error_prepended_to_task(self):
+        """When the inbound envelope carries an ``error``, HumanEngine
+        must surface it to the UI so the human sees what failed
+        upstream — same role ``env.context`` plays today.
+        """
+        from lazybridge.envelope import Envelope, ErrorInfo
+        from lazybridge.ext.hil.human import HumanEngine, _UIProtocol
+
+        captured: dict[str, str] = {}
+
+        class _CaptureUI(_UIProtocol):
+            async def prompt(self, task, *, tools, output_type):  # type: ignore[no-untyped-def]
+                captured["task"] = task
+                return "ok"
+
+        engine = HumanEngine(ui=_CaptureUI())
+        env = Envelope(
+            task="please retry",
+            error=ErrorInfo(type="UpstreamFailed", message="search timed out"),
+        )
+        await engine.run(env, tools=[], output_type=str, memory=None, session=None)
+
+        # Error type + message must appear in the task surfaced to the
+        # UI, before the original task body.
+        assert "UpstreamFailed" in captured["task"]
+        assert "search timed out" in captured["task"]
+        assert "please retry" in captured["task"]
+        assert captured["task"].index("UpstreamFailed") < captured["task"].index("please retry")
+
+    @pytest.mark.asyncio
+    async def test_no_error_means_no_prefix(self):
+        """Envelopes without an error must produce the unchanged task —
+        no spurious banner.
+        """
+        from lazybridge.envelope import Envelope
+        from lazybridge.ext.hil.human import HumanEngine, _UIProtocol
+
+        captured: dict[str, str] = {}
+
+        class _CaptureUI(_UIProtocol):
+            async def prompt(self, task, *, tools, output_type):  # type: ignore[no-untyped-def]
+                captured["task"] = task
+                return "ok"
+
+        engine = HumanEngine(ui=_CaptureUI())
+        env = Envelope(task="just a question")
+        await engine.run(env, tools=[], output_type=str, memory=None, session=None)
+
+        assert captured["task"] == "just a question"
+        assert "upstream error" not in captured["task"]
+
+
+# =============================================================================
 # HumanEngine ui="web" wiring
 # =============================================================================
 

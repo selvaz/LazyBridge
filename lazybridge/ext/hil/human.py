@@ -259,6 +259,35 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
 </html>"""
 
 
+def _build_thinking_page() -> str:
+    """HTML served by GET when no form is ready (agent is processing).
+
+    Uses ``<meta http-equiv="refresh">`` to poll every 500 ms; when the
+    next ``prompt()`` publishes a form, the next refresh picks it up.
+    No JavaScript — the page degrades gracefully in any browser.
+    """
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0.5">
+<title>LazyBridge — waiting</title>
+<style>
+  body {font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#555;}
+  h2 {color:#0066cc;}
+  .spinner {display:inline-block;width:18px;height:18px;border:3px solid #e0e0e0;
+            border-top-color:#0066cc;border-radius:50%;animation:spin 1s linear infinite;
+            vertical-align:middle;margin-right:10px;}
+  @keyframes spin {to {transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<h2><span class="spinner"></span>Agent is thinking…</h2>
+<p>This page will refresh automatically when the next prompt is ready.</p>
+</body>
+</html>"""
+
+
 class _WebUI(_UIProtocol):
     """Minimal web UI for HumanEngine: serves a form on localhost, waits for submission.
 
@@ -352,20 +381,25 @@ class _WebUI(_UIProtocol):
 
             class _Handler(BaseHTTPRequestHandler):
                 def do_GET(self) -> None:
-                    # Long-poll until a form is ready.  The post-submit
-                    # 303 redirect lands here and blocks until the next
-                    # ``prompt()`` publishes a new form.
-                    ready = ui._html_ready.wait(timeout=ui._timeout or 3600.0)
-                    if not ready:
-                        self.send_response(504)
+                    # Non-blocking: when no form is ready (agent is
+                    # processing the previous turn), serve the
+                    # "thinking" page with a meta-refresh that pulls
+                    # the next form once it arrives.  Blocking the GET
+                    # used to leave the browser with a hung request and
+                    # no visible feedback during long pipeline steps.
+                    if ui._html_ready.is_set():
+                        with ui._lock:
+                            html_now = ui._pending_html or ""
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
                         self.end_headers()
-                        return
-                    with ui._lock:
-                        html_now = ui._pending_html or ""
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(html_now.encode())
+                        self.wfile.write(html_now.encode())
+                    else:
+                        body = _build_thinking_page().encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(body)
 
                 def do_POST(self) -> None:
                     length = int(self.headers.get("Content-Length", 0))
@@ -468,6 +502,17 @@ class HumanEngine:
 
         try:
             task_text = env.task or env.text()
+            # Surface a prior step's error to the human, symmetric with
+            # ``env.context`` below: a HIL placed after a fallible step
+            # in a Plan acts as the natural recovery / retry surface,
+            # but only if the human can SEE that something went wrong.
+            # Without this, an error envelope flowing into HIL produces
+            # a form with no indication of what failed upstream.
+            if env.error is not None:
+                err = env.error
+                err_msg = getattr(err, "message", None) or str(err)
+                err_type = getattr(err, "type", None) or err.__class__.__name__
+                task_text = f"[upstream error — {err_type}] {err_msg}\n\n{task_text}"
             if env.context:
                 task_text = f"{task_text}\n\nContext:\n{env.context}"
             # Multimodal: humans can't view base64 in a terminal, but
