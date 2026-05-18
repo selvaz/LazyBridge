@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "lazybridge"
 version = "0.7.9"
 description = "Zero-boilerplate multi-provider LLM agent framework"
+readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 authors = [{ name = "selvaz" }]
@@ -17,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]

@@ -8,6 +8,13 @@ on:
       - "mkdocs.yml"
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -62,6 +69,11 @@ jobs:
 
   deploy:
     needs: build
+    # Only publish to GitHub Pages from `main` pushes / manual dispatch.
+    # Pull-request runs still execute the `build` job (strict mkdocs +
+    # llms.txt assertions) so docs regressions are caught pre-merge,
+    # but the site itself is updated only when the change lands on main.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
