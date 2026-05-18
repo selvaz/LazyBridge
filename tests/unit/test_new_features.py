@@ -220,6 +220,132 @@ class TestWebUIClass:
 
 
 # =============================================================================
+# Persistent Web UI — server reuse across prompt() calls
+# =============================================================================
+
+
+def _post_form(port: int, data: dict[str, str], *, follow_redirect: bool = False) -> tuple[int, str]:
+    import urllib.parse
+    import urllib.request
+
+    body = urllib.parse.urlencode(data).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/",
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    # The handler sends a 303; urllib auto-follows on POST in Python 3.11+
+    # (via HTTPRedirectHandler.redirect_request), which then issues a GET
+    # to ``/``.  For the test we want to inspect the 303 itself, not the
+    # redirect target, so disable auto-follow when ``follow_redirect`` is
+    # False.
+    if follow_redirect:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, resp.read().decode()
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def http_error_303(self, req, fp, code, msg, headers):  # noqa: D401
+            return fp  # surface the 303 response unchanged
+
+        http_error_302 = http_error_301 = http_error_307 = http_error_303
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    with opener.open(req, timeout=5) as resp:
+        return resp.status, resp.read().decode(errors="replace")
+
+
+class TestPersistentWebUI:
+    @pytest.mark.asyncio
+    async def test_two_consecutive_prompts_reuse_same_server(self):
+        """Second prompt() must reuse the first prompt()'s server / port."""
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            # Drive the first prompt() in a task; submit a POST to it.
+            task1 = asyncio.create_task(ui.prompt("first task", tools=[], output_type=str))
+            # Poll for the server to start.
+            for _ in range(50):
+                if ui._server is not None and ui._url is not None:
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._server is not None, "server failed to start on first prompt"
+            first_server = ui._server
+            first_url = ui._url
+            assert first_url is not None
+            port1 = int(first_url.rsplit(":", 1)[1].rstrip("/"))
+
+            # Submit the first form via POST (urllib runs in a thread).
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _post_form(port1, {"response": "answer one"})
+            )
+            result1 = await asyncio.wait_for(task1, timeout=5)
+            assert result1 == "answer one"
+
+            # Second prompt() must NOT create a new server.
+            task2 = asyncio.create_task(ui.prompt("second task", tools=[], output_type=str))
+            await asyncio.sleep(0.05)  # let prompt() publish the new HTML
+            assert ui._server is first_server, "server was recreated for second prompt"
+            assert ui._url == first_url, "URL changed between prompts"
+
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _post_form(port1, {"response": "answer two"})
+            )
+            result2 = await asyncio.wait_for(task2, timeout=5)
+            assert result2 == "answer two"
+        finally:
+            ui.close()
+
+    @pytest.mark.asyncio
+    async def test_post_returns_303_redirect_to_root(self):
+        """POST handler must redirect back to ``/`` so the browser auto-refreshes."""
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            task = asyncio.create_task(ui.prompt("task", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None:
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._url is not None
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+
+            status, _body = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _post_form(port, {"response": "x"}, follow_redirect=False)
+            )
+            assert status == 303
+            await asyncio.wait_for(task, timeout=5)
+        finally:
+            ui.close()
+
+    def test_close_is_idempotent(self):
+        """close() must be safe to call before any prompt() has run, and again after."""
+        ui = _WebUI(port=0)
+        ui.close()  # never started — must not raise
+        ui.close()  # second call — still safe
+
+    @pytest.mark.asyncio
+    async def test_close_shuts_down_server(self):
+        """After close() the server thread must terminate."""
+        ui = _WebUI(timeout=5, port=0)
+        task = asyncio.create_task(ui.prompt("task", tools=[], output_type=str))
+        for _ in range(50):
+            if ui._url is not None:
+                break
+            await asyncio.sleep(0.02)
+        assert ui._url is not None
+        port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _post_form(port, {"response": "x"})
+        )
+        await asyncio.wait_for(task, timeout=5)
+
+        srv_thread = ui._server_thread
+        assert srv_thread is not None and srv_thread.is_alive()
+        ui.close()
+        assert not srv_thread.is_alive()
+        assert ui._server is None
+
+
+# =============================================================================
 # HumanEngine ui="web" wiring
 # =============================================================================
 

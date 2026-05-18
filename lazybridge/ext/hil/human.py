@@ -264,21 +264,63 @@ class _WebUI(_UIProtocol):
 
     Uses only the standard library (http.server, threading, webbrowser).
     The OS picks a free port (port=0) unless an explicit port is supplied.
+
+    The HTTP server is started lazily on the first ``prompt()`` call and
+    **reused across subsequent calls** on the same instance — so the
+    browser tab stays on the same URL throughout a multi-turn session
+    (e.g. a ``Plan`` that routes back to a HIL step).  After each POST,
+    the response is a 303 redirect to ``/``; the resulting GET long-polls
+    until the next ``prompt()`` arrives, so the browser auto-refreshes
+    onto the next form with no user interaction between turns.
+
+    Call :meth:`close` to shut the server down explicitly; otherwise the
+    serving thread is a daemon and dies with the process.
     """
 
     def __init__(self, timeout: float | None = None, port: int = 0, default: str | None = None) -> None:
+        import queue as _queue
+        import threading as _threading
+
         self._timeout = timeout
         self._port = port
         self._default = default
+        # Server state — lazily created on first ``prompt()``.
+        self._server: Any = None
+        self._server_thread: _threading.Thread | None = None
+        self._url: str | None = None
+        self._opened_browser: bool = False
+        # Per-turn synchronisation.  ``_pending_html`` holds the form to
+        # serve on the next GET; ``_html_ready`` signals that a fresh
+        # ``prompt()`` has set it.  ``_response_q`` carries POST results
+        # back to the awaiting ``prompt()``.
+        self._lock = _threading.Lock()
+        self._pending_html: str | None = None
+        self._is_model: bool = False
+        self._fields: dict[str, Any] = {}
+        self._html_ready = _threading.Event()
+        self._response_q: _queue.Queue[str] = _queue.Queue()
+
+    def close(self) -> None:
+        """Shut down the HTTP server and join its thread.
+
+        Idempotent; safe to call if the server was never started.
+        """
+        if self._server is not None:
+            try:
+                self._server.shutdown()
+            except Exception:
+                pass
+            self._server = None
+        if self._server_thread is not None and self._server_thread.is_alive():
+            self._server_thread.join(timeout=2.0)
+        self._server_thread = None
 
     async def prompt(self, task: str, *, tools: list[Any], output_type: type) -> str:
-        import asyncio
         import json
-        import queue
         import threading
         import urllib.parse
         import webbrowser
-        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
         from pydantic import BaseModel
 
@@ -286,54 +328,89 @@ class _WebUI(_UIProtocol):
         fields: dict[str, Any] = getattr(output_type, "model_fields", {}) if is_model else {}
 
         html = _build_web_form(task, tools, is_model, fields)
-        response_q: queue.Queue[str] = queue.Queue()
 
-        class _Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(html.encode())
+        # Publish the new form for the next GET (which may be a redirect
+        # follow-up from a previous POST, already waiting on
+        # ``_html_ready``).  Capture is_model/fields too so the POST
+        # handler decodes against the SAME shape that was rendered.
+        with self._lock:
+            self._pending_html = html
+            self._is_model = is_model
+            self._fields = fields
+        # Drain any stale POST result left from a previously-timed-out
+        # turn so this call never returns a response that belongs to an
+        # earlier prompt.
+        while not self._response_q.empty():
+            try:
+                self._response_q.get_nowait()
+            except Exception:
+                break
+        self._html_ready.set()
 
-            def do_POST(self) -> None:
-                length = int(self.headers.get("Content-Length", 0))
-                raw = self.rfile.read(length).decode("utf-8", errors="replace")
-                data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
-                if is_model:
-                    result = json.dumps({k: data.get(k, "") for k in fields})
-                else:
-                    result = data.get("response", "")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"<html><body><h2>Response submitted. You may close this tab.</h2></body></html>")
-                response_q.put(result)
+        if self._server is None:
+            ui = self  # captured by handler closure — handlers are short-lived
 
-            def log_message(self, *_args: Any) -> None:  # suppress server logs
-                pass
+            class _Handler(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:
+                    # Long-poll until a form is ready.  The post-submit
+                    # 303 redirect lands here and blocks until the next
+                    # ``prompt()`` publishes a new form.
+                    ready = ui._html_ready.wait(timeout=ui._timeout or 3600.0)
+                    if not ready:
+                        self.send_response(504)
+                        self.end_headers()
+                        return
+                    with ui._lock:
+                        html_now = ui._pending_html or ""
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(html_now.encode())
 
-        server = HTTPServer(("127.0.0.1", self._port), _Handler)
-        port = server.server_address[1]
-        url = f"http://127.0.0.1:{port}/"
+                def do_POST(self) -> None:
+                    length = int(self.headers.get("Content-Length", 0))
+                    raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                    data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
+                    with ui._lock:
+                        is_model_now = ui._is_model
+                        fields_now = ui._fields
+                    if is_model_now:
+                        result = json.dumps({k: data.get(k, "") for k in fields_now})
+                    else:
+                        result = data.get("response", "")
+                    # Clear the ready-flag so the redirect GET below
+                    # blocks until the next ``prompt()`` arrives.
+                    ui._html_ready.clear()
+                    # 303 → GET / makes the browser auto-refresh onto
+                    # the next form once it's published.  No user action
+                    # required between turns.
+                    self.send_response(303)
+                    self.send_header("Location", "/")
+                    self.end_headers()
+                    ui._response_q.put(result)
 
-        print(f"\n[Human Input Required — Web UI]\nOpen: {url}\n")
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass  # browser launch is best-effort
+                def log_message(self, *_args: Any) -> None:  # suppress server logs
+                    pass
 
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        server_thread.start()
+            self._server = ThreadingHTTPServer(("127.0.0.1", self._port), _Handler)
+            actual_port = self._server.server_address[1]
+            self._url = f"http://127.0.0.1:{actual_port}/"
+            self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+            self._server_thread.start()
+
+        if not self._opened_browser:
+            print(f"\n[Human Input Required — Web UI]\nOpen: {self._url}\n")
+            try:
+                webbrowser.open(self._url)
+            except Exception:
+                pass  # browser launch is best-effort
+            self._opened_browser = True
 
         timeout = self._timeout or 3600.0
         loop = asyncio.get_running_loop()
         try:
-            # Same timeout on both sides: ``wait_for`` cancels the asyncio
-            # future on deadline and the executor's blocking ``get`` returns
-            # at the same moment instead of leaking the worker thread for
-            # an extra second after ``server.shutdown()`` runs.
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: response_q.get(timeout=timeout)),
+                loop.run_in_executor(None, lambda: self._response_q.get(timeout=timeout)),
                 timeout=timeout,
             )
         except TimeoutError as exc:
@@ -341,8 +418,6 @@ class _WebUI(_UIProtocol):
                 print(f"[Timeout — using default: {self._default!r}]")
                 return self._default
             raise TimeoutError(f"Web UI timed out after {timeout}s without a response") from exc
-        finally:
-            server.shutdown()
 
         return result
 
