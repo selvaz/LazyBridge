@@ -108,7 +108,14 @@ class Envelope(BaseModel, Generic[T]):
 
     @classmethod
     def from_task(cls, task: str, context: str | None = None) -> Envelope:
-        return cls(task=task, context=context, payload=task)  # type: ignore[arg-type]
+        # ``payload=task`` (a ``str``) vs ``T | None``: mypy 3.11 infers
+        # ``T = str`` from the kwarg and accepts it, while mypy 3.12
+        # keeps ``T`` unbound and rejects ``arg-type``.  The dual
+        # ``# type: ignore[arg-type, unused-ignore]`` is the canonical
+        # cross-version fix — the inner code never breaks at runtime
+        # because Pydantic coerces ``payload`` to ``Any`` regardless of
+        # ``T``.
+        return cls(task=task, context=context, payload=task)  # type: ignore[arg-type, unused-ignore]
 
     @classmethod
     def error_envelope(cls, exc: BaseException, *, retryable: bool = False) -> Envelope:

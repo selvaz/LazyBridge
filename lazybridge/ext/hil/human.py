@@ -206,8 +206,22 @@ class _TerminalUI(_UIProtocol):
             return raw
 
 
-def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[str, Any]) -> str:
-    """Return a self-contained HTML form for the human-input web UI."""
+def _build_web_form(
+    task: str,
+    tools: list[Any],
+    is_model: bool,
+    fields: dict[str, Any],
+    *,
+    epoch: int = 0,
+) -> str:
+    """Return a self-contained HTML form for the human-input web UI.
+
+    ``epoch`` is embedded as a hidden ``_epoch`` field so the POST
+    handler can detect submissions from a stale form (e.g. one rendered
+    for a previous ``prompt()`` whose response timed out before a later
+    ``prompt()`` arrived) and reject them instead of decoding them as
+    the new prompt's response.
+    """
     import html as _html
 
     tool_section = ""
@@ -232,6 +246,7 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
         form_body = '<textarea name="response" rows="8" style="width:100%;max-width:700px"></textarea>'
 
     task_escaped = _html.escape(task).replace("\n", "<br>")
+    epoch_field = f'<input type="hidden" name="_epoch" value="{int(epoch)}">'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -252,9 +267,64 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
 <pre>{task_escaped}</pre>
 {tool_section}
 <form method="POST" action="/">
+{epoch_field}
 {form_body}
 <br><button type="submit">Submit</button>
 </form>
+</body>
+</html>"""
+
+
+def _build_stale_form_page() -> str:
+    """HTML returned (with 410 Gone) when a POST arrives carrying an
+    ``_epoch`` that no longer matches the server's current form.
+
+    Auto-redirects back to ``/`` so the browser refreshes onto the
+    current form (or the "thinking" placeholder if no form is ready).
+    The 410 status is the audit-trail signal — humans see the auto-
+    redirect and the page text, but automated tests / log readers see
+    a clear "stale submission" exit code.
+    """
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=/">
+<title>LazyBridge — form expired</title>
+<style>body {font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#a00;}</style>
+</head>
+<body>
+<h2>This form has expired.</h2>
+<p>Redirecting you to the current prompt…</p>
+</body>
+</html>"""
+
+
+def _build_thinking_page() -> str:
+    """HTML served by GET when no form is ready (agent is processing).
+
+    Uses ``<meta http-equiv="refresh">`` to poll every 500 ms; when the
+    next ``prompt()`` publishes a form, the next refresh picks it up.
+    No JavaScript — the page degrades gracefully in any browser.
+    """
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0.5">
+<title>LazyBridge — waiting</title>
+<style>
+  body {font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#555;}
+  h2 {color:#0066cc;}
+  .spinner {display:inline-block;width:18px;height:18px;border:3px solid #e0e0e0;
+            border-top-color:#0066cc;border-radius:50%;animation:spin 1s linear infinite;
+            vertical-align:middle;margin-right:10px;}
+  @keyframes spin {to {transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<h2><span class="spinner"></span>Agent is thinking…</h2>
+<p>This page will refresh automatically when the next prompt is ready.</p>
 </body>
 </html>"""
 
@@ -264,85 +334,215 @@ class _WebUI(_UIProtocol):
 
     Uses only the standard library (http.server, threading, webbrowser).
     The OS picks a free port (port=0) unless an explicit port is supplied.
+
+    The HTTP server is started lazily on the first ``prompt()`` call and
+    **reused across subsequent calls** on the same instance — so the
+    browser tab stays on the same URL throughout a multi-turn session
+    (e.g. a ``Plan`` that routes back to a HIL step).  After each POST,
+    the response is a 303 redirect to ``/``; the resulting GET long-polls
+    until the next ``prompt()`` arrives, so the browser auto-refreshes
+    onto the next form with no user interaction between turns.
+
+    Call :meth:`close` to shut the server down explicitly; otherwise the
+    serving thread is a daemon and dies with the process.
     """
 
     def __init__(self, timeout: float | None = None, port: int = 0, default: str | None = None) -> None:
+        import queue as _queue
+        import threading as _threading
+
         self._timeout = timeout
         self._port = port
         self._default = default
+        # Server state — lazily created on first ``prompt()``.
+        self._server: Any = None
+        self._server_thread: _threading.Thread | None = None
+        self._url: str | None = None
+        self._opened_browser: bool = False
+        # Per-turn synchronisation.  ``_pending_html`` holds the form to
+        # serve on the next GET; ``_html_ready`` signals that a fresh
+        # ``prompt()`` has set it.  ``_response_q`` carries POST results
+        # back to the awaiting ``prompt()``.
+        self._lock = _threading.Lock()
+        self._pending_html: str | None = None
+        self._is_model: bool = False
+        self._fields: dict[str, Any] = {}
+        # Monotonic per-prompt counter.  Embedded into each form as a
+        # hidden ``_epoch`` field and re-checked by the POST handler so
+        # a late submission from a stale form (e.g. the previous
+        # ``prompt()`` timed out, then a new ``prompt()`` published a
+        # different form, then the human submitted the OLD form) is
+        # rejected with 410 instead of being decoded as the new
+        # prompt's response.
+        self._form_epoch: int = 0
+        self._html_ready = _threading.Event()
+        self._response_q: _queue.Queue[str] = _queue.Queue()
+
+    def close(self) -> None:
+        """Shut down the HTTP server and join its thread.
+
+        Idempotent; safe to call if the server was never started.
+        """
+        if self._server is not None:
+            try:
+                self._server.shutdown()
+            except Exception:
+                pass
+            self._server = None
+        if self._server_thread is not None and self._server_thread.is_alive():
+            self._server_thread.join(timeout=2.0)
+        self._server_thread = None
 
     async def prompt(self, task: str, *, tools: list[Any], output_type: type) -> str:
-        import asyncio
         import json
-        import queue
+        import queue as _queue
         import threading
         import urllib.parse
         import webbrowser
-        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
         from pydantic import BaseModel
 
         is_model = isinstance(output_type, type) and issubclass(output_type, BaseModel)
         fields: dict[str, Any] = getattr(output_type, "model_fields", {}) if is_model else {}
 
-        html = _build_web_form(task, tools, is_model, fields)
-        response_q: queue.Queue[str] = queue.Queue()
+        # Publish the new form for the next GET (which may be a redirect
+        # follow-up from a previous POST, already waiting on
+        # ``_html_ready``).  Capture is_model/fields too so the POST
+        # handler decodes against the SAME shape that was rendered.
+        # Bump the epoch so any in-flight submission from a stale form
+        # (rendered for a previous timed-out prompt) is rejected with
+        # 410 instead of being decoded as this prompt's response.
+        with self._lock:
+            self._form_epoch += 1
+            epoch = self._form_epoch
+            self._pending_html = _build_web_form(task, tools, is_model, fields, epoch=epoch)
+            self._is_model = is_model
+            self._fields = fields
+        # Drain any stale POST result left from a previously-timed-out
+        # turn so this call never returns a response that belongs to an
+        # earlier prompt.
+        while not self._response_q.empty():
+            try:
+                self._response_q.get_nowait()
+            except Exception:
+                break
+        self._html_ready.set()
 
-        class _Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(html.encode())
+        if self._server is None:
+            ui = self  # captured by handler closure — handlers are short-lived
 
-            def do_POST(self) -> None:
-                length = int(self.headers.get("Content-Length", 0))
-                raw = self.rfile.read(length).decode("utf-8", errors="replace")
-                data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
-                if is_model:
-                    result = json.dumps({k: data.get(k, "") for k in fields})
-                else:
-                    result = data.get("response", "")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"<html><body><h2>Response submitted. You may close this tab.</h2></body></html>")
-                response_q.put(result)
+            class _Handler(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:
+                    # Non-blocking: when no form is ready (agent is
+                    # processing the previous turn), serve the
+                    # "thinking" page with a meta-refresh that pulls
+                    # the next form once it arrives.  Blocking the GET
+                    # used to leave the browser with a hung request and
+                    # no visible feedback during long pipeline steps.
+                    if ui._html_ready.is_set():
+                        with ui._lock:
+                            html_now = ui._pending_html or ""
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(html_now.encode())
+                    else:
+                        body = _build_thinking_page().encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(body)
 
-            def log_message(self, *_args: Any) -> None:  # suppress server logs
-                pass
+                def do_POST(self) -> None:
+                    length = int(self.headers.get("Content-Length", 0))
+                    raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                    data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
+                    # Reject submissions from a stale form (epoch
+                    # mismatch).  Without this guard, a POST from a
+                    # form rendered for a previous ``prompt()`` whose
+                    # response timed out could be decoded against the
+                    # NEW prompt's ``_is_model``/``_fields`` and
+                    # consumed as that prompt's response.
+                    try:
+                        posted_epoch = int(data.get("_epoch", "-1"))
+                    except (TypeError, ValueError):
+                        posted_epoch = -1
+                    with ui._lock:
+                        current_epoch = ui._form_epoch
+                        is_model_now = ui._is_model
+                        fields_now = ui._fields
+                    if posted_epoch != current_epoch or not ui._html_ready.is_set():
+                        body = _build_stale_form_page().encode()
+                        self.send_response(410)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
+                    if is_model_now:
+                        result = json.dumps({k: data.get(k, "") for k in fields_now})
+                    else:
+                        result = data.get("response", "")
+                    # Clear the ready-flag so the redirect GET below
+                    # blocks until the next ``prompt()`` arrives.
+                    ui._html_ready.clear()
+                    # 303 → GET / makes the browser auto-refresh onto
+                    # the next form once it's published.  No user action
+                    # required between turns.
+                    self.send_response(303)
+                    self.send_header("Location", "/")
+                    self.end_headers()
+                    ui._response_q.put(result)
 
-        server = HTTPServer(("127.0.0.1", self._port), _Handler)
-        port = server.server_address[1]
-        url = f"http://127.0.0.1:{port}/"
+                def log_message(self, *_args: Any) -> None:  # suppress server logs
+                    pass
 
-        print(f"\n[Human Input Required — Web UI]\nOpen: {url}\n")
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass  # browser launch is best-effort
+            self._server = ThreadingHTTPServer(("127.0.0.1", self._port), _Handler)
+            actual_port = self._server.server_address[1]
+            self._url = f"http://127.0.0.1:{actual_port}/"
+            self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+            self._server_thread.start()
 
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        server_thread.start()
+        if not self._opened_browser and self._url is not None:
+            print(f"\n[Human Input Required — Web UI]\nOpen: {self._url}\n")
+            try:
+                webbrowser.open(self._url)
+            except Exception:
+                pass  # browser launch is best-effort
+            self._opened_browser = True
 
         timeout = self._timeout or 3600.0
         loop = asyncio.get_running_loop()
         try:
-            # Same timeout on both sides: ``wait_for`` cancels the asyncio
-            # future on deadline and the executor's blocking ``get`` returns
-            # at the same moment instead of leaking the worker thread for
-            # an extra second after ``server.shutdown()`` runs.
+            # Two timeouts race here: ``queue.get(timeout=)`` raises
+            # ``queue.Empty`` and ``asyncio.wait_for`` raises
+            # ``TimeoutError``; whichever fires first wins.  Both are
+            # legitimate "no response" signals — treat them identically
+            # by catching both in the except branch below.
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: response_q.get(timeout=timeout)),
+                loop.run_in_executor(None, lambda: self._response_q.get(timeout=timeout)),
                 timeout=timeout,
             )
-        except TimeoutError as exc:
+        except (TimeoutError, _queue.Empty) as exc:
+            # Invalidate the current form so the persistent server
+            # stops serving the now-orphaned page.  Without this clear,
+            # a subsequent ``prompt()`` in the same session could be
+            # answered by a late submission of the stale form, decoded
+            # against the new prompt's ``_is_model``/``_fields``.  The
+            # epoch check in ``do_POST`` is the second line of defence,
+            # but invalidating ``_html_ready`` here means GETs in the
+            # interim see the "thinking" placeholder rather than the
+            # expired form.
+            with self._lock:
+                self._pending_html = None
+                self._is_model = False
+                self._fields = {}
+            self._html_ready.clear()
             if self._default is not None:
                 print(f"[Timeout — using default: {self._default!r}]")
                 return self._default
             raise TimeoutError(f"Web UI timed out after {timeout}s without a response") from exc
-        finally:
-            server.shutdown()
 
         return result
 
@@ -393,6 +593,17 @@ class HumanEngine:
 
         try:
             task_text = env.task or env.text()
+            # Surface a prior step's error to the human, symmetric with
+            # ``env.context`` below: a HIL placed after a fallible step
+            # in a Plan acts as the natural recovery / retry surface,
+            # but only if the human can SEE that something went wrong.
+            # Without this, an error envelope flowing into HIL produces
+            # a form with no indication of what failed upstream.
+            if env.error is not None:
+                err = env.error
+                err_msg = getattr(err, "message", None) or str(err)
+                err_type = getattr(err, "type", None) or err.__class__.__name__
+                task_text = f"[upstream error — {err_type}] {err_msg}\n\n{task_text}"
             if env.context:
                 task_text = f"{task_text}\n\nContext:\n{env.context}"
             # Multimodal: humans can't view base64 in a terminal, but
