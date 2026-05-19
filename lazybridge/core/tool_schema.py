@@ -382,7 +382,7 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # fields that the validator would reject, leading to "the LLM
     # generated against this schema but Pydantic rejected it" surprises.
     if inspect.isclass(annotation) and issubclass(annotation, _BaseModel):
-        schema = annotation.model_json_schema(mode="validation")
+        schema: dict[str, Any] = annotation.model_json_schema(mode="validation")
         schema.pop("title", None)
         return schema
 

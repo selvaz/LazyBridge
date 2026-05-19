@@ -108,7 +108,7 @@ class Envelope(BaseModel, Generic[T]):
 
     @classmethod
     def from_task(cls, task: str, context: str | None = None) -> Envelope:
-        return cls(task=task, context=context, payload=task)  # type: ignore[arg-type]
+        return cls(task=task, context=context, payload=task)
 
     @classmethod
     def error_envelope(cls, exc: BaseException, *, retryable: bool = False) -> Envelope:

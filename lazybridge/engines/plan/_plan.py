@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._serialisation import (
@@ -226,7 +226,7 @@ class Plan:
                 "nested_cost_usd": nested_cost,
             }
         )
-        return result_env.model_copy(update={"metadata": new_meta})
+        return cast(Envelope[Any], result_env.model_copy(update={"metadata": new_meta}))
 
     # ------------------------------------------------------------------
     # Checkpoint helpers

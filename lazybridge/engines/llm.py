@@ -542,7 +542,7 @@ class LLMEngine:
                 run_id=run_id,
             )
 
-        return result
+        return cast(Envelope[Any], result)
 
     # ------------------------------------------------------------------
     # Multimodal user-message construction
