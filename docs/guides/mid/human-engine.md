@@ -160,6 +160,11 @@ reviewer_web = Agent(
 )
 ```
 
+A runnable file-backed `_UIProtocol` lives in
+[`examples/hil_app/04_custom_ui.py`](../../recipes/hil-custom-ui.md) —
+useful as a starting point when integrating with Slack, a ticket
+system, or any other surface where the human is reached out-of-band.
+
 ## Pitfalls
 
 - **The terminal UI blocks the current process.** This is

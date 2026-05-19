@@ -214,10 +214,18 @@ approver = human_agent(
 Same `output=PydanticModel` support; same envelope contract. Useful when
 the agent runs on a server and a remote operator approves via browser.
 
+The web UI keeps its HTTP server alive across successive `prompt()`
+calls, so the same `HumanEngine` can sit inside a `Plan` routing
+cycle and drive a full multi-turn chat from a single browser tab —
+see the [HIL chat loop recipe](../recipes/hil-chat-loop.md) for the
+runnable pattern.
+
 You can also plug your own UI (Slack bot, ticket system, mobile app)
 through the engine's protocol — `ui=YourCustomUI()` accepts any object
 that implements `prompt(task, tools, output_type)`. See the
-[HumanEngine guide](../guides/mid/human-engine.md) for the full protocol.
+[HumanEngine guide](../guides/mid/human-engine.md) for the full protocol
+and the [custom-UI recipe](../recipes/hil-custom-ui.md) for a runnable
+`_UIProtocol` implementation.
 
 ---
 

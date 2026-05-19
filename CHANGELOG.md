@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.7.9] — 2026-05-10 — simplification release
+## [0.7.9] — 2026-05-19 — simplification release + HIL boundary primitive
 
 The headline change: **deletion-led simplification**.  The framework
 had no users yet, so we ship breaking changes without deprecation
@@ -18,6 +18,14 @@ Zero new public concept.
 
 The single LLM-friendliness lever is consistency: one canonical
 form per concept, errors always raise, no opt-in modes.
+
+Between the initial simplification work (2026-05-10) and the
+2026-05-19 publication to PyPI, the ``HumanEngine`` web UI was
+also refactored to make HIL a true *boundary primitive* — usable
+as a clarifier, an entrypoint, a cyclic chat loop, and an
+extension point for production UIs through the unchanged
+``_UIProtocol`` hook.  No new public concept; the additions are
+all under existing surface.
 
 See ``docs/migrations/0.7-to-0.79.md`` for per-deletion before/after
 codemod snippets.
@@ -125,6 +133,41 @@ codemod snippets.
 - **``test_public_api_snapshot.py``** — pins ``lazybridge.__all__``
   and locks the deleted-in-0.7.9 names as permanently gone.
 
+### Added — HIL boundary primitive (post-2026-05-10 work)
+
+The same ``HumanEngine`` primitive now composes into four structurally
+distinct roles — clarifier, entrypoint, chat loop, custom UI — with
+no chat-specific framework code.  All additions live under existing
+public surface (``human_agent(...)`` / ``HumanEngine(ui=...)`` /
+``_UIProtocol``); no new top-level imports.
+
+- **Persistent web UI** — ``ext/hil/human.py:_WebUI`` now reuses the
+  same ``ThreadingHTTPServer`` and browser tab across multiple
+  ``prompt()`` calls; previously each call spawned a fresh server
+  and opened a new tab.  This is what lets ``HumanEngine`` participate
+  in ``Plan`` routing cycles (e.g. multi-turn chat) — see
+  ``examples/hil_app/03_chat_loop.py``.
+- **Non-blocking GET with auto-refresh** — the GET handler returns
+  immediately with a small ``<meta http-equiv="refresh">`` "Agent is
+  thinking…" page when no form is ready, instead of long-polling for
+  up to an hour.  Browser shows continuous feedback during agent
+  processing.
+- **``env.error`` surfaced to HIL** — ``HumanEngine.run`` now
+  prepends ``[upstream error — <type>] <message>`` to the task shown
+  to the human when the inbound envelope carries an error.  Symmetric
+  with the existing ``env.context`` handling.  Makes HIL a natural
+  recovery surface for fallible upstream steps.
+- **Stale-form rejection** — each rendered form carries a hidden
+  ``_epoch`` field; the POST handler rejects mismatched submissions
+  with ``410 Gone``, preventing a late submission of a previous form
+  from being decoded against a later prompt's
+  ``_is_model`` / ``_fields`` schema.  Closes a correctness hole in
+  the timeout-then-reprompt scenario.
+- **Four runnable examples** under ``examples/hil_app/`` — clarifier
+  (``01_clarify.py``), entrypoint (``02_entrypoint.py``), chat loop
+  (``03_chat_loop.py``), custom ``_UIProtocol`` (``04_custom_ui.py``).
+  See the "Human-in-the-loop" section in ``docs/recipes/index.md``.
+
 ### Fixed (bug fixes from Phase 1)
 
 - B1: DeepSeek provider — defensively rebuild ``params['messages']``
@@ -150,6 +193,32 @@ codemod snippets.
 - I5: Anthropic adaptive-thinking warning corrected for Opus 4.7
   (pre-fix said "use 'effort'" but Opus 4.7 only accepts ``display``).
 
+### Fixed — type strictness (post-2026-05-10 work)
+
+mypy 1.19 + pydantic 2.x surface stricter generic inference; four
+pre-existing sites needed annotation/cast updates to clear the CI
+type-check job on both Python 3.11 and 3.12.
+
+- Cross-version mypy compatibility on ``Envelope.from_task`` — uses
+  ``# type: ignore[arg-type, unused-ignore]`` so the ignore is
+  honoured under 3.12 (where ``T`` stays unbound) and tolerated under
+  3.11 (where ``T = str`` is inferred and the ignore would otherwise
+  be flagged unused).
+- ``cast(Envelope[Any], ...)`` on ``model_copy(update=...)`` returns
+  in ``engines/llm.py`` and ``engines/plan/_plan.py`` so mypy 1.19's
+  stricter generic propagation through pydantic kwargs doesn't
+  surface ``no-any-return``.
+- Explicit ``dict[str, Any]`` annotation on the ``schema`` local in
+  ``core/tool_schema.py:_annotation_to_schema`` for the same reason.
+- ``_WebUI._url`` narrowed from ``str | None`` to ``str`` (via an
+  ``is not None`` guard) before ``webbrowser.open`` to satisfy
+  ``arg-type``.
+- ``HumanEngine`` timeout branch now also catches ``queue.Empty`` —
+  the underlying ``response_q.get(timeout=…)`` and the outer
+  ``asyncio.wait_for(…, timeout=…)`` race; previously only
+  ``TimeoutError`` was caught, so a ``queue.Empty`` win propagated
+  out as an unhandled exception.
+
 ### Documentation
 
 - ``SKILL.md`` rewritten for the 0.7.9 surface; canonical Plan
@@ -168,6 +237,14 @@ codemod snippets.
   as best practice.
 - ``examples/verify_judge_loop.py`` (new), ``examples/guardrails_demo.py``
   (new), env preflight in ``examples/daily_news_report.py``.
+- ``examples/hil_app/`` (new, 4 files) + four ``docs/recipes/hil-*.md``
+  recipe pages walking through them.  Both the beginners HIL step
+  (``docs/beginners/11-human-engine.md``) and the HIL guide
+  (``docs/guides/mid/human-engine.md``) now cross-reference the
+  runnable recipes.
+- ``README.md`` Install section cleaned up — the obsolete
+  "until 0.7.9 is on PyPI" blockquote and the "post-0.7.9 once on
+  PyPI" inline comment are gone now that the wheel is shipped.
 
 ### Tooling
 

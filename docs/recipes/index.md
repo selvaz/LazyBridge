@@ -29,6 +29,18 @@ single agent → tools → composition → planning → production.
 - [Blackboard planner](blackboard-planner.md) — `examples/patterns/blackboard_planner.py`
 - [Dynamic re-planning](dynamic-replanning.md) — `examples/patterns/dynamic_planner.py`
 
+## Human-in-the-loop
+
+The same `HumanEngine` primitive composes into four structurally
+different roles — a leaf clarifier, a pipeline entrypoint, a cyclic
+chat loop, and a fully custom UI surface — without any chat-specific
+framework code. See `examples/hil_app/` for runnable versions.
+
+- [HIL as a clarifier](hil-clarify.md) — `examples/hil_app/01_clarify.py`
+- [HIL as an entrypoint](hil-entrypoint.md) — `examples/hil_app/02_entrypoint.py`
+- [HIL as a chat loop](hil-chat-loop.md) — `examples/hil_app/03_chat_loop.py` (web UI with persistent server)
+- [HIL with a custom UI](hil-custom-ui.md) — `examples/hil_app/04_custom_ui.py` (file-watched `_UIProtocol`)
+
 ## Composition shapes
 
 - [Nested pipelines (horizontal)](../guides/full/nested-pipelines.md)
