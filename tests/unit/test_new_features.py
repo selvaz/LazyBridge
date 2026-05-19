@@ -245,7 +245,7 @@ def _post_form(port: int, data: dict[str, str], *, follow_redirect: bool = False
             return resp.status, resp.read().decode()
 
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def http_error_303(self, req, fp, code, msg, headers):  # noqa: D401
+        def http_error_303(self, req, fp, code, msg, headers):
             return fp  # surface the 303 response unchanged
 
         http_error_302 = http_error_301 = http_error_307 = http_error_303
@@ -333,9 +333,7 @@ class TestPersistentWebUI:
             await asyncio.sleep(0.02)
         assert ui._url is not None
         port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
-        await asyncio.get_running_loop().run_in_executor(
-            None, lambda: _post_form(port, {"response": "x"})
-        )
+        await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}))
         await asyncio.wait_for(task, timeout=5)
 
         srv_thread = ui._server_thread
@@ -388,9 +386,7 @@ class TestThinkingPage:
             assert not ui._html_ready.is_set()
 
             t0 = time.monotonic()
-            status, body = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _get(port)
-            )
+            status, body = await asyncio.get_running_loop().run_in_executor(None, lambda: _get(port))
             elapsed = time.monotonic() - t0
             assert status == 200
             # Must return promptly (<<1s) instead of long-polling.
@@ -420,16 +416,12 @@ class TestThinkingPage:
             assert ui._html_ready.is_set()
             port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
 
-            status, body = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _get(port)
-            )
+            status, body = await asyncio.get_running_loop().run_in_executor(None, lambda: _get(port))
             assert status == 200
             assert "the real question" in body
             assert "<textarea" in body
             # Tear down via POST so the task completes.
-            await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _post_form(port, {"response": "x"})
-            )
+            await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}))
             await asyncio.wait_for(task, timeout=5)
         finally:
             ui.close()

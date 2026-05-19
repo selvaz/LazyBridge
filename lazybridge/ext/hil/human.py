@@ -432,7 +432,7 @@ class _WebUI(_UIProtocol):
             self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
             self._server_thread.start()
 
-        if not self._opened_browser:
+        if not self._opened_browser and self._url is not None:
             print(f"\n[Human Input Required — Web UI]\nOpen: {self._url}\n")
             try:
                 webbrowser.open(self._url)
