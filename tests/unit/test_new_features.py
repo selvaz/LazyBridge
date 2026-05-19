@@ -224,11 +224,28 @@ class TestWebUIClass:
 # =============================================================================
 
 
-def _post_form(port: int, data: dict[str, str], *, follow_redirect: bool = False) -> tuple[int, str]:
+def _post_form(
+    port: int,
+    data: dict[str, str],
+    *,
+    follow_redirect: bool = False,
+    epoch: int | None = None,
+) -> tuple[int, str]:
+    """POST ``data`` to ``_WebUI`` on ``port``.
+
+    When ``epoch`` is provided it's added as ``_epoch`` (matching the
+    hidden field a real browser would carry); leaving it ``None`` means
+    "skip the epoch field" and is used by tests that exercise the
+    stale-form rejection path.
+    """
+    import urllib.error
     import urllib.parse
     import urllib.request
 
-    body = urllib.parse.urlencode(data).encode()
+    payload = dict(data)
+    if epoch is not None:
+        payload.setdefault("_epoch", str(epoch))
+    body = urllib.parse.urlencode(payload).encode()
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/",
         data=body,
@@ -251,8 +268,15 @@ def _post_form(port: int, data: dict[str, str], *, follow_redirect: bool = False
         http_error_302 = http_error_301 = http_error_307 = http_error_303
 
     opener = urllib.request.build_opener(_NoRedirect)
-    with opener.open(req, timeout=5) as resp:
-        return resp.status, resp.read().decode(errors="replace")
+    try:
+        with opener.open(req, timeout=5) as resp:
+            return resp.status, resp.read().decode(errors="replace")
+    except urllib.error.HTTPError as exc:
+        # 4xx / 5xx responses (e.g. the 410 returned for stale forms)
+        # are surfaced by urllib as exceptions even with the no-redirect
+        # opener; we want the test to inspect status + body, not a raise.
+        body = exc.read().decode(errors="replace") if exc.fp is not None else ""
+        return exc.code, body
 
 
 class TestPersistentWebUI:
@@ -275,8 +299,9 @@ class TestPersistentWebUI:
             port1 = int(first_url.rsplit(":", 1)[1].rstrip("/"))
 
             # Submit the first form via POST (urllib runs in a thread).
+            e1 = ui._form_epoch
             await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _post_form(port1, {"response": "answer one"})
+                None, lambda: _post_form(port1, {"response": "answer one"}, epoch=e1)
             )
             result1 = await asyncio.wait_for(task1, timeout=5)
             assert result1 == "answer one"
@@ -287,8 +312,9 @@ class TestPersistentWebUI:
             assert ui._server is first_server, "server was recreated for second prompt"
             assert ui._url == first_url, "URL changed between prompts"
 
+            e2 = ui._form_epoch
             await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _post_form(port1, {"response": "answer two"})
+                None, lambda: _post_form(port1, {"response": "answer two"}, epoch=e2)
             )
             result2 = await asyncio.wait_for(task2, timeout=5)
             assert result2 == "answer two"
@@ -308,8 +334,9 @@ class TestPersistentWebUI:
             assert ui._url is not None
             port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
 
+            e = ui._form_epoch
             status, _body = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _post_form(port, {"response": "x"}, follow_redirect=False)
+                None, lambda: _post_form(port, {"response": "x"}, follow_redirect=False, epoch=e)
             )
             assert status == 303
             await asyncio.wait_for(task, timeout=5)
@@ -333,7 +360,8 @@ class TestPersistentWebUI:
             await asyncio.sleep(0.02)
         assert ui._url is not None
         port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
-        await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}))
+        e = ui._form_epoch
+        await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}, epoch=e))
         await asyncio.wait_for(task, timeout=5)
 
         srv_thread = ui._server_thread
@@ -377,8 +405,9 @@ class TestThinkingPage:
             assert ui._url is not None
             port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
 
+            e = ui._form_epoch
             await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _post_form(port, {"response": "first answer"})
+                None, lambda: _post_form(port, {"response": "first answer"}, epoch=e)
             )
             await asyncio.wait_for(task, timeout=5)
             # POST cleared ``_html_ready`` — the next GET should NOT
@@ -421,8 +450,163 @@ class TestThinkingPage:
             assert "the real question" in body
             assert "<textarea" in body
             # Tear down via POST so the task completes.
-            await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}))
+            e = ui._form_epoch
+            await asyncio.get_running_loop().run_in_executor(None, lambda: _post_form(port, {"response": "x"}, epoch=e))
             await asyncio.wait_for(task, timeout=5)
+        finally:
+            ui.close()
+
+
+# =============================================================================
+# Stale-form rejection — late submission from a previous-prompt form
+# must not be consumed as the next prompt's response.
+# =============================================================================
+
+
+class TestStaleFormRejection:
+    @pytest.mark.asyncio
+    async def test_post_with_wrong_epoch_rejected_410(self):
+        """A POST carrying an ``_epoch`` other than the current one
+        must NOT be consumed; it must return 410 Gone and leave the
+        in-flight ``prompt()`` waiting for the correct submission.
+        """
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            task = asyncio.create_task(ui.prompt("real prompt", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None and ui._html_ready.is_set():
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._url is not None
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+
+            stale_epoch = ui._form_epoch - 1  # one short of current
+            status, body = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(
+                    port,
+                    {"response": "stale submission"},
+                    epoch=stale_epoch,
+                    follow_redirect=False,
+                ),
+            )
+            assert status == 410, "stale form POST must be rejected with 410 Gone"
+            assert "expired" in body.lower()
+            # prompt() must still be waiting — the stale submission
+            # was rejected, not consumed.
+            assert not task.done()
+
+            # A correctly-epoched POST still completes the prompt().
+            e = ui._form_epoch
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(port, {"response": "fresh"}, epoch=e),
+            )
+            result = await asyncio.wait_for(task, timeout=5)
+            assert result == "fresh"
+        finally:
+            ui.close()
+
+    @pytest.mark.asyncio
+    async def test_post_without_epoch_rejected(self):
+        """A POST with no ``_epoch`` field at all (e.g. a crafted
+        cross-tab submission) is treated as stale."""
+        ui = _WebUI(timeout=5, port=0)
+        try:
+            task = asyncio.create_task(ui.prompt("task", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None and ui._html_ready.is_set():
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._url is not None
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+
+            status, _body = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(
+                    port,
+                    {"response": "no epoch"},
+                    follow_redirect=False,
+                ),
+            )
+            assert status == 410
+            assert not task.done()
+
+            # Clean up: a valid POST so the prompt completes.
+            e = ui._form_epoch
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(port, {"response": "ok"}, epoch=e),
+            )
+            await asyncio.wait_for(task, timeout=5)
+        finally:
+            ui.close()
+
+    @pytest.mark.asyncio
+    async def test_chatgpt_scenario_late_post_after_timeout_and_reprompt(self):
+        """End-to-end of the bug described in the ChatGPT review:
+        prompt #1 times out, prompt #2 starts, the BROWSER (still
+        showing prompt #1's form) submits late — that POST must NOT
+        be consumed as prompt #2's response.
+        """
+        ui = _WebUI(timeout=0.3, port=0, default="defaulted")
+        try:
+            # Prompt #1: starts, captures its epoch, then we let it
+            # time out without ever submitting.
+            task1 = asyncio.create_task(ui.prompt("first task", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._url is not None and ui._html_ready.is_set():
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._url is not None
+            port = int(ui._url.rsplit(":", 1)[1].rstrip("/"))
+            stale_epoch = ui._form_epoch
+
+            # Wait for the timeout to fire and the default path to
+            # return.  prompt() should clear ``_html_ready`` and the
+            # form state so a late POST can't be misdirected.
+            result1 = await asyncio.wait_for(task1, timeout=2)
+            assert result1 == "defaulted"
+            assert not ui._html_ready.is_set()
+
+            # Bump the UI's per-prompt timeout for prompt #2 — we want
+            # it to wait long enough for the test to send first a stale
+            # POST then a fresh one without the second prompt timing
+            # out.  The 0.3s default was only needed to drive #1 into
+            # the timeout path.
+            ui._timeout = 5.0
+
+            # Prompt #2: publishes a brand-new form with bumped epoch.
+            task2 = asyncio.create_task(ui.prompt("second task", tools=[], output_type=str))
+            for _ in range(50):
+                if ui._html_ready.is_set() and ui._form_epoch != stale_epoch:
+                    break
+                await asyncio.sleep(0.02)
+            assert ui._form_epoch != stale_epoch
+
+            # Simulate the browser submitting prompt #1's stale form
+            # AFTER prompt #2 went live.  Without the epoch guard this
+            # would be consumed as prompt #2's response.
+            status, _body = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(
+                    port,
+                    {"response": "STALE — must not reach prompt #2"},
+                    epoch=stale_epoch,
+                    follow_redirect=False,
+                ),
+            )
+            assert status == 410, "stale POST after timeout+reprompt must be 410"
+            assert not task2.done(), "stale POST must not satisfy prompt #2"
+
+            # The fresh form still completes normally.
+            fresh_epoch = ui._form_epoch
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: _post_form(port, {"response": "real answer"}, epoch=fresh_epoch),
+            )
+            result2 = await asyncio.wait_for(task2, timeout=5)
+            assert result2 == "real answer"
         finally:
             ui.close()
 

@@ -206,8 +206,22 @@ class _TerminalUI(_UIProtocol):
             return raw
 
 
-def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[str, Any]) -> str:
-    """Return a self-contained HTML form for the human-input web UI."""
+def _build_web_form(
+    task: str,
+    tools: list[Any],
+    is_model: bool,
+    fields: dict[str, Any],
+    *,
+    epoch: int = 0,
+) -> str:
+    """Return a self-contained HTML form for the human-input web UI.
+
+    ``epoch`` is embedded as a hidden ``_epoch`` field so the POST
+    handler can detect submissions from a stale form (e.g. one rendered
+    for a previous ``prompt()`` whose response timed out before a later
+    ``prompt()`` arrived) and reject them instead of decoding them as
+    the new prompt's response.
+    """
     import html as _html
 
     tool_section = ""
@@ -232,6 +246,7 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
         form_body = '<textarea name="response" rows="8" style="width:100%;max-width:700px"></textarea>'
 
     task_escaped = _html.escape(task).replace("\n", "<br>")
+    epoch_field = f'<input type="hidden" name="_epoch" value="{int(epoch)}">'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -252,9 +267,35 @@ def _build_web_form(task: str, tools: list[Any], is_model: bool, fields: dict[st
 <pre>{task_escaped}</pre>
 {tool_section}
 <form method="POST" action="/">
+{epoch_field}
 {form_body}
 <br><button type="submit">Submit</button>
 </form>
+</body>
+</html>"""
+
+
+def _build_stale_form_page() -> str:
+    """HTML returned (with 410 Gone) when a POST arrives carrying an
+    ``_epoch`` that no longer matches the server's current form.
+
+    Auto-redirects back to ``/`` so the browser refreshes onto the
+    current form (or the "thinking" placeholder if no form is ready).
+    The 410 status is the audit-trail signal — humans see the auto-
+    redirect and the page text, but automated tests / log readers see
+    a clear "stale submission" exit code.
+    """
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=/">
+<title>LazyBridge — form expired</title>
+<style>body {font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#a00;}</style>
+</head>
+<body>
+<h2>This form has expired.</h2>
+<p>Redirecting you to the current prompt…</p>
 </body>
 </html>"""
 
@@ -326,6 +367,14 @@ class _WebUI(_UIProtocol):
         self._pending_html: str | None = None
         self._is_model: bool = False
         self._fields: dict[str, Any] = {}
+        # Monotonic per-prompt counter.  Embedded into each form as a
+        # hidden ``_epoch`` field and re-checked by the POST handler so
+        # a late submission from a stale form (e.g. the previous
+        # ``prompt()`` timed out, then a new ``prompt()`` published a
+        # different form, then the human submitted the OLD form) is
+        # rejected with 410 instead of being decoded as the new
+        # prompt's response.
+        self._form_epoch: int = 0
         self._html_ready = _threading.Event()
         self._response_q: _queue.Queue[str] = _queue.Queue()
 
@@ -346,6 +395,7 @@ class _WebUI(_UIProtocol):
 
     async def prompt(self, task: str, *, tools: list[Any], output_type: type) -> str:
         import json
+        import queue as _queue
         import threading
         import urllib.parse
         import webbrowser
@@ -356,14 +406,17 @@ class _WebUI(_UIProtocol):
         is_model = isinstance(output_type, type) and issubclass(output_type, BaseModel)
         fields: dict[str, Any] = getattr(output_type, "model_fields", {}) if is_model else {}
 
-        html = _build_web_form(task, tools, is_model, fields)
-
         # Publish the new form for the next GET (which may be a redirect
         # follow-up from a previous POST, already waiting on
         # ``_html_ready``).  Capture is_model/fields too so the POST
         # handler decodes against the SAME shape that was rendered.
+        # Bump the epoch so any in-flight submission from a stale form
+        # (rendered for a previous timed-out prompt) is rejected with
+        # 410 instead of being decoded as this prompt's response.
         with self._lock:
-            self._pending_html = html
+            self._form_epoch += 1
+            epoch = self._form_epoch
+            self._pending_html = _build_web_form(task, tools, is_model, fields, epoch=epoch)
             self._is_model = is_model
             self._fields = fields
         # Drain any stale POST result left from a previously-timed-out
@@ -405,9 +458,28 @@ class _WebUI(_UIProtocol):
                     length = int(self.headers.get("Content-Length", 0))
                     raw = self.rfile.read(length).decode("utf-8", errors="replace")
                     data = dict(urllib.parse.parse_qsl(raw, keep_blank_values=True))
+                    # Reject submissions from a stale form (epoch
+                    # mismatch).  Without this guard, a POST from a
+                    # form rendered for a previous ``prompt()`` whose
+                    # response timed out could be decoded against the
+                    # NEW prompt's ``_is_model``/``_fields`` and
+                    # consumed as that prompt's response.
+                    try:
+                        posted_epoch = int(data.get("_epoch", "-1"))
+                    except (TypeError, ValueError):
+                        posted_epoch = -1
                     with ui._lock:
+                        current_epoch = ui._form_epoch
                         is_model_now = ui._is_model
                         fields_now = ui._fields
+                    if posted_epoch != current_epoch or not ui._html_ready.is_set():
+                        body = _build_stale_form_page().encode()
+                        self.send_response(410)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
                     if is_model_now:
                         result = json.dumps({k: data.get(k, "") for k in fields_now})
                     else:
@@ -443,11 +515,30 @@ class _WebUI(_UIProtocol):
         timeout = self._timeout or 3600.0
         loop = asyncio.get_running_loop()
         try:
+            # Two timeouts race here: ``queue.get(timeout=)`` raises
+            # ``queue.Empty`` and ``asyncio.wait_for`` raises
+            # ``TimeoutError``; whichever fires first wins.  Both are
+            # legitimate "no response" signals — treat them identically
+            # by catching both in the except branch below.
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: self._response_q.get(timeout=timeout)),
                 timeout=timeout,
             )
-        except TimeoutError as exc:
+        except (TimeoutError, _queue.Empty) as exc:
+            # Invalidate the current form so the persistent server
+            # stops serving the now-orphaned page.  Without this clear,
+            # a subsequent ``prompt()`` in the same session could be
+            # answered by a late submission of the stale form, decoded
+            # against the new prompt's ``_is_model``/``_fields``.  The
+            # epoch check in ``do_POST`` is the second line of defence,
+            # but invalidating ``_html_ready`` here means GETs in the
+            # interim see the "thinking" placeholder rather than the
+            # expired form.
+            with self._lock:
+                self._pending_html = None
+                self._is_model = False
+                self._fields = {}
+            self._html_ready.clear()
             if self._default is not None:
                 print(f"[Timeout — using default: {self._default!r}]")
                 return self._default
