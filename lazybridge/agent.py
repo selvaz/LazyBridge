@@ -655,17 +655,24 @@ class Agent:
         # raises ``RuntimeError`` when there is no current loop, unlike
         # the deprecated ``get_event_loop`` which implicitly creates one.
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             # No loop running — safe to run directly on a new loop.
             return _run_on_new_loop(self.run(task, images=images, audio=audio))
 
-        # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
-        # Spin up a fresh loop on a worker thread, copying the caller's
-        # contextvars context so OTel spans / request IDs / structured-
-        # logging context flow into the agent's loop instead of starting
-        # empty (which would silently break observability for sync
-        # callers running inside an async framework).
+        # nest_asyncio (Spyder / Jupyter) patches the loop and sets
+        # ``_nest_patched = True``.  Running directly on the caller's loop
+        # avoids an event-loop lifetime mismatch: httpx/anyio transports
+        # created during the call stay bound to a loop that is never closed,
+        # so their cleanup tasks succeed silently instead of raising
+        # ``RuntimeError: Event loop is closed``.
+        if getattr(loop, '_nest_patched', False):
+            return loop.run_until_complete(self.run(task, images=images, audio=audio))
+
+        # True async framework (FastAPI, asyncio tests, …) — spin up a fresh
+        # loop on a worker thread, copying the caller's contextvars context so
+        # OTel spans / request IDs / structured-logging context flow into the
+        # agent's loop instead of starting empty.
         return _run_coro_with_context(self.run(task, images=images, audio=audio))
 
     # ------------------------------------------------------------------
@@ -1201,9 +1208,11 @@ class ParallelAgent:
         # forward-compatible detection (``get_event_loop`` is deprecated
         # under 3.12 and errors under 3.14+ when no loop is running).
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             return _run_on_new_loop(self.run(task))
+        if getattr(loop, '_nest_patched', False):
+            return loop.run_until_complete(self.run(task))
         # Propagate caller contextvars into the worker loop.
         return _run_coro_with_context(self.run(task))
 
