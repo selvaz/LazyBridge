@@ -1012,9 +1012,7 @@ def _describe_output_type(output: Any) -> str:
     return str(output).replace("typing.", "")
 
 
-def _suppress_loop_closed(
-    loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-) -> None:
+def _suppress_loop_closed(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
     """Swallow 'Event loop is closed' noise emitted by httpx/anyio cleanup tasks.
 
     When a fresh loop is closed after the coroutine finishes, the GC may later
