@@ -657,8 +657,8 @@ class Agent:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            # No loop running — safe to use asyncio.run directly.
-            return asyncio.run(self.run(task, images=images, audio=audio))
+            # No loop running — safe to run directly on a new loop.
+            return _run_on_new_loop(self.run(task, images=images, audio=audio))
 
         # Running inside a loop (Jupyter, FastAPI, asyncio tests, …).
         # Spin up a fresh loop on a worker thread, copying the caller's
@@ -1005,6 +1005,44 @@ def _describe_output_type(output: Any) -> str:
     return str(output).replace("typing.", "")
 
 
+def _suppress_loop_closed(
+    loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+) -> None:
+    """Swallow 'Event loop is closed' noise emitted by httpx/anyio cleanup tasks.
+
+    When a fresh loop is closed after the coroutine finishes, the GC may later
+    call ``AsyncClient.__del__`` which tries to schedule an ``aclose()`` task on
+    the now-closed loop.  The resulting ``RuntimeError`` is benign — the request
+    already completed successfully — but without this handler it prints a
+    confusing traceback to stderr.
+    """
+    exc = context.get("exception")
+    if isinstance(exc, RuntimeError) and str(exc) == "Event loop is closed":
+        return
+    loop.default_exception_handler(context)
+
+
+def _run_on_new_loop(coro: Any) -> Any:
+    """Run *coro* on a fresh event loop with a clean-exit exception handler.
+
+    Replaces bare ``asyncio.run()`` at the ``__call__`` boundary so that
+    httpx/anyio 'Event loop is closed' cleanup noise is suppressed without
+    hiding real errors.
+    """
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(_suppress_loop_closed)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            pending = asyncio.all_tasks(loop)
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        loop.close()
+
+
 def _run_coro_with_context(coro: Any) -> Any:
     """Run ``coro`` on a fresh event loop in a worker thread, with the
     caller's :mod:`contextvars` context propagated into it.
@@ -1022,7 +1060,7 @@ def _run_coro_with_context(coro: Any) -> Any:
     ctx = contextvars.copy_context()
 
     def _run() -> Any:
-        return ctx.run(asyncio.run, coro)
+        return ctx.run(_run_on_new_loop, coro)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(_run).result()
@@ -1165,7 +1203,7 @@ class ParallelAgent:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.run(task))
+            return _run_on_new_loop(self.run(task))
         # Propagate caller contextvars into the worker loop.
         return _run_coro_with_context(self.run(task))
 
