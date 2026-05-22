@@ -1042,9 +1042,16 @@ def _run_on_new_loop(coro: Any) -> Any:
         try:
             pending = asyncio.all_tasks(loop)
             if pending:
+                for task in pending:
+                    task.cancel()
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception:
-            pass
+        except Exception as exc:
+            loop.call_exception_handler(
+                {
+                    "message": "Error while draining pending tasks during loop shutdown",
+                    "exception": exc,
+                }
+            )
         loop.close()
 
 
