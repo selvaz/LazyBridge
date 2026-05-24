@@ -1,8 +1,14 @@
 # Extension engines & integrations
 
-Surface that lives under `lazybridge.ext.*`. These are first-class
-extensions — `pip install lazybridge` ships them by default
-(except `OTelExporter` which requires the `[otel]` extra).
+Framework extensions that live under `lazybridge.ext.*` — `pip install
+lazybridge` ships them by default (except `OTelExporter`, which requires the
+`[otel]` extra).
+
+> **Connectors moved (0.8).** The MCP connector and the external tool gateway
+> are no longer `lazybridge.ext.*` — they moved to the
+> [LazyTools](../tools/index.md) package (`lazytools.connectors.{mcp,gateway}`,
+> `pip install lazytoolkit`). The old `lazybridge.ext.{mcp,gateway}` import
+> paths still work with a `DeprecationWarning` until 0.9.
 
 For narrative usage see the corresponding guides:
 [HumanEngine](../guides/mid/human-engine.md),
@@ -24,9 +30,9 @@ For narrative usage see the corresponding guides:
 
 ## MCP integration
 
-::: lazytools.connectors.mcp.MCP
-
-::: lazytools.connectors.mcp.MCPServer
+Moved to `lazytools.connectors.mcp` — see the [MCP guide](../guides/mid/mcp.md)
+and the [LazyTools overview](../tools/index.md). Install with
+`pip install lazytoolkit[mcp]`.
 
 ## Evaluation framework
 

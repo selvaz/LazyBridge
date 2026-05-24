@@ -1,5 +1,8 @@
 # External tool gateway
 
+> **Ships in `lazytoolkit`.** Install: `pip install lazytoolkit`. Part of the
+> [LazyTools capabilities](../../tools/index.md) package, not the core runtime.
+
 `lazytools.connectors.gateway` integrates remote tool catalogues hosted as
 HTTP services — Pipedream, Composio, Arcade, your team's internal
 gateway, or any service that publishes tools over JSON. Implement the

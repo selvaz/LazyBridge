@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased] — 0.8 — lazytoolkit extraction (Phases 0–2)
+## [0.8.0] — 2026-05-24 — lazytoolkit extraction (Phases 0–2)
 
 The concrete, dependency-carrying tools moved to the new sibling package
 **`lazytoolkit`** (repo: `selvaz/LazyTools`). LazyBridge keeps only the minimal

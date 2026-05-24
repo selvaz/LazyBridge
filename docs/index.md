@@ -35,6 +35,8 @@ mental model is the same.
 
 - [**Quickstart**](quickstart.md) — install LazyBridge and run your first
   agent in five minutes.
+- [**Ecosystem**](ecosystem.md) — the three packages (lazybridge core,
+  lazytools capabilities, lazypulse always-on) and which one you need.
 - [**Concepts → Mental model**](concepts/mental-model.md) — Agent =
   Engine + Tools + State, the only decomposition you need.
 - [**Concepts → Everything is a tool**](concepts/everything-is-a-tool.md) —

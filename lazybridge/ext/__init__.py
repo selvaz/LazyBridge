@@ -4,20 +4,25 @@ Pre-1.0 (0.7.x): everything in lazybridge is ``alpha``. Interfaces may
 change between any two releases. Pin exact versions in production.
 
 This sub-package holds **framework-level** extensions — code that
-augments the agent runtime itself. Domain tool kits live alongside in
-``lazybridge.external_tools``: read_docs, doc_skills.  HTML/PDF
-report assembly moved to the sibling ``lazybridge-reports`` package
-in 0.7.9.
+augments the agent runtime itself.
+
+Connectors and domain tool kits moved to the sibling ``lazytoolkit``
+package in 0.8: the MCP connector (``lazytools.connectors.mcp``), the
+external tool gateway (``lazytools.connectors.gateway``), document
+reading (``lazytools.documents``), and doc skills
+(``lazytools.skills``).  The old ``lazybridge.ext.{mcp,gateway}`` and
+``lazybridge.external_tools.*`` import paths still work via lazy
+deprecation shims until 0.9.  HTML/PDF report assembly moved to the
+``lazybridge-reports`` package in 0.7.9.
 
 Available framework extensions::
 
-    lazybridge.ext.mcp       Model Context Protocol client (stdio + HTTP)
     lazybridge.ext.otel      OpenTelemetry span exporter
     lazybridge.ext.hil       Human-in-the-loop engines (HumanEngine, SupervisorEngine)
     lazybridge.ext.evals     EvalSuite, EvalCase, llm_judge, assertion helpers
-    lazybridge.ext.gateway   Adapter for server-side tool gateways
     lazybridge.ext.planners  Planner factories (DAG builder + blackboard)
     lazybridge.ext.viz       Live + replay pipeline visualizer
 
-See ``docs/guides/core-vs-ext.md`` for the import boundary policy.
+See ``docs/guides/core-vs-ext.md`` for the import boundary policy and
+``docs/ecosystem.md`` for the three-package layout.
 """
