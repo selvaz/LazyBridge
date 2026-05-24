@@ -52,10 +52,8 @@ this page is the same information annotated for human review.
   deny-by-default since 0.7.9 and will raise `ValueError`. Pass
   `allow=["*"]` after auditing the surface, or a glob list like
   `allow=["fs.read_*", "fs.list_*"]`.
-- Don't import `lazybridge.external_tools.report_builder` — the
-  reporting subsystem moved to the sibling package
-  [`lazybridge-reports`](https://github.com/selvaz/LazyReport) in
-  0.7.9.
+- Reporting has moved to the sibling package selvaz/LazyReport and is
+  not part of the LazyBridge surface.
 - Don't wrap the entry point in `asyncio.run(main())` for
   quickstarts. `Agent.__call__` auto-detects an event loop; the
   sync path is the normal first-contact experience.
@@ -115,9 +113,8 @@ imports when you need the corresponding capability:
 | Blackboard planner | `from lazybridge.ext.planners import BlackboardPlanner` |
 | HTTP gateway (`lazybridge serve`) | `from lazytools.connectors.gateway import build_app` |
 
-Reporting (`lazybridge_reports.*`) lives in the sibling package
-[lazybridge-reports](https://github.com/selvaz/LazyReport) — install
-separately, do **not** look for it under `lazybridge.external_tools`.
+Reporting has moved to the sibling package selvaz/LazyReport and is
+not part of the LazyBridge surface.
 
 ## Production-safe defaults
 

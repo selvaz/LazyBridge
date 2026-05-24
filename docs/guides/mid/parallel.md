@@ -195,7 +195,7 @@ for env in results:
 
 - [Chain](chain.md) — sequential composition; complements
   parallel.
-- [Nested pipelines](../full/nested-pipelines.md) — parallel bands
+- [Nested pipelines](../full/composition-patterns.md) — parallel bands
   of **sub-pipelines** (not just single agents) with
   `from_parallel_all(...)` aggregation, plus the choice between
   `Agent.parallel(...)`, `parallel=True` plan bands, and

@@ -249,5 +249,5 @@ Good luck, and welcome to LazyBridge.
 
 ---
 
-[← Step 12: LazyBridge vs LangGraph vs CrewAI](12-vs-frameworks.md){ .md-button }
+[← LazyBridge vs LangGraph vs CrewAI](../comparison.md){ .md-button }
 [Start over →](index.md){ .md-button }

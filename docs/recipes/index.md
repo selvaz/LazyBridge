@@ -31,18 +31,10 @@ single agent → tools → composition → planning → production.
 
 ## Composition shapes
 
-- [Nested pipelines (horizontal)](../guides/full/nested-pipelines.md)
+- [Nested pipelines (horizontal)](../guides/full/composition-patterns.md)
   — Plan-of-Plans, parallel bands of sub-pipelines, and LLM-decided
   dispatch over sub-pipelines.  Companion to the vertical
   `chain` / `Plan` recipes above.
-
-## Reporting
-
-The HTML/PDF reporting recipes moved to the sibling
-[LazyReport](https://github.com/selvaz/LazyReport) repository in 0.7.9.
-Install with `pip install lazybridge-reports` and follow the recipes
-there — the rest of LazyBridge stays installable without WeasyPrint /
-Quarto / Pandoc.
 
 ## Observability
 

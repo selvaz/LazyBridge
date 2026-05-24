@@ -1,138 +1,198 @@
-# LazyBridge
+---
+hide:
+  - navigation
+  - toc
+title: LazyBridge
+---
 
-A zero-boilerplate, multi-provider Python framework for composing LLMs, plain
-functions, deterministic plans, humans, and external tools under one uniform
-model: **everything is a tool.**
+<div class="lb-page">
 
-```python
-from lazybridge import Agent
+<!-- ═══ HERO ══════════════════════════════════════════════════════════════ -->
+<section class="lb-hero">
+  <div class="lb-hero__copy">
+    <div class="lb-pill">Recursive &middot; Validated &middot; Observable</div>
 
-# Tier alias works across all 4 providers: anthropic / openai / google / deepseek.
-agent = Agent.from_provider("anthropic", tier="cheap")
-result = agent("What's the capital of France?")
-print(result.text())
-```
+    <h1>Compose LLM pipelines<br>that are also <span class="accent">tools</span>.</h1>
 
-That's the whole framework's surface area when you start. It grows only when
-your problem grows.
+    <p class="lb-subhead">
+      LazyBridge composes LLMs, deterministic plans, humans, and external
+      tools through one contract. Pipelines are tools. Tools are tools.
+      Nesting has no special syntax — and every level validates at
+      construction, before any LLM call.
+    </p>
 
-## What LazyBridge gives you
+    <div class="lb-cta-row">
+      <a href="quickstart/" class="lb-btn lb-btn--primary">Get started &rarr;</a>
+      <a href="concepts/layered-composition/" class="lb-btn lb-btn--ghost">How composition works</a>
+    </div>
 
-An agent in LazyBridge is the composition of three things — and only these three:
+    <div class="lb-chips">
+      <span class="lb-chip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+        Multi-dimensional composition
+      </span>
+      <span class="lb-chip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        Plan validated at construction
+      </span>
+      <span class="lb-chip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        Provider freedom
+      </span>
+      <span class="lb-chip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Output validated + verify
+      </span>
+      <span class="lb-chip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+        Observable by default
+      </span>
+    </div>
+  </div>
 
-- **Engine** — the decision-making layer (an LLM, a deterministic `Plan`, a
-  human-in-the-loop, or your own).
-- **Tools** — every capability the agent can use. Plain Python functions,
-  other agents, MCP servers, and full pipelines all behave the same way.
-- **State** — `Memory`, `Session`, and `Store`: continuity, traceability, and
-  shared blackboard between steps.
+  <div class="lb-hero__art">
+    <img src="assets/hero.png" alt="LazyBridge mascot" />
+  </div>
+</section>
 
-That's it. Whether you're writing a one-shot helper or a checkpointed
-multi-region pipeline with human approvals and OpenTelemetry traces, the
-mental model is the same.
+<!-- ═══ FEATURE CARDS ═════════════════════════════════════════════════════ -->
+<section class="lb-feature-cards">
+  <div class="lb-card">
+    <div class="lb-card__icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+    </div>
+    <div class="lb-card__body">
+      <h3>Recursive composition</h3>
+      <p>A Plan is an Agent. An Agent is a Tool. Pipelines compose without glue, at any depth, with automatic cost and observability rollup.</p>
+      <a href="concepts/layered-composition/" class="lb-card__link">Learn more &rarr;</a>
+    </div>
+  </div>
+  <div class="lb-card">
+    <div class="lb-card__icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+    </div>
+    <div class="lb-card__body">
+      <h3>Plans fail fast</h3>
+      <p>PlanCompileError catches duplicate names, forward references, type drift, and broken sentinels — at construction, before any LLM call.</p>
+      <a href="guides/full/plan/" class="lb-card__link">Learn more &rarr;</a>
+    </div>
+  </div>
+  <div class="lb-card">
+    <div class="lb-card__icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+    </div>
+    <div class="lb-card__body">
+      <h3>Observable by default</h3>
+      <p>Session + OpenTelemetry semconv. Cost rollup across nested agents, GenAI-standard spans, structured event log — opt-out, not opt-in.</p>
+      <a href="guides/mid/session/" class="lb-card__link">Learn more &rarr;</a>
+    </div>
+  </div>
+</section>
 
-## Where to go next
+<!-- ═══ CODE PANEL ════════════════════════════════════════════════════════ -->
+<div class="lb-code-panel">
+  <div class="lb-code-header">
+    <span class="lb-code-caption">The simple case stays one line. The architecture grows only when the problem grows — without changing the mental model.</span>
+    <span class="lb-code-lang">Python</span>
+  </div>
 
-- [**Quickstart**](quickstart.md) — install LazyBridge and run your first
-  agent in five minutes.
-- [**Ecosystem**](https://lazybridge.com/) — the three packages (lazybridge
-  core, lazytools capabilities, lazypulse always-on) and which one you need.
-- [**Concepts → Mental model**](concepts/mental-model.md) — Agent =
-  Engine + Tools + State, the only decomposition you need.
-- [**Concepts → Everything is a tool**](concepts/everything-is-a-tool.md) —
-  the composition rule that holds the framework together.
-- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
-  the twelve rungs from one-line agent to checkpointed pipeline.
-- [**Concepts → Canonical vs sugar**](concepts/canonical-vs-sugar.md) —
-  every factory function and shortcut LazyBridge ships, with its
-  canonical equivalent and any subtle differences.
-- **Guides → Basic** — one focused page per Day-1 concept:
-  [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md),
-  [Envelope](guides/basic/envelope.md),
-  [Native tools](guides/basic/native-tools.md).
-- **Guides → Mid** — twelve pages on real-app concerns:
-  [Memory](guides/mid/memory.md), [Store](guides/mid/store.md),
-  [Session](guides/mid/session.md), [Guards](guides/mid/guards.md),
-  [verify=](guides/mid/verify.md), [Chain](guides/mid/chain.md),
-  [Parallel](guides/mid/parallel.md), [As tool](guides/mid/as-tool.md),
-  [HumanEngine](guides/mid/human-engine.md), [MCP](https://tools.lazybridge.com/mcp/),
-  [Multimodal](guides/mid/multimodal.md), [Evals](guides/mid/evals.md).
-- **Guides → Full** — nine pages on production pipelines:
-  [Plan](guides/full/plan.md), [Step](guides/full/step.md),
-  [Sentinels](guides/full/sentinels.md), [Routing](guides/full/routing.md),
-  [Parallel plan steps](guides/full/parallel-plan-steps.md),
-  [Checkpoint & resume](guides/full/checkpoint.md),
-  [Exporters](guides/full/exporters.md),
-  [GraphSchema](guides/full/graph-schema.md),
-  [SupervisorEngine](guides/full/supervisor.md).
-- **Guides → Advanced** — seven pages on the extension surface:
-  [Engine protocol](guides/advanced/engine-protocol.md),
-  [BaseProvider](guides/advanced/base-provider.md),
-  [Providers catalogue](guides/advanced/providers.md),
-  [External tool gateway](https://tools.lazybridge.com/gateway/),
-  [Plan serialization](guides/advanced/plan-serialize.md),
-  [OpenTelemetry](guides/advanced/otel.md),
-  [Visualizer](guides/advanced/visualizer.md).
-- [**Recipes**](recipes/index.md) — runnable examples from the
-  `examples/` directory, embedded verbatim.
-- [**Decisions**](decisions/index.md) — nine "which one do I
-  use?" decision trees with quick-reference tables.
-- [**Reference**](reference/index.md) — auto-generated API surface
-  for every public symbol, organised by category.
-- [**Errors**](errors.md) — cause → diagnosis → fix table for
-  every framework exception and `Envelope.error.type` value.
-- [**For LLM assistants**](for-llms/index.md) — Claude Skill install,
-  `/llms.txt` index, and `/llms-full.txt` corpus dump.
+=== "Simplest"
 
-## Design principles
+    ```python
+    from lazybridge import Agent, LLMEngine
 
-- **Provider freedom.** Switch models or providers without rewriting
-  your architecture.
-- **Everything is a tool.** Functions, agents, plans, pipelines, MCP
-  servers, and external systems all compose through the same primitive.
-- **Zero boilerplate.** No duplicated function definitions, no manual
-  JSON schema translation, no orchestration glue you have to maintain.
-- **Progressive complexity.** Simple use cases stay simple. Complex
-  workflows are possible without changing the core mental model.
-- **Designed for humans and LLMs.** Code that's readable to a
-  reviewer is also learnable to an assistant that writes the next
-  patch.
-- **Determinism when you need it.** Drop down from autonomous LLM
-  loops to a typed, validated `Plan` whenever auditability or repeat
-  cost matters.
-- **Composability over monoliths.** Large systems emerge from small,
-  specialised components — not one overloaded prompt.
-- **Observable and debuggable.** Sessions, exporters, the Visualizer,
-  and OpenTelemetry mean you can always see what happened and why.
+    agent = Agent(engine=LLMEngine("claude-sonnet-4-6"))
+    print(agent("Explain LazyBridge in one sentence.").text())
+    ```
 
-LazyBridge is meant to feel like a bridge, not a cage.
+=== "Pipelines that nest"
 
-## Maturity
+    ```python
+    from lazybridge import Agent, LLMEngine, Plan, Step, Session, from_step
 
-LazyBridge 0.8.0 is on PyPI as **Alpha** (`Development Status :: 3` in
-PyPI metadata, `lazybridge.__stability__ = "alpha"`).  The public API
-is stable enough that breaking changes go through the migration guides
-under [`docs/migrations/`](migrations/0.7-to-0.79.md), but production
-hardening is uneven by subsystem.  The labels below describe the
-state of each feature area in this release.
+    search    = Agent(engine=LLMEngine("gpt-5.4-mini"),      name="search")
+    summarise = Agent(engine=LLMEngine("gemini-2.5-pro"),    name="summarise")
+    writer    = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="write")
 
-| Subsystem | Status | Notes |
-|---|---|---|
-| `Agent`, `LLMEngine`, `Tool`, `Envelope` | **Stable** | Public surface, exercised by every test path. |
-| `Plan`, `Step`, sentinels, routing | **Stable** | Compiler validates at construction; serialisation supported. |
-| `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
-| `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled (`redact_secrets`). |
-| Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters are stable; model/price tables drift with provider releases. |
-| MCP / external tool gateway | **Moved** | Migrated to the `lazytoolkit` package in 0.8 (`lazytools.connectors.{mcp,gateway}`) — see [tools.lazybridge.com](https://tools.lazybridge.com). The old `lazybridge.ext.{mcp,gateway}` paths are deprecation shims until 0.9. |
-| Native tools (`NativeTool`) | **Alpha** | Provider-hosted capabilities (web search, code interpreter). Surface area changes when providers add new tools. |
-| `Checkpoint` / `resume`  | **Alpha** | Internal-state atomic across parallel `Plan` bands; *external* side-effect rollback is not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)). |
-| Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Alpha** | Behaviour is stable; default rule libraries are still growing. |
-| `HumanEngine`, `SupervisorEngine` | **Alpha** | Public API stable; UX polish continues. |
-| Evals (`lazybridge.ext.evals`) | **Experimental** | Scoring helpers are stable; the runner API may consolidate before 1.0. |
-| Visualizer (`lazybridge.ext.viz`) | **Experimental** | Useful for debugging; not part of the runtime path. |
-| Provider model fallback chains (`_FALLBACKS`) | **Planned** | Data tables exist; the retry path that consumes them is not implemented yet. |
-| Automatic PII redaction | **Planned** | Default redactor masks credential shapes only.  Compose your own for emails / phone numbers / SSNs. |
+    research = Agent(
+        engine=Plan(Step("search"), Step("summarise")),
+        tools=[search, summarise], name="research",
+    )
+    article = Agent(
+        engine=Plan(Step("research"),
+                    Step("write", context=from_step("research"))),
+        tools=[research, writer], session=Session(),
+    )
+    print(article("AI agents in 2026").text())
+    ```
 
-The roadmap toward a 1.0 stable surface is to lift each Alpha row to
-Stable, ship the Planned items where the design is settled, and either
-implement or remove the experimental modules based on user feedback.
+=== "With verify + resume"
+
+    ```python
+    from lazybridge import Agent, LLMEngine, Plan, Step, Session, Store, from_step
+    from lazybridge.ext.otel import OTelExporter
+
+    judge     = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="judge")
+    search    = Agent(engine=LLMEngine("gpt-5.4-mini"),      name="search")
+    summarise = Agent(engine=LLMEngine("gemini-2.5-pro"),    name="summarise")
+    writer    = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="write")
+
+    research = Agent(
+        engine=Plan(Step("search"), Step("summarise")),
+        tools=[search, summarise], name="research",
+    )
+    article = Agent(
+        engine=Plan(
+            Step("research"),
+            Step("write", context=from_step("research"),
+                 verify=judge, max_verify=3, checkpoint_key="write"),
+            checkpoint_key="research",
+        ),
+        tools=[research, writer],
+        session=Session(store=Store(db="run.sqlite"),
+                        exporters=[OTelExporter()]),
+    )
+    print(article("AI agents in 2026").text())
+    ```
+
+</div>
+
+<!-- ═══ PROVIDERS ══════════════════════════════════════════════════════════ -->
+<section class="lb-providers">
+  <p class="lb-providers__caption">Works with the best models and tools</p>
+  <div class="lb-providers__logos">
+    <img src="assets/providers/anthropic.svg" alt="Anthropic" />
+    <img src="assets/providers/openai.svg"    alt="OpenAI" />
+    <img src="assets/providers/google.svg"    alt="Google" />
+    <img src="assets/providers/deepseek.svg"  alt="DeepSeek" />
+    <img src="assets/providers/meta.svg"      alt="Meta" />
+    <img src="assets/providers/mistral.svg"   alt="Mistral" />
+    <img src="assets/providers/ollama.svg"    alt="Ollama" />
+  </div>
+</section>
+
+</div>
+
+---
+
+??? note "Maturity — 0.8.0 (Alpha)"
+
+    LazyBridge 0.8.0 is on PyPI as **Alpha** (`lazybridge.__stability__ = "alpha"`).
+    Breaking changes go through [migration guides](migrations/0.7-to-0.79.md).
+
+    | Subsystem | Status | Notes |
+    |---|---|---|
+    | `Agent`, `LLMEngine`, `Tool`, `Envelope` | **Stable** | Public surface, exercised by every test path. |
+    | `Plan`, `Step`, sentinels, routing | **Stable** | Compiler validates at construction; serialisation supported. |
+    | `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
+    | `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled. |
+    | Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters stable; model/price tables drift with providers. |
+    | MCP / external tool gateway | **Moved** | Migrated to `lazytoolkit` in 0.8 — see [tools.lazybridge.com](https://tools.lazybridge.com). |
+    | Native tools (`NativeTool`) | **Alpha** | Surface area changes when providers add new tools. |
+    | `Checkpoint` / `resume` | **Alpha** | Atomic across parallel bands; external side-effect rollback not implemented. |
+    | Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Alpha** | Behaviour stable; default rule libraries growing. |
+    | `HumanEngine`, `SupervisorEngine` | **Alpha** | Public API stable; UX polish continues. |
+    | Evals (`lazybridge.ext.evals`) | **Experimental** | Runner API may consolidate before 1.0. |
+    | Visualizer (`lazybridge.ext.viz`) | **Experimental** | Useful for debugging; not on the runtime path. |
+    | Provider model fallback chains | **Planned** | Data tables exist; retry path not yet implemented. |
+    | Automatic PII redaction | **Planned** | Default redactor masks credential shapes only. |
