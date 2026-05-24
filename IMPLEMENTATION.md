@@ -251,7 +251,7 @@ In `lazybridge/session.py`:
 - [x] SKILL.md: anti-pattern list updated (no more `from_*` factories, no config objects)
 - [x] `docs/reference/engines.md`: add `thinking=` row to LLMEngine table
 - [x] `docs/guides/mid/parallel.md`: scripted vs LLM-driven disambig
-- [x] `docs/guides/mid/mcp.md`: examples show `allow=` filtering
+- [x] MCP guide: examples show `allow=` filtering (now at tools.lazybridge.com)
 - [x] `docs/guides/full/step.md`: `Step.after_branches` section
 - [x] `docs/decisions/composition.md`: alias migration note
 - [x] `docs/reference/providers.md`: Google `finish_reason` normalization

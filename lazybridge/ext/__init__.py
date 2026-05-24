@@ -24,5 +24,5 @@ Available framework extensions::
     lazybridge.ext.viz       Live + replay pipeline visualizer
 
 See ``docs/guides/core-vs-ext.md`` for the import boundary policy and
-``docs/ecosystem.md`` for the three-package layout.
+https://lazybridge.com/ for the three-package layout.
 """

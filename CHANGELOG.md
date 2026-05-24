@@ -185,8 +185,8 @@ codemod snippets.
   normalisation table (Google ``MAX_TOKENS`` mapping fix).
 - ``docs/guides/mid/parallel.md`` rewritten for the new
   single-Envelope return contract.
-- ``docs/guides/mid/mcp.md`` example now shows ``allow=`` filtering
-  as best practice.
+- the MCP guide example now shows ``allow=`` filtering as best
+  practice.
 - ``examples/verify_judge_loop.py`` (new), ``examples/guardrails_demo.py``
   (new), env preflight in ``examples/daily_news_report.py``.
 

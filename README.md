@@ -82,7 +82,7 @@ for a flowchart.
 pip install "lazybridge[anthropic]"      # post-0.7.9 once on PyPI
 # or [openai], [google], [deepseek], [litellm], [otel], [encryption], [all]
 # Concrete tools (MCP, Gmail, Telegram, gateways, doc readers) ship in the
-# sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see docs/ecosystem.md)
+# sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see https://lazybridge.com/)
 ```
 
 Confirm you're on the modern API:
