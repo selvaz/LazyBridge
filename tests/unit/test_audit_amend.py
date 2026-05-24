@@ -20,64 +20,19 @@ Covers (numbering matches AUDIT_DEEP_FRAMEWORK.md):
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import decimal
 import inspect
 import pathlib
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
 # 3.1 — MCP transports concurrent connect() race
 # ---------------------------------------------------------------------------
-
-
-def test_mcp_stdio_transport_has_per_instance_connect_lock() -> None:
-    """Two StdioTransport instances get distinct locks (no shared state)."""
-    from lazybridge.ext.mcp.transports import StdioTransport
-
-    a = StdioTransport(command="echo", args=["hi"])
-    b = StdioTransport(command="echo", args=["hi"])
-    assert isinstance(a._connect_lock, asyncio.Lock)
-    assert a._connect_lock is not b._connect_lock
-
-
-def test_mcp_http_transport_has_per_instance_connect_lock() -> None:
-    from lazybridge.ext.mcp.transports import HttpTransport
-
-    t = HttpTransport(url="http://localhost:0/mcp")
-    assert isinstance(t._connect_lock, asyncio.Lock)
-
-
-@pytest.mark.asyncio
-async def test_mcp_connect_serialises_concurrent_callers() -> None:
-    """Two concurrent connect() callers must not both build a stack.
-
-    We patch the SDK import to fail so connect() raises ImportError;
-    the assertion is that the lock was acquired/released cleanly and
-    the second caller saw the same outcome as the first (both raise),
-    not that one silently completed while the other was mid-flight.
-    """
-    from lazybridge.ext.mcp.transports import StdioTransport
-
-    t = StdioTransport(command="echo")
-
-    # Force the SDK import to fail so we don't actually spawn anything.
-    with patch.dict("sys.modules", {"mcp": None}):
-        results = await asyncio.gather(
-            t.connect(),
-            t.connect(),
-            return_exceptions=True,
-        )
-
-    # Both calls failed identically (no half-built state).
-    assert all(isinstance(r, ImportError) for r in results)
-    assert t._session is None
-    assert t._stack is None
-
+# Relocated to lazytools/tests/test_mcp.py with the MCP connector (moved to
+# lazytoolkit in 0.8).
 
 # ---------------------------------------------------------------------------
 # 3.2 + 3.3 — Quarto YAML escape / section_renderer sandbox
@@ -195,47 +150,8 @@ def test_otel_set_attr_passes_short_strings_through() -> None:
 # ---------------------------------------------------------------------------
 # 3.9 — gateway cross-host redirect refusal
 # ---------------------------------------------------------------------------
-
-
-def test_gateway_redirect_handler_rejects_cross_host() -> None:
-    import urllib.error
-    import urllib.request
-
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
-
-    handler = _SameOriginRedirectHandler()
-    req = urllib.request.Request("https://api.example.com/v1/tool")
-
-    with pytest.raises(urllib.error.HTTPError, match="different host"):
-        handler.redirect_request(req, fp=None, code=302, msg="", headers={}, newurl="https://evil.invalid/path")
-
-
-def test_gateway_redirect_handler_rejects_https_downgrade() -> None:
-    import urllib.error
-    import urllib.request
-
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
-
-    handler = _SameOriginRedirectHandler()
-    req = urllib.request.Request("https://api.example.com/v1/tool")
-
-    with pytest.raises(urllib.error.HTTPError, match="downgrade"):
-        handler.redirect_request(req, fp=None, code=302, msg="", headers={}, newurl="http://api.example.com/v1/tool")
-
-
-def test_gateway_redirect_handler_allows_same_host_path_change() -> None:
-    """Same-host redirect (e.g., /v1 -> /v2) must still work."""
-    import urllib.request
-
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
-
-    handler = _SameOriginRedirectHandler()
-    req = urllib.request.Request("https://api.example.com/v1/tool")
-    # super().redirect_request returns a Request — assert it doesn't raise.
-    new_req = handler.redirect_request(
-        req, fp=None, code=302, msg="", headers={}, newurl="https://api.example.com/v2/tool"
-    )
-    assert new_req.full_url == "https://api.example.com/v2/tool"
+# Relocated to lazytools/tests/test_gateway.py with the gateway connector
+# (moved to lazytoolkit in 0.8).
 
 
 # ---------------------------------------------------------------------------

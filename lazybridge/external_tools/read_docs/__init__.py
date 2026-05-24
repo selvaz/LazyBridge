@@ -1,24 +1,25 @@
-"""lazybridge.external_tools.read_docs — Multi-format document reader (domain example).
+"""Deprecated location. Moved to ``lazytools.documents`` (pip install lazytoolkit).
 
-Domain example shipped with LazyBridge — not part of the framework
-contract. Pin to a specific lazybridge release if you depend on it.
-
-Reads .txt, .md, .pdf, .docx, .html files from a folder or a single file
-and returns their text content in a format ready for LLM consumption.
-
-Quick start::
-
-    from lazybridge.external_tools.read_docs import read_docs_tools
-    from lazybridge import Agent
-
-    agent = Agent.from_provider("anthropic", tier="medium", tools=read_docs_tools())
-    resp = agent("Read /path/to/reports and summarise the Q4 outlook.")
-
-Optional dependencies::
-
-    pip install lazybridge[tools]   # installs pypdf, python-docx, trafilatura
+This shim keeps ``from lazybridge.external_tools.read_docs import read_docs_tools``
+working with a :class:`DeprecationWarning`. It is removed in 0.9.
 """
 
-from lazybridge.external_tools.read_docs.read_docs import read_docs_tools, read_folder_docs
+from __future__ import annotations
 
-__all__ = ["read_docs_tools", "read_folder_docs"]
+import warnings
+
+
+def __getattr__(name: str):  # PEP 562 — fires only on attribute access
+    warnings.warn(
+        "lazybridge.external_tools.read_docs moved to lazytools.documents in 0.8; "
+        "install 'lazytoolkit' and import from there. This shim is removed in 0.9.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        from lazytools import documents as _moved
+    except ImportError as exc:
+        raise ImportError(
+            "lazybridge.external_tools.read_docs now requires 'lazytoolkit' (pip install 'lazytoolkit[docs]')."
+        ) from exc
+    return getattr(_moved, name)

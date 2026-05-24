@@ -79,3 +79,52 @@ def test_extensions_never_import_from_core_internals() -> None:
             "(see docs/guides/core-vs-ext.md, rule #2). Found:\n" + "\n".join(failures)
         )
         pytest.fail(msg)
+
+
+def _module_level_imports(path: pathlib.Path) -> list[tuple[int, str]]:
+    """Return [(lineno, name)] for top-level (eager) imports in *path*.
+
+    Imports nested inside a function body are skipped — the lazy deprecation
+    shims (``lazybridge.ext.mcp``, ``lazybridge.ext.gateway``,
+    ``lazybridge.external_tools.*``) import ``lazytools`` inside ``__getattr__``,
+    which is allowed; only eager module-level imports are forbidden.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+
+    def walk(body: list[ast.stmt]) -> list[tuple[int, str]]:
+        found: list[tuple[int, str]] = []
+        for node in body:
+            if isinstance(node, ast.Import):
+                found += [(node.lineno, a.name) for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                found.append((node.lineno, node.module or ""))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue  # function-body imports are lazy — allowed
+            elif isinstance(node, ast.ClassDef):
+                found += walk(node.body)
+            elif isinstance(node, (ast.If, ast.Try, ast.With)):
+                found += walk(node.body)
+                found += walk(getattr(node, "orelse", []))
+                found += walk(getattr(node, "finalbody", []))
+        return found
+
+    return walk(tree.body)
+
+
+def test_lazybridge_never_eagerly_imports_lazytools() -> None:
+    """``lazybridge`` (shipped code) must not import ``lazytools`` at module
+    level. Because ``lazytools -> lazybridge``, an eager re-export would create
+    a circular import and violate the dependency rule. Backward-compat shims use
+    a lazy PEP 562 ``__getattr__`` (import inside the function body) instead.
+    """
+    offenders: list[str] = []
+    for path in _python_files(PKG_ROOT):
+        for lineno, module in _module_level_imports(path):
+            if module == "lazytools" or module.startswith("lazytools."):
+                offenders.append(f"  {path.relative_to(PKG_ROOT.parent)}:{lineno} → {module}")
+
+    if offenders:
+        pytest.fail(
+            "lazybridge must not eagerly import lazytools (use a lazy "
+            "__getattr__ shim instead). Found:\n" + "\n".join(offenders)
+        )

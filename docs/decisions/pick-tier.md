@@ -29,7 +29,7 @@ cross-process Plan serialisation?
 | You need | Start at | Key surface (import path) |
 |---|---|---|
 | One agent, one tool, one call | **Basic** | `Agent`, `LLMEngine`, `Envelope`, `Tool`, `NativeTool` — all `from lazybridge` |
-| Memory, Store, Session, Guards, `chain` / `parallel` / `as_tool`, MCP, Evals, HumanEngine, `verify=` | **Mid** | `Memory`, `Store`, `Session`, `Agent.chain`, `Agent.parallel`, `verify=` from `lazybridge`; `MCP` from `lazybridge.ext.mcp`; `HumanEngine` from `lazybridge.ext.hil` |
+| Memory, Store, Session, Guards, `chain` / `parallel` / `as_tool`, MCP, Evals, HumanEngine, `verify=` | **Mid** | `Memory`, `Store`, `Session`, `Agent.chain`, `Agent.parallel`, `verify=` from `lazybridge`; `MCP` from `lazytools.connectors.mcp`; `HumanEngine` from `lazybridge.ext.hil` |
 | Plan + Step + sentinels, routing, parallel bands, checkpoint / resume, exporters, GraphSchema, `SupervisorEngine` | **Full** | `Plan`, `Step`, `from_prev` / `from_step` / `from_start` / `from_agent`, `Step(routes=…)`, `Step(parallel=True)`, `GraphSchema`, `ConsoleExporter` / `JsonFileExporter` / `StructuredLogExporter` from `lazybridge`; `SupervisorEngine` from `lazybridge.ext.hil` |
 | Custom engine, custom provider, Plan persistence, OTel deep, Visualizer | **Advanced** | `BaseProvider` from `lazybridge.core.providers.base`; `Engine` Protocol from `lazybridge.engines.base`; `Plan.to_dict` / `Plan.from_dict` on the `Plan` class; `OTelExporter` from `lazybridge.ext.otel`; `Visualizer` from `lazybridge.ext.viz` |
 

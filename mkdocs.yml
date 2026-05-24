@@ -1,6 +1,6 @@
 site_name: LazyBridge
 site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
-site_url: https://lazybridge.com/
+site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
 edit_uri: edit/main/docs/
@@ -109,7 +109,7 @@ extra:
   # wired up for multi-version docs, set ``provider: mike`` here and
   # drop the manual ``default``.
   version:
-    default: "0.7.9"
+    default: "0.8.0"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
@@ -158,7 +158,6 @@ nav:
           - Parallel: guides/mid/parallel.md
           - As tool: guides/mid/as-tool.md
           - HumanEngine: guides/mid/human-engine.md
-          - MCP: guides/mid/mcp.md
           - Multimodal: guides/mid/multimodal.md
           - Evals: guides/mid/evals.md
       - Full:
@@ -177,7 +176,6 @@ nav:
           - Engine protocol: guides/advanced/engine-protocol.md
           - BaseProvider: guides/advanced/base-provider.md
           - Providers: guides/advanced/providers.md
-          - External tool gateway: guides/advanced/external-tools.md
           - Plan serialization: guides/advanced/plan-serialize.md
           - OpenTelemetry: guides/advanced/otel.md
           - Visualizer: guides/advanced/visualizer.md

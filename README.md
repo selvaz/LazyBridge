@@ -80,7 +80,9 @@ for a flowchart.
 
 ```bash
 pip install "lazybridge[anthropic]"      # post-0.7.9 once on PyPI
-# or [openai], [google], [deepseek], [litellm], [mcp], [otel], [encryption], [all]
+# or [openai], [google], [deepseek], [litellm], [otel], [encryption], [all]
+# Concrete tools (MCP, Gmail, Telegram, gateways, doc readers) ship in the
+# sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see https://lazybridge.com/)
 ```
 
 Confirm you're on the modern API:
@@ -168,7 +170,7 @@ turn, they run concurrently via `asyncio.gather`. No flag, no config, no
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 fs = MCP.stdio(
     "fs",

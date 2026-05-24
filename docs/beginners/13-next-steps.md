@@ -82,7 +82,7 @@ roughly know.
   [As tool](../guides/mid/as-tool.md) — formal docs for Step 5/7/8
 - [HumanEngine](../guides/mid/human-engine.md) — the deep reference for
   Step 11, including the custom UI protocol
-- [MCP](../guides/mid/mcp.md) — Model Context Protocol servers as tools
+- [MCP](https://tools.lazybridge.com/mcp/) — Model Context Protocol servers as tools
 - [Multimodal](../guides/mid/multimodal.md) — images and audio as inputs
 - [Evals](../guides/mid/evals.md) — evaluation harness for agent quality
 
@@ -122,7 +122,7 @@ contributors, integrators, and people running LazyBridge at scale:
   use)
 - [Providers](../guides/advanced/providers.md) — the built-in provider
   catalogue, tier aliases, pricing tables
-- [External tool gateway](../guides/advanced/external-tools.md) —
+- [External tool gateway](https://tools.lazybridge.com/gateway/) —
   registering remote tools via the HTTP gateway
 - [Plan serialization](../guides/advanced/plan-serialize.md) — saving
   Plans to JSON / YAML

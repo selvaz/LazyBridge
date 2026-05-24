@@ -108,12 +108,12 @@ imports when you need the corresponding capability:
 |---|---|
 | Human-in-the-loop CLI / web UI | `from lazybridge.ext.hil import HumanEngine, human_agent` |
 | Supervisor pattern | `from lazybridge.ext.hil import SupervisorEngine, supervisor_agent` |
-| MCP servers (stdio / HTTP) | `from lazybridge.ext.mcp import MCP` |
+| MCP servers (stdio / HTTP) | `from lazytools.connectors.mcp import MCP` |
 | OpenTelemetry exporter | `from lazybridge.ext.otel import OTelExporter` |
 | Eval harness | `from lazybridge.ext.evals import EvalSuite, EvalCase, llm_judge` |
 | Live visualizer | `from lazybridge.ext.viz import Visualizer` |
 | Blackboard planner | `from lazybridge.ext.planners import BlackboardPlanner` |
-| HTTP gateway (`lazybridge serve`) | `from lazybridge.ext.gateway import build_app` |
+| HTTP gateway (`lazybridge serve`) | `from lazytools.connectors.gateway import build_app` |
 
 Reporting (`lazybridge_reports.*`) lives in the sibling package
 [lazybridge-reports](https://github.com/selvaz/LazyReport) — install

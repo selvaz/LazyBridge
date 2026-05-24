@@ -204,49 +204,9 @@ def test_memory_compression_does_not_hold_lock() -> None:
 
 
 # ---------------------------------------------------------------------------
-# H-E: MCP cache TTL + invalidation
+# H-E: MCP cache TTL + invalidation — relocated to lazytools/tests/test_mcp.py
+# (the MCP connector moved to lazytoolkit in 0.8).
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_mcp_tools_cache_expires_after_ttl() -> None:
-    from lazybridge.ext.mcp import MCP
-    from tests.unit.test_mcp import FakeTransport
-
-    transport = FakeTransport()
-    fs = MCP.from_transport("fs", transport, cache_tools_ttl=0.05)
-    first = await fs.alist_tools()
-    # Second call within TTL hits cache — transport is not re-asked.
-    second = await fs.alist_tools()
-    assert first is second  # same cached list object
-
-    # Wait past TTL; the next call re-fetches and may or may not return
-    # the same object (it actually rebuilds, but Tool identity differs).
-    await asyncio.sleep(0.1)
-    third = await fs.alist_tools()
-    assert third is not first
-    assert [t.name for t in third] == [t.name for t in first]
-
-
-@pytest.mark.asyncio
-async def test_mcp_invalidate_tools_cache_forces_refetch() -> None:
-    from lazybridge.ext.mcp import MCP
-    from tests.unit.test_mcp import FakeTransport
-
-    transport = FakeTransport()
-    fs = MCP.from_transport("fs", transport, cache_tools_ttl=600)
-    first = await fs.alist_tools()
-    fs.invalidate_tools_cache()
-    second = await fs.alist_tools()
-    assert second is not first
-
-
-def test_mcp_cache_ttl_validates_value() -> None:
-    from lazybridge.ext.mcp import MCP
-    from tests.unit.test_mcp import FakeTransport
-
-    with pytest.raises(ValueError, match="cache_tools_ttl"):
-        MCP.from_transport("fs", FakeTransport(), cache_tools_ttl=0)
 
 
 # ---------------------------------------------------------------------------

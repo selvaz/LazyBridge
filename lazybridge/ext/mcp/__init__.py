@@ -1,42 +1,29 @@
-"""Model Context Protocol (MCP) integration for LazyBridge.
+"""Deprecated location. Moved to ``lazytools.connectors.mcp`` (pip install lazytoolkit).
 
-MCP is a JSON-RPC protocol for exposing tools, resources, and prompts to
-LLM clients. LazyBridge integrates MCP at the **tool boundary** — an
-``MCPServer`` acts as a *tool provider* that expands into a list of
-:class:`lazybridge.Tool` entries when added to ``Agent(tools=[...])``.
-
-Phase 1 (this release) ships **tools only**. Resources and prompts are
-planned for later phases.
-
-Quick start
------------
-::
-
-    from lazybridge import Agent
-    from lazybridge.ext.mcp import MCP
-
-    fs = MCP.stdio(
-        "fs",
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
-    )
-
-    agent = Agent("claude-opus-4-7", tools=[fs])
-    print(agent("Read README.md and summarise the install steps").text())
-
-Multiple servers, mixing transports::
-
-    github = MCP.http("github", "https://example.com/mcp",
-                      headers={"Authorization": "Bearer …"})
-    db     = MCP.stdio("db", command="uvx", args=["mcp-postgres"])
-
-    agent = Agent("gpt-5.5", tools=[github, db])
+The MCP connector (``MCP``, ``MCPServer``) is a tool provider that connects to
+external MCP servers, so it now lives with the other connectors in
+``lazytools``. This shim keeps ``from lazybridge.ext.mcp import MCP`` working
+with a :class:`DeprecationWarning`. It is removed in 0.9.
 
 Install with::
 
-    pip install lazybridge[mcp]
+    pip install lazytoolkit[mcp]
 """
 
-from lazybridge.ext.mcp.server import MCP, MCPServer
+from __future__ import annotations
 
-__all__ = ["MCP", "MCPServer"]
+import warnings
+
+
+def __getattr__(name: str):  # PEP 562 — fires only on attribute access
+    warnings.warn(
+        "lazybridge.ext.mcp moved to lazytools.connectors.mcp in 0.8; "
+        "install 'lazytoolkit' and import from there. This shim is removed in 0.9.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        from lazytools.connectors import mcp as _moved
+    except ImportError as exc:
+        raise ImportError("lazybridge.ext.mcp now requires 'lazytoolkit' (pip install 'lazytoolkit[mcp]').") from exc
+    return getattr(_moved, name)

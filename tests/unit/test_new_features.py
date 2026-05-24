@@ -799,35 +799,3 @@ class TestAgentFallback:
         result = agent("sync call")
         assert result.ok
         assert result.text() == "sync call"
-
-
-# =============================================================================
-# ext/ doc_skills API migration (import smoke test)
-# =============================================================================
-
-
-class TestDocSkillsImport:
-    def test_imports_use_current_api(self):
-        # Should not raise — no LazyAgent/LazySession/LazyTool used
-        from lazybridge.external_tools.doc_skills.doc_skills import (
-            skill_builder_tools,
-            skill_tools,
-        )
-
-        assert callable(skill_builder_tools)
-        assert callable(skill_tools)
-
-    def test_skill_builder_tools_returns_list_of_tool(self):
-        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tools
-
-        out = skill_builder_tools()
-        assert isinstance(out, list)
-        assert len(out) == 1
-        assert isinstance(out[0], Tool)
-        assert out[0].name == "build_doc_skill"
-
-    def test_skill_builder_tools_custom_name(self):
-        from lazybridge.external_tools.doc_skills.doc_skills import skill_builder_tools
-
-        out = skill_builder_tools(name="my_builder")
-        assert out[0].name == "my_builder"

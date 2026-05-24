@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.7.9"
+version = "0.8.0"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -38,14 +38,17 @@ deepseek  = ["openai>=1.70.0,<3.0.0"]
 # prefix. Native providers still handle their own models directly.
 litellm   = ["litellm>=1.40.0,<2.0.0"]
 yaml      = ["pyyaml>=6.0,<7.0"]
-tools     = ["pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0"]
+# The document-reading (``read_docs``) and skill (``doc_skills``) tool kits
+# moved to the sibling ``lazytoolkit`` package in 0.8; install their deps via
+# ``pip install 'lazytoolkit[docs]'``.
 # Reporting subsystem extracted to the sibling lazybridge-reports
 # package in 0.7.9 (see https://github.com/selvaz/LazyReport).  The
 # old [report], [pdf], [report-charts], [report-citations], and
 # [report-fallback] extras live there now — install via
 # ``pip install 'lazybridge-reports[charts,citations,fallback]'``.
 otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
-mcp       = ["mcp>=1.0,<2.0"]
+# The MCP connector moved to the sibling ``lazytoolkit`` package in 0.8;
+# install it via ``pip install 'lazytoolkit[mcp]'``.
 # At-rest encryption for Store values via EncryptedStoreAdapter.  Pulls
 # ``cryptography`` (Fernet = AES-128-CBC + HMAC-SHA256, key rotation via
 # MultiFernet).  Opt-in because cryptography is a C-extension; the rest
@@ -62,7 +65,7 @@ docs      = [
     "mkdocs-llmstxt>=0.3,<1.0",
     "pymdown-extensions>=10.0,<11.0",
 ]
-all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "mcp>=1.0,<2.0", "cryptography>=42,<46"]
+all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "cryptography>=42,<46"]
 
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
@@ -197,22 +200,23 @@ warn_return_any = true
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["lazybridge"]
-# Coverage scope.  The framework extensions (``ext.otel``, ``ext.mcp``,
-# ``ext.hil``, ``ext.planners``, ``ext.evals``, ``ext.viz``, ``ext.gateway``)
-# are gated as first-class surface and run in the default test suite.
-# Domain tool packages (``external_tools.*``) are split: pure logic
-# (path safety, HTML/YAML escaping, fragment validation) is covered by
-# lightweight tests in the default suite; heavy render paths that need
-# optional deps (WeasyPrint, Quarto binary, Chrome) remain excluded.
+# Coverage scope.  The framework extensions (``ext.otel``, ``ext.hil``,
+# ``ext.planners``, ``ext.evals``, ``ext.viz``) are gated as first-class
+# surface and run in the default test suite.  The connector tools
+# (``ext.mcp``, ``ext.gateway``) and the domain tool packages
+# (``external_tools.*``) moved to the sibling ``lazytoolkit`` package in 0.8;
+# only thin lazy deprecation shims remain here.
 omit = [
-    # Domain tool kits gated behind optional extras.
+    # Lazy deprecation shims for symbols moved to lazytoolkit (0.8).
     "lazybridge/external_tools/doc_skills/*",
     "lazybridge/external_tools/read_docs/*",
+    "lazybridge/ext/mcp/*",
+    "lazybridge/ext/gateway.py",
 ]
 
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
-# (mcp / otel / hil / planners / evals / gateway / viz) are gated as
+# (otel / hil / planners / evals / viz) are gated as
 # first-class.  0.7.9: 73 % floor, sitting just below the actual CI
 # measurement (73.74 % as of cd0c498).  The 85 % target stays a
 # Phase 6 goal after we backfill provider-streaming and HIL paths.

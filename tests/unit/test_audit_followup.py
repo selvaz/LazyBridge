@@ -64,31 +64,8 @@ def test_provider_alias_registration_concurrent_no_lost_writes():
 # ---------------------------------------------------------------------------
 # P1.4 — MCP transports: RuntimeError, not AssertionError, before connect
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_stdio_transport_list_tools_before_connect_raises_runtimeerror():
-    pytest.importorskip("mcp")
-    from lazybridge.ext.mcp.transports import StdioTransport
-
-    t = StdioTransport(command="false")  # never connect
-    with pytest.raises(RuntimeError, match="connect"):
-        await t.list_tools()
-    with pytest.raises(RuntimeError, match="connect"):
-        await t.call_tool("anything", {})
-
-
-@pytest.mark.asyncio
-async def test_http_transport_list_tools_before_connect_raises_runtimeerror():
-    pytest.importorskip("mcp")
-    from lazybridge.ext.mcp.transports import HttpTransport
-
-    t = HttpTransport(url="http://127.0.0.1:1/")
-    with pytest.raises(RuntimeError, match="connect"):
-        await t.list_tools()
-    with pytest.raises(RuntimeError, match="connect"):
-        await t.call_tool("anything", {})
-
+# Relocated to lazytools/tests/test_mcp.py with the MCP connector (moved to
+# lazytoolkit in 0.8).
 
 # ---------------------------------------------------------------------------
 # P1.5 — OTelExporter._on_agent_end snapshots once
