@@ -1,4 +1,4 @@
-# Nested pipelines — horizontal composition
+# Composition patterns
 
 Most introductions to LazyBridge compose agents **vertically** —
 `Agent.chain(a, b, c)` for a one-shot linear pipeline, or

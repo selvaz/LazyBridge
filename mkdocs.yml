@@ -143,6 +143,7 @@ nav:
   - Concepts:
       - Mental model: concepts/mental-model.md
       - Everything is a tool: concepts/everything-is-a-tool.md
+      - Layered composition: concepts/layered-composition.md
       - Progressive complexity: concepts/progressive-complexity.md
       - Canonical vs sugar: concepts/canonical-vs-sugar.md
   - Guides:
@@ -169,7 +170,7 @@ nav:
           - Sentinels: guides/full/sentinels.md
           - Routing: guides/full/routing.md
           - Parallel plan steps: guides/full/parallel-plan-steps.md
-          - Nested pipelines (horizontal composition): guides/full/nested-pipelines.md
+          - Composition patterns: guides/full/composition-patterns.md
           - Checkpoint & resume: guides/full/checkpoint.md
           - Exporters: guides/full/exporters.md
           - GraphSchema: guides/full/graph-schema.md
