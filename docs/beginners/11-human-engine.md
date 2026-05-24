@@ -369,6 +369,6 @@ guides that go deeper.
 
 ---
 
-[**Step 12: LazyBridge vs LangGraph vs CrewAI →**](12-vs-frameworks.md){ .md-button .md-button--primary }
+[**LazyBridge vs LangGraph vs CrewAI →**](../comparison.md){ .md-button .md-button--primary }
 
 [← Step 10: Routing](10-routing.md){ .md-button }

@@ -74,6 +74,8 @@ plugins:
           - reference/*.md
         Errors:
           - errors.md
+        Comparison:
+          - comparison.md
 
 markdown_extensions:
   - admonition
@@ -122,6 +124,7 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Comparison: comparison.md
   - For Beginners:
       - Start here: beginners/index.md
       - "Step 1: What is an LLM?": beginners/01-what-is-an-llm.md
@@ -135,7 +138,7 @@ nav:
       - "Step 9: Explicit DAGs (Plan & sentinels)": beginners/09-plan.md
       - "Step 10: Routing (conditional branching)": beginners/10-routing.md
       - "Step 11: Human in the loop (HumanEngine)": beginners/11-human-engine.md
-      - "Step 12: LazyBridge vs LangGraph vs CrewAI": beginners/12-vs-frameworks.md
+      - "Step 12 → moved": beginners/12-vs-frameworks.md
       - "Step 13: Where to go next": beginners/13-next-steps.md
   - Concepts:
       - Mental model: concepts/mental-model.md
