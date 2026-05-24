@@ -304,3 +304,4 @@ recipes, reference, and the topics we deliberately left for later.
 ---
 
 [**Get started →**](quickstart.md){ .md-button .md-button--primary }
+[Why LazyBridge](why.md){ .md-button }

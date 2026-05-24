@@ -74,6 +74,8 @@ plugins:
           - reference/*.md
         Errors:
           - errors.md
+        Why:
+          - why.md
         Comparison:
           - comparison.md
 
@@ -124,6 +126,7 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Why LazyBridge: why.md
   - Comparison: comparison.md
   - For Beginners:
       - Start here: beginners/index.md
