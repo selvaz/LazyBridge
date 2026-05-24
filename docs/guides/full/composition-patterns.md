@@ -20,9 +20,9 @@ Vertical composition produces a single sequence of steps:
 ```python
 from lazybridge import Agent, LLMEngine, Plan, Step
 
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="research")
+researcher = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="research")
 writer     = Agent(engine=LLMEngine("gpt-5.4-mini"),    name="write")
-editor     = Agent(engine=LLMEngine("claude-opus-4-7"), name="edit")
+editor     = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="edit")
 
 pipeline = Agent(
     engine=Plan(Step("research"), Step("write"), Step("edit")),
@@ -59,7 +59,7 @@ research_pipeline = Agent(
 
 # --- Outer pipeline: research → write → edit ---
 writer = Agent(engine=LLMEngine("gpt-5.4-mini"),    name="write")
-editor = Agent(engine=LLMEngine("claude-opus-4-7"), name="edit")
+editor = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="edit")
 
 pipeline = Agent(
     engine=Plan(
@@ -122,11 +122,11 @@ def make_research_pipeline(name: str, source_agent: Agent) -> Agent:
         name=name,
     )
 
-web_research      = make_research_pipeline("web",      Agent(engine=LLMEngine("claude-opus-4-7"), name="web_search"))
-academic_research = make_research_pipeline("academic", Agent(engine=LLMEngine("claude-opus-4-7"), name="academic_search"))
-internal_research = make_research_pipeline("internal", Agent(engine=LLMEngine("claude-opus-4-7"), name="internal_search"))
+web_research      = make_research_pipeline("web",      Agent(engine=LLMEngine("claude-sonnet-4-6"), name="web_search"))
+academic_research = make_research_pipeline("academic", Agent(engine=LLMEngine("claude-sonnet-4-6"), name="academic_search"))
+internal_research = make_research_pipeline("internal", Agent(engine=LLMEngine("claude-sonnet-4-6"), name="internal_search"))
 
-synthesiser = Agent(engine=LLMEngine("claude-opus-4-7"), name="synthesise")
+synthesiser = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="synthesise")
 
 pipeline = Agent(
     engine=Plan(
@@ -175,7 +175,7 @@ from lazybridge import Agent, LLMEngine
 # Same three sub-pipelines as above (each is an Agent(engine=Plan(...))).
 orchestrator = Agent(
     engine=LLMEngine(
-        "claude-opus-4-7",
+        "claude-sonnet-4-6",
         system=(
             "You have three research sub-pipelines available.  Call only "
             "the ones that match the user's question; combine their results."
