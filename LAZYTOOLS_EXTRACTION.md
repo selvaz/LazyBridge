@@ -52,8 +52,8 @@ inside the function body). See §5.3.
 | `external_tools/read_docs/read_docs.py` | `read_folder_docs`, `read_docs_tools` | **MOVE** | `lazytools/read_docs/read_docs.py` |
 | `external_tools/doc_skills/doc_skills.py` | `build_skill`, `query_skill`, `skill_tools`, `skill_builder_tools`, `skill_pipeline` | **MOVE** | `lazytools/doc_skills/doc_skills.py` |
 | `external_tools/__init__.py` (+ subpkgs) | namespace | **SHIM** (lazy) → delete in 0.9 | re-export from `lazytools` |
+| `ext/mcp/*` | `MCP`, `MCPServer`, transports | **MOVE** *(Decision D1 — resolved)* | `lazytools/mcp/` |
 | `ext/gateway.py` | `ExternalToolProvider` (Composio/Pipedream/Arcade) | **MOVE** *(see Decision D2)* | `lazytools/gateway/` |
-| `ext/mcp/*` | `MCP`, `MCPServer` | **KEEP** *(see Decision D1)* | — |
 | `ext/{hil,planners,otel,viz,evals}/*` | HumanEngine, planners, tracing, viz, evals | **KEEP** | maps 1:1 to a core abstraction |
 | everything else under `lazybridge/` | core runtime | **KEEP** | — |
 
@@ -97,10 +97,17 @@ The brief's rule: a **Tool** is invoked by the worker mid-run → movable; an
 
 > Resolve these **before Phase 1** — they change the move manifest.
 
-- **D1 — `ext/mcp`:** Keep in `lazybridge`. `MCPServer` is a generic *protocol*
-  bridge (a `ToolProvider`), not a product integration, and `lazybridge.ext.mcp`
-  is an established public path. **Recommendation: KEEP.** Override only if core
-  must hold zero outbound tool connectors.
+- **D1 — `ext/mcp`: RESOLVED → MOVE** to `lazytools/mcp/`. `MCPServer` is a
+  `ToolProvider` that connects to external MCP servers, so it belongs with the
+  other connectors in `lazytools`. **Caveat (elevated churn):** unlike the doc
+  tools, `lazybridge.ext.mcp` is a widely-advertised public path — referenced in
+  `docs/` (guides, reference, `pick-tier`, codegen-contract), `skill/SKILL.md`,
+  `examples/llm_assistant/05_mcp_allowlisted.py`, and several `tests/unit/*`. It
+  needs a robust lazy shim at `lazybridge.ext.mcp` **and** a coordinated docs
+  pass (Phase 2). When moved, change its internal import from
+  `from lazybridge.tools import Tool` to the public `from lazybridge import Tool`.
+  The `mcp = ["mcp>=1.0,<2.0"]` extra moves to `lazytoolkit[mcp]` and drops out
+  of `lazybridge`'s `all` extra.
 - **D2 — `ext/gateway`:** A connector to commercial integration gateways
   (Composio/Pipedream/Arcade). Fits the bucket-B "connector client" definition
   and brings outbound HTTP. **Recommendation: MOVE** to `lazytools/gateway/`
@@ -109,8 +116,11 @@ The brief's rule: a **Tool** is invoked by the worker mid-run → movable; an
   only by Pulse. Moving it makes Pulse's `gmail` extra depend on `lazytoolkit`
   (allowed, but couples them). **Recommendation: MOVE** (reusable). Keep in
   Pulse only if you want the inbox to stand alone with no `lazytools` dependency.
-- **D4 — Target repo for `lazytoolkit`:** which repo hosts `src/lazytools`?
-  (`git_test` is currently an empty placeholder.) Confirm before scaffolding.
+- **D4 — Target repo for `lazytoolkit`: RESOLVED → the `LazyTools` repo** hosts
+  `src/lazytools`. *Access note:* this assistant's GitHub scope currently covers
+  only `selvaz/{lazybridge,git_test,lazypulse}` and only those three are cloned
+  locally — pushing the new package to `selvaz/LazyTools` requires that repo to
+  be added to scope (and cloned) first.
 - **D5 — Version floors:** `lazytoolkit → lazybridge>=0.7.9,<0.9` and
   `lazypulse[gmail] → lazytoolkit[gmail]`. Confirm the three-way pin window.
 
@@ -130,6 +140,10 @@ src/lazytools/
     __init__.py          # TelegramClient, TelegramService, TelegramTools, TelegramSendBlocked
     client.py
     tools.py
+  mcp/
+    __init__.py          # MCP, MCPServer
+    server.py
+    transports.py
   read_docs/
     __init__.py
     read_docs.py
@@ -166,6 +180,7 @@ dependencies = ["lazybridge>=0.7.9,<0.9"]
 [project.optional-dependencies]
 gmail    = ["google-api-python-client>=2.0,<3.0", "google-auth>=2.0,<3.0", "google-auth-oauthlib>=1.0,<2.0"]
 telegram = ["httpx>=0.27,<1.0"]
+mcp      = ["mcp>=1.0,<2.0"]
 docs     = ["pypdf>=3.0,<7.0", "python-docx>=1.0,<2.0", "trafilatura>=1.6,<3.0"]
 test     = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
 
@@ -343,9 +358,11 @@ This validates the API and de-risks Phase 1.
 - `[ ]` Promote the Phase-0 `safety` helper into `lazytools/safety/`.
 - `[ ]` Add `lazytools/testing/fake_clients.py`.
 - `[ ]` Move the tool-level tests (§6 matrix); add the two boundary tests.
-- `[ ]` **LazyBridge:** replace `external_tools/{read_docs,doc_skills}` bodies
-  with lazy shims (§5.3); update `pyproject` (drop `tools` extra + its members
-  from `all`; remove the two `coverage omit` lines).
+- `[ ]` **LazyBridge:** replace `external_tools/{read_docs,doc_skills}` bodies,
+  `ext/mcp/*`, and `ext/gateway.py` with lazy shims (§5.3); update `pyproject`
+  (drop the `tools`, `mcp`, and—if D2 confirmed—gateway-related members from the
+  extras and from `all`; remove the two `coverage omit` lines and the "first-class
+  ext" mention of `mcp` in the coverage comment).
 - `[ ]` **LazyPulse:** point `gmail`/`telegram` extras at `lazytoolkit[...]`;
   rewrite inbox imports of `*Service`/`parse_authentication_results` to
   `lazytools.*`; add lazy re-export shims in the two adapter `__init__.py`.
@@ -371,8 +388,14 @@ python -W error::DeprecationWarning -c "from lazybridge.external_tools.read_docs
 - `[ ]` LazyBridge docs: "concrete tools live in `lazytools` (`pip install lazytoolkit`)";
   update `docs/guides/core-vs-ext.md`, `docs/guides/basic/tool.md`.
 - `[ ]` Update examples to import `lazytools.*`:
-  `LazyPulse/examples/03_gmail_polling.py`, `07_telegram_polling.py`, and any
-  LazyBridge example using `external_tools`.
+  `LazyPulse/examples/03_gmail_polling.py`, `07_telegram_polling.py`,
+  `LazyBridge/examples/llm_assistant/05_mcp_allowlisted.py`, and any example
+  using `external_tools`.
+- `[ ]` **MCP doc pass** (largest churn): repoint every `from lazybridge.ext.mcp
+  import MCP` in `docs/guides/{mid/mcp.md,basic/tool.md}`,
+  `docs/reference/extensions.md`, `docs/decisions/pick-tier.md`,
+  `docs/for-llms/codegen-contract.md`, and `lazybridge/skill/SKILL.md` to
+  `lazytools.mcp`.
 - `[ ]` `lazytoolkit` README with the import contract from §3.
 
 **Gate 2:** `test_doc_examples_runtime.py` (LazyBridge) green; doc-path link checks pass.
@@ -424,6 +447,8 @@ freedom from circular imports. Same pattern for `doc_skills`, the optional
 | `LazyPulse/tests/unit/test_gmail_auth_parser.py` | move (if D3=MOVE) | `lazytools/tests/test_gmail_auth.py` |
 | `LazyPulse/tests/unit/test_telegram.py` | **split**: tool cases move, inbox/policy cases stay | both |
 | `LazyBridge/tests/unit/test_new_features.py` (read_docs/doc_skills cases) | move | `lazytools/tests/` |
+| `LazyBridge/tests/unit/test_mcp.py` | move | `lazytools/tests/test_mcp.py` |
+| `LazyBridge/tests/unit/test_audit_{short_term,amend,followup}.py` (ext.mcp imports) | **update imports** | repoint to `lazytools.mcp` (or the lazy shim) |
 | `LazyPulse/tests/unit/test_gmail_inbox.py` | keep | — |
 | `LazyBridge/tests/unit/test_ext_core_boundary.py` | **extend** | add: `lazybridge` must not `import lazytools` |
 | `LazyPulse/tests/unit/test_no_private_imports.py` | **extend / mirror** | add: `lazytools` must not `import lazypulse` |
@@ -484,8 +509,12 @@ def test_lazytools_never_imports_lazypulse():
    `coverage omit`; removing it should *raise* the percentage, but read the new
    floor from a green CI run before touching `fail_under` (pyproject warns about
    local-vs-CI drift).
-6. **Docs/examples drift.** `test_doc_examples_runtime.py` will fail if examples
-   still import old paths — they must update in Phase 2.
+6. **Docs/examples drift — amplified by the MCP move.** `lazybridge.ext.mcp` is
+   referenced across guides, reference docs, `pick-tier`, the codegen contract,
+   `skill/SKILL.md`, an example, and several tests. The lazy shim keeps code
+   working, but `test_doc_examples_runtime.py` / doc-path checks will fail unless
+   the Phase-2 doc pass repoints every reference. Budget MCP as the single
+   largest churn item in the whole migration.
 7. **`auth.py` coupling (D3).** Moving it adds a Pulse→lazytools dependency for
    the `gmail` extra. Allowed, but make the choice explicitly.
 
