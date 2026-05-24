@@ -95,14 +95,19 @@ Sed-replace in repo (43 call sites across `tests/`, `examples/`, `docs/`, `SKILL
 - [x] `Agent.from_chain(a, b, **k)` → `Agent.chain(a, b, **k)`
 - [x] `Agent.from_parallel(*a, **k)` → `Agent.parallel(*a, **k)`
 
-### Block B — Delete 4 public config objects (kills `_UNSET`)
+### Block B — Delete 3 public config objects (kills `_UNSET`)
 
 In `lazybridge/__init__.py` and `lazybridge/core/types.py`:
 - [x] Delete `AgentRuntimeConfig`
-- [x] Delete `CacheConfig`
+- [-] **Kept `CacheConfig`** — *not* deleted. It carries real semantic value
+  (`enabled` + `ttl` prompt-caching opt-in), is wired into `LLMEngine.cache`,
+  has dedicated tests (`test_prompt_caching.py`), is documented
+  (`reference/configs.md`, `guides/basic/agent.md`, the 0.7→0.79 migration), and
+  stays in `__all__` and `test_public_api_snapshot.py`. The other three config
+  objects were pure precedence-game wrappers; this one is a typed feature flag.
 - [x] Delete `ObservabilityConfig`
 - [x] Delete `ResilienceConfig`
-- [x] Remove these names from `__all__`
+- [x] Remove `AgentRuntimeConfig` / `ObservabilityConfig` / `ResilienceConfig` from `__all__` (CacheConfig retained)
 
 In `lazybridge/agent.py`:
 - [x] Delete `_UNSET` sentinel
