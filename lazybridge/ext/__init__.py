@@ -10,9 +10,9 @@ Connectors and domain tool kits moved to the sibling ``lazytoolkit``
 package in 0.8: the MCP connector (``lazytools.connectors.mcp``), the
 external tool gateway (``lazytools.connectors.gateway``), document
 reading (``lazytools.documents``), and doc skills
-(``lazytools.skills``).  The old ``lazybridge.ext.{mcp,gateway}`` and
-``lazybridge.external_tools.*`` import paths still work via lazy
-deprecation shims until 0.9.  HTML/PDF report assembly moved to the
+(``lazytools.skills``).  The ``lazybridge.ext.{mcp,gateway}`` and
+``lazybridge.external_tools.*`` deprecation shims were removed in 0.9 —
+import from ``lazytools`` instead.  HTML/PDF report assembly moved to the
 ``lazybridge-reports`` package in 0.7.9.
 
 Available framework extensions::

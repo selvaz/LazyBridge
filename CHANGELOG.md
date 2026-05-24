@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.0] — 2026-05-24 — lazytoolkit extraction (Phase 3: shims removed)
+
+### Removed (breaking)
+The lazy deprecation shims left behind by the 0.8 extraction are gone.
+Import from `lazytools` directly.
+
+- `lazybridge.ext.mcp` → use `lazytools.connectors.mcp` (`pip install 'lazytoolkit[mcp]'`).
+- `lazybridge.ext.gateway` → use `lazytools.connectors.gateway`.
+- `lazybridge.external_tools.read_docs` → use `lazytools.documents` (`pip install 'lazytoolkit[docs]'`).
+- `lazybridge.external_tools.doc_skills` → use `lazytools.skills`.
+- The whole `lazybridge.external_tools` namespace is deleted.
+
+The old paths now raise `ModuleNotFoundError` instead of emitting a
+`DeprecationWarning`. `lazybridge` still has no runtime dependency on
+`lazytools`.
+
+---
+
 ## [0.8.0] — 2026-05-24 — lazytoolkit extraction (Phases 0–2)
 
 The concrete, dependency-carrying tools moved to the new sibling package

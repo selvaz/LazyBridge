@@ -171,7 +171,7 @@ Both factories are **deny-by-default since 0.7.9** — omitting both
   list.
 
 ```python
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 # Restrict an internal stdio MCP server to read-only filesystem tools.
 fs_safe = MCP.stdio(

@@ -123,7 +123,7 @@ state of each feature area in this release.
 | `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
 | `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled (`redact_secrets`). |
 | Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters are stable; model/price tables drift with provider releases. |
-| MCP / external tool gateway | **Moved** | Migrated to the `lazytoolkit` package in 0.8 (`lazytools.connectors.{mcp,gateway}`) — see [tools.lazybridge.com](https://tools.lazybridge.com). The old `lazybridge.ext.{mcp,gateway}` paths are deprecation shims until 0.9. |
+| MCP / external tool gateway | **Moved** | Migrated to the `lazytoolkit` package in 0.8 (`lazytools.connectors.{mcp,gateway}`) — see [tools.lazybridge.com](https://tools.lazybridge.com). The old `lazybridge.ext.{mcp,gateway}` deprecation shims were removed in 0.9. |
 | Native tools (`NativeTool`) | **Alpha** | Provider-hosted capabilities (web search, code interpreter). Surface area changes when providers add new tools. |
 | `Checkpoint` / `resume`  | **Alpha** | Internal-state atomic across parallel `Plan` bands; *external* side-effect rollback is not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)). |
 | Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Alpha** | Behaviour is stable; default rule libraries are still growing. |
