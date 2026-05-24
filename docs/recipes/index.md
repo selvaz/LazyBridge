@@ -36,14 +36,6 @@ single agent → tools → composition → planning → production.
   dispatch over sub-pipelines.  Companion to the vertical
   `chain` / `Plan` recipes above.
 
-## Reporting
-
-The HTML/PDF reporting recipes moved to the sibling
-[LazyReport](https://github.com/selvaz/LazyReport) repository in 0.7.9.
-Install with `pip install lazybridge-reports` and follow the recipes
-there — the rest of LazyBridge stays installable without WeasyPrint /
-Quarto / Pandoc.
-
 ## Observability
 
 - [Live visualization](live-visualization.md) — `examples/viz_demo.py`
