@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 32" width="90" height="32">
+  <!-- OpenAI swirl mark simplified -->
+  <circle cx="16" cy="16" r="11" fill="none" stroke="#10A37F" stroke-width="2"/>
+  <circle cx="16" cy="16" r="6" fill="none" stroke="#10A37F" stroke-width="2"/>
+  <text x="32" y="21" font-family="'Arial', sans-serif" font-size="14" font-weight="600" fill="#10A37F">OpenAI</text>
+</svg>
