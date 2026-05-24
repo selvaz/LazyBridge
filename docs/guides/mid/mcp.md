@@ -6,12 +6,12 @@ expands the server into one `Tool` per advertised tool, namespaces
 the names to avoid collisions, and respects allow / deny lists for
 sensitive surfaces.
 
-> **Status: alpha.** Install: `pip install lazybridge[mcp]`.
+> **Status: alpha.** Install: `pip install lazytoolkit[mcp]`.
 
 ## Signature
 
 ```python
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 # Spawn a stdio MCP server as a subprocess.
 MCP.stdio(
@@ -53,7 +53,7 @@ async with server:                 # explicit lifecycle (rare)
 ```
 
 The discovered-tools cache lives `cache_tools_ttl` seconds. The MCP
-SDK is an optional dependency — `import lazybridge.ext.mcp` is cheap;
+SDK is an optional dependency — `import lazytools.connectors.mcp` is cheap;
 constructing an `MCP.stdio(...)` or `MCP.http(...)` is what triggers
 the SDK import (and a clean `ImportError` if missing).
 
@@ -104,7 +104,7 @@ name, so you write `"github.delete_*"` rather than regex.
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 
 # 1) Spawn a stdio MCP server (subprocess) and use its tools.

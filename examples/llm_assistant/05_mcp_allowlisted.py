@@ -9,7 +9,7 @@ sub-surface you've audited.
 
 from __future__ import annotations
 
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 
 def main() -> None:

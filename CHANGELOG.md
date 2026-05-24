@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased] — 0.8 — lazytoolkit extraction (Phases 0–2)
+
+The concrete, dependency-carrying tools moved to the new sibling package
+**`lazytoolkit`** (repo: `selvaz/LazyTools`). LazyBridge keeps only the minimal
+runtime + framework extensions.
+
+### Moved (lazy deprecation shims left behind; removed in 0.9)
+- `lazybridge.ext.mcp` → `lazytools.connectors.mcp` (`pip install 'lazytoolkit[mcp]'`).
+- `lazybridge.ext.gateway` → `lazytools.connectors.gateway`.
+- `lazybridge.external_tools.read_docs` → `lazytools.documents`
+  (`pip install 'lazytoolkit[docs]'`).
+- `lazybridge.external_tools.doc_skills` → `lazytools.skills`.
+
+Old import paths still work and emit a `DeprecationWarning` pointing at the new
+location. The shims are lazy (PEP 562 `__getattr__`) so `import lazybridge`
+never imports `lazytools` — `lazybridge` has no runtime dependency on the
+toolkit. The `mcp` and `tools` extras were removed (use `lazytoolkit[mcp]` /
+`lazytoolkit[docs]`).
+
+---
+
 ## [0.7.9] — 2026-05-10 — simplification release
 
 The headline change: **deletion-led simplification**.  The framework

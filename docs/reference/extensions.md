@@ -24,9 +24,9 @@ For narrative usage see the corresponding guides:
 
 ## MCP integration
 
-::: lazybridge.ext.mcp.MCP
+::: lazytools.connectors.mcp.MCP
 
-::: lazybridge.ext.mcp.MCPServer
+::: lazytools.connectors.mcp.MCPServer
 
 ## Evaluation framework
 

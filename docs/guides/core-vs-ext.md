@@ -4,9 +4,15 @@ LazyBridge is split into three concentric layers:
 
 | Layer | Lives in | Holds |
 |---|---|---|
-| **Core** | `lazybridge/` (excluding the two subtrees below) | `Agent`, `LLMEngine`, `Plan`, `Step`, `Tool`, `Envelope`, `Memory`, `Store`, `Session`, sentinels, predicates, guards, providers |
-| **Framework extensions** | `lazybridge/ext/*` | MCP, OpenTelemetry, HumanEngine / SupervisorEngine, Evals, the HTTP gateway, planners, visualizer |
-| **Domain tool kits** | `lazybridge/external_tools/*` | `read_docs`, `doc_skills`, and any future heavy-dep examples |
+| **Core** | `lazybridge/` (excluding the subtree below) | `Agent`, `LLMEngine`, `Plan`, `Step`, `Tool`, `Envelope`, `Memory`, `Store`, `Session`, sentinels, predicates, guards, providers |
+| **Framework extensions** | `lazybridge/ext/*` | OpenTelemetry, HumanEngine / SupervisorEngine, Evals, planners, visualizer |
+| **Concrete tools** | sibling `lazytoolkit` package (`pip install lazytoolkit`) | connectors (Gmail, Telegram, MCP, the HTTP gateway), document readers (`read_docs`), skills (`doc_skills`) |
+
+> **Moved in 0.8.** The MCP and gateway connectors (`lazybridge.ext.{mcp,gateway}`)
+> and the domain tool kits (`lazybridge.external_tools.*`) moved to the standalone
+> [`lazytoolkit`](https://github.com/selvaz/LazyTools) package. Old import paths
+> still work via lazy deprecation shims until 0.9 — import from `lazytools.*`
+> instead (e.g. `from lazytools.connectors.mcp import MCP`).
 
 This split is enforced — not just convention — by three architectural
 tests that fail the build the moment a forbidden import lands:

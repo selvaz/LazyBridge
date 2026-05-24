@@ -37,7 +37,7 @@ import pytest
 
 def test_mcp_stdio_transport_has_per_instance_connect_lock() -> None:
     """Two StdioTransport instances get distinct locks (no shared state)."""
-    from lazybridge.ext.mcp.transports import StdioTransport
+    from lazytools.connectors.mcp.transports import StdioTransport
 
     a = StdioTransport(command="echo", args=["hi"])
     b = StdioTransport(command="echo", args=["hi"])
@@ -46,7 +46,7 @@ def test_mcp_stdio_transport_has_per_instance_connect_lock() -> None:
 
 
 def test_mcp_http_transport_has_per_instance_connect_lock() -> None:
-    from lazybridge.ext.mcp.transports import HttpTransport
+    from lazytools.connectors.mcp.transports import HttpTransport
 
     t = HttpTransport(url="http://localhost:0/mcp")
     assert isinstance(t._connect_lock, asyncio.Lock)
@@ -61,7 +61,7 @@ async def test_mcp_connect_serialises_concurrent_callers() -> None:
     the second caller saw the same outcome as the first (both raise),
     not that one silently completed while the other was mid-flight.
     """
-    from lazybridge.ext.mcp.transports import StdioTransport
+    from lazytools.connectors.mcp.transports import StdioTransport
 
     t = StdioTransport(command="echo")
 
@@ -201,7 +201,7 @@ def test_gateway_redirect_handler_rejects_cross_host() -> None:
     import urllib.error
     import urllib.request
 
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
+    from lazytools.connectors.gateway import _SameOriginRedirectHandler
 
     handler = _SameOriginRedirectHandler()
     req = urllib.request.Request("https://api.example.com/v1/tool")
@@ -214,7 +214,7 @@ def test_gateway_redirect_handler_rejects_https_downgrade() -> None:
     import urllib.error
     import urllib.request
 
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
+    from lazytools.connectors.gateway import _SameOriginRedirectHandler
 
     handler = _SameOriginRedirectHandler()
     req = urllib.request.Request("https://api.example.com/v1/tool")
@@ -227,7 +227,7 @@ def test_gateway_redirect_handler_allows_same_host_path_change() -> None:
     """Same-host redirect (e.g., /v1 -> /v2) must still work."""
     import urllib.request
 
-    from lazybridge.ext.gateway import _SameOriginRedirectHandler
+    from lazytools.connectors.gateway import _SameOriginRedirectHandler
 
     handler = _SameOriginRedirectHandler()
     req = urllib.request.Request("https://api.example.com/v1/tool")

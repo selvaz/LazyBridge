@@ -68,8 +68,8 @@ to `Tool` instances at construction time:
 
 ```python
 from lazybridge import Agent, LLMEngine, Tool
-from lazybridge.ext.mcp import MCP
-from lazybridge.external_tools.read_docs import read_docs_tools
+from lazytools.connectors.mcp import MCP
+from lazytools.documents import read_docs_tools
 
 agent = Agent(
     engine=LLMEngine("gpt-5.4-mini"),

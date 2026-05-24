@@ -128,38 +128,46 @@ The brief's rule: a **Tool** is invoked by the worker mid-run → movable; an
 
 ## 3. The `lazytools` package layout
 
+> **As built — reorganised by category** (see "Deviations" below). Connectors
+> are grouped under `connectors/`; document tools and skills get their own
+> top-level categories.
+
 ```
 src/lazytools/
   __init__.py            # __version__ + light re-exports only; NO eager heavy imports
-  gmail/
-    __init__.py          # GmailClient, GmailService, GmailTools, GmailSendBlocked, parse_authentication_results
-    client.py
-    tools.py
-    auth.py
-  telegram/
-    __init__.py          # TelegramClient, TelegramService, TelegramTools, TelegramSendBlocked
-    client.py
-    tools.py
-  mcp/
-    __init__.py          # MCP, MCPServer
-    server.py
-    transports.py
-  read_docs/
+  connectors/            # clients + tool providers that bridge to an external service/protocol
+    __init__.py          # no eager imports
+    gmail/
+      __init__.py        # GmailClient, GmailService, GmailTools, GmailSendBlocked, parse_authentication_results
+      client.py
+      tools.py
+      auth.py
+    telegram/
+      __init__.py        # TelegramClient, TelegramService, TelegramTools, TelegramSendBlocked
+      client.py
+      tools.py
+    mcp/
+      __init__.py        # MCP, MCPServer
+      server.py
+      transports.py
+    gateway/
+      __init__.py        # ExternalToolProvider, ExternalToolSpec, ExternalToolClient, ExternalToolError, JsonHttpExternalToolClient
+  documents/             # base document-reading tools
     __init__.py
     read_docs.py
-  doc_skills/
+  skills/                # build/query portable doc skills
     __init__.py
     doc_skills.py
   safety/
-    __init__.py
+    __init__.py          # Allowlist, ConfirmationGate, ActionBlocked, active_scope, current_scope
     allowlist.py
     gates.py
+    context.py           # ambient scope contextvar shared with the orchestrator
   testing/
     __init__.py
     fake_clients.py
-  gateway/               # only if D2 = MOVE
-    __init__.py
-  # future: github/  slack/  notion/  browser/  calendar/  filesystem/
+  # planned (created when the first module lands, not scaffolded empty):
+  #   connectors/{github,slack,notion,calendar,filesystem,browser}, more base tools
 ```
 
 **`pyproject.toml` (new repo):**
@@ -191,10 +199,13 @@ packages = ["src/lazytools"]
 Import contract (what users type after `pip install lazytoolkit`):
 
 ```python
-from lazytools.gmail import GmailTools, GmailClient
-from lazytools.telegram import TelegramTools
+from lazytools.connectors.gmail import GmailTools, GmailClient
+from lazytools.connectors.telegram import TelegramTools
+from lazytools.connectors.mcp import MCP
+from lazytools.connectors.gateway import ExternalToolProvider
 from lazytools.safety import Allowlist, ConfirmationGate, ActionBlocked
-from lazytools.read_docs import read_docs_tools
+from lazytools.documents import read_docs_tools
+from lazytools.skills import build_skill, skill_tools
 ```
 
 ---
@@ -228,6 +239,15 @@ class Allowlist:
 
 **`lazytools/safety/gates.py`**
 
+> **Corrected — grants carry a `scope` dimension.** The real `GmailTools` /
+> `TelegramTools` bind grants to `(target, task_id)` and the public surface
+> includes `confirm_once(*, task_id=…)` / `confirm_send(*, task_id=…)` (with
+> task-bound e2e tests). The plan's original gate dropped that dimension, which
+> would have broken the public surface and 5 tests. The gate is kept
+> **scope-agnostic** — the caller passes the current scope — so it has no
+> orchestration dependency; the ambient value lives in `safety/context.py`
+> (`active_scope` / `current_scope`) and is set by `PulseAgent`.
+
 ```python
 from __future__ import annotations
 
@@ -236,26 +256,36 @@ _ANY = "*"
 class ConfirmationGate:
     """One-shot, target-bound confirmation grants for dangerous actions.
 
-    Not a sticky boolean: each grant authorizes exactly one action, so an
-    approved single message can never silently authorize a flood. A
-    recipient/target-bound grant is consumed before an any-target one. No
-    global "approved forever" state.
+    Not a sticky boolean: each grant authorizes exactly one action. Grants are
+    matched most-to-least specific: (target, scope) → (target, None) →
+    (_ANY, scope) → (_ANY, None). A scope-bound grant is never spendable when no
+    scope is supplied. No global "approved forever" state.
     """
     def __init__(self, *, enabled: bool = True) -> None:
         self._enabled = enabled
-        self._grants: dict[str, int] = {}
+        self._grants: dict[tuple[str, str | None], int] = {}
 
-    def grant(self, target: object) -> None:
-        key = str(target).lower()
+    def grant(self, target: object, *, scope: str | None = None) -> None:
+        self._add((str(target).lower(), scope))
+
+    def grant_any(self, *, scope: str | None = None) -> None:
+        self._add((_ANY, scope))
+
+    def _add(self, key: tuple[str, str | None]) -> None:
         self._grants[key] = self._grants.get(key, 0) + 1
 
-    def grant_any(self) -> None:
-        self._grants[_ANY] = self._grants.get(_ANY, 0) + 1
-
-    def consume(self, target: object) -> bool:
+    def consume(self, target: object, *, scope: str | None = None) -> bool:
         if not self._enabled:
             return True
-        for key in (str(target).lower(), _ANY):
+        target_l = str(target).lower()
+        candidates = []
+        if scope is not None:
+            candidates.append((target_l, scope))
+        candidates.append((target_l, None))
+        if scope is not None:
+            candidates.append((_ANY, scope))
+        candidates.append((_ANY, None))
+        for key in candidates:
             if self._grants.get(key, 0) > 0:
                 self._grants[key] -= 1
                 return True
@@ -337,33 +367,33 @@ class GmailTools:
 Each phase ends at an **acceptance gate**. Do not start the next phase until the
 gate is green.
 
-### Phase 0 — in-place safety extraction (lowest risk, fully reversible) `[ ]`
+### Phase 0 — in-place safety extraction (lowest risk, fully reversible) `[x]`
 
 Land the `safety` helper **inside the current repos first**, before any move.
 This validates the API and de-risks Phase 1.
 
-- `[ ]` Add `lazypulse/_safety.py` (or a temp module) with `Allowlist` + `ConfirmationGate`.
-- `[ ]` Refactor `GmailTools` and `TelegramTools` onto it; keep the public
+- `[x]` Add `lazypulse/_safety.py` (or a temp module) with `Allowlist` + `ConfirmationGate`.
+- `[x]` Refactor `GmailTools` and `TelegramTools` onto it; keep the public
   surface (`confirm_once`, `confirm_send`, `require_confirmation`, `*SendBlocked`).
-- `[ ]` Existing tests (`test_gmail_tools.py`, `test_telegram.py`) pass **unchanged**.
+- `[x]` Existing tests (`test_gmail_tools.py`, `test_telegram.py`) pass **unchanged**.
 
 **Gate 0:** `cd LazyPulse && pytest -q` green; no public-API diff in the tool classes.
 
-### Phase 1 — create `lazytoolkit`, move modules, add lazy shims `[ ]`
+### Phase 1 — create `lazytoolkit`, move modules, add lazy shims `[x]`
 
-- `[ ]` Scaffold the repo (D4) with the layout in §3.
-- `[ ]` Move modules per §1; rewrite internal imports
+- `[x]` Scaffold the repo (D4) with the layout in §3.
+- `[x]` Move modules per §1; rewrite internal imports
   (`lazypulse.adapters.gmail.client` → `lazytools.gmail.client`;
   `from lazybridge import Tool` is unchanged and correct).
-- `[ ]` Promote the Phase-0 `safety` helper into `lazytools/safety/`.
-- `[ ]` Add `lazytools/testing/fake_clients.py`.
-- `[ ]` Move the tool-level tests (§6 matrix); add the two boundary tests.
-- `[ ]` **LazyBridge:** replace `external_tools/{read_docs,doc_skills}` bodies,
+- `[x]` Promote the Phase-0 `safety` helper into `lazytools/safety/`.
+- `[x]` Add `lazytools/testing/fake_clients.py`.
+- `[x]` Move the tool-level tests (§6 matrix); add the two boundary tests.
+- `[x]` **LazyBridge:** replace `external_tools/{read_docs,doc_skills}` bodies,
   `ext/mcp/*`, and `ext/gateway.py` with lazy shims (§5.3); update `pyproject`
   (drop the `tools`, `mcp`, and—if D2 confirmed—gateway-related members from the
   extras and from `all`; remove the two `coverage omit` lines and the "first-class
   ext" mention of `mcp` in the coverage comment).
-- `[ ]` **LazyPulse:** point `gmail`/`telegram` extras at `lazytoolkit[...]`;
+- `[x]` **LazyPulse:** point `gmail`/`telegram` extras at `lazytoolkit[...]`;
   rewrite inbox imports of `*Service`/`parse_authentication_results` to
   `lazytools.*`; add lazy re-export shims in the two adapter `__init__.py`.
 
@@ -383,20 +413,20 @@ cd LazyBridge && pytest -q tests/unit/test_ext_core_boundary.py
 python -W error::DeprecationWarning -c "from lazybridge.external_tools.read_docs import read_folder_docs" ; echo "expect: DeprecationWarning raised"
 ```
 
-### Phase 2 — docs & examples `[ ]`
+### Phase 2 — docs & examples `[x]`
 
-- `[ ]` LazyBridge docs: "concrete tools live in `lazytools` (`pip install lazytoolkit`)";
+- `[x]` LazyBridge docs: "concrete tools live in `lazytools` (`pip install lazytoolkit`)";
   update `docs/guides/core-vs-ext.md`, `docs/guides/basic/tool.md`.
-- `[ ]` Update examples to import `lazytools.*`:
+- `[x]` Update examples to import `lazytools.*`:
   `LazyPulse/examples/03_gmail_polling.py`, `07_telegram_polling.py`,
   `LazyBridge/examples/llm_assistant/05_mcp_allowlisted.py`, and any example
   using `external_tools`.
-- `[ ]` **MCP doc pass** (largest churn): repoint every `from lazybridge.ext.mcp
+- `[x]` **MCP doc pass** (largest churn): repoint every `from lazybridge.ext.mcp
   import MCP` in `docs/guides/{mid/mcp.md,basic/tool.md}`,
   `docs/reference/extensions.md`, `docs/decisions/pick-tier.md`,
   `docs/for-llms/codegen-contract.md`, and `lazybridge/skill/SKILL.md` to
   `lazytools.mcp`.
-- `[ ]` `lazytoolkit` README with the import contract from §3.
+- `[x]` `lazytoolkit` README with the import contract from §3.
 
 **Gate 2:** `test_doc_examples_runtime.py` (LazyBridge) green; doc-path link checks pass.
 
@@ -478,16 +508,16 @@ def test_lazytools_never_imports_lazypulse():
 
 ## 7. Acceptance criteria (from the brief) → mechanism
 
-- `[ ]` `lazybridge` imports without optional service deps — providers already
+- `[x]` `lazybridge` imports without optional service deps — providers already
   optional; `external_tools` becomes lazy shims. *(Gate 1)*
-- `[ ]` `lazybridge` / `lazytools` / `lazypulse` suites pass. *(Gates 1–2)*
-- `[ ]` `Agent(..., tools=[...])` and `PulseAgent(..., tools=[...])` both accept
+- `[x]` `lazybridge` / `lazytools` / `lazypulse` suites pass. *(Gates 1–2)*
+- `[x]` `Agent(..., tools=[...])` and `PulseAgent(..., tools=[...])` both accept
   `lazytools` providers — they keep `_is_lazy_tool_provider`. *(Gate 1)*
-- `[ ]` `lazytools` has no import from `lazypulse`. *(boundary test)*
-- `[ ]` `lazybridge` has no import from `lazytools`. *(boundary test + lazy shims)*
-- `[ ]` Dangerous tools require allow-list and/or one-shot confirmation; no
+- `[x]` `lazytools` has no import from `lazypulse`. *(boundary test)*
+- `[x]` `lazybridge` has no import from `lazytools`. *(boundary test + lazy shims)*
+- `[x]` Dangerous tools require allow-list and/or one-shot confirmation; no
   sticky global approval. *(`lazytools.safety` + `test_safety.py`)*
-- `[ ]` Old imports still work with `DeprecationWarning`, removal documented. *(§5.3, Phase 3)*
+- `[x]` Old imports still work with `DeprecationWarning`, removal documented. *(§5.3, Phase 3)*
 
 ---
 
@@ -529,3 +559,55 @@ def test_lazytools_never_imports_lazypulse():
   bump (`lazybridge 0.9`, `lazypulse` minor) and a `CHANGELOG` migration note.
   If a consumer breaks, restoring the lazy shim (a single small commit) is the
   fix — no data or behavior is lost.
+
+---
+
+## 10. Deviations from this plan (as built — Phases 0–2)
+
+Recorded here per the "fix the plan if you find a concrete error" rule.
+
+1. **Package reorganised by category (§3).** Instead of a flat layout
+   (`gmail/`, `telegram/`, `mcp/`, `read_docs/`, …) the connectors are grouped
+   under `connectors/` and the document/skill tools get their own categories:
+   `connectors/{gmail,telegram,mcp,gateway}`, `documents/read_docs.py`,
+   `skills/doc_skills.py`, `safety/`, `testing/`. Rationale: a clearer
+   by-type taxonomy that scales as `github`/`slack`/… connectors land. The
+   import contract changed accordingly (`lazytools.connectors.gmail`,
+   `lazytools.documents`, `lazytools.skills`); shim targets updated to match.
+
+2. **`ConfirmationGate` carries a `scope` dimension (§4).** The plan's gate was
+   target-only and dropped the task-binding the real tools have. The shipped
+   gate keys grants on `(target, scope)` and stays orchestration-agnostic (the
+   caller passes `scope=`). The ambient scope lives in `lazytools/safety/context.py`
+   (`active_scope` / `current_scope`). `safety/__init__.py` therefore also
+   exports `active_scope` and `current_scope`.
+
+3. **`lazypulse._context` bridges to `lazytools.safety.active_scope`.** So that
+   `PulseAgent` (which sets the task id) and the moved tools (which read it via
+   `current_scope()`) share one contextvar without `lazytools` importing
+   `lazypulse`. The import is **guarded** (`try/except ImportError` with a local
+   fallback), so `import lazypulse` still works with `lazytoolkit` uninstalled —
+   keeping the `lazypulse → lazytools` dependency optional.
+
+4. **Test matrix corrections (§6).** `test_new_features.py` had no `read_docs`
+   cases — only 3 `doc_skills` import-smoke tests; those moved to
+   `lazytools/tests/test_doc_skills.py`. The MCP cache tests in
+   `test_audit_short_term.py` reuse `FakeTransport` from the (moved) `test_mcp.py`,
+   so they were **relocated** to `lazytools/tests/test_mcp.py` rather than left in
+   LazyBridge. The remaining MCP/gateway audit tests (`test_audit_amend.py`,
+   `test_audit_followup.py`) had their imports repointed to `lazytools.connectors.*`;
+   `lazytoolkit` is therefore a **dev/test** dependency of LazyBridge (never a
+   runtime one — `import lazybridge` stays clean without it).
+
+5. **Shims have no `__all__`.** PEP 562 `__getattr__` shims provide names
+   lazily; declaring `__all__` tripped ruff `F822` (undefined names). Dropped it
+   (matches the §5.3 template). The LazyPulse adapter `__init__` shims keep a
+   `TYPE_CHECKING` import block so type-checkers and `__all__` still see the
+   moved names.
+
+**Gates passed:** Gate 0 (LazyPulse green, tool public surface unchanged);
+Gate 1 (`import lazybridge` / `import lazypulse` clean with `lazytoolkit`
+uninstalled; three suites green — LazyBridge 1584, LazyTools 95, LazyPulse 176;
+both boundary guards green; old import paths warn + resolve); Gate 2
+(`test_doc_examples_runtime.py` green; examples + docs repointed to
+`lazytools.*`).

@@ -1,6 +1,6 @@
 # External tool gateway
 
-`lazybridge.ext.gateway` integrates remote tool catalogues hosted as
+`lazytools.connectors.gateway` integrates remote tool catalogues hosted as
 HTTP services — Pipedream, Composio, Arcade, your team's internal
 gateway, or any service that publishes tools over JSON. Implement the
 `ExternalToolClient` protocol once and every tool the gateway exposes
@@ -15,7 +15,7 @@ service.
 ## Signature
 
 ```python
-from lazybridge.ext.gateway import (
+from lazytools.connectors.gateway import (
     ExternalToolSpec,
     ExternalToolError,
     ExternalToolClient,         # Protocol
@@ -122,7 +122,7 @@ arguments, cost tracking, session events.
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazybridge.ext.gateway import (
+from lazytools.connectors.gateway import (
     ExternalToolProvider,
     JsonHttpExternalToolClient,
 )
@@ -160,7 +160,7 @@ print(result.text())
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from lazybridge.ext.gateway import ExternalToolClient, ExternalToolSpec
+from lazytools.connectors.gateway import ExternalToolClient, ExternalToolSpec
 
 
 class PipedreamClient:

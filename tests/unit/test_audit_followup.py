@@ -69,7 +69,7 @@ def test_provider_alias_registration_concurrent_no_lost_writes():
 @pytest.mark.asyncio
 async def test_stdio_transport_list_tools_before_connect_raises_runtimeerror():
     pytest.importorskip("mcp")
-    from lazybridge.ext.mcp.transports import StdioTransport
+    from lazytools.connectors.mcp.transports import StdioTransport
 
     t = StdioTransport(command="false")  # never connect
     with pytest.raises(RuntimeError, match="connect"):
@@ -81,7 +81,7 @@ async def test_stdio_transport_list_tools_before_connect_raises_runtimeerror():
 @pytest.mark.asyncio
 async def test_http_transport_list_tools_before_connect_raises_runtimeerror():
     pytest.importorskip("mcp")
-    from lazybridge.ext.mcp.transports import HttpTransport
+    from lazytools.connectors.mcp.transports import HttpTransport
 
     t = HttpTransport(url="http://127.0.0.1:1/")
     with pytest.raises(RuntimeError, match="connect"):

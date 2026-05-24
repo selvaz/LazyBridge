@@ -1,39 +1,27 @@
-"""lazybridge.external_tools.doc_skills — BM25 local documentation skill runtime (domain example).
+"""Deprecated location. Moved to ``lazytools.skills`` (pip install lazytoolkit).
 
-Domain example shipped with LazyBridge — not part of the framework
-contract. Pin to a specific lazybridge release if you depend on it.
-
-Index local documentation folders into a portable skill bundle, then expose
-the bundle as a LazyBridge tool or pipeline that any agent can call.
-
-Quick start::
-
-    from lazybridge.external_tools.doc_skills import build_skill, skill_tools
-    from lazybridge import Agent
-
-    meta = build_skill(["./docs", "./reference"], "my-project")
-    tools = skill_tools(skill_dir=meta["skill_dir"])
-    resp = Agent.from_provider("anthropic", tier="medium", tools=tools)("How does X work?")
-
-No extra dependencies required beyond the standard library.
+This shim keeps ``from lazybridge.external_tools.doc_skills import build_skill``
+(and the other skill symbols) working with a :class:`DeprecationWarning`. It is
+removed in 0.9.
 """
 
-from lazybridge.external_tools.doc_skills.doc_skills import (
-    DocChunk,
-    SkillManifest,
-    build_skill,
-    query_skill,
-    skill_builder_tools,
-    skill_pipeline,
-    skill_tools,
-)
+from __future__ import annotations
 
-__all__ = [
-    "DocChunk",
-    "SkillManifest",
-    "build_skill",
-    "query_skill",
-    "skill_builder_tools",
-    "skill_pipeline",
-    "skill_tools",
-]
+import warnings
+
+
+def __getattr__(name: str):  # PEP 562 — fires only on attribute access
+    warnings.warn(
+        "lazybridge.external_tools.doc_skills moved to lazytools.skills in 0.8; "
+        "install 'lazytoolkit' and import from there. This shim is removed in 0.9.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        from lazytools import skills as _moved
+    except ImportError as exc:
+        raise ImportError(
+            "lazybridge.external_tools.doc_skills now requires 'lazytoolkit' "
+            "(pip install 'lazytoolkit')."
+        ) from exc
+    return getattr(_moved, name)

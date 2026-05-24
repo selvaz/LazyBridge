@@ -168,7 +168,7 @@ turn, they run concurrently via `asyncio.gather`. No flag, no config, no
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazybridge.ext.mcp import MCP
+from lazytools.connectors.mcp import MCP
 
 fs = MCP.stdio(
     "fs",
