@@ -31,7 +31,7 @@ single agent → tools → composition → planning → production.
 
 ## Composition shapes
 
-- [Nested pipelines (horizontal)](../guides/full/nested-pipelines.md)
+- [Nested pipelines (horizontal)](../guides/full/composition-patterns.md)
   — Plan-of-Plans, parallel bands of sub-pipelines, and LLM-decided
   dispatch over sub-pipelines.  Companion to the vertical
   `chain` / `Plan` recipes above.
