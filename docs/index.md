@@ -35,8 +35,8 @@ mental model is the same.
 
 - [**Quickstart**](quickstart.md) — install LazyBridge and run your first
   agent in five minutes.
-- [**Ecosystem**](ecosystem.md) — the three packages (lazybridge core,
-  lazytools capabilities, lazypulse always-on) and which one you need.
+- [**Ecosystem**](https://lazybridge.com/) — the three packages (lazybridge
+  core, lazytools capabilities, lazypulse always-on) and which one you need.
 - [**Concepts → Mental model**](concepts/mental-model.md) — Agent =
   Engine + Tools + State, the only decomposition you need.
 - [**Concepts → Everything is a tool**](concepts/everything-is-a-tool.md) —
@@ -55,7 +55,7 @@ mental model is the same.
   [Session](guides/mid/session.md), [Guards](guides/mid/guards.md),
   [verify=](guides/mid/verify.md), [Chain](guides/mid/chain.md),
   [Parallel](guides/mid/parallel.md), [As tool](guides/mid/as-tool.md),
-  [HumanEngine](guides/mid/human-engine.md), [MCP](guides/mid/mcp.md),
+  [HumanEngine](guides/mid/human-engine.md), [MCP](https://tools.lazybridge.com/mcp/),
   [Multimodal](guides/mid/multimodal.md), [Evals](guides/mid/evals.md).
 - **Guides → Full** — nine pages on production pipelines:
   [Plan](guides/full/plan.md), [Step](guides/full/step.md),
@@ -69,7 +69,7 @@ mental model is the same.
   [Engine protocol](guides/advanced/engine-protocol.md),
   [BaseProvider](guides/advanced/base-provider.md),
   [Providers catalogue](guides/advanced/providers.md),
-  [External tool gateway](guides/advanced/external-tools.md),
+  [External tool gateway](https://tools.lazybridge.com/gateway/),
   [Plan serialization](guides/advanced/plan-serialize.md),
   [OpenTelemetry](guides/advanced/otel.md),
   [Visualizer](guides/advanced/visualizer.md).
@@ -109,7 +109,7 @@ LazyBridge is meant to feel like a bridge, not a cage.
 
 ## Maturity
 
-LazyBridge 0.7.9 is on PyPI as **Alpha** (`Development Status :: 3` in
+LazyBridge 0.8.0 is on PyPI as **Alpha** (`Development Status :: 3` in
 PyPI metadata, `lazybridge.__stability__ = "alpha"`).  The public API
 is stable enough that breaking changes go through the migration guides
 under [`docs/migrations/`](migrations/0.7-to-0.79.md), but production

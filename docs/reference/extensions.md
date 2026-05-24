@@ -6,14 +6,14 @@ lazybridge` ships them by default (except `OTelExporter`, which requires the
 
 > **Connectors moved (0.8).** The MCP connector and the external tool gateway
 > are no longer `lazybridge.ext.*` — they moved to the
-> [LazyTools](../tools/index.md) package (`lazytools.connectors.{mcp,gateway}`,
+> [LazyTools](https://tools.lazybridge.com/) package (`lazytools.connectors.{mcp,gateway}`,
 > `pip install lazytoolkit`). The old `lazybridge.ext.{mcp,gateway}` import
 > paths still work with a `DeprecationWarning` until 0.9.
 
 For narrative usage see the corresponding guides:
 [HumanEngine](../guides/mid/human-engine.md),
 [SupervisorEngine](../guides/full/supervisor.md),
-[MCP](../guides/mid/mcp.md),
+[MCP](https://tools.lazybridge.com/mcp/),
 [Evals](../guides/mid/evals.md),
 [OpenTelemetry](../guides/advanced/otel.md),
 [Visualizer](../guides/advanced/visualizer.md).
@@ -30,8 +30,8 @@ For narrative usage see the corresponding guides:
 
 ## MCP integration
 
-Moved to `lazytools.connectors.mcp` — see the [MCP guide](../guides/mid/mcp.md)
-and the [LazyTools overview](../tools/index.md). Install with
+Moved to `lazytools.connectors.mcp` — see the [MCP guide](https://tools.lazybridge.com/mcp/)
+and the [LazyTools overview](https://tools.lazybridge.com/). Install with
 `pip install lazytoolkit[mcp]`.
 
 ## Evaluation framework

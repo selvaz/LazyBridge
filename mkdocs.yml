@@ -1,6 +1,6 @@
 site_name: LazyBridge
 site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
-site_url: https://lazybridge.com/
+site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
 edit_uri: edit/main/docs/
@@ -62,10 +62,6 @@ plugins:
   - llmstxt:
       full_output: llms-full.txt
       sections:
-        Overview:
-          - ecosystem.md
-          - tools/index.md
-          - pulse/index.md
         Concepts:
           - concepts/*.md
         Guides:
@@ -113,7 +109,7 @@ extra:
   # wired up for multi-version docs, set ``provider: mike`` here and
   # drop the manual ``default``.
   version:
-    default: "0.7.9"
+    default: "0.8.0"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
@@ -126,7 +122,6 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
-  - Ecosystem: ecosystem.md
   - For Beginners:
       - Start here: beginners/index.md
       - "Step 1: What is an LLM?": beginners/01-what-is-an-llm.md
@@ -184,12 +179,6 @@ nav:
           - Plan serialization: guides/advanced/plan-serialize.md
           - OpenTelemetry: guides/advanced/otel.md
           - Visualizer: guides/advanced/visualizer.md
-  - LazyTools (capabilities):
-      - Overview: tools/index.md
-      - MCP: guides/mid/mcp.md
-      - External tool gateway: guides/advanced/external-tools.md
-  - LazyPulse (always-on):
-      - Overview: pulse/index.md
   - Recipes:
       - Overview: recipes/index.md
       - React agent: recipes/react-agent.md
