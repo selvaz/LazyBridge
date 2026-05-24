@@ -102,12 +102,17 @@ Ship in **ext** when:
 - It's a cross-cutting concern that augments the agent runtime
   rather than being part of the universal composition.
 
-Ship in **external_tools** when:
+Ship in the sibling **`lazytoolkit`** package (`import lazytools`) when:
 
-- It's a domain example, not a framework primitive (PDF readers,
-  BM25 skill builders, report renderers, …).
-- It might be lifted out into a sibling package later (the
-  reporting subsystem was — see `selvaz/LazyReport`).
+- It's a concrete tool or connector, not a framework primitive
+  (PDF readers, BM25 skill builders, MCP / gateway connectors, …).
+- It brings outbound I/O or a heavy optional dependency that the core
+  framework should never pull in.
+
+> The old `lazybridge.external_tools.*` namespace held these before 0.8;
+> it now contains only lazy deprecation shims and is removed in 0.9. The
+> reporting subsystem moved out the same way in 0.7.9 — see
+> `selvaz/LazyReport`.
 
 ## Stability
 
