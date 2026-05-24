@@ -1,6 +1,6 @@
 site_name: LazyBridge
 site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
-site_url: https://lazybridge.com/
+site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
 edit_uri: edit/main/docs/
@@ -104,10 +104,6 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
-  # Static version chip in the site header.  Bumped manually on each
-  # release in lock-step with ``pyproject.toml``.  When ``mike`` is
-  # wired up for multi-version docs, set ``provider: mike`` here and
-  # drop the manual ``default``.
   version:
     default: "0.7.9"
   social:
@@ -228,12 +224,5 @@ nav:
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
 
-# ---------------------------------------------------------------------------
-# Build-time hooks — generated content
-# ---------------------------------------------------------------------------
-# `mkdocs_provider_table` replaces the `<!-- PROVIDER_CAPABILITY_TABLE -->`
-# marker on any page with a freshly-rendered support matrix sourced from
-# `lazybridge.matrix.provider_capabilities()`.  Keeps README / providers
-# docs from drifting when a provider classvar changes.
 hooks:
   - tools/mkdocs_provider_table.py
