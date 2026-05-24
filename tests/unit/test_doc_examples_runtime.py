@@ -197,7 +197,7 @@ def test_migration_guide_0_to_0_79_plan_pattern_runs():
 
 
 def test_nested_pipelines_parallel_bands_snippet_constructs_and_runs():
-    """``docs/guides/full/nested-pipelines.md`` shows a horizontal
+    """``docs/guides/full/composition-patterns.md`` shows a horizontal
     composition: three sub-pipelines run as parallel bands of an outer
     Plan, joined via ``from_parallel_all``.  An earlier draft passed
     ``target=`` twice to ``Step`` and would have raised at construction;
