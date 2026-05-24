@@ -21,7 +21,6 @@ def __getattr__(name: str):  # PEP 562 — fires only on attribute access
         from lazytools import skills as _moved
     except ImportError as exc:
         raise ImportError(
-            "lazybridge.external_tools.doc_skills now requires 'lazytoolkit' "
-            "(pip install 'lazytoolkit')."
+            "lazybridge.external_tools.doc_skills now requires 'lazytoolkit' (pip install 'lazytoolkit')."
         ) from exc
     return getattr(_moved, name)

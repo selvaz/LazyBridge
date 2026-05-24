@@ -25,8 +25,5 @@ def __getattr__(name: str):  # PEP 562 — fires only on attribute access
     try:
         from lazytools.connectors import mcp as _moved
     except ImportError as exc:
-        raise ImportError(
-            "lazybridge.ext.mcp now requires 'lazytoolkit' "
-            "(pip install 'lazytoolkit[mcp]')."
-        ) from exc
+        raise ImportError("lazybridge.ext.mcp now requires 'lazytoolkit' (pip install 'lazytoolkit[mcp]').") from exc
     return getattr(_moved, name)

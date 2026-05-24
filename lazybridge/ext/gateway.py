@@ -22,8 +22,5 @@ def __getattr__(name: str):  # PEP 562 — fires only on attribute access
     try:
         from lazytools.connectors import gateway as _moved
     except ImportError as exc:
-        raise ImportError(
-            "lazybridge.ext.gateway now requires 'lazytoolkit' "
-            "(pip install 'lazytoolkit')."
-        ) from exc
+        raise ImportError("lazybridge.ext.gateway now requires 'lazytoolkit' (pip install 'lazytoolkit').") from exc
     return getattr(_moved, name)
