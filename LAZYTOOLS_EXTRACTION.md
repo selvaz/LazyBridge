@@ -45,6 +45,12 @@ inside the function body). See §5.3.
 
 ## 1. What moves, what stays (decision record)
 
+> **Note (as built).** The "New home" paths below are the *original plan*
+> targets (a flat layout). Phases 0–2 shipped a by-category layout instead —
+> `lazytools/connectors/{mcp,gateway,gmail,telegram}`, `lazytools/documents`,
+> `lazytools/skills`. See §3 for the as-built tree and §10 for the deviation
+> record; the deprecation shims point at these final paths.
+
 ### 1.1 From `lazybridge/`
 
 | Source | Symbols | Disposition | New home |
