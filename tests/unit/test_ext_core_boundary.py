@@ -1,5 +1,5 @@
-"""Architectural guard: ext / external_tools may only import from the
-public ``lazybridge`` surface — never from ``lazybridge.core.*``.
+"""Architectural guard: ext may only import from the public
+``lazybridge`` surface — never from ``lazybridge.core.*``.
 
 The reverse rule (core never importing from extensions) is enforced
 by the sibling ``test_core_ext_boundary.py``. Together the two tests
@@ -19,7 +19,7 @@ PKG_ROOT = pathlib.Path(__file__).resolve().parents[2] / "lazybridge"
 
 # Subtrees whose imports we audit.  Any ``.py`` file under one of
 # these may not reach into ``lazybridge.core.*``.
-GUARDED_SUBTREES = ("ext", "external_tools")
+GUARDED_SUBTREES = ("ext",)
 
 # Forbidden import prefixes when reaching from a guarded subtree.
 FORBIDDEN_PREFIXES = ("lazybridge.core",)
@@ -53,9 +53,9 @@ def _imports_into_core(path: pathlib.Path) -> list[tuple[int, str]]:
 
 
 def test_extensions_never_import_from_core_internals() -> None:
-    """``lazybridge.ext`` and ``lazybridge.external_tools`` must use the
-    public package surface (``from lazybridge import X``), never reach
-    into ``lazybridge.core.*`` directly.
+    """``lazybridge.ext`` must use the public package surface
+    (``from lazybridge import X``), never reach into
+    ``lazybridge.core.*`` directly.
     """
     failures: list[str] = []
     scanned_any = False
@@ -69,11 +69,11 @@ def test_extensions_never_import_from_core_internals() -> None:
             for lineno, statement in _imports_into_core(path):
                 failures.append(f"  {path.relative_to(PKG_ROOT.parent)}:{lineno} → {statement}")
 
-    assert scanned_any, "expected at least one ext/external_tools .py file to scan"
+    assert scanned_any, "expected at least one ext .py file to scan"
 
     if failures:
         msg = (
-            "Import boundary violation: ext / external_tools may not "
+            "Import boundary violation: ext may not "
             "import from internal lazybridge.core.* submodules. Use the "
             "public API (``from lazybridge import X``) instead "
             "(see docs/guides/core-vs-ext.md, rule #2). Found:\n" + "\n".join(failures)
@@ -84,10 +84,9 @@ def test_extensions_never_import_from_core_internals() -> None:
 def _module_level_imports(path: pathlib.Path) -> list[tuple[int, str]]:
     """Return [(lineno, name)] for top-level (eager) imports in *path*.
 
-    Imports nested inside a function body are skipped — the lazy deprecation
-    shims (``lazybridge.ext.mcp``, ``lazybridge.ext.gateway``,
-    ``lazybridge.external_tools.*``) import ``lazytools`` inside ``__getattr__``,
-    which is allowed; only eager module-level imports are forbidden.
+    Imports nested inside a function body are skipped — only eager
+    module-level imports are forbidden. (A future ``lazytools`` re-export
+    would have to be lazy, inside ``__getattr__``, to stay legal.)
     """
     tree = ast.parse(path.read_text(), filename=str(path))
 
@@ -114,8 +113,8 @@ def _module_level_imports(path: pathlib.Path) -> list[tuple[int, str]]:
 def test_lazybridge_never_eagerly_imports_lazytools() -> None:
     """``lazybridge`` (shipped code) must not import ``lazytools`` at module
     level. Because ``lazytools -> lazybridge``, an eager re-export would create
-    a circular import and violate the dependency rule. Backward-compat shims use
-    a lazy PEP 562 ``__getattr__`` (import inside the function body) instead.
+    a circular import and violate the dependency rule — lazybridge has no
+    runtime dependency on the toolkit.
     """
     offenders: list[str] = []
     for path in _python_files(PKG_ROOT):

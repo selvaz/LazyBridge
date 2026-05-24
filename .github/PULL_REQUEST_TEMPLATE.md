@@ -11,7 +11,7 @@
 
 ## Tier
 
-<!-- core / ext / external_tools / docs / build — see
+<!-- core / ext / docs / build — see
      docs/guides/core-vs-ext.md for the import-boundary policy. -->
 
 ## Checklist

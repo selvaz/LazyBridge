@@ -436,11 +436,13 @@ python -W error::DeprecationWarning -c "from lazybridge.external_tools.read_docs
 
 **Gate 2:** `test_doc_examples_runtime.py` (LazyBridge) green; doc-path link checks pass.
 
-### Phase 3 — remove shims (after one minor release) `[ ]`
+### Phase 3 — remove shims (after one minor release) `[~]`
 
-- `[ ]` Delete `lazybridge/external_tools/*` shims (target `lazybridge 0.9`).
+- `[x]` Delete `lazybridge/external_tools/*` and `lazybridge/ext/{mcp,gateway}`
+  shims (`lazybridge 0.9`); updated the core/ext boundary tests + coverage scope.
 - `[ ]` Delete the moved-symbol re-exports from the Pulse adapter `__init__.py`.
-- `[ ]` Record the breaking change in both `CHANGELOG.md` files with the migration line.
+- `[x]` Record the breaking change in the LazyBridge `CHANGELOG.md` (`[0.9.0]`).
+  Pulse `CHANGELOG.md` pending its own shim removal.
 
 **Gate 3:** grep finds no `external_tools` references in shipped code/docs; suites green.
 

@@ -81,7 +81,7 @@ agent = Agent(
         MCP.stdio("fs", command="npx",
                   args=["@modelcontextprotocol/server-filesystem", "."],
                   allow=["fs.read_*", "fs.list_*"]),  # 5. MCPServer (allow= required)
-        *read_docs_tools(),                          # 6. external_tools kit (list[Tool])
+        *read_docs_tools(),                          # 6. lazytools docs kit (list[Tool])
     ],
 )
 ```

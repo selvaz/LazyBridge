@@ -118,7 +118,7 @@ extra:
   # wired up for multi-version docs, set ``provider: mike`` here and
   # drop the manual ``default``.
   version:
-    default: "0.8.0"
+    default: "0.9.0"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge

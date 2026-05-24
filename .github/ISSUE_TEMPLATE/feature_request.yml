@@ -45,7 +45,7 @@ body:
       options:
         - core (universal Engine/Tools/State primitive)
         - ext (optional dependency or cross-cutting concern)
-        - external_tools (domain example)
+        - lazytoolkit (concrete tool/connector — sibling package)
         - not sure
     validations:
       required: true

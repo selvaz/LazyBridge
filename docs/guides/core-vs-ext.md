@@ -10,9 +10,9 @@ LazyBridge is split into three concentric layers:
 
 > **Moved in 0.8.** The MCP and gateway connectors (`lazybridge.ext.{mcp,gateway}`)
 > and the domain tool kits (`lazybridge.external_tools.*`) moved to the standalone
-> [`lazytoolkit`](https://github.com/selvaz/LazyTools) package. Old import paths
-> still work via lazy deprecation shims until 0.9 — import from `lazytools.*`
-> instead (e.g. `from lazytools.connectors.mcp import MCP`).
+> [`lazytoolkit`](https://github.com/selvaz/LazyTools) package. The old import
+> paths were kept as lazy deprecation shims through 0.8 and removed in 0.9 —
+> import from `lazytools.*` instead (e.g. `from lazytools.connectors.mcp import MCP`).
 
 This split is enforced — not just convention — by three architectural
 tests that fail the build the moment a forbidden import lands:
@@ -23,7 +23,7 @@ tests that fail the build the moment a forbidden import lands:
 
 ## The three rules
 
-### Rule 1 — Core never imports from `ext.*` or `external_tools.*`
+### Rule 1 — Core never imports from `ext.*`
 
 Core stays self-contained.  No lazy imports, no `TYPE_CHECKING`-only
 imports, no function-local imports — the boundary is the import
@@ -96,7 +96,7 @@ Ship in **core** when:
 
 Ship in **ext** when:
 
-- It introduces an optional dependency (`mcp`, `opentelemetry`,
+- It introduces an optional dependency (`opentelemetry`,
   `cryptography`, a web framework, …).
 - It crosses a process boundary (subprocess, HTTP server, …).
 - It's a cross-cutting concern that augments the agent runtime
@@ -110,7 +110,7 @@ Ship in the sibling **`lazytoolkit`** package (`import lazytools`) when:
   framework should never pull in.
 
 > The old `lazybridge.external_tools.*` namespace held these before 0.8;
-> it now contains only lazy deprecation shims and is removed in 0.9. The
+> it was kept as lazy deprecation shims through 0.8 and removed in 0.9. The
 > reporting subsystem moved out the same way in 0.7.9 — see
 > `selvaz/LazyReport`.
 

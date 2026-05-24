@@ -110,8 +110,8 @@ imports when you need the corresponding capability:
 | OpenTelemetry exporter | `from lazybridge.ext.otel import OTelExporter` |
 | Eval harness | `from lazybridge.ext.evals import EvalSuite, EvalCase, llm_judge` |
 | Live visualizer | `from lazybridge.ext.viz import Visualizer` |
-| Blackboard planner | `from lazybridge.ext.planners import BlackboardPlanner` |
-| HTTP gateway (`lazybridge serve`) | `from lazytools.connectors.gateway import build_app` |
+| Blackboard planner | `from lazybridge.ext.planners import make_blackboard_planner` |
+| HTTP gateway | `from lazytools.connectors.gateway import build_app` |
 
 Reporting has moved to the sibling package selvaz/LazyReport and is
 not part of the LazyBridge surface.

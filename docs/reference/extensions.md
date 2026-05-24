@@ -7,8 +7,8 @@ lazybridge` ships them by default (except `OTelExporter`, which requires the
 > **Connectors moved (0.8).** The MCP connector and the external tool gateway
 > are no longer `lazybridge.ext.*` — they moved to the
 > [LazyTools](https://tools.lazybridge.com/) package (`lazytools.connectors.{mcp,gateway}`,
-> `pip install lazytoolkit`). The old `lazybridge.ext.{mcp,gateway}` import
-> paths still work with a `DeprecationWarning` until 0.9.
+> `pip install lazytoolkit`). The old `lazybridge.ext.{mcp,gateway}` deprecation
+> shims were removed in 0.9 — import from `lazytools` instead.
 
 For narrative usage see the corresponding guides:
 [HumanEngine](../guides/mid/human-engine.md),

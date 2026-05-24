@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.8.0"
+version = "0.9.0"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -205,14 +205,7 @@ source = ["lazybridge"]
 # surface and run in the default test suite.  The connector tools
 # (``ext.mcp``, ``ext.gateway``) and the domain tool packages
 # (``external_tools.*``) moved to the sibling ``lazytoolkit`` package in 0.8;
-# only thin lazy deprecation shims remain here.
-omit = [
-    # Lazy deprecation shims for symbols moved to lazytoolkit (0.8).
-    "lazybridge/external_tools/doc_skills/*",
-    "lazybridge/external_tools/read_docs/*",
-    "lazybridge/ext/mcp/*",
-    "lazybridge/ext/gateway.py",
-]
+# their deprecation shims were removed in 0.9, so nothing to omit here.
 
 [tool.coverage.report]
 # Coverage gate.  Cross-cutting ``ext.*`` extensions
