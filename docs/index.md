@@ -1,102 +1,94 @@
 ---
 hide:
-  - navigation
   - toc
-title: LazyBridge
+title: LazyBridge Docs
 ---
 
 <div class="lb-page">
 
-<!-- ═══ HERO ══════════════════════════════════════════════════════════════ -->
-<section class="lb-hero">
-  <div class="lb-hero__copy">
-    <div class="lb-pill">Recursive &middot; Validated &middot; Observable</div>
-
-    <h1>Compose LLM pipelines<br>that are also <span class="accent">tools</span>.</h1>
-
+<!-- ═══ DOCS HERO ══════════════════════════════════════════════════════════ -->
+<section class="lb-docs-hero">
+  <div class="lb-docs-hero__copy">
+    <div class="lb-pill">0.8.0 Alpha &middot; Apache-2.0</div>
+    <h1>LazyBridge <span class="accent">documentation</span></h1>
     <p class="lb-subhead">
-      LazyBridge composes LLMs, deterministic plans, humans, and external
-      tools through one contract. Pipelines are tools. Tools are tools.
-      Nesting has no special syntax — and every level validates at
-      construction, before any LLM call.
+      Zero-boilerplate multi-provider LLM agent framework.
+      Engine + Tools + State — everything is a tool.
     </p>
-
     <div class="lb-cta-row">
-      <a href="quickstart/" class="lb-btn lb-btn--primary">Get started &rarr;</a>
-      <a href="concepts/layered-composition/" class="lb-btn lb-btn--ghost">How composition works</a>
-    </div>
-
-    <div class="lb-chips">
-      <span class="lb-chip">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
-        Multi-dimensional composition
-      </span>
-      <span class="lb-chip">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-        Plan validated at construction
-      </span>
-      <span class="lb-chip">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        Provider freedom
-      </span>
-      <span class="lb-chip">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        Output validated + verify
-      </span>
-      <span class="lb-chip">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
-        Observable by default
-      </span>
-    </div>
-  </div>
-
-  <div class="lb-hero__art">
-    <img src="assets/hero.png" alt="LazyBridge mascot" />
-  </div>
-</section>
-
-<!-- ═══ FEATURE CARDS ═════════════════════════════════════════════════════ -->
-<section class="lb-feature-cards">
-  <div class="lb-card">
-    <div class="lb-card__icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
-    </div>
-    <div class="lb-card__body">
-      <h3>Recursive composition</h3>
-      <p>A Plan is an Agent. An Agent is a Tool. Pipelines compose without glue, at any depth, with automatic cost and observability rollup.</p>
-      <a href="concepts/layered-composition/" class="lb-card__link">Learn more &rarr;</a>
-    </div>
-  </div>
-  <div class="lb-card">
-    <div class="lb-card__icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-    </div>
-    <div class="lb-card__body">
-      <h3>Plans fail fast</h3>
-      <p>PlanCompileError catches duplicate names, forward references, type drift, and broken sentinels — at construction, before any LLM call.</p>
-      <a href="guides/full/plan/" class="lb-card__link">Learn more &rarr;</a>
-    </div>
-  </div>
-  <div class="lb-card">
-    <div class="lb-card__icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
-    </div>
-    <div class="lb-card__body">
-      <h3>Observable by default</h3>
-      <p>Session + OpenTelemetry semconv. Cost rollup across nested agents, GenAI-standard spans, structured event log — opt-out, not opt-in.</p>
-      <a href="guides/mid/session/" class="lb-card__link">Learn more &rarr;</a>
+      <a href="quickstart/" class="lb-btn lb-btn--primary">Quickstart &rarr;</a>
+      <a href="why/" class="lb-btn lb-btn--ghost">Why LazyBridge</a>
     </div>
   </div>
 </section>
 
-<!-- ═══ CODE PANEL ════════════════════════════════════════════════════════ -->
-<div class="lb-code-panel">
-  <div class="lb-code-header">
-    <span class="lb-code-caption">The simple case stays one line. The architecture grows only when the problem grows — without changing the mental model.</span>
-    <span class="lb-code-lang">Python</span>
-  </div>
+<!-- ═══ NAV CARDS ══════════════════════════════════════════════════════════ -->
+<section class="lb-nav-cards">
+  <a href="quickstart/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </div>
+    <div>
+      <strong>Quickstart</strong>
+      <p>First agent in 5 minutes</p>
+    </div>
+  </a>
+  <a href="concepts/mental-model/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+    </div>
+    <div>
+      <strong>Concepts</strong>
+      <p>Mental model, composition, progressive complexity</p>
+    </div>
+  </a>
+  <a href="guides/basic/agent/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+    </div>
+    <div>
+      <strong>Guides</strong>
+      <p>Agent, Tool, Plan, Session, and more</p>
+    </div>
+  </a>
+  <a href="recipes/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/><path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/><path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/><path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/><path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z"/><path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/></svg>
+    </div>
+    <div>
+      <strong>Recipes</strong>
+      <p>Copy-paste patterns for common workflows</p>
+    </div>
+  </a>
+  <a href="reference/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </div>
+    <div>
+      <strong>Reference</strong>
+      <p>Full API — Agent, Tool, Plan, Envelope</p>
+    </div>
+  </a>
+  <a href="decisions/" class="lb-nav-card">
+    <div class="lb-nav-card__icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+    </div>
+    <div>
+      <strong>Decisions</strong>
+      <p>Pick tier, composition style, state layer</p>
+    </div>
+  </a>
+</section>
 
-=== "Simplest"
+<!-- ═══ CODE EXAMPLE ═══════════════════════════════════════════════════════ -->
+<div class="lb-code-header lb-code-header--standalone">
+  <span class="lb-code-caption">Simple stays simple. Complex is possible without changing the mental model.</span>
+  <span class="lb-code-lang">Python</span>
+</div>
+
+<div class="lb-code-tabs">
+
+=== "Single agent"
 
     ```python
     from lazybridge import Agent, LLMEngine
@@ -105,10 +97,22 @@ title: LazyBridge
     print(agent("Explain LazyBridge in one sentence.").text())
     ```
 
-=== "Pipelines that nest"
+=== "With tools"
 
     ```python
-    from lazybridge import Agent, LLMEngine, Plan, Step, Session, from_step
+    from lazybridge import Agent, LLMEngine, Tool
+
+    agent = Agent(
+        engine=LLMEngine("claude-sonnet-4-6"),
+        tools=[Tool.wrap(get_weather, name="get_weather")],
+    )
+    print(agent("What's the weather in Paris?").text())
+    ```
+
+=== "Multi-agent pipeline"
+
+    ```python
+    from lazybridge import Agent, LLMEngine, Plan, Step, from_step
 
     search    = Agent(engine=LLMEngine("gpt-5.4-mini"),      name="search")
     summarise = Agent(engine=LLMEngine("gemini-2.5-pro"),    name="summarise")
@@ -121,55 +125,12 @@ title: LazyBridge
     article = Agent(
         engine=Plan(Step("research"),
                     Step("write", context=from_step("research"))),
-        tools=[research, writer], session=Session(),
-    )
-    print(article("AI agents in 2026").text())
-    ```
-
-=== "With verify + resume"
-
-    ```python
-    from lazybridge import Agent, LLMEngine, Plan, Step, Session, Store, from_step
-    from lazybridge.ext.otel import OTelExporter
-
-    judge     = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="judge")
-    search    = Agent(engine=LLMEngine("gpt-5.4-mini"),      name="search")
-    summarise = Agent(engine=LLMEngine("gemini-2.5-pro"),    name="summarise")
-    writer    = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="write")
-
-    research = Agent(
-        engine=Plan(Step("search"), Step("summarise")),
-        tools=[search, summarise], name="research",
-    )
-    article = Agent(
-        engine=Plan(
-            Step("research"),
-            Step("write", context=from_step("research"),
-                 verify=judge, max_verify=3, checkpoint_key="write"),
-            checkpoint_key="research",
-        ),
         tools=[research, writer],
-        session=Session(store=Store(db="run.sqlite"),
-                        exporters=[OTelExporter()]),
     )
     print(article("AI agents in 2026").text())
     ```
 
 </div>
-
-<!-- ═══ PROVIDERS ══════════════════════════════════════════════════════════ -->
-<section class="lb-providers">
-  <p class="lb-providers__caption">Works with the best models and tools</p>
-  <div class="lb-providers__logos">
-    <img src="assets/providers/anthropic.svg" alt="Anthropic" />
-    <img src="assets/providers/openai.svg"    alt="OpenAI" />
-    <img src="assets/providers/google.svg"    alt="Google" />
-    <img src="assets/providers/deepseek.svg"  alt="DeepSeek" />
-    <img src="assets/providers/meta.svg"      alt="Meta" />
-    <img src="assets/providers/mistral.svg"   alt="Mistral" />
-    <img src="assets/providers/ollama.svg"    alt="Ollama" />
-  </div>
-</section>
 
 </div>
 
