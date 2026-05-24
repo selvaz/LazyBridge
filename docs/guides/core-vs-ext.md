@@ -96,7 +96,7 @@ Ship in **core** when:
 
 Ship in **ext** when:
 
-- It introduces an optional dependency (`mcp`, `opentelemetry`,
+- It introduces an optional dependency (`opentelemetry`,
   `cryptography`, a web framework, …).
 - It crosses a process boundary (subprocess, HTTP server, …).
 - It's a cross-cutting concern that augments the agent runtime

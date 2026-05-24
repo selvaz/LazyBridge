@@ -6,9 +6,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-> **Status: alpha (0.7.x).** API is intentionally fluid pre-1.0 — see
+> **Status: alpha (0.9.x).** API is intentionally fluid pre-1.0 — see
 > [CHANGELOG](CHANGELOG.md) for breaking changes between minor releases .
-> Pin a minor (`lazybridge>=0.7,<0.8`) in production until 1.0.
+> Pin a minor (`lazybridge>=0.9,<0.10`) in production until 1.0.
 
 **Zero-boilerplate, multi-provider Python framework for LLM agents.** One
 `Agent` class, swappable engines (LLM / Plan / Human / Supervisor), and one
@@ -68,18 +68,16 @@ for a flowchart.
 
 ## Install
 
-> **PyPI version note.** Until LazyBridge 0.7.9 is published to PyPI,
-> the 0.4.x release on PyPI exposes the **older `LazyAgent` /
-> `LazyTool` / `LazySession` API and does not match this README**.
-> Install from source while we ship 0.7.9 — or pin
-> `lazybridge>=0.7.9` once it lands:
+> **PyPI version note.** Older releases on PyPI (0.4.x) expose the
+> **legacy `LazyAgent` / `LazyTool` / `LazySession` API and do not match
+> this README**. Pin `lazybridge>=0.9,<0.10`, or install from source:
 >
 > ```bash
 > pip install "git+https://github.com/selvaz/LazyBridge.git#egg=lazybridge[anthropic]"
 > ```
 
 ```bash
-pip install "lazybridge[anthropic]"      # post-0.7.9 once on PyPI
+pip install "lazybridge[anthropic]"
 # or [openai], [google], [deepseek], [litellm], [otel], [encryption], [all]
 # Concrete tools (MCP, Gmail, Telegram, gateways, doc readers) ship in the
 # sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see https://lazybridge.com/)
@@ -89,9 +87,9 @@ Confirm you're on the modern API:
 
 ```python
 import lazybridge
-assert lazybridge.__version__.startswith("0.7."), (
-    f"LazyBridge {lazybridge.__version__} is too old — this README "
-    f"requires >=0.7.9.  See https://github.com/selvaz/LazyBridge."
+assert lazybridge.__version__.startswith(("0.7", "0.8", "0.9")), (
+    f"LazyBridge {lazybridge.__version__} predates the modern API — this "
+    f"README requires >=0.7.9.  See https://github.com/selvaz/LazyBridge."
 )
 ```
 
@@ -188,7 +186,7 @@ agent("Read README.md and summarise the install steps")
 
 The MCP server expands into one LazyBridge `Tool` per remote tool — no
 separate engine, no graph wrappers. See
-[Guides → Mid → MCP](https://lazybridge.com/guides/mid/mcp/).
+[LazyTools → MCP](https://tools.lazybridge.com/mcp/).
 
 ### 5 · Declared typed pipeline with crash resume
 

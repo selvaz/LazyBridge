@@ -284,12 +284,13 @@ In `lazybridge/session.py`:
 
 ---
 
-## Phase 5 — Extract `report_builder` (shipped under v0.7.9; v0.9.0 tag obsolete)
+## Phase 5 — Extract `report_builder` (shipped under v0.7.9)
 
-**Note**: the strategic plan called for cutting v0.9.0 here, but the
-extraction shipped inside the 0.7.9 simplification release because we
-were already paying breaking-change costs.  No separate v0.9.0 will
-happen — Phase 6 follows directly.
+**Note**: the strategic plan called for cutting v0.9.0 *here* (for the
+report extraction), but that extraction shipped inside the 0.7.9
+simplification release because we were already paying breaking-change
+costs.  v0.9.0 was later used for a different breaking change — the
+removal of the lazytoolkit deprecation shims (see `CHANGELOG.md`).
 
 ### Extraction
 

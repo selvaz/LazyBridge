@@ -103,7 +103,7 @@ try:
         __version__ = "0.9.0"
     del _dist_version, PackageNotFoundError
 except ImportError:  # pragma: no cover — Python < 3.8, not supported
-    __version__ = "0.8.0"
+    __version__ = "0.9.0"
 
 __stability__ = "alpha"
 
