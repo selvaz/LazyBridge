@@ -19,8 +19,20 @@ from __future__ import annotations
 
 import pytest
 
-cryptography = pytest.importorskip("cryptography.fernet")
-from cryptography.fernet import Fernet, InvalidToken
+# ``cryptography`` is a Rust C-extension.  On some hosts importing it does
+# not merely raise ``ImportError`` (which ``importorskip`` would handle) but
+# triggers a ``pyo3_runtime.PanicException`` — a ``BaseException`` subclass
+# that would otherwise abort *collection* of this whole file, breaking
+# ``pytest --collect-only`` for everyone whenever the optional [encryption]
+# extra is half-installed.  Catch broadly and skip the module instead.
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except BaseException as _exc:  # Rust panic isn't a plain Exception
+    pytest.skip(
+        f"cryptography unavailable or failed to import ({_exc!r}); "
+        "skipping EncryptedStoreAdapter tests.",
+        allow_module_level=True,
+    )
 
 from lazybridge.store import Store, StoreEntry
 from lazybridge.store.encryption import EncryptedStoreAdapter
