@@ -109,7 +109,7 @@ LazyBridge is meant to feel like a bridge, not a cage.
 
 ## Maturity
 
-LazyBridge 0.8.0 is on PyPI as **Alpha** (`Development Status :: 3` in
+LazyBridge 0.9.0 is on PyPI as **Alpha** (`Development Status :: 3` in
 PyPI metadata, `lazybridge.__stability__ = "alpha"`).  The public API
 is stable enough that breaking changes go through the migration guides
 under [`docs/migrations/`](migrations/0.7-to-0.79.md), but production
