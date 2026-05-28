@@ -110,7 +110,7 @@ class Agent:
         store: Any | None = None,
         sources: list[Any] | None = None,
         guard: Any | None = None,
-        verify: Agent | None = None,
+        verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
         name: str | None = None,
         description: str | None = None,
@@ -348,9 +348,14 @@ class Agent:
                     and getattr(related, "_is_lazy_agent", False)
                     and getattr(related, "session", None) is None
                 ):
-                    related.session = self.session
-                    _safe_register_agent(self.session, related)
-                    _safe_register_tool_edge(self.session, self, related, label=label)
+                    # Duck-typed ``_is_lazy_agent`` covers Agent and MockAgent
+                    # (and any other agent-shaped object); cast for the typed
+                    # graph helpers since the static type of ``related`` now
+                    # admits a plain Callable via the widened ``verify=``.
+                    related_agent = cast("Agent", related)
+                    related_agent.session = self.session
+                    _safe_register_agent(self.session, related_agent)
+                    _safe_register_tool_edge(self.session, self, related_agent, label=label)
 
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
