@@ -202,7 +202,7 @@ expose attack surface so large that we require an explicit opt-in:
 
 ```python
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     native_tools=[NativeTool.CODE_EXECUTION],
     allow_dangerous_native_tools=True,  # REQUIRED for CODE_EXECUTION / COMPUTER_USE
 )

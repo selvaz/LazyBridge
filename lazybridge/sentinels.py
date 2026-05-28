@@ -104,7 +104,7 @@ class _FromAgent:
             tools=[search],     # search is a plain function
             store=store,
         )
-        writer = Agent(engine=LLMEngine("gpt-4o"))
+        writer = Agent(engine=LLMEngine("gpt-5.4-mini"))
 
         # Works in Plan — from_agent reads what the "research" step wrote.
         pipeline = Agent(
@@ -148,7 +148,7 @@ class _FromMemory:
             tools=[search],     # search is a plain function
             memory=Memory(strategy="summary"),
         )
-        writer = Agent(engine=LLMEngine("gpt-4o"))
+        writer = Agent(engine=LLMEngine("gpt-5.4-mini"))
 
         pipeline = Agent(
             engine=Plan(

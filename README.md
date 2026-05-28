@@ -20,7 +20,7 @@ engine emits N tool calls in a turn; deterministic when you declare it.
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
 )
 result = agent("hello")
 print(result.text())
@@ -125,7 +125,7 @@ def get_weather(city: str) -> str:
 
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     tools=[Tool.wrap(get_weather, name="get_weather")],
 )
 result = agent("what's the weather in Rome and Paris?")
@@ -145,7 +145,7 @@ too (backward-compatible auto-wrap). See
 from lazybridge import Agent, LLMEngine, NativeTool
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     native_tools=[NativeTool.WEB_SEARCH],
 )
 agent("AI news this week")
@@ -161,13 +161,18 @@ agent("AI news this week")
 ```python
 from lazybridge import Agent, LLMEngine
 
+def search(query: str) -> str:
+    """Search the web and return a short result (stub for the example)."""
+    return f"results for {query!r}"
+
+
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     tools=[search],
     name="research",
 )
 editor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     tools=[researcher],
     name="editor",
 )
@@ -193,7 +198,7 @@ fs = MCP.stdio(
     cache_tools_ttl=60.0,
 )
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-4-8"),
     tools=[fs],
 )
 agent("Read README.md and summarise the install steps")
@@ -210,8 +215,8 @@ from lazybridge import Agent, LLMEngine, Plan, Step, Store, from_prev, from_step
 
 store = Store(db="pipeline.sqlite")
 
-researcher = Agent(engine=LLMEngine("claude-opus-4-7"), name="search")
-ranker     = Agent(engine=LLMEngine("claude-opus-4-7"), name="rank")
+researcher = Agent(engine=LLMEngine("claude-opus-4-8"), name="search")
+ranker     = Agent(engine=LLMEngine("claude-opus-4-8"), name="rank")
 writer     = Agent(engine=LLMEngine("gpt-5.4-mini"),          name="write")
 
 pipeline = Agent(

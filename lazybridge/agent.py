@@ -22,18 +22,18 @@ class Agent:
     **Canonical composition** — give each sub-agent an explicit ``name=``
     and pass it directly in ``tools=[...]``::
 
-        from lazybridge import Agent, LLMEngine, Plan, Step, tool, from_step
+        from lazybridge import Agent, LLMEngine, Plan, Step, tool, from_prev, from_step
 
         search = tool(search_web, name="search", description="Search the web.")
 
         researcher = Agent(
             name="research",
-            engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
+            engine=LLMEngine("claude-haiku-4-5", system="You are a research expert."),
             tools=[search],
         )
         writer = Agent(
             name="write",
-            engine=LLMEngine("gpt-4o", system="You are a concise writer."),
+            engine=LLMEngine("gpt-5.4-mini", system="You are a concise writer."),
         )
 
         # Deterministic orchestrator — Plan engine
@@ -50,7 +50,7 @@ class Agent:
         # Dynamic orchestrator — LLM engine
         orchestrator = Agent(
             name="orchestrator",
-            engine=LLMEngine("claude-opus-4-7"),
+            engine=LLMEngine("claude-opus-4-8"),
             tools=[researcher, writer],
             session=sess,
         )
@@ -58,8 +58,8 @@ class Agent:
     The engine is the only thing that changes. Everything else — tools,
     memory, session, guard, output — is the same surface on every Agent.
 
-    **String shortcut** — ``Agent("claude-opus-4-7")`` is sugar for
-    ``Agent(engine=LLMEngine("claude-opus-4-7"))``.  Use the explicit
+    **String shortcut** — ``Agent("claude-opus-4-8")`` is sugar for
+    ``Agent(engine=LLMEngine("claude-opus-4-8"))``.  Use the explicit
     form when you need to configure the engine (``system=``, ``max_turns=``,
     ``thinking=``, etc.).
 
