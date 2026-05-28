@@ -1,5 +1,5 @@
 site_name: LazyBridge
-site_description: Zero-boilerplate multi-provider LLM agent framework. Engine + Tools + State, everything is a tool.
+site_description: Zero-boilerplate multi-provider LLM composition runtime, not an agent framework. Engine + Tools + State, everything is a tool.
 site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge

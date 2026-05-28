@@ -83,6 +83,21 @@ pip install "lazybridge[anthropic]"
 # sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see https://tools.lazybridge.com/)
 ```
 
+> **Naming note — `lazytoolkit` vs `lazytools`.** The concrete tools ship in a
+> single sibling package whose **distribution name** (what you `pip install`) is
+> **`lazytoolkit`**, while its **import name** (what you write in code) is
+> **`lazytools`**:
+>
+> ```bash
+> pip install "lazytoolkit[mcp]"            # distribution name
+> ```
+> ```python
+> from lazytools.connectors.mcp import MCP  # import name
+> ```
+>
+> This mirrors well-known packages such as `pip install beautifulsoup4` →
+> `import bs4`.
+
 Confirm you're on the modern API:
 
 ```python
@@ -168,7 +183,7 @@ turn, they run concurrently via `asyncio.gather`. No flag, no config, no
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazytools.connectors.mcp import MCP
+from lazytools.connectors.mcp import MCP  # pip install lazytoolkit (import name: lazytools)
 
 fs = MCP.stdio(
     "fs",
