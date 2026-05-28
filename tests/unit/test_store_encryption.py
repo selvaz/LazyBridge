@@ -24,13 +24,19 @@ import pytest
 # triggers a ``pyo3_runtime.PanicException`` — a ``BaseException`` subclass
 # that would otherwise abort *collection* of this whole file, breaking
 # ``pytest --collect-only`` for everyone whenever the optional [encryption]
-# extra is half-installed.  Catch broadly and skip the module instead.
+# extra is half-installed.  Name that panic type explicitly (falling back to
+# an empty tuple when pyo3 isn't present) so the module skips without a broad
+# ``except BaseException``.
+try:
+    from pyo3_runtime import PanicException
+except ImportError:  # pyo3 not in play — nothing extra to catch
+    PanicException = ()  # type: ignore[assignment, misc]
+
 try:
     from cryptography.fernet import Fernet, InvalidToken
-except BaseException as _exc:  # Rust panic isn't a plain Exception
+except (ImportError, PanicException) as _exc:  # type: ignore[misc]
     pytest.skip(
-        f"cryptography unavailable or failed to import ({_exc!r}); "
-        "skipping EncryptedStoreAdapter tests.",
+        f"cryptography unavailable or failed to import ({_exc!r}); skipping EncryptedStoreAdapter tests.",
         allow_module_level=True,
     )
 
