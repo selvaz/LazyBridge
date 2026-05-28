@@ -77,6 +77,7 @@ _EXPECTED: frozenset[str] = frozenset(
         "StructuredLogExporter",
         # Provider entry point (custom adapters)
         "BaseProvider",
+        "Tier",
         "UnsupportedFeatureError",
         "UnsupportedNativeToolError",
         # Multimodal content blocks

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
+
+if TYPE_CHECKING:
+    from lazybridge.core.providers.base import Tier
 
 
 class Agent:
@@ -806,7 +809,7 @@ class Agent:
         cls,
         provider: str,
         *,
-        tier: str = "medium",
+        tier: Tier | str = "medium",
         **kwargs: Any,
     ) -> Agent:
         """Construct an Agent for ``provider`` using its tier alias for model selection.
