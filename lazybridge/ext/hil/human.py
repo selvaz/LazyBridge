@@ -122,8 +122,11 @@ class _TerminalUI(_UIProtocol):
             except ValidationError as exc:
                 # Compact single-line summary of the first error.
                 errors = exc.errors()
-                err: dict = errors[0] if errors else {}  # type: ignore[assignment]
-                last_exc = f"{err.get('msg', 'invalid')} ({err.get('type', '?')})"
+                if errors:
+                    err = errors[0]
+                    last_exc = f"{err.get('msg', 'invalid')} ({err.get('type', '?')})"
+                else:
+                    last_exc = "invalid"
         # Out of retries — return whatever _coerce_field would have
         # produced in lenient mode (matches the previous behaviour).
         return self._coerce_field(annotation, raw)
