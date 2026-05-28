@@ -16,3 +16,19 @@ repos:
       - id: detect-private-key
       - id: end-of-file-fixer
       - id: trailing-whitespace
+
+  # Type-checking mirrors the CI gate (``mypy lazybridge/``) and the
+  # CONTRIBUTING checklist, so contributors catch type regressions before
+  # pushing.  additional_dependencies match what CI installs alongside
+  # mypy (pydantic for plugin-style validation, plus the stub packages
+  # used by the docs/skill helpers).
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        files: ^lazybridge/
+        additional_dependencies:
+          - pydantic>=2.0.0,<3.0.0
+          - types-Markdown
+          - types-bleach
