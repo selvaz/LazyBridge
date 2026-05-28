@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazybridge"
-version = "0.9.0"
+version = "0.9.1"
 description = "Zero-boilerplate multi-provider LLM agent framework"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -29,6 +29,9 @@ dependencies = ["pydantic>=2.0.0,<3.0.0"]
 # Bump the upper bound intentionally after re-running the provider
 # integration tests against the new major.
 [project.optional-dependencies]
+anthropicx = ["anthropic>=0.49.0,<1.0.0"]
+anthropicx = ["anthropic>=0.49.0,<1.0.0"]
+anthropicx = ["anthropic>=0.49.0,<1.0.0"]
 anthropic = ["anthropic>=0.49.0,<1.0.0"]
 openai    = ["openai>=1.70.0,<3.0.0"]
 google    = ["google-genai>=1.10.0,<2.0.0"]

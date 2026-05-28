@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.1] — 2026-05-28 — Store.items(prefix=) range scan
+
+### Added
+- **`Store.items(prefix=)`** — returns `(key, value)` pairs restricted to keys
+  starting with `prefix` via a single indexed B-tree range scan
+  (`WHERE key >= ? AND key < ?`). Sub-linear in total keyspace size;
+  O(M) in the number of matching keys. The in-memory path filters under the
+  store lock using `str.startswith`. Pass `prefix=None` (default) or `prefix=""`
+  to iterate the full store. The `EncryptedStoreAdapter` delegates to the inner
+  store and decrypts each returned value.
+- **`_prefix_upper_bound(prefix)`** — private helper that computes the exclusive
+  upper bound for the B-tree scan. Handles the U+10FFFF edge case by falling back
+  to a Python-level `startswith` filter.
+
+### Compatibility
+Additive — no existing behaviour changed. LazyPulse 0.2.0 uses this method
+to replace its O(N+1) `_scan_records` implementation.
+
+---
+
 ## [0.9.0] — 2026-05-24 — lazytoolkit extraction (Phase 3: shims removed)
 
 ### Removed (breaking)
@@ -112,8 +132,7 @@ codemod snippets.
 - **``wrap_tool`` made private** (``_wrap_tool``).  Use the public
   ``tool(...)`` factory instead.
 - **``LLMEngine(tool_choice="parallel")`` raises ``ValueError``**
-  (was a 0.7-era ``DeprecationWarning`` that downgraded to ``"auto"``).
-  Concurrent tool execution is the default and not configurable.
+  (was a 0.7-era ``DeprecationWarning`` that downgraded to ``"auto"``).\n  Concurrent tool execution is the default and not configurable.
 - **``Old doc/`` directory deleted** (1.2 MB, zero references).
 - **``pythonpath = ["lazybridge"]`` removed** from ``pyproject.toml``
   (unused).
