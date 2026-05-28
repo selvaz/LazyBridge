@@ -46,7 +46,7 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import Any, Literal
 
 from lazybridge.core.types import (
     CompletionRequest,
@@ -54,6 +54,13 @@ from lazybridge.core.types import (
     NativeTool,
     StreamChunk,
 )
+
+#: Canonical tier aliases recognised by ``Agent.from_provider(tier=...)``
+#: and each provider's ``_TIER_ALIASES`` map.  Single source of truth for
+#: the tier vocabulary — ordered cheapest → most capable.  A string not in
+#: this set is treated as a literal model id (passthrough), so callers may
+#: still pass an explicit model name where a ``Tier`` is annotated.
+Tier = Literal["super_cheap", "cheap", "medium", "expensive", "top"]
 
 
 class UnsupportedNativeToolError(ValueError):
@@ -358,10 +365,10 @@ class BaseProvider(ABC):
 
     #: Tier aliases.  Each provider populates this with the concrete
     #: model it considers "top"/"expensive"/"medium"/"cheap"/
-    #: "super_cheap" so users can write ``Agent.from_provider(
-    #: "anthropic", tier="cheap")`` without hard-coding preview /
-    #: date-pinned names.  A string not in this dict is treated as a
-    #: literal model name (passthrough).
+    #: "super_cheap" (the :data:`Tier` vocabulary) so users can write
+    #: ``Agent.from_provider("anthropic", tier="cheap")`` without
+    #: hard-coding preview / date-pinned names.  A string not in this
+    #: dict is treated as a literal model name (passthrough).
     _TIER_ALIASES: dict[str, str] = {}
 
     #: Optional fallback chain.  If a concrete model in the key is

@@ -68,7 +68,7 @@ to `Tool` instances at construction time:
 
 ```python
 from lazybridge import Agent, LLMEngine, Tool
-from lazytools.connectors.mcp import MCP
+from lazytools.connectors.mcp import MCP  # pip install lazytoolkit (import name: lazytools)
 from lazytools.documents import read_docs_tools
 
 agent = Agent(

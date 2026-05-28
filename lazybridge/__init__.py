@@ -2,7 +2,7 @@
 
 Every Agent has the same shape.  Only the engine changes::
 
-    from lazybridge import Agent, LLMEngine, Plan, Step, Session, Tool, from_step
+    from lazybridge import Agent, LLMEngine, Plan, Step, Session, Tool, from_prev, from_step
 
     # --- Wrap Python functions as tools with explicit names ---
 
@@ -36,15 +36,15 @@ Every Agent has the same shape.  Only the engine changes::
 
     orchestrator = Agent(
         name="orchestrator",
-        engine=LLMEngine("claude-opus-4-7"),
+        engine=LLMEngine("claude-opus-4-8"),
         tools=[researcher, writer],
         session=Session(),
     )
 
     result = pipeline("AI trends 2026").text()
 
-**String shortcut** — ``Agent("claude-opus-4-7")`` expands to
-``Agent(engine=LLMEngine("claude-opus-4-7"))``.  Use the explicit
+**String shortcut** — ``Agent("claude-opus-4-8")`` expands to
+``Agent(engine=LLMEngine("claude-opus-4-8"))``.  Use the explicit
 ``LLMEngine(...)`` form when you need ``system=``, ``max_turns=``,
 ``thinking=``, or other engine-level config.
 
@@ -118,7 +118,7 @@ __stability__ = "alpha"
 from lazybridge.agent import Agent, ParallelAgent
 
 # Provider entry points
-from lazybridge.core.providers import BaseProvider, UnsupportedFeatureError, UnsupportedNativeToolError
+from lazybridge.core.providers import BaseProvider, Tier, UnsupportedFeatureError, UnsupportedNativeToolError
 from lazybridge.core.types import (
     AudioContent,
     CacheConfig,
@@ -235,6 +235,7 @@ __all__ = [
     "StructuredLogExporter",
     # Provider entry point (custom adapters)
     "BaseProvider",
+    "Tier",
     "UnsupportedFeatureError",
     "UnsupportedNativeToolError",
     # Multimodal content blocks

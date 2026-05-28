@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
+
+if TYPE_CHECKING:
+    from lazybridge.core.providers.base import Tier
 
 
 class Agent:
@@ -22,18 +25,18 @@ class Agent:
     **Canonical composition** — give each sub-agent an explicit ``name=``
     and pass it directly in ``tools=[...]``::
 
-        from lazybridge import Agent, LLMEngine, Plan, Step, tool, from_step
+        from lazybridge import Agent, LLMEngine, Plan, Step, tool, from_prev, from_step
 
         search = tool(search_web, name="search", description="Search the web.")
 
         researcher = Agent(
             name="research",
-            engine=LLMEngine("claude-opus-4-7", system="You are a research expert."),
+            engine=LLMEngine("claude-haiku-4-5", system="You are a research expert."),
             tools=[search],
         )
         writer = Agent(
             name="write",
-            engine=LLMEngine("gpt-4o", system="You are a concise writer."),
+            engine=LLMEngine("gpt-5.4-mini", system="You are a concise writer."),
         )
 
         # Deterministic orchestrator — Plan engine
@@ -50,7 +53,7 @@ class Agent:
         # Dynamic orchestrator — LLM engine
         orchestrator = Agent(
             name="orchestrator",
-            engine=LLMEngine("claude-opus-4-7"),
+            engine=LLMEngine("claude-opus-4-8"),
             tools=[researcher, writer],
             session=sess,
         )
@@ -58,8 +61,8 @@ class Agent:
     The engine is the only thing that changes. Everything else — tools,
     memory, session, guard, output — is the same surface on every Agent.
 
-    **String shortcut** — ``Agent("claude-opus-4-7")`` is sugar for
-    ``Agent(engine=LLMEngine("claude-opus-4-7"))``.  Use the explicit
+    **String shortcut** — ``Agent("claude-opus-4-8")`` is sugar for
+    ``Agent(engine=LLMEngine("claude-opus-4-8"))``.  Use the explicit
     form when you need to configure the engine (``system=``, ``max_turns=``,
     ``thinking=``, etc.).
 
@@ -110,7 +113,7 @@ class Agent:
         store: Any | None = None,
         sources: list[Any] | None = None,
         guard: Any | None = None,
-        verify: Agent | None = None,
+        verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
         name: str | None = None,
         description: str | None = None,
@@ -348,9 +351,14 @@ class Agent:
                     and getattr(related, "_is_lazy_agent", False)
                     and getattr(related, "session", None) is None
                 ):
-                    related.session = self.session
-                    _safe_register_agent(self.session, related)
-                    _safe_register_tool_edge(self.session, self, related, label=label)
+                    # Duck-typed ``_is_lazy_agent`` covers Agent and MockAgent
+                    # (and any other agent-shaped object); cast for the typed
+                    # graph helpers since the static type of ``related`` now
+                    # admits a plain Callable via the widened ``verify=``.
+                    related_agent = cast("Agent", related)
+                    related_agent.session = self.session
+                    _safe_register_agent(self.session, related_agent)
+                    _safe_register_tool_edge(self.session, self, related_agent, label=label)
 
         # PlanCompiler runs at construction time
         if hasattr(self.engine, "_validate"):
@@ -801,7 +809,7 @@ class Agent:
         cls,
         provider: str,
         *,
-        tier: str = "medium",
+        tier: Tier | str = "medium",
         **kwargs: Any,
     ) -> Agent:
         """Construct an Agent for ``provider`` using its tier alias for model selection.

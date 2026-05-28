@@ -21,11 +21,26 @@ ClassVars on the provider class itself.
 
 from __future__ import annotations
 
+import importlib
+import warnings
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
 from lazybridge.core.types import NativeTool
+
+#: ``provider name → (module, attribute)`` for every provider LLMEngine can
+#: instantiate.  Imported lazily and *individually* (see
+#: :func:`provider_capabilities`) so a single broken provider SDK degrades
+#: that one row instead of blinding the whole introspection matrix.
+_PROVIDER_IMPORTS: list[tuple[str, str, str]] = [
+    ("anthropic", "lazybridge.core.providers.anthropic", "AnthropicProvider"),
+    ("openai", "lazybridge.core.providers.openai", "OpenAIProvider"),
+    ("google", "lazybridge.core.providers.google", "GoogleProvider"),
+    ("deepseek", "lazybridge.core.providers.deepseek", "DeepSeekProvider"),
+    ("litellm", "lazybridge.core.providers.litellm", "LiteLLMProvider"),
+    ("lmstudio", "lazybridge.core.providers.lmstudio", "LMStudioProvider"),
+]
 
 
 @dataclass(frozen=True)
@@ -56,25 +71,26 @@ def provider_capabilities() -> dict[str, ProviderCapabilities]:
     Cached after first call; the underlying ``ClassVar`` declarations
     are immutable in practice so re-querying the providers each call
     would just thrash the import system.
-    """
-    # Import lazily so this module stays free of optional-dep cost.
-    from lazybridge.core.providers.anthropic import AnthropicProvider
-    from lazybridge.core.providers.deepseek import DeepSeekProvider
-    from lazybridge.core.providers.google import GoogleProvider
-    from lazybridge.core.providers.litellm import LiteLLMProvider
-    from lazybridge.core.providers.lmstudio import LMStudioProvider
-    from lazybridge.core.providers.openai import OpenAIProvider
 
-    classes: list[tuple[str, Any]] = [
-        ("anthropic", AnthropicProvider),
-        ("openai", OpenAIProvider),
-        ("google", GoogleProvider),
-        ("deepseek", DeepSeekProvider),
-        ("litellm", LiteLLMProvider),
-        ("lmstudio", LMStudioProvider),
-    ]
+    **Graceful degradation** — each provider class is imported lazily and
+    *individually*.  If importing one provider's module fails (e.g. a
+    broken optional SDK that explodes at import time), that provider is
+    omitted from the returned matrix and a :class:`UserWarning` is issued,
+    rather than letting one bad import break introspection for every other
+    provider.
+    """
     out: dict[str, ProviderCapabilities] = {}
-    for name, cls in classes:
+    for name, module_path, attr in _PROVIDER_IMPORTS:
+        try:
+            cls: Any = getattr(importlib.import_module(module_path), attr)
+        except Exception as exc:  # defend against any import-time blow-up
+            warnings.warn(
+                f"lazybridge.matrix: provider {name!r} is unavailable "
+                f"(failed to import {module_path}.{attr}: {exc!r}); "
+                f"omitting it from the capability matrix.",
+                stacklevel=2,
+            )
+            continue
         out[name] = ProviderCapabilities(
             native_tools=frozenset(getattr(cls, "supported_native_tools", frozenset())),
             streaming=bool(getattr(cls, "supports_streaming", True)),

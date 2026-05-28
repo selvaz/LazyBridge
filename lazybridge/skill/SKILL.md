@@ -383,7 +383,7 @@ agent.
 
 ```python
 from lazybridge import Agent, LLMEngine
-from lazytools.connectors.mcp import MCP
+from lazytools.connectors.mcp import MCP  # pip install lazytoolkit (import name: lazytools)
 
 # command / args / allow are keyword-only on MCP.stdio.
 # allow= (or deny=) is REQUIRED since 0.7.9 — deny-by-default for
