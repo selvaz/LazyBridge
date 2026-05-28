@@ -2,7 +2,21 @@
 
 ## Reporting Vulnerabilities
 
-Report security issues to the maintainers via GitHub Issues (private) or email. Do not open public issues for security vulnerabilities.
+**Please do not open public issues for security vulnerabilities.**
+
+The preferred channel is **GitHub Private Vulnerability Reporting**, which is
+enabled on this repository. Open
+<https://github.com/selvaz/LazyBridge/security/advisories/new> (Security tab →
+"Report a vulnerability") to file a private report visible only to the
+maintainers. This keeps the disclosure confidential while we triage and ship a
+fix.
+
+If you cannot use GitHub's reporting flow, email the maintainers at
+**security@lazybridge.com** instead.
+
+Please include a description of the issue, the affected version(s), and a
+minimal reproduction if you have one. We aim to acknowledge reports within a
+few business days and will coordinate a disclosure timeline with you.
 
 ## Known Security Considerations
 
