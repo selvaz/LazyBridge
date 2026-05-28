@@ -71,6 +71,31 @@ def test_content_guard_input_block():
     assert action.message == "no"
 
 
+def test_agent_input_guard_block_surfaces_as_guardblocked():
+    # An input-guard block must produce error.type == "GuardBlocked", symmetric
+    # with the output-guard path, so a policy block reads distinctly from a
+    # generic engine failure. The engine below must never be reached.
+    from typing import Any
+
+    from lazybridge import Agent, Envelope
+
+    class _UnreachableEngine:
+        async def run(self, env: Envelope, **kwargs: Any) -> Envelope:
+            raise AssertionError("engine must not run when input guard blocks")
+
+        async def stream(self, *args: Any, **kwargs: Any):
+            raise NotImplementedError
+            yield  # pragma: no cover
+
+    guard = ContentGuard(input_fn=lambda _t: GuardAction.block("nope"))
+    agent = Agent(name="g", engine=_UnreachableEngine(), guard=guard)
+    env = asyncio.run(agent.run("do something"))
+    assert not env.ok
+    assert env.error is not None
+    assert env.error.type == "GuardBlocked"
+    assert "nope" in env.error.message
+
+
 def test_content_guard_output_modify():
     g = ContentGuard(output_fn=lambda t: GuardAction.modify(t.replace("bad", "***")))
     action = g.check_output("bad word")

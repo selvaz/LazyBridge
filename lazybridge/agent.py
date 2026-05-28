@@ -413,7 +413,17 @@ class Agent:
         if self.guard:
             action = await self.guard.acheck_input(env.task or "")
             if not action.allowed:
-                return Envelope.error_envelope(ValueError(action.message or "Blocked by guard"))
+                # Symmetric with the output-guard path below: a guard rejection
+                # surfaces as ``error.type == "GuardBlocked"`` regardless of
+                # whether it fired on input or output, so downstream consumers
+                # (e.g. LazyPulse's _finalize) can tell a *policy* block from a
+                # generic engine ValueError.
+                from lazybridge.envelope import ErrorInfo
+
+                return Envelope(
+                    task=env.task,
+                    error=ErrorInfo(type="GuardBlocked", message=action.message or "Input blocked"),
+                )
             if action.modified_text is not None:
                 env = Envelope(
                     task=action.modified_text,
