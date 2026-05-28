@@ -245,8 +245,8 @@ class Store:
         Parameters
         ----------
         prefix:
-            Optional key prefix to filter by.  ``None`` (default) or ``""""
-            returns every pair in the store.  Any other string restricts the
+            Optional key prefix to filter by. ``None`` (default) or ``""``
+            returns every pair in the store. Any other string restricts the
             results to keys starting with that prefix.
         """
         if self._db:
