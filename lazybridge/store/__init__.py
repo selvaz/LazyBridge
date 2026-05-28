@@ -255,10 +255,14 @@ class Store:
             else:
                 upper = _prefix_upper_bound(prefix)
                 if upper is not None:
-                    rows = self._conn().execute(
-                        "SELECT key, value FROM store WHERE key >= ? AND key < ?",
-                        (prefix, upper),
-                    ).fetchall()
+                    rows = (
+                        self._conn()
+                        .execute(
+                            "SELECT key, value FROM store WHERE key >= ? AND key < ?",
+                            (prefix, upper),
+                        )
+                        .fetchall()
+                    )
                 else:
                     # All characters in the prefix are U+10FFFF — no finite upper
                     # bound; fall back to a full scan with Python startswith filter.
@@ -269,11 +273,7 @@ class Store:
                     ]
             return [(r["key"], json.loads(r["value"])) for r in rows]
         with self._lock:
-            return [
-                (k, _deep_copy_safe(v.value))
-                for k, v in self._mem.items()
-                if not prefix or k.startswith(prefix)
-            ]
+            return [(k, _deep_copy_safe(v.value)) for k, v in self._mem.items() if not prefix or k.startswith(prefix)]
 
     def __iter__(self):
         return iter(self.keys())

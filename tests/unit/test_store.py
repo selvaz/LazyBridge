@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
+
 from lazybridge.store import Store
 from lazybridge.store.encryption import EncryptedStoreAdapter
 
@@ -114,12 +117,7 @@ def test_items_prefix_parity(tmp_path) -> None:
 # ── EncryptedStoreAdapter ────────────────────────────────────────────────────
 
 
-try:
-    from cryptography.fernet import Fernet as _Fernet
-
-    _HAS_CRYPTO = True
-except ImportError:
-    _HAS_CRYPTO = False
+_HAS_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
 
 @pytest.mark.skipif(not _HAS_CRYPTO, reason="cryptography not installed")
