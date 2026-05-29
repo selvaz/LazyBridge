@@ -124,6 +124,9 @@ extra:
       link: https://github.com/selvaz/LazyBridge
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lazybridge/
+    - icon: fontawesome/solid/envelope
+      link: mailto:LazyBridgeLabs@gmail.com
+      name: Email LazyBridge Labs
 
 extra_css:
   - stylesheets/extra.css
@@ -237,6 +240,10 @@ nav:
       - Error-recovery cheat-sheet: for-llms/error-recovery.md
       - Claude Skill install: for-llms/claude-skill.md
       - llms.txt explained: for-llms/llms-txt.md
+  - Ecosystem:
+      - lazybridge.com: https://lazybridge.com/
+      - LazyPulse: https://pulse.lazybridge.com/
+      - LazyTools: https://tools.lazybridge.com/
 
 # ---------------------------------------------------------------------------
 # Build-time hooks — generated content
