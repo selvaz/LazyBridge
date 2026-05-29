@@ -375,6 +375,33 @@ class Agent:
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
+        # ``run()`` ends a conclude chain: a ``conclude(...)`` raised anywhere
+        # in the nested tree is caught here and turned back into a normal
+        # Envelope.  Nested call sites (``as_tool``, ``AgentPool.route``, and
+        # Plan agent-steps) invoke ``_run_as_tool`` instead, which runs the
+        # same body WITHOUT this catch, so the signal keeps propagating up to
+        # whichever ``run()`` originated the chain.  See ``lazybridge.signals``.
+        from lazybridge.signals import ConcludeSignal
+
+        try:
+            return await self._run_as_tool(task, images=images, audio=audio)
+        except ConcludeSignal as sig:
+            return Envelope(payload=sig.message)
+
+    async def _run_as_tool(
+        self,
+        task: str | Envelope,
+        *,
+        images: list[Any] | None = None,
+        audio: Any | None = None,
+    ) -> Envelope:
+        """Run the agent without catching ``ConcludeSignal``.
+
+        Used when this agent is invoked as a tool (directly via ``as_tool``
+        or through an :class:`~lazybridge.pool.AgentPool`): a ``conclude``
+        raised inside must propagate past this level up to the originating
+        top-level :meth:`run`.
+        """
         # ``getattr`` with a default keeps this backwards-compatible for
         # Agents constructed via ``Agent.__new__`` (test helpers, custom
         # subclasses) that haven't set ``self.timeout``.
@@ -752,7 +779,12 @@ class Agent:
         if verify is None:
 
             async def _run(task: str) -> Envelope:
-                result = await agent.run(task)
+                # ``_run_as_tool`` (not ``run``) so a ``conclude`` raised inside
+                # the sub-agent propagates up to the top-level caller instead of
+                # being absorbed here.  Duck-typed doubles without it fall back
+                # to ``run``.
+                runner = getattr(agent, "_run_as_tool", agent.run)
+                result = await runner(task)
                 # Always write under the alias so from_agent("alias") can find
                 # the output regardless of agent.name.  _run_body also writes
                 # under agent.name (for standalone callers); the alias write

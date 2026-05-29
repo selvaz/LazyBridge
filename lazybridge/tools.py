@@ -403,7 +403,10 @@ def _agent_as_tool(agent: Any) -> Tool:
         return agent.as_tool()
 
     async def _run(task: str) -> Envelope[Any]:  # type: ignore[name-defined]
-        return await agent.run(task)
+        # ``_run_as_tool`` lets a nested ``conclude`` propagate to the top-level
+        # caller; fall back to ``run`` for duck-typed doubles without it.
+        runner = getattr(agent, "_run_as_tool", agent.run)
+        return await runner(task)
 
     _run.__name__ = agent.name or "agent"
     _run.__doc__ = agent.description or f"Run the {agent.name} agent on the given task."

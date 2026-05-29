@@ -162,6 +162,7 @@ from lazybridge.exporters import (
 from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
+from lazybridge.pool import AgentPool
 from lazybridge.predicates import when
 from lazybridge.sentinels import (
     from_agent,
@@ -173,6 +174,7 @@ from lazybridge.sentinels import (
     from_step,
 )
 from lazybridge.session import EventLog, EventType, Session
+from lazybridge.signals import ConcludeSignal, conclude
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
 from lazybridge.tools import Tool, ToolProvider, tool
@@ -195,6 +197,10 @@ __all__ = [
     "Tool",
     "tool",
     "ToolProvider",
+    # Multi-agent graphs
+    "AgentPool",
+    "conclude",
+    "ConcludeSignal",
     # Native tools (provider-hosted, e.g. web search)
     "NativeTool",
     # Predicates DSL (for Step.routes)
