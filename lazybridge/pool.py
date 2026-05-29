@@ -75,6 +75,11 @@ class AgentPool:
         finally:
             self._depth.reset(token)
 
-    def as_tool(self) -> Tool:
-        """Wrap routing as a ``route(agent_name, task)`` tool for ``tools=[...]``."""
-        return Tool.wrap(self.route, name="route")
+    def as_tool(self, name: str = "route") -> Tool:
+        """Wrap routing as a ``route(agent_name, task)`` tool for ``tools=[...]``.
+
+        Pass a distinct ``name`` to give one agent access to several pools
+        without a tool-name collision, e.g.
+        ``tools=[my_team.as_tool("ask_team"), peers.as_tool("ask_peer")]``.
+        """
+        return Tool.wrap(self.route, name=name)

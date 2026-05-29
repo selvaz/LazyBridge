@@ -311,8 +311,10 @@ result = alice.run("...")            # alice may route("bob", …); any agent ma
 ```
 
 - `pool.as_tool()` is an ordinary `Tool` named `route` — the engine does not
-  special-case it. `AgentPool(max_depth=…)` bounds recursion so cycles can't
-  blow the stack.
+  special-case it. Pass `pool.as_tool("ask_team")` to rename it so one agent
+  can hold several pools (e.g. `tools=[team.as_tool("ask_team"),
+  peers.as_tool("ask_peer")]`) — handy for layered/nested routing.
+  `AgentPool(max_depth=…)` bounds recursion so cycles can't blow the stack.
 - `conclude("answer")` is a non-local exit: raised anywhere in the nested tree,
   it unwinds the **whole** chain and returns straight to the top-level
   `run()` — internally a `ConcludeSignal` (a `BaseException`) caught only there.

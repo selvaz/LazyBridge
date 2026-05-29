@@ -127,6 +127,23 @@ def test_as_tool_is_named_route() -> None:
     assert tool.name == "route"
 
 
+def test_as_tool_custom_name_lets_one_agent_use_two_pools() -> None:
+    team = AgentPool()
+    peers = AgentPool()
+    team.register(_agent(_CallsProvider(model="fake-tool-model"), name="t1"))
+    peers.register(_agent(_CallsProvider(model="fake-tool-model"), name="p1"))
+
+    # Distinct names → no collision when both pools sit on one agent.
+    agent = _agent(
+        _CallsProvider(model="fake-tool-model"),
+        name="hub",
+        tools=[team.as_tool("ask_team"), peers.as_tool("ask_peer")],
+    )
+
+    names = {t.name for t in agent._tool_map.values()}
+    assert {"ask_team", "ask_peer"} <= names
+
+
 def test_roster_lists_agents() -> None:
     pool = AgentPool()
     a = _agent(_CallsProvider(model="fake-tool-model"), name="alpha")
