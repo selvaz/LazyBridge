@@ -107,13 +107,13 @@ writer = Agent(
 
 pool.register(researcher, writer)        # register AFTER construction
 
-result = researcher.run("Summarise 2026 AI-policy trends in 3 bullets.")
+result = researcher("Summarise 2026 AI-policy trends in 3 bullets.")
 print(result.text())                     # whatever 'writer' passed to conclude(...)
 ```
 
 `researcher` may `route("writer", ...)`; `writer` ends the task with
-`conclude(...)`, and its message surfaces from `researcher.run` — the
-original call — regardless of how deep the routing went.
+`conclude(...)`, and its message surfaces from the top-level
+`researcher(...)` call — regardless of how deep the routing went.
 
 Layered routing — one agent, two pools, distinct tool names:
 
