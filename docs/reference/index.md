@@ -26,6 +26,8 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 
 - [Engines](engines.md) — `LLMEngine`, `Plan`, `Step`,
   `PlanCompileError`, `ToolTimeoutError`, `StreamStallError`.
+- [Multi-agent graphs](multi-agent.md) — `AgentPool`, `conclude`,
+  `ConcludeSignal` for dynamic, LLM-routed agent systems.
 - [Sentinels & predicates](sentinels.md) — `from_*` sentinels and
   the `when` DSL for routing.
 

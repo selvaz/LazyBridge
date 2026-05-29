@@ -117,6 +117,15 @@ class LLMEngine:
         to a small integer (e.g. 4–8) to apply backpressure on wide
         tool fan-outs and prevent thread/socket/DB exhaustion on a
         single turn.
+    max_tool_calls_per_turn:
+        Maximum number of tool calls *executed* per model turn — distinct
+        from ``max_parallel_tools`` (which only bounds how many run
+        concurrently).  ``None`` (default) executes every call the model
+        emits.  Set to ``1`` to keep a multi-agent graph on a single,
+        non-branching path: the first call runs and any extras get an
+        ``is_error`` result block telling the model only one call per turn
+        is allowed, so it learns to emit fewer.  See
+        :class:`~lazybridge.AgentPool` and :func:`~lazybridge.conclude`.
     tool_timeout:
         Per-tool deadline in seconds.  When set, each tool execution
         is wrapped in ``asyncio.wait_for``.  On timeout the tool's
