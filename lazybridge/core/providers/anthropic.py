@@ -67,6 +67,7 @@ _BETA_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*-\d{4}-\d{2}-\d{2}$")
 # Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
+    "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-6": (5.0, 25.0),
     "claude-opus-4-5": (5.0, 25.0),
@@ -82,17 +83,17 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 }
 
 # Models where temperature/top_p/top_k are not supported (returns 400)
-_NO_SAMPLING_MODELS = frozenset({"claude-opus-4-7"})
+_NO_SAMPLING_MODELS = frozenset({"claude-opus-4-8", "claude-opus-4-7"})
 
 # Models that use adaptive thinking only (no budget_tokens)
-_ADAPTIVE_ONLY_MODELS = frozenset({"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"})
+_ADAPTIVE_ONLY_MODELS = frozenset({"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"})
 
 
 class AnthropicProvider(BaseProvider):
     """Anthropic Claude provider.
 
     Supports:
-    - Adaptive thinking (claude-opus-4-7 / claude-opus-4-6 / claude-sonnet-4-6)
+    - Adaptive thinking (claude-opus-4-8 / claude-opus-4-7 / claude-opus-4-6 / claude-sonnet-4-6)
     - Extended thinking with budget_tokens (older models: 3.x, 4.5)
     - Structured output via messages.parse() + Pydantic
     - Tool use via beta tool_runner or manual loop
@@ -101,7 +102,7 @@ class AnthropicProvider(BaseProvider):
     - Streaming
 
     Model-specific behavior:
-    - Opus 4.7: adaptive thinking only, no temperature/sampling params
+    - Opus 4.8 / Opus 4.7: adaptive thinking only, no temperature/sampling params
     - Opus 4.6 / Sonnet 4.6: adaptive thinking, full sampling support
     - Older models: extended thinking with budget_tokens
     """
@@ -111,13 +112,14 @@ class AnthropicProvider(BaseProvider):
     # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
     # resolves here.  Update this table when new models ship.
     _TIER_ALIASES = {
-        "top": "claude-opus-4-7",
-        "expensive": "claude-opus-4-6",  # second tier, same quality family as top
+        "top": "claude-opus-4-8",
+        "expensive": "claude-opus-4-7",  # second tier, same quality family as top
         "medium": "claude-sonnet-4-6",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",
     }
     _FALLBACKS = {
+        "claude-opus-4-8": ["claude-opus-4-7", "claude-sonnet-4-6"],
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
         "claude-opus-4-1": ["claude-opus-4-6", "claude-sonnet-4-6"],
@@ -207,7 +209,7 @@ class AnthropicProvider(BaseProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for a given Anthropic model."""
         resolved = (model or self.model or self.default_model or "").lower()
-        if "opus-4-7" in resolved or "opus-4-6" in resolved:
+        if any(x in resolved for x in ("opus-4-8", "opus-4-7", "opus-4-6")):
             return 128_000
         if any(x in resolved for x in ("sonnet-4-6", "haiku-4-5", "opus-4-5", "sonnet-4-5")):
             return 64_000
@@ -504,7 +506,7 @@ class AnthropicProvider(BaseProvider):
                 ]
             else:
                 params["system"] = system
-        # Opus 4.7 does not support temperature/top_p/top_k — warn rather
+        # Opus 4.8 / 4.7 do not support temperature/top_p/top_k — warn rather
         # than drop silently so users aren't surprised when their
         # temperature setting has no effect.
         no_sampling = any(key in model for key in _NO_SAMPLING_MODELS)
@@ -581,10 +583,12 @@ class AnthropicProvider(BaseProvider):
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
         )
-        # reasoning_tokens is an optional field added to the usage object when
-        # the model was run in thinking/reasoning mode.  getattr with None as the
-        # default avoids AttributeError on SDK versions that predate this field.
-        _tt = getattr(response.usage, "reasoning_tokens", None)
+        # Thinking token count: SDK v0.105+ exposes this via
+        # usage.output_tokens_details.thinking_tokens; older SDK builds used
+        # usage.reasoning_tokens directly.  Check the new path first, fall back
+        # to the legacy attribute so both SDK generations work without pinning.
+        _otd = getattr(response.usage, "output_tokens_details", None)
+        _tt = getattr(_otd, "thinking_tokens", None) or getattr(response.usage, "reasoning_tokens", None)
         if _tt is not None:
             usage.thinking_tokens = _tt
         # Price lookup by substring match — see _compute_cost for ordering notes.
@@ -796,8 +800,12 @@ class AnthropicProvider(BaseProvider):
                         input_tokens=final.usage.input_tokens,
                         output_tokens=final.usage.output_tokens,
                     )
-                    # reasoning_tokens is only present for thinking-mode responses.
-                    _thinking_tokens = getattr(final.usage, "reasoning_tokens", None)
+                    # thinking_tokens: SDK v0.105+ uses output_tokens_details.thinking_tokens;
+                    # older SDK builds exposed it as usage.reasoning_tokens directly.
+                    _otd = getattr(final.usage, "output_tokens_details", None)
+                    _thinking_tokens = getattr(_otd, "thinking_tokens", None) or getattr(
+                        final.usage, "reasoning_tokens", None
+                    )
                     if _thinking_tokens is not None:
                         usage.thinking_tokens = _thinking_tokens
                     usage = self._populate_cached_input_tokens(usage, final.usage)

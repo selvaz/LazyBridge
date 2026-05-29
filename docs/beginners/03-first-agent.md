@@ -70,8 +70,8 @@ The five tier aliases, ordered cheapest → smartest:
 | `super_cheap` | High-volume classification, simple extraction (legacy SKUs) | `claude-3-haiku` | `gpt-4o-mini` | `gemini-2.5-flash-lite` | `deepseek-v4-flash` |
 | `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-5.4-nano` | `gemini-3.1-flash-lite-preview` | `deepseek-v4-flash` |
 | `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
-| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-4-6` | `gpt-5.5` | `gemini-2.5-pro` | `deepseek-v4-pro` |
-| `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-opus-4-7` | `gpt-5.5-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-4-7` | `gpt-5.5` | `gemini-2.5-pro` | `deepseek-v4-pro` |
+| `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-opus-4-8` | `gpt-5.5-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
 
 !!! note "How to read the table"
     - **`top` vs `expensive`** are *both* the provider's flagship class —
@@ -103,12 +103,12 @@ multi_model  = Agent.from_provider("openai",    tier="medium")   # one-string sw
 
 !!! tip "When to pin a specific model id"
     Tier aliases follow each provider's current SKU. **Pin** a specific
-    model string (e.g. `"claude-opus-4-7"`) only when:
+    model string (e.g. `"claude-opus-4-8"`) only when:
 
     - You're writing a recipe that needs reproducible behaviour for a
       specific model
     - You're testing a model-specific feature (e.g. extended thinking on
-      `claude-opus-4-7`)
+      `claude-opus-4-8`)
     - Compliance / audit requires a frozen model id
 
     For everything else — *especially your own everyday code* — use

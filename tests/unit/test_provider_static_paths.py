@@ -130,7 +130,7 @@ def test_openai_compute_cost_clamps_cached_to_input():
         (OpenAIProvider, "o1-mini", 32_000),
         (OpenAIProvider, "o3", 50_000),
         (OpenAIProvider, "unknown-model", 1_000),
-        (AnthropicProvider, "claude-opus-4-7", 100_000),
+        (AnthropicProvider, "claude-opus-4-8", 100_000),
         (AnthropicProvider, "claude-sonnet-4-6", 60_000),
         (AnthropicProvider, "claude-haiku-3", 4_000),
         (AnthropicProvider, "claude-3-5-sonnet", 8_000),
@@ -196,7 +196,7 @@ def test_fallback_targets_have_pricing(provider_cls):
     [
         (OpenAIProvider, "top", "gpt-5.5"),
         (OpenAIProvider, "cheap", "gpt-5.4-nano"),
-        (AnthropicProvider, "top", "claude-opus-4-7"),
+        (AnthropicProvider, "top", "claude-opus-4-8"),
         (AnthropicProvider, "cheap", "claude-haiku"),
         (GoogleProvider, "top", "gemini-3.1-pro"),
         (DeepSeekProvider, "top", "deepseek-v4-pro"),
