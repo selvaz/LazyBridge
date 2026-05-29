@@ -16,11 +16,11 @@ provider see [BaseProvider](base-provider.md).
 from lazybridge import Agent, LLMEngine
 
 # Direct model selection — provider inferred from the model string.
-Agent(engine=LLMEngine("claude-opus-4-7"))
+Agent(engine=LLMEngine("claude-opus-4-8"))
 Agent(engine=LLMEngine("gpt-5.4-mini"))
 
 # Tier-based selection — model never appears in app code.
-Agent.from_provider("anthropic", tier="top")     # → claude-opus-4-7
+Agent.from_provider("anthropic", tier="top")     # → claude-opus-4-8
 Agent.from_provider("openai",    tier="medium")  # → gpt-5.4-mini
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
@@ -50,16 +50,16 @@ name (passthrough).
 
 | tier | model | ctx | max_out | $/M in | $/M out |
 |---|---|---|---|---|---|
-| `top` | `claude-opus-4-7` | 1 M | 128 K | $5.00 | $25.00 |
-| `expensive` | `claude-opus-4-6` | 1 M | 128 K | $5.00 | $25.00 |
+| `top` | `claude-opus-4-8` | 1 M | 128 K | $5.00 | $25.00 |
+| `expensive` | `claude-opus-4-7` | 1 M | 128 K | $5.00 | $25.00 |
 | `medium` | `claude-sonnet-4-6` | 1 M | 64 K | $3.00 | $15.00 |
 | `cheap` | `claude-haiku-4-5` | 200 K | 64 K | $1.00 | $5.00 |
 | `super_cheap` | `claude-3-haiku` | 200 K | 4 K | $0.25 | $1.25 |
 
-- **Thinking.** `opus-4-7` / `opus-4-6` / `sonnet-4-6` use adaptive
+- **Thinking.** `opus-4-8` / `opus-4-7` / `opus-4-6` / `sonnet-4-6` use adaptive
   thinking (no `budget_tokens` argument). `haiku-4-5` and earlier
-  3.x models require `ThinkingConfig(budget_tokens=N)`. `opus-4-7`
-  does **not** accept `temperature`.
+  3.x models require `ThinkingConfig(budget_tokens=N)`. `opus-4-8` and `opus-4-7`
+  do **not** accept `temperature`.
 - **Native tools.** `WEB_SEARCH`, `CODE_EXECUTION`, `COMPUTER_USE`.
 
 ### OpenAI
