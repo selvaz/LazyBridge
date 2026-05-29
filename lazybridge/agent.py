@@ -375,11 +375,12 @@ class Agent:
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
-        # Top-level entry point: this is where a ``conclude(...)`` raised
-        # anywhere in the (possibly nested) agent tree is caught and turned
-        # back into a normal Envelope.  ``_run_as_tool`` runs the same body
-        # without that catch, so the signal propagates up to whichever
-        # ``run()`` originated the chain.  See ``lazybridge.signals``.
+        # ``run()`` ends a conclude chain: a ``conclude(...)`` raised anywhere
+        # in the nested tree is caught here and turned back into a normal
+        # Envelope.  Nested call sites (``as_tool``, ``AgentPool.route``, and
+        # Plan agent-steps) invoke ``_run_as_tool`` instead, which runs the
+        # same body WITHOUT this catch, so the signal keeps propagating up to
+        # whichever ``run()`` originated the chain.  See ``lazybridge.signals``.
         from lazybridge.signals import ConcludeSignal
 
         try:

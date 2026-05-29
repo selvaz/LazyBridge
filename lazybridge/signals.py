@@ -26,5 +26,12 @@ def conclude(message: str) -> str:
     Use as a tool in multi-agent graphs: any agent — however deeply nested —
     can call ``conclude("…")`` to short-circuit the entire call chain and
     return its answer directly to the original caller.
+
+    Immediacy note: the exit fires as soon as the turn's tool calls settle.
+    If the model emits ``conclude`` *alongside* other tool calls in the same
+    turn, those siblings still run to completion first (they execute
+    concurrently via ``asyncio.gather``), so a slow sibling can delay the
+    exit. Set ``LLMEngine(max_tool_calls_per_turn=1)`` — the recommended
+    multi-agent configuration — to keep one call per turn and avoid this.
     """
     raise ConcludeSignal(message)

@@ -45,6 +45,7 @@ from lazybridge.sentinels import (
     _FromStep,
 )
 from lazybridge.session import EventType
+from lazybridge.signals import ConcludeSignal
 
 if TYPE_CHECKING:
     from lazybridge.memory import Memory
@@ -679,6 +680,14 @@ class Plan:
                 # the whole band atomically.  Same atomicity as failure —
                 # no writes from succeeded siblings are applied; resume
                 # re-runs the whole band cleanly.
+                # A ``conclude`` from any branch ends the whole task: re-raise
+                # so it unwinds the plan to the top-level caller (the band's
+                # other branch results are discarded), the same non-local exit
+                # sequential steps get.
+                for r in raw:
+                    if isinstance(r, ConcludeSignal):
+                        raise r
+
                 paused_branch: tuple[Step, PlanPaused] | None = None
                 for _s, r in zip(group, raw):
                     if isinstance(r, PlanPaused):
@@ -1219,8 +1228,12 @@ class Plan:
                 else:
                     result_env = Envelope(task=env.task, payload=raw)
             elif callable(target) and hasattr(target, "run") and hasattr(target, "_is_lazy_agent"):
-                # Agent as step
-                result_env = await target.run(env)
+                # Agent as step.  Use ``_run_as_tool`` (not ``run``) so a
+                # ``conclude`` raised inside the step propagates out of the plan
+                # to the top-level caller, matching the tool-target path above.
+                # Duck-typed doubles without it fall back to ``run``.
+                runner = getattr(target, "_run_as_tool", target.run)
+                result_env = await runner(env)
             elif callable(target):
                 # Raw callable.  Sync targets are dispatched to the default
                 # executor so blocking I/O / CPU work in a user-supplied

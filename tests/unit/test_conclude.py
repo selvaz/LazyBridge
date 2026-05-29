@@ -125,3 +125,53 @@ async def test_conclude_signal_is_base_exception() -> None:
     with pytest.raises(ConcludeSignal) as ei:
         conclude("x")
     assert ei.value.message == "x"
+
+
+@pytest.mark.asyncio
+async def test_conclude_unwinds_a_plan_chain() -> None:
+    """A direct-agent Plan step that concludes unwinds the whole plan.
+
+    Regression for the absorb-in-Agent.run path: Agent.chain builds
+    Step(target=agent) steps that the Plan dispatches via _run_as_tool, so a
+    conclude in step 1 must skip step 2 and surface from the pipeline.run.
+    """
+    from lazybridge import Agent
+
+    step1_tcs = [ToolCall(id="s0", name="conclude", arguments={"message": "stop at step 1"})]
+    step1 = _agent(_CallsProvider(model="fake-tool-model", tool_calls=step1_tcs), name="step1", tools=[conclude])
+
+    second_provider = _CallsProvider(model="fake-tool-model", tool_calls=[], final="step 2 ran")
+    step2 = _agent(second_provider, name="step2", tools=[])
+
+    pipeline = Agent.chain(step1, step2, name="pipe")
+    result = await pipeline.run("start")
+
+    assert result.ok
+    assert result.text() == "stop at step 1"
+    # Step 2's provider must never have been invoked.
+    assert second_provider._n == 0
+
+
+@pytest.mark.asyncio
+async def test_conclude_unwinds_a_parallel_plan_band() -> None:
+    """A conclude from inside a parallel band unwinds the plan (not error)."""
+    from lazybridge import Agent
+    from lazybridge.engines.plan import Plan, Step
+
+    concluder_tcs = [ToolCall(id="p0", name="conclude", arguments={"message": "branch concluded"})]
+    concluder = _agent(
+        _CallsProvider(model="fake-tool-model", tool_calls=concluder_tcs), name="brancher", tools=[conclude]
+    )
+    sibling = _agent(
+        _CallsProvider(model="fake-tool-model", tool_calls=[], final="sibling done"), name="sibling", tools=[]
+    )
+
+    plan = Plan(
+        Step(target=concluder, name="brancher", parallel=True),
+        Step(target=sibling, name="sibling", parallel=True),
+    )
+    pipeline = Agent(engine=plan, name="pipe")
+    result = await pipeline.run("start")
+
+    assert result.ok
+    assert result.text() == "branch concluded"
