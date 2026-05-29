@@ -37,6 +37,10 @@ _EXPECTED: frozenset[str] = frozenset(
         "tool",
         "Tool",
         "ToolProvider",
+        # Multi-agent graphs
+        "AgentPool",
+        "conclude",
+        "ConcludeSignal",
         # Native tools (provider-hosted)
         "NativeTool",
         # Predicates DSL (for Step.routes)

@@ -172,7 +172,9 @@ from lazybridge.sentinels import (
     from_start,
     from_step,
 )
+from lazybridge.pool import AgentPool
 from lazybridge.session import EventLog, EventType, Session
+from lazybridge.signals import ConcludeSignal, conclude
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
 from lazybridge.tools import Tool, ToolProvider, tool
@@ -195,6 +197,10 @@ __all__ = [
     "Tool",
     "tool",
     "ToolProvider",
+    # Multi-agent graphs
+    "AgentPool",
+    "conclude",
+    "ConcludeSignal",
     # Native tools (provider-hosted, e.g. web search)
     "NativeTool",
     # Predicates DSL (for Step.routes)

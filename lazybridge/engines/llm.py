@@ -22,6 +22,7 @@ from lazybridge.core.types import (
 )
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
+from lazybridge.signals import ConcludeSignal
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import BaseProvider
@@ -136,6 +137,7 @@ class LLMEngine:
     # Class-level defaults so tests that bypass ``__init__`` via ``__new__``
     # (and any subclass that forgets to call super) still see safe values.
     max_parallel_tools: int | None = 8
+    max_tool_calls_per_turn: int | None = None
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = DEFAULT_STREAM_IDLE_TIMEOUT
     stream_buffer: int = 64
@@ -156,6 +158,7 @@ class LLMEngine:
         retry_delay: float = 1.0,
         request_timeout: float | None = 120.0,
         max_parallel_tools: int | None = 8,
+        max_tool_calls_per_turn: int | None = None,
         tool_timeout: float | None = None,
         stream_idle_timeout: float | None = _USE_DEFAULT_STREAM_IDLE,
         stream_buffer: int = 64,
@@ -170,6 +173,10 @@ class LLMEngine:
         self.request_timeout = request_timeout
         if max_parallel_tools is not None and max_parallel_tools < 1:
             raise ValueError(f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}")
+        if max_tool_calls_per_turn is not None and max_tool_calls_per_turn < 1:
+            raise ValueError(
+                f"max_tool_calls_per_turn must be >= 1 or None, got {max_tool_calls_per_turn!r}"
+            )
         if tool_timeout is not None and tool_timeout <= 0:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         # ``stream_idle_timeout`` has three valid input shapes:
@@ -195,6 +202,7 @@ class LLMEngine:
         if stream_buffer < 1:
             raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
         self.max_parallel_tools = max_parallel_tools
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn
         self.tool_timeout = tool_timeout
         self.stream_idle_timeout = stream_idle_timeout
         # Bounded queue between the streaming producer (provider) and
@@ -876,13 +884,32 @@ class LLMEngine:
                 async with _sem:
                     return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
 
+            # ``max_tool_calls_per_turn`` caps how many calls actually run this
+            # turn (distinct from ``max_parallel_tools``, which only bounds
+            # concurrency).  Setting it to 1 keeps a multi-agent graph on a
+            # single, non-branching path.  Rejected calls still need a result
+            # block below — the provider requires one per emitted tool_use id.
+            cap = self.max_tool_calls_per_turn
+            to_run = resp.tool_calls if cap is None else resp.tool_calls[:cap]
+            rejected = [] if cap is None else resp.tool_calls[cap:]
+
             raw_results = await asyncio.gather(
-                *[_run_one(tc) for tc in resp.tool_calls],
+                *[_run_one(tc) for tc in to_run],
                 return_exceptions=True,
             )
 
+            # ``conclude(...)`` raised inside a tool surfaces here: gather
+            # captures BaseException into the results list rather than
+            # propagating it, so re-raise it explicitly.  It then escapes this
+            # loop (engine.run's ``except Exception`` ignores BaseException) and
+            # — if we are a nested agent — is captured again by the parent's
+            # gather and re-raised at each level until the top-level Agent.run.
+            for tr in raw_results:
+                if isinstance(tr, ConcludeSignal):
+                    raise tr
+
             result_blocks: list[Any] = []
-            for tc, tr in zip(resp.tool_calls, raw_results):
+            for tc, tr in zip(to_run, raw_results):
                 # Detect Envelope-returning tools (agent-as-tool,
                 # verified tools): preserve their metadata and error
                 # state, stringify via .text() for the provider.
@@ -913,6 +940,17 @@ class LLMEngine:
                         content=content,
                         tool_name=tc.name,
                         is_error=is_err,
+                    )
+                )
+            # Calls beyond the per-turn cap were not executed, but the provider
+            # still expects a result for every tool_use id it emitted.
+            for tc in rejected:
+                result_blocks.append(
+                    ToolResultContent(
+                        tool_use_id=tc.id,
+                        content=f"Not executed: at most {cap} tool call(s) per turn allowed.",
+                        tool_name=tc.name,
+                        is_error=True,
                     )
                 )
             messages.append(Message(role=Role.USER, content=result_blocks))

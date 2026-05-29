@@ -292,6 +292,34 @@ Use `researcher.as_tool("alias")` only when you need a surface name
 different from the agent's own `name=`. Prefer this over building
 bespoke multi-agent orchestration glue.
 
+### Dynamic graph (AgentPool + conclude)
+
+For multi-agent graphs where agents delegate to **each other** by name and
+the topology is decided by the LLM at runtime (not a fixed DAG), use
+`AgentPool` together with `conclude`:
+
+```python
+from lazybridge import Agent, AgentPool, LLMEngine, conclude
+
+pool = AgentPool()  # registry exposed as a single `route(agent_name, task)` tool
+alice = Agent(engine=LLMEngine("claude-opus-4-8"), name="alice",
+              tools=[pool.as_tool(), conclude])
+bob = Agent(engine=LLMEngine("claude-opus-4-8"), name="bob",
+            tools=[pool.as_tool(), conclude])
+pool.register(alice, bob)            # register AFTER construction (breaks the cycle)
+result = alice.run("...")            # alice may route("bob", …); any agent may conclude(…)
+```
+
+- `pool.as_tool()` is an ordinary `Tool` named `route` — the engine does not
+  special-case it. `AgentPool(max_depth=…)` bounds recursion so cycles can't
+  blow the stack.
+- `conclude("answer")` is a non-local exit: raised anywhere in the nested tree,
+  it unwinds the **whole** chain and returns straight to the top-level
+  `run()` — internally a `ConcludeSignal` (a `BaseException`) caught only there.
+- Pair with `LLMEngine(max_tool_calls_per_turn=1)` to keep the graph on a
+  single non-branching path (distinct from `max_parallel_tools`, which only
+  bounds concurrency, not the number of calls executed).
+
 ### Deterministic plan
 
 ```python
