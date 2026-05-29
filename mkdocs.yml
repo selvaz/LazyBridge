@@ -124,6 +124,9 @@ extra:
       link: https://github.com/selvaz/LazyBridge
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lazybridge/
+    - icon: fontawesome/solid/envelope
+      link: mailto:LazyBridgeLabs@gmail.com
+      name: Email LazyBridge Labs
 
 extra_css:
   - stylesheets/extra.css
