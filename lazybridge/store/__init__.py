@@ -234,6 +234,47 @@ class Store:
         with self._lock:
             return list(self._mem.keys())
 
+    def items(self, *, prefix: str | None = None) -> list[tuple[str, Any]]:
+        """Return ``(key, value)`` pairs, optionally restricted to keys starting
+        with ``prefix``.
+
+        Uses an indexed B-tree range scan on the SQLite path (a single
+        ``WHERE key >= ? AND key < ?`` query) — sub-linear in the total
+        keyspace.  The in-memory path filters under the store lock.
+
+        Parameters
+        ----------
+        prefix:
+            Optional key prefix to filter by. ``None`` (default) or ``""``
+            returns every pair in the store. Any other string restricts the
+            results to keys starting with that prefix.
+        """
+        if self._db:
+            if not prefix:
+                rows = self._conn().execute("SELECT key, value FROM store").fetchall()
+            else:
+                upper = _prefix_upper_bound(prefix)
+                if upper is not None:
+                    rows = (
+                        self._conn()
+                        .execute(
+                            "SELECT key, value FROM store WHERE key >= ? AND key < ?",
+                            (prefix, upper),
+                        )
+                        .fetchall()
+                    )
+                else:
+                    # All characters in the prefix are U+10FFFF — no finite upper
+                    # bound; fall back to a full scan with Python startswith filter.
+                    rows = [
+                        r
+                        for r in self._conn().execute("SELECT key, value FROM store").fetchall()
+                        if r["key"].startswith(prefix)
+                    ]
+            return [(r["key"], json.loads(r["value"])) for r in rows]
+        with self._lock:
+            return [(k, _deep_copy_safe(v.value)) for k, v in self._mem.items() if not prefix or k.startswith(prefix)]
+
     def __iter__(self):
         return iter(self.keys())
 
@@ -382,3 +423,26 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_to_jsonable(v) for v in value]
     return value
+
+
+def _prefix_upper_bound(prefix: str) -> str | None:
+    """Exclusive upper bound for a B-tree range scan on key prefix ``prefix``.
+
+    Returns the smallest string that is strictly greater than every key
+    starting with ``prefix``, or ``None`` when no finite upper bound exists
+    (all characters in the prefix are at the Unicode maximum U+10FFFF).
+
+    Examples::
+
+        _prefix_upper_bound("pulse:task:")  # -> "pulse:task;" (ord(':')=58, ord(';')=59)
+        _prefix_upper_bound("")             # -> None
+        _prefix_upper_bound("a")            # -> "b"
+    """
+    if not prefix:
+        return None
+    chars = list(prefix)
+    for i in range(len(chars) - 1, -1, -1):
+        if ord(chars[i]) < 0x10FFFF:
+            chars[i] = chr(ord(chars[i]) + 1)
+            return "".join(chars[: i + 1])
+    return None

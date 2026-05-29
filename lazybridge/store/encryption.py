@@ -51,12 +51,12 @@ Threat model & non-goals:
 
 The adapter forwards every Store public method (``write``, ``read``,
 ``read_entry``, ``read_all``, ``delete``, ``clear``, ``keys``,
-``compare_and_swap``, ``to_text``, ``__iter__``, ``__contains__``,
-``__len__``, ``close``).  ``compare_and_swap`` is implemented at the
-adapter layer (NOT delegated raw) because the underlying Store would
-otherwise compare ciphertext tokens — and Fernet ciphertexts include
-a nonce, so two encryptions of the same plaintext don't compare
-equal.
+``items``, ``compare_and_swap``, ``to_text``, ``__iter__``,
+``__contains__``, ``__len__``, ``close``).  ``compare_and_swap`` is
+implemented at the adapter layer (NOT delegated raw) because the
+underlying Store would otherwise compare ciphertext tokens — and Fernet
+ciphertexts include a nonce, so two encryptions of the same plaintext
+don't compare equal.
 """
 
 from __future__ import annotations
@@ -205,6 +205,11 @@ class EncryptedStoreAdapter:
 
     def keys(self) -> list[str]:
         return self._inner.keys()
+
+    def items(self, *, prefix: str | None = None) -> list[tuple[str, Any]]:
+        """Return ``(key, decrypted-value)`` pairs, optionally restricted to
+        keys starting with ``prefix``."""
+        return [(k, self._decrypt(v)) for k, v in self._inner.items(prefix=prefix)]
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
