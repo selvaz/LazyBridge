@@ -44,9 +44,7 @@ class AgentPool:
             raise ValueError(f"max_depth must be >= 1, got {max_depth!r}")
         self._agents: dict[str, Agent] = {}
         self._max_depth = max_depth
-        self._depth: contextvars.ContextVar[int] = contextvars.ContextVar(
-            "lb_pool_depth", default=0
-        )
+        self._depth: contextvars.ContextVar[int] = contextvars.ContextVar("lb_pool_depth", default=0)
 
     def register(self, *agents: Agent) -> None:
         """Add agents to the pool, keyed by their ``name``."""

@@ -174,9 +174,7 @@ class LLMEngine:
         if max_parallel_tools is not None and max_parallel_tools < 1:
             raise ValueError(f"max_parallel_tools must be >= 1 or None, got {max_parallel_tools!r}")
         if max_tool_calls_per_turn is not None and max_tool_calls_per_turn < 1:
-            raise ValueError(
-                f"max_tool_calls_per_turn must be >= 1 or None, got {max_tool_calls_per_turn!r}"
-            )
+            raise ValueError(f"max_tool_calls_per_turn must be >= 1 or None, got {max_tool_calls_per_turn!r}")
         if tool_timeout is not None and tool_timeout <= 0:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         # ``stream_idle_timeout`` has three valid input shapes:

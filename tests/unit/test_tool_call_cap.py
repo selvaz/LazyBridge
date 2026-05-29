@@ -104,8 +104,11 @@ async def test_cap_executes_only_first_and_rejects_rest() -> None:
     engine = _build_engine(provider, max_tool_calls_per_turn=1)
 
     result = await engine.run(
-        Envelope.from_task("go"), tools=[Tool(note, name="note")],
-        output_type=str, memory=None, session=None,
+        Envelope.from_task("go"),
+        tools=[Tool(note, name="note")],
+        output_type=str,
+        memory=None,
+        session=None,
     )
 
     assert result.ok
@@ -131,8 +134,11 @@ async def test_no_cap_runs_all_calls() -> None:
     engine = _build_engine(provider)  # max_tool_calls_per_turn defaults to None
 
     result = await engine.run(
-        Envelope.from_task("go"), tools=[Tool(note, name="note")],
-        output_type=str, memory=None, session=None,
+        Envelope.from_task("go"),
+        tools=[Tool(note, name="note")],
+        output_type=str,
+        memory=None,
+        session=None,
     )
 
     assert result.ok

@@ -22,8 +22,6 @@ from lazybridge.core.types import (
     UsageStats,
 )
 from lazybridge.engines.llm import LLMEngine
-from lazybridge.envelope import Envelope
-from lazybridge.tools import Tool
 
 
 class _CallsProvider(BaseProvider):
@@ -88,8 +86,7 @@ def _agent(provider: BaseProvider, *, name: str, tools: list[Any]) -> Agent:
 async def test_conclude_direct_tool() -> None:
     """conclude called directly (no nesting) → Envelope.ok with the message."""
     tcs = [ToolCall(id="c0", name="conclude", arguments={"message": "the answer"})]
-    agent = _agent(_CallsProvider(model="fake-tool-model", tool_calls=tcs),
-                   name="solo", tools=[conclude])
+    agent = _agent(_CallsProvider(model="fake-tool-model", tool_calls=tcs), name="solo", tools=[conclude])
 
     result = await agent.run("question")
 
@@ -102,13 +99,15 @@ async def test_conclude_propagates_through_nesting() -> None:
     """Inner agent concludes; the message returns from the OUTER agent.run."""
     # Inner agent: its first turn calls conclude.
     inner_tcs = [ToolCall(id="i0", name="conclude", arguments={"message": "deep answer"})]
-    inner = _agent(_CallsProvider(model="fake-tool-model", tool_calls=inner_tcs),
-                   name="inner", tools=[conclude])
+    inner = _agent(_CallsProvider(model="fake-tool-model", tool_calls=inner_tcs), name="inner", tools=[conclude])
 
     # Outer agent: its first turn delegates to inner (agent-as-tool).
     outer_tcs = [ToolCall(id="o0", name="inner", arguments={"task": "dig"})]
-    outer = _agent(_CallsProvider(model="fake-tool-model", tool_calls=outer_tcs, final="outer-fallback"),
-                   name="outer", tools=[inner])
+    outer = _agent(
+        _CallsProvider(model="fake-tool-model", tool_calls=outer_tcs, final="outer-fallback"),
+        name="outer",
+        tools=[inner],
+    )
 
     result = await outer.run("start")
 

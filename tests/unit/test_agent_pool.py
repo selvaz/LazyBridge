@@ -157,15 +157,17 @@ async def test_pool_plus_conclude_integration() -> None:
     """Orchestrator routes to a worker that concludes → answer reaches the top."""
     # Worker concludes on its first turn.
     worker_tcs = [ToolCall(id="w0", name="conclude", arguments={"message": "final via pool"})]
-    worker = _agent(_CallsProvider(model="fake-tool-model", tool_calls=worker_tcs),
-                    name="worker", tools=[conclude])
+    worker = _agent(_CallsProvider(model="fake-tool-model", tool_calls=worker_tcs), name="worker", tools=[conclude])
 
     pool = AgentPool()
 
     # Orchestrator routes to the worker on its first turn.
     orch_tcs = [ToolCall(id="o0", name="route", arguments={"agent_name": "worker", "task": "go"})]
-    orchestrator = _agent(_CallsProvider(model="fake-tool-model", tool_calls=orch_tcs, final="orch-fallback"),
-                          name="orch", tools=[pool.as_tool(), conclude])
+    orchestrator = _agent(
+        _CallsProvider(model="fake-tool-model", tool_calls=orch_tcs, final="orch-fallback"),
+        name="orch",
+        tools=[pool.as_tool(), conclude],
+    )
     pool.register(worker)
 
     result = await orchestrator.run("start")
