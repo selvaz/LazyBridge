@@ -8,6 +8,12 @@ honest about when LazyBridge *isn't* it.
 > winner in the abstract — there's the one that fits *your* project's
 > shape, team, and constraints.
 
+!!! info "Comparing more than three?"
+    This page is the focused, decision-tree head-to-head of LangGraph, CrewAI
+    and LazyBridge. For the broader category view — Pydantic AI, LlamaIndex,
+    Haystack, AutoGen, Microsoft Agent Framework and Google ADK alongside these —
+    start from [Best Python AI Agent Frameworks in 2026](best-python-ai-agent-frameworks.md).
+
 ---
 
 ## What each framework optimises for
