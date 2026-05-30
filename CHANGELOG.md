@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`ext.planners` DAG builder — `add_step` now exposes `from_parallel_all`.**
+  The incremental builder tool's `task_kind` annotation was
+  `Literal["literal", "from_prev", "from_step", "from_parallel"]`, omitting
+  `from_parallel_all` even though `StepSpec`, the step validator, `_resolve_task`,
+  and `PLANNER_GUIDANCE` all already supported it — so the value the guidance
+  steers the planner toward was not selectable through the generated tool schema.
+  Added `"from_parallel_all"` to the `add_step` Literal and documented it in the
+  tool docstring. Additive; no existing behaviour changes.
+
+---
+
 ## [0.9.1] — 2026-05-28 — Store.items(prefix=) range scan
 
 ### Added
