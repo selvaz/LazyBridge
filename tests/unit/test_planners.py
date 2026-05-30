@@ -184,6 +184,17 @@ def test_add_step_rejects_from_parallel_all_on_non_parallel_target() -> None:
     assert out.startswith("REJECTED") and "parallel=True" in out
 
 
+def test_add_step_task_kind_annotation_exposes_from_parallel_all() -> None:
+    # Regression: the generated tool schema (an enum derived from this Literal)
+    # must list ``from_parallel_all`` — otherwise PLANNER_GUIDANCE steers the
+    # LLM toward a value it cannot select through the add_step builder tool.
+    import typing
+
+    _, add, *_ = make_plan_builder_tools(_agents())
+    hints = typing.get_type_hints(add.func, include_extras=True)
+    assert "from_parallel_all" in typing.get_args(hints["task_kind"])
+
+
 def test_run_plan_rejects_empty_plan() -> None:
     a = _agents()
     create, _, _, run, _ = make_plan_builder_tools(a)

@@ -356,7 +356,7 @@ def make_plan_builder_tools(
         plan_id: str,
         name: str,
         agent: str,
-        task_kind: Literal["literal", "from_prev", "from_step", "from_parallel"] = "from_prev",
+        task_kind: Literal["literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"] = "from_prev",
         task_text: str | None = None,
         task_step: str | None = None,
         context_kind: Literal["from_step", "from_parallel"] | None = None,
@@ -374,10 +374,14 @@ def make_plan_builder_tools(
             task_kind: ``literal`` (use ``task_text``) / ``from_prev``
                 (default; previous step's output) / ``from_step``
                 (named earlier step's output) / ``from_parallel``
-                (alias of ``from_step``, naming is for readability).
+                (alias of ``from_step``, naming is for readability) /
+                ``from_parallel_all`` (aggregate the WHOLE parallel band
+                starting at ``task_step`` into one labelled-text join;
+                ``task_step`` must be the FIRST ``parallel=true`` member).
             task_text: Required when ``task_kind="literal"``.
-            task_step: Required when ``task_kind`` is ``from_step`` or
-                ``from_parallel``; must name an earlier step.
+            task_step: Required when ``task_kind`` is ``from_step``,
+                ``from_parallel``, or ``from_parallel_all``; must name an
+                earlier step.
             context_kind: Optional secondary input pulled into the step's
                 context. Useful to combine TWO parallel branches.
             context_step: Required when ``context_kind`` is set.
