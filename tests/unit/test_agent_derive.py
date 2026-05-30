@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from lazybridge import Agent, Step
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.engines.plan import Plan
