@@ -152,7 +152,7 @@ class Agent:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         # Fallback agent tried when the primary engine returns an error.
-        # ``Agent("claude-opus-4-7", fallback=Agent("gpt-4o"))``.
+        # ``Agent("claude-opus-4-7", fallback=Agent("gpt-4o"))``.)
         fallback: Agent | None = None,
         # Prompt caching — when True, marks the static prefix (system
         # prompt + tools) as cacheable so providers that support it
@@ -220,7 +220,7 @@ class Agent:
         # If the caller passed native_tools but also supplied a pre-built
         # engine, push the list onto the engine if it has the attribute.
         # This lets ``Agent(engine=LLMEngine("claude"), native_tools=[...])``
-        # work the same as ``Agent("claude", native_tools=[...])``.
+        # work the same as ``Agent("claude", native_tools=[...])``.)
         if native_tools and hasattr(self.engine, "native_tools"):
             from lazybridge.core.types import NativeTool
 
@@ -869,7 +869,18 @@ class Agent:
             fallback=self.fallback,
         )
         base_kwargs.update(overrides)
-        return Agent(**base_kwargs)
+        derived = Agent(**base_kwargs)
+        # __init__ stamps engine._agent_name on every construction; since the engine
+        # object is shared, restore the original so base-agent runs continue to
+        # log/emit under the correct identity.
+        if hasattr(self.engine, "_agent_name"):
+            self.engine._agent_name = self.name
+        # Preserve _name_explicit unless name= was explicitly overridden — passing
+        # name=self.name through __init__ would otherwise silently promote an
+        # implicitly-named agent to explicitly-named, bypassing the guard.
+        if "name" not in overrides:
+            derived._name_explicit = self._name_explicit
+        return derived
 
     # ------------------------------------------------------------------
     # Factories
