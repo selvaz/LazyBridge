@@ -356,9 +356,7 @@ def make_plan_builder_tools(
         plan_id: str,
         name: str,
         agent: str,
-        task_kind: Literal[
-            "literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"
-        ] = "from_prev",
+        task_kind: Literal["literal", "from_prev", "from_step", "from_parallel", "from_parallel_all"] = "from_prev",
         task_text: str | None = None,
         task_step: str | None = None,
         context_kind: Literal["from_step", "from_parallel"] | None = None,
