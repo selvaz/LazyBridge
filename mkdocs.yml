@@ -67,6 +67,8 @@ plugins:
   - llmstxt:
       full_output: llms-full.txt
       sections:
+        Category guides:
+          - best-python-ai-agent-frameworks.md
         Concepts:
           - concepts/*.md
         Guides:
@@ -135,6 +137,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Why LazyBridge: why.md
+  - Best Python AI agent frameworks: best-python-ai-agent-frameworks.md
   - Comparison: comparison.md
   - For Beginners:
       - Start here: beginners/index.md
