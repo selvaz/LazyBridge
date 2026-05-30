@@ -103,9 +103,7 @@ LazyBridge starts with a smaller model:
 Agent = Engine + Tools + State
 ```
 
-The **Engine** decides what happens next.  
-The **Tools** define what the agent can do.  
-The **State** carries continuity, memory, persistence, events and observability.
+The **Engine** decides what happens next. The **Tools** define what the agent can do. The **State** carries continuity, memory, persistence, events and observability.
 
 That split matters because LazyBridge does not treat an agent as “an LLM wrapper”.
 
@@ -135,11 +133,11 @@ LazyBridge is split into three focused packages.
 | LazyTools | Capability layer | Gmail, Telegram, MCP, external gateways, document readers, skills, allowlists, confirmation gates |
 | LazyPulse | Governed service layer | tick loop, inbound adapters, trust policy, task lifecycle, human review and audit trail |
 
-The split is intentional.
+The split is intentional:
 
-Core does not need to import connector packages.  
-Tools does not need to know about the scheduler.  
-Pulse runs Agents and applies policy before external work reaches the model.
+- Core does not need to import connector packages.
+- Tools does not need to know about the scheduler.
+- Pulse runs Agents and applies policy before external work reaches the model.
 
 A compact way to understand the ecosystem:
 
@@ -169,6 +167,7 @@ dynamic_agent = Agent(
 deterministic_pipeline = Agent(
     engine=Plan(Step("research"), Step("write")),
     tools=[research_agent, writer_agent],
+    name="pipeline",
 )
 ```
 
@@ -236,8 +235,7 @@ A [`Plan`](guides/full/plan.md) is a deterministic engine.
 
 It declares steps, data flow, routes, typed handoffs, parallel bands, store writes and checkpoint/resume behavior.
 
-Use an LLM when the model should decide.  
-Use a Plan when the system should decide.
+Use an LLM when the model should decide. Use a Plan when the system should decide.
 
 This separation keeps high-level control flow out of the prompt when auditability, repeatability or cost predictability matter.
 
@@ -485,6 +483,7 @@ article = Agent(
         Step("write", context=from_step("research")),
     ),
     tools=[research, write],
+    name="article",
     session=Session(),
 )
 
