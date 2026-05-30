@@ -205,8 +205,8 @@ docstrings. Use it as a search target:
 
 If you generate LazyBridge code with an LLM, point it at:
 
-- [`llms.txt`](https://lazybridge.com/llms.txt) — concise index
-- [`llms-full.txt`](https://lazybridge.com/llms-full.txt) — full
+- [`llms.txt`](https://core.lazybridge.com/llms.txt) — concise index
+- [`llms-full.txt`](https://core.lazybridge.com/llms-full.txt) — full
   consolidated docs in one file
 - [Codegen contract](../for-llms/codegen-contract.md) — strict
   conventions (canonical imports, what to avoid, what to prefer)
