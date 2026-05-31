@@ -39,6 +39,7 @@ def test_no_default_model_raises_on_missing_model() -> None:
     assert OpenAIProvider.default_model is None
     # Constructing without model= and then resolving should raise ValueError.
     from lazybridge.core.types import CompletionRequest, Message
+
     provider = OpenAIProvider.__new__(OpenAIProvider)
     provider.model = None
     provider.fallback_model = None
