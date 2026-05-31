@@ -20,6 +20,7 @@ The guard fires on check_input only (output is left untouched).
 from __future__ import annotations
 
 import re
+
 from lazybridge.guardrails import Guard, GuardAction
 
 

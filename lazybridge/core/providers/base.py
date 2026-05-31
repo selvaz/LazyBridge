@@ -125,9 +125,11 @@ class BaseProvider(ABC):
       ``asyncio.get_event_loop().run_in_executor`` for blocking SDK calls.
     """
 
-    default_model: str = ""
+    default_model: str | None = ""
     """Class-level default model identifier.  Used when neither the request
-    nor the constructor ``model=`` argument specifies a model."""
+    nor the constructor ``model=`` argument specifies a model.
+    Set to ``None`` on paid cloud providers to force explicit model selection
+    and prevent silent fallback to an expensive flagship."""
 
     supported_native_tools: frozenset[NativeTool] = frozenset()
     """Declare which :class:`~lazybridge.core.types.NativeTool` values this

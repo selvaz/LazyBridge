@@ -174,7 +174,7 @@ class Executor:
         return self._provider
 
     @property
-    def model(self) -> str:
+    def model(self) -> str | None:
         return self._provider.model
 
     def _should_retry(self, exc: BaseException) -> bool:
