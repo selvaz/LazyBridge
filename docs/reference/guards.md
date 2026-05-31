@@ -22,6 +22,7 @@ with judge feedback instead of blocking — see
 | `ContentGuard` | Deterministic regex/list-based filter | none |
 | `GuardChain` | Compose multiple guards (first-fail wins) | sum of children |
 | `LLMGuard` | LLM-as-judge guard | one LLM call per check |
+| `DeduplicateGuard` | Removes repeated text blocks from input | none |
 | `GuardError` | Exception some integrations raise on hard policy failures | n/a |
 
 ::: lazybridge.Guard
@@ -33,5 +34,7 @@ with judge feedback instead of blocking — see
 ::: lazybridge.GuardChain
 
 ::: lazybridge.LLMGuard
+
+::: lazybridge.dedup_guard.DeduplicateGuard
 
 ::: lazybridge.GuardError
