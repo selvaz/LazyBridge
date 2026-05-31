@@ -70,9 +70,9 @@ Why does this matter? Because:
 | Model | Context window | Rough input price |
 |---|---|---|
 | `claude-haiku-4-5` | 200 K tokens | $ |
-| `gpt-5.4-mini` | 128 K tokens | $ |
+| `gpt-5.4-mini` | 400 K tokens | $ |
 | `gemini-3-flash-preview` | 1 M tokens | $ |
-| `claude-opus-4-8` | 200 K tokens | $$$ |
+| `claude-opus-4-8` | 1 M tokens | $$$ |
 
 (One `$` ≈ sub-dollar per million input tokens; `$$$` ≈ tens of dollars per
 million. Each provider publishes exact prices on its pricing page.)
