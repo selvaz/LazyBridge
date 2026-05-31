@@ -20,6 +20,7 @@ The guard fires on check_input only (output is left untouched).
 from __future__ import annotations
 
 import re
+
 from lazybridge.guardrails import Guard, GuardAction
 
 
@@ -67,14 +68,14 @@ def deduplicate(text: str, *, similarity_chars: int = 60) -> tuple[str, int]:
     if not text:
         return text, 0
 
-    blocks   = _split_blocks(text)
+    blocks = _split_blocks(text)
     seen_full: set[str] = set()
     seen_prefix: set[str] = set()
     kept: list[str] = []
     removed = 0
 
     for block in blocks:
-        norm   = _normalise(block)
+        norm = _normalise(block)
         prefix = norm[:similarity_chars]
 
         if norm in seen_full or (prefix and prefix in seen_prefix):
@@ -119,9 +120,9 @@ class DeduplicateGuard(Guard):
         min_block_chars: int = 40,
         verbose: bool = True,
     ) -> None:
-        self._sim_chars  = similarity_chars
-        self._min_chars  = min_block_chars
-        self._verbose    = verbose
+        self._sim_chars = similarity_chars
+        self._min_chars = min_block_chars
+        self._verbose = verbose
 
     def check_input(self, text: str) -> GuardAction:
         if not text or len(text) < self._min_chars:

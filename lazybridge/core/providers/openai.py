@@ -176,7 +176,10 @@ class OpenAIProvider(BaseProvider):
     - Streaming
     """
 
-    default_model = "gpt-5.5"
+    # No default — forces explicit model= to avoid silent expensive fallback.
+    # Use fallback_model='cheapest' or fallback_model='gpt-4o-mini' if you
+    # want a safety net.
+    default_model: str | None = None
 
     # Tier aliases.  GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
     # so medium/cheap continue to point at the GPT-5.4 family.

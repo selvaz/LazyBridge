@@ -109,7 +109,9 @@ class GoogleProvider(BaseProvider):
     - Streaming
     """
 
-    default_model = "gemini-3.1-pro-preview"
+    # No default — forces explicit model= to avoid silent paid fallback.
+    # Use fallback_model="cheapest" or fallback_model="gemini-2.0-flash" if you want a safety net.
+    default_model = None
 
     # Tier aliases.  Gemini 3 preview series used where available.
     _TIER_ALIASES = {

@@ -34,8 +34,18 @@ def _provider() -> OpenAIProvider:
     return OpenAIProvider.__new__(OpenAIProvider)
 
 
-def test_default_model_is_gpt_5_5() -> None:
-    assert OpenAIProvider.default_model == "gpt-5.5"
+def test_no_default_model_raises_on_missing_model() -> None:
+    # default_model is intentionally None — paid providers must be explicit.
+    assert OpenAIProvider.default_model is None
+    # Constructing without model= and then resolving should raise ValueError.
+    from lazybridge.core.types import CompletionRequest, Message
+
+    provider = OpenAIProvider.__new__(OpenAIProvider)
+    provider.model = None
+    provider.fallback_model = None
+    req = CompletionRequest(messages=[Message(role="user", content="hi")])
+    with pytest.raises(ValueError, match="no model configured"):
+        provider._resolve_model(req)
 
 
 def test_tier_aliases_route_to_gpt_5_5_family() -> None:

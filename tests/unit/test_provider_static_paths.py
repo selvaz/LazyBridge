@@ -64,6 +64,9 @@ def _bare(provider_cls):
     p = provider_cls.__new__(provider_cls)
     p.api_key = None
     p.model = provider_cls.default_model
+    # Do NOT set _user_model — absence triggers the sentinel fallback in
+    # _resolve_model, which then reads self.model for backward compat.
+    p.fallback_model = None
     return p
 
 
@@ -223,14 +226,28 @@ def test_resolve_model_passes_concrete_models_through(provider_cls):
     assert p._resolve_model(req) == "some-bespoke-finetune-v2"
 
 
-def test_resolve_model_falls_back_through_instance_and_default():
+def test_resolve_model_falls_back_through_instance_and_explicit_fallback():
     p = _bare(OpenAIProvider)
+    # Simulate a provider constructed with model="gpt-4.1"
     p.model = "gpt-4.1"
+    p._user_model = "gpt-4.1"
     req = CompletionRequest(messages=[Message(role=Role.USER, content="hi")])
     assert p._resolve_model(req) == "gpt-4.1"
 
+    # Simulate no user model — fallback_model should be honoured.
     p.model = ""
-    assert p._resolve_model(req) == OpenAIProvider.default_model
+    p._user_model = None
+    p.fallback_model = "gpt-4o-mini"
+    assert p._resolve_model(req) == "gpt-4o-mini"
+
+    # "cheapest" resolves to the super_cheap tier alias.
+    p.fallback_model = "cheapest"
+    assert p._resolve_model(req) == OpenAIProvider._TIER_ALIASES["super_cheap"]
+
+    # No model, no fallback → ValueError.
+    p.fallback_model = None
+    with pytest.raises(ValueError, match="no model configured"):
+        p._resolve_model(req)
 
 
 # ---------------------------------------------------------------------------

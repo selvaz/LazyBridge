@@ -125,9 +125,11 @@ class BaseProvider(ABC):
       ``asyncio.get_event_loop().run_in_executor`` for blocking SDK calls.
     """
 
-    default_model: str = ""
+    default_model: str | None = ""
     """Class-level default model identifier.  Used when neither the request
-    nor the constructor ``model=`` argument specifies a model."""
+    nor the constructor ``model=`` argument specifies a model.
+    Set to ``None`` on paid cloud providers to force explicit model selection
+    and prevent silent fallback to an expensive flagship."""
 
     supported_native_tools: frozenset[NativeTool] = frozenset()
     """Declare which :class:`~lazybridge.core.types.NativeTool` values this
@@ -209,6 +211,7 @@ class BaseProvider(ABC):
         api_key: str | None = None,
         model: str | None = None,
         *,
+        fallback_model: str | None = None,
         strict_native_tools: bool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -217,11 +220,23 @@ class BaseProvider(ABC):
         Parameters
         ----------
         api_key:
-            Provider API key.  If ``None``, ``_init_client`` should read it from
+            Provider API key.  If ``None``, ``_init_client`` reads it from
             an environment variable (standard pattern for all built-in providers).
         model:
-            Model identifier to use for all requests.  Falls back to
-            ``default_model`` when ``None``.
+            Model identifier to use for all requests.  When ``None`` and
+            ``default_model`` is also ``None`` (recommended for paid cloud
+            providers), ``_resolve_model`` raises a clear ``ValueError``
+            rather than silently falling back to an expensive flagship.
+        fallback_model:
+            Model to use when neither ``model=`` nor ``request.model`` is set.
+            Two forms:
+            - Explicit string, e.g. ``fallback_model="gpt-4o-mini"`` — used
+              verbatim (tier aliases are resolved normally).
+            - ``"cheapest"`` — automatically resolves to the cheapest tier
+              alias available on this provider
+              (``super_cheap`` → ``cheap`` → ``medium``, in that order).
+            When ``None`` (default) and no model is configured, a
+            ``ValueError`` is raised with guidance on how to fix it.
         strict_native_tools:
             When ``True``, requesting an unsupported :class:`NativeTool`
             raises :class:`UnsupportedNativeToolError`.  When ``None``
@@ -237,7 +252,14 @@ class BaseProvider(ABC):
                 "variable, or provide a valid key."
             )
         self.api_key = api_key
+        # Store the user-supplied model separately so _resolve_model can
+        # distinguish "user didn't pass a model" from "class default applies".
+        # self.model is the effective value for backward-compat reads (e.g.
+        # executor.model); _resolve_model uses _user_model to decide when to
+        # consult fallback_model before falling through to default_model.
+        self._user_model: str | None = model
         self.model = model or self.default_model
+        self.fallback_model = fallback_model
         if strict_native_tools is not None:
             # Per-instance override of the class-level default.
             self.strict_native_tools = bool(strict_native_tools)
@@ -387,30 +409,83 @@ class BaseProvider(ABC):
     #:    supported resilience pattern in 0.7.9.
     _FALLBACKS: dict[str, list[str]] = {}
 
-    def _resolve_model(self, request: CompletionRequest) -> str:
-        """Return the effective model: request → instance → class default.
+    def _cheapest_tier(self) -> str | None:
+        """Return the concrete model for the cheapest available tier alias.
 
-        Tier aliases (``"top"``, ``"cheap"`` etc.) are resolved here via
-        ``_TIER_ALIASES``; everything else is a passthrough.  Always use
-        this inside ``complete`` / ``stream`` instead of reading
-        ``self.model`` directly so that per-request overrides and
-        per-provider tier tables are respected.
+        Walks ``super_cheap`` → ``cheap`` → ``medium`` and returns the first
+        hit.  Returns ``None`` if none of those tiers are defined on this
+        provider.
         """
-        name = request.model or self.model or self.default_model
-        # Phase-2 Block C: 0.7 returned an empty string when nothing was
-        # configured, leaving the SDK to surface a cryptic provider-side
-        # error.  0.7.9 raises with concrete fix guidance.
-        if not name:
-            raise ValueError(
-                f"{type(self).__name__}: no model configured.\n"
-                f"  Pass ``model=`` on the request, the provider, or set "
-                f"``default_model`` on the class.\n"
-                f"  Available tier aliases: {sorted(self._TIER_ALIASES)} "
-                f"(or pass an explicit model id)."
-            )
-        # Tier alias?  Resolve to the concrete model.
-        resolved = self._TIER_ALIASES.get(name, name)
-        return resolved
+        for tier in ("super_cheap", "cheap", "medium"):
+            model = self._TIER_ALIASES.get(tier)
+            if model:
+                return model
+        return None
+
+    def _resolve_model(self, request: CompletionRequest) -> str:
+        """Return the effective model for this request.
+
+        Resolution order:
+        1. ``request.model``         — per-call override (highest priority)
+        2. ``self._user_model``      — explicitly passed at construction time
+        3. ``self.fallback_model``   — explicit fallback or ``"cheapest"``
+        4. ``self.default_model``    — class-level default (free/cheap providers only)
+        5. raise ``ValueError``      — no silent expensive surprises
+
+        Tier aliases (``"top"``, ``"cheap"``, ``"super_cheap"`` etc.) are
+        resolved at the end via ``_TIER_ALIASES``; everything else passes
+        through verbatim.  Always call this method instead of reading
+        ``self.model`` directly so per-request overrides and tier tables
+        are respected.
+        """
+        # 1. Per-request override.
+        if request.model:
+            return self._TIER_ALIASES.get(request.model, request.model)
+
+        # 2. User-supplied model at construction time.  getattr for backward
+        # compat with __new__-bypassed instances (tests, legacy subclasses)
+        # that never called __init__ and lack _user_model; fall back to
+        # self.model which those callers set directly.  _user_model=None
+        # means "user passed no model= argument" and is distinct from
+        # "attribute absent", so fallback_model is correctly consulted even
+        # when a class default_model exists (e.g. LMStudioProvider with
+        # fallback_model="cheapest").
+        user_model: str | None = getattr(self, "_user_model", self.model)
+        if user_model:
+            return self._TIER_ALIASES.get(user_model, user_model)
+
+        # 3. fallback_model — opt-in safety net, checked BEFORE default_model
+        # so LMStudioProvider(fallback_model="cheapest") takes effect even
+        # when the class defines a default_model.
+        fb: str | None = getattr(self, "fallback_model", None)
+        if fb == "cheapest":
+            cheapest = self._cheapest_tier()
+            if cheapest is None:
+                raise ValueError(
+                    f"{type(self).__name__}: fallback_model='cheapest' requested "
+                    f"but no cheap/super_cheap/medium tier alias is defined.\n"
+                    f"  Available tier aliases: {sorted(self._TIER_ALIASES)}"
+                )
+            return self._TIER_ALIASES.get(cheapest, cheapest)
+        if fb:
+            return self._TIER_ALIASES.get(fb, fb)
+
+        # 4. Class-level default (free/cheap providers only; paid providers
+        # set default_model = None to force explicit selection).
+        default = self.default_model
+        if default:
+            return self._TIER_ALIASES.get(default, default)
+
+        raise ValueError(
+            f"{type(self).__name__}: no model configured.\n"
+            f"  Fix options:\n"
+            f"  1. Pass model= explicitly:      LLMEngine('gpt-4o-mini')\n"
+            f"  2. Set on the provider:          OpenAIProvider(model='gpt-4o-mini')\n"
+            f"  3. Explicit fallback:            OpenAIProvider(fallback_model='gpt-4o-mini')\n"
+            f"  4. Cheapest-tier fallback:       OpenAIProvider(fallback_model='cheapest')\n"
+            f"  Available tier aliases: {sorted(self._TIER_ALIASES)} "
+            f"(or pass an explicit model id)."
+        )
 
     def _check_native_tools(self, tools: list[NativeTool]) -> list[NativeTool]:
         """Filter ``tools`` to only those declared in ``supported_native_tools``.
