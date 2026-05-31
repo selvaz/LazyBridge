@@ -57,6 +57,7 @@ _EXPECTED: frozenset[str] = frozenset(
         "GuardAction",
         "GuardError",
         "ContentGuard",
+        "DeduplicateGuard",
         "GuardChain",
         "LLMGuard",
         # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
