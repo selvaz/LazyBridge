@@ -427,9 +427,10 @@ class BaseProvider(ABC):
 
         Resolution order:
         1. ``request.model``         — per-call override (highest priority)
-        2. ``self.model``            — set at provider construction time
+        2. ``self._user_model``      — explicitly passed at construction time
         3. ``self.fallback_model``   — explicit fallback or ``"cheapest"``
-        4. raise ``ValueError``      — no silent expensive surprises
+        4. ``self.default_model``    — class-level default (free/cheap providers only)
+        5. raise ``ValueError``      — no silent expensive surprises
 
         Tier aliases (``"top"``, ``"cheap"``, ``"super_cheap"`` etc.) are
         resolved at the end via ``_TIER_ALIASES``; everything else passes
@@ -437,52 +438,54 @@ class BaseProvider(ABC):
         ``self.model`` directly so per-request overrides and tier tables
         are respected.
         """
-        # Resolution order:
-        # 1. request.model  — per-call override
-        # 2. _user_model    — explicitly passed at construction time
-        # 3. fallback_model — opt-in safety net (checked BEFORE default_model
-        #                     so LMStudioProvider(fallback_model="cheapest")
-        #                     actually takes effect instead of being shadowed
-        #                     by the class-level default_model)
-        # 4. default_model  — class-level default (free/cheap providers only)
-        # 5. raise ValueError
-        _UNSET = object.__new__(object)  # sentinel
-        _user = getattr(self, "_user_model", _UNSET)
-        # If _user_model was never set (e.g. __new__ bypass in tests or
-        # legacy subclasses), fall back to self.model for backward compat.
-        name = request.model or (_user if _user is not _UNSET else self.model)
+        # 1. Per-request override.
+        if request.model:
+            return self._TIER_ALIASES.get(request.model, request.model)
 
-        if not name:
-            # Apply fallback_model if configured.
-            fb = getattr(self, "fallback_model", None)
-            if fb == "cheapest":
-                name = self._cheapest_tier()
-                if not name:
-                    raise ValueError(
-                        f"{type(self).__name__}: fallback_model='cheapest' requested "
-                        f"but no cheap/super_cheap/medium tier alias is defined.\n"
-                        f"  Available tier aliases: {sorted(self._TIER_ALIASES)}"
-                    )
-            elif fb:
-                name = fb
+        # 2. User-supplied model at construction time.  getattr for backward
+        # compat with __new__-bypassed instances (tests, legacy subclasses)
+        # that never called __init__ and lack _user_model; fall back to
+        # self.model which those callers set directly.  _user_model=None
+        # means "user passed no model= argument" and is distinct from
+        # "attribute absent", so fallback_model is correctly consulted even
+        # when a class default_model exists (e.g. LMStudioProvider with
+        # fallback_model="cheapest").
+        user_model: str | None = getattr(self, "_user_model", self.model)
+        if user_model:
+            return self._TIER_ALIASES.get(user_model, user_model)
 
-        if not name:
-            name = self.default_model
+        # 3. fallback_model — opt-in safety net, checked BEFORE default_model
+        # so LMStudioProvider(fallback_model="cheapest") takes effect even
+        # when the class defines a default_model.
+        fb: str | None = getattr(self, "fallback_model", None)
+        if fb == "cheapest":
+            cheapest = self._cheapest_tier()
+            if cheapest is None:
+                raise ValueError(
+                    f"{type(self).__name__}: fallback_model='cheapest' requested "
+                    f"but no cheap/super_cheap/medium tier alias is defined.\n"
+                    f"  Available tier aliases: {sorted(self._TIER_ALIASES)}"
+                )
+            return self._TIER_ALIASES.get(cheapest, cheapest)
+        if fb:
+            return self._TIER_ALIASES.get(fb, fb)
 
-        if not name:
-            raise ValueError(
-                f"{type(self).__name__}: no model configured.\n"
-                f"  Fix options:\n"
-                f"  1. Pass model= explicitly:      LLMEngine('gpt-4o-mini')\n"
-                f"  2. Set on the provider:          OpenAIProvider(model='gpt-4o-mini')\n"
-                f"  3. Explicit fallback:            OpenAIProvider(fallback_model='gpt-4o-mini')\n"
-                f"  4. Cheapest-tier fallback:       OpenAIProvider(fallback_model='cheapest')\n"
-                f"  Available tier aliases: {sorted(self._TIER_ALIASES)} "
-                f"(or pass an explicit model id)."
-            )
+        # 4. Class-level default (free/cheap providers only; paid providers
+        # set default_model = None to force explicit selection).
+        default = self.default_model
+        if default:
+            return self._TIER_ALIASES.get(default, default)
 
-        # Tier alias?  Resolve to the concrete model.
-        return self._TIER_ALIASES.get(name, name)
+        raise ValueError(
+            f"{type(self).__name__}: no model configured.\n"
+            f"  Fix options:\n"
+            f"  1. Pass model= explicitly:      LLMEngine('gpt-4o-mini')\n"
+            f"  2. Set on the provider:          OpenAIProvider(model='gpt-4o-mini')\n"
+            f"  3. Explicit fallback:            OpenAIProvider(fallback_model='gpt-4o-mini')\n"
+            f"  4. Cheapest-tier fallback:       OpenAIProvider(fallback_model='cheapest')\n"
+            f"  Available tier aliases: {sorted(self._TIER_ALIASES)} "
+            f"(or pass an explicit model id)."
+        )
 
     def _check_native_tools(self, tools: list[NativeTool]) -> list[NativeTool]:
         """Filter ``tools`` to only those declared in ``supported_native_tools``.
