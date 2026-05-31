@@ -138,6 +138,8 @@ from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 #: ``LLMEngine.provider_aliases()`` instead — this constant is a
 #: snapshot, not a live view.
 PROVIDER_ALIASES: dict[str, str] = LLMEngine.provider_aliases()
+# Graph / Guards
+from lazybridge.dedup_guard import DeduplicateGuard
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
     Plan,
@@ -157,9 +159,6 @@ from lazybridge.exporters import (
     JsonFileExporter,
     StructuredLogExporter,
 )
-
-# Graph / Guards
-from lazybridge.dedup_guard import DeduplicateGuard
 from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
