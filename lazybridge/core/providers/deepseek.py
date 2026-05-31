@@ -57,10 +57,11 @@ _THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
 _THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penalty", "frequency_penalty"})
 
 # Price per 1M tokens (input, output). Verify at platform.deepseek.com/api-docs/pricing.
+# V4 Pro: the 75%-off promo became the permanent standard rate (announced 2026-05).
 # Cache-hit input rates (automatic for repeated prefixes ≥1024 tokens, same account):
-#   deepseek-v4-pro:   $0.145/M   deepseek-v4-flash: $0.028/M
+#   deepseek-v4-pro:   $0.003625/M   deepseek-v4-flash: $0.0028/M
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "deepseek-v4-pro": (1.74, 3.48),
+    "deepseek-v4-pro": (0.435, 0.87),
     "deepseek-v4-flash": (0.14, 0.28),
     # Deprecated 2026-07-24; currently API-routed to deepseek-v4-flash.
     "deepseek-reasoner": (0.14, 0.28),

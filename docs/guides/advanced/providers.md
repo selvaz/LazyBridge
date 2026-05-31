@@ -116,8 +116,8 @@ Other supported models (passed verbatim, no tier alias):
 
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
-| `top` / `expensive` | `deepseek-v4-pro` | 1 M | 384 K | $1.74 | $0.145 | $3.48 |
-| `medium` / `cheap` / `super_cheap` | `deepseek-v4-flash` | 1 M | 384 K | $0.14 | $0.028 | $0.28 |
+| `top` / `expensive` | `deepseek-v4-pro` | 1 M | 384 K | $0.435 | $0.003625 | $0.87 |
+| `medium` / `cheap` / `super_cheap` | `deepseek-v4-flash` | 1 M | 384 K | $0.14 | $0.0028 | $0.28 |
 
 - **Thinking.** Both V4 models accept `ThinkingConfig` →
   `reasoning_content` field on the response. In thinking mode the
