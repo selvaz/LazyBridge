@@ -107,7 +107,9 @@ class AnthropicProvider(BaseProvider):
     - Older models: extended thinking with budget_tokens
     """
 
-    default_model = "claude-sonnet-4-6"
+    # No default — forces explicit model= to avoid silent paid fallback.
+    # Use fallback_model="cheapest" or fallback_model="claude-haiku-4-5" if you want a safety net.
+    default_model = None
 
     # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
     # resolves here.  Update this table when new models ship.
