@@ -143,6 +143,25 @@ orchestrator = Agent(
 - **`route` returns text, not a typed envelope.** Nested cost/token
   metadata is still rolled up, but structured payloads are flattened to
   `.text()`. Use a `Plan` step when you need a typed hand-off.
+- **Context inflation in nested or cyclic routing.** Each hop typically
+  passes the full conversation history as the task string. In a deep or
+  cyclic chain (`A → B → A → …`) the same dialogue turns can appear
+  multiple times inside a single context window, wasting tokens and
+  degrading coherence. Add a
+  [`DeduplicateGuard`](../mid/dedup-guard.md) to any agent that receives
+  accumulated history:
+
+  ```python
+  from lazybridge import DeduplicateGuard
+
+  worker = Agent(
+      name="worker",
+      engine=LLMEngine("claude-haiku-4-5"),
+      guard=DeduplicateGuard(),   # strip repeated turns before the LLM sees them
+      tools=[pool.as_tool(), conclude],
+  )
+  ```
+
 - **`max_depth` is per-pool.** Each pool counts its own routing depth via
   an independent `contextvars` counter; in a layered setup each pool
   bounds only its own recursion. Cross-pool cycles are still bounded, but
@@ -156,6 +175,8 @@ orchestrator = Agent(
 - [As tool](as-tool.md) — static one-way `agent → agent` composition.
 - [Chain](chain.md) / [Plan](../full/plan.md) — fixed, deterministic
   control flow when the topology is known up front.
+- [DeduplicateGuard](dedup-guard.md) — strip repeated history blocks
+  from task strings in nested or cyclic routing chains.
 - [Everything is a tool](../../concepts/everything-is-a-tool.md) — why
   `route` and `conclude` need no special engine support.
 - [Multi-agent graphs](../../reference/multi-agent.md) — API reference

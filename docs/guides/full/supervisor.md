@@ -235,6 +235,9 @@ supervisor_web = Agent(
 
 ## See also
 
+- [DeduplicateGuard](../mid/dedup-guard.md) — if worker agents
+  accumulate full conversation history across retry loops, attach this
+  guard to strip repeated blocks before the LLM sees them.
 - [HumanEngine](../mid/human-engine.md) — the lighter
   approval-only variant.
 - [Plan](plan.md) — typical container for a supervisor mid-
