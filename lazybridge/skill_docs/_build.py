@@ -44,6 +44,7 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
         "GuardAction",
         "GuardError",
         "ContentGuard",
+        "DeduplicateGuard",
         "GuardChain",
         "LLMGuard",
         # Provider-routing introspection — surfaced in

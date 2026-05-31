@@ -171,6 +171,7 @@ nav:
           - Store: guides/mid/store.md
           - Session: guides/mid/session.md
           - Guards: guides/mid/guards.md
+          - DeduplicateGuard: guides/mid/dedup-guard.md
           - verify=: guides/mid/verify.md
           - Chain: guides/mid/chain.md
           - Parallel: guides/mid/parallel.md
