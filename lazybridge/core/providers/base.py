@@ -252,6 +252,12 @@ class BaseProvider(ABC):
                 "variable, or provide a valid key."
             )
         self.api_key = api_key
+        # Store the user-supplied model separately so _resolve_model can
+        # distinguish "user didn't pass a model" from "class default applies".
+        # self.model is the effective value for backward-compat reads (e.g.
+        # executor.model); _resolve_model uses _user_model to decide when to
+        # consult fallback_model before falling through to default_model.
+        self._user_model: str | None = model
         self.model = model or self.default_model
         self.fallback_model = fallback_model
         if strict_native_tools is not None:
@@ -431,7 +437,20 @@ class BaseProvider(ABC):
         ``self.model`` directly so per-request overrides and tier tables
         are respected.
         """
-        name = request.model or self.model
+        # Resolution order:
+        # 1. request.model  — per-call override
+        # 2. _user_model    — explicitly passed at construction time
+        # 3. fallback_model — opt-in safety net (checked BEFORE default_model
+        #                     so LMStudioProvider(fallback_model="cheapest")
+        #                     actually takes effect instead of being shadowed
+        #                     by the class-level default_model)
+        # 4. default_model  — class-level default (free/cheap providers only)
+        # 5. raise ValueError
+        _UNSET = object.__new__(object)  # sentinel
+        _user = getattr(self, "_user_model", _UNSET)
+        # If _user_model was never set (e.g. __new__ bypass in tests or
+        # legacy subclasses), fall back to self.model for backward compat.
+        name = request.model or (_user if _user is not _UNSET else self.model)
 
         if not name:
             # Apply fallback_model if configured.
@@ -446,6 +465,9 @@ class BaseProvider(ABC):
                     )
             elif fb:
                 name = fb
+
+        if not name:
+            name = self.default_model
 
         if not name:
             raise ValueError(
