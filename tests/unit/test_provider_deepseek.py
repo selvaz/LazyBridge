@@ -23,6 +23,8 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # openai stub — the DeepSeek provider imports it lazily, but at __init__
 # time it constructs an OpenAI(api_key=..., base_url=...) client.  Stub
@@ -86,6 +88,20 @@ def test_compute_cost_signature_accepts_cached_input_tokens():
 def test_compute_cost_unknown_model_returns_none():
     p = _bare_deepseek()
     assert p._compute_cost("not-a-deepseek", 100, 100) is None
+
+
+def test_compute_cost_applies_cache_hit_rate():
+    p = _bare_deepseek()
+    # 1M input all cached: should use $0.003625 not $0.435
+    cost_all_cached = p._compute_cost("deepseek-v4-pro", 1_000_000, 0, cached_input_tokens=1_000_000)
+    assert cost_all_cached == pytest.approx(0.003625)
+    # 1M input no cache: standard $0.435
+    cost_no_cache = p._compute_cost("deepseek-v4-pro", 1_000_000, 0, cached_input_tokens=0)
+    assert cost_no_cache == pytest.approx(0.435)
+    # 500K cached + 500K uncached + 1M output for v4-flash
+    cost_mixed = p._compute_cost("deepseek-v4-flash", 500_000, 1_000_000, cached_input_tokens=500_000)
+    expected = (500_000 * 0.14 + 500_000 * 0.0028 + 1_000_000 * 0.28) / 1_000_000
+    assert cost_mixed == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------

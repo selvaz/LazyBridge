@@ -58,14 +58,21 @@ _THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penal
 
 # Price per 1M tokens (input, output). Verify at platform.deepseek.com/api-docs/pricing.
 # V4 Pro: the 75%-off promo became the permanent standard rate (announced 2026-05).
-# Cache-hit input rates (automatic for repeated prefixes ≥1024 tokens, same account):
-#   deepseek-v4-pro:   $0.003625/M   deepseek-v4-flash: $0.0028/M
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "deepseek-v4-pro": (0.435, 0.87),
     "deepseek-v4-flash": (0.14, 0.28),
     # Deprecated 2026-07-24; currently API-routed to deepseek-v4-flash.
     "deepseek-reasoner": (0.14, 0.28),
     "deepseek-chat": (0.14, 0.28),
+}
+
+# Cache-hit input rates per 1M tokens (automatic for repeated prefixes ≥1024 tokens,
+# same account). DeepSeek exposes hits via prompt_tokens_details.cached_tokens.
+_CACHE_HIT_PRICE_TABLE: dict[str, float] = {
+    "deepseek-v4-pro": 0.003625,
+    "deepseek-v4-flash": 0.0028,
+    "deepseek-reasoner": 0.0028,
+    "deepseek-chat": 0.0028,
 }
 
 
@@ -108,13 +115,13 @@ class DeepSeekProvider(OpenAIProvider):
     def _compute_cost(
         self, model: str, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
     ) -> float | None:
-        # Match the OpenAIProvider supertype signature (cached_input_tokens
-        # ignored — DeepSeek pricing is the same regardless of caching).
-        del cached_input_tokens  # unused; kept for signature compatibility
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
-                return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+                cached = max(0, min(cached_input_tokens, input_tokens))
+                uncached = input_tokens - cached
+                cache_hit_price = _CACHE_HIT_PRICE_TABLE.get(key, in_price)
+                return (uncached * in_price + cached * cache_hit_price + output_tokens * out_price) / 1_000_000
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
