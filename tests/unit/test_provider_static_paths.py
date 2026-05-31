@@ -223,14 +223,25 @@ def test_resolve_model_passes_concrete_models_through(provider_cls):
     assert p._resolve_model(req) == "some-bespoke-finetune-v2"
 
 
-def test_resolve_model_falls_back_through_instance_and_default():
+def test_resolve_model_falls_back_through_instance_and_explicit_fallback():
     p = _bare(OpenAIProvider)
     p.model = "gpt-4.1"
     req = CompletionRequest(messages=[Message(role=Role.USER, content="hi")])
     assert p._resolve_model(req) == "gpt-4.1"
 
+    # No class default_model anymore — explicit fallback_model is honoured instead.
     p.model = ""
-    assert p._resolve_model(req) == OpenAIProvider.default_model
+    p.fallback_model = "gpt-4o-mini"
+    assert p._resolve_model(req) == "gpt-4o-mini"
+
+    # "cheapest" resolves to the super_cheap tier alias.
+    p.fallback_model = "cheapest"
+    assert p._resolve_model(req) == OpenAIProvider._TIER_ALIASES["super_cheap"]
+
+    # No model, no fallback → ValueError.
+    p.fallback_model = None
+    with pytest.raises(ValueError, match="no model configured"):
+        p._resolve_model(req)
 
 
 # ---------------------------------------------------------------------------
