@@ -98,8 +98,8 @@ def test_compute_cost_applies_cache_hit_rate():
     # 1M input no cache: standard $0.435
     cost_no_cache = p._compute_cost("deepseek-v4-pro", 1_000_000, 0, cached_input_tokens=0)
     assert cost_no_cache == pytest.approx(0.435)
-    # 500K cached + 500K uncached + 1M output for v4-flash
-    cost_mixed = p._compute_cost("deepseek-v4-flash", 500_000, 1_000_000, cached_input_tokens=500_000)
+    # 1M total input, 500K cached + 500K uncached + 1M output for v4-flash
+    cost_mixed = p._compute_cost("deepseek-v4-flash", 1_000_000, 1_000_000, cached_input_tokens=500_000)
     expected = (500_000 * 0.14 + 500_000 * 0.0028 + 1_000_000 * 0.28) / 1_000_000
     assert cost_mixed == pytest.approx(expected)
 
