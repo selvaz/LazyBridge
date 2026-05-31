@@ -158,9 +158,9 @@ from lazybridge.exporters import (
     StructuredLogExporter,
 )
 
-# Graph
-from lazybridge.graph import GraphSchema
+# Graph / Guards
 from lazybridge.dedup_guard import DeduplicateGuard
+from lazybridge.graph import GraphSchema
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
 from lazybridge.pool import AgentPool

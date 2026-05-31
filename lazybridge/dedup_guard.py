@@ -49,7 +49,12 @@ def _split_blocks(text: str) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip()]
 
 
-def deduplicate(text: str, *, similarity_chars: int = 60) -> tuple[str, int]:
+def deduplicate(
+    text: str,
+    *,
+    similarity_chars: int = 60,
+    min_block_chars: int = 0,
+) -> tuple[str, int]:
     """Remove duplicate blocks from text.
 
     Parameters
@@ -59,6 +64,10 @@ def deduplicate(text: str, *, similarity_chars: int = 60) -> tuple[str, int]:
     similarity_chars:
         Number of leading characters used to detect near-duplicate blocks.
         Blocks whose first N chars match a previously seen block are dropped.
+    min_block_chars:
+        Blocks shorter than this (in original characters) are kept as-is and
+        never considered for deduplication.  ``0`` disables the per-block
+        length guard (default when called directly).
 
     Returns
     -------
@@ -75,6 +84,12 @@ def deduplicate(text: str, *, similarity_chars: int = 60) -> tuple[str, int]:
     removed = 0
 
     for block in blocks:
+        # Short blocks are always kept — they may be meaningful repeated
+        # phrases (e.g. "Yes", "Ok") that should not be deduplicated.
+        if min_block_chars and len(block) < min_block_chars:
+            kept.append(block)
+            continue
+
         norm = _normalise(block)
         prefix = norm[:similarity_chars]
 
@@ -125,10 +140,14 @@ class DeduplicateGuard(Guard):
         self._verbose = verbose
 
     def check_input(self, text: str) -> GuardAction:
-        if not text or len(text) < self._min_chars:
+        if not text:
             return GuardAction.allow()
 
-        cleaned, n_removed = deduplicate(text, similarity_chars=self._sim_chars)
+        cleaned, n_removed = deduplicate(
+            text,
+            similarity_chars=self._sim_chars,
+            min_block_chars=self._min_chars,
+        )
 
         if n_removed == 0:
             return GuardAction.allow()

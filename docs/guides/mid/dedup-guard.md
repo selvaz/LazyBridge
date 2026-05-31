@@ -48,7 +48,7 @@ DeduplicateGuard(
 | Parameter | Default | What it controls |
 |---|---|---|
 | `similarity_chars` | `60` | How many leading chars are used as a "fingerprint". Lower = more aggressive. |
-| `min_block_chars` | `40` | Minimum block length to be eligible for dedup. Prevents removing short repeated phrases like "Yes" or "Ok". |
+| `min_block_chars` | `40` | Blocks shorter than this (in characters) are kept as-is and never considered for deduplication. Prevents removing short repeated phrases like "Yes" or "Ok". |
 | `verbose` | `True` | Prints `[DeduplicateGuard] removed N block(s) — X → Y chars (-Z%)` to stdout. Set `False` in production. |
 
 ## How it works
@@ -189,9 +189,9 @@ print(n_removed)  # 1
   and double-newline paragraphs in the same string, the guard uses
   `[Turn N]` markers and ignores paragraph breaks within a turn.
 
-- **`min_block_chars` applies to the original block, not the normalised
-  form.** Whitespace-heavy blocks that are short after normalisation may
-  still pass the length check.
+- **`min_block_chars` is measured on the original block, not the normalised
+  form.** A block with lots of whitespace may be shorter after normalisation
+  but still pass the length threshold and be eligible for deduplication.
 
 - **The guard modifies the task string, not the message list.** If you are
   passing a structured `messages=` list directly to the engine rather than
