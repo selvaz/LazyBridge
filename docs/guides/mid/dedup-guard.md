@@ -25,8 +25,7 @@ these blocks automatically — no prompt engineering needed.
 ## Quick start
 
 ```python
-from lazybridge import Agent, LLMEngine
-from lazybridge.dedup_guard import DeduplicateGuard
+from lazybridge import Agent, DeduplicateGuard, LLMEngine
 
 agent = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
@@ -123,8 +122,7 @@ Run it **first** so downstream guards operate on the already-cleaned text:
 
 ```python
 import re
-from lazybridge import Agent, ContentGuard, GuardAction, GuardChain, LLMEngine
-from lazybridge.dedup_guard import DeduplicateGuard
+from lazybridge import Agent, ContentGuard, DeduplicateGuard, GuardAction, GuardChain, LLMEngine
 
 def no_pii(text: str) -> GuardAction:
     if re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text):
@@ -143,8 +141,7 @@ agent = Agent(
 ## Example: supervisor chain
 
 ```python
-from lazybridge import Agent, LLMEngine
-from lazybridge.dedup_guard import DeduplicateGuard
+from lazybridge import Agent, DeduplicateGuard, LLMEngine
 
 researcher = Agent(engine=LLMEngine("claude-haiku-4-5"), name="researcher")
 supervisor = Agent(

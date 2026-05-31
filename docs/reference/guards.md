@@ -35,6 +35,6 @@ with judge feedback instead of blocking — see
 
 ::: lazybridge.LLMGuard
 
-::: lazybridge.dedup_guard.DeduplicateGuard
+::: lazybridge.DeduplicateGuard
 
 ::: lazybridge.GuardError

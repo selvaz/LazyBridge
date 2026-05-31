@@ -160,6 +160,7 @@ from lazybridge.exporters import (
 
 # Graph
 from lazybridge.graph import GraphSchema
+from lazybridge.dedup_guard import DeduplicateGuard
 from lazybridge.guardrails import ContentGuard, Guard, GuardAction, GuardChain, GuardError, LLMGuard
 from lazybridge.memory import Memory
 from lazybridge.pool import AgentPool
@@ -217,6 +218,7 @@ __all__ = [
     "GuardAction",
     "GuardError",
     "ContentGuard",
+    "DeduplicateGuard",
     "GuardChain",
     "LLMGuard",
     # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
