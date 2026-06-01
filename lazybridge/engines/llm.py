@@ -930,6 +930,11 @@ class LLMEngine:
                     nested_cost += nm.cost_usd + nm.nested_cost_usd
                     content = tr.text()
                     is_err = not tr.ok
+                    # error_envelope() sets payload=None so text() returns "".
+                    # Fall back to the ErrorInfo message so the LLM sees a
+                    # meaningful error description instead of empty content.
+                    if is_err and not content and tr.error is not None:
+                        content = f"Agent error ({tr.error.type}): {tr.error.message}"
                 elif isinstance(tr, ToolTimeoutError):
                     # Explicit timeout marker so the model can recognise
                     # cancellation distinct from a generic exception.
