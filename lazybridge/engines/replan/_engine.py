@@ -117,7 +117,7 @@ class ReplanEngine:
         self,
         *,
         planner_name: str = "planner",
-        store: "Store | None" = None,
+        store: Store | None = None,
         checkpoint_key: str | None = None,
         resume: bool = False,
         max_rounds: int = 20,
@@ -136,11 +136,11 @@ class ReplanEngine:
         self,
         env: Envelope[Any],
         *,
-        tools: "list[Tool]",
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
-        store: "Any | None" = None,
+        memory: Memory | None,
+        session: Session | None,
+        store: Any | None = None,
         plan_state: Any | None = None,
     ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
@@ -181,29 +181,25 @@ class ReplanEngine:
         self,
         env: Envelope[Any],
         *,
-        tools: "list[Tool]",
+        tools: list[Tool],
         output_type: type,
-        memory: "Memory | None",
-        session: "Session | None",
+        memory: Memory | None,
+        session: Session | None,
     ) -> AsyncIterator[str]:
-        result = await self.run(
-            env, tools=tools, output_type=output_type, memory=memory, session=session
-        )
+        result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
         yield result.text()
 
     # ------------------------------------------------------------------
     # Checkpoint helpers (same CAS pattern as Plan)
     # ------------------------------------------------------------------
 
-    def _checkpoint_store(self) -> "Store | None":
+    def _checkpoint_store(self) -> Store | None:
         return self.store if self.checkpoint_key else None
 
-    def _effective_key(self, run_uid: str) -> str | None:  # noqa: ARG002
+    def _effective_key(self, run_uid: str) -> str | None:
         return self.checkpoint_key  # single-writer semantics (no "fork" mode yet)
 
-    def _claim_checkpoint(
-        self, effective_key: str | None, run_uid: str
-    ) -> "dict[str, Any] | None":
+    def _claim_checkpoint(self, effective_key: str | None, run_uid: str) -> dict[str, Any] | None:
         store = self._checkpoint_store()
         if store is None or effective_key is None:
             return None
@@ -227,9 +223,7 @@ class ReplanEngine:
             if self.resume:
                 return existing  # short-circuit in _run_impl
             if not store.compare_and_swap(effective_key, existing, claimed):
-                raise ConcurrentPlanRunError(
-                    f"Lost race re-claiming completed key {effective_key!r}.  Retry."
-                )
+                raise ConcurrentPlanRunError(f"Lost race re-claiming completed key {effective_key!r}.  Retry.")
             return claimed
         if status is None:
             raise ConcurrentPlanRunError(
@@ -244,12 +238,10 @@ class ReplanEngine:
             )
         adopted = {**existing, "run_uid": run_uid}
         if not store.compare_and_swap(effective_key, existing, adopted):
-            raise ConcurrentPlanRunError(
-                f"Lost race adopting {effective_key!r} for resume.  Retry."
-            )
+            raise ConcurrentPlanRunError(f"Lost race adopting {effective_key!r} for resume.  Retry.")
         return adopted
 
-    def _load_checkpoint(self, effective_key: str | None) -> "dict[str, Any] | None":
+    def _load_checkpoint(self, effective_key: str | None) -> dict[str, Any] | None:
         store = self._checkpoint_store()
         if store is None or effective_key is None or not self.resume:
             return None
@@ -258,15 +250,15 @@ class ReplanEngine:
 
     def _save_checkpoint(
         self,
-        last_snap: "dict[str, Any] | None",
+        last_snap: dict[str, Any] | None,
         effective_key: str | None,
         run_uid: str,
         *,
         round: int,
-        history: "list[dict[str, Any]]",
+        history: list[dict[str, Any]],
         status: str,
-        final_answer: "str | None" = None,
-    ) -> "dict[str, Any] | None":
+        final_answer: str | None = None,
+    ) -> dict[str, Any] | None:
         store = self._checkpoint_store()
         if store is None or effective_key is None:
             return None
@@ -292,8 +284,8 @@ class ReplanEngine:
     def _build_planner_input(
         self,
         task: str,
-        history: "list[dict[str, Any]]",
-        tool_map: "dict[str, Tool]",
+        history: list[dict[str, Any]],
+        tool_map: dict[str, Tool],
     ) -> str:
         """Build the planner's input: tool schemas + task + history.
 
@@ -305,9 +297,7 @@ class ReplanEngine:
             if name == self.planner_name:
                 continue
             props = t.definition().parameters.get("properties", {})
-            sig = ", ".join(
-                f"{k}: {v.get('type', 'any')}" for k, v in props.items()
-            )
+            sig = ", ".join(f"{k}: {v.get('type', 'any')}" for k, v in props.items())
             desc = t.description or ""
             entry = f"- {name}({sig})"
             if desc:
@@ -315,11 +305,7 @@ class ReplanEngine:
             lines.append(entry)
         roster = "\n".join(lines) if lines else "(no tools available)"
         hist = _format_history(history)
-        return (
-            f"Available tools:\n{roster}\n\n"
-            f"Task: {task}\n\n"
-            f"History:\n{hist}"
-        )
+        return f"Available tools:\n{roster}\n\nTask: {task}\n\nHistory:\n{hist}"
 
     # ------------------------------------------------------------------
     # Core loop
@@ -329,12 +315,12 @@ class ReplanEngine:
         self,
         env: Envelope[Any],
         *,
-        tools: "list[Tool]",
-        session: "Session | None",
+        tools: list[Tool],
+        session: Session | None,
         run_id: str,
         agent_name: str,
     ) -> Envelope[Any]:
-        tool_map: dict[str, "Tool"] = {t.name: t for t in tools}
+        tool_map: dict[str, Tool] = {t.name: t for t in tools}
         run_uid = uuid.uuid4().hex
         effective_key = self._effective_key(run_uid)
 
@@ -361,36 +347,37 @@ class ReplanEngine:
 
         for round_num in range(round_start, self.max_rounds):
             # ── Ask the planner ───────────────────────────────────────────
-            planner_input = self._build_planner_input(env.task, history, tool_map)
+            planner_input = self._build_planner_input(env.task or "", history, tool_map)
             try:
                 planner_raw = await planner_tool.run(
                     **{"task": planner_input}
-                    if "task"
-                    in planner_tool.definition().parameters.get("properties", {})
+                    if "task" in planner_tool.definition().parameters.get("properties", {})
                     else _first_arg_kwargs(planner_tool, planner_input)
                 )
             except ConcludeSignal:
                 raise
             except Exception as exc:
                 self._save_checkpoint(
-                    last_snap, effective_key, run_uid,
-                    round=round_num, history=history, status="failed",
+                    last_snap,
+                    effective_key,
+                    run_uid,
+                    round=round_num,
+                    history=history,
+                    status="failed",
                 )
                 return Envelope.error_envelope(exc)
 
-            plan: PlanRound | None = (
-                planner_raw.payload
-                if isinstance(planner_raw, Envelope)
-                else planner_raw
-            )
+            plan: PlanRound | None = planner_raw.payload if isinstance(planner_raw, Envelope) else planner_raw
 
             if plan is None:
-                err_info = (
-                    planner_raw.error if isinstance(planner_raw, Envelope) else None
-                )
+                err_info = planner_raw.error if isinstance(planner_raw, Envelope) else None
                 self._save_checkpoint(
-                    last_snap, effective_key, run_uid,
-                    round=round_num, history=history, status="failed",
+                    last_snap,
+                    effective_key,
+                    run_uid,
+                    round=round_num,
+                    history=history,
+                    status="failed",
                 )
                 if err_info is not None:
                     return Envelope(
@@ -407,16 +394,24 @@ class ReplanEngine:
 
             if plan.done:
                 last_snap = self._save_checkpoint(
-                    last_snap, effective_key, run_uid,
-                    round=round_num, history=history, status="done",
+                    last_snap,
+                    effective_key,
+                    run_uid,
+                    round=round_num,
+                    history=history,
+                    status="done",
                     final_answer=plan.final_answer,
                 )
                 return Envelope(task=env.task, payload=plan.final_answer)
 
             if not plan.tasks:
                 self._save_checkpoint(
-                    last_snap, effective_key, run_uid,
-                    round=round_num, history=history, status="failed",
+                    last_snap,
+                    effective_key,
+                    run_uid,
+                    round=round_num,
+                    history=history,
+                    status="failed",
                 )
                 return Envelope.error_envelope(
                     RuntimeError(
@@ -427,16 +422,13 @@ class ReplanEngine:
 
             # ── Dispatch round ────────────────────────────────────────────
             parallel_tasks = [t for t in plan.tasks if t.parallel]
-            seq_tasks      = [t for t in plan.tasks if not t.parallel]
+            seq_tasks = [t for t in plan.tasks if not t.parallel]
 
             # Parallel band — same gather/error-scan pattern as Plan.
             par_results: list[Any] = []
             if parallel_tasks:
                 par_raw = await asyncio.gather(
-                    *[
-                        self._dispatch(t, tool_map, session, run_id, agent_name)
-                        for t in parallel_tasks
-                    ],
+                    *[self._dispatch(t, tool_map, session, run_id, agent_name) for t in parallel_tasks],
                     return_exceptions=True,
                 )
                 for r in par_raw:
@@ -445,8 +437,12 @@ class ReplanEngine:
                 for r in par_raw:
                     if isinstance(r, BaseException):
                         self._save_checkpoint(
-                            last_snap, effective_key, run_uid,
-                            round=round_num, history=history, status="failed",
+                            last_snap,
+                            effective_key,
+                            run_uid,
+                            round=round_num,
+                            history=history,
+                            status="failed",
                         )
                         return Envelope.error_envelope(r)
                 par_results = list(par_raw)
@@ -455,33 +451,40 @@ class ReplanEngine:
             seq_results: list[Any] = []
             for t in seq_tasks:
                 try:
-                    seq_results.append(
-                        await self._dispatch(t, tool_map, session, run_id, agent_name)
-                    )
+                    seq_results.append(await self._dispatch(t, tool_map, session, run_id, agent_name))
                 except ConcludeSignal:
                     raise
                 except Exception as exc:
                     self._save_checkpoint(
-                        last_snap, effective_key, run_uid,
-                        round=round_num, history=history, status="failed",
+                        last_snap,
+                        effective_key,
+                        run_uid,
+                        round=round_num,
+                        history=history,
+                        status="failed",
                     )
                     return Envelope.error_envelope(exc)
 
             outputs = _reinterleave(plan.tasks, par_results, seq_results)
-            history = list(history) + [
-                {"task": t.model_dump(), "output": o}
-                for t, o in zip(plan.tasks, outputs)
-            ]
+            history = list(history) + [{"task": t.model_dump(), "output": o} for t, o in zip(plan.tasks, outputs)]
 
             last_snap = self._save_checkpoint(
-                last_snap, effective_key, run_uid,
-                round=round_num + 1, history=history, status="running",
+                last_snap,
+                effective_key,
+                run_uid,
+                round=round_num + 1,
+                history=history,
+                status="running",
             )
 
         # max_rounds exceeded.
         self._save_checkpoint(
-            last_snap, effective_key, run_uid,
-            round=self.max_rounds, history=history, status="failed",
+            last_snap,
+            effective_key,
+            run_uid,
+            round=self.max_rounds,
+            history=history,
+            status="failed",
         )
         return Envelope.error_envelope(
             RuntimeError(
@@ -494,8 +497,8 @@ class ReplanEngine:
     async def _dispatch(
         self,
         task: Task,
-        tool_map: "dict[str, Tool]",
-        session: "Session | None",
+        tool_map: dict[str, Tool],
+        session: Session | None,
         run_id: str,
         agent_name: str,
     ) -> str:
@@ -518,11 +521,7 @@ class ReplanEngine:
                 run_id=run_id,
             )
         raw = await tool.run(**task.kwargs)
-        result = (
-            raw
-            if isinstance(raw, str)
-            else (raw.text() if isinstance(raw, Envelope) else str(raw))
-        )
+        result = raw if isinstance(raw, str) else (raw.text() if isinstance(raw, Envelope) else str(raw))
         if session:
             session.emit(
                 EventType.TOOL_RESULT,
