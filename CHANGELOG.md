@@ -8,6 +8,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`ReplanEngine` — guardian of the dynamic replan loop.** The adaptive
+  counterpart to `Plan` for pipelines whose shape is decided at runtime by a
+  planner agent. The planner is a tool in the parent `Agent`'s `tool_map`
+  (built with `output=PlanRound`, located by `planner_name`); it is called
+  every round and the tasks it emits are dispatched via
+  `tool.run(**task.kwargs)` — agents, plain functions, and pool routes alike,
+  with no special-casing. Tasks flagged `parallel=True` run concurrently via
+  `asyncio.gather`. Pass `store=` + `checkpoint_key=` to persist round state
+  after every round and `resume=True` to continue from the last checkpoint;
+  same compare-and-swap single-writer semantics as `Plan`
+  (`ConcurrentPlanRunError` on a contended key). `max_rounds` (default `20`)
+  caps the loop; a `done=True` round must carry a `final_answer`.
+- **`PlanRound` and `Task`** (`lazybridge.engines.replan`, re-exported from
+  `lazybridge`) — the planner's structured output schema. `PlanRound` carries
+  `reasoning`, a list of `Task`, a `done` flag, and the terminal
+  `final_answer`; `Task` is one tool call (`tool` + `kwargs` + `parallel`).
+  Added to the public API snapshot. New guide:
+  `docs/guides/full/replan-engine.md`; reference entries
+  in `docs/reference/engines.md`.
+
 ### Fixed
 - **`ext.planners` DAG builder — `add_step` now exposes `from_parallel_all`.**
   The incremental builder tool's `task_kind` annotation was

@@ -45,6 +45,9 @@ unit is a batch of tasks rather than a single tool call.
 
 ## See also
 
+- [ReplanEngine](../guides/full/replan-engine.md) — the engine that wraps
+  this loop with structured rounds and checkpoint/resume, so you don't
+  hand-roll the `asyncio.gather` orchestration.
 - [Plan](../guides/full/plan.md) — declared alternative when the
   structure is known up front.
 - [Parallel](../guides/mid/parallel.md) — `Agent.parallel` is

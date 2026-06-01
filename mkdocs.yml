@@ -188,6 +188,7 @@ nav:
       - Full:
           - Plan: guides/full/plan.md
           - Step: guides/full/step.md
+          - ReplanEngine: guides/full/replan-engine.md
           - Sentinels: guides/full/sentinels.md
           - Routing: guides/full/routing.md
           - Parallel plan steps: guides/full/parallel-plan-steps.md
