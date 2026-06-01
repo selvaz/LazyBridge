@@ -296,8 +296,7 @@ class OpenAIProvider(BaseProvider):
         self._async_client_kwargs = kwargs
         self._async_clients: dict[int, Any] = {}  # loop_id → AsyncOpenAI
 
-    @property
-    def _async_client(self) -> Any:
+    def _get_async_client(self) -> Any:
         """Return an AsyncOpenAI client bound to the *current* event loop.
 
         A fresh client is created the first time each event loop requests one
@@ -305,6 +304,10 @@ class OpenAIProvider(BaseProvider):
         different loop" crash when an Agent sub-tool is called from a background
         thread (e.g. inside PulseAgent.start()) whose event loop differs from
         the one the provider was originally constructed on.
+
+        Subclasses (LMStudioProvider, DeepSeekProvider) set ``self._async_client``
+        as a plain instance attribute in their own ``_init_client``. They do NOT
+        call this method — it is an OpenAIProvider-only concern.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -880,7 +883,7 @@ class OpenAIProvider(BaseProvider):
         fc_args: dict[str, str] = {}
         completed_response = None
 
-        async for event in await self._async_client.responses.create(**params):
+        async for event in await self._get_async_client().responses.create(**params):
             etype = getattr(event, "type", None)
 
             if etype == "response.output_text.delta":
@@ -1113,7 +1116,7 @@ class OpenAIProvider(BaseProvider):
         """Async completion."""
         if self._use_responses_api(request):
             params = self._build_responses_params(request)
-            response = await self._async_client.responses.create(**params)
+            response = await self._get_async_client().responses.create(**params)
             resp = self._parse_responses_response(response)
             if request.structured_output:
                 from lazybridge.core.structured import apply_structured_validation
@@ -1129,7 +1132,7 @@ class OpenAIProvider(BaseProvider):
 
             schema = request.structured_output.schema
             params["response_format"] = schema
-            response = await self._async_client.beta.chat.completions.parse(**params)
+            response = await self._get_async_client().beta.chat.completions.parse(**params)
             resp = self._parse_chat_response(response)
             native_parsed = response.choices[0].message.parsed if response.choices else None
             if native_parsed is not None:
@@ -1139,7 +1142,7 @@ class OpenAIProvider(BaseProvider):
                 apply_structured_validation(resp, resp.content, schema)
             return resp
 
-        response = await self._async_client.chat.completions.create(**params)
+        response = await self._get_async_client().chat.completions.create(**params)
         return self._parse_chat_response(response)
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
@@ -1171,7 +1174,7 @@ class OpenAIProvider(BaseProvider):
         tool_call_accum: dict[int, dict[str, Any]] = {}
         final_chunk: StreamChunk | None = None
         final_usage: UsageStats | None = None
-        async for chunk in await self._async_client.chat.completions.create(**params):
+        async for chunk in await self._get_async_client().chat.completions.create(**params):
             if chunk.usage:
                 final_usage = UsageStats(
                     input_tokens=chunk.usage.prompt_tokens,
