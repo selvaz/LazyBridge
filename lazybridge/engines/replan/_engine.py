@@ -393,7 +393,25 @@ class ReplanEngine:
                 )
 
             if plan.done:
-                last_snap = self._save_checkpoint(
+                # P2: reject missing final_answer before writing a permanent "done" checkpoint.
+                # A None answer cached as "done" would silently short-circuit every future
+                # resume=True call with an empty payload.
+                if plan.final_answer is None:
+                    self._save_checkpoint(
+                        last_snap,
+                        effective_key,
+                        run_uid,
+                        round=round_num,
+                        history=history,
+                        status="failed",
+                    )
+                    return Envelope.error_envelope(
+                        RuntimeError(
+                            "ReplanEngine: planner set done=True but omitted final_answer.  "
+                            "Set final_answer to a non-None string when done=True."
+                        )
+                    )
+                self._save_checkpoint(
                     last_snap,
                     effective_key,
                     run_uid,
@@ -521,6 +539,13 @@ class ReplanEngine:
                 run_id=run_id,
             )
         raw = await tool.run(**task.kwargs)
+        # P1: propagate tool-level errors rather than silently converting them to empty
+        # strings.  An error Envelope's .text() returns "" which looks like a successful
+        # but empty result to the planner — it would replan from phantom empty output.
+        if isinstance(raw, Envelope) and raw.error is not None:
+            raise RuntimeError(
+                f"ReplanEngine: tool {task.tool!r} returned an error: {raw.error.message}"
+            )
         result = raw if isinstance(raw, str) else (raw.text() if isinstance(raw, Envelope) else str(raw))
         if session:
             session.emit(
