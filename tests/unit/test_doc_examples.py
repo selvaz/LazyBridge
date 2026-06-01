@@ -720,9 +720,7 @@ def test_pool_chain_three_local_worlds_constructs():
     )
 
     discovery_pool.register(scout, analyst, gateway_to_build)
-    build_pool.register(
-        gateway_to_build, architect, implementer, tester, gateway_to_release
-    )
+    build_pool.register(gateway_to_build, architect, implementer, tester, gateway_to_release)
     release_pool.register(gateway_to_release, reviewer, approver, publisher)
 
     # Gateways bridge adjacent local worlds.
