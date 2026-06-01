@@ -393,6 +393,41 @@ resumed = Agent(
 Concurrent forks on the same key are protected by compare-and-swap; pass
 `on_concurrent="fail"` (default) or `"queue"`.
 
+### Dynamic replan loop — ReplanEngine
+
+Use `ReplanEngine` when the pipeline shape is decided at runtime by a planner
+agent.  `Plan` is for fixed DAGs; `ReplanEngine` is for adaptive multi-round
+work where each round's tasks depend on the previous round's results.
+
+```python
+from lazybridge import Agent, LLMEngine, ReplanEngine, Store
+from lazybridge.engines.replan import PlanRound, Task
+
+planner = Agent(
+    engine=LLMEngine("claude-opus-4-8", system="You are a task planner."),
+    output=PlanRound,
+    name="planner",
+)
+
+guardian = Agent(
+    engine=ReplanEngine(
+        store=Store(db="project.sqlite"),
+        checkpoint_key="my-project",
+        resume=True,
+    ),
+    tools=[planner, analyst, coder],
+    name="guardian",
+)
+
+guardian("refactor the auth module")   # first session
+guardian("continue")                    # resumes from last checkpoint
+```
+
+`Task` uses `tool + kwargs` so dispatch is `tool_map[task.tool].run(**task.kwargs)` —
+no special-casing for pools, agents, or functions.  The planner receives the
+available tool schemas and accumulated history dynamically so its system prompt
+needs no hardcoded worker names.  Same checkpoint/resume semantics as `Plan`.
+
 ### Human-in-the-loop
 
 ```python

@@ -1,40 +1,38 @@
-"""Dynamic planner with re-planning and per-round parallel execution.
+"""Dynamic planner with re-planning, parallel execution, and checkpoint/resume.
 
 Pattern
 -------
 A planner agent reasons about the user's query and emits a *round* of
 independent tasks (run in parallel). After each round it sees the results
 and either emits another round or declares the work done. This is "ReAct
-on tasks" — the planner re-plans every round, so it can adapt to
-intermediate findings instead of committing to a fixed task list up front.
+on tasks" — the planner re-plans every round, adapting to intermediate
+findings instead of committing to a fixed task list up front.
 
 Why not :class:`lazybridge.Plan`?
     ``Plan`` is compiled at construction time — its DAG is fixed. This file
     targets the case where the *shape* of the work depends on the query and
-    on intermediate results, so we use a normal ``Agent`` with structured
-    output and a tiny Python orchestration loop.
+    on intermediate results.
 
-Why structured output?
-    ``Agent(output=PlanRound)`` forces the planner's response through Pydantic
-    validation, so the dispatcher gets typed ``Task`` objects, not free-form
-    text it has to parse.
+Why :class:`lazybridge.ReplanEngine` instead of a raw Python loop?
+    ``ReplanEngine`` is the guardian: it checkpoints after every round so a
+    restart continues from the correct round rather than re-executing completed
+    work.  Pass ``store=`` and ``checkpoint_key=`` to enable persistence.
 
-Knobs to tune
--------------
-- ``max_rounds``        : safety cap on re-plans.
-- ``done`` flag         : planner short-circuits when nothing more is needed.
-- ``parallel=False``    : per-task escape hatch when ordering matters within
-                          a round (rare — usually you'd just emit two rounds).
+Architecture (LazyBridge "everything is a tool")
+-------------------------------------------------
+The planner and all workers are tools in the guardian Agent's tool_map:
+
+    guardian.tools = [planner, research_agent, math_agent, writer_agent]
+                       ↑ (output=PlanRound)   ↑ workers dispatched by ReplanEngine
+
+The planner receives the available tool schemas + history dynamically — its
+system prompt does not need to hardcode worker names.
 """
 
 from __future__ import annotations
 
-import asyncio
-from typing import Literal
-
-from pydantic import BaseModel, Field
-
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, LLMEngine, ReplanEngine
+from lazybridge.engines.replan import PlanRound
 
 # ---------------------------------------------------------------------------
 # 1. Sub-agents — each owns its own tool set / system prompt
@@ -63,6 +61,7 @@ research_agent = Agent(
     ),
     tools=[web_search],
     name="research",
+    description="Web lookups, facts, news. Cannot do math.",
 )
 
 math_agent = Agent(
@@ -72,6 +71,7 @@ math_agent = Agent(
     ),
     tools=[add, multiply],
     name="math",
+    description="Arithmetic only.",
 )
 
 writer_agent = Agent(
@@ -80,58 +80,29 @@ writer_agent = Agent(
         system="You synthesise prior results into clear prose. No new facts.",
     ),
     name="writer",
+    description="Synthesise prior results into prose. Adds no new facts.",
 )
 
-AGENTS: dict[str, Agent] = {
-    "research": research_agent,
-    "math": math_agent,
-    "writer": writer_agent,
-}
-
 
 # ---------------------------------------------------------------------------
-# 2. Typed plan — one *round* at a time. Planner emits this each iteration.
+# 2. Planner — emits PlanRound each turn
+#
+# The system prompt is minimal: ReplanEngine injects the available tool
+# schemas and the accumulated history into every planner call dynamically.
 # ---------------------------------------------------------------------------
-
-
-AgentName = Literal["research", "math", "writer"]
-
-
-class Task(BaseModel):
-    agent: AgentName = Field(..., description="Which sub-agent runs this task.")
-    instruction: str = Field(..., description="Self-contained instruction for the sub-agent.")
-    parallel: bool = Field(
-        default=True,
-        description="If False, run sequentially after parallel siblings in the same round.",
-    )
-
-
-class PlanRound(BaseModel):
-    reasoning: str = Field(..., description="Why this round of tasks was chosen.")
-    tasks: list[Task] = Field(default_factory=list, description="Tasks for this round.")
-    done: bool = Field(default=False, description="True when no further rounds are needed.")
-    final_answer: str | None = Field(default=None, description="Required when done=True; the user-facing answer.")
-
 
 PLANNER_SYSTEM = """\
-You are a planner. Each turn you produce ONE round of tasks to run.
+You are a task planner. Each turn you receive:
+  - "Available tools:" — the tool names, signatures, and descriptions
+  - "Task:" — the original user query
+  - "History:" — outputs from prior rounds
 
-Available sub-agents:
-- research : web lookups, facts, news. Cannot do math.
-- math     : arithmetic only.
-- writer   : synthesise prior results into prose. Adds no new facts.
-
-Rules:
-1. Tasks within a round run IN PARALLEL — do not put dependent tasks in the
-   same round. Emit dependents in the next round, after you've seen results.
-2. Tasks marked parallel=False run sequentially after the parallel ones in
-   the same round (rarely needed).
-3. When the user's question can be answered from the accumulated results,
-   set done=true and put the user-facing answer in final_answer.
-4. Be greedy with parallelism: if two facts can be looked up independently,
-   put them in the same round.
+Produce ONE PlanRound. Rules:
+1. Tasks within a round run IN PARALLEL — put dependent tasks in the next round.
+2. Use tool names and kwargs exactly as listed in "Available tools".
+3. When the question is answered, set done=true and put the answer in final_answer.
+4. Be greedy with parallelism: independent lookups belong in the same round.
 """
-
 
 planner = Agent(
     engine=LLMEngine("deepseek-v4-flash", system=PLANNER_SYSTEM),
@@ -141,74 +112,14 @@ planner = Agent(
 
 
 # ---------------------------------------------------------------------------
-# 3. Orchestration loop — replan + parallel dispatch
+# 3. Guardian — ReplanEngine wraps the replan loop with checkpoint/resume
 # ---------------------------------------------------------------------------
 
-
-def _format_history(query: str, history: list[tuple[Task, str]]) -> str:
-    lines = [f"User query: {query}"]
-    if history:
-        lines.append("\nResults from prior rounds:")
-        for i, (t, out) in enumerate(history, 1):
-            lines.append(f"  {i}. [{t.agent}] {t.instruction}\n     → {out}")
-    else:
-        lines.append("\n(no prior rounds — this is round 1)")
-    return "\n".join(lines)
-
-
-async def _run_round(tasks: list[Task]) -> list[str]:
-    """Run a round: parallel tasks concurrently, then sequential ones in order."""
-    parallel = [t for t in tasks if t.parallel]
-    sequential = [t for t in tasks if not t.parallel]
-
-    par_results: list[str] = []
-    if parallel:
-        envs = await asyncio.gather(*(AGENTS[t.agent].run(t.instruction) for t in parallel))
-        par_results = [e.text() for e in envs]
-
-    seq_results: list[str] = []
-    for t in sequential:
-        env = await AGENTS[t.agent].run(t.instruction)
-        seq_results.append(env.text())
-
-    # Re-interleave so the result list matches the original tasks order.
-    out: list[str] = []
-    p_iter = iter(par_results)
-    s_iter = iter(seq_results)
-    for t in tasks:
-        out.append(next(p_iter) if t.parallel else next(s_iter))
-    return out
-
-
-async def solve(query: str, max_rounds: int = 5) -> str:
-    history: list[tuple[Task, str]] = []
-    for round_num in range(1, max_rounds + 1):
-        plan_env = await planner.run(_format_history(query, history))
-        plan: PlanRound | None = plan_env.payload
-        if plan is None:
-            # Provider returned no structured payload (typical when the
-            # ANTHROPIC_API_KEY env var is missing — the request errored
-            # and the envelope's ``.error`` carries the exception).
-            err = plan_env.error or RuntimeError("planner returned no payload")
-            return f"planner unavailable: {type(err).__name__}: {err}"
-
-        print(f"\n=== round {round_num} ===")
-        print(f"reasoning: {plan.reasoning}")
-        if plan.done:
-            print("planner: DONE")
-            return plan.final_answer or (history[-1][1] if history else "")
-
-        if not plan.tasks:
-            # Pathological: not done but no tasks — break to avoid an infinite loop.
-            return plan.final_answer or "planner emitted empty round; aborting"
-
-        for t in plan.tasks:
-            print(f"  → [{t.agent}{'' if t.parallel else ' (seq)'}] {t.instruction}")
-
-        outputs = await _run_round(plan.tasks)
-        history.extend(zip(plan.tasks, outputs))
-
-    return "max_rounds reached without done=True; partial: " + (history[-1][1] if history else "")
+guardian = Agent(
+    engine=ReplanEngine(max_rounds=10),  # add store= + checkpoint_key= for persistence
+    tools=[planner, research_agent, math_agent, writer_agent],
+    name="guardian",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +133,11 @@ def main() -> None:
         "write a one-paragraph note on what those numbers say about the "
         "two companies' staffing strategies?"
     )
-    answer = asyncio.run(solve(query))
-    print("\n=== FINAL ANSWER ===\n" + answer)
+    env = guardian(query)
+    if env.error:
+        print(f"ERROR: {env.error.message}")
+    else:
+        print("\n=== FINAL ANSWER ===\n" + (env.text() or ""))
 
 
 if __name__ == "__main__":
