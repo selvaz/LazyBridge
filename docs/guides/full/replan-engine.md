@@ -188,12 +188,17 @@ Semantics match [`Plan`](plan.md):
 
 - The `store` alone does nothing — persistence is keyed on
   `checkpoint_key`. Without it, every run is in-memory.
-- The first call **claims** the key via compare-and-swap. A second
-  concurrent run on the same key raises `ConcurrentPlanRunError`
-  (single-writer semantics).
-- `resume=False` on an already-held key refuses to overwrite — use a
-  unique `checkpoint_key` for a fresh run, or pass `resume=True` to
-  adopt the existing one.
+- The first call **claims** the key via compare-and-swap.
+- With **`resume=False`**, a second run against a key already held by
+  another run raises `ConcurrentPlanRunError` — fail-fast, single-writer.
+  Use a unique `checkpoint_key` for a fresh concurrent run.
+- With **`resume=True`**, a second call **adopts** the existing
+  checkpoint instead of raising (it stamps its own `run_uid`). This is
+  what lets *you* resume your own crashed or paused run — but it is not a
+  concurrency guard: do **not** point two `resume=True` workers at the
+  same key, or the adopter will preempt the still-running one, which then
+  loses its next checkpoint CAS. Give each concurrent run its own
+  `checkpoint_key`.
 - A completed run (`status="done"`) short-circuits on the next
   `resume=True` call and returns the cached `final_answer` immediately.
 
