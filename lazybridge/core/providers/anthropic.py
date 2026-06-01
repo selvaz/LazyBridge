@@ -328,11 +328,17 @@ class AnthropicProvider(BaseProvider):
                             }
                         )
                     elif isinstance(block, ToolResultContent):
+                        # Anthropic rejects is_error=True with empty content.
+                        # Guard here so a tool that raises an exception with an
+                        # empty str() representation never produces a 400.
+                        content = block.content
+                        if block.is_error and not content:
+                            content = "(tool error — no message)"
                         blocks.append(
                             {
                                 "type": "tool_result",
                                 "tool_use_id": block.tool_use_id,
-                                "content": block.content,
+                                "content": content,
                                 "is_error": block.is_error,
                             }
                         )

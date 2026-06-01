@@ -8,6 +8,7 @@ Default model: gpt-5.5. Pass model= to override.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -285,7 +286,38 @@ class OpenAIProvider(BaseProvider):
             )
         base_url = kwargs.pop("base_url", None)
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
-        self._async_client = _openai.AsyncOpenAI(api_key=key, base_url=base_url, **kwargs)
+        # Store credentials for lazy async client creation — AsyncOpenAI wraps
+        # httpx.AsyncClient which binds to the event loop it was created in.
+        # Creating it eagerly in __init__ causes "attached to a different loop"
+        # crashes when the provider is used from a background thread (e.g.
+        # PulseAgent's daemon loop). Instead we create one per loop on demand.
+        self._async_api_key = key
+        self._async_base_url = base_url
+        self._async_client_kwargs = kwargs
+        self._async_clients: dict[int, Any] = {}  # loop_id → AsyncOpenAI
+
+    @property
+    def _async_client(self) -> Any:
+        """Return an AsyncOpenAI client bound to the *current* event loop.
+
+        A fresh client is created the first time each event loop requests one
+        and cached for that loop. This avoids the httpx "Future attached to a
+        different loop" crash when an Agent sub-tool is called from a background
+        thread (e.g. inside PulseAgent.start()) whose event loop differs from
+        the one the provider was originally constructed on.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop_id = id(loop)
+        except RuntimeError:
+            loop_id = 0  # no running loop — use a shared fallback slot
+        if loop_id not in self._async_clients:
+            self._async_clients[loop_id] = _openai.AsyncOpenAI(
+                api_key=self._async_api_key,
+                base_url=self._async_base_url,
+                **self._async_client_kwargs,
+            )
+        return self._async_clients[loop_id]
 
     # ------------------------------------------------------------------
     # Internal helpers
