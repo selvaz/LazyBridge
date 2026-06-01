@@ -719,14 +719,17 @@ def test_pool_chain_three_local_worlds_constructs():
         tools=[release_pool.as_tool("ask_release_pool"), conclude],
     )
 
+    # One-way chain: each forward gateway is registered ONLY in its source
+    # pool, so a later world cannot route back through it.
     discovery_pool.register(scout, analyst, gateway_to_build)
-    build_pool.register(gateway_to_build, architect, implementer, tester, gateway_to_release)
-    release_pool.register(gateway_to_release, reviewer, approver, publisher)
+    build_pool.register(architect, implementer, tester, gateway_to_release)
+    release_pool.register(reviewer, approver, publisher)
 
-    # Gateways bridge adjacent local worlds.
+    # Each gateway is reachable from its source world...
     assert "gateway_to_build" in discovery_pool.roster()
-    assert "gateway_to_build" in build_pool.roster()
     assert "gateway_to_release" in build_pool.roster()
-    assert "gateway_to_release" in release_pool.roster()
+    # ...but NOT from its destination world (no backward route).
+    assert "gateway_to_build" not in build_pool.roster()
+    assert "gateway_to_release" not in release_pool.roster()
     # The route tool is named per local action space.
     assert release_pool.as_tool("ask_release_pool").name == "ask_release_pool"

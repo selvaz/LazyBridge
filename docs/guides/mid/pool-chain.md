@@ -140,9 +140,12 @@ publisher = Agent(
 )
 
 # --- Register each pool AFTER its members exist ----------------------------
+# A forward gateway is registered ONLY in its source pool. It is reachable
+# from the pool it leaves, and carries the next pool's route tool to step
+# forward — but destination agents cannot select it, so there is no path back.
 discovery_pool.register(scout, analyst, gateway_to_build)
-build_pool.register(gateway_to_build, architect, implementer, tester, gateway_to_release)
-release_pool.register(gateway_to_release, reviewer, approver, publisher)
+build_pool.register(architect, implementer, tester, gateway_to_release)
+release_pool.register(reviewer, approver, publisher)
 
 result = scout("Should we ship a usage-based pricing tier? Investigate, build a plan, release it.")
 print(result.text())   # whatever approver/publisher passed to conclude(...)
@@ -159,8 +162,13 @@ What this expresses:
   decides to call the next pool. `gateway_to_build` is the only door from
   Discovery to Build; `gateway_to_release` the only door onward.
 - This is a **progressive, non-recombining** chain: it flows
-  Discovery → Build → Release and terminates at `conclude`. It cannot
-  return to an earlier world, which makes it easy to trace.
+  Discovery → Build → Release and terminates at `conclude`. Because each
+  forward gateway is registered **only in its source pool**, agents in a
+  later world cannot select it, so there is no route back to an earlier
+  world — which makes the chain easy to trace. (If a gateway is also
+  registered in its destination pool, that destination becomes able to
+  route back through it — which is exactly how the recombining variant
+  below is built.)
 
 ## Recombining (reversible-boundary) variant
 
