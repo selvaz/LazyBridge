@@ -148,6 +148,7 @@ from lazybridge.engines.plan import (
     PlanRuntimeError,
     Step,
 )
+from lazybridge.engines.replan import PlanRound, ReplanEngine, Task
 from lazybridge.envelope import Envelope
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
@@ -229,6 +230,9 @@ __all__ = [
     "PlanCompileError",
     "PlanPaused",
     "PlanRuntimeError",
+    "ReplanEngine",
+    "PlanRound",
+    "Task",
     "ToolTimeoutError",
     "StreamStallError",
     # Graph
