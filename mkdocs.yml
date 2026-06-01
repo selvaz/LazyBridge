@@ -107,7 +107,11 @@ markdown_extensions:
       base_path:
         - .
         - examples
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:
@@ -177,6 +181,7 @@ nav:
           - Parallel: guides/mid/parallel.md
           - As tool: guides/mid/as-tool.md
           - Dynamic graph: guides/mid/dynamic-graph.md
+          - Pool chains: guides/mid/pool-chain.md
           - HumanEngine: guides/mid/human-engine.md
           - Multimodal: guides/mid/multimodal.md
           - Evals: guides/mid/evals.md
