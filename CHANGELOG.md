@@ -26,7 +26,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `reasoning`, a list of `Task`, a `done` flag, and the terminal
   `final_answer`; `Task` is one tool call (`tool` + `kwargs` + `parallel`).
   Added to the public API snapshot. New guide:
-  [Full → ReplanEngine](docs/guides/full/replan-engine.md); reference entries
+  `docs/guides/full/replan-engine.md`; reference entries
   in `docs/reference/engines.md`.
 
 ### Fixed
