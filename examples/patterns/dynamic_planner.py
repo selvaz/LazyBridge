@@ -116,7 +116,7 @@ planner = Agent(
 # ---------------------------------------------------------------------------
 
 guardian = Agent(
-    engine=ReplanEngine(max_rounds=10),   # add store= + checkpoint_key= for persistence
+    engine=ReplanEngine(max_rounds=10),  # add store= + checkpoint_key= for persistence
     tools=[planner, research_agent, math_agent, writer_agent],
     name="guardian",
 )

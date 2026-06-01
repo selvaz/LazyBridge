@@ -543,9 +543,7 @@ class ReplanEngine:
         # strings.  An error Envelope's .text() returns "" which looks like a successful
         # but empty result to the planner — it would replan from phantom empty output.
         if isinstance(raw, Envelope) and raw.error is not None:
-            raise RuntimeError(
-                f"ReplanEngine: tool {task.tool!r} returned an error: {raw.error.message}"
-            )
+            raise RuntimeError(f"ReplanEngine: tool {task.tool!r} returned an error: {raw.error.message}")
         result = raw if isinstance(raw, str) else (raw.text() if isinstance(raw, Envelope) else str(raw))
         if session:
             session.emit(
