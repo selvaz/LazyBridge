@@ -552,3 +552,184 @@ def test_litellm_guide_prefix_routes_to_bridge(monkeypatch):
     assert LLMEngine._infer_provider("litellm/groq/llama-3.3-70b") == "litellm"
     # Native routing stays intact.
     assert LLMEngine._infer_provider("claude-opus-4-7") == "anthropic"
+
+
+# ---------------------------------------------------------------------------
+# guides/mid/dynamic-graph.md + guides/mid/pool-chain.md
+#   gateway agents, reversible boundary, and the three-pool product chain
+# ---------------------------------------------------------------------------
+
+
+def test_dynamic_graph_gateway_agent_constructs():
+    """A gateway is an ordinary Agent carrying a second pool's route tool."""
+    from lazybridge import AgentPool, conclude
+
+    discovery_pool = AgentPool(max_depth=8)
+    build_pool = AgentPool(max_depth=8)
+
+    gateway = Agent(
+        name="gateway_to_build",
+        description="Gateway from discovery to build.",
+        engine=LLMEngine(
+            "claude-opus-4-8",
+            system="Move into build only when requirements are clear.",
+            max_tool_calls_per_turn=1,
+        ),
+        tools=[
+            discovery_pool.as_tool("ask_discovery_pool"),
+            build_pool.as_tool("ask_build_pool"),
+        ],
+    )
+    scout = Agent(
+        name="scout",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[discovery_pool.as_tool("ask_discovery_pool")],
+    )
+    architect = Agent(
+        name="architect",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool")],
+    )
+    tester = Agent(
+        name="tester",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool"), conclude],
+    )
+
+    # Gateway appears in BOTH local worlds; its authority is the tools it carries.
+    discovery_pool.register(scout, gateway)
+    build_pool.register(gateway, architect, tester)
+
+    assert "gateway_to_build" in discovery_pool.roster()
+    assert "gateway_to_build" in build_pool.roster()
+
+
+def test_dynamic_graph_reversible_boundary_constructs():
+    """A reversible boundary carries both pools and is registered in both."""
+    from lazybridge import AgentPool
+
+    discovery_pool = AgentPool(max_depth=8)
+    build_pool = AgentPool(max_depth=8)
+
+    boundary = Agent(
+        name="boundary_manager",
+        description="Boundary controller between discovery and build.",
+        engine=LLMEngine(
+            "claude-opus-4-8",
+            system="Reversible boundary between Discovery and Build.",
+            max_tool_calls_per_turn=1,
+        ),
+        tools=[
+            discovery_pool.as_tool("ask_discovery_pool"),
+            build_pool.as_tool("ask_build_pool"),
+        ],
+    )
+    scout = Agent(
+        name="scout",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[discovery_pool.as_tool("ask_discovery_pool")],
+    )
+    architect = Agent(
+        name="architect",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool")],
+    )
+
+    discovery_pool.register(scout, boundary)
+    build_pool.register(boundary, architect)
+
+    assert "boundary_manager" in discovery_pool.roster()
+    assert "boundary_manager" in build_pool.roster()
+
+
+def test_pool_chain_three_local_worlds_constructs():
+    """Discovery -> Build -> Release progressive chain; only terminals conclude."""
+    from lazybridge import AgentPool, conclude
+
+    discovery_pool = AgentPool(max_depth=8)
+    build_pool = AgentPool(max_depth=8)
+    release_pool = AgentPool(max_depth=8)
+
+    scout = Agent(
+        name="scout",
+        description="Gathers raw evidence.",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[discovery_pool.as_tool("ask_discovery_pool")],
+    )
+    analyst = Agent(
+        name="analyst",
+        description="Structures findings.",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[discovery_pool.as_tool("ask_discovery_pool")],
+    )
+    gateway_to_build = Agent(
+        name="gateway_to_build",
+        description="Gateway from Discovery into Build.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[
+            discovery_pool.as_tool("ask_discovery_pool"),
+            build_pool.as_tool("ask_build_pool"),
+        ],
+    )
+
+    architect = Agent(
+        name="architect",
+        description="Designs the solution.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool")],
+    )
+    implementer = Agent(
+        name="implementer",
+        description="Implements the design.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool")],
+    )
+    tester = Agent(
+        name="tester",
+        description="Validates the implementation.",
+        engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+        tools=[build_pool.as_tool("ask_build_pool")],
+    )
+    gateway_to_release = Agent(
+        name="gateway_to_release",
+        description="Gateway from Build into Release.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[
+            build_pool.as_tool("ask_build_pool"),
+            release_pool.as_tool("ask_release_pool"),
+        ],
+    )
+
+    reviewer = Agent(
+        name="reviewer",
+        description="Reviews the release candidate.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[release_pool.as_tool("ask_release_pool")],
+    )
+    approver = Agent(
+        name="approver",
+        description="Approves the release; a terminal agent.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[release_pool.as_tool("ask_release_pool"), conclude],
+    )
+    publisher = Agent(
+        name="publisher",
+        description="Publishes and concludes the chain.",
+        engine=LLMEngine("claude-opus-4-8", max_tool_calls_per_turn=1),
+        tools=[release_pool.as_tool("ask_release_pool"), conclude],
+    )
+
+    # One-way chain: each forward gateway is registered ONLY in its source
+    # pool, so a later world cannot route back through it.
+    discovery_pool.register(scout, analyst, gateway_to_build)
+    build_pool.register(architect, implementer, tester, gateway_to_release)
+    release_pool.register(reviewer, approver, publisher)
+
+    # Each gateway is reachable from its source world...
+    assert "gateway_to_build" in discovery_pool.roster()
+    assert "gateway_to_release" in build_pool.roster()
+    # ...but NOT from its destination world (no backward route).
+    assert "gateway_to_build" not in build_pool.roster()
+    assert "gateway_to_release" not in release_pool.roster()
+    # The route tool is named per local action space.
+    assert release_pool.as_tool("ask_release_pool").name == "ask_release_pool"

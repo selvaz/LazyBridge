@@ -219,6 +219,38 @@ print(result.text())
 
 ---
 
+## 9. Route through an AgentPool
+
+```python
+# Canonical — the pool's route tool, named explicitly per local action space
+from lazybridge import Agent, AgentPool, LLMEngine, conclude
+
+pool = AgentPool(max_depth=8)
+worker = Agent(
+    name="worker",
+    engine=LLMEngine("claude-haiku-4-5", max_tool_calls_per_turn=1),
+    tools=[pool.as_tool("ask_pool"), conclude],
+)
+pool.register(worker, ...)        # register AFTER construction
+```
+
+`pool.as_tool("ask_pool")` is **not sugar** over `tools=[agent]`. The two
+express different things: `tools=[agent]` is a *static, one-way* edge
+(this agent may call that one), while `pool.as_tool(...)` exposes a whole
+**bounded local action space** the agent can route within at runtime —
+including cycles, which `tools=[agent]` cannot express. There is no
+shorter canonical form; the explicit tool name is what scopes one local
+world from another (see
+[Dynamic graph](../guides/mid/dynamic-graph.md) and
+[Pool chains](../guides/mid/pool-chain.md)).
+
+| Form | When |
+|---|---|
+| `tools=[other_agent]` | A fixed, one-way `agent → agent` call. No cycles, no runtime topology. |
+| `pool.as_tool("ask_pool")` | A bounded local action space chosen at runtime; supports cycles, gateways, and `conclude`. |
+
+---
+
 ## Summary — when sugar is worth it
 
 | Situation | Reach for sugar |
