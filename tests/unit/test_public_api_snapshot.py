@@ -69,6 +69,9 @@ _EXPECTED: frozenset[str] = frozenset(
         "PlanCompileError",
         "PlanPaused",
         "PlanRuntimeError",
+        "ReplanEngine",
+        "PlanRound",
+        "Task",
         "ToolTimeoutError",
         "StreamStallError",
         # Graph
