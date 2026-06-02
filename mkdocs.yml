@@ -131,7 +131,7 @@ extra:
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lazybridge/
     - icon: fontawesome/solid/envelope
-      link: mailto:lazylabsllm@gmail.com
+      link: mailto:LazyBridgeLabs@gmail.com
       name: Email LazyBridge Labs
 
 extra_css:
