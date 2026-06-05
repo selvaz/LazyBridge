@@ -1,4 +1,4 @@
-/* ── Sidebar nav typography ──────────────────────────────────────────────── */
+/* ── Sidebar nav typography ──────────────────────────────────────────── */
 
 .md-nav__title {
   font-size: 0.7rem;
@@ -19,9 +19,20 @@
   font-weight: 600;
 }
 
-/* ── Purple palette pin (matches landing #6B5DD3) ────────────────────────── */
+/* ── Purple palette pin (matches landing #6B5DD3) ─────────────────────── */
 [data-md-color-primary="deep purple"] {
   --md-primary-fg-color:        #6B5DD3;
   --md-primary-fg-color--light: #8B7DE3;
   --md-primary-fg-color--dark:  #4A3FB5;
+}
+
+/* ── HOW THIS WAS BUILT ─────────────────────────────────────────────── */
+.footer-built-by {
+  font-size: 13px;
+  color: var(--md-footer-fg-color--lighter);
+  text-align: center;
+  padding: 0.5rem 1rem 1rem;
+  margin: 0;
+  line-height: 1.6;
+  opacity: 0.75;
 }
