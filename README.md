@@ -318,3 +318,12 @@ test suite with `pip install -e ".[test,all]"` then `pytest`. See
 ## Licence
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+---
+
+## How This Was Built
+
+LazyBridge is designed by **selvaz** with **Claude Code** and
+**ChatGPT Codex** as primary implementation partners.
+I focus on architecture, mental model, and trade-offs —
+they handle the building under my direction.
