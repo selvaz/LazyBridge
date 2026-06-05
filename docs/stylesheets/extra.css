@@ -29,10 +29,9 @@
 /* ── HOW THIS WAS BUILT ─────────────────────────────────────────────── */
 .footer-built-by {
   font-size: 13px;
-  color: var(--md-footer-fg-color--lighter);
   text-align: center;
-  padding: 0.5rem 1rem 1rem;
+  padding: 0.25rem 0 0.75rem;
   margin: 0;
   line-height: 1.6;
-  opacity: 0.75;
+  opacity: 0.8;
 }

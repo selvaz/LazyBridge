@@ -2,11 +2,17 @@
 
 {% block footer %}
 {{ super() }}
-<p class="footer-built-by">
-  LazyBridge is designed by <strong>selvaz</strong> with
-  <strong>Claude Code</strong> and <strong>ChatGPT Codex</strong>
-  as primary implementation partners.
-  I focus on architecture, mental model, and trade-offs —
-  they handle the building under my direction.
-</p>
+<footer class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <p class="footer-built-by">
+        LazyBridge is designed by <strong>selvaz</strong> with
+        <strong>Claude Code</strong> and <strong>ChatGPT Codex</strong>
+        as primary implementation partners.
+        I focus on architecture, mental model, and trade-offs —
+        they handle the building under my direction.
+      </p>
+    </div>
+  </div>
+</footer>
 {% endblock %}
