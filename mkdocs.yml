@@ -11,6 +11,7 @@ strict: true
 
 theme:
   name: material
+  custom_dir: overrides
   language: en
   logo: assets/logo.svg
   favicon: assets/logo.svg
@@ -119,10 +120,6 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
-  # Static version chip in the site header.  Bumped manually on each
-  # release in lock-step with ``pyproject.toml``.  When ``mike`` is
-  # wired up for multi-version docs, set ``provider: mike`` here and
-  # drop the manual ``default``.
   version:
     default: "0.9.0"
   social:
@@ -257,12 +254,5 @@ nav:
       - LazyPulse: https://pulse.lazybridge.com/
       - LazyTools: https://tools.lazybridge.com/
 
-# ---------------------------------------------------------------------------
-# Build-time hooks — generated content
-# ---------------------------------------------------------------------------
-# `mkdocs_provider_table` replaces the `<!-- PROVIDER_CAPABILITY_TABLE -->`
-# marker on any page with a freshly-rendered support matrix sourced from
-# `lazybridge.matrix.provider_capabilities()`.  Keeps README / providers
-# docs from drifting when a provider classvar changes.
 hooks:
   - tools/mkdocs_provider_table.py
