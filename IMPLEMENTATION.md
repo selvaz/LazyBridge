@@ -335,6 +335,60 @@ removal of the lazytoolkit deprecation shims (see `CHANGELOG.md`).
 
 ---
 
+## Phase 7 — Agent config file (`agents.md`) + SuperTool/Skill — NOT STARTED
+
+> **Status: design-complete, implementation deferred. Do not forget.**
+> Two design docs are agreed and committed; no code exists yet. Full
+> specs: [`PROJECT_LAYOUT.md`](PROJECT_LAYOUT.md) (the `agents.md`
+> convention + composition ladder) and
+> [`SUPERTOOL_PLAN.md`](SUPERTOOL_PLAN.md) (the Skill/SuperTool factory).
+> This entry exists so the work is remembered and tracked.
+
+**What it is.** An opt-in convention for large fleets: one `agents.md`
+holds each agent's base LLM config + prompt (+ optional inline `output`),
+retrievable by `## name`; `LLMEngine.for_agent(name)` auto-fills any
+unset parameter from it. A `SuperTool`/`Skill` factory binds the open
+Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
+`agents.md` on a single authority ladder.
+
+**Confirmed design decisions (locked — do not relitigate):**
+- Single config file, `## name` heading = name tag = `Agent(name=...)`.
+- `output`: inline `field: type` (→ `create_model`) **or** dotted ref to
+  a Pydantic class (escape hatch); `schemas.py` optional.
+- Precedence via **one resolver** + **one module-level `UNSET` sentinel**
+  (never `None`). NB: `_UNSET` was deleted in Phase 2 — this reintroduces
+  a sentinel, by design, for a different purpose.
+- Per-field **merge strategy**: `OVERRIDE` (single-value fields) vs
+  `COMPOSE` (prompt). This amends SuperTool invariant #4.
+- OVERRIDE ladder: `fleet > caller > agents.md > Skill > engine default`
+  (agent beats Skill for `output`, `model`, `temperature`, `thinking`,
+  `max_tokens`, `disclosure`).
+- Prompt COMPOSE order: agent prompt first, Skill body appended.
+- SuperTool: not a core primitive (compiles to existing primitives); no
+  format fork; Skill suggests, never enforces; a *Tool* may still keep
+  hard gates (reconciles with LazyTools `ConfirmationGate`/`Allowlist`);
+  `suggested_output` is a default, not a guarantee; output+safeguard
+  decay as a coupled unit + emit an opt-in `Session` event.
+
+**Work items (none started):**
+- [ ] `agents.md` parser (split on `## `, first fenced YAML = config,
+      remainder = prompt; inline-output → `create_model`; dotted-ref
+      resolution)
+- [ ] Shared precedence resolver + `UNSET` sentinel (per-field
+      `OVERRIDE | COMPOSE` strategy) — built once, reused by both tracks
+- [ ] `LLMEngine.for_agent(name, ...)` auto-fill (resolve open Qs A1–A3:
+      file location, prompt→`system`, output wiring)
+- [ ] `Skill` loader (open `SKILL.md` format; 3 progressive-disclosure
+      tiers) + `SuperTool` factory
+- [ ] Disclosure modes `inline` / `on_request` (`{name}__guide`) /
+      `subagent` (decide resolution timing: construction vs call-time)
+- [ ] Safeguard coupling + decay + opt-in `Session` event
+- [ ] Composition tests: `agents.md` agent using a SuperTool, across the
+      authority ladder; multi-provider output threading
+- [ ] Docs: concept page, anti-patterns, migration note
+
+---
+
 ## Cross-cutting principles (apply throughout)
 
 - [ ] CI lint scans CHANGELOG `(bug fix)` markers and asserts a matching test exists
@@ -353,3 +407,4 @@ removal of the lazytoolkit deprecation shims (see `CHANGELOG.md`).
 | Phase 4 — docs + examples + CI + skill_docs (v0.7.9) | **release candidate** | 2026-05-10 | (tag pending merge to main) | All Block K items shipped (`22d7d06`): SKILL.md rewritten, `docs/migrations/0.7-to-0.79.md` (new), engines.md adds `thinking=`, providers.md adds `stop_reason` table, mcp.md shows `allow=` filtering, `examples/verify_judge_loop.py` + `examples/guardrails_demo.py` (new), env preflight in `daily_news_report.py`, `.github/workflows/integration.yml` (new — manual + nightly live + heavy_render), coverage gate 70 → 73 %, mypy strict tier on `envelope` / `predicates` / `sentinels`, version bump to 0.7.9.  Tag `v0.7.9` requires (1) merge of `claude/audit-lazybridge-llm-SXOl4` to main and (2) one CI cycle green. |
 | Phase 5 — extract `report_builder` (rolled into v0.7.9) | **done — LazyBridge side** | 2026-05-10 | (no separate tag; v0.9.0 plan obsolete) | EncryptedStoreAdapter + cryptography extra shipped (`278f661`, 23 tests). `report_builder` deleted from `lazybridge` (`59a8565`, −8499 LOC) and bundled into the staging zip the user pushed to `selvaz/LazyReport`. Suite: 1730 → 1610 (−120 report_builder tests gone, all green). User-side: configure CI on LazyReport, publish `lazybridge-reports 0.1.0` to PyPI. |
 | Phase 6 — stabilisation (staying on 0.7.9) | **partial — strict tier + SECURITY.md done** | 2026-05-10 | (no tag, on 0.7.9) | mypy strict on `lazybridge.engines.*` + `lazybridge.core.providers.*` now in `pyproject.toml`; `SECURITY.md` refreshed (MCP.stdio deny-by-default, EncryptedStoreAdapter, native-tool opt-in).  `__stability__="stable"` / `v1.0.0` deferred per user direction (keep 0.7.9). |
+| Phase 7 — `agents.md` config file + SuperTool/Skill | **design-complete — NOT STARTED** | — | (none) | Design agreed and committed (`PROJECT_LAYOUT.md` + `SUPERTOOL_PLAN.md`); zero code. Confirmed decisions locked. **Must remember to implement.** |
