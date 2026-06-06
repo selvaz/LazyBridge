@@ -3,21 +3,21 @@
 > **Status.** Proposal / design doc. Nothing ships yet. Captures the
 > agreed format so we can build it next.
 >
-> **Idea in one line.** Keep every agent's **base LLM config + system
-> prompt** in a single Markdown file, one section per agent, retrievable
-> by name — and let `LLMEngine` auto-fill from it any parameter you don't
-> pass explicitly.
+> **Idea in one line.** Keep every agent's **base LLM config, prompt, and
+> output shape** in a *single* Markdown file, one section per agent,
+> retrievable by name — and let `LLMEngine` auto-fill from it any
+> parameter you don't pass explicitly.
 
 This is an **opt-in convention** for projects with many agents. The core
 stays code-first and zero-config; this is a thin layer on top.
 
 ---
 
-## 1. `agents.md` — one file, one section per agent
+## 1. `agents.md` — one file, everything per agent
 
 Each agent is an `## <name>` section (the heading is the **name tag**).
-Inside: a fenced config block (base LLM knobs) followed by the prompt
-prose.
+Inside: a fenced config block (base LLM knobs + output shape) followed by
+the prompt prose.
 
 ````markdown
 ## researcher
@@ -26,6 +26,9 @@ model: claude-opus-4-8
 thinking: true
 max_tokens: 4096
 temperature: 0.2
+output:
+  summary: str
+  citations: list[str]
 ```
 You are a research expert. Find primary sources, cross-check claims,
 and return a structured summary with citations.
@@ -45,6 +48,7 @@ You are a writer. Turn research notes into clear prose.
 - **Config block:** YAML, data only — the base config of each LLM
   (`model`, `thinking`, `max_tokens`, `temperature`, …). `thinking` may
   carry its own model when needed (e.g. `thinking: {model: ...}`).
+- **`output`** (optional): the structured-output shape (see §2).
 - **Prompt:** everything after the config block, as prose.
 
 ### Retrieval
@@ -52,7 +56,8 @@ You are a writer. Turn research notes into clear prose.
 ```python
 cfg = load_agents("agents.md")["researcher"]
 # -> {"model": "...", "thinking": True, "max_tokens": 4096,
-#     "temperature": 0.2, "prompt": "You are a research expert. ..."}
+#     "temperature": 0.2, "output": <pydantic model>,
+#     "prompt": "You are a research expert. ..."}
 ```
 
 Parser is ~15 lines: split on `^## `, first line is the name, the first
@@ -60,21 +65,33 @@ fenced block is the YAML config, the remainder is `prompt`.
 
 ---
 
-## 2. `schemas.py` — structured outputs
+## 2. `output` — inline shape, with an escape hatch
 
-Structured outputs are Pydantic models, so they stay typed Python (kept
-in code for autocomplete + mypy), with a name → model map mirroring the
-agent names:
+Structured outputs are Pydantic models, but most agent outputs are flat,
+so they can be declared **inline** as `field: type` pairs. The loader
+builds a Pydantic model at load time via `pydantic.create_model`:
 
-```python
-from pydantic import BaseModel
-
-class Research(BaseModel):
-    summary: str
-    citations: list[str]
-
-OUTPUTS = {"researcher": Research}   # agent name -> output model
+```yaml
+output:
+  summary: str
+  citations: list[str]
 ```
+
+When an output is complex (nested types, validators, reuse), point at a
+real Python class instead — the **escape hatch**:
+
+```yaml
+output: schemas.Research      # dotted reference to a Pydantic model
+```
+
+So the common case (flat output) lives entirely in the single file; only
+rich outputs reach into code. A `schemas.py` module is therefore
+**optional** — just the destination for the complex cases.
+
+**Trade-off of inline outputs.** Nested/complex types are clumsy in YAML,
+the `.payload` is not statically typed (no mypy/autocomplete), and custom
+validators can't live there. Reach for the escape hatch when any of those
+bite.
 
 ---
 
@@ -106,7 +123,7 @@ Open sub-questions:
 - **A2. Prompt.** Should `for_agent` also pull the prompt into `system=`
   by default (likely yes), with an opt-out?
 - **A3. Output wiring.** Does `for_agent` (or a sibling `Agent.for_agent`)
-  also attach `OUTPUTS[name]` automatically, or stays manual?
+  also attach the section's `output` model automatically?
 
 ---
 
@@ -114,18 +131,19 @@ Open sub-questions:
 
 ```
 project/
-├── agents.md       # base LLM config + prompt per agent (## name sections)
-├── schemas.py      # Pydantic output models + name -> model map
+├── agents.md       # base LLM config + prompt + output shape per agent
+├── schemas.py      # OPTIONAL: Pydantic models for complex outputs only
 ├── tools.py        # shared tools
-└── fleet.py        # thin: LLMEngine.for_agent(name) + tools + OUTPUTS -> Agent
+└── fleet.py        # thin: LLMEngine.for_agent(name) + tools -> Agent
 ```
 
-That's the whole convention: two files describe the agents (one data,
-one types), and the engine knows how to read the data one.
+That's the whole convention: one file describes the agents; the engine
+knows how to read it; code is only needed for tools and complex outputs.
 
 ---
 
 ## 5. Next step
 
-Build the `agents.md` parser + `LLMEngine.for_agent(...)` (with the UNSET
-sentinel) and one worked example. Resolve A1–A3 first.
+Build the `agents.md` parser (config + inline/escape-hatch output) and
+`LLMEngine.for_agent(...)` (with the UNSET sentinel), plus one worked
+example. Resolve A1–A3 first.
