@@ -60,8 +60,17 @@ cfg = load_agents("agents.md")["researcher"]
 #     "prompt": "You are a research expert. ..."}
 ```
 
-Parser is ~15 lines: split on `^## `, first line is the name, the first
-fenced block is the YAML config, the remainder is `prompt`.
+Parser (~20 lines): an **agent boundary** is a `## <name>` heading whose
+first non-empty following line opens the YAML config fence (```` ```yaml ````
+or ```` ``` ````). The heading text is the name, the fenced block is the
+config, the remainder up to the next *boundary* heading is the prompt.
+
+> **Boundary rule (do not naively split on `^## `).** A prompt is free
+> Markdown and may contain its own `##` headings; those must stay part of
+> the prompt. Only a heading **immediately followed by a config fence**
+> starts a new agent — any other `##` is prompt content. (A config-less
+> agent still writes an empty fence ```` ```yaml\n``` ```` to mark its
+> boundary.)
 
 ---
 

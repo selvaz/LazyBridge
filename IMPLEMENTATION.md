@@ -371,9 +371,11 @@ Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
   decay as a coupled unit + emit an opt-in `Session` event.
 
 **Work items (none started):**
-- [ ] `agents.md` parser (split on `## `, first fenced YAML = config,
-      remainder = prompt; inline-output → `create_model`; dotted-ref
-      resolution)
+- [ ] `agents.md` parser — **boundary = `## name` heading immediately
+      followed by a YAML config fence** (NOT a naive `^## ` split: prompts
+      contain their own `##` headings — Codex P2 on PR #96). First fenced
+      block = config, remainder to next boundary = prompt; inline-output →
+      `create_model`; dotted-ref resolution
 - [ ] Shared precedence resolver + `UNSET` sentinel (per-field
       `OVERRIDE | COMPOSE` strategy) — built once, reused by both tracks
 - [ ] `LLMEngine.for_agent(name, ...)` auto-fill (resolve open Qs A1–A3:
