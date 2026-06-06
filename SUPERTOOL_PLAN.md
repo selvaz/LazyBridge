@@ -153,10 +153,10 @@ In sintesi:
    `agents.md` impone due strategie, non una: **OVERRIDE** (campi a valore
    singolo — `output`, `model`, knob, `disclosure` — dove l'agent batte la
    Skill) e **COMPOSE** (il prompt, che si concatena senza perdere nulla).
-   Resta un solo resolver, ma la strategia è un attributo del campo. Da
-   confermare: (a) l'ordine di concatenazione del prompt (default: agent
-   prima, Skill in coda); (b) se anche `model`/`temperature`/`thinking`/
-   `max_tokens` seguono `output` (agent vince), come assunto qui.
+   Resta un solo resolver, ma la strategia è un attributo del campo.
+   **Confermato:** (a) ordine di concatenazione del prompt = agent prima,
+   Skill in coda; (b) sì, tutti gli scalari (`model`/`temperature`/
+   `thinking`/`max_tokens`) seguono `output` → agent vince.
 
 ---
 

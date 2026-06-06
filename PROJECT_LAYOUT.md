@@ -158,8 +158,8 @@ is **not `UNSET`**, scanning outer → inner.
 
 - A caller's explicit `system=` still overrides outright (top of ladder).
 - Otherwise the prompt is **composed**: `agents.md` prompt **+** Skill
-  body, both kept. Default order: agent prompt first (its role/identity),
-  Skill body appended (its how-to expertise). *(order: to confirm)*
+  body, both kept. Order (**confirmed**): agent prompt first (its
+  role/identity), Skill body appended (its how-to expertise).
 - A fleet-wide preamble, if any, composes too.
 
 ### Shared mechanism
@@ -176,8 +176,8 @@ is **not `UNSET`**, scanning outer → inner.
   like with like.
 
 > **Net effect.** `output` → agent wins; prompt → agent + Skill composed,
-> nothing lost. Other scalar knobs follow `output` (agent wins) unless we
-> decide otherwise.
+> nothing lost. All other scalar knobs follow `output` — agent wins
+> (**confirmed**).
 
 ---
 
