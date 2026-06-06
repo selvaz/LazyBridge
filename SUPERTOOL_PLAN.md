@@ -19,6 +19,8 @@ Questi non si rinegoziano in fase di implementazione. Tutto il resto del piano d
    effective = caller_value if caller_value is not UNSET else skill_value
    ```
    > **Corretto** rispetto al draft originale (`is not None`): vedi *Review notes* #2 — `None` è un valore esplicito legittimo, quindi il marcatore "non passato" è un sentinel `UNSET`, non `None`.
+   >
+   > **Raffinato** dalla composizione con `agents.md` (vedi *Review notes* #5): la regola "uno vince" sopra è la strategia **OVERRIDE**, valida per i campi a valore singolo (`output`, `model`, knob). Il **prompt** usa invece la strategia **COMPOSE** (concatena, non sceglie). Resta un solo resolver, ma parametrizzato dalla strategia per-campo — *non* "stessa regola identica per ogni campo".
 
 5. **L'enforcement derivato da una Skill vive in alto, mai sulla foglia.** Una garanzia che deve reggere (PII, safety) si monta sull'engine, sulla policy di fleet, o come `Guard` sull'`Agent` esterno — mai *dentro la Skill*. La sicurezza *suggerita da una Skill* si sposta verso l'alto nella gerarchia.
    > **Riconciliato** col modello safety di LazyTools: vedi *Review notes* #1 — un **Tool** (codice) può comunque avere i suoi gate hard (es. `ConfirmationGate`, `Allowlist`). Ciò che non impone mai è la **Skill** (documento).
@@ -61,9 +63,9 @@ La SuperTool standardizza un parametro `disclosure`, ciascun valore mappato a un
 
 ### Fase 2 — Factory + resolver di precedenza (CONDIVISO con agents.md)
 - `SuperTool`/factory che, dato `Skill + callable/Agent`, compila verso i primitivi.
-- Implementare il **resolver lineare** (invariante #4) come unico punto di risoluzione, riusato per ogni campo — **lo stesso resolver e lo stesso sentinel `UNSET` del `LLMEngine.for_agent` di `agents.md`**. Costruirlo una volta sola, in un posto solo.
-- Garantire che il resolver sia *uniforme*: stessa funzione per `disclosure`, `output`, e qualunque campo futuro. Niente rami per-campo.
-- Test: caller override vince su ogni campo; assenza di override → valore skill; `None` esplicito è preservato (non confuso con "non passato").
+- Implementare il **resolver** (invariante #4) come unico punto di risoluzione, riusato per ogni campo — **lo stesso resolver e lo stesso sentinel `UNSET` del `LLMEngine.for_agent` di `agents.md`**. Costruirlo una volta sola, in un posto solo.
+- Resolver **una funzione, parametrizzata dalla strategia di merge per-campo**: `OVERRIDE` (valore singolo → vince la scala, agent batte Skill) vs `COMPOSE` (prompt → concatena). *Non* "stessa regola identica per ogni campo": la strategia è un attributo del campo, non un ramo ad-hoc.
+- Test: per i campi OVERRIDE, caller batte agent batte Skill; per il prompt, agent + Skill si compongono (nulla perso) e `system=` esplicito del chiamante resta override; `None` esplicito è preservato (non confuso con "non passato").
 
 ### Fase 3 — Modalità di disclosure
 - `inline`: iniezione una-tantum del corpo nel contesto alla selezione.
@@ -101,19 +103,28 @@ Quando in un progetto sono presenti **sia** `agents.md` **sia** una
 SuperTool/Skill, i due non competono: si compongono su **una sola scala
 di autorità**, definita in dettaglio in `PROJECT_LAYOUT.md` §4.
 
-```
-fleet policy  >  caller (explicit)  >  Skill (suggested)  >  agents.md (default)  >  engine default
-```
+I campi si risolvono con **due strategie**, non una sola
+(`PROJECT_LAYOUT.md` §4):
+
+- **OVERRIDE** (valore singolo: `output`, `model`, knob, `disclosure`) —
+  vince uno, scelto dalla scala. Qui **l'agent batte la Skill**:
+  ```
+  fleet policy  >  caller (explicit)  >  agents.md  >  Skill (suggested)  >  engine default
+  ```
+- **COMPOSE** (il prompt) — non si sceglie, si **concatena**: prompt
+  `agents.md` + corpo Skill, nulla si perde (salvo `system=` esplicito del
+  chiamante, che resta override in cima alla scala).
+
+In sintesi:
 
 - `agents.md` configura l'**Agent** (model, prompt, output di base).
 - la Skill configura un **Tool** che l'agente chiama (disclosure, output
-  suggerito, safeguard accoppiata).
-- I due contendono lo stesso campo solo sotto disclosure `subagent`, dove
-  la Skill diventa il `system` di un subagente; lì decide la scala
-  (Skill suggested > agents.md default, salvo override del chiamante).
-- **Meccanismo condiviso:** un solo resolver di precedenza, un solo
-  sentinel `UNSET`, una sola rappresentazione dell'output. Costruiti una
-  volta in `agents.md` (`LLMEngine.for_agent`), riusati qui (Fase 2).
+  suggerito, safeguard accoppiata) e, per il prompt, *aggiunge* la propria
+  competenza al prompt dell'agente.
+- **Meccanismo condiviso:** un solo resolver, parametrizzato dalla
+  strategia per-campo (OVERRIDE | COMPOSE); un solo sentinel `UNSET`; una
+  sola rappresentazione dell'output. Costruiti una volta in `agents.md`
+  (`LLMEngine.for_agent`), riusati qui (Fase 2).
 
 ---
 
@@ -138,6 +149,14 @@ fleet policy  >  caller (explicit)  >  Skill (suggested)  >  agents.md (default)
    regola di decadimento, ma emettere un evento `Session` opt-in. C'è
    differenza tra *imporre* una validazione (vietato) e *informare* che
    è stata persa (osservabilità, lecita).
+5. **Strategia di merge per-campo (emenda #4).** La composizione con
+   `agents.md` impone due strategie, non una: **OVERRIDE** (campi a valore
+   singolo — `output`, `model`, knob, `disclosure` — dove l'agent batte la
+   Skill) e **COMPOSE** (il prompt, che si concatena senza perdere nulla).
+   Resta un solo resolver, ma la strategia è un attributo del campo. Da
+   confermare: (a) l'ordine di concatenazione del prompt (default: agent
+   prima, Skill in coda); (b) se anche `model`/`temperature`/`thinking`/
+   `max_tokens` seguono `output` (agent vince), come assunto qui.
 
 ---
 

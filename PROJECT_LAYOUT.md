@@ -129,57 +129,55 @@ Open sub-questions:
 
 ## 4. Composition with Skills (SuperTool)
 
-`agents.md` and a Skill/SuperTool (see `SUPERTOOL_PLAN.md`) are **not
-rivals** — they attach at different levels and **compose** when both are
-present. `agents.md` configures the *Agent* (its base model, prompt,
-output); a Skill configures a *Tool* the agent calls (its disclosure,
-suggested output, coupled safeguard). They share one mechanism so they
-never drift apart.
+`agents.md` and a Skill/SuperTool (see `SUPERTOOL_PLAN.md`) **compose**
+when both describe the same agent. They do **not** resolve every field
+the same way — fields fall into two merge strategies.
 
-### One authority ladder (outer wins)
+### Two merge strategies
 
-Every fillable field — `model`, prompt/`system`, `output`, engine knobs,
-`disclosure` — resolves through the **same** ladder, most-outer first:
+- **OVERRIDE** — single-value fields (`output`, `model`, `temperature`,
+  `max_tokens`, `thinking`, `disclosure`). One value wins, chosen by the
+  ladder below. Two output schemas can't be meaningfully merged, so we
+  pick one.
+- **COMPOSE** — the additive field (the prompt / `system`). **Nothing is
+  lost:** the agent's prompt and the Skill body are concatenated. The
+  agent keeps its identity *and* gains the Skill's expertise.
+
+### Ladder for OVERRIDE fields (outer wins)
 
 ```
-fleet policy  >  caller (explicit)  >  Skill (suggested)  >  agents.md (default)  >  engine default
+fleet policy  >  caller (explicit)  >  agents.md  >  Skill (suggested)  >  engine default
 ```
 
-The effective value is the first one that is **not `UNSET`**, scanning
-outer → inner.
+For owned single-value fields **the agent beats the Skill**: `agents.md`
+is the operator's deliberate per-agent config, the Skill only *suggests*.
+Caller and fleet still sit above both. Effective value = the first that
+is **not `UNSET`**, scanning outer → inner.
 
-### One resolver, one sentinel, one output shape
+### The prompt (COMPOSE field)
 
-- **One resolver.** A single precedence function implements the ladder
-  for every field — no per-field branches. (This is SuperTool
-  invariant #4, with the fix below.)
-- **One sentinel.** "Not provided" is a single module-level `UNSET`,
-  never `None`, so `temperature=None` / `output=None` stay valid explicit
-  values. This is the *same* `UNSET` that `LLMEngine.for_agent` needs
-  (§3) and that SuperTool invariant #4 requires instead of its
-  `is not None` check.
-- **One output representation.** A Skill's suggested output and an
-  `agents.md` `output` are the *same kind of value* — inline `field: type`
-  (via `create_model`) or a dotted reference to a Pydantic class — so the
-  resolver compares them directly.
+- A caller's explicit `system=` still overrides outright (top of ladder).
+- Otherwise the prompt is **composed**: `agents.md` prompt **+** Skill
+  body, both kept. Default order: agent prompt first (its role/identity),
+  Skill body appended (its how-to expertise). *(order: to confirm)*
+- A fleet-wide preamble, if any, composes too.
 
-### When both are present
+### Shared mechanism
 
-- **Agent identity** (model, prompt, output) comes from `agents.md`
-  unless a caller or fleet policy overrides it.
-- A **SuperTool** the agent calls carries its own Skill-supplied defaults,
-  overridable by the caller via the same ladder.
-- The two contend for the same field only under `subagent` disclosure,
-  where the Skill becomes a subagent's `system`. If that subagent is
-  itself an `agents.md` agent, the ladder decides: Skill (suggested) sits
-  above `agents.md` (default), so the Skill priming wins over the base
-  prompt unless the caller says otherwise.
+- **One resolver**, parameterized by each field's strategy
+  (`OVERRIDE | COMPOSE`) — *not* an identical pick-one for every field.
+  This **refines** SuperTool invariant #4 ("no per-field branches"): there
+  is still one resolver, but it now knows each field's merge strategy.
+- **One `UNSET` sentinel**, never `None`, so `temperature=None` /
+  `output=None` stay valid explicit values. Same sentinel as
+  `LLMEngine.for_agent` (§3).
+- **One output representation** — inline `field: type` (via
+  `create_model`) or a dotted Pydantic reference — so OVERRIDE compares
+  like with like.
 
-> **Debatable rung.** Skill-above-`agents.md` is the one ordering worth a
-> second look: a Skill is a more specific, opt-in capability, so we treat
-> it as "more outer" than the base per-agent default. If operators expect
-> `agents.md` to be the final word per agent, flip these two rungs — but
-> keep the ladder single and uniform either way.
+> **Net effect.** `output` → agent wins; prompt → agent + Skill composed,
+> nothing lost. Other scalar knobs follow `output` (agent wins) unless we
+> decide otherwise.
 
 ---
 
