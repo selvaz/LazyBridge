@@ -15,12 +15,12 @@ stays code-first and zero-config; this is a thin layer on top.
 
 ## 1. `agents.md` — one file, everything per agent
 
-Each agent is an `## <name>` section (the heading is the **name tag**).
-Inside: a fenced config block (base LLM knobs + output shape) followed by
-the prompt prose.
+Each agent starts at a **delimiter comment** `<!-- agent: <name> -->`
+(the **name tag**). After it: a fenced config block (base LLM knobs +
+output shape), then the prompt prose, running until the next delimiter.
 
 ````markdown
-## researcher
+<!-- agent: researcher -->
 ```yaml
 model: claude-opus-4-8
 thinking: true
@@ -33,7 +33,9 @@ output:
 You are a research expert. Find primary sources, cross-check claims,
 and return a structured summary with citations.
 
-## writer
+## Output format    ← a heading inside the prompt; stays prompt content
+
+<!-- agent: writer -->
 ```yaml
 model: claude-sonnet-4-6
 max_tokens: 2048
@@ -42,14 +44,17 @@ temperature: 0.7
 You are a writer. Turn research notes into clear prose.
 ````
 
-- **Name tag:** the `## ` heading text is the agent name — same key as
-  `Agent(name=...)`, so the LazyBridge Name Chain (`from_agent`, `Step`,
-  routing) keeps working unchanged.
+- **Name tag:** the `<!-- agent: <name> -->` comment is the agent name —
+  same key as `Agent(name=...)`, so the LazyBridge Name Chain
+  (`from_agent`, `Step`, routing) keeps working unchanged. Markdown never
+  emits this comment by accident, so a prompt may contain **any** `##`
+  headings or fenced examples without being mis-parsed.
 - **Config block:** YAML, data only — the base config of each LLM
   (`model`, `thinking`, `max_tokens`, `temperature`, …). `thinking` may
   carry its own model when needed (e.g. `thinking: {model: ...}`).
 - **`output`** (optional): the structured-output shape (see §2).
-- **Prompt:** everything after the config block, as prose.
+- **Prompt:** everything after the config block, up to the next
+  delimiter, as prose.
 
 ### Retrieval
 
@@ -60,17 +65,12 @@ cfg = load_agents("agents.md")["researcher"]
 #     "prompt": "You are a research expert. ..."}
 ```
 
-Parser (~20 lines): an **agent boundary** is a `## <name>` heading whose
-first non-empty following line opens the YAML config fence (```` ```yaml ````
-or ```` ``` ````). The heading text is the name, the fenced block is the
-config, the remainder up to the next *boundary* heading is the prompt.
-
-> **Boundary rule (do not naively split on `^## `).** A prompt is free
-> Markdown and may contain its own `##` headings; those must stay part of
-> the prompt. Only a heading **immediately followed by a config fence**
-> starts a new agent — any other `##` is prompt content. (A config-less
-> agent still writes an empty fence ```` ```yaml\n``` ```` to mark its
-> boundary.)
+Parser (~15 lines): split on `^<!-- agent:\s*(\S+)\s*-->`, the captured
+group is the name, the first fenced block is the YAML config, the
+remainder up to the next delimiter is the prompt. The delimiter is the
+**only** boundary — chosen precisely because free-form Markdown prompts
+cannot accidentally reproduce it (addresses the `^## `-ambiguity flagged
+in review).
 
 ---
 

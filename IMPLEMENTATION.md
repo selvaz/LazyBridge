@@ -352,7 +352,10 @@ Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
 `agents.md` on a single authority ladder.
 
 **Confirmed design decisions (locked — do not relitigate):**
-- Single config file, `## name` heading = name tag = `Agent(name=...)`.
+- Single config file; boundary/name tag = `<!-- agent: name -->`
+  delimiter comment (= `Agent(name=...)`). Chosen over `## name` because
+  free-form Markdown prompts can't accidentally reproduce the comment
+  (Codex P2 on #96/#97); prompts may then contain any `##` / fences.
 - `output`: inline `field: type` (→ `create_model`) **or** dotted ref to
   a Pydantic class (escape hatch); `schemas.py` optional.
 - Precedence via **one resolver** + **one module-level `UNSET` sentinel**
@@ -371,11 +374,11 @@ Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
   decay as a coupled unit + emit an opt-in `Session` event.
 
 **Work items (none started):**
-- [ ] `agents.md` parser — **boundary = `## name` heading immediately
-      followed by a YAML config fence** (NOT a naive `^## ` split: prompts
-      contain their own `##` headings — Codex P2 on PR #96). First fenced
-      block = config, remainder to next boundary = prompt; inline-output →
-      `create_model`; dotted-ref resolution
+- [ ] `agents.md` parser — **boundary = `<!-- agent: name -->` delimiter
+      comment** (unambiguous: free-form Markdown prompts can't reproduce
+      it — Codex P2 on #96/#97). First fenced block after = config,
+      remainder to next delimiter = prompt; inline-output → `create_model`;
+      dotted-ref resolution
 - [ ] Shared precedence resolver + `UNSET` sentinel (per-field
       `OVERRIDE | COMPOSE` strategy) — built once, reused by both tracks
 - [ ] `LLMEngine.for_agent(name, ...)` auto-fill (resolve open Qs A1–A3:
