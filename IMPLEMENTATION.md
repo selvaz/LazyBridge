@@ -394,6 +394,43 @@ Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
 
 ---
 
+## Phase 8 — Audio/Video output (media generation) — NOT STARTED
+
+> **Status: design-complete, implementation deferred.** Full spec:
+> [`MEDIA_OUTPUT.md`](MEDIA_OUTPUT.md). Zero code yet.
+
+**What it is.** Media *generation* (audio, video, images, speech) as
+**tools that return a `MediaRef`**, not new core output plumbing. The
+only core addition is the `MediaRef` handle. Rejected the maximalist
+route (output media on `Envelope`/`CompletionResponse`/`StreamChunk` +
+per-provider parsing + output-capability flags) as anti-"core minimal".
+
+**Confirmed decisions (locked):**
+- Tool-first; inline chat-turn audio-out (gpt-4o-audio/realtime)
+  **deferred** — stays out of scope as in `multimodal.md`.
+- `MediaRef` = asset handle, **reference-first** (`uri` / `store_key`;
+  inline `data` bytes only for small assets) + `media_type`, duration,
+  size; bridges to input via `ImageContent.from_ref` / `AudioContent.from_ref`.
+- Video = `video_gen` returns a **job handle** + `check_video` tool
+  (non-blocking); blocking poll is *not* the default.
+- Capability gating lives in the tool (raises clearly if unsupported).
+- Media cost = tool-supplied `Envelope.metadata` (`returns_envelope`);
+  token-based `_compute_cost` untouched.
+- `output=` (Pydantic) stays text; `MediaRef` is orthogonal.
+
+**Work items (none started):**
+- [ ] `MediaRef` (core) + `ImageContent.from_ref` / `AudioContent.from_ref`
+      bridges
+- [ ] LazyTools generation providers: `image_gen`, `speech` (TTS),
+      `transcribe` (STT)
+- [ ] `video_gen` (job handle) + `check_video` (poll → `MediaRef`)
+- [ ] Per-tool capability gating + cost-in-metadata
+- [ ] Example: generate media → feed to a downstream agent
+- [ ] (Deferred sub-track) inline audio-out: `output_modalities` knob on
+      `LLMEngine` → `agents.md` OVERRIDE ladder; Envelope media carriers
+
+---
+
 ## Cross-cutting principles (apply throughout)
 
 - [ ] CI lint scans CHANGELOG `(bug fix)` markers and asserts a matching test exists
@@ -413,3 +450,4 @@ Agent Skills format (`SKILL.md`) to a `Tool`/`Agent` and composes with
 | Phase 5 — extract `report_builder` (rolled into v0.7.9) | **done — LazyBridge side** | 2026-05-10 | (no separate tag; v0.9.0 plan obsolete) | EncryptedStoreAdapter + cryptography extra shipped (`278f661`, 23 tests). `report_builder` deleted from `lazybridge` (`59a8565`, −8499 LOC) and bundled into the staging zip the user pushed to `selvaz/LazyReport`. Suite: 1730 → 1610 (−120 report_builder tests gone, all green). User-side: configure CI on LazyReport, publish `lazybridge-reports 0.1.0` to PyPI. |
 | Phase 6 — stabilisation (staying on 0.7.9) | **partial — strict tier + SECURITY.md done** | 2026-05-10 | (no tag, on 0.7.9) | mypy strict on `lazybridge.engines.*` + `lazybridge.core.providers.*` now in `pyproject.toml`; `SECURITY.md` refreshed (MCP.stdio deny-by-default, EncryptedStoreAdapter, native-tool opt-in).  `__stability__="stable"` / `v1.0.0` deferred per user direction (keep 0.7.9). |
 | Phase 7 — `agents.md` config file + SuperTool/Skill | **design-complete — NOT STARTED** | — | (none) | Design agreed and committed (`PROJECT_LAYOUT.md` + `SUPERTOOL_PLAN.md`); zero code. Confirmed decisions locked. **Must remember to implement.** |
+| Phase 8 — audio/video output (media generation) | **design-complete — NOT STARTED** | — | (none) | Design agreed and committed (`MEDIA_OUTPUT.md`); zero code. Tool-first (`MediaRef` only core addition); inline audio-out deferred. **Must remember to implement.** |
