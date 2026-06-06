@@ -127,7 +127,63 @@ Open sub-questions:
 
 ---
 
-## 4. Resulting project shape
+## 4. Composition with Skills (SuperTool)
+
+`agents.md` and a Skill/SuperTool (see `SUPERTOOL_PLAN.md`) are **not
+rivals** — they attach at different levels and **compose** when both are
+present. `agents.md` configures the *Agent* (its base model, prompt,
+output); a Skill configures a *Tool* the agent calls (its disclosure,
+suggested output, coupled safeguard). They share one mechanism so they
+never drift apart.
+
+### One authority ladder (outer wins)
+
+Every fillable field — `model`, prompt/`system`, `output`, engine knobs,
+`disclosure` — resolves through the **same** ladder, most-outer first:
+
+```
+fleet policy  >  caller (explicit)  >  Skill (suggested)  >  agents.md (default)  >  engine default
+```
+
+The effective value is the first one that is **not `UNSET`**, scanning
+outer → inner.
+
+### One resolver, one sentinel, one output shape
+
+- **One resolver.** A single precedence function implements the ladder
+  for every field — no per-field branches. (This is SuperTool
+  invariant #4, with the fix below.)
+- **One sentinel.** "Not provided" is a single module-level `UNSET`,
+  never `None`, so `temperature=None` / `output=None` stay valid explicit
+  values. This is the *same* `UNSET` that `LLMEngine.for_agent` needs
+  (§3) and that SuperTool invariant #4 requires instead of its
+  `is not None` check.
+- **One output representation.** A Skill's suggested output and an
+  `agents.md` `output` are the *same kind of value* — inline `field: type`
+  (via `create_model`) or a dotted reference to a Pydantic class — so the
+  resolver compares them directly.
+
+### When both are present
+
+- **Agent identity** (model, prompt, output) comes from `agents.md`
+  unless a caller or fleet policy overrides it.
+- A **SuperTool** the agent calls carries its own Skill-supplied defaults,
+  overridable by the caller via the same ladder.
+- The two contend for the same field only under `subagent` disclosure,
+  where the Skill becomes a subagent's `system`. If that subagent is
+  itself an `agents.md` agent, the ladder decides: Skill (suggested) sits
+  above `agents.md` (default), so the Skill priming wins over the base
+  prompt unless the caller says otherwise.
+
+> **Debatable rung.** Skill-above-`agents.md` is the one ordering worth a
+> second look: a Skill is a more specific, opt-in capability, so we treat
+> it as "more outer" than the base per-agent default. If operators expect
+> `agents.md` to be the final word per agent, flip these two rungs — but
+> keep the ladder single and uniform either way.
+
+---
+
+## 5. Resulting project shape
 
 ```
 project/
@@ -142,8 +198,10 @@ knows how to read it; code is only needed for tools and complex outputs.
 
 ---
 
-## 5. Next step
+## 6. Next step
 
 Build the `agents.md` parser (config + inline/escape-hatch output) and
 `LLMEngine.for_agent(...)` (with the UNSET sentinel), plus one worked
-example. Resolve A1–A3 first.
+example. Resolve A1–A3 first. The precedence resolver and `UNSET`
+sentinel built here are the **same** ones the SuperTool/Skill work
+(`SUPERTOOL_PLAN.md`) reuses — build them once, in one place.
