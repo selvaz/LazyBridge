@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import warnings
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -150,7 +151,11 @@ class GoogleProvider(BaseProvider):
         return None
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
-        """Return the default max_tokens for the given model."""
+        """Return the default max_tokens for the given model.
+
+        Applied in ``_build_config`` when the caller doesn't set
+        ``request.max_tokens`` — same contract as the other providers
+        (see ``BaseProvider.get_default_max_tokens``)."""
         resolved = (model or self.model or self.default_model or "").lower()
         if "gemini-3" in resolved or "gemini-2.5" in resolved:
             return 65_536
@@ -195,7 +200,9 @@ class GoogleProvider(BaseProvider):
                 "Google API key not found. Set the GOOGLE_API_KEY or GEMINI_API_KEY "
                 "environment variable, or pass api_key= to the provider."
             )
-        self._client = _genai.Client(api_key=key)
+        # Forward extra kwargs (http_options=, vertexai=, ...) to the SDK
+        # client — they were silently discarded before.
+        self._client = _genai.Client(api_key=key, **kwargs)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -331,9 +338,22 @@ class GoogleProvider(BaseProvider):
 
                 elif isinstance(block, ToolResultContent):
                     content_str = block.content if isinstance(block.content, str) else json.dumps(block.content)
-                    tool_fn_name = (
-                        getattr(block, "tool_name", None) or getattr(block, "name", None) or block.tool_use_id
-                    )
+                    tool_fn_name = getattr(block, "tool_name", None) or getattr(block, "name", None)
+                    if not tool_fn_name:
+                        # Last-resort fallback: derive the function name from
+                        # tool_use_id.  Ids synthesised by _synthesize_fc_id
+                        # carry a "-<N>" suffix ("lookup-0") which is NOT a
+                        # valid function name — strip it before use.
+                        tool_fn_name = re.sub(r"-\d+$", "", block.tool_use_id) or block.tool_use_id
+                        warnings.warn(
+                            f"ToolResultContent(tool_use_id={block.tool_use_id!r}) has no "
+                            f"tool_name — falling back to the id-derived name "
+                            f"{tool_fn_name!r}.  Set ToolResultContent.tool_name to the "
+                            f"called function's name for a reliable Gemini "
+                            f"function_response.",
+                            UserWarning,
+                            stacklevel=3,
+                        )
                     function_response_parts.append(
                         _gtypes.Part.from_function_response(
                             name=tool_fn_name,
@@ -373,8 +393,19 @@ class GoogleProvider(BaseProvider):
             )
         return decls
 
-    def _build_tools_config(self, request: CompletionRequest) -> list[Any]:
+    def _build_tools_config(
+        self,
+        request: CompletionRequest,
+        native: list[NativeTool],
+        func_decls: list[Any],
+    ) -> list[Any]:
         """Build Gemini tools list including native and function tools.
+
+        ``native`` is the ALREADY-FILTERED native-tool list (the output of
+        ``_check_native_tools``) and ``func_decls`` the pre-built function
+        declarations — both are computed once in ``_build_config`` and passed
+        in, so the unsupported-tool warning fires once per request instead of
+        twice.
 
         Google Search:
           - Default: ``Tool(google_search=GoogleSearch())``, always grounds.
@@ -395,7 +426,6 @@ class GoogleProvider(BaseProvider):
             ``_build_config`` via ``google_maps_lat`` / ``google_maps_lng``.
         """
         tools = []
-        native = self._check_native_tools(request.native_tools)
 
         # Phase-3 Block I, T9 — Google treats ``WEB_SEARCH`` and
         # ``GOOGLE_SEARCH`` as aliases (the API only accepts ONE grounding
@@ -473,7 +503,6 @@ class GoogleProvider(BaseProvider):
                     stacklevel=3,
                 )
 
-        func_decls = self._build_function_declarations(request)
         if func_decls:
             tools.append(_gtypes.Tool(function_declarations=func_decls))
 
@@ -491,10 +520,13 @@ class GoogleProvider(BaseProvider):
                 "xhigh": "high",
                 "max": "high",
             }.get(request.thinking.effort, "high")
-            return _gtypes.ThinkingConfig(thinking_level=level)  # type: ignore[arg-type]
+            # include_thoughts=True surfaces thought-summary parts in the
+            # response — without it CompletionResponse.thinking is never
+            # populated despite supports_thinking=True.
+            return _gtypes.ThinkingConfig(thinking_level=level, include_thoughts=True)  # type: ignore[arg-type]
         # budget=-1 → model decides automatically; 0 → no thinking
         budget = request.thinking.budget_tokens if request.thinking.budget_tokens is not None else -1
-        return _gtypes.ThinkingConfig(thinking_budget=budget)
+        return _gtypes.ThinkingConfig(thinking_budget=budget, include_thoughts=True)
 
     def _build_config(self, request: CompletionRequest) -> Any:
         kwargs: dict[str, Any] = {}
@@ -506,8 +538,10 @@ class GoogleProvider(BaseProvider):
         if request.temperature is not None:
             kwargs["temperature"] = request.temperature
 
-        if request.max_tokens:
-            kwargs["max_output_tokens"] = request.max_tokens
+        # Apply the per-model default when the caller doesn't set max_tokens —
+        # contract parity with the other providers (see BaseProvider.
+        # get_default_max_tokens and anthropic.py:_build_params).
+        kwargs["max_output_tokens"] = request.max_tokens or self.get_default_max_tokens(self._resolve_model(request))
 
         native = self._check_native_tools(request.native_tools)
         google_search_active = any(nt in (NativeTool.WEB_SEARCH, NativeTool.GOOGLE_SEARCH) for nt in native)
@@ -525,8 +559,11 @@ class GoogleProvider(BaseProvider):
                 "the two features are mutually exclusive in the Gemini API."
             )
 
-        tools = self._build_tools_config(request)
+        # Compute the filtered native list and the function declarations ONCE
+        # and hand them to _build_tools_config — calling _check_native_tools /
+        # _build_function_declarations twice duplicated the warnings.
         func_decls = self._build_function_declarations(request)
+        tools = self._build_tools_config(request, native, func_decls)
         has_native_search = google_search_active
         has_custom_tools = bool(func_decls)
 
@@ -536,39 +573,67 @@ class GoogleProvider(BaseProvider):
                 disable=True  # We handle tool calls ourselves for unified output
             )
 
-        # When both server-side (grounding) and client-side (function_declarations)
-        # tools are present, Google requires tool_config with
-        # include_server_side_tool_invocations=True — otherwise 400 INVALID_ARGUMENT.
+        # ---- tool_config: ONE merged object ---------------------------
+        # Three independent inputs contribute to ToolConfig — tool_choice
+        # (function_calling_config.mode), the mixed native+custom flag
+        # (include_server_side_tool_invocations) and Maps lat/lng
+        # (retrieval_config).  They must be composed into a single object:
+        # assigning kwargs["tool_config"] per-branch let the last branch
+        # silently cancel the others.
+        fcc_kwargs: dict[str, Any] = {}
+        if request.tool_choice and has_custom_tools:
+            mode = {"auto": "AUTO", "required": "ANY", "any": "ANY", "none": "NONE"}.get(request.tool_choice)
+            if mode is None:
+                # Validated tool name (CompletionRequest.__post_init__):
+                # force-call that specific function.
+                fcc_kwargs["mode"] = "ANY"
+                fcc_kwargs["allowed_function_names"] = [request.tool_choice]
+            else:
+                fcc_kwargs["mode"] = mode
         if has_native_search and has_custom_tools:
+            # Required when server-side (grounding) and client-side
+            # (function_declarations) tools are mixed — otherwise 400.
+            fcc_kwargs["include_server_side_tool_invocations"] = True
+
+        fcc = None
+        if fcc_kwargs:
             try:
-                kwargs["tool_config"] = _gtypes.ToolConfig(
-                    function_calling_config=_gtypes.FunctionCallingConfig(  # type: ignore[call-arg]
-                        include_server_side_tool_invocations=True,
-                    )
-                )
+                fcc = _gtypes.FunctionCallingConfig(**fcc_kwargs)  # type: ignore[call-arg]
             except Exception:
+                # Older SDKs don't know include_server_side_tool_invocations.
                 _logger.warning(
-                    "Google SDK does not support FunctionCallingConfig"
-                    ".include_server_side_tool_invocations — skipping tool_config."
-                    " Mixed native+custom tools may fail with 400 INVALID_ARGUMENT."
+                    "Google SDK rejected FunctionCallingConfig(%s) — retrying without "
+                    "include_server_side_tool_invocations. Mixed native+custom tools "
+                    "may fail with 400 INVALID_ARGUMENT.",
+                    ", ".join(fcc_kwargs),
                 )
+                fcc_kwargs.pop("include_server_side_tool_invocations", None)
+                if fcc_kwargs:
+                    fcc = _gtypes.FunctionCallingConfig(**fcc_kwargs)
 
         # Google Maps: lat/lng goes in ToolConfig.retrieval_config, not inside GoogleMaps()
+        retrieval_config = None
         if google_maps_active:
             lat = request.extra.get("google_maps_lat")
             lng = request.extra.get("google_maps_lng")
             if lat is not None and lng is not None:
                 try:
-                    kwargs["tool_config"] = _gtypes.ToolConfig(
-                        retrieval_config=_gtypes.RetrievalConfig(
-                            lat_lng=_gtypes.LatLng(
-                                latitude=float(lat),
-                                longitude=float(lng),
-                            )
+                    retrieval_config = _gtypes.RetrievalConfig(
+                        lat_lng=_gtypes.LatLng(
+                            latitude=float(lat),
+                            longitude=float(lng),
                         )
                     )
                 except AttributeError as exc:
                     _logger.debug("Google SDK RetrievalConfig not supported, skipping lat/lng: %s", exc)
+
+        if fcc is not None or retrieval_config is not None:
+            tc_kwargs: dict[str, Any] = {}
+            if fcc is not None:
+                tc_kwargs["function_calling_config"] = fcc
+            if retrieval_config is not None:
+                tc_kwargs["retrieval_config"] = retrieval_config
+            kwargs["tool_config"] = _gtypes.ToolConfig(**tc_kwargs)
 
         thinking = self._build_thinking_config(request)
         if thinking:
@@ -652,7 +717,10 @@ class GoogleProvider(BaseProvider):
                 um = response.usage_metadata
                 usage.input_tokens = getattr(um, "prompt_token_count", 0) or 0
                 usage.output_tokens = getattr(um, "candidates_token_count", 0) or 0
-            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
+            # Gemini bills thought tokens as output but reports them separately
+            # (thoughts_token_count, excluded from candidates_token_count) —
+            # sum them for cost purposes.
+            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens + usage.thinking_tokens)
             return CompletionResponse(
                 content="",
                 tool_calls=[],
@@ -667,10 +735,15 @@ class GoogleProvider(BaseProvider):
         # Gemini omits fc.id and the same function is
         # called multiple times in one turn.
         for part in candidate.content.parts:
-            if hasattr(part, "text") and part.text:
-                content += part.text
-            if hasattr(part, "thought") and part.thought:
-                thinking = (thinking or "") + part.thought
+            part_text = getattr(part, "text", None)
+            if part_text:
+                # ``part.thought`` is a *bool flag* in google-genai (the
+                # reasoning text lives in ``part.text``).  Route by the flag
+                # so thought text never contaminates ``content``.
+                if getattr(part, "thought", False):
+                    thinking = (thinking or "") + part_text
+                else:
+                    content += part_text
             if hasattr(part, "function_call") and part.function_call:
                 fc = part.function_call
                 # Store the raw Part so _messages_to_gemini can re-emit it unchanged.
@@ -694,7 +767,10 @@ class GoogleProvider(BaseProvider):
             usage.input_tokens = getattr(um, "prompt_token_count", 0) or 0
             usage.output_tokens = getattr(um, "candidates_token_count", 0) or 0
             usage.thinking_tokens = getattr(um, "thoughts_token_count", 0) or 0
-        usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
+        # Gemini bills thought tokens as output but reports them separately
+        # (thoughts_token_count is NOT included in candidates_token_count) —
+        # sum them so cost_usd reflects what Google actually charges.
+        usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens + usage.thinking_tokens)
 
         grounding_sources, web_search_queries, search_entry_point = self._extract_grounding_metadata(candidate)
 
@@ -769,14 +845,20 @@ class GoogleProvider(BaseProvider):
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
-                if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=str(part.thought))
-                elif hasattr(part, "text") and part.text:
-                    text_accum += part.text
-                    yield StreamChunk(delta=part.text)
+                part_text = getattr(part, "text", None)
+                if part_text and getattr(part, "thought", False):
+                    # ``thought`` is a bool flag in google-genai; the
+                    # reasoning text itself lives in part.text.
+                    yield StreamChunk(thinking_delta=part_text)
+                elif part_text:
+                    text_accum += part_text
+                    yield StreamChunk(delta=part_text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = str(getattr(fc, "id", None) or fc.name)
+                    # Same-name calls without an SDK id must not collide in
+                    # the accumulator — synthesise a unique id exactly like
+                    # the non-streaming path does.
+                    call_id = _synthesize_fc_id(fc, len(tool_call_accum))
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
@@ -793,7 +875,9 @@ class GoogleProvider(BaseProvider):
                 output_tokens=getattr(um, "candidates_token_count", 0) or 0,
                 thinking_tokens=getattr(um, "thoughts_token_count", 0) or 0,
             )
-            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
+            # Thought tokens are billed as output but reported separately
+            # (thoughts_token_count) — include them in the cost basis.
+            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens + usage.thinking_tokens)
         tool_calls = [
             ToolCall(id=d["id"], name=d["name"], arguments=d["args"], thought_signature=d.get("thought_signature"))
             for d in tool_call_accum.values()
@@ -871,14 +955,20 @@ class GoogleProvider(BaseProvider):
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
-                if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=str(part.thought))
-                elif hasattr(part, "text") and part.text:
-                    text_accum += part.text
-                    yield StreamChunk(delta=part.text)
+                part_text = getattr(part, "text", None)
+                if part_text and getattr(part, "thought", False):
+                    # ``thought`` is a bool flag in google-genai; the
+                    # reasoning text itself lives in part.text.
+                    yield StreamChunk(thinking_delta=part_text)
+                elif part_text:
+                    text_accum += part_text
+                    yield StreamChunk(delta=part_text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = str(getattr(fc, "id", None) or fc.name)
+                    # Same-name calls without an SDK id must not collide in
+                    # the accumulator — synthesise a unique id exactly like
+                    # the non-streaming path does.
+                    call_id = _synthesize_fc_id(fc, len(tool_call_accum))
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
@@ -894,7 +984,9 @@ class GoogleProvider(BaseProvider):
                 output_tokens=getattr(um, "candidates_token_count", 0) or 0,
                 thinking_tokens=getattr(um, "thoughts_token_count", 0) or 0,
             )
-            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens)
+            # Thought tokens are billed as output but reported separately
+            # (thoughts_token_count) — include them in the cost basis.
+            usage.cost_usd = self._compute_cost(model, usage.input_tokens, usage.output_tokens + usage.thinking_tokens)
         tool_calls = [
             ToolCall(id=d["id"], name=d["name"], arguments=d["args"], thought_signature=d.get("thought_signature"))
             for d in tool_call_accum.values()

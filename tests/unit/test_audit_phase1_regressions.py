@@ -119,39 +119,46 @@ def test_anthropic_compute_cost_default_signature():
 
 
 def test_anthropic_compute_cost_applies_cache_discount():
-    """Cache hits charged at 10% of base input rate (Anthropic standard)."""
+    """Cache hits charged at 10% of base input rate (Anthropic standard).
+
+    Anthropic's ``usage.input_tokens`` EXCLUDES the cache counters: the
+    cache-read count is ADDITIVE, not a subset (total prompt = input +
+    creation + read).  Telemetry-audit fix A1.
+    """
     provider = _bare_anthropic()
-    # 1M total input tokens, 100% cached → cost = 1M * 0.1 * 5 / 1M = $0.50
+    # Fully-cached prompt: 0 uncached input + 1M cache reads
+    # → cost = 1M * 0.1 * 5 / 1M = $0.50
     fully_cached = provider._compute_cost(
         "claude-opus-4-7",
-        input_tokens=1_000_000,
+        input_tokens=0,
         output_tokens=0,
         cached_input_tokens=1_000_000,
     )
     assert fully_cached == pytest.approx(0.5)
 
-    # 1M total input tokens, 50% cached → 0.5M * 5 + 0.5M * 0.5 = $2.75
+    # 1M total prompt, 50% cached → 0.5M uncached + 0.5M cache reads
+    # → 0.5M * 5 + 0.5M * 0.5 = $2.75
     half_cached = provider._compute_cost(
         "claude-opus-4-7",
-        input_tokens=1_000_000,
+        input_tokens=500_000,
         output_tokens=0,
         cached_input_tokens=500_000,
     )
     assert half_cached == pytest.approx(2.75)
 
 
-def test_anthropic_compute_cost_clamps_cached_tokens():
-    """Cached tokens reported above input_tokens (SDK noise) are clamped."""
+def test_anthropic_compute_cost_cached_tokens_are_additive():
+    """cached_input_tokens > input_tokens is a VALID shape (cache reads are
+    not a subset of input_tokens) — both components must be billed."""
     provider = _bare_anthropic()
-    # If cached > input, clamp to input — entire input is cached.
     cost = provider._compute_cost(
         "claude-opus-4-7",
         input_tokens=1_000,
         output_tokens=0,
-        cached_input_tokens=10_000,  # more than total — clamped
+        cached_input_tokens=10_000,  # additive — most of the prompt was a cache hit
     )
-    # Equivalent to all 1_000 cached at 0.1 × $5/1M
-    assert cost == pytest.approx(1_000 * 0.1 * 5 / 1_000_000)
+    # 1_000 uncached at $5/1M + 10_000 cached at 0.1 × $5/1M
+    assert cost == pytest.approx((1_000 * 5 + 10_000 * 0.5) / 1_000_000)
 
 
 # ---------------------------------------------------------------------------

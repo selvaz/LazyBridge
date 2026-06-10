@@ -170,9 +170,12 @@ class ImageContent:
         header, _, body = data_uri[5:].partition(",")
         if not body:
             raise ValueError("malformed data URI: missing payload")
-        media_type, _, encoding = header.partition(";")
+        media_type, _, params = header.partition(";")
         media_type = media_type or "image/jpeg"
-        if encoding == "base64":
+        # ``base64`` may not be the first parameter (e.g.
+        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
+        # otherwise the payload gets re-encoded (double base64).
+        if any(p.strip() == "base64" for p in params.split(";")):
             return cls(base64_data=body, media_type=media_type)
         return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
 
@@ -231,9 +234,12 @@ class AudioContent:
         header, _, body = data_uri[5:].partition(",")
         if not body:
             raise ValueError("malformed data URI: missing payload")
-        media_type, _, encoding = header.partition(";")
+        media_type, _, params = header.partition(";")
         media_type = media_type or "audio/wav"
-        if encoding == "base64":
+        # ``base64`` may not be the first parameter (e.g.
+        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
+        # otherwise the payload gets re-encoded (double base64).
+        if any(p.strip() == "base64" for p in params.split(";")):
             return cls(base64_data=body, media_type=media_type)
         return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
 
@@ -259,6 +265,10 @@ class ToolResultContent:
 @dataclass
 class ThinkingContent:
     thinking: str
+    #: Anthropic: thinking blocks replayed in assistant turns (required in
+    #: tool loops with thinking enabled) must carry the original block's
+    #: ``signature`` or the API rejects them with a 400.
+    signature: str | None = None
     type: ContentType = ContentType.THINKING
 
 
@@ -410,9 +420,16 @@ class ThinkingConfig:
 
 @dataclass
 class SkillsConfig:
-    """Anthropic Skills — server-side domain-expert packages."""
+    """Anthropic Skills — server-side domain-expert packages.
 
-    skills: list[str]  # e.g. ["pdf", "excel", "powerpoint", "word"]
+    Anthropic-managed skill ids: ``pptx``, ``xlsx``, ``docx``, ``pdf``
+    (friendly aliases ``powerpoint``/``excel``/``word`` are accepted and
+    mapped).  Ids starting with ``skill_`` are treated as custom skills
+    uploaded via the Skills API.  Requires the code-execution container;
+    the provider adds the code_execution tool automatically.
+    """
+
+    skills: list[str]  # e.g. ["pdf", "xlsx"] or ["skill_abc123"]
 
 
 @dataclass

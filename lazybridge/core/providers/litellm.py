@@ -202,7 +202,7 @@ def _messages_to_openai(request: CompletionRequest) -> list[dict[str, Any]]:
             # format. If there was also text in the same LazyBridge message,
             # emit it first as a user message (can't mix on role=tool).
             if parts:
-                messages.append({"role": msg.role.value, "content": parts})
+                messages.append({"role": "user", "content": parts})
             for tr in tool_results:
                 messages.append({"role": "tool", **tr})
         elif tool_calls:
@@ -240,7 +240,7 @@ def _tools_to_openai(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
     return result
 
 
-def _tool_choice_to_openai(choice: str, tools: list[ToolDefinition]) -> Any:
+def _tool_choice_to_openai(choice: str) -> Any:
     """Map LazyBridge tool_choice keyword / tool-name → OpenAI tool_choice field."""
     if choice in ("auto", "none", "required"):
         return choice
@@ -262,7 +262,11 @@ class LiteLLMProvider(BaseProvider):
     Install ``pip install lazybridge[litellm]`` to pull the dependency.
     """
 
-    default_model = "litellm/gpt-4o-mini"
+    #: No class default — the bridge fronts paid cloud backends, so we
+    #: follow the base-class convention for paid providers: force an
+    #: explicit model choice (``_resolve_model`` raises a ValueError with
+    #: fix options) instead of silently falling back to a flagship.
+    default_model = None
 
     #: No native-tools through the bridge — LiteLLM normalises to the
     #: OpenAI wire shape which has no slot for WEB_SEARCH / CODE_EXECUTION.
@@ -301,12 +305,26 @@ class LiteLLMProvider(BaseProvider):
             ) from exc
         self._litellm = litellm
         # Forward extra kwargs to litellm module-level config (e.g.
-        # drop_params, set_verbose, telemetry). Anything unknown is
-        # stored silently on the module; callers are responsible for
-        # knowing litellm's surface.
+        # drop_params, set_verbose, telemetry).
+        #
+        # NOTE: this configuration is GLOBAL to the litellm module —
+        # litellm exposes these as module attributes, so the values are
+        # shared by every LiteLLMProvider instance (and any other code
+        # importing litellm) in the process.  Unknown keys are NOT set;
+        # they raise a UserWarning so typos (e.g. ``drop_parms=True``)
+        # don't get silently discarded.
         for key, value in kwargs.items():
             if hasattr(litellm, key):
                 setattr(litellm, key, value)
+            else:
+                warnings.warn(
+                    f"LiteLLMProvider: unknown litellm config kwarg {key!r} "
+                    f"ignored — the litellm module has no such attribute. "
+                    f"Check for typos against litellm's module-level settings "
+                    f"(e.g. drop_params, set_verbose, telemetry).",
+                    UserWarning,
+                    stacklevel=3,
+                )
 
     # ------------------------------------------------------------------
     # Request → LiteLLM params
@@ -315,13 +333,9 @@ class LiteLLMProvider(BaseProvider):
     def _build_params(self, request: CompletionRequest) -> dict[str, Any]:
         """Translate a CompletionRequest into litellm.completion kwargs."""
         if request.native_tools:
-            warnings.warn(
-                f"LiteLLMProvider: native_tools={list(request.native_tools)!r} "
-                f"is not forwarded through the bridge (LiteLLM normalises to "
-                f"the OpenAI shape). Use a native provider for these.",
-                UserWarning,
-                stacklevel=3,
-            )
+            # Warn-and-drop by default; raises UnsupportedNativeToolError
+            # when the provider was built with strict_native_tools=True.
+            self._check_native_tools(request.native_tools)
 
         resolved = _strip_prefix(self._resolve_model(request))
         params: dict[str, Any] = {
@@ -334,10 +348,12 @@ class LiteLLMProvider(BaseProvider):
         if request.tools:
             params["tools"] = _tools_to_openai(request.tools)
             if request.tool_choice is not None:
-                params["tool_choice"] = _tool_choice_to_openai(
-                    request.tool_choice,
-                    request.tools,
-                )
+                params["tool_choice"] = _tool_choice_to_openai(request.tool_choice)
+        if request.structured_output:
+            # JSON mode — litellm translates response_format for the
+            # backends that support it.  Validation against the schema
+            # happens client-side in complete/stream/acomplete/astream.
+            params["response_format"] = {"type": "json_object"}
         if self.api_key:
             # When set explicitly, hand LiteLLM the key. Otherwise it reads
             # from the appropriate env var (OPENAI_API_KEY, ANTHROPIC_API_KEY,
@@ -387,14 +403,31 @@ class LiteLLMProvider(BaseProvider):
             raw=resp,
         )
 
-    def _extract_usage(self, resp: Any) -> UsageStats:
-        raw_usage = getattr(resp, "usage", None)
-        if raw_usage is None:
-            return UsageStats()
+    @staticmethod
+    def _usage_from_raw(raw_usage: Any) -> UsageStats:
+        """Build UsageStats from an OpenAI-shape usage object.
+
+        Also picks up the optional detail blocks when the backend reports
+        them: ``completion_tokens_details.reasoning_tokens`` (thinking) and
+        ``prompt_tokens_details.cached_tokens`` (prompt-cache hits).
+        """
         usage = UsageStats(
             input_tokens=getattr(raw_usage, "prompt_tokens", 0) or 0,
             output_tokens=getattr(raw_usage, "completion_tokens", 0) or 0,
         )
+        completion_details = getattr(raw_usage, "completion_tokens_details", None)
+        if completion_details is not None:
+            usage.thinking_tokens = getattr(completion_details, "reasoning_tokens", 0) or 0
+        prompt_details = getattr(raw_usage, "prompt_tokens_details", None)
+        if prompt_details is not None:
+            usage.cached_input_tokens = getattr(prompt_details, "cached_tokens", 0) or 0
+        return usage
+
+    def _extract_usage(self, resp: Any) -> UsageStats:
+        raw_usage = getattr(resp, "usage", None)
+        if raw_usage is None:
+            return UsageStats()
+        usage = self._usage_from_raw(raw_usage)
         # LiteLLM stuffs the computed cost under _hidden_params when it can
         # price the model; fall back to _compute_cost override otherwise.
         hidden = getattr(resp, "_hidden_params", None) or {}
@@ -404,6 +437,13 @@ class LiteLLMProvider(BaseProvider):
                 usage.cost_usd = float(cost)
             except (TypeError, ValueError):
                 usage.cost_usd = None
+        if usage.cost_usd is None:
+            usage.cost_usd = self._compute_cost(
+                getattr(resp, "model", None) or "",
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cached_input_tokens,
+            )
         return usage
 
     # ------------------------------------------------------------------
@@ -423,18 +463,12 @@ class LiteLLMProvider(BaseProvider):
         """
         choices = getattr(chunk, "choices", []) or []
         if not choices:
-            # Usage-only final chunk (some providers emit one after the
-            # content stream completes).
+            # Usage-only trailer chunk: with stream_options.include_usage
+            # the OpenAI spec sends a final chunk with choices=[] carrying
+            # the usage block.  Read it even though there is no choice.
             u = getattr(chunk, "usage", None)
             if u:
-                return (
-                    "",
-                    None,
-                    UsageStats(
-                        input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                        output_tokens=getattr(u, "completion_tokens", 0) or 0,
-                    ),
-                )
+                return "", None, self._usage_from_raw(u)
             return "", None, None
 
         choice = choices[0]
@@ -460,19 +494,23 @@ class LiteLLMProvider(BaseProvider):
         usage = None
         u = getattr(chunk, "usage", None)
         if u:
-            usage = UsageStats(
-                input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                output_tokens=getattr(u, "completion_tokens", 0) or 0,
-            )
+            usage = self._usage_from_raw(u)
         return delta_text, finish_reason, usage
 
     def _finalise_stream(
         self,
+        request: CompletionRequest,
         partial_tool_calls: dict[int, dict[str, Any]],
         finish_reason: str | None,
         usage: UsageStats | None,
+        text_accum: str,
     ) -> StreamChunk:
-        """Build the final StreamChunk from accumulated state."""
+        """Build the final StreamChunk from accumulated state.
+
+        Always produced — even when the stream died without ever sending a
+        finish_reason, in which case ``stop_reason`` is ``"incomplete"`` so
+        the is_final=True contract from base.py holds.
+        """
         tool_calls = [
             ToolCall(
                 id=slot["id"] or f"tc_{idx}",
@@ -482,60 +520,87 @@ class LiteLLMProvider(BaseProvider):
             for idx, slot in sorted(partial_tool_calls.items())
             if slot["name"]  # guard against malformed partials
         ]
-        return StreamChunk(
+        final = StreamChunk(
             delta="",
             tool_calls=tool_calls,
-            stop_reason=finish_reason or "end_turn",
+            stop_reason=finish_reason or "incomplete",
             usage=usage,
             is_final=True,
         )
+        # Tool-call turns have empty/irrelevant text by design — validating
+        # them would record a spurious validation_error.
+        if request.structured_output and not tool_calls:
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(final, text_accum, request.structured_output.schema)
+        return final
 
     # ------------------------------------------------------------------
     # Abstract-method implementations
     # ------------------------------------------------------------------
 
+    def _apply_structured_validation(self, request: CompletionRequest, resp: CompletionResponse) -> CompletionResponse:
+        """Validate response content against request.structured_output, if set.
+
+        Tool-call turns are skipped — their content is empty by design and
+        validating it would record a spurious validation_error.
+        """
+        if request.structured_output and not resp.tool_calls:
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(resp, resp.content, request.structured_output.schema)
+        return resp
+
     def complete(self, request: CompletionRequest) -> CompletionResponse:
         params = self._build_params(request)
         params["stream"] = False
         resp = self._litellm.completion(**params)
-        return self._convert_response(resp)
+        return self._apply_structured_validation(request, self._convert_response(resp))
 
     def stream(self, request: CompletionRequest) -> Iterator[StreamChunk]:
         params = self._build_params(request)
         params["stream"] = True
+        # OpenAI-spec opt-in: ask for the usage trailer chunk (choices=[]).
+        params["stream_options"] = {"include_usage": True}
         iterator = self._litellm.completion(**params)
         partial: dict[int, dict[str, Any]] = {}
         last_usage: UsageStats | None = None
         last_finish: str | None = None
+        text_accum = ""
         for chunk in iterator:
             delta_text, finish_reason, usage = self._reduce_stream_chunk(chunk, partial)
             if delta_text:
+                text_accum += delta_text
                 yield StreamChunk(delta=delta_text)
             if finish_reason:
                 last_finish = finish_reason
             if usage is not None:
                 last_usage = usage
-        yield self._finalise_stream(partial, last_finish, last_usage)
+        yield self._finalise_stream(request, partial, last_finish, last_usage, text_accum)
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         params = self._build_params(request)
         params["stream"] = False
         resp = await self._litellm.acompletion(**params)
-        return self._convert_response(resp)
+        return self._apply_structured_validation(request, self._convert_response(resp))
 
     async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         params = self._build_params(request)
         params["stream"] = True
+        # OpenAI-spec opt-in: ask for the usage trailer chunk (choices=[]).
+        params["stream_options"] = {"include_usage": True}
         async_iterator = await self._litellm.acompletion(**params)
         partial: dict[int, dict[str, Any]] = {}
         last_usage: UsageStats | None = None
         last_finish: str | None = None
+        text_accum = ""
         async for chunk in async_iterator:
             delta_text, finish_reason, usage = self._reduce_stream_chunk(chunk, partial)
             if delta_text:
+                text_accum += delta_text
                 yield StreamChunk(delta=delta_text)
             if finish_reason:
                 last_finish = finish_reason
             if usage is not None:
                 last_usage = usage
-        yield self._finalise_stream(partial, last_finish, last_usage)
+        yield self._finalise_stream(request, partial, last_finish, last_usage, text_accum)

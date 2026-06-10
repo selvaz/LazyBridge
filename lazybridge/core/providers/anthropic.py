@@ -38,6 +38,26 @@ _NATIVE_TOOL_MAP: dict[NativeTool, dict[str, Any]] = {
     NativeTool.COMPUTER_USE: {"type": "computer_use_20250124", "name": "computer"},
 }
 
+# Friendly aliases accepted in SkillsConfig.skills → Anthropic skill ids.
+# The API only knows pptx/xlsx/docx/pdf for Anthropic-managed skills.
+_SKILL_ID_ALIASES: dict[str, str] = {
+    "excel": "xlsx",
+    "powerpoint": "pptx",
+    "word": "docx",
+}
+
+
+def _skill_ref(skill: str) -> dict[str, str]:
+    """Build one ``container.skills`` entry from a SkillsConfig string.
+
+    Ids starting with ``skill_`` are custom skills uploaded via the Skills
+    API; everything else is treated as an Anthropic-managed skill id.
+    """
+    sid = _SKILL_ID_ALIASES.get(skill, skill)
+    skill_type = "custom" if sid.startswith("skill_") else "anthropic"
+    return {"type": skill_type, "skill_id": sid, "version": "latest"}
+
+
 # Beta headers required per feature
 _BETA_WEB_SEARCH = "web-search-2025-03-05"
 _BETA_CODE_EXEC = "code-execution-2025-08-25"
@@ -170,6 +190,8 @@ class AnthropicProvider(BaseProvider):
         input_tokens: int,
         output_tokens: int,
         cached_input_tokens: int = 0,
+        *,
+        cache_creation_tokens: int = 0,
     ) -> float | None:
         # Substring matching against model.lower() lets a fully-qualified model
         # string like "claude-sonnet-4-6-20250514" match the short key
@@ -180,18 +202,40 @@ class AnthropicProvider(BaseProvider):
         # so that a longer, specific key matches first.  Python 3.7+ dicts preserve
         # insertion order, which makes the match deterministic.
         #
-        # Cache-hit pricing: Anthropic charges 10% of the base input rate for
-        # cache reads (uniform across cache-capable models).  ``cached_input_tokens``
-        # is clamped to ``input_tokens`` to handle SDK noise where the reported
-        # cache hits exceed total input.
+        # Cache pricing: in the Anthropic API ``usage.input_tokens`` EXCLUDES the
+        # cache counters — ``cache_read_input_tokens`` and
+        # ``cache_creation_input_tokens`` are ADDITIVE (total prompt = input +
+        # creation + read), not subsets of ``input_tokens``.  Cache reads are
+        # billed at 10% of the base input rate; cache writes (creation) at 125%.
+        #
+        # ``cache_creation_tokens`` is keyword-only so the positional signature
+        # stays compatible with the 4-parameter contract inherited from
+        # ``BaseProvider._compute_cost``.
         model_l = model.lower()
         for key, (in_price, out_price) in _PRICE_TABLE.items():
             if key in model_l:
-                cached = max(0, min(cached_input_tokens, input_tokens))
-                uncached = input_tokens - cached
-                cached_rate = 0.1 * in_price
-                return (uncached * in_price + cached * cached_rate + output_tokens * out_price) / 1_000_000
+                cached = max(0, cached_input_tokens)
+                creation = max(0, cache_creation_tokens)
+                return (
+                    input_tokens * in_price
+                    + cached * 0.1 * in_price
+                    + creation * 1.25 * in_price
+                    + output_tokens * out_price
+                ) / 1_000_000
         return None
+
+    @staticmethod
+    def _get_cache_creation_tokens(raw_usage: Any) -> int:
+        """Read ``cache_creation_input_tokens`` from a raw SDK usage object.
+
+        Additive counter (see ``_compute_cost``): tokens written to the prompt
+        cache this turn, billed at 125% of the base input rate.  Older SDK
+        builds lack the attribute — treated as zero.
+        """
+        if not raw_usage:
+            return 0
+        creation = getattr(raw_usage, "cache_creation_input_tokens", None)
+        return int(creation) if creation else 0
 
     @staticmethod
     def _populate_cached_input_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
@@ -207,6 +251,34 @@ class AnthropicProvider(BaseProvider):
         if cached:
             usage.cached_input_tokens = int(cached)
         return usage
+
+    @staticmethod
+    def _extract_grounding_sources(content_blocks: Any) -> list[GroundingSource]:
+        """Extract web-search citations from Anthropic content blocks.
+
+        The SDK does NOT return top-level ``web_search_result`` blocks: it
+        returns ``web_search_tool_result`` blocks whose ``.content`` holds the
+        nested list of ``web_search_result`` items (or, on failure, an error
+        object instead of a list).  Iterate the wrapper blocks and lift each
+        nested result into a :class:`GroundingSource`.
+        """
+        sources: list[GroundingSource] = []
+        for block in content_blocks or []:
+            if getattr(block, "type", None) != "web_search_tool_result":
+                continue
+            items = getattr(block, "content", None)
+            if not isinstance(items, (list, tuple)):
+                # Error payload (e.g. WebSearchToolResultError) — no sources.
+                continue
+            for item in items:
+                if getattr(item, "type", None) == "web_search_result":
+                    sources.append(
+                        GroundingSource(
+                            url=getattr(item, "url", "") or "",
+                            title=getattr(item, "title", None),
+                        )
+                    )
+        return sources
 
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for a given Anthropic model."""
@@ -272,7 +344,12 @@ class AnthropicProvider(BaseProvider):
                     if isinstance(block, TextContent):
                         blocks.append({"type": "text", "text": block.text})
                     elif isinstance(block, ThinkingContent):
-                        blocks.append({"type": "thinking", "thinking": block.thinking})
+                        tb: dict[str, Any] = {"type": "thinking", "thinking": block.thinking}
+                        # Replayed thinking blocks must keep the original
+                        # signature or the API rejects the turn with a 400.
+                        if getattr(block, "signature", None):
+                            tb["signature"] = block.signature
+                        blocks.append(tb)
                     elif isinstance(block, ImageContent):
                         if block.url:
                             blocks.append(
@@ -347,13 +424,20 @@ class AnthropicProvider(BaseProvider):
         return result
 
     def _get_system(self, request: CompletionRequest) -> str | None:
-        """Extract system prompt from request or system messages."""
+        """Extract the system prompt from request.system + SYSTEM messages.
+
+        All sources are concatenated — previously only the first one won
+        and any additional SYSTEM message was silently dropped.
+        """
+        parts: list[str] = []
         if request.system:
-            return request.system
+            parts.append(request.system)
         for msg in request.messages:
             if msg.role == Role.SYSTEM:
-                return msg.to_text()
-        return None
+                text = msg.to_text()
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts) or None
 
     def _build_tools(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Build tool definitions list for Anthropic API."""
@@ -462,8 +546,6 @@ class AnthropicProvider(BaseProvider):
 
         if is_adaptive:
             if request.thinking.budget_tokens is not None:
-                import warnings
-
                 # I5 (audit) — the previous message said "Use 'effort' instead"
                 # but Opus 4.7 only accepts the ``display`` knob; ``effort`` is
                 # not a valid parameter for adaptive-thinking models.  Surface
@@ -482,8 +564,26 @@ class AnthropicProvider(BaseProvider):
                 thinking["display"] = request.thinking.display
             return thinking
 
-        # Older models (3.x, 4.5): explicit budget required
-        budget = request.thinking.budget_tokens or 8000
+        # Older models (3.x, 4.5): explicit budget required.
+        # ``is not None`` (not ``or``) so an explicit budget_tokens=0 is
+        # honoured rather than silently replaced by the 8000 default.
+        budget_tokens = request.thinking.budget_tokens
+        budget = budget_tokens if budget_tokens is not None else 8000
+        # The API requires budget_tokens < max_tokens (and >= 1024).  Clamp
+        # against the effective max so a default/over-sized budget never
+        # produces a guaranteed 400.
+        effective_max = request.max_tokens or self.get_default_max_tokens(model)
+        max_budget = effective_max - 1024
+        if budget > max_budget:
+            warnings.warn(
+                f"ThinkingConfig.budget_tokens={budget} exceeds the API limit for "
+                f"model {model!r} (budget_tokens must be < max_tokens; effective "
+                f"max_tokens={effective_max}).  Clamping budget_tokens to "
+                f"{max_budget}.",
+                UserWarning,
+                stacklevel=4,
+            )
+            budget = max_budget
         return {"type": "enabled", "budget_tokens": budget}
 
     def _build_params(self, request: CompletionRequest) -> dict[str, Any]:
@@ -543,15 +643,28 @@ class AnthropicProvider(BaseProvider):
                     cache_block["ttl"] = request.cache.ttl
                 tools[-1] = {**tools[-1], "cache_control": cache_block}
             params["tools"] = tools
-        if request.tool_choice:
-            if request.tool_choice in ("auto", "none", "required"):
+        if request.tool_choice and tools:
+            # Anthropic's valid tool_choice types are auto / any / tool / none.
+            # Both LazyBridge keywords for "must call a tool" — "required"
+            # (OpenAI vocabulary) and "any" — map to Anthropic's {"type": "any"}.
+            # Only emitted when tools are present: a dangling tool_choice
+            # without tools is a guaranteed 400.
+            if request.tool_choice in ("auto", "none"):
                 params["tool_choice"] = {"type": request.tool_choice}
-            elif request.tool_choice == "any":
-                # "any" is LazyBridge's provider-neutral "must call a tool";
-                # Anthropic's equivalent is "required".
-                params["tool_choice"] = {"type": "required"}
+            elif request.tool_choice in ("required", "any"):
+                params["tool_choice"] = {"type": "any"}
             else:
                 params["tool_choice"] = {"type": "tool", "name": request.tool_choice}
+        if request.skills and request.skills.skills:
+            # Skills are activated via the ``container`` parameter; the beta
+            # headers alone (see _build_betas) do nothing — before this fix
+            # the feature was a silent no-op.
+            params["container"] = {"skills": [_skill_ref(s) for s in request.skills.skills]}
+            # Skills execute inside the code-execution container, so the
+            # code_execution tool is mandatory.  Add it unless already present.
+            skill_tools = params.get("tools", [])
+            if not any(t.get("name") == "code_execution" for t in skill_tools):
+                params["tools"] = [*skill_tools, _NATIVE_TOOL_MAP[NativeTool.CODE_EXECUTION]]
         thinking = self._build_thinking(request)
         if thinking:
             params["thinking"] = thinking
@@ -559,12 +672,9 @@ class AnthropicProvider(BaseProvider):
 
     def _parse_response(self, response: Any) -> CompletionResponse:
         """Convert Anthropic response to unified CompletionResponse."""
-        from lazybridge.core.types import GroundingSource
-
         content = ""
         thinking = None
         tool_calls: list[ToolCall] = []
-        grounding_sources: list[GroundingSource] = []
 
         for block in response.content:
             if block.type == "text":
@@ -579,13 +689,10 @@ class AnthropicProvider(BaseProvider):
                         arguments=block.input,
                     )
                 )
-            elif block.type == "web_search_result":
-                grounding_sources.append(
-                    GroundingSource(
-                        url=getattr(block, "url", "") or "",
-                        title=getattr(block, "title", None),
-                    )
-                )
+
+        # Citations live inside web_search_tool_result wrapper blocks —
+        # see _extract_grounding_sources for the nested SDK shape.
+        grounding_sources = self._extract_grounding_sources(response.content)
 
         usage = UsageStats(
             input_tokens=response.usage.input_tokens,
@@ -602,7 +709,11 @@ class AnthropicProvider(BaseProvider):
         # Price lookup by substring match — see _compute_cost for ordering notes.
         usage = self._populate_cached_input_tokens(usage, response.usage)
         usage.cost_usd = self._compute_cost(
-            response.model, usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+            response.model,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            cache_creation_tokens=self._get_cache_creation_tokens(response.usage),
         )
 
         return CompletionResponse(
@@ -623,9 +734,12 @@ class AnthropicProvider(BaseProvider):
         if effective_max > threshold:
             import logging as _logging
 
+            # Log the EFFECTIVE value used for the comparison —
+            # request.max_tokens is None in the most common case (model
+            # default applied) and would break the %d format.
             _logging.getLogger(__name__).debug(
-                "AnthropicProvider: auto-forcing streaming because max_tokens=%d > threshold=%d.",
-                request.max_tokens,
+                "AnthropicProvider: auto-forcing streaming because effective max_tokens=%d > threshold=%d.",
+                effective_max,
                 threshold,
             )
             return True
@@ -654,6 +768,9 @@ class AnthropicProvider(BaseProvider):
             parsed=final_chunk.parsed if final_chunk else None,
             validation_error=final_chunk.validation_error if final_chunk else None,
             validated=final_chunk.validated if final_chunk else None,
+            grounding_sources=final_chunk.grounding_sources if final_chunk else [],
+            web_search_queries=final_chunk.web_search_queries if final_chunk else [],
+            search_entry_point=final_chunk.search_entry_point if final_chunk else None,
         )
 
     async def _acollect_streamed_response(self, request: CompletionRequest) -> CompletionResponse:
@@ -679,6 +796,9 @@ class AnthropicProvider(BaseProvider):
             parsed=final_chunk.parsed if final_chunk else None,
             validation_error=final_chunk.validation_error if final_chunk else None,
             validated=final_chunk.validated if final_chunk else None,
+            grounding_sources=final_chunk.grounding_sources if final_chunk else [],
+            web_search_queries=final_chunk.web_search_queries if final_chunk else [],
+            search_entry_point=final_chunk.search_entry_point if final_chunk else None,
         )
 
     # ------------------------------------------------------------------
@@ -787,6 +907,7 @@ class AnthropicProvider(BaseProvider):
         # text_accum collects all text deltas so structured output validation
         # can be run against the complete response at message_stop time.
         text_accum = ""
+        emitted_final = False
         with ctx as s:
             for event in s:
                 if event.type == "content_block_delta":
@@ -822,18 +943,13 @@ class AnthropicProvider(BaseProvider):
                         usage.input_tokens,
                         usage.output_tokens,
                         usage.cached_input_tokens,
+                        cache_creation_tokens=self._get_cache_creation_tokens(final.usage),
                     )
                     tool_calls = [
                         ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"
                     ]
-                    grounding_sources = [
-                        GroundingSource(
-                            url=getattr(b, "url", "") or "",
-                            title=getattr(b, "title", None),
-                        )
-                        for b in final.content
-                        if b.type == "web_search_result"
-                    ]
+                    # Nested web_search_tool_result extraction — shared helper.
+                    grounding_sources = self._extract_grounding_sources(final.content)
                     final_chunk = StreamChunk(
                         stop_reason=final.stop_reason,
                         usage=usage,
@@ -845,7 +961,19 @@ class AnthropicProvider(BaseProvider):
                         from lazybridge.core.structured import apply_structured_validation
 
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+                    emitted_final = True
                     yield final_chunk
+
+        if not emitted_final:
+            # The SDK iterator ended without a message_stop event (dropped
+            # connection / truncation) — honour the BaseProvider contract:
+            # a final is_final=True chunk is always emitted.
+            fallback_chunk = StreamChunk(stop_reason="incomplete", is_final=True)
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(fallback_chunk, text_accum, request.structured_output.schema)
+            yield fallback_chunk
 
     # ------------------------------------------------------------------
     # Async API
@@ -944,6 +1072,7 @@ class AnthropicProvider(BaseProvider):
         # text_accum collects all text deltas for end-of-stream validation.
         # See the sync stream() method for detailed inline commentary.
         text_accum = ""
+        emitted_final = False
         async with ctx as s:
             async for event in s:
                 if event.type == "content_block_delta":
@@ -960,8 +1089,13 @@ class AnthropicProvider(BaseProvider):
                         input_tokens=final.usage.input_tokens,
                         output_tokens=final.usage.output_tokens,
                     )
-                    # reasoning_tokens only present for thinking-mode responses.
-                    _thinking_tokens = getattr(final.usage, "reasoning_tokens", None)
+                    # thinking_tokens: SDK v0.105+ uses output_tokens_details.thinking_tokens;
+                    # older SDK builds exposed it as usage.reasoning_tokens directly.
+                    # Mirrors the sync stream() / _parse_response() lookup order.
+                    _otd = getattr(final.usage, "output_tokens_details", None)
+                    _thinking_tokens = getattr(_otd, "thinking_tokens", None) or getattr(
+                        final.usage, "reasoning_tokens", None
+                    )
                     if _thinking_tokens is not None:
                         usage.thinking_tokens = _thinking_tokens
                     usage = self._populate_cached_input_tokens(usage, final.usage)
@@ -970,18 +1104,13 @@ class AnthropicProvider(BaseProvider):
                         usage.input_tokens,
                         usage.output_tokens,
                         usage.cached_input_tokens,
+                        cache_creation_tokens=self._get_cache_creation_tokens(final.usage),
                     )
                     tool_calls = [
                         ToolCall(id=b.id, name=b.name, arguments=b.input) for b in final.content if b.type == "tool_use"
                     ]
-                    grounding_sources = [
-                        GroundingSource(
-                            url=getattr(b, "url", "") or "",
-                            title=getattr(b, "title", None),
-                        )
-                        for b in final.content
-                        if b.type == "web_search_result"
-                    ]
+                    # Nested web_search_tool_result extraction — shared helper.
+                    grounding_sources = self._extract_grounding_sources(final.content)
                     final_chunk = StreamChunk(
                         stop_reason=final.stop_reason,
                         usage=usage,
@@ -993,4 +1122,16 @@ class AnthropicProvider(BaseProvider):
                         from lazybridge.core.structured import apply_structured_validation
 
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+                    emitted_final = True
                     yield final_chunk
+
+        if not emitted_final:
+            # The SDK iterator ended without a message_stop event (dropped
+            # connection / truncation) — honour the BaseProvider contract:
+            # a final is_final=True chunk is always emitted.
+            fallback_chunk = StreamChunk(stop_reason="incomplete", is_final=True)
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(fallback_chunk, text_accum, request.structured_output.schema)
+            yield fallback_chunk
