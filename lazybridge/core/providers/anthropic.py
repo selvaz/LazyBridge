@@ -543,13 +543,16 @@ class AnthropicProvider(BaseProvider):
                     cache_block["ttl"] = request.cache.ttl
                 tools[-1] = {**tools[-1], "cache_control": cache_block}
             params["tools"] = tools
-        if request.tool_choice:
-            if request.tool_choice in ("auto", "none", "required"):
+        if request.tool_choice and tools:
+            # Anthropic's valid tool_choice types are auto / any / tool / none.
+            # Both LazyBridge keywords for "must call a tool" — "required"
+            # (OpenAI vocabulary) and "any" — map to Anthropic's {"type": "any"}.
+            # Only emitted when tools are present: a dangling tool_choice
+            # without tools is a guaranteed 400.
+            if request.tool_choice in ("auto", "none"):
                 params["tool_choice"] = {"type": request.tool_choice}
-            elif request.tool_choice == "any":
-                # "any" is LazyBridge's provider-neutral "must call a tool";
-                # Anthropic's equivalent is "required".
-                params["tool_choice"] = {"type": "required"}
+            elif request.tool_choice in ("required", "any"):
+                params["tool_choice"] = {"type": "any"}
             else:
                 params["tool_choice"] = {"type": "tool", "name": request.tool_choice}
         thinking = self._build_thinking(request)
