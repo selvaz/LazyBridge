@@ -278,7 +278,7 @@ _NATIVE_UNION_TYPE: type | None = getattr(_types, "UnionType", None)
 def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     """Recursively convert a Python type annotation to a JSON Schema dict."""
     origin = getattr(annotation, "__origin__", None)
-    args = getattr(annotation, "__args__", ()) or ()
+    args: tuple[Any, ...] = getattr(annotation, "__args__", ()) or ()
 
     # Detect both typing.Union[X, Y] and native str | int (Python 3.10+)
     is_union = origin is typing.Union or (_NATIVE_UNION_TYPE is not None and isinstance(annotation, _NATIVE_UNION_TYPE))
@@ -500,7 +500,7 @@ def _make_arg_model(func: Callable[..., Any]) -> type | None:
                     continue
                 if isinstance(ann, str):
                     try:
-                        ann = eval(ann, func_globals)  # noqa: S307 — annotation eval, same as get_type_hints
+                        ann = eval(ann, func_globals)
                     except Exception:
                         continue
                 hints[pname] = ann

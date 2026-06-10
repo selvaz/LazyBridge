@@ -514,10 +514,9 @@ def test_google_unsupported_native_tool_warns_exactly_once():
         messages=[Message.user("q")],
         native_tools=[NativeTool.CODE_EXECUTION],  # not supported by Gemini
     )
-    with patch.object(google_module, "_gtypes", MagicMock()):
-        with _warnings_mod.catch_warnings(record=True) as rec:
-            _warnings_mod.simplefilter("always")
-            p._build_config(req)
+    with patch.object(google_module, "_gtypes", MagicMock()), _warnings_mod.catch_warnings(record=True) as rec:
+        _warnings_mod.simplefilter("always")
+        p._build_config(req)
     unsupported = [w for w in rec if "does not support native tool" in str(w.message)]
     assert len(unsupported) == 1  # was 2: _build_config AND _build_tools_config
 
@@ -574,9 +573,8 @@ def test_google_function_response_fallback_strips_synthetic_suffix():
         content=[ToolResultContent(tool_use_id="lookup-3", content="42")],  # no tool_name
     )
     gtypes = MagicMock()
-    with patch.object(google_module, "_gtypes", gtypes):
-        with pytest.warns(UserWarning, match="tool_name"):
-            p._messages_to_gemini(CompletionRequest(messages=[msg]))
+    with patch.object(google_module, "_gtypes", gtypes), pytest.warns(UserWarning, match="tool_name"):
+        p._messages_to_gemini(CompletionRequest(messages=[msg]))
     assert gtypes.Part.from_function_response.call_args.kwargs["name"] == "lookup"
 
 
@@ -589,8 +587,7 @@ def test_google_function_response_with_tool_name_does_not_warn():
         content=[ToolResultContent(tool_use_id="lookup-3", content="42", tool_name="real_fn")],
     )
     gtypes = MagicMock()
-    with patch.object(google_module, "_gtypes", gtypes):
-        with _warnings_mod.catch_warnings():
-            _warnings_mod.simplefilter("error")
-            p._messages_to_gemini(CompletionRequest(messages=[msg]))
+    with patch.object(google_module, "_gtypes", gtypes), _warnings_mod.catch_warnings():
+        _warnings_mod.simplefilter("error")
+        p._messages_to_gemini(CompletionRequest(messages=[msg]))
     assert gtypes.Part.from_function_response.call_args.kwargs["name"] == "real_fn"

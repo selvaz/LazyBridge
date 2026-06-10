@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 import logging
 import os
+import threading
 import warnings
 from collections.abc import AsyncIterator, Iterator
 from typing import Any

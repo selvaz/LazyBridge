@@ -392,9 +392,7 @@ class DeepSeekProvider(OpenAIProvider):
         else:
             params["messages"] = [{"role": "system", "content": instruction}, *messages]
 
-    def _apply_structured_output_params(
-        self, params: dict[str, Any], request: CompletionRequest, model: str
-    ) -> None:
+    def _apply_structured_output_params(self, params: dict[str, Any], request: CompletionRequest, model: str) -> None:
         """JSON-mode wiring shared by all four entry points.
 
         DeepSeek structured output is JSON mode only (not full schema

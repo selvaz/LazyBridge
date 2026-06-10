@@ -153,7 +153,7 @@ def test_google_tool_config_merges_maps_and_function_calling():
         native_tools=[NativeTool.GOOGLE_MAPS],
         extra={"google_maps_lat": 41.9, "google_maps_lng": 12.5},
     )
-    kwargs = _google_config_kwargs(req, gtypes)
+    _google_config_kwargs(req, gtypes)
 
     tc_kwargs = gtypes.ToolConfig.call_args.kwargs
     assert "function_calling_config" in tc_kwargs
@@ -198,9 +198,7 @@ def test_openai_responses_temperature_not_dropped_by_thinking():
     from lazybridge.core.types import ThinkingConfig
 
     p = _bare_openai()
-    req = CompletionRequest(
-        messages=[Message.user("x")], model="gpt-4o", temperature=0.3, thinking=ThinkingConfig()
-    )
+    req = CompletionRequest(messages=[Message.user("x")], model="gpt-4o", temperature=0.3, thinking=ThinkingConfig())
     params = p._build_responses_params(req)
     # Non-reasoning model: temperature must survive even with thinking set.
     assert params["temperature"] == 0.3
@@ -212,7 +210,6 @@ def test_openai_responses_temperature_not_dropped_by_thinking():
 
 
 def test_openai_system_history_messages_are_forwarded():
-    from lazybridge.core.types import Role
 
     p = _bare_openai()
     req = CompletionRequest(
@@ -233,9 +230,7 @@ def test_openai_chat_path_warns_on_dropped_native_tools():
 
     p = _bare_openai()
     p.strict_native_tools = False
-    req = CompletionRequest(
-        messages=[Message.user("x")], model="gpt-4o-mini", native_tools=[NativeTool.WEB_SEARCH]
-    )
+    req = CompletionRequest(messages=[Message.user("x")], model="gpt-4o-mini", native_tools=[NativeTool.WEB_SEARCH])
     with w.catch_warnings(record=True) as caught:
         w.simplefilter("always")
         p._build_chat_params(req)

@@ -261,11 +261,7 @@ def test_stream_skips_validation_on_tool_call_turn():
     """A streamed tool-call turn must not record a spurious validation_error."""
     chunks = [
         _FakeResponse(
-            [
-                _FakeChoice(
-                    delta=_FakeDelta(tool_calls=[_FakeToolCall(id="c1", name="search", arguments="{}", index=0)])
-                )
-            ]
+            [_FakeChoice(delta=_FakeDelta(tool_calls=[_FakeToolCall(id="c1", name="search", arguments="{}", index=0)]))]
         ),
         _FakeResponse([_FakeChoice(delta=_FakeDelta(), finish_reason="tool_calls")], usage=_FakeUsage()),
     ]
@@ -503,9 +499,9 @@ def test_init_client_warns_on_unknown_kwarg():
 def test_init_client_sets_known_kwarg_without_warning():
     """Known module-level flags are still forwarded to the litellm module."""
     stub = _install_stub_litellm()
-    from lazybridge.core.providers.litellm import LiteLLMProvider
-
     import warnings as _warnings
+
+    from lazybridge.core.providers.litellm import LiteLLMProvider
 
     with _warnings.catch_warnings():
         _warnings.simplefilter("error")  # any warning → test failure

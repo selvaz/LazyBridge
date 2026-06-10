@@ -388,7 +388,9 @@ def test_anthropic_thinking_signature_survives_replay():
         ]
     )
     wire = p._messages_to_anthropic(req)
-    thinking_blocks = [b for m in wire for b in m["content"] if isinstance(m["content"], list) and b.get("type") == "thinking"]
+    thinking_blocks = [
+        b for m in wire for b in m["content"] if isinstance(m["content"], list) and b.get("type") == "thinking"
+    ]
     assert thinking_blocks and thinking_blocks[0]["signature"] == "sig123"
 
 
