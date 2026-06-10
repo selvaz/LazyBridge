@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, get_origin
 
 from lazybridge.core.types import Message
@@ -131,7 +132,12 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
         else:
             normalized[key] = value
 
-    if normalized.get("type") == "object" and "additionalProperties" not in normalized:
+    # Close object nodes by default.  An explicit ``type: "object"`` OR an
+    # implicit one (``properties`` present, no ``type``) both count — the
+    # implicit form is what Pydantic emits for some composed schemas and
+    # was previously left open.
+    is_object = normalized.get("type") == "object" or ("properties" in normalized and "type" not in normalized)
+    if is_object and "additionalProperties" not in normalized:
         normalized["additionalProperties"] = False
 
     return normalized
@@ -270,7 +276,16 @@ def parse_structured_output(
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise StructuredOutputError(f"JSON parse error: {exc}") from exc
+        # Models often wrap the JSON in prose ("Here is the JSON:\n```json
+        # ...```") — try the first fenced block before giving up.
+        fence = re.search(r"```(?:json)?\s*\n(.*?)```", content, re.DOTALL | re.IGNORECASE)
+        if fence:
+            try:
+                data = json.loads(fence.group(1).strip())
+            except (json.JSONDecodeError, ValueError):
+                raise StructuredOutputError(f"JSON parse error: {exc}") from exc
+        else:
+            raise StructuredOutputError(f"JSON parse error: {exc}") from exc
 
     # Step 3 — validate
     if isinstance(schema, dict):

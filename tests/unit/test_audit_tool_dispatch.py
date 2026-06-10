@@ -120,3 +120,21 @@ def test_flatten_refs_builders_do_not_share_cache_entries():
     flat_json = json.dumps(flat.definition.parameters)
     assert "$ref" not in flat_json
     assert "$defs" not in flat_json
+
+
+def test_local_return_type_does_not_break_validation():
+    """A return annotation referencing a locally-defined class raises
+    NameError in get_type_hints; parameter validation must survive it
+    (regression: Plan steps with such tools silently failed)."""
+
+    class LocalOut:  # not importable from module globals
+        pass
+
+    def tool(task: str) -> LocalOut:
+        assert isinstance(task, str)
+        return LocalOut()
+
+    t = Tool(tool)
+    assert isinstance(t.run_sync(task="hello"), LocalOut)
+    with pytest.raises(ToolArgumentValidationError):
+        t.run_sync(task="x", unexpected=1)

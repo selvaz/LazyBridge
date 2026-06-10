@@ -170,9 +170,12 @@ class ImageContent:
         header, _, body = data_uri[5:].partition(",")
         if not body:
             raise ValueError("malformed data URI: missing payload")
-        media_type, _, encoding = header.partition(";")
+        media_type, _, params = header.partition(";")
         media_type = media_type or "image/jpeg"
-        if encoding == "base64":
+        # ``base64`` may not be the first parameter (e.g.
+        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
+        # otherwise the payload gets re-encoded (double base64).
+        if any(p.strip() == "base64" for p in params.split(";")):
             return cls(base64_data=body, media_type=media_type)
         return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
 
@@ -231,9 +234,12 @@ class AudioContent:
         header, _, body = data_uri[5:].partition(",")
         if not body:
             raise ValueError("malformed data URI: missing payload")
-        media_type, _, encoding = header.partition(";")
+        media_type, _, params = header.partition(";")
         media_type = media_type or "audio/wav"
-        if encoding == "base64":
+        # ``base64`` may not be the first parameter (e.g.
+        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
+        # otherwise the payload gets re-encoded (double base64).
+        if any(p.strip() == "base64" for p in params.split(";")):
             return cls(base64_data=body, media_type=media_type)
         return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
 

@@ -339,8 +339,10 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
             "items": False,
         }
 
-    # dict[K, V] — simple object
+    # dict[K, V] — object with typed values (JSON keys are always strings)
     if origin is dict:
+        if len(args) == 2:
+            return {"type": "object", "additionalProperties": _annotation_to_schema(args[1])}
         return {"type": "object"}
 
     # Primitives
@@ -476,10 +478,32 @@ def _make_arg_model(func: Callable[..., Any]) -> type | None:
 
         try:
             sig = inspect.signature(func)
-            hints = typing.get_type_hints(func, include_extras=True)
         except (TypeError, ValueError, AttributeError) as exc:
             _logger.debug("Cannot inspect signature for %r: %s", getattr(func, "__qualname__", func), exc)
             return None
+        try:
+            hints = typing.get_type_hints(func, include_extras=True)
+        except (TypeError, ValueError, AttributeError) as exc:
+            _logger.debug("Cannot resolve hints for %r: %s", getattr(func, "__qualname__", func), exc)
+            return None
+        except NameError:
+            # get_type_hints resolves EVERY annotation, including the return
+            # type — a return class defined in a local scope (common in tests
+            # and factories) raises NameError even though all parameter
+            # annotations are resolvable.  Validation only needs parameters:
+            # resolve them individually and leave unresolvable ones untyped.
+            hints = {}
+            func_globals = getattr(func, "__globals__", {})
+            for pname, param in sig.parameters.items():
+                ann = param.annotation
+                if ann is inspect.Parameter.empty:
+                    continue
+                if isinstance(ann, str):
+                    try:
+                        ann = eval(ann, func_globals)  # noqa: S307 — annotation eval, same as get_type_hints
+                    except Exception:
+                        continue
+                hints[pname] = ann
 
         accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         fields: dict[str, Any] = {}
