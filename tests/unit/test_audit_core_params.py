@@ -58,3 +58,80 @@ def test_anthropic_tool_choice_without_tools_is_not_emitted():
     req = CompletionRequest(messages=[Message.user("hi")], tool_choice="auto")
     params = p._build_params(req)
     assert "tool_choice" not in params
+
+
+# ---------------------------------------------------------------------------
+# Google — tool_choice mapping + single merged ToolConfig
+# ---------------------------------------------------------------------------
+
+
+def _bare_google():
+    from lazybridge.core.providers.google import GoogleProvider
+
+    p = GoogleProvider.__new__(GoogleProvider)
+    p.api_key = "fake"
+    p.model = "gemini-2.5-flash"
+    p._user_model = "gemini-2.5-flash"
+    p.fallback_model = None
+    p.strict_native_tools = False
+    return p
+
+
+def _google_config_kwargs(request, gtypes):
+    """Run _build_config with a stubbed SDK and return GenerateContentConfig kwargs."""
+    from unittest.mock import patch
+
+    from lazybridge.core.providers import google as google_module
+
+    p = _bare_google()
+    with patch.object(google_module, "_gtypes", gtypes):
+        p._build_config(request)
+    return gtypes.GenerateContentConfig.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected_mode", "expected_allowed"),
+    [
+        ("auto", "AUTO", None),
+        ("required", "ANY", None),
+        ("any", "ANY", None),
+        ("none", "NONE", None),
+        ("get_weather", "ANY", ["get_weather"]),
+    ],
+)
+def test_google_tool_choice_maps_to_function_calling_config(choice, expected_mode, expected_allowed):
+    """tool_choice was completely ignored by GoogleProvider before the fix."""
+    from unittest.mock import MagicMock
+
+    gtypes = MagicMock()
+    req = CompletionRequest(messages=[Message.user("hi")], tools=[_TOOL], tool_choice=choice)
+    kwargs = _google_config_kwargs(req, gtypes)
+
+    assert "tool_config" in kwargs
+    fcc_kwargs = gtypes.FunctionCallingConfig.call_args.kwargs
+    assert fcc_kwargs["mode"] == expected_mode
+    if expected_allowed is None:
+        assert "allowed_function_names" not in fcc_kwargs
+    else:
+        assert fcc_kwargs["allowed_function_names"] == expected_allowed
+
+
+def test_google_tool_config_merges_maps_and_function_calling():
+    """Maps lat/lng (retrieval_config) must not cancel function_calling_config."""
+    from unittest.mock import MagicMock
+
+    from lazybridge.core.types import NativeTool
+
+    gtypes = MagicMock()
+    req = CompletionRequest(
+        messages=[Message.user("hi")],
+        tools=[_TOOL],
+        tool_choice="auto",
+        native_tools=[NativeTool.GOOGLE_MAPS],
+        extra={"google_maps_lat": 41.9, "google_maps_lng": 12.5},
+    )
+    kwargs = _google_config_kwargs(req, gtypes)
+
+    tc_kwargs = gtypes.ToolConfig.call_args.kwargs
+    assert "function_calling_config" in tc_kwargs
+    assert "retrieval_config" in tc_kwargs  # merged, not overwritten

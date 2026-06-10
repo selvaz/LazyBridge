@@ -171,6 +171,75 @@ def test_deepseek_async_client_is_lazy_and_per_loop():
     assert client is not None
 
 
+# ---------------------------------------------------------------------------
+# Google — part.thought is a bool flag (reasoning text lives in part.text)
+# and same-name tool calls must not collide in the streaming accumulator
+# ---------------------------------------------------------------------------
+
+
+def _bare_google():
+    from lazybridge.core.providers.google import GoogleProvider
+
+    p = GoogleProvider.__new__(GoogleProvider)
+    p.api_key = "fake"
+    p.model = "gemini-2.5-flash"
+    p._user_model = "gemini-2.5-flash"
+    p.fallback_model = None
+    p.strict_native_tools = False
+    return p
+
+
+def test_google_thought_flag_routes_text_to_thinking():
+    p = _bare_google()
+    parts = [
+        NS(text="step 1: reason", thought=True, function_call=None),
+        NS(text="the answer", thought=None, function_call=None),
+    ]
+    candidate = NS(content=NS(parts=parts), finish_reason=None, grounding_metadata=None)
+    response = NS(candidates=[candidate], usage_metadata=None)
+
+    resp = p._parse_response(response, "gemini-2.5-flash")
+
+    assert resp.thinking == "step 1: reason"
+    assert resp.content == "the answer"  # no thought contamination, no TypeError
+
+
+def test_google_stream_thought_flag_and_fc_id_collision():
+    from unittest.mock import patch
+
+    from lazybridge.core.providers import google as google_module
+    from lazybridge.core.types import CompletionRequest, Message
+
+    p = _bare_google()
+    # Two same-name calls WITHOUT an SDK id — before the fix the second
+    # overwrote the first in the accumulator (keyed on fc.name).
+    fc1 = NS(id=None, name="lookup", args={"q": 1})
+    fc2 = NS(id=None, name="lookup", args={"q": 2})
+    parts = [
+        NS(text="thinking...", thought=True, function_call=None),
+        NS(text=None, thought=None, function_call=fc1),
+        NS(text=None, thought=None, function_call=fc2),
+    ]
+    chunk = NS(
+        candidates=[NS(content=NS(parts=parts), finish_reason=NS(name="STOP"), grounding_metadata=None)],
+        usage_metadata=None,
+    )
+    p._client = MagicMock()
+    p._client.models.generate_content_stream.return_value = iter([chunk])
+
+    req = CompletionRequest(messages=[Message.user("hi")])
+    with patch.object(google_module, "_gtypes", MagicMock()):
+        chunks = list(p.stream(req))
+
+    thinking_chunks = [c for c in chunks if c.thinking_delta]
+    assert thinking_chunks and thinking_chunks[0].thinking_delta == "thinking..."
+    final = chunks[-1]
+    assert final.is_final
+    assert len(final.tool_calls) == 2
+    assert {tc.arguments["q"] for tc in final.tool_calls} == {1, 2}
+    assert len({tc.id for tc in final.tool_calls}) == 2
+
+
 def test_responses_stream_incomplete_status_is_captured():
     """``response.incomplete`` must populate the final chunk (truncation),
     not be silently dropped as an unknown event type."""

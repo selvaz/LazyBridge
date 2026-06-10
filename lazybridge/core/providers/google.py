@@ -491,10 +491,13 @@ class GoogleProvider(BaseProvider):
                 "xhigh": "high",
                 "max": "high",
             }.get(request.thinking.effort, "high")
-            return _gtypes.ThinkingConfig(thinking_level=level)  # type: ignore[arg-type]
+            # include_thoughts=True surfaces thought-summary parts in the
+            # response — without it CompletionResponse.thinking is never
+            # populated despite supports_thinking=True.
+            return _gtypes.ThinkingConfig(thinking_level=level, include_thoughts=True)  # type: ignore[arg-type]
         # budget=-1 → model decides automatically; 0 → no thinking
         budget = request.thinking.budget_tokens if request.thinking.budget_tokens is not None else -1
-        return _gtypes.ThinkingConfig(thinking_budget=budget)
+        return _gtypes.ThinkingConfig(thinking_budget=budget, include_thoughts=True)
 
     def _build_config(self, request: CompletionRequest) -> Any:
         kwargs: dict[str, Any] = {}
@@ -536,39 +539,67 @@ class GoogleProvider(BaseProvider):
                 disable=True  # We handle tool calls ourselves for unified output
             )
 
-        # When both server-side (grounding) and client-side (function_declarations)
-        # tools are present, Google requires tool_config with
-        # include_server_side_tool_invocations=True — otherwise 400 INVALID_ARGUMENT.
+        # ---- tool_config: ONE merged object ---------------------------
+        # Three independent inputs contribute to ToolConfig — tool_choice
+        # (function_calling_config.mode), the mixed native+custom flag
+        # (include_server_side_tool_invocations) and Maps lat/lng
+        # (retrieval_config).  They must be composed into a single object:
+        # assigning kwargs["tool_config"] per-branch let the last branch
+        # silently cancel the others.
+        fcc_kwargs: dict[str, Any] = {}
+        if request.tool_choice and has_custom_tools:
+            mode = {"auto": "AUTO", "required": "ANY", "any": "ANY", "none": "NONE"}.get(request.tool_choice)
+            if mode is None:
+                # Validated tool name (CompletionRequest.__post_init__):
+                # force-call that specific function.
+                fcc_kwargs["mode"] = "ANY"
+                fcc_kwargs["allowed_function_names"] = [request.tool_choice]
+            else:
+                fcc_kwargs["mode"] = mode
         if has_native_search and has_custom_tools:
+            # Required when server-side (grounding) and client-side
+            # (function_declarations) tools are mixed — otherwise 400.
+            fcc_kwargs["include_server_side_tool_invocations"] = True
+
+        fcc = None
+        if fcc_kwargs:
             try:
-                kwargs["tool_config"] = _gtypes.ToolConfig(
-                    function_calling_config=_gtypes.FunctionCallingConfig(  # type: ignore[call-arg]
-                        include_server_side_tool_invocations=True,
-                    )
-                )
+                fcc = _gtypes.FunctionCallingConfig(**fcc_kwargs)  # type: ignore[call-arg]
             except Exception:
+                # Older SDKs don't know include_server_side_tool_invocations.
                 _logger.warning(
-                    "Google SDK does not support FunctionCallingConfig"
-                    ".include_server_side_tool_invocations — skipping tool_config."
-                    " Mixed native+custom tools may fail with 400 INVALID_ARGUMENT."
+                    "Google SDK rejected FunctionCallingConfig(%s) — retrying without "
+                    "include_server_side_tool_invocations. Mixed native+custom tools "
+                    "may fail with 400 INVALID_ARGUMENT.",
+                    ", ".join(fcc_kwargs),
                 )
+                fcc_kwargs.pop("include_server_side_tool_invocations", None)
+                if fcc_kwargs:
+                    fcc = _gtypes.FunctionCallingConfig(**fcc_kwargs)
 
         # Google Maps: lat/lng goes in ToolConfig.retrieval_config, not inside GoogleMaps()
+        retrieval_config = None
         if google_maps_active:
             lat = request.extra.get("google_maps_lat")
             lng = request.extra.get("google_maps_lng")
             if lat is not None and lng is not None:
                 try:
-                    kwargs["tool_config"] = _gtypes.ToolConfig(
-                        retrieval_config=_gtypes.RetrievalConfig(
-                            lat_lng=_gtypes.LatLng(
-                                latitude=float(lat),
-                                longitude=float(lng),
-                            )
+                    retrieval_config = _gtypes.RetrievalConfig(
+                        lat_lng=_gtypes.LatLng(
+                            latitude=float(lat),
+                            longitude=float(lng),
                         )
                     )
                 except AttributeError as exc:
                     _logger.debug("Google SDK RetrievalConfig not supported, skipping lat/lng: %s", exc)
+
+        if fcc is not None or retrieval_config is not None:
+            tc_kwargs: dict[str, Any] = {}
+            if fcc is not None:
+                tc_kwargs["function_calling_config"] = fcc
+            if retrieval_config is not None:
+                tc_kwargs["retrieval_config"] = retrieval_config
+            kwargs["tool_config"] = _gtypes.ToolConfig(**tc_kwargs)
 
         thinking = self._build_thinking_config(request)
         if thinking:
@@ -667,10 +698,15 @@ class GoogleProvider(BaseProvider):
         # Gemini omits fc.id and the same function is
         # called multiple times in one turn.
         for part in candidate.content.parts:
-            if hasattr(part, "text") and part.text:
-                content += part.text
-            if hasattr(part, "thought") and part.thought:
-                thinking = (thinking or "") + part.thought
+            part_text = getattr(part, "text", None)
+            if part_text:
+                # ``part.thought`` is a *bool flag* in google-genai (the
+                # reasoning text lives in ``part.text``).  Route by the flag
+                # so thought text never contaminates ``content``.
+                if getattr(part, "thought", False):
+                    thinking = (thinking or "") + part_text
+                else:
+                    content += part_text
             if hasattr(part, "function_call") and part.function_call:
                 fc = part.function_call
                 # Store the raw Part so _messages_to_gemini can re-emit it unchanged.
@@ -769,14 +805,20 @@ class GoogleProvider(BaseProvider):
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
-                if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=str(part.thought))
-                elif hasattr(part, "text") and part.text:
-                    text_accum += part.text
-                    yield StreamChunk(delta=part.text)
+                part_text = getattr(part, "text", None)
+                if part_text and getattr(part, "thought", False):
+                    # ``thought`` is a bool flag in google-genai; the
+                    # reasoning text itself lives in part.text.
+                    yield StreamChunk(thinking_delta=part_text)
+                elif part_text:
+                    text_accum += part_text
+                    yield StreamChunk(delta=part_text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = str(getattr(fc, "id", None) or fc.name)
+                    # Same-name calls without an SDK id must not collide in
+                    # the accumulator — synthesise a unique id exactly like
+                    # the non-streaming path does.
+                    call_id = _synthesize_fc_id(fc, len(tool_call_accum))
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
@@ -871,14 +913,20 @@ class GoogleProvider(BaseProvider):
             if not candidate.content or not candidate.content.parts:
                 continue
             for part in candidate.content.parts:
-                if hasattr(part, "thought") and part.thought:
-                    yield StreamChunk(thinking_delta=str(part.thought))
-                elif hasattr(part, "text") and part.text:
-                    text_accum += part.text
-                    yield StreamChunk(delta=part.text)
+                part_text = getattr(part, "text", None)
+                if part_text and getattr(part, "thought", False):
+                    # ``thought`` is a bool flag in google-genai; the
+                    # reasoning text itself lives in part.text.
+                    yield StreamChunk(thinking_delta=part_text)
+                elif part_text:
+                    text_accum += part_text
+                    yield StreamChunk(delta=part_text)
                 elif hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
-                    call_id = str(getattr(fc, "id", None) or fc.name)
+                    # Same-name calls without an SDK id must not collide in
+                    # the accumulator — synthesise a unique id exactly like
+                    # the non-streaming path does.
+                    call_id = _synthesize_fc_id(fc, len(tool_call_accum))
                     tool_call_accum[call_id] = {
                         "id": call_id,
                         "name": fc.name,
