@@ -76,6 +76,89 @@ _CACHE_HIT_PRICE_TABLE: dict[str, float] = {
 }
 
 
+class _DeepSeekStreamState:
+    """Folds OpenAI-compatible stream chunks (DeepSeek dialect, with
+    ``reasoning_content`` deltas) — shared by ``stream`` and ``astream``.
+
+    Two contract points the per-chunk loop must honour:
+
+    * with ``stream_options={"include_usage": True}`` the usage arrives on
+      a dedicated trailer chunk with ``choices=[]`` — it must be read
+      outside any ``if choice:`` guard or token accounting is lost;
+    * a final ``is_final=True`` chunk is emitted unconditionally after the
+      stream ends, even when no ``finish_reason`` was ever delivered
+      (truncated/disconnected streams), per the BaseProvider contract.
+    """
+
+    def __init__(self, provider: DeepSeekProvider) -> None:
+        self._provider = provider
+        self.text_accum = ""
+        self.tool_call_accum: dict[int, dict[str, Any]] = {}
+        self.final_usage: UsageStats | None = None
+        self.stop_reason: str | None = None
+
+    def handle(self, chunk: Any) -> list[StreamChunk]:
+        """Fold one SDK chunk; return the StreamChunks to yield (0-2)."""
+        out: list[StreamChunk] = []
+        if chunk.usage:
+            usage = UsageStats(
+                input_tokens=chunk.usage.prompt_tokens,
+                output_tokens=chunk.usage.completion_tokens,
+            )
+            usage = self._provider._populate_reasoning_tokens(usage, chunk.usage)
+            usage = self._provider._populate_cached_input_tokens(usage, chunk.usage)
+            usage.cost_usd = self._provider._compute_cost(
+                getattr(chunk, "model", "") or "",
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cached_input_tokens,
+            )
+            self.final_usage = usage
+
+        choice = chunk.choices[0] if chunk.choices else None
+        if not choice:
+            return out
+        delta = choice.delta
+        reasoning_delta = getattr(delta, "reasoning_content", None) or ""
+        content_delta = delta.content or ""
+        if reasoning_delta:
+            out.append(StreamChunk(thinking_delta=reasoning_delta))
+        if content_delta:
+            self.text_accum += content_delta
+            out.append(StreamChunk(delta=content_delta))
+        if delta.tool_calls:
+            for tc in delta.tool_calls:
+                acc = self.tool_call_accum.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+                if tc.id:
+                    acc["id"] = tc.id
+                if tc.function.name:
+                    acc["name"] = tc.function.name
+                if tc.function.arguments:
+                    acc["args"] += tc.function.arguments
+        if choice.finish_reason:
+            self.stop_reason = choice.finish_reason
+        return out
+
+    def final_chunk(self, request: CompletionRequest) -> StreamChunk:
+        tool_calls = [
+            ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
+            for v in self.tool_call_accum.values()
+        ]
+        final = StreamChunk(
+            stop_reason=self.stop_reason or "incomplete",
+            tool_calls=tool_calls,
+            usage=self.final_usage,
+            is_final=True,
+        )
+        # Tool-call turns have empty content by design — validating them
+        # would record a spurious validation_error (parity with complete()).
+        if request.structured_output and not tool_calls:
+            from lazybridge.core.structured import apply_structured_validation
+
+            apply_structured_validation(final, self.text_accum, request.structured_output.schema)
+        return final
+
+
 class DeepSeekProvider(OpenAIProvider):
     """DeepSeek provider — extends OpenAI provider with DeepSeek-specific handling.
 
@@ -309,6 +392,31 @@ class DeepSeekProvider(OpenAIProvider):
         else:
             params["messages"] = [{"role": "system", "content": instruction}, *messages]
 
+    def _apply_structured_output_params(
+        self, params: dict[str, Any], request: CompletionRequest, model: str
+    ) -> None:
+        """JSON-mode wiring shared by all four entry points.
+
+        DeepSeek structured output is JSON mode only (not full schema
+        enforcement).  V4 models (deepseek-v4-pro / deepseek-v4-flash)
+        support response_format + tools simultaneously; legacy models
+        (deepseek-chat / deepseek-reasoner) return empty content on
+        tool-call turns which breaks JSON parsing, so the JSON request
+        is dropped (with a one-shot warning).  The schema hint is only
+        injected into the prompt when JSON mode is actually active —
+        injecting it after dropping structured output would push the
+        model towards JSON in a tool loop the caller was just told is
+        NOT structured.
+        """
+        if not request.structured_output:
+            return
+        has_tools = bool(params.get("tools"))
+        if has_tools and model not in _THINKING_CAPABLE_MODELS:
+            self._warn_structured_drop_once()
+            return
+        params["response_format"] = {"type": "json_object"}
+        self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
+
     def complete(self, request: CompletionRequest) -> CompletionResponse:
         """Execute a synchronous completion."""
         request = self._resolve_thinking(request)
@@ -319,21 +427,7 @@ class DeepSeekProvider(OpenAIProvider):
             params.pop("tool_choice", None)
 
         self._apply_thinking_params(params, model, request)
-
-        # DeepSeek structured output: JSON mode only (not full schema
-        # enforcement).  V4 models (deepseek-v4-pro / deepseek-v4-flash)
-        # support response_format + tools simultaneously via strict
-        # mode; legacy models (deepseek-chat / deepseek-reasoner) return
-        # empty content on tool-call turns which breaks JSON parsing,
-        # so the JSON request is dropped (with a one-shot warning).
-        has_tools = bool(params.get("tools"))
-        supports_structured_with_tools = model in _THINKING_CAPABLE_MODELS
-        if request.structured_output:
-            if has_tools and not supports_structured_with_tools:
-                self._warn_structured_drop_once()
-            else:
-                params["response_format"] = {"type": "json_object"}
-                self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
+        self._apply_structured_output_params(params, request, model)
 
         response = self._client.chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
@@ -357,60 +451,12 @@ class DeepSeekProvider(OpenAIProvider):
             params.pop("tool_choice", None)
 
         self._apply_thinking_params(params, model, request)
+        self._apply_structured_output_params(params, request, model)
 
-        text_accum = ""
-        tool_call_accum: dict[int, dict[str, Any]] = {}
+        state = _DeepSeekStreamState(self)
         for chunk in self._client.chat.completions.create(**params):
-            choice = chunk.choices[0] if chunk.choices else None
-            if choice:
-                delta = choice.delta
-                reasoning_delta = getattr(delta, "reasoning_content", None) or ""
-                content_delta = delta.content or ""
-
-                if reasoning_delta:
-                    yield StreamChunk(thinking_delta=reasoning_delta)
-                if content_delta:
-                    text_accum += content_delta
-                    yield StreamChunk(delta=content_delta)
-
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tool_call_accum:
-                            tool_call_accum[idx] = {"id": tc.id or "", "name": tc.function.name or "", "args": ""}
-                        if tc.id:
-                            tool_call_accum[idx]["id"] = tc.id
-                        if tc.function.name:
-                            tool_call_accum[idx]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tool_call_accum[idx]["args"] += tc.function.arguments
-
-                if choice.finish_reason:
-                    tool_calls = [
-                        ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                        for v in tool_call_accum.values()
-                    ]
-                    usage = None
-                    if chunk.usage:
-                        usage = UsageStats(
-                            input_tokens=chunk.usage.prompt_tokens,
-                            output_tokens=chunk.usage.completion_tokens,
-                        )
-                        usage = self._populate_reasoning_tokens(usage, chunk.usage)
-                        usage.cost_usd = self._compute_cost(
-                            getattr(chunk, "model", "") or "", usage.input_tokens, usage.output_tokens
-                        )
-                    final_chunk = StreamChunk(
-                        stop_reason=choice.finish_reason,
-                        tool_calls=tool_calls,
-                        usage=usage,
-                        is_final=True,
-                    )
-                    if request.structured_output:
-                        from lazybridge.core.structured import apply_structured_validation
-
-                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-                    yield final_chunk
+            yield from state.handle(chunk)
+        yield state.final_chunk(request)
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         """Async completion."""
@@ -422,15 +468,7 @@ class DeepSeekProvider(OpenAIProvider):
             params.pop("tool_choice", None)
 
         self._apply_thinking_params(params, model, request)
-
-        has_tools = bool(params.get("tools"))
-        supports_structured_with_tools = model in _THINKING_CAPABLE_MODELS
-        if request.structured_output:
-            if has_tools and not supports_structured_with_tools:
-                self._warn_structured_drop_once()
-            else:
-                params["response_format"] = {"type": "json_object"}
-            self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
+        self._apply_structured_output_params(params, request, model)
 
         response = await self._get_async_client().chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
@@ -454,56 +492,10 @@ class DeepSeekProvider(OpenAIProvider):
             params.pop("tool_choice", None)
 
         self._apply_thinking_params(params, model, request)
+        self._apply_structured_output_params(params, request, model)
 
-        text_accum = ""
-        tool_call_accum: dict[int, dict[str, Any]] = {}
+        state = _DeepSeekStreamState(self)
         async for chunk in await self._get_async_client().chat.completions.create(**params):
-            choice = chunk.choices[0] if chunk.choices else None
-            if choice:
-                delta = choice.delta
-                reasoning_delta = getattr(delta, "reasoning_content", None) or ""
-                content_delta = delta.content or ""
-                if reasoning_delta:
-                    yield StreamChunk(thinking_delta=reasoning_delta)
-                if content_delta:
-                    text_accum += content_delta
-                    yield StreamChunk(delta=content_delta)
-
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tool_call_accum:
-                            tool_call_accum[idx] = {"id": tc.id or "", "name": tc.function.name or "", "args": ""}
-                        if tc.id:
-                            tool_call_accum[idx]["id"] = tc.id
-                        if tc.function.name:
-                            tool_call_accum[idx]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tool_call_accum[idx]["args"] += tc.function.arguments
-
-                if choice.finish_reason:
-                    tool_calls = [
-                        ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                        for v in tool_call_accum.values()
-                    ]
-                    usage = None
-                    if chunk.usage:
-                        usage = UsageStats(
-                            input_tokens=chunk.usage.prompt_tokens,
-                            output_tokens=chunk.usage.completion_tokens,
-                        )
-                        usage = self._populate_reasoning_tokens(usage, chunk.usage)
-                        usage.cost_usd = self._compute_cost(
-                            getattr(chunk, "model", "") or "", usage.input_tokens, usage.output_tokens
-                        )
-                    final_chunk = StreamChunk(
-                        stop_reason=choice.finish_reason,
-                        tool_calls=tool_calls,
-                        usage=usage,
-                        is_final=True,
-                    )
-                    if request.structured_output:
-                        from lazybridge.core.structured import apply_structured_validation
-
-                        apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
-                    yield final_chunk
+            for out in state.handle(chunk):
+                yield out
+        yield state.final_chunk(request)

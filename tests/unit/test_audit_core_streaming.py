@@ -240,6 +240,91 @@ def test_google_stream_thought_flag_and_fc_id_collision():
     assert len({tc.id for tc in final.tool_calls}) == 2
 
 
+# ---------------------------------------------------------------------------
+# DeepSeek streaming — usage trailer chunk (choices=[]) and final-chunk
+# contract on truncated streams
+# ---------------------------------------------------------------------------
+
+
+def _ds_text_chunk(text: str) -> NS:
+    delta = NS(content=text, tool_calls=None)
+    delta.reasoning_content = None
+    return NS(choices=[NS(delta=delta, finish_reason=None)], usage=None, model="deepseek-v4-flash")
+
+
+def _ds_finish_chunk() -> NS:
+    delta = NS(content=None, tool_calls=None)
+    delta.reasoning_content = None
+    return NS(choices=[NS(delta=delta, finish_reason="stop")], usage=None, model="deepseek-v4-flash")
+
+
+def _ds_usage_trailer() -> NS:
+    # Per the OpenAI streaming spec with include_usage: a dedicated final
+    # chunk with EMPTY choices carries the usage.
+    usage = NS(prompt_tokens=10, completion_tokens=5)
+    usage.completion_tokens_details = None
+    usage.prompt_tokens_details = None
+    return NS(choices=[], usage=usage, model="deepseek-v4-flash")
+
+
+def test_deepseek_stream_reads_usage_from_choices_empty_trailer():
+    p = _bare_deepseek()
+    p._client = MagicMock()
+    p._client.chat.completions.create.return_value = iter(
+        [_ds_text_chunk("hi"), _ds_finish_chunk(), _ds_usage_trailer()]
+    )
+
+    from lazybridge.core.types import CompletionRequest, Message
+
+    req = CompletionRequest(messages=[Message.user("x")], model="deepseek-v4-flash")
+    chunks = list(p.stream(req))
+
+    final = chunks[-1]
+    assert final.is_final
+    assert final.stop_reason == "stop"
+    assert final.usage is not None
+    assert final.usage.input_tokens == 10
+    assert final.usage.output_tokens == 5
+    assert final.usage.cost_usd is not None
+
+
+def test_deepseek_stream_truncation_still_emits_final_chunk():
+    """A stream that dies before finish_reason must still emit is_final."""
+    p = _bare_deepseek()
+    p._client = MagicMock()
+    p._client.chat.completions.create.return_value = iter([_ds_text_chunk("par")])
+
+    from lazybridge.core.types import CompletionRequest, Message
+
+    req = CompletionRequest(messages=[Message.user("x")], model="deepseek-v4-flash")
+    chunks = list(p.stream(req))
+
+    final = chunks[-1]
+    assert final.is_final
+    assert final.stop_reason == "incomplete"
+
+
+def test_deepseek_astream_parity_with_stream():
+    p = _bare_deepseek()
+
+    async def _create(**_kw):
+        return _AsyncEventStream([_ds_text_chunk("hi"), _ds_finish_chunk(), _ds_usage_trailer()])
+
+    p._get_async_client = lambda: NS(chat=NS(completions=NS(create=_create)))
+
+    from lazybridge.core.types import CompletionRequest, Message
+
+    req = CompletionRequest(messages=[Message.user("x")], model="deepseek-v4-flash")
+
+    async def _run():
+        return [c async for c in p.astream(req)]
+
+    chunks = asyncio.run(_run())
+    final = chunks[-1]
+    assert final.is_final
+    assert final.usage is not None and final.usage.input_tokens == 10
+
+
 def test_responses_stream_incomplete_status_is_captured():
     """``response.incomplete`` must populate the final chunk (truncation),
     not be silently dropped as an unknown event type."""
