@@ -167,6 +167,73 @@ def _audio_format_from_media_type(media_type: str) -> str:
     return _AUDIO_FORMAT_BY_MEDIA_TYPE.get(media_type.lower(), "wav")
 
 
+class _ResponsesStreamState:
+    """Folds Responses API stream events — shared by the sync and async paths.
+
+    Function-call data is split across event types: ``output_item.added``
+    carries the ``item.id → call_id`` / name mapping, the argument deltas
+    (``response.function_call_arguments.delta``) reference the *item id*
+    only (they have no ``call_id`` attribute), and ``output_item.done``
+    carries the complete arguments string — used as a safety net when no
+    deltas were captured for a call.
+    """
+
+    def __init__(self) -> None:
+        self.fc_names: dict[str, str] = {}  # call_id → function name
+        self.fc_args: dict[str, str] = {}  # call_id → accumulated args JSON string
+        self.item_to_call: dict[str, str] = {}  # item id → call_id
+        self.completed_response: Any = None
+
+    def handle(self, event: Any) -> StreamChunk | None:
+        """Fold one SDK event into the state; return a chunk to yield, if any."""
+        etype = getattr(event, "type", None)
+
+        if etype == "response.output_text.delta":
+            delta = getattr(event, "delta", "") or ""
+            if delta:
+                return StreamChunk(delta=delta)
+
+        elif etype == "response.output_item.added":
+            # Capture function call metadata (name, call_id, item id) as soon
+            # as the item is added, before any argument deltas arrive.
+            item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) == "function_call":
+                call_id = getattr(item, "call_id", None) or ""
+                item_id = getattr(item, "id", None) or ""
+                name = getattr(item, "name", "") or ""
+                if call_id:
+                    self.fc_names[call_id] = name
+                    self.fc_args.setdefault(call_id, "")
+                    if item_id:
+                        self.item_to_call[item_id] = call_id
+
+        elif etype == "response.function_call_arguments.delta":
+            # Delta events carry ``item_id`` — resolve to the call_id through
+            # the map built on output_item.added.  ``call_id`` is consulted as
+            # a fallback for SDK builds that expose it directly.
+            key = getattr(event, "item_id", None) or getattr(event, "call_id", None) or ""
+            call_id = self.item_to_call.get(key, key)
+            delta = getattr(event, "delta", "") or ""
+            if call_id:
+                self.fc_args[call_id] = self.fc_args.get(call_id, "") + delta
+
+        elif etype == "response.output_item.done":
+            # The done item carries the full arguments string — use it when
+            # no deltas were captured for this call.
+            item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) == "function_call":
+                call_id = getattr(item, "call_id", None) or ""
+                args = getattr(item, "arguments", "") or ""
+                if call_id and args and not self.fc_args.get(call_id):
+                    self.fc_names.setdefault(call_id, getattr(item, "name", "") or "")
+                    self.fc_args[call_id] = args
+
+        elif etype in ("response.completed", "response.failed", "response.incomplete"):
+            self.completed_response = getattr(event, "response", None)
+
+        return None
+
+
 class OpenAIProvider(BaseProvider):
     """OpenAI provider.
 
@@ -809,47 +876,15 @@ class OpenAIProvider(BaseProvider):
             return "error"
         return "end_turn"
 
-    def _stream_responses_api(self, params: dict[str, Any]) -> Iterator[StreamChunk]:
-        """Stream from the Responses API with parsing of official event types."""
-        fc_names: dict[str, str] = {}  # call_id → function name
-        fc_args: dict[str, str] = {}  # call_id → accumulated args JSON string
-        completed_response = None
-
-        for event in self._client.responses.create(**params):
-            etype = getattr(event, "type", None)
-
-            if etype == "response.output_text.delta":
-                delta = getattr(event, "delta", "") or ""
-                if delta:
-                    yield StreamChunk(delta=delta)
-
-            elif etype == "response.output_item.added":
-                # Capture function call metadata (name, call_id) as soon as the
-                # item is added, before any argument deltas arrive.
-                item = getattr(event, "item", None)
-                if item and getattr(item, "type", None) == "function_call":
-                    call_id = getattr(item, "call_id", None) or ""
-                    name = getattr(item, "name", "") or ""
-                    if call_id:
-                        fc_names[call_id] = name
-                        fc_args.setdefault(call_id, "")
-
-            elif etype == "response.function_call_arguments.delta":
-                call_id = getattr(event, "call_id", None) or ""
-                delta = getattr(event, "delta", "") or ""
-                if call_id:
-                    fc_args[call_id] = fc_args.get(call_id, "") + delta
-
-            elif etype == "response.completed" or etype == "response.failed":
-                completed_response = getattr(event, "response", None)
-
-        # Build final chunk
+    def _responses_final_chunk(self, state: _ResponsesStreamState) -> StreamChunk:
+        """Build the is_final StreamChunk from accumulated stream state."""
         tool_calls = []
-        for call_id, args_str in fc_args.items():
-            name = fc_names.get(call_id, call_id)
+        for call_id, args_str in state.fc_args.items():
+            name = state.fc_names.get(call_id, call_id)
             arguments = _safe_json_loads(args_str) if args_str else {}
             tool_calls.append(ToolCall(id=call_id, name=name, arguments=arguments))
 
+        completed_response = state.completed_response
         usage = None
         grounding_sources = []
         if completed_response is not None:
@@ -869,78 +904,31 @@ class OpenAIProvider(BaseProvider):
                 )
             grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
 
-        yield StreamChunk(
+        return StreamChunk(
             stop_reason=self._responses_stop_reason(completed_response, tool_calls),
             tool_calls=tool_calls,
             usage=usage,
             is_final=True,
             grounding_sources=grounding_sources,
         )
+
+    def _stream_responses_api(self, params: dict[str, Any]) -> Iterator[StreamChunk]:
+        """Stream from the Responses API with parsing of official event types."""
+        state = _ResponsesStreamState()
+        for event in self._client.responses.create(**params):
+            chunk = state.handle(event)
+            if chunk is not None:
+                yield chunk
+        yield self._responses_final_chunk(state)
 
     async def _astream_responses_api(self, params: dict[str, Any]) -> AsyncIterator[StreamChunk]:
         """Async version of _stream_responses_api."""
-        fc_names: dict[str, str] = {}
-        fc_args: dict[str, str] = {}
-        completed_response = None
-
+        state = _ResponsesStreamState()
         async for event in await self._get_async_client().responses.create(**params):
-            etype = getattr(event, "type", None)
-
-            if etype == "response.output_text.delta":
-                delta = getattr(event, "delta", "") or ""
-                if delta:
-                    yield StreamChunk(delta=delta)
-
-            elif etype == "response.output_item.added":
-                item = getattr(event, "item", None)
-                if item and getattr(item, "type", None) == "function_call":
-                    call_id = getattr(item, "call_id", None) or ""
-                    name = getattr(item, "name", "") or ""
-                    if call_id:
-                        fc_names[call_id] = name
-                        fc_args.setdefault(call_id, "")
-
-            elif etype == "response.function_call_arguments.delta":
-                call_id = getattr(event, "call_id", None) or ""
-                delta = getattr(event, "delta", "") or ""
-                if call_id:
-                    fc_args[call_id] = fc_args.get(call_id, "") + delta
-
-            elif etype == "response.completed" or etype == "response.failed":
-                completed_response = getattr(event, "response", None)
-
-        tool_calls = []
-        for call_id, args_str in fc_args.items():
-            name = fc_names.get(call_id, call_id)
-            arguments = _safe_json_loads(args_str) if args_str else {}
-            tool_calls.append(ToolCall(id=call_id, name=name, arguments=arguments))
-
-        usage = None
-        grounding_sources = []
-        if completed_response is not None:
-            u = getattr(completed_response, "usage", None)
-            if u:
-                usage = UsageStats(
-                    input_tokens=getattr(u, "input_tokens", 0) or 0,
-                    output_tokens=getattr(u, "output_tokens", 0) or 0,
-                )
-                usage = self._populate_reasoning_tokens(usage, u)
-                usage = self._populate_cached_input_tokens(usage, u)
-                usage.cost_usd = self._compute_cost(
-                    getattr(completed_response, "model", "") or "",
-                    usage.input_tokens,
-                    usage.output_tokens,
-                    usage.cached_input_tokens,
-                )
-            grounding_sources = self._extract_grounding_from_output(getattr(completed_response, "output", []))
-
-        yield StreamChunk(
-            stop_reason=self._responses_stop_reason(completed_response, tool_calls),
-            tool_calls=tool_calls,
-            usage=usage,
-            is_final=True,
-            grounding_sources=grounding_sources,
-        )
+            chunk = state.handle(event)
+            if chunk is not None:
+                yield chunk
+        yield self._responses_final_chunk(state)
 
     def _use_responses_api(self, request: CompletionRequest) -> bool:
         # Responses API is the default for all requests.
