@@ -147,14 +147,12 @@ class DeepSeekProvider(OpenAIProvider):
                 f"DeepSeek API key not found. Set the {_DEEPSEEK_ENV_KEY} environment variable "
                 "or pass api_key= to the provider."
             )
-        self._client = _openai.OpenAI(
-            api_key=key,
-            base_url=_DEEPSEEK_BASE_URL,
-        )
-        self._async_client = _openai.AsyncOpenAI(
-            api_key=key,
-            base_url=_DEEPSEEK_BASE_URL,
-        )
+        del _openai  # imported only as an availability check
+        # Shared with OpenAIProvider: sync client now, async clients lazily
+        # per event loop via _get_async_client() — an eager AsyncOpenAI here
+        # would bind its httpx client to the construction-time loop and crash
+        # when used from another loop/thread.
+        self._setup_clients(key, _DEEPSEEK_BASE_URL, **kwargs)
         self._structured_drop_warned: bool = False
 
     def _warn_structured_drop_once(self) -> None:
@@ -434,7 +432,7 @@ class DeepSeekProvider(OpenAIProvider):
                 params["response_format"] = {"type": "json_object"}
             self._ensure_json_word_in_prompt(params, schema=request.structured_output.schema)
 
-        response = await self._async_client.chat.completions.create(**params)
+        response = await self._get_async_client().chat.completions.create(**params)
         resp = self._parse_deepseek_chat_response(response, model)
 
         if request.structured_output and not resp.tool_calls:
@@ -459,7 +457,7 @@ class DeepSeekProvider(OpenAIProvider):
 
         text_accum = ""
         tool_call_accum: dict[int, dict[str, Any]] = {}
-        async for chunk in await self._async_client.chat.completions.create(**params):
+        async for chunk in await self._get_async_client().chat.completions.create(**params):
             choice = chunk.choices[0] if chunk.choices else None
             if choice:
                 delta = choice.delta

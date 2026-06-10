@@ -109,8 +109,10 @@ def test_init_client_uses_default_base_url(monkeypatch):
     kwargs = sync_cls.call_args.kwargs
     assert kwargs["base_url"] == _DEFAULT_BASE_URL
     assert kwargs["api_key"] == _PLACEHOLDER_API_KEY
-    async_cls.assert_called_once()
-    assert async_cls.call_args.kwargs["base_url"] == _DEFAULT_BASE_URL
+    # AsyncOpenAI is created lazily per event loop by _get_async_client()
+    # (an eager instance would bind to the construction-time loop); only
+    # the credentials are stashed at construction.
+    async_cls.assert_not_called()
 
 
 def test_init_client_explicit_base_url_wins(monkeypatch):

@@ -144,6 +144,33 @@ def test_responses_stream_output_item_done_is_a_safety_net():
     assert final.tool_calls[0].arguments == {"q": 1}
 
 
+# ---------------------------------------------------------------------------
+# LMStudio / DeepSeek — async client wiring (was: AttributeError on every
+# acomplete()/astream() because _init_client never set _async_clients)
+# ---------------------------------------------------------------------------
+
+
+async def _grab_async_client(p):
+    return p._get_async_client()
+
+
+def test_lmstudio_async_client_path_does_not_crash():
+    from lazybridge.core.providers.lmstudio import LMStudioProvider
+
+    p = LMStudioProvider()
+    client = asyncio.run(_grab_async_client(p))
+    assert client is not None
+    assert len(p._async_clients) == 1
+
+
+def test_deepseek_async_client_is_lazy_and_per_loop():
+    p = DeepSeekProvider(api_key="fake")
+    # No eager AsyncOpenAI at construction time (loop-binding bug).
+    assert p._async_clients == {}
+    client = asyncio.run(_grab_async_client(p))
+    assert client is not None
+
+
 def test_responses_stream_incomplete_status_is_captured():
     """``response.incomplete`` must populate the final chunk (truncation),
     not be silently dropped as an unknown event type."""

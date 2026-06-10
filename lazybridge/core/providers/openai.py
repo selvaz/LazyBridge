@@ -352,6 +352,16 @@ class OpenAIProvider(BaseProvider):
                 "variable, or pass api_key= to OpenAIProvider."
             )
         base_url = kwargs.pop("base_url", None)
+        self._setup_clients(key, base_url, **kwargs)
+
+    def _setup_clients(self, key: str, base_url: str | None, **kwargs: Any) -> None:
+        """Create the sync client and stash credentials for lazy async clients.
+
+        Shared by OpenAIProvider and its subclasses (DeepSeekProvider,
+        LMStudioProvider) so the per-event-loop AsyncOpenAI handling in
+        :meth:`_get_async_client` works uniformly — the inherited
+        ``acomplete`` / ``astream`` paths call it unconditionally.
+        """
         self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
         # Store credentials for lazy async client creation — AsyncOpenAI wraps
         # httpx.AsyncClient which binds to the event loop it was created in.
@@ -372,9 +382,8 @@ class OpenAIProvider(BaseProvider):
         thread (e.g. inside PulseAgent.start()) whose event loop differs from
         the one the provider was originally constructed on.
 
-        Subclasses (LMStudioProvider, DeepSeekProvider) set ``self._async_client``
-        as a plain instance attribute in their own ``_init_client``. They do NOT
-        call this method — it is an OpenAIProvider-only concern.
+        Subclasses (LMStudioProvider, DeepSeekProvider) participate through
+        :meth:`_setup_clients`, which stores the credentials this method needs.
         """
         try:
             loop = asyncio.get_running_loop()

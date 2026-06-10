@@ -200,8 +200,13 @@ class LMStudioProvider(OpenAIProvider):
         base_url = kwargs.pop("base_url", None) or os.environ.get(_BASE_URL_ENV) or _DEFAULT_BASE_URL
         key = self.api_key or os.environ.get(_API_KEY_ENV) or _PLACEHOLDER_API_KEY
 
-        self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
-        self._async_client = _openai.AsyncOpenAI(api_key=key, base_url=base_url, **kwargs)
+        del _openai  # imported only as an availability check
+        # Shared with OpenAIProvider: sync client now, async clients lazily
+        # per event loop via _get_async_client().  The previous eager
+        # AsyncOpenAI was never read by the inherited async paths (they call
+        # _get_async_client()), so every acomplete()/astream() crashed with
+        # AttributeError: '_async_clients'.
+        self._setup_clients(key, base_url, **kwargs)
 
     def _resolve_model(self, request: CompletionRequest) -> str:
         """Strip the optional ``lmstudio/`` routing prefix.
