@@ -43,6 +43,15 @@ class Tool:
     Use Tool(fn, ...) only when you need explicit configuration.
     """
 
+    #: Validate and coerce LLM-provided arguments against the function
+    #: signature (Pydantic-backed) before every dispatch.  Bad arguments
+    #: raise :class:`~lazybridge.core.tool_schema.ToolArgumentValidationError`
+    #: with a readable message the engine can feed back to the model,
+    #: instead of an opaque ``TypeError`` from inside the user function.
+    #: Class-level so instances built via ``from_schema`` (``__new__``)
+    #: inherit it; set ``tool.validate_args = False`` to opt out.
+    validate_args: bool = True
+
     def __init__(
         self,
         func: Callable,
@@ -148,7 +157,16 @@ class Tool:
             )
             return self._definition
 
+    def _coerce_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Validate/coerce ``kwargs`` against ``self.func``'s signature."""
+        if not self.validate_args:
+            return kwargs
+        from lazybridge.core.tool_schema import _validate_and_coerce_arguments
+
+        return _validate_and_coerce_arguments(self.func, kwargs)
+
     async def run(self, **kwargs: Any) -> Any:
+        kwargs = self._coerce_arguments(kwargs)
         if asyncio.iscoroutinefunction(self.func):
             return await self.func(**kwargs)
         # ``asyncio.get_event_loop`` is deprecated in 3.10+ and errors on
@@ -171,6 +189,7 @@ class Tool:
           ``SupervisorEngine`` / REPL callers were previously getting
           ``"<coroutine object _run at 0x...>"`` instead of the result.
         """
+        kwargs = self._coerce_arguments(kwargs)
         if not asyncio.iscoroutinefunction(self.func):
             return self.func(**kwargs)
 

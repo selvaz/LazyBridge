@@ -45,7 +45,9 @@ from lazybridge.core.types import ToolDefinition
 _logger = logging.getLogger(__name__)
 
 # Bump these when compile logic or LLM prompt templates change.
-_COMPILER_VERSION = "1"
+# v2: fingerprint now includes flatten_refs (a flattening builder and a
+# non-flattening builder sharing one ArtifactStore used to collide).
+_COMPILER_VERSION = "2"
 _LLM_PROMPT_VERSION = "1"
 
 
@@ -196,6 +198,9 @@ class _CompileInput:
     schema_llm_id: str  # stable identifier; "" when schema_llm is None
     compiler_version: str
     prompt_version: str
+    # Part of the cache key: a flattened and a non-flattened artifact are
+    # different outputs and must not share a fingerprint.
+    flatten_refs: bool = False
 
     def fingerprint(self) -> str:
         """Return a deterministic 24-char hex hash of all compile inputs."""
@@ -239,6 +244,7 @@ def _make_compile_input(
     mode: ToolSchemaMode,
     strict: bool,
     schema_llm: Any,
+    flatten_refs: bool = False,
 ) -> _CompileInput:
     return _CompileInput(
         func_qualname=getattr(func, "__qualname__", getattr(func, "__name__", repr(func))),
@@ -250,6 +256,7 @@ def _make_compile_input(
         schema_llm_id=_schema_llm_id(schema_llm),
         compiler_version=_COMPILER_VERSION,
         prompt_version=_LLM_PROMPT_VERSION,
+        flatten_refs=flatten_refs,
     )
 
 
@@ -528,7 +535,14 @@ def _validate_and_coerce_arguments(func: Callable[..., Any], arguments: dict[str
         # are returned as proper Python objects instead of being recursively
         # converted to plain dicts, which would cause AttributeError when
         # the tool function tries to access model attributes.
-        return {f: getattr(validated, f) for f in type(validated).model_fields}
+        out = {f: getattr(validated, f) for f in type(validated).model_fields}
+        # Functions accepting **kwargs build the model with extra="allow";
+        # those extras live in __pydantic_extra__, not model_fields — without
+        # this they would be silently dropped from the dispatch.
+        extra = getattr(validated, "__pydantic_extra__", None)
+        if extra:
+            out.update(extra)
+        return out
     except _ValidationError as exc:
         errors = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
         raise ToolArgumentValidationError(f"Invalid arguments for '{func.__name__}': {errors}") from exc
@@ -646,7 +660,24 @@ def _flatten_refs(schema: dict[str, Any]) -> dict[str, Any]:
     This is correct for DAG-shaped schemas where a definition can be referenced
     from multiple independent branches without being considered circular.
     """
-    defs = schema.get("$defs", {})
+    # Collect $defs at EVERY depth, not just the top level: parameter
+    # schemas produced by ``_annotation_to_schema`` embed each Pydantic
+    # model's ``$defs`` inside the property node, so a top-level-only
+    # lookup made flatten_refs a silent no-op for the common case.
+    defs: dict[str, Any] = {}
+
+    def _collect_defs(node: Any) -> None:
+        if isinstance(node, dict):
+            d = node.get("$defs")
+            if isinstance(d, dict):
+                defs.update(d)
+            for v in node.values():
+                _collect_defs(v)
+        elif isinstance(node, list):
+            for v in node:
+                _collect_defs(v)
+
+    _collect_defs(schema)
     if not defs:
         return schema
 
@@ -686,7 +717,8 @@ def _flatten_refs(schema: dict[str, Any]) -> dict[str, Any]:
                     # corrupt the original $defs entry when it is used elsewhere.
                     return _resolve(copy.deepcopy(defs[def_name]), visited | {def_name})
             return node
-        return {k: _resolve(v, visited) for k, v in node.items()}
+        # Strip $defs at every level — all definitions are inlined.
+        return {k: _resolve(v, visited) for k, v in node.items() if k != "$defs"}
 
     # Strip "$defs" from the output — all definitions are now inlined.
     # Each top-level value starts with an empty visited set (independent paths).
@@ -838,7 +870,9 @@ class ToolSchemaBuilder:
             # minor docstring edits don't invalidate the fingerprint.
             effective_desc = doc.splitlines()[0].strip() if doc else ""
 
-        compile_input = _make_compile_input(func, effective_name, effective_desc, mode, strict, schema_llm)
+        compile_input = _make_compile_input(
+            func, effective_name, effective_desc, mode, strict, schema_llm, flatten_refs=self._flatten_refs
+        )
         # 24-char hex fingerprint uniquely identifies this compile configuration.
         fp = compile_input.fingerprint()
 
