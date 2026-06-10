@@ -38,6 +38,26 @@ _NATIVE_TOOL_MAP: dict[NativeTool, dict[str, Any]] = {
     NativeTool.COMPUTER_USE: {"type": "computer_use_20250124", "name": "computer"},
 }
 
+# Friendly aliases accepted in SkillsConfig.skills → Anthropic skill ids.
+# The API only knows pptx/xlsx/docx/pdf for Anthropic-managed skills.
+_SKILL_ID_ALIASES: dict[str, str] = {
+    "excel": "xlsx",
+    "powerpoint": "pptx",
+    "word": "docx",
+}
+
+
+def _skill_ref(skill: str) -> dict[str, str]:
+    """Build one ``container.skills`` entry from a SkillsConfig string.
+
+    Ids starting with ``skill_`` are custom skills uploaded via the Skills
+    API; everything else is treated as an Anthropic-managed skill id.
+    """
+    sid = _SKILL_ID_ALIASES.get(skill, skill)
+    skill_type = "custom" if sid.startswith("skill_") else "anthropic"
+    return {"type": skill_type, "skill_id": sid, "version": "latest"}
+
+
 # Beta headers required per feature
 _BETA_WEB_SEARCH = "web-search-2025-03-05"
 _BETA_CODE_EXEC = "code-execution-2025-08-25"
@@ -555,6 +575,16 @@ class AnthropicProvider(BaseProvider):
                 params["tool_choice"] = {"type": "any"}
             else:
                 params["tool_choice"] = {"type": "tool", "name": request.tool_choice}
+        if request.skills and request.skills.skills:
+            # Skills are activated via the ``container`` parameter; the beta
+            # headers alone (see _build_betas) do nothing — before this fix
+            # the feature was a silent no-op.
+            params["container"] = {"skills": [_skill_ref(s) for s in request.skills.skills]}
+            # Skills execute inside the code-execution container, so the
+            # code_execution tool is mandatory.  Add it unless already present.
+            skill_tools = params.get("tools", [])
+            if not any(t.get("name") == "code_execution" for t in skill_tools):
+                params["tools"] = [*skill_tools, _NATIVE_TOOL_MAP[NativeTool.CODE_EXECUTION]]
         thinking = self._build_thinking(request)
         if thinking:
             params["thinking"] = thinking

@@ -410,9 +410,16 @@ class ThinkingConfig:
 
 @dataclass
 class SkillsConfig:
-    """Anthropic Skills — server-side domain-expert packages."""
+    """Anthropic Skills — server-side domain-expert packages.
 
-    skills: list[str]  # e.g. ["pdf", "excel", "powerpoint", "word"]
+    Anthropic-managed skill ids: ``pptx``, ``xlsx``, ``docx``, ``pdf``
+    (friendly aliases ``powerpoint``/``excel``/``word`` are accepted and
+    mapped).  Ids starting with ``skill_`` are treated as custom skills
+    uploaded via the Skills API.  Requires the code-execution container;
+    the provider adds the code_execution tool automatically.
+    """
+
+    skills: list[str]  # e.g. ["pdf", "xlsx"] or ["skill_abc123"]
 
 
 @dataclass

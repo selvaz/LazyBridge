@@ -116,6 +116,29 @@ def test_google_tool_choice_maps_to_function_calling_config(choice, expected_mod
         assert fcc_kwargs["allowed_function_names"] == expected_allowed
 
 
+def test_anthropic_skills_are_serialised_into_container():
+    """request.skills only set beta headers before the fix — the skills list
+    never reached the API payload (silent no-op)."""
+    from lazybridge.core.types import SkillsConfig
+
+    p = _bare_anthropic()
+    req = CompletionRequest(
+        messages=[Message.user("make a deck")],
+        skills=SkillsConfig(skills=["powerpoint", "pdf", "skill_abc123"]),
+    )
+    params = p._build_params(req)
+
+    assert params["container"] == {
+        "skills": [
+            {"type": "anthropic", "skill_id": "pptx", "version": "latest"},
+            {"type": "anthropic", "skill_id": "pdf", "version": "latest"},
+            {"type": "custom", "skill_id": "skill_abc123", "version": "latest"},
+        ]
+    }
+    # Skills require the code-execution container tool.
+    assert any(t.get("name") == "code_execution" for t in params["tools"])
+
+
 def test_google_tool_config_merges_maps_and_function_calling():
     """Maps lat/lng (retrieval_config) must not cancel function_calling_config."""
     from unittest.mock import MagicMock
