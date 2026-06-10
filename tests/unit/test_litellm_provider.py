@@ -305,7 +305,15 @@ def test_extra_kwargs_forwarded():
 
 
 def test_native_tools_warn_and_drop():
-    """native_tools raise a UserWarning and aren't forwarded."""
+    """native_tools raise a UserWarning and aren't forwarded.
+
+    Updated for the audit fix: the provider now delegates to the base-class
+    ``_check_native_tools`` helper instead of emitting an ad-hoc warning, so
+    ``strict_native_tools=True`` raises as per the base.py contract.  The
+    old ``match="native_tools"`` matched the bespoke message wording that
+    encoded the buggy bypass — the contract message is "does not support
+    native tool ...".
+    """
     captured = {}
 
     def fake_completion(**kwargs):
@@ -316,7 +324,7 @@ def test_native_tools_warn_and_drop():
     from lazybridge.core.types import NativeTool
 
     req = _basic_request(native_tools=[NativeTool.WEB_SEARCH])
-    with pytest.warns(UserWarning, match="native_tools"):
+    with pytest.warns(UserWarning, match="does not support native tool"):
         prov.complete(req)
     # Never forwarded.
     assert "native_tools" not in captured
