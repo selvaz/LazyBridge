@@ -265,6 +265,10 @@ class ToolResultContent:
 @dataclass
 class ThinkingContent:
     thinking: str
+    #: Anthropic: thinking blocks replayed in assistant turns (required in
+    #: tool loops with thinking enabled) must carry the original block's
+    #: ``signature`` or the API rejects them with a 400.
+    signature: str | None = None
     type: ContentType = ContentType.THINKING
 
 

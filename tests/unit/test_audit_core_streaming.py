@@ -342,3 +342,78 @@ def test_responses_stream_incomplete_status_is_captured():
     final = list(p._stream_responses_api({"model": "gpt-4o-mini"}))[-1]
     assert final.is_final
     assert final.stop_reason == "max_tokens"
+
+
+# ---------------------------------------------------------------------------
+# Anthropic — system concatenation, thinking signature replay, final-chunk
+# contract on truncated streams
+# ---------------------------------------------------------------------------
+
+
+def _bare_anthropic():
+    from lazybridge.core.providers.anthropic import AnthropicProvider
+
+    p = AnthropicProvider.__new__(AnthropicProvider)
+    p.api_key = "sk-test"
+    p.model = "claude-sonnet-4-6"
+    p._user_model = "claude-sonnet-4-6"
+    p.fallback_model = None
+    p._beta_overrides = {}
+    p._temperature_warned = False
+    return p
+
+
+def test_anthropic_system_messages_are_concatenated():
+    from lazybridge.core.types import CompletionRequest, Message
+
+    p = _bare_anthropic()
+    req = CompletionRequest(
+        messages=[Message.system("rule one"), Message.system("rule two"), Message.user("hi")],
+        system="top",
+    )
+    assert p._get_system(req) == "top\n\nrule one\n\nrule two"
+
+
+def test_anthropic_thinking_signature_survives_replay():
+    from lazybridge.core.types import CompletionRequest, Message, Role, TextContent, ThinkingContent
+
+    p = _bare_anthropic()
+    req = CompletionRequest(
+        messages=[
+            Message.user("hi"),
+            Message(
+                role=Role.ASSISTANT,
+                content=[ThinkingContent(thinking="hmm", signature="sig123"), TextContent("ok")],
+            ),
+        ]
+    )
+    wire = p._messages_to_anthropic(req)
+    thinking_blocks = [b for m in wire for b in m["content"] if isinstance(m["content"], list) and b.get("type") == "thinking"]
+    assert thinking_blocks and thinking_blocks[0]["signature"] == "sig123"
+
+
+def test_anthropic_stream_truncation_emits_final_chunk():
+    from unittest.mock import MagicMock
+
+    from lazybridge.core.types import CompletionRequest, Message
+
+    p = _bare_anthropic()
+    # A stream that delivers one text delta and then dies — no message_stop.
+    events = [NS(type="content_block_delta", delta=NS(type="text_delta", text="par"))]
+
+    class _Ctx:
+        def __enter__(self):
+            return iter(events)
+
+        def __exit__(self, *a):
+            return False
+
+    p._client = MagicMock()
+    p._client.messages.stream.return_value = _Ctx()
+    p._client.beta.messages.stream.return_value = _Ctx()
+
+    req = CompletionRequest(messages=[Message.user("x")], model="claude-sonnet-4-6", max_tokens=100)
+    chunks = list(p.stream(req))
+    final = chunks[-1]
+    assert final.is_final
+    assert final.stop_reason == "incomplete"

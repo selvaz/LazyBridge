@@ -344,7 +344,12 @@ class AnthropicProvider(BaseProvider):
                     if isinstance(block, TextContent):
                         blocks.append({"type": "text", "text": block.text})
                     elif isinstance(block, ThinkingContent):
-                        blocks.append({"type": "thinking", "thinking": block.thinking})
+                        tb: dict[str, Any] = {"type": "thinking", "thinking": block.thinking}
+                        # Replayed thinking blocks must keep the original
+                        # signature or the API rejects the turn with a 400.
+                        if getattr(block, "signature", None):
+                            tb["signature"] = block.signature
+                        blocks.append(tb)
                     elif isinstance(block, ImageContent):
                         if block.url:
                             blocks.append(
@@ -419,13 +424,20 @@ class AnthropicProvider(BaseProvider):
         return result
 
     def _get_system(self, request: CompletionRequest) -> str | None:
-        """Extract system prompt from request or system messages."""
+        """Extract the system prompt from request.system + SYSTEM messages.
+
+        All sources are concatenated — previously only the first one won
+        and any additional SYSTEM message was silently dropped.
+        """
+        parts: list[str] = []
         if request.system:
-            return request.system
+            parts.append(request.system)
         for msg in request.messages:
             if msg.role == Role.SYSTEM:
-                return msg.to_text()
-        return None
+                text = msg.to_text()
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts) or None
 
     def _build_tools(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Build tool definitions list for Anthropic API."""
@@ -895,6 +907,7 @@ class AnthropicProvider(BaseProvider):
         # text_accum collects all text deltas so structured output validation
         # can be run against the complete response at message_stop time.
         text_accum = ""
+        emitted_final = False
         with ctx as s:
             for event in s:
                 if event.type == "content_block_delta":
@@ -948,7 +961,19 @@ class AnthropicProvider(BaseProvider):
                         from lazybridge.core.structured import apply_structured_validation
 
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+                    emitted_final = True
                     yield final_chunk
+
+        if not emitted_final:
+            # The SDK iterator ended without a message_stop event (dropped
+            # connection / truncation) — honour the BaseProvider contract:
+            # a final is_final=True chunk is always emitted.
+            fallback_chunk = StreamChunk(stop_reason="incomplete", is_final=True)
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(fallback_chunk, text_accum, request.structured_output.schema)
+            yield fallback_chunk
 
     # ------------------------------------------------------------------
     # Async API
@@ -1047,6 +1072,7 @@ class AnthropicProvider(BaseProvider):
         # text_accum collects all text deltas for end-of-stream validation.
         # See the sync stream() method for detailed inline commentary.
         text_accum = ""
+        emitted_final = False
         async with ctx as s:
             async for event in s:
                 if event.type == "content_block_delta":
@@ -1096,4 +1122,16 @@ class AnthropicProvider(BaseProvider):
                         from lazybridge.core.structured import apply_structured_validation
 
                         apply_structured_validation(final_chunk, text_accum, request.structured_output.schema)
+                    emitted_final = True
                     yield final_chunk
+
+        if not emitted_final:
+            # The SDK iterator ended without a message_stop event (dropped
+            # connection / truncation) — honour the BaseProvider contract:
+            # a final is_final=True chunk is always emitted.
+            fallback_chunk = StreamChunk(stop_reason="incomplete", is_final=True)
+            if request.structured_output:
+                from lazybridge.core.structured import apply_structured_validation
+
+                apply_structured_validation(fallback_chunk, text_accum, request.structured_output.schema)
+            yield fallback_chunk

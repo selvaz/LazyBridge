@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import logging
 import os
 import warnings
@@ -395,6 +396,10 @@ class OpenAIProvider(BaseProvider):
         self._async_base_url = base_url
         self._async_client_kwargs = kwargs
         self._async_clients: dict[int, Any] = {}  # loop_id → AsyncOpenAI
+        # Serialises check-then-set on _async_clients: this method exists
+        # precisely for multi-thread scenarios, where two threads could
+        # otherwise both create a client and orphan one of them.
+        self._async_clients_lock = threading.Lock()
 
     def _get_async_client(self) -> Any:
         """Return an AsyncOpenAI client bound to the *current* event loop.
@@ -413,13 +418,24 @@ class OpenAIProvider(BaseProvider):
             loop_id = id(loop)
         except RuntimeError:
             loop_id = 0  # no running loop — use a shared fallback slot
-        if loop_id not in self._async_clients:
-            self._async_clients[loop_id] = _openai.AsyncOpenAI(
-                api_key=self._async_api_key,
-                base_url=self._async_base_url,
-                **self._async_client_kwargs,
+        lock = getattr(self, "_async_clients_lock", None)
+        if lock is None:  # __new__-bypassed instances in tests
+            return self._async_clients.setdefault(
+                loop_id,
+                _openai.AsyncOpenAI(
+                    api_key=self._async_api_key,
+                    base_url=self._async_base_url,
+                    **self._async_client_kwargs,
+                ),
             )
-        return self._async_clients[loop_id]
+        with lock:
+            if loop_id not in self._async_clients:
+                self._async_clients[loop_id] = _openai.AsyncOpenAI(
+                    api_key=self._async_api_key,
+                    base_url=self._async_base_url,
+                    **self._async_client_kwargs,
+                )
+            return self._async_clients[loop_id]
 
     # ------------------------------------------------------------------
     # Internal helpers
