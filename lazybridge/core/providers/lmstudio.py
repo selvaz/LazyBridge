@@ -220,6 +220,10 @@ class LMStudioProvider(OpenAIProvider):
         resolved = super()._resolve_model(request)
         if resolved.startswith(_PREFIX):
             resolved = resolved[len(_PREFIX) :]
+            # Tier-alias lookup in super() ran BEFORE the strip, so
+            # "lmstudio/cheap" missed the "cheap" alias and would be sent
+            # to the server verbatim — re-resolve after stripping.
+            resolved = self._TIER_ALIASES.get(resolved, resolved)
         return resolved
 
     # ``_use_responses_api`` is intentionally NOT overridden — LM Studio

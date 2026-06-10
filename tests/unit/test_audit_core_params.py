@@ -158,3 +158,147 @@ def test_google_tool_config_merges_maps_and_function_calling():
     tc_kwargs = gtypes.ToolConfig.call_args.kwargs
     assert "function_calling_config" in tc_kwargs
     assert "retrieval_config" in tc_kwargs  # merged, not overwritten
+
+
+# ---------------------------------------------------------------------------
+# OpenAI — chat/responses param parity and contract fixes
+# ---------------------------------------------------------------------------
+
+
+def _bare_openai():
+    from lazybridge.core.providers.openai import OpenAIProvider
+
+    p = OpenAIProvider.__new__(OpenAIProvider)
+    p.api_key = "fake"
+    p.model = "gpt-4o-mini"
+    p._user_model = "gpt-4o-mini"
+    p.fallback_model = None
+    return p
+
+
+def test_openai_chat_reasoning_effort_only_on_reasoning_models():
+    import warnings as w
+
+    from lazybridge.core.types import ThinkingConfig
+
+    p = _bare_openai()
+    req = CompletionRequest(messages=[Message.user("x")], model="gpt-4o", thinking=ThinkingConfig())
+    with w.catch_warnings(record=True) as caught:
+        w.simplefilter("always")
+        params = p._build_chat_params(req)
+    assert "reasoning_effort" not in params
+    assert any("not a reasoning model" in str(x.message) for x in caught)
+
+    req2 = CompletionRequest(messages=[Message.user("x")], model="o3-mini", thinking=ThinkingConfig())
+    params2 = p._build_chat_params(req2)
+    assert params2["reasoning_effort"]
+
+
+def test_openai_responses_temperature_not_dropped_by_thinking():
+    from lazybridge.core.types import ThinkingConfig
+
+    p = _bare_openai()
+    req = CompletionRequest(
+        messages=[Message.user("x")], model="gpt-4o", temperature=0.3, thinking=ThinkingConfig()
+    )
+    params = p._build_responses_params(req)
+    # Non-reasoning model: temperature must survive even with thinking set.
+    assert params["temperature"] == 0.3
+
+    req2 = CompletionRequest(messages=[Message.user("x")], model="o3-mini", temperature=0.3)
+    params2 = p._build_responses_params(req2)
+    # Reasoning model: temperature is rejected by the API — omit it.
+    assert "temperature" not in params2
+
+
+def test_openai_system_history_messages_are_forwarded():
+    from lazybridge.core.types import Role
+
+    p = _bare_openai()
+    req = CompletionRequest(
+        messages=[Message.system("inline rule"), Message.user("hi")],
+        system="top-level prompt",
+        model="gpt-4o-mini",
+    )
+    chat = p._messages_to_openai(req)
+    assert [m["content"] for m in chat if m["role"] == "system"] == ["top-level prompt", "inline rule"]
+    items = p._messages_to_responses_input(req)
+    assert [m["content"] for m in items if m.get("role") == "system"] == ["top-level prompt", "inline rule"]
+
+
+def test_openai_chat_path_warns_on_dropped_native_tools():
+    import warnings as w
+
+    from lazybridge.core.types import NativeTool
+
+    p = _bare_openai()
+    p.strict_native_tools = False
+    req = CompletionRequest(
+        messages=[Message.user("x")], model="gpt-4o-mini", native_tools=[NativeTool.WEB_SEARCH]
+    )
+    with w.catch_warnings(record=True) as caught:
+        w.simplefilter("always")
+        p._build_chat_params(req)
+    assert any("Responses API" in str(x.message) for x in caught)
+
+
+def test_deepseek_strict_native_tools_raises_on_chat_path():
+    from lazybridge.core.providers.base import UnsupportedNativeToolError
+    from lazybridge.core.providers.deepseek import DeepSeekProvider
+    from lazybridge.core.types import NativeTool
+
+    p = DeepSeekProvider.__new__(DeepSeekProvider)
+    p.api_key = "fake"
+    p.model = "deepseek-v4-flash"
+    p.strict_native_tools = True
+    req = CompletionRequest(
+        messages=[Message.user("x")], model="deepseek-v4-flash", native_tools=[NativeTool.WEB_SEARCH]
+    )
+    with pytest.raises(UnsupportedNativeToolError):
+        p._build_chat_params(req)
+
+
+def test_openai_responses_failed_raises():
+    from types import SimpleNamespace as NS
+
+    p = _bare_openai()
+    failed = NS(status="failed", error=NS(message="overloaded"), output=[], usage=None, model="gpt-4o")
+    with pytest.raises(RuntimeError, match="overloaded"):
+        p._parse_responses_response(failed)
+
+
+def test_openai_reasoning_tokens_from_responses_usage_shape():
+    from types import SimpleNamespace as NS
+
+    from lazybridge.core.providers.openai import OpenAIProvider
+    from lazybridge.core.types import UsageStats
+
+    usage = UsageStats()
+    raw = NS(output_tokens_details=NS(reasoning_tokens=42))
+    raw.completion_tokens_details = None
+    out = OpenAIProvider._populate_reasoning_tokens(usage, raw)
+    assert out.thinking_tokens == 42
+
+
+def test_merge_streamed_tool_calls_dedupes_same_id_across_indices():
+    from lazybridge.core.providers.openai import _merge_streamed_tool_calls
+
+    accum = {
+        0: {"id": "call_1", "name": "f", "args": '{"a"'},
+        1: {"id": "call_1", "name": "", "args": ": 1}"},
+    }
+    calls = _merge_streamed_tool_calls(accum)
+    assert len(calls) == 1
+    assert calls[0].arguments == {"a": 1}
+
+
+def test_lmstudio_prefixed_tier_alias_resolves():
+    from lazybridge.core.providers.lmstudio import LMStudioProvider
+
+    p = LMStudioProvider.__new__(LMStudioProvider)
+    p.api_key = "fake"
+    p.model = None
+    p._user_model = None
+    p.fallback_model = None
+    req = CompletionRequest(messages=[Message.user("x")], model="lmstudio/cheap")
+    assert p._resolve_model(req) == p._TIER_ALIASES["cheap"]

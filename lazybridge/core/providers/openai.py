@@ -167,6 +167,29 @@ def _audio_format_from_media_type(media_type: str) -> str:
     return _AUDIO_FORMAT_BY_MEDIA_TYPE.get(media_type.lower(), "wav")
 
 
+def _merge_streamed_tool_calls(tool_call_accum: dict[int, dict[str, Any]]) -> list[ToolCall]:
+    """Dedupe accumulated streamed tool calls on tool-call id.
+
+    Most streams index each tool call by a stable ``tc.index`` and the id
+    arrives in the first delta, but reconnect / multi-choice responses can
+    emit the same id under different indices — merge the ``args`` in that
+    case so we don't invent phantom duplicate calls.  Shared by the sync
+    and async Chat Completions streaming paths.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    ordered: list[dict[str, Any]] = []
+    for v in tool_call_accum.values():
+        key = v["id"] or f"__idx_{id(v)}"
+        if key in by_id:
+            by_id[key]["args"] += v["args"]
+            if v["name"] and not by_id[key]["name"]:
+                by_id[key]["name"] = v["name"]
+        else:
+            by_id[key] = dict(v)
+            ordered.append(by_id[key])
+    return [ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"])) for v in ordered]
+
+
 class _ResponsesStreamState:
     """Folds Responses API stream events — shared by the sync and async paths.
 
@@ -407,10 +430,20 @@ class OpenAIProvider(BaseProvider):
 
     @staticmethod
     def _populate_reasoning_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
-        if raw_usage and hasattr(raw_usage, "completion_tokens_details"):
-            details = raw_usage.completion_tokens_details
-            if details and hasattr(details, "reasoning_tokens"):
-                usage.thinking_tokens = details.reasoning_tokens or 0
+        if not raw_usage:
+            return usage
+        # Chat Completions exposes reasoning tokens on
+        # ``completion_tokens_details``; the Responses API (default path)
+        # uses ``output_tokens_details`` — check both shapes, otherwise
+        # thinking_tokens stays 0 on every Responses call.
+        for attr in ("completion_tokens_details", "output_tokens_details"):
+            details = getattr(raw_usage, attr, None)
+            if details is None:
+                continue
+            reasoning = getattr(details, "reasoning_tokens", None)
+            if reasoning:
+                usage.thinking_tokens = reasoning
+                return usage
         return usage
 
     @staticmethod
@@ -439,9 +472,10 @@ class OpenAIProvider(BaseProvider):
             messages.append({"role": "system", "content": request.system})
         for msg in request.messages:
             if msg.role == Role.SYSTEM:
-                # Already handled above, or inline
-                if not request.system:
-                    messages.append({"role": "system", "content": msg.to_text()})
+                # Always forwarded — Chat Completions accepts multiple system
+                # messages.  Dropping them when request.system was set lost
+                # instructions silently.
+                messages.append({"role": "system", "content": msg.to_text()})
                 continue
             if isinstance(msg.content, str):
                 # ``Role.TOOL`` with string content has no ``tool_call_id``
@@ -532,8 +566,13 @@ class OpenAIProvider(BaseProvider):
                         )
 
                 if tool_results_in_msg:
-                    if parts:  # text present in the same message: emit it first
-                        messages.append({"role": msg.role.value, "content": parts})
+                    if parts:
+                        # Text in the same message is emitted first — but a
+                        # Role.TOOL message must not produce a bare
+                        # {"role": "tool"} without tool_call_id (400): route
+                        # the text through role=user instead.
+                        text_role = "user" if msg.role == Role.TOOL else msg.role.value
+                        messages.append({"role": text_role, "content": parts})
                     for tr in tool_results_in_msg:
                         messages.append({"role": "tool", **tr})
                 elif tool_calls_in_msg:
@@ -584,10 +623,37 @@ class OpenAIProvider(BaseProvider):
             if request.temperature is not None:
                 params["temperature"] = request.temperature
 
-        # Reasoning effort
+        # Reasoning effort — only valid on reasoning models; sending it for
+        # e.g. gpt-4o (or LM Studio backends) produces a 400/ignored param.
         if request.thinking and request.thinking.enabled:
-            effort = _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)
-            params["reasoning_effort"] = effort
+            if self._is_reasoning_model(model):
+                effort = _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)
+                params["reasoning_effort"] = effort
+            else:
+                warnings.warn(
+                    f"OpenAI model {model!r} is not a reasoning model — "
+                    "ThinkingConfig is ignored on the Chat Completions path.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+
+        # Native tools cannot run on the Chat Completions path (they are a
+        # Responses API feature).  Honour the BaseProvider contract: warn,
+        # or raise in strict mode, instead of dropping them silently.
+        if request.native_tools:
+            requested = self._check_native_tools(request.native_tools)
+            if requested:
+                msg = (
+                    f"OpenAIProvider: native tools {[t.value for t in requested]} require the "
+                    "Responses API, but this request was routed to Chat Completions "
+                    "(Pydantic structured output forces it). The native tools are dropped — "
+                    "use a dict JSON schema, or drop structured_output, to keep them."
+                )
+                if getattr(self, "strict_native_tools", False):
+                    from lazybridge.core.providers.base import UnsupportedNativeToolError
+
+                    raise UnsupportedNativeToolError(msg)
+                warnings.warn(msg, UserWarning, stacklevel=4)
 
         tools = self._build_function_tools(request)
         if tools:
@@ -629,8 +695,9 @@ class OpenAIProvider(BaseProvider):
             items.append({"role": "system", "content": request.system})
         for msg in request.messages:
             if msg.role == Role.SYSTEM:
-                if not request.system:
-                    items.append({"role": "system", "content": msg.to_text()})
+                # Always forwarded (multiple system items are valid input) —
+                # dropping them when request.system was set lost instructions.
+                items.append({"role": "system", "content": msg.to_text()})
                 continue
             if isinstance(msg.content, str):
                 items.append({"role": msg.role.value, "content": msg.content})
@@ -740,11 +807,15 @@ class OpenAIProvider(BaseProvider):
                 else:
                     # Responses API specific tool: {"type": "function", "name": "..."}
                     params["tool_choice"] = {"type": "function", "name": request.tool_choice}
-        if request.max_tokens:
+        if request.max_tokens is not None:
             params["max_output_tokens"] = request.max_tokens
         if request.thinking and request.thinking.enabled:
-            params["reasoning"] = {"effort": _EFFORT_MAP.get(request.thinking.effort, "high")}
-        elif request.temperature is not None:
+            # Passthrough for unknown effort values (parity with the Chat
+            # path): the API rejects them loudly instead of a silent "high".
+            params["reasoning"] = {"effort": _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)}
+        # temperature is rejected by reasoning models — mirror the Chat-path
+        # guard instead of silently dropping it whenever thinking is set.
+        if request.temperature is not None and not self._is_reasoning_model(model):
             params["temperature"] = request.temperature
         if "store" in request.extra:
             params["store"] = request.extra["store"]
@@ -818,8 +889,23 @@ class OpenAIProvider(BaseProvider):
             raw=response,
         )
 
+    @staticmethod
+    def _raise_if_responses_failed(response: Any) -> None:
+        """Raise on a failed Responses API result.
+
+        ``status == "failed"`` used to be mapped to ``stop_reason="error"``
+        with empty content and no diagnostics — the Executor only retries
+        exceptions, so transient failures could never be retried and callers
+        got a silent empty reply.
+        """
+        if getattr(response, "status", None) == "failed":
+            err = getattr(response, "error", None)
+            msg = getattr(err, "message", None) or (str(err) if err else "no error details")
+            raise RuntimeError(f"OpenAI Responses API request failed: {msg}")
+
     def _parse_responses_response(self, response: Any) -> CompletionResponse:
         """Parse Responses API output."""
+        self._raise_if_responses_failed(response)
         content = ""
         tool_calls = []
         for item in response.output:
@@ -887,6 +973,8 @@ class OpenAIProvider(BaseProvider):
 
     def _responses_final_chunk(self, state: _ResponsesStreamState) -> StreamChunk:
         """Build the is_final StreamChunk from accumulated stream state."""
+        if state.completed_response is not None:
+            self._raise_if_responses_failed(state.completed_response)
         tool_calls = []
         for call_id, args_str in state.fc_args.items():
             name = state.fc_names.get(call_id, call_id)
@@ -1029,23 +1117,7 @@ class OpenAIProvider(BaseProvider):
         final_usage: UsageStats | None = None
 
         def _finalise_tool_calls() -> list[ToolCall]:
-            # Dedupe on tool-call id.  Most streams index each tool call
-            # by a stable ``tc.index`` and the id arrives in the first
-            # delta, but reconnect / multi-choice responses can emit the
-            # same id under different indices — merge the ``args`` in
-            # that case so we don't invent phantom duplicate calls.
-            by_id: dict[str, dict[str, Any]] = {}
-            ordered: list[dict[str, Any]] = []
-            for v in tool_call_accum.values():
-                key = v["id"] or f"__idx_{id(v)}"
-                if key in by_id:
-                    by_id[key]["args"] += v["args"]
-                    if v["name"] and not by_id[key]["name"]:
-                        by_id[key]["name"] = v["name"]
-                else:
-                    by_id[key] = dict(v)
-                    ordered.append(by_id[key])
-            return [ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"])) for v in ordered]
+            return _merge_streamed_tool_calls(tool_call_accum)
 
         for chunk in self._client.chat.completions.create(**params):
             if chunk.usage:
@@ -1165,6 +1237,16 @@ class OpenAIProvider(BaseProvider):
         params["stream_options"] = {"include_usage": True}
 
         if request.structured_output and not isinstance(request.structured_output.schema, dict):
+            # Same best-effort caveat as the sync stream() — warn here too so
+            # sync and async behave identically.
+            warnings.warn(
+                "OpenAI streaming with a Pydantic output_schema is best-effort: "
+                "the schema is enforced at validation time, not by the model's "
+                "response_format. Expect occasional parse/validation failures on "
+                "long completions.  Use stream=False for strict Pydantic parsing.",
+                UserWarning,
+                stacklevel=4,
+            )
             params["response_format"] = {"type": "json_object"}
 
         text_accum = ""
@@ -1201,13 +1283,12 @@ class OpenAIProvider(BaseProvider):
                     if tc.function.arguments:
                         tool_call_accum[idx]["args"] += tc.function.arguments
             if choice and choice.finish_reason:
-                tool_calls = [
-                    ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                    for v in tool_call_accum.values()
-                ]
                 final_chunk = StreamChunk(
                     stop_reason=choice.finish_reason,
-                    tool_calls=tool_calls,
+                    # Merge/dedupe like the sync path — async previously built
+                    # ToolCalls verbatim, producing phantom duplicates when the
+                    # same id arrived under different indices.
+                    tool_calls=_merge_streamed_tool_calls(tool_call_accum),
                     usage=final_usage,
                     is_final=True,
                 )
@@ -1218,10 +1299,7 @@ class OpenAIProvider(BaseProvider):
         if final_chunk is None:
             # Interrupted / truncated async stream — emit a best-effort final
             # chunk so awaiters don't hang.
-            tool_calls = [
-                ToolCall(id=v["id"], name=v["name"], arguments=_safe_json_loads(v["args"]))
-                for v in tool_call_accum.values()
-            ]
+            tool_calls = _merge_streamed_tool_calls(tool_call_accum)
             final_chunk = StreamChunk(
                 stop_reason="incomplete",
                 tool_calls=tool_calls,
