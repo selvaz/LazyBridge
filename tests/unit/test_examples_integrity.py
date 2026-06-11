@@ -26,9 +26,7 @@ import pytest
 
 _EXAMPLES_DIR = Path(__file__).parents[2] / "examples"
 
-_EXAMPLE_FILES = sorted(
-    p for p in _EXAMPLES_DIR.rglob("*.py") if "__pycache__" not in p.parts
-)
+_EXAMPLE_FILES = sorted(p for p in _EXAMPLES_DIR.rglob("*.py") if "__pycache__" not in p.parts)
 
 
 def _ids(path: Path) -> str:
@@ -64,9 +62,7 @@ def test_example_lazybridge_imports_resolve(path: Path) -> None:
                 continue
             for alias in node.names:
                 if alias.name != "*" and not hasattr(mod, alias.name):
-                    problems.append(
-                        f"line {node.lineno}: {node.module!r} has no attribute {alias.name!r}"
-                    )
+                    problems.append(f"line {node.lineno}: {node.module!r} has no attribute {alias.name!r}")
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if not alias.name.startswith("lazybridge"):
@@ -76,6 +72,4 @@ def test_example_lazybridge_imports_resolve(path: Path) -> None:
                 except ImportError as exc:
                     problems.append(f"line {node.lineno}: cannot import {alias.name!r}: {exc}")
 
-    assert not problems, f"{path.relative_to(_EXAMPLES_DIR)} is out of sync with the API:\n" + "\n".join(
-        problems
-    )
+    assert not problems, f"{path.relative_to(_EXAMPLES_DIR)} is out of sync with the API:\n" + "\n".join(problems)

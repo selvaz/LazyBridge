@@ -38,7 +38,9 @@ from lazybridge.envelope import Envelope
 # ---------------------------------------------------------------------------
 
 
-def _patch_loop(monkeypatch, *, tokens: int = 2, started: list[str] | None = None, gate: dict[str, asyncio.Event] | None = None):
+def _patch_loop(
+    monkeypatch, *, tokens: int = 2, started: list[str] | None = None, gate: dict[str, asyncio.Event] | None = None
+):
     """Patch ``LLMEngine._loop`` with a fake that streams into the adopted sink.
 
     * appends the engine's agent name to ``started`` on entry (ordering probe);
@@ -66,10 +68,7 @@ def _agent(name: str) -> Agent:
 
 async def _collect(plan: Plan) -> list[str]:
     return [
-        tok
-        async for tok in plan.stream(
-            Envelope.from_task("go"), tools=[], output_type=str, memory=None, session=None
-        )
+        tok async for tok in plan.stream(Envelope.from_task("go"), tools=[], output_type=str, memory=None, session=None)
     ]
 
 
