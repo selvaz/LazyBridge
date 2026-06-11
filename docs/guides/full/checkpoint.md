@@ -262,8 +262,12 @@ print(state["kv"]["clean"])      # the partial result
   loses the durable Store value; the value still lives in the
   checkpoint's serialised `kv` and is read back on resume, so
   the Plan continues correctly. Anything reading the Store
-  out-of-band (a dashboard, a sidecar process) should compare
-  the keys against `state["kv"]` to detect this gap.
+  out-of-band (a dashboard, a sidecar process) can now check
+  mechanically: every plan Store write is stamped with the owning
+  run's id, and `Plan.store_write_is_current(store,
+  checkpoint_key=..., key=...)` returns `False` whenever the value
+  is stale relative to the checkpoint — fall back to the
+  checkpoint's `kv` snapshot in that case.
 
 ## See also
 

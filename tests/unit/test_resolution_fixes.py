@@ -56,9 +56,9 @@ def test_plan_sequential_checkpoint_before_store_write():
     ops: list[str] = []
 
     class _TrackingStore(Store):
-        def write(self, key, value):
+        def write(self, key, value, *, agent_id=None):
             ops.append(f"store.write:{key}")
-            super().write(key, value)
+            super().write(key, value, agent_id=agent_id)
 
         def compare_and_swap(self, key, expected, new):
             if key and "__plan_checkpoint__" in str(key):
@@ -91,9 +91,9 @@ def test_plan_parallel_checkpoint_before_store_write():
     ops: list[str] = []
 
     class _TrackingStore(Store):
-        def write(self, key, value):
+        def write(self, key, value, *, agent_id=None):
             ops.append(f"store.write:{key}")
-            super().write(key, value)
+            super().write(key, value, agent_id=agent_id)
 
         def compare_and_swap(self, key, expected, new):
             if key and "__plan_checkpoint__" in str(key):

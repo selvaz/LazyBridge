@@ -61,7 +61,9 @@ Need a user-visible history of every step's Envelope?
   that a crash in the gap loses the durable Store value. The
   value still lives in the checkpoint's `kv` so the Plan
   continues correctly — but sidecar consumers reading the Store
-  directly should reconcile against the checkpoint snapshot.
+  directly should reconcile against the checkpoint snapshot
+  (mechanically: `Plan.store_write_is_current(store,
+  checkpoint_key=..., key=...)`).
 - **A failed parallel band points the checkpoint at the band's
   *first* step.** The whole band re-runs cleanly so all sibling
   `writes` are produced consistently. Branches with non-

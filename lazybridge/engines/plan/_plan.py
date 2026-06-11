@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._serialisation import (
     _first_arg_kwargs,
@@ -53,6 +54,13 @@ if TYPE_CHECKING:
     from lazybridge.store import Store
     from lazybridge.tools import Tool
 
+#: ``agent_id`` stamp prefix on every durable ``Step(writes=...)`` Store
+#: write.  The full stamp is ``f"{_WRITE_STAMP_PREFIX}{run_uid}"`` where
+#: ``run_uid`` is the same value persisted in the checkpoint snapshot —
+#: which is what lets a sidecar consumer detect the crash-window staleness
+#: documented in ``Plan.__init__`` (see ``Plan.store_write_is_current``).
+_WRITE_STAMP_PREFIX = "plan-run:"
+
 
 class Plan:
     """Structured multi-step execution engine.
@@ -73,8 +81,16 @@ class Plan:
         checkpoint_key: str | None = None,
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
+        stream_buffer: int = 64,
     ) -> None:
         """Construct a Plan.
+
+        Streaming
+        ---------
+        ``stream()`` yields tokens live from each step's LLM engine as the
+        plan executes (see :meth:`stream`).  ``stream_buffer`` bounds the
+        token queue exactly like ``LLMEngine(stream_buffer=...)`` — a slow
+        consumer throttles the producing step instead of growing memory.
 
         Checkpoint / resume
         -------------------
@@ -166,6 +182,9 @@ class Plan:
                 "shared checkpoint to resume from.  Use on_concurrent='fail' "
                 "with a unique per-run checkpoint_key if you need resume."
             )
+        if stream_buffer < 1:
+            raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
+        self.stream_buffer = stream_buffer
         self.steps = list(steps)
         self.max_iterations = max_iterations
         self._compiler = PlanCompiler()
@@ -232,6 +251,34 @@ class Plan:
     # ------------------------------------------------------------------
     # Checkpoint helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def store_write_is_current(store: Store, *, checkpoint_key: str, key: str) -> bool:
+        """Can a sidecar consumer trust ``store[key]`` right now?
+
+        Closes the documented crash-window blind spot: each step's
+        checkpoint is written *before* its durable ``Step(writes=...)``
+        Store write, so after a crash in that gap the checkpoint claims
+        the step completed while ``store[key]`` still holds a stale value
+        from an earlier run (or nothing).  Every plan Store write is
+        therefore stamped with the owning run's ``run_uid``; this helper
+        compares that stamp against the checkpoint's recorded ``run_uid``.
+
+        Returns ``True`` only when ``key`` exists and was written by the
+        run the checkpoint at ``checkpoint_key`` describes.  ``False``
+        means "reconcile against the checkpoint's ``kv`` snapshot instead"
+        (the value there is always consistent with ``completed_steps``).
+
+        With ``on_concurrent="fork"``, pass the *effective* key
+        (``f"{checkpoint_key}:{run_uid}"``) the run actually used.
+        """
+        snap = store.read(checkpoint_key)
+        if not isinstance(snap, dict) or not snap.get("run_uid"):
+            return False
+        entry = store.read_entry(key)
+        if entry is None:
+            return False
+        return entry.agent_id == _WRITE_STAMP_PREFIX + str(snap["run_uid"])
 
     def _checkpoint_store(self) -> Store | None:
         return self.store if self.checkpoint_key else None
@@ -587,7 +634,9 @@ class Plan:
                 completed_set = set(completed)
                 for step_def in self.steps:
                     if step_def.name in completed_set and step_def.writes and step_def.writes in kv:
-                        effective_store.write(step_def.writes, kv[step_def.writes])
+                        effective_store.write(
+                            step_def.writes, kv[step_def.writes], agent_id=_WRITE_STAMP_PREFIX + run_uid
+                        )
 
         # Resume from checkpoint if available
         current_name: str | None
@@ -651,24 +700,32 @@ class Plan:
                 # Each branch gets an isolated snapshot of history/kv.
                 hist_snap = list(history)
                 kv_snap = dict(kv)
-                raw = await asyncio.gather(
-                    *[
-                        self._execute_one(
-                            s,
-                            prev_env,
-                            start_env,
-                            hist_snap,
-                            kv_snap,
-                            tool_map=tool_map,
-                            session=session,
-                            run_id=run_id,
-                            branch_id=s.name,
-                            agent_name=agent_name,
-                        )
-                        for s in group
-                    ],
-                    return_exceptions=True,
-                )
+                # Streaming: unbind the ambient token sink around the band —
+                # gather's tasks snapshot the suppressed context, so
+                # concurrent branches cannot interleave tokens (see
+                # lazybridge/core/streaming.py).
+                _sink_suppress = suppress_ambient_token_sink()
+                try:
+                    raw = await asyncio.gather(
+                        *[
+                            self._execute_one(
+                                s,
+                                prev_env,
+                                start_env,
+                                hist_snap,
+                                kv_snap,
+                                tool_map=tool_map,
+                                session=session,
+                                run_id=run_id,
+                                branch_id=s.name,
+                                agent_name=agent_name,
+                            )
+                            for s in group
+                        ],
+                        return_exceptions=True,
+                    )
+                finally:
+                    restore_ambient_token_sink(_sink_suppress)
 
                 # Atomicity: scan ALL branches for failure first.  If any
                 # branch errored we return WITHOUT applying any writes to
@@ -796,7 +853,7 @@ class Plan:
                         # in this scope.
                         assert isinstance(r, Envelope)
                         if s.writes and r.payload is not None:
-                            effective_store.write(s.writes, r.payload)
+                            effective_store.write(s.writes, r.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
                 continue
 
             # ──────────────────────────────────────────────────────────────
@@ -885,7 +942,7 @@ class Plan:
                 history=history,
             )
             if step.writes and result_env.payload is not None and effective_store:
-                effective_store.write(step.writes, result_env.payload)
+                effective_store.write(step.writes, result_env.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
 
         # If we exited the loop because the iteration cap was hit (rather
         # than because the plan ran to completion with ``current_name``
@@ -1538,5 +1595,40 @@ class Plan:
     async def stream(
         self, env: Envelope[Any], *, tools: list[Any], output_type: type, memory: Any, session: Any
     ) -> AsyncIterator[str]:
-        result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
-        yield result.text()
+        """Stream tokens live from the plan's steps as they execute.
+
+        The plan runs exactly as :meth:`run` does (same checkpointing,
+        routing, and metadata aggregation); while it runs, every
+        *sequential* step whose target bottoms out in an ``LLMEngine``
+        streams its tokens here as they are generated — so the consumer
+        watches the pipeline think step by step instead of waiting for one
+        final text block.
+
+        Semantics:
+
+        * **Parallel bands do not stream** — concurrent branches would
+          interleave tokens into an unreadable shuffle; their results still
+          flow into downstream steps, whose tokens do stream.
+        * **Nested tool-calls are silent** — within a step, agents invoked
+          as tools between turns do not stream, matching
+          ``LLMEngine.stream()``.
+        * **Fallback** — a plan with no streaming-capable step (pure
+          functions, mock engines) yields the final text once, preserving
+          the pre-streaming contract.
+        * **Verification caveat** — as with ``Agent.stream()``, tokens are
+          emitted before any ``verify=`` / ``output=`` post-processing on
+          the step's agent completes.
+        * **Store output caveat** — ``Agent.stream()`` persists the joined
+          streamed tokens under the agent's output key.  For a plan engine
+          that is the concatenated narration of every streamed step, not
+          the final step's text alone (which is what ``Agent.run()``
+          stores).  Downstream consumers needing exact step values should
+          read the ``Step(writes=...)`` keys instead.
+        """
+        from lazybridge.core.streaming import stream_envelope_run
+
+        async def _run() -> Envelope[Any]:
+            return await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
+
+        async for token in stream_envelope_run(_run, buffer=self.stream_buffer):
+            yield token

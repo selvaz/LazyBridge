@@ -9,6 +9,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **True token streaming for `Plan` and `ReplanEngine`.**
+  `Agent(engine=plan).stream(...)` previously awaited the entire plan and
+  yielded the final text once; it now streams tokens live from each
+  sequential step's LLM engine via an ambient token sink
+  (`lazybridge/core/streaming.py`) that `LLMEngine.run()` adopts.
+  Parallel bands are suppressed (no token interleaving), nested
+  agents-as-tools stay silent (the `LLMEngine.stream()` contract), plans
+  with no streaming-capable step fall back to yielding the final text
+  once, and closing the stream early cancels the in-flight run. New
+  `Plan(stream_buffer=N)` bounds the token queue exactly like
+  `LLMEngine(stream_buffer=N)`. The `ReplanEngine` planner's structured
+  `PlanRound` output is loop control and is kept out of the stream. See
+  *Guides → Full → Plan → Streaming*.
+- **Checkpoint-epoch stamping + `Plan.store_write_is_current()`.** Every
+  durable `Step(writes=...)` Store write (sequential, parallel band, and
+  resume replay) now carries `agent_id="plan-run:<run_uid>"`, matching
+  the `run_uid` persisted in the checkpoint snapshot. Sidecar consumers
+  reading the Store out-of-band can call
+  `Plan.store_write_is_current(store, checkpoint_key=..., key=...)` to
+  detect the documented crash-window staleness mechanically instead of
+  diffing against the checkpoint `kv` by hand.
+- **Example-rot guard.** `tests/unit/test_examples_integrity.py` checks
+  that every file under `examples/` compiles and that every `lazybridge`
+  import in it resolves against the installed package, so a public API
+  rename can no longer silently break the examples.
 - **`ReplanEngine` — guardian of the dynamic replan loop.** The adaptive
   counterpart to `Plan` for pipelines whose shape is decided at runtime by a
   planner agent. The planner is a tool in the parent `Agent`'s `tool_map`
