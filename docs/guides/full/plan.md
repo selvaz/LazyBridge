@@ -170,6 +170,28 @@ crash-resume, fan-out runs — see the dedicated guides:
 [Routing](routing.md), and the Phase 3b guides
 *Parallel plan steps* and *Checkpoint & resume*.
 
+## Streaming
+
+`Agent(engine=plan).stream(...)` streams tokens **live from each
+sequential step** as the plan executes — you watch the pipeline think
+step by step instead of waiting for one final text block. The rules:
+
+- Sequential steps whose target bottoms out in an `LLMEngine` stream
+  in step order; nested agents-as-tools inside a step stay silent
+  (same contract as `LLMEngine.stream()`).
+- **Parallel bands do not stream** — concurrent branches would
+  interleave tokens; their results still feed downstream steps, which
+  do stream.
+- A plan with no streaming-capable step (pure functions, mock
+  engines) yields the final text once.
+- `Plan(stream_buffer=N)` bounds the token queue exactly like
+  `LLMEngine(stream_buffer=N)` — a slow consumer throttles the
+  producing step.
+- Tokens are emitted before a step agent's `verify=` / `output=`
+  post-processing completes, and `Agent.stream()`'s Store output key
+  records the joined narration of all streamed steps (read
+  `Step(writes=...)` keys when you need exact step values).
+
 ## Pitfalls
 
 - **`max_iterations` is a safety net for routing loops** (default
