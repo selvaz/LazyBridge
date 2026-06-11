@@ -1206,6 +1206,11 @@ class LLMEngine:
         sink: asyncio.Queue[str | None] = asyncio.Queue(maxsize=self.stream_buffer)
 
         async def _run_loop() -> None:
+            # Sentinel on completion and on error — but NOT on cancellation:
+            # the canceller is the consumer's ``finally`` (early break /
+            # aclose), which no longer drains the queue. A ``finally``-based
+            # ``await sink.put(None)`` on a full bounded queue would then
+            # block forever and deadlock the generator's cleanup.
             try:
                 await self._loop(
                     env,
@@ -1216,7 +1221,12 @@ class LLMEngine:
                     run_id=run_id,
                     _stream_sink=sink,
                 )
-            finally:
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                await sink.put(None)  # wake the consumer so the error surfaces
+                raise
+            else:
                 await sink.put(None)  # sentinel — loop done
 
         task = asyncio.create_task(_run_loop())

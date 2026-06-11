@@ -21,7 +21,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `Plan(stream_buffer=N)` bounds the token queue exactly like
   `LLMEngine(stream_buffer=N)`. The `ReplanEngine` planner's structured
   `PlanRound` output is loop control and is kept out of the stream. See
-  *Guides → Full → Plan → Streaming*.
+  *Guides → Full → Plan → Streaming*. Post-review hardening: the closing
+  sentinel is skipped on cancellation (in both the ambient-sink runner
+  and `LLMEngine.stream`'s loop), so a consumer that disconnects while
+  the bounded queue is full can no longer deadlock `aclose()` on
+  `sink.put(None)`.
 - **Checkpoint-epoch stamping + `Plan.store_write_is_current()`.** Every
   durable `Step(writes=...)` Store write (sequential, parallel band, and
   resume replay) now carries `agent_id="plan-run:<run_uid>"`, matching
