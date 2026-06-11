@@ -100,10 +100,20 @@ async def stream_envelope_run(
     result_box: list[Envelope[Any]] = []
 
     async def _runner() -> None:
+        # The closing ``None`` sentinel is sent on completion and on error —
+        # but NOT on cancellation: the canceller is the consumer's own
+        # ``finally`` block, which is no longer draining the queue. With a
+        # ``finally``-based put, a cancel landing while the bounded queue is
+        # full would block forever on ``sink.put`` and deadlock ``aclose()``.
         try:
             result_box.append(await run())
-        finally:
-            await sink.put(None)  # sentinel — run done (or failed)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            await sink.put(None)  # wake the consumer so the error surfaces
+            raise
+        else:
+            await sink.put(None)  # sentinel — run done
 
     # Bind the sink only for the background task: ``create_task`` snapshots
     # the current context, so resetting immediately afterwards keeps the

@@ -251,3 +251,41 @@ async def test_replan_stream_yields_final_answer_without_llm():
         )
     ]
     assert chunks == ["all done"]
+
+
+# ---------------------------------------------------------------------------
+# Early close must not deadlock when the bounded queue is full (Codex P1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_early_close_with_full_queue_does_not_hang(monkeypatch):
+    """A slow consumer that disconnects while the producer is blocked on a
+    full ``stream_buffer=1`` queue must still tear down promptly: the
+    runner's sentinel is skipped on cancellation, so ``aclose()`` cannot
+    deadlock on ``sink.put(None)`` into a queue nobody drains."""
+    _patch_loop(monkeypatch, tokens=50)  # floods the size-1 queue
+    plan = Plan(Step(_agent("flood")), stream_buffer=1)
+
+    async def _consume_one_then_close() -> None:
+        gen = plan.stream(Envelope.from_task("go"), tools=[], output_type=str, memory=None, session=None)
+        assert await gen.__anext__() == "flood:0"
+        await gen.aclose()
+
+    await asyncio.wait_for(_consume_one_then_close(), timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_llm_engine_stream_early_close_with_full_queue_does_not_hang(monkeypatch):
+    """Same contract for ``LLMEngine.stream`` directly (the pattern the
+    plan-level fix was copied from)."""
+    _patch_loop(monkeypatch, tokens=50)
+    eng = LLMEngine("claude-opus-4-7", stream_buffer=1)
+    eng._agent_name = "flood"
+
+    async def _consume_one_then_close() -> None:
+        gen = eng.stream(Envelope.from_task("go"), tools=[], output_type=str, memory=None, session=None)
+        assert await gen.__anext__() == "flood:0"
+        await gen.aclose()
+
+    await asyncio.wait_for(_consume_one_then_close(), timeout=5.0)
