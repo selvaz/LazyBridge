@@ -1581,6 +1581,12 @@ class Plan:
         * **Verification caveat** — as with ``Agent.stream()``, tokens are
           emitted before any ``verify=`` / ``output=`` post-processing on
           the step's agent completes.
+        * **Store output caveat** — ``Agent.stream()`` persists the joined
+          streamed tokens under the agent's output key.  For a plan engine
+          that is the concatenated narration of every streamed step, not
+          the final step's text alone (which is what ``Agent.run()``
+          stores).  Downstream consumers needing exact step values should
+          read the ``Step(writes=...)`` keys instead.
         """
         from lazybridge.core.streaming import stream_envelope_run
 
