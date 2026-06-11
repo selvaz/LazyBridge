@@ -54,6 +54,13 @@ if TYPE_CHECKING:
     from lazybridge.store import Store
     from lazybridge.tools import Tool
 
+#: ``agent_id`` stamp prefix on every durable ``Step(writes=...)`` Store
+#: write.  The full stamp is ``f"{_WRITE_STAMP_PREFIX}{run_uid}"`` where
+#: ``run_uid`` is the same value persisted in the checkpoint snapshot —
+#: which is what lets a sidecar consumer detect the crash-window staleness
+#: documented in ``Plan.__init__`` (see ``Plan.store_write_is_current``).
+_WRITE_STAMP_PREFIX = "plan-run:"
+
 
 class Plan:
     """Structured multi-step execution engine.
@@ -244,6 +251,34 @@ class Plan:
     # ------------------------------------------------------------------
     # Checkpoint helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def store_write_is_current(store: Store, *, checkpoint_key: str, key: str) -> bool:
+        """Can a sidecar consumer trust ``store[key]`` right now?
+
+        Closes the documented crash-window blind spot: each step's
+        checkpoint is written *before* its durable ``Step(writes=...)``
+        Store write, so after a crash in that gap the checkpoint claims
+        the step completed while ``store[key]`` still holds a stale value
+        from an earlier run (or nothing).  Every plan Store write is
+        therefore stamped with the owning run's ``run_uid``; this helper
+        compares that stamp against the checkpoint's recorded ``run_uid``.
+
+        Returns ``True`` only when ``key`` exists and was written by the
+        run the checkpoint at ``checkpoint_key`` describes.  ``False``
+        means "reconcile against the checkpoint's ``kv`` snapshot instead"
+        (the value there is always consistent with ``completed_steps``).
+
+        With ``on_concurrent="fork"``, pass the *effective* key
+        (``f"{checkpoint_key}:{run_uid}"``) the run actually used.
+        """
+        snap = store.read(checkpoint_key)
+        if not isinstance(snap, dict) or not snap.get("run_uid"):
+            return False
+        entry = store.read_entry(key)
+        if entry is None:
+            return False
+        return entry.agent_id == _WRITE_STAMP_PREFIX + str(snap["run_uid"])
 
     def _checkpoint_store(self) -> Store | None:
         return self.store if self.checkpoint_key else None
@@ -599,7 +634,9 @@ class Plan:
                 completed_set = set(completed)
                 for step_def in self.steps:
                     if step_def.name in completed_set and step_def.writes and step_def.writes in kv:
-                        effective_store.write(step_def.writes, kv[step_def.writes])
+                        effective_store.write(
+                            step_def.writes, kv[step_def.writes], agent_id=_WRITE_STAMP_PREFIX + run_uid
+                        )
 
         # Resume from checkpoint if available
         current_name: str | None
@@ -816,7 +853,7 @@ class Plan:
                         # in this scope.
                         assert isinstance(r, Envelope)
                         if s.writes and r.payload is not None:
-                            effective_store.write(s.writes, r.payload)
+                            effective_store.write(s.writes, r.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
                 continue
 
             # ──────────────────────────────────────────────────────────────
@@ -905,7 +942,7 @@ class Plan:
                 history=history,
             )
             if step.writes and result_env.payload is not None and effective_store:
-                effective_store.write(step.writes, result_env.payload)
+                effective_store.write(step.writes, result_env.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
 
         # If we exited the loop because the iteration cap was hit (rather
         # than because the plan ran to completion with ``current_name``
