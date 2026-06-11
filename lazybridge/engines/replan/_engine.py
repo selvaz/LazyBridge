@@ -38,6 +38,11 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from lazybridge.core.streaming import (
+    restore_ambient_token_sink,
+    stream_envelope_run,
+    suppress_ambient_token_sink,
+)
 from lazybridge.engines.plan._serialisation import _first_arg_kwargs
 from lazybridge.engines.plan._types import ConcurrentPlanRunError
 from lazybridge.engines.replan._types import PlanRound, Task
@@ -186,8 +191,21 @@ class ReplanEngine:
         memory: Memory | None,
         session: Session | None,
     ) -> AsyncIterator[str]:
-        result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
-        yield result.text()
+        """Stream tokens live from the worker tools as each round executes.
+
+        Same semantics as :meth:`Plan.stream`: sequential workers whose
+        target bottoms out in an ``LLMEngine`` stream their tokens as they
+        are generated; parallel-band workers and the planner itself do not
+        stream (the planner's structured ``PlanRound`` output is loop
+        control, not user-facing text).  When nothing streamed — mock
+        engines, non-LLM tools — the final text is yielded once.
+        """
+
+        async def _run() -> Envelope[Any]:
+            return await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
+
+        async for token in stream_envelope_run(_run):
+            yield token
 
     # ------------------------------------------------------------------
     # Checkpoint helpers (same CAS pattern as Plan)
@@ -348,6 +366,10 @@ class ReplanEngine:
         for round_num in range(round_start, self.max_rounds):
             # ── Ask the planner ───────────────────────────────────────────
             planner_input = self._build_planner_input(env.task or "", history, tool_map)
+            # Streaming: the planner emits structured loop-control output
+            # (PlanRound JSON), not user-facing text — keep it out of the
+            # ambient token stream.
+            _sink_suppress = suppress_ambient_token_sink()
             try:
                 planner_raw = await planner_tool.run(
                     **{"task": planner_input}
@@ -366,6 +388,8 @@ class ReplanEngine:
                     status="failed",
                 )
                 return Envelope.error_envelope(exc)
+            finally:
+                restore_ambient_token_sink(_sink_suppress)
 
             plan: PlanRound | None = planner_raw.payload if isinstance(planner_raw, Envelope) else planner_raw
 
@@ -445,10 +469,16 @@ class ReplanEngine:
             # Parallel band — same gather/error-scan pattern as Plan.
             par_results: list[Any] = []
             if parallel_tasks:
-                par_raw = await asyncio.gather(
-                    *[self._dispatch(t, tool_map, session, run_id, agent_name) for t in parallel_tasks],
-                    return_exceptions=True,
-                )
+                # Streaming: suppressed for the band — concurrent workers
+                # would interleave tokens (same rule as Plan's parallel band).
+                _band_suppress = suppress_ambient_token_sink()
+                try:
+                    par_raw = await asyncio.gather(
+                        *[self._dispatch(t, tool_map, session, run_id, agent_name) for t in parallel_tasks],
+                        return_exceptions=True,
+                    )
+                finally:
+                    restore_ambient_token_sink(_band_suppress)
                 for r in par_raw:
                     if isinstance(r, ConcludeSignal):
                         raise r

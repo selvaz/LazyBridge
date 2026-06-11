@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.executor import Executor
+from lazybridge.core.streaming import consume_ambient_token_sink, restore_ambient_token_sink
 from lazybridge.core.types import (
     CompletionRequest,
     CompletionResponse,
@@ -520,6 +521,13 @@ class LLMEngine:
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
 
+        # Ambient streaming: when a composite engine (Plan / ReplanEngine)
+        # is streaming, it binds a token sink to the context before running
+        # its steps.  Adopt it here so this engine's turns stream live —
+        # and *consume* the binding so nested agents-as-tools below this
+        # frame stay silent, matching the ``stream()`` contract that tool
+        # calls between turns are executed silently.
+        ambient_sink, ambient_token = consume_ambient_token_sink()
         try:
             result = await self._loop(
                 env,
@@ -528,11 +536,14 @@ class LLMEngine:
                 memory=memory,
                 session=session,
                 run_id=run_id,
+                _stream_sink=ambient_sink,
             )
         except Exception as exc:
             if session:
                 session.emit(EventType.AGENT_FINISH, {"agent_name": agent_name, "error": str(exc)}, run_id=run_id)
             return Envelope.error_envelope(exc)
+        finally:
+            restore_ambient_token_sink(ambient_token)
 
         latency_ms = (time.monotonic() - t_start) * 1000
         # Rebuild metadata via ``model_copy`` so we don't rely on

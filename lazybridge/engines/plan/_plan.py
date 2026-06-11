@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._serialisation import (
     _first_arg_kwargs,
@@ -73,8 +74,16 @@ class Plan:
         checkpoint_key: str | None = None,
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
+        stream_buffer: int = 64,
     ) -> None:
         """Construct a Plan.
+
+        Streaming
+        ---------
+        ``stream()`` yields tokens live from each step's LLM engine as the
+        plan executes (see :meth:`stream`).  ``stream_buffer`` bounds the
+        token queue exactly like ``LLMEngine(stream_buffer=...)`` — a slow
+        consumer throttles the producing step instead of growing memory.
 
         Checkpoint / resume
         -------------------
@@ -166,6 +175,9 @@ class Plan:
                 "shared checkpoint to resume from.  Use on_concurrent='fail' "
                 "with a unique per-run checkpoint_key if you need resume."
             )
+        if stream_buffer < 1:
+            raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
+        self.stream_buffer = stream_buffer
         self.steps = list(steps)
         self.max_iterations = max_iterations
         self._compiler = PlanCompiler()
@@ -651,24 +663,32 @@ class Plan:
                 # Each branch gets an isolated snapshot of history/kv.
                 hist_snap = list(history)
                 kv_snap = dict(kv)
-                raw = await asyncio.gather(
-                    *[
-                        self._execute_one(
-                            s,
-                            prev_env,
-                            start_env,
-                            hist_snap,
-                            kv_snap,
-                            tool_map=tool_map,
-                            session=session,
-                            run_id=run_id,
-                            branch_id=s.name,
-                            agent_name=agent_name,
-                        )
-                        for s in group
-                    ],
-                    return_exceptions=True,
-                )
+                # Streaming: unbind the ambient token sink around the band —
+                # gather's tasks snapshot the suppressed context, so
+                # concurrent branches cannot interleave tokens (see
+                # lazybridge/core/streaming.py).
+                _sink_suppress = suppress_ambient_token_sink()
+                try:
+                    raw = await asyncio.gather(
+                        *[
+                            self._execute_one(
+                                s,
+                                prev_env,
+                                start_env,
+                                hist_snap,
+                                kv_snap,
+                                tool_map=tool_map,
+                                session=session,
+                                run_id=run_id,
+                                branch_id=s.name,
+                                agent_name=agent_name,
+                            )
+                            for s in group
+                        ],
+                        return_exceptions=True,
+                    )
+                finally:
+                    restore_ambient_token_sink(_sink_suppress)
 
                 # Atomicity: scan ALL branches for failure first.  If any
                 # branch errored we return WITHOUT applying any writes to
@@ -1538,5 +1558,34 @@ class Plan:
     async def stream(
         self, env: Envelope[Any], *, tools: list[Any], output_type: type, memory: Any, session: Any
     ) -> AsyncIterator[str]:
-        result = await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
-        yield result.text()
+        """Stream tokens live from the plan's steps as they execute.
+
+        The plan runs exactly as :meth:`run` does (same checkpointing,
+        routing, and metadata aggregation); while it runs, every
+        *sequential* step whose target bottoms out in an ``LLMEngine``
+        streams its tokens here as they are generated — so the consumer
+        watches the pipeline think step by step instead of waiting for one
+        final text block.
+
+        Semantics:
+
+        * **Parallel bands do not stream** — concurrent branches would
+          interleave tokens into an unreadable shuffle; their results still
+          flow into downstream steps, whose tokens do stream.
+        * **Nested tool-calls are silent** — within a step, agents invoked
+          as tools between turns do not stream, matching
+          ``LLMEngine.stream()``.
+        * **Fallback** — a plan with no streaming-capable step (pure
+          functions, mock engines) yields the final text once, preserving
+          the pre-streaming contract.
+        * **Verification caveat** — as with ``Agent.stream()``, tokens are
+          emitted before any ``verify=`` / ``output=`` post-processing on
+          the step's agent completes.
+        """
+        from lazybridge.core.streaming import stream_envelope_run
+
+        async def _run() -> Envelope[Any]:
+            return await self.run(env, tools=tools, output_type=output_type, memory=memory, session=session)
+
+        async for token in stream_envelope_run(_run, buffer=self.stream_buffer):
+            yield token
