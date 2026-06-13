@@ -31,10 +31,20 @@ from lazybridge.core.types import (
 
 _logger = logging.getLogger(__name__)
 
-try:
-    import openai as _openai
-except ImportError:
-    _openai = None  # type: ignore[assignment]
+def _require_openai() -> Any:
+    """Resolve the ``openai`` SDK at call time.
+
+    Resolved per call (a ``sys.modules`` lookup once imported) instead of
+    snapshotted at module load: the SDK is optional, may be installed or
+    stubbed in ``sys.modules`` after this module is first imported, and an
+    import-time ``None`` snapshot would shadow it forever.
+    """
+
+    try:
+        import openai
+    except ImportError as exc:
+        raise ImportError("openai package not installed. Run: pip install openai") from exc
+    return openai
 
 # Reasoning models that use `reasoning_effort` instead of `temperature`
 _REASONING_MODELS = frozenset(
@@ -367,8 +377,7 @@ class OpenAIProvider(BaseProvider):
         return 16_384
 
     def _init_client(self, **kwargs: Any) -> None:
-        if _openai is None:
-            raise ImportError("openai package not installed. Run: pip install openai")
+        _require_openai()  # fail fast with install guidance
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
             raise ValueError(
@@ -386,7 +395,7 @@ class OpenAIProvider(BaseProvider):
         :meth:`_get_async_client` works uniformly — the inherited
         ``acomplete`` / ``astream`` paths call it unconditionally.
         """
-        self._client = _openai.OpenAI(api_key=key, base_url=base_url, **kwargs)
+        self._client = _require_openai().OpenAI(api_key=key, base_url=base_url, **kwargs)
         # Store credentials for lazy async client creation — AsyncOpenAI wraps
         # httpx.AsyncClient which binds to the event loop it was created in.
         # Creating it eagerly in __init__ causes "attached to a different loop"
@@ -422,7 +431,7 @@ class OpenAIProvider(BaseProvider):
         if lock is None:  # __new__-bypassed instances in tests
             return self._async_clients.setdefault(
                 loop_id,
-                _openai.AsyncOpenAI(
+                _require_openai().AsyncOpenAI(
                     api_key=self._async_api_key,
                     base_url=self._async_base_url,
                     **self._async_client_kwargs,
@@ -430,7 +439,7 @@ class OpenAIProvider(BaseProvider):
             )
         with lock:
             if loop_id not in self._async_clients:
-                self._async_clients[loop_id] = _openai.AsyncOpenAI(
+                self._async_clients[loop_id] = _require_openai().AsyncOpenAI(
                     api_key=self._async_api_key,
                     base_url=self._async_base_url,
                     **self._async_client_kwargs,
