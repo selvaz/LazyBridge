@@ -44,6 +44,41 @@ and the [LazyTools overview](https://tools.lazybridge.com/). Install with
 
 ::: lazybridge.ext.evals.EvalResult
 
+### Assertion helpers
+
+Ready-made `assertion` callables for `EvalCase` (compose your own too):
+
+::: lazybridge.ext.evals.exact_match
+
+::: lazybridge.ext.evals.contains
+
+::: lazybridge.ext.evals.not_contains
+
+::: lazybridge.ext.evals.min_length
+
+::: lazybridge.ext.evals.max_length
+
+::: lazybridge.ext.evals.llm_judge
+
+## Planners
+
+Multi-step planning agents (`lazybridge.ext.planners`). `orchestrator_agent` /
+`blackboard_orchestrator_agent` are the canonical factories; `make_planner` /
+`make_blackboard_planner` are backward-compat aliases for the same callables.
+See the [Planners guide](../recipes/plan-tool.md).
+
+::: lazybridge.ext.planners.orchestrator_agent
+
+::: lazybridge.ext.planners.blackboard_orchestrator_agent
+
+::: lazybridge.ext.planners.make_plan_builder_tools
+
+::: lazybridge.ext.planners.make_execute_plan_tool
+
+::: lazybridge.ext.planners.PlanSpec
+
+::: lazybridge.ext.planners.StepSpec
+
 ## OpenTelemetry exporter
 
 ::: lazybridge.ext.otel.OTelExporter
