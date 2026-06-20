@@ -78,7 +78,7 @@ for a flowchart.
 
 ```bash
 pip install "lazybridge[anthropic]"
-# or [openai], [google], [deepseek], [litellm], [otel], [encryption], [all]
+# or [openai], [google], [deepseek], [litellm], [yaml], [otel], [encryption], [all]
 # Concrete tools (MCP, Gmail, Telegram, gateways, doc readers) ship in the
 # sibling lazytoolkit package: pip install "lazytoolkit[mcp]"  (see https://tools.lazybridge.com/)
 ```
