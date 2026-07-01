@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import inspect
 import threading
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from lazybridge._asyncbridge import run_coroutine_blocking
 from lazybridge.core.types import Message, Role
 
 
@@ -347,32 +346,20 @@ class Memory:
 def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:
     """Drive an awaitable from sync context regardless of loop state.
 
-    * No loop running → ``asyncio.run(...)``.
-    * Loop running (Jupyter, FastAPI, inside an Agent's async path) →
-      dispatch to a fresh loop on a worker thread so we don't nest.
-
-    Mirrors the bridge used by :meth:`Agent.__call__` so Memory's
-    compression path has identical async semantics.
+    Thin wrapper over the shared sync↔async bridge
+    (:func:`lazybridge._asyncbridge.run_coroutine_blocking`) so Memory's
+    compression path has semantics identical to ``Agent.__call__`` —
+    including nest_asyncio (Jupyter), contextvars propagation, and
+    loop-closed cleanup, none of which this path handled before.
 
     When ``timeout`` is set the awaitable is wrapped in
-    ``asyncio.wait_for``; on deadline a :class:`TimeoutError` propagates
-    so the caller can fall back gracefully.
+    ``asyncio.wait_for`` inside the executing loop; on deadline the
+    coroutine is cancelled and a :class:`TimeoutError` propagates so the
+    caller can fall back gracefully.
     """
-
-    async def _run() -> Any:
-        coro = _ensure_coroutine(awaitable)
-        if timeout is None:
-            return await coro
-        return await asyncio.wait_for(coro, timeout=timeout)
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_run())
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, _run()).result()
+    return run_coroutine_blocking(lambda: _ensure_coroutine(awaitable), timeout=timeout)
 
 
 async def _ensure_coroutine(awaitable: Any) -> Any:
-    """Wrap any awaitable in a coroutine so ``asyncio.run`` accepts it."""
+    """Wrap any awaitable in a coroutine so the bridge can await it."""
     return await awaitable

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from lazybridge.envelope import Envelope
 
+from lazybridge._asyncbridge import run_coroutine_blocking
 from lazybridge.core.tool_schema import ToolSchemaBuilder, ToolSchemaMode
 from lazybridge.core.types import ToolDefinition
 
@@ -179,43 +180,22 @@ class Tool:
     def run_sync(self, **kwargs: Any) -> Any:
         """Blocking tool invocation.
 
-        Handles three cases so that callers never see a stray coroutine:
+        Handles two cases so that callers never see a stray coroutine:
 
         * plain sync function → called directly.
-        * async function → executed inside the current event loop if one
-          is running (a worker thread hops out of it), otherwise on a
-          fresh ``asyncio.run`` loop.  Needed because :meth:`Agent.as_tool`
-          wraps the agent's ``.run()`` coroutine into ``Tool.func`` —
-          ``SupervisorEngine`` / REPL callers were previously getting
-          ``"<coroutine object _run at 0x...>"`` instead of the result.
+        * async function → driven to completion through the shared
+          sync↔async bridge (:func:`lazybridge._asyncbridge.run_coroutine_blocking`),
+          which handles nest_asyncio, contextvars propagation, and
+          loop-closed cleanup identically to ``Agent.__call__``.  Needed
+          because :meth:`Agent.as_tool` wraps the agent's ``.run()``
+          coroutine into ``Tool.func`` — ``SupervisorEngine`` / REPL
+          callers were previously getting ``"<coroutine object _run at
+          0x...>"`` instead of the result.
         """
         kwargs = self._coerce_arguments(kwargs)
         if not asyncio.iscoroutinefunction(self.func):
             return self.func(**kwargs)
-
-        coro_factory = lambda: self.func(**kwargs)  # noqa: E731
-        # ``asyncio.get_running_loop`` is the forward-compatible check
-        # (it raises cleanly when no loop is running, unlike the
-        # deprecated ``get_event_loop``).  When a loop is running we
-        # hop to a worker thread so we never try to nest.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro_factory())
-        # Propagate the caller's contextvars context (OTel, structured
-        # logging, request IDs) into the worker loop.  A raw
-        # ``asyncio.run`` on a fresh thread would start in an empty
-        # context and silently break observability for sync callers.
-        import concurrent.futures
-        import contextvars
-
-        ctx = contextvars.copy_context()
-
-        def _run() -> Any:
-            return ctx.run(asyncio.run, coro_factory())
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_run).result()
+        return run_coroutine_blocking(lambda: self.func(**kwargs))
 
     def __repr__(self) -> str:
         return f"Tool({self.name!r})"

@@ -1464,13 +1464,14 @@ class Plan:
         See :meth:`arun_many` for the async variant when the caller is
         already inside an event loop.
         """
-        # Re-use the sync-bridge that ``Agent.__call__`` ships with —
-        # it propagates contextvars (OTel spans, request ids, …) into
-        # the worker loop so observability flows through fan-outs.
-        from lazybridge.agent import _run_coro_with_context
+        # Re-use the shared sync↔async bridge — it propagates contextvars
+        # (OTel spans, request ids, …) into the worker loop so observability
+        # flows through fan-outs, and handles nest_asyncio / loop-closed
+        # cleanup uniformly.  See ``lazybridge._asyncbridge``.
+        from lazybridge._asyncbridge import run_coroutine_blocking
 
-        result: list[Envelope[Any]] = _run_coro_with_context(
-            self.arun_many(
+        result: list[Envelope[Any]] = run_coroutine_blocking(
+            lambda: self.arun_many(
                 tasks,
                 concurrency=concurrency,
                 tools=tools,

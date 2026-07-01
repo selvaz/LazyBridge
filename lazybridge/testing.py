@@ -253,14 +253,12 @@ class MockAgent:
         return env_out
 
     def __call__(self, task: str | Envelope) -> Envelope:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.run(task))
-        import concurrent.futures
+        # Same shared sync↔async bridge as the real ``Agent.__call__`` so the
+        # double behaves identically across loop states (see
+        # ``lazybridge._asyncbridge``).
+        from lazybridge._asyncbridge import run_coroutine_blocking
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, self.run(task)).result()
+        return run_coroutine_blocking(lambda: self.run(task))
 
     async def stream(self, task: str | Envelope) -> AsyncGenerator[str, None]:
         """Minimal streaming surface: yields the final text in one chunk.
