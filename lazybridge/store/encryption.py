@@ -254,7 +254,15 @@ class EncryptedStoreAdapter:
         else:
             current_plain = self._decrypt(current_token)
 
-        if not _plain_eq(current_plain, expected):
+        # JSON-shape equality — reuse the base Store's own rule so a Pydantic
+        # model compares equal to the dict it round-trips to.  Without it the
+        # plaintext CAS would ``repr()`` the model and never match the
+        # persisted shape (the Codex P2 regression that first motivated a
+        # dedicated equality helper here).  Sharing ``_json_eq`` keeps this
+        # CAS path in lock-step with ``Store.compare_and_swap``.
+        from lazybridge.store import _json_eq
+
+        if not _json_eq(current_plain, expected):
             return False
 
         return self._inner.compare_and_swap(
@@ -273,22 +281,3 @@ class EncryptedStoreAdapter:
     @property
     def inner(self) -> Store:
         return self._inner
-
-
-def _plain_eq(a: Any, b: Any) -> bool:
-    """JSON-shape equality for the plaintext path.
-
-    Mirrors :func:`lazybridge.store._json_eq` semantics so the
-    adapter's CAS plays the same equality rules the base Store does:
-    a Pydantic model and the dict it round-trips to compare equal
-    (Codex P2 regression — without ``_to_jsonable`` we'd ``repr()``
-    the model and never match the persisted dict shape).
-    """
-    from lazybridge.store import _to_jsonable
-
-    try:
-        sa = json.dumps(_to_jsonable(a), sort_keys=True, default=str)
-        sb = json.dumps(_to_jsonable(b), sort_keys=True, default=str)
-    except TypeError:
-        return False
-    return sa == sb
