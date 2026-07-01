@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Deduplicated the encrypted-Store CAS equality check.**
+  `EncryptedStoreAdapter.compare_and_swap` compared the decrypted
+  plaintext against `expected` through a private `_plain_eq` that was a
+  byte-for-byte copy of `lazybridge.store._json_eq` (JSON-shape equality
+  via `_to_jsonable`, so a Pydantic model compares equal to the dict it
+  round-trips to). The adapter now calls the shared `_json_eq` directly,
+  keeping its CAS rule in lock-step with `Store.compare_and_swap` and
+  removing the copy. Behaviour is unchanged.
 - **Unified the synchronous→async bridge.** The logic that runs a
   coroutine to completion from synchronous code (detect the event-loop
   state, then run on a fresh loop / in-loop under nest_asyncio / on a
