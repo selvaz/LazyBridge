@@ -205,6 +205,35 @@ def test_no_coroutine_never_awaited_warning() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 9. asyncio.run shutdown semantics — async generators are finalised before
+#    the loop closes (regression guard for the six unified call sites, three
+#    of which previously called asyncio.run directly).
+# ---------------------------------------------------------------------------
+
+
+def test_async_generators_are_shutdown_before_loop_closes() -> None:
+    state: dict[str, bool] = {}
+
+    async def _gen() -> object:
+        try:
+            yield 1
+            yield 2
+        finally:
+            # Runs only if loop.shutdown_asyncgens() drives aclose() on a
+            # generator that was never fully consumed / explicitly closed.
+            state["finally_ran"] = True
+
+    async def _main() -> object:
+        agen = _gen()
+        await agen.__anext__()  # partially consume; do NOT close it
+        return agen  # keep it referenced so GC doesn't finalise it early
+
+    holder = run_coroutine_blocking(lambda: _main())
+    assert state.get("finally_ran") is True
+    del holder
+
+
+# ---------------------------------------------------------------------------
 # Integration — the unified call sites work from inside a running loop
 # (this is the path that used to diverge / hang).
 # ---------------------------------------------------------------------------

@@ -57,9 +57,14 @@ def _run_on_new_loop(coro: Awaitable[T]) -> T:
     """Run *coro* to completion on a fresh event loop, then drain + close it.
 
     Replaces a bare ``asyncio.run()`` so the "Event loop is closed" cleanup
-    noise is suppressed without hiding real errors, and so pending tasks are
-    cancelled and awaited before the loop closes (correctness, not cosmetics —
-    a detached task left on a closing loop can swallow exceptions).
+    noise is suppressed without hiding real errors, while otherwise mirroring
+    ``asyncio.run`` / ``asyncio.Runner.close`` shutdown semantics: cancel and
+    await pending tasks, then ``shutdown_asyncgens()`` + ``shutdown_default_executor()``,
+    then ``close()``.  The generator-shutdown step matters because several
+    call sites (``Tool.run_sync``, ``Memory``, ``MockAgent``) previously called
+    ``asyncio.run`` directly — skipping it would leave a partially-consumed
+    async generator that owns a stream/response without running its
+    ``finally`` / ``aclose`` before the loop closes.
     """
     loop = asyncio.new_event_loop()
     loop.set_exception_handler(_suppress_loop_closed)
@@ -72,10 +77,14 @@ def _run_on_new_loop(coro: Awaitable[T]) -> T:
                 for task in pending:
                     task.cancel()
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # Mirror asyncio.run()'s finally block: flush async generators and
+            # the default thread-pool executor before the loop is torn down.
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(loop.shutdown_default_executor())
         except Exception as exc:
             loop.call_exception_handler(
                 {
-                    "message": "Error while draining pending tasks during loop shutdown",
+                    "message": "Error during event-loop shutdown (task drain / asyncgen / executor)",
                     "exception": exc,
                 }
             )
