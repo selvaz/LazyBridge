@@ -6,6 +6,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+- **Unified the synchronous→async bridge.** The logic that runs a
+  coroutine to completion from synchronous code (detect the event-loop
+  state, then run on a fresh loop / in-loop under nest_asyncio / on a
+  worker thread) lived in six near-identical, subtly-divergent copies:
+  `Agent.__call__`, `ParallelAgent.__call__`, `Tool.run_sync`,
+  `Memory._drive_to_completion`, `MockAgent.__call__`, and
+  `Plan.run_many`. Only the `Agent` copy handled nest_asyncio
+  (Jupyter/Spyder) and suppressed httpx/anyio "Event loop is closed"
+  GC noise; only `Memory` honoured a timeout; the others skipped the
+  in-loop nest_asyncio branch — so the *same* call took a worker-thread
+  path in a notebook while `Agent.__call__` ran in-loop, a source of
+  intermittent, path-dependent behaviour. All six now delegate to a
+  single private helper, `lazybridge._asyncbridge.run_coroutine_blocking`,
+  so every synchronous entry point crosses the boundary with identical
+  semantics. **Observable effects:** `Tool.run_sync`,
+  `MockAgent.__call__`, and `Plan.run_many` now take the in-loop path
+  under nest_asyncio and suppress loop-closed cleanup noise;
+  `Memory`'s summariser path now also propagates the caller's
+  `contextvars` (OTel spans / request-ids / structured-logging context)
+  into the worker loop. `Memory`'s `timeout` contract is unchanged. The
+  helper takes a coroutine *factory* rather than a live coroutine, so a
+  failure anywhere in dispatch can never strand a "coroutine was never
+  awaited" object, and its `timeout` is applied with `asyncio.wait_for`
+  inside the executing loop (the coroutine is actually cancelled on
+  expiry, not left running detached).
+
 ## [0.9.2] — 2026-06-12
 
 ### Added

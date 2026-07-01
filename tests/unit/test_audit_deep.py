@@ -3,8 +3,10 @@
 One test per behaviour so a breakage points straight at the offending area.
 
   * Public ``__all__`` exposes ``GuardError`` / ``EventExporter``.
-  * ``ParallelAgent.__call__`` uses ``asyncio.get_running_loop``
-    (not the deprecated ``get_event_loop``).
+  * The shared sync↔async bridge (``lazybridge._asyncbridge``) uses
+    ``asyncio.get_running_loop`` (not the deprecated ``get_event_loop``),
+    and ``Agent`` / ``ParallelAgent`` ``__call__`` delegate to it rather
+    than re-implementing loop detection inline.
   * ``LLMGuard`` has real ``acheck_input`` / ``acheck_output``.
   * ``Plan`` short-circuits when a referenced upstream step errored.
   * ``OTelExporter.close`` flushes orphaned spans; ``_spans`` is
@@ -53,16 +55,29 @@ def test_l1_all_exposes_previously_hidden_names() -> None:
 # ── H1 ────────────────────────────────────────────────────────────────────────
 
 
-def test_h1_parallel_agent_uses_get_running_loop() -> None:
+def test_h1_bridge_uses_get_running_loop() -> None:
+    # The sync→async loop detection is centralised in the shared bridge.
     # Walk the AST so documentation that mentions the old name doesn't
     # trick a plain substring search.
     import ast
 
-    src = inspect.getsource(ParallelAgent.__call__)
-    tree = ast.parse(src.strip())
+    from lazybridge import _asyncbridge
+
+    src = inspect.getsource(_asyncbridge)
+    tree = ast.parse(src)
     names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    assert "get_event_loop" not in names, "ParallelAgent.__call__ must not use deprecated asyncio.get_event_loop"
+    assert "get_event_loop" not in names, "the async bridge must not use deprecated asyncio.get_event_loop"
     assert "get_running_loop" in names
+
+
+def test_h1_call_sites_delegate_to_shared_bridge() -> None:
+    # Agent / ParallelAgent must not re-implement loop detection inline —
+    # they delegate to the shared bridge so every sync entry point crosses
+    # the boundary with identical semantics (nest_asyncio, contextvars, …).
+    for target in (Agent.__call__, ParallelAgent.__call__):
+        src = inspect.getsource(target)
+        assert "run_coroutine_blocking" in src, f"{target.__qualname__} must delegate to run_coroutine_blocking"
+        assert "get_event_loop" not in src, f"{target.__qualname__} must not touch asyncio.get_event_loop"
 
 
 # ── H2 ────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from lazybridge._asyncbridge import run_coroutine_blocking
 from lazybridge.envelope import Envelope
 from lazybridge.tools import Tool, build_tool_map
 
@@ -695,30 +696,12 @@ class Agent:
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
-        # Detect whether we're already inside a running event loop.
-        # ``asyncio.get_running_loop`` is the forward-compatible way — it
-        # raises ``RuntimeError`` when there is no current loop, unlike
-        # the deprecated ``get_event_loop`` which implicitly creates one.
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No loop running — safe to run directly on a new loop.
-            return _run_on_new_loop(self.run(task, images=images, audio=audio))
-
-        # nest_asyncio (Spyder / Jupyter) patches the loop and sets
-        # ``_nest_patched = True``.  Running directly on the caller's loop
-        # avoids an event-loop lifetime mismatch: httpx/anyio transports
-        # created during the call stay bound to a loop that is never closed,
-        # so their cleanup tasks succeed silently instead of raising
-        # ``RuntimeError: Event loop is closed``.
-        if getattr(loop, "_nest_patched", False):
-            return loop.run_until_complete(self.run(task, images=images, audio=audio))
-
-        # True async framework (FastAPI, asyncio tests, …) — spin up a fresh
-        # loop on a worker thread, copying the caller's contextvars context so
-        # OTel spans / request IDs / structured-logging context flow into the
-        # agent's loop instead of starting empty.
-        return _run_coro_with_context(self.run(task, images=images, audio=audio))
+        # Cross the sync→async boundary via the shared bridge so this path is
+        # identical to every other synchronous entry point (Tool.run_sync,
+        # Memory, Plan.run_many, …) — including nest_asyncio (Jupyter/Spyder),
+        # contextvars propagation, and loop-closed cleanup.  See
+        # ``lazybridge._asyncbridge``.
+        return run_coroutine_blocking(lambda: self.run(task, images=images, audio=audio))
 
     # ------------------------------------------------------------------
     # Tool exposure
@@ -1112,72 +1095,6 @@ def _describe_output_type(output: Any) -> str:
     return str(output).replace("typing.", "")
 
 
-def _suppress_loop_closed(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
-    """Swallow 'Event loop is closed' noise emitted by httpx/anyio cleanup tasks.
-
-    When a fresh loop is closed after the coroutine finishes, the GC may later
-    call ``AsyncClient.__del__`` which tries to schedule an ``aclose()`` task on
-    the now-closed loop.  The resulting ``RuntimeError`` is benign — the request
-    already completed successfully — but without this handler it prints a
-    confusing traceback to stderr.
-    """
-    exc = context.get("exception")
-    if isinstance(exc, RuntimeError) and str(exc) == "Event loop is closed":
-        return
-    loop.default_exception_handler(context)
-
-
-def _run_on_new_loop(coro: Any) -> Any:
-    """Run *coro* on a fresh event loop with a clean-exit exception handler.
-
-    Replaces bare ``asyncio.run()`` at the ``__call__`` boundary so that
-    httpx/anyio 'Event loop is closed' cleanup noise is suppressed without
-    hiding real errors.
-    """
-    loop = asyncio.new_event_loop()
-    loop.set_exception_handler(_suppress_loop_closed)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        try:
-            pending = asyncio.all_tasks(loop)
-            if pending:
-                for task in pending:
-                    task.cancel()
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception as exc:
-            loop.call_exception_handler(
-                {
-                    "message": "Error while draining pending tasks during loop shutdown",
-                    "exception": exc,
-                }
-            )
-        loop.close()
-
-
-def _run_coro_with_context(coro: Any) -> Any:
-    """Run ``coro`` on a fresh event loop in a worker thread, with the
-    caller's :mod:`contextvars` context propagated into it.
-
-    Without ``ctx.run`` here, ``asyncio.run`` on a worker thread starts
-    with an empty context, so contextvars set by the outer framework
-    (OpenTelemetry spans, request IDs, structured-logging context) are
-    invisible to the agent.  Living at the ``__call__`` boundary means
-    every Engine type benefits without individually re-implementing
-    the bridge.
-    """
-    import concurrent.futures
-    import contextvars
-
-    ctx = contextvars.copy_context()
-
-    def _run() -> Any:
-        return ctx.run(_run_on_new_loop, coro)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_run).result()
-
-
 def _read_source(src: Any) -> str:
     """Extract a string from any source object — Memory, Store, callable, str."""
     # Memory / Store / objects with .text() or .to_text()
@@ -1309,17 +1226,8 @@ class ParallelAgent:
         return self._join_branches(task, branches)
 
     def __call__(self, task: str | Envelope) -> Envelope:
-        # Mirror ``Agent.__call__`` — ``get_running_loop`` is the only
-        # forward-compatible detection (``get_event_loop`` is deprecated
-        # under 3.12 and errors under 3.14+ when no loop is running).
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return _run_on_new_loop(self.run(task))
-        if getattr(loop, "_nest_patched", False):
-            return loop.run_until_complete(self.run(task))
-        # Propagate caller contextvars into the worker loop.
-        return _run_coro_with_context(self.run(task))
+        # Same shared bridge as ``Agent.__call__`` — see ``lazybridge._asyncbridge``.
+        return run_coroutine_blocking(lambda: self.run(task))
 
     # ------------------------------------------------------------------
     # Tool-is-Tool — ``run()`` already returns a single Envelope so the
