@@ -229,8 +229,11 @@ def test_async_generators_are_shutdown_before_loop_closes() -> None:
         return agen  # keep it referenced so GC doesn't finalise it early
 
     holder = run_coroutine_blocking(lambda: _main())
+    # ``holder`` keeps the async generator referenced through the assert so
+    # the finaliser we're checking is the loop's shutdown_asyncgens(), not an
+    # early GC of an unreferenced object.
+    assert holder is not None
     assert state.get("finally_ran") is True
-    del holder
 
 
 # ---------------------------------------------------------------------------
