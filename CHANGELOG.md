@@ -6,7 +6,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.10.0] — 2026-07-02 — v1 stabilization bridge
+
+The bridge release before 1.0: every finding from the v1 deep audit of
+the core is fixed here, the plan runtime is decomposed into focused
+modules, and the public API gets its final pre-1.0 cleanup.  Package
+stability moves **alpha → beta** (`Development Status :: 4`).  The plan:
+this release settles across the dependent Lazy* projects, then 1.0.0 is
+tagged from it without further changes.
+
+**Migration summary (breaking / deprecated):**
+
+1. `Agent(output=Model)` that exhausts `max_output_retries` now returns
+   `ok=False` with `error.type == "OutputValidationError"` instead of
+   `ok=True` with the raw string. Check the error type; the raw payload
+   is preserved on the envelope.
+2. `Agent.stream(timeout=)` is now a total-stream deadline (was
+   per-chunk); the stream also enforces the output guard on completion
+   and fails over to `fallback=` when the engine dies before the first
+   token.
+3. `lazybridge.Task` → `lazybridge.ReplanTask` (deprecated alias warns,
+   removed in 1.0). `CacheConfig` → import from `lazybridge.core.types`.
+   `PROVIDER_ALIASES` → call `LLMEngine.provider_aliases()`.
+4. Routing (`routes=` / `routes_by=`) into a `parallel=True` step is now
+   a `PlanCompileError` (it silently lost the rejoin jump at runtime).
+5. `Plan.to_dict()` is now v2 (records `Step.output` / `Step.input` by
+   name); pass the types in the `from_dict` registry
+   (`{"type:<Name>": <class>}`). v1 payloads still load.
+
+### Added
+- **No-extras test environment is green.** The suite now passes with no
+  provider SDK installed: `tests/conftest.py` installs a MagicMock
+  `openai` stub *before* any lazybridge import (the per-file
+  `sys.modules` stubs came too late once the provider module was
+  imported, leaving `_openai = None` bound forever — 15 failures), and
+  `test_store_encryption.py`'s skip guard no longer crashes collection
+  on hosts where `cryptography`'s Rust extension panics (the pyo3
+  `PanicException` is matched by name; the old import-then-catch bound
+  `()` into the except clause and raised `TypeError`).
 
 ### Fixed
 - **Memory summaries now accumulate across compressions.** Repeated

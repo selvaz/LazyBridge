@@ -81,8 +81,9 @@ def test_core_never_imports_from_extension_subtrees() -> None:
         pytest.fail(msg)
 
 
-def test_top_level_package_is_alpha() -> None:
-    """Pre-1.0: the package declares a single ``alpha`` stability marker."""
+def test_top_level_package_is_beta() -> None:
+    """0.10 (the v1 stabilization bridge release) declares ``beta``;
+    the 1.0 tag flips this to ``stable``."""
     import lazybridge
 
-    assert lazybridge.__stability__ == "alpha"
+    assert lazybridge.__stability__ == "beta"

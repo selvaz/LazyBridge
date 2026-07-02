@@ -55,6 +55,29 @@ for _mod_name in _google_stubs:
         sys.modules[_mod_name] = types.ModuleType(_mod_name)
 
 # ---------------------------------------------------------------------------
+# OpenAI SDK stub (no-extras environments)
+#
+# ``lazybridge/core/providers/openai.py`` binds ``import openai`` to a
+# module-global ``_openai`` at import time.  Several test modules stub
+# ``sys.modules["openai"]`` at *their* import time — but by then the
+# provider module may already be imported (via this conftest or an
+# earlier test file), so the stub never reaches ``_openai`` and 15
+# OpenAI/DeepSeek/LM Studio tests fail on ``NoneType has no attribute
+# 'OpenAI'`` in environments without the SDK.  Install one MagicMock
+# stub HERE, before any lazybridge import, so ``_openai`` binds to it
+# consistently for the whole suite.  A real installed SDK wins.
+# ---------------------------------------------------------------------------
+try:
+    import openai as _openai_real  # noqa: F401
+except ImportError:
+    from unittest.mock import MagicMock as _MagicMock
+
+    _openai_stub = types.ModuleType("openai")
+    _openai_stub.OpenAI = _MagicMock(name="OpenAI")  # type: ignore[attr-defined]
+    _openai_stub.AsyncOpenAI = _MagicMock(name="AsyncOpenAI")  # type: ignore[attr-defined]
+    sys.modules["openai"] = _openai_stub
+
+# ---------------------------------------------------------------------------
 # Nested event loop compatibility (Spyder / Jupyter)
 #
 # pytest-asyncio uses asyncio.Runner (Python 3.11+) which refuses to run when
