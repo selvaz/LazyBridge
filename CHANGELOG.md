@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`Agent(verify=...)` no longer recurses infinitely.** Found live by the
+  pre-v1 stress notebook: `_run_body`'s verify branch called
+  `verify_with_retry`, which called back into the full `agent.run()` —
+  which re-entered the same verify branch, recursing until
+  `RecursionError` on *any* `Agent(verify=...)` invocation. The suite
+  never caught it because the judge tests drive `verify_with_retry` with
+  mock agents that don't re-enter. `verify_with_retry` now accepts a
+  `run=` override and `Agent._run_body` passes its engine-only runner
+  (`_run_engine`), so each verify attempt re-executes the engine (plus
+  structured-output validation) without re-entering the guard/verify
+  pipeline. Regression tests cover the callable-judge, Agent-judge, and
+  retry-with-feedback paths.
+
 ## [0.10.0] — 2026-07-02 — v1 stabilization bridge
 
 The bridge release before 1.0: every finding from the v1 deep audit of
