@@ -85,7 +85,7 @@ def test_cancelled_run_leaves_terminal_checkpoint():
         await asyncio.sleep(0.1)  # step "a" done, step "b" sleeping
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
 
     asyncio.run(_go())
     snap = store.read("k1")
@@ -106,7 +106,7 @@ def test_cancelled_key_is_claimable_by_a_fresh_run():
         await asyncio.sleep(0.1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
 
     asyncio.run(_cancel_run())
     assert store.read("k2")["status"] == "cancelled"
@@ -135,7 +135,7 @@ def test_cancelled_key_resumes_from_next_step():
         await asyncio.sleep(0.1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
 
     asyncio.run(_cancel_run())
 
@@ -165,7 +165,7 @@ def test_stream_early_close_leaves_terminal_checkpoint():
         await asyncio.sleep(0.1)  # plan is inside step "b"'s sleep
         pending.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await pending
+            await asyncio.wait_for(pending, timeout=5)
         await agen.aclose()
 
     asyncio.run(_go())
@@ -331,7 +331,7 @@ def test_replan_cancellation_leaves_terminal_checkpoint():
         await asyncio.sleep(0.1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
 
     asyncio.run(_go())
     snap = store.read("rk1")
@@ -380,7 +380,7 @@ def test_flush_after_close_returns_immediately():
 
 
 def test_encrypted_adapter_context_manager():
-    cryptography = pytest.importorskip("cryptography")  # noqa: F841
+    pytest.importorskip("cryptography")
     from cryptography.fernet import Fernet
 
     from lazybridge.store.encryption import EncryptedStoreAdapter
@@ -391,7 +391,7 @@ def test_encrypted_adapter_context_manager():
 
 
 def test_encrypted_adapter_bulk_read_names_offending_key():
-    cryptography = pytest.importorskip("cryptography")  # noqa: F841
+    pytest.importorskip("cryptography")
     from cryptography.fernet import Fernet
 
     from lazybridge.store.encryption import EncryptedStoreAdapter

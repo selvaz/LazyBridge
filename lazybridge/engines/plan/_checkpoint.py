@@ -253,6 +253,9 @@ class CheckpointMixin:
                 history_payload=history_payload,
             )
         except Exception:
+            # Deliberately swallowed: the non-local exit that triggered this
+            # terminal write must propagate unmasked, and a CAS loss just
+            # means another run legitimately owns the key now.
             pass
 
     def _load_checkpoint(self, effective_key: str | None) -> dict[str, Any] | None:

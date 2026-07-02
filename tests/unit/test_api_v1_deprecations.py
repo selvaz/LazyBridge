@@ -16,11 +16,10 @@ import lazybridge
 
 
 def test_replan_task_is_the_canonical_name():
-    from lazybridge import ReplanTask
     from lazybridge.engines.replan import ReplanTask as SubmoduleReplanTask
     from lazybridge.engines.replan import Task as SubmoduleTask
 
-    assert ReplanTask is SubmoduleReplanTask
+    assert lazybridge.ReplanTask is SubmoduleReplanTask
     # The submodule alias stays a plain (non-warning) alias until 1.0.
     assert SubmoduleTask is SubmoduleReplanTask
 

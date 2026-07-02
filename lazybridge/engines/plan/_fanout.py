@@ -31,7 +31,10 @@ class FanoutMixin:
             session: Any,
             store: Any | None = None,
             plan_state: Any | None = None,
-        ) -> Envelope[Any]: ...
+        ) -> Envelope[Any]:
+            # Typing-only stub (TYPE_CHECKING block, never executed):
+            # the real method comes from the host class (Plan).
+            raise NotImplementedError
 
     def run_many(
         self,

@@ -67,9 +67,9 @@ for _mod_name in _google_stubs:
 # stub HERE, before any lazybridge import, so ``_openai`` binds to it
 # consistently for the whole suite.  A real installed SDK wins.
 # ---------------------------------------------------------------------------
-try:
-    import openai as _openai_real  # noqa: F401
-except ImportError:
+import importlib.util as _importlib_util
+
+if _importlib_util.find_spec("openai") is None:
     from unittest.mock import MagicMock as _MagicMock
 
     _openai_stub = types.ModuleType("openai")

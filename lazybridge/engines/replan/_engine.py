@@ -341,6 +341,9 @@ class ReplanEngine:
                 final_answer=final_answer,
             )
         except Exception:
+            # Deliberately swallowed: the non-local exit that triggered this
+            # terminal write must propagate unmasked, and a CAS loss just
+            # means another run legitimately owns the key now.
             pass
 
     # ------------------------------------------------------------------
