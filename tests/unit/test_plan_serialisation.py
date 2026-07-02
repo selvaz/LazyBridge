@@ -20,7 +20,7 @@ def _tool(name: str):
 def test_to_dict_emits_version_and_steps() -> None:
     plan = Plan(Step("a"))
     d = plan.to_dict()
-    assert d["version"] == 1
+    assert d["version"] == 2
     assert isinstance(d["steps"], list)
     assert d["max_iterations"] == 100  # default
 

@@ -9,6 +9,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Cancelled Plan/Replan runs no longer poison the checkpoint key.**
+  A run unwound by cancellation (e.g. a consumer breaking out of
+  `plan.stream()` early), by `conclude()`, or by an unexpected exception
+  escaped past the per-step checkpointing and left the key stuck in
+  `claimed`/`running` under a dead `run_uid` — every subsequent
+  `on_concurrent="fail"` run raised `ConcurrentPlanRunError` until the key
+  was manually cleared. Both engines now write a best-effort terminal
+  checkpoint on non-local exits (`cancelled` on cancellation, `done` on
+  conclude — with the conclude answer cached for Replan — and `failed` on
+  unexpected exceptions), and `_claim_checkpoint` treats `cancelled` as
+  claimable by fresh runs and adoptable by `resume=True` (which continues
+  from the recorded `next_step` / round).
+- **Plan serialization carries `Step.output` / `Step.input` (to_dict v2).**
+  `to_dict()` silently dropped both, so `from_dict()` rebuilt every step
+  with `output=str`: structured steps degraded to raw strings and any
+  `routes_by=` plan failed recompilation (`PlanCompileError`) after a
+  round-trip. Types are now recorded by name and rebound via the
+  `from_dict` registry (`"type:<Name>"` or bare `"<Name>"` key) with a
+  loud `KeyError` when missing. v1 payloads still load (missing keys
+  default to `str` / `Any`).
+- **Routing into a parallel band is now a compile error.** `routes=` /
+  `routes_by=` targeting a `parallel=True` step compiled cleanly but the
+  band dispatcher advances linearly and never consults the
+  `after_branches` rejoin state — the jump was silently lost and a stale
+  entry leaked. `PlanCompiler` now rejects it with a fix hint (wrap the
+  parallel work in an `Agent(engine=Plan(...))` branch step).
+- **Per-step checkpoint cost no longer quadratic.** `_save_checkpoint`
+  re-serialized the entire growing history (`model_dump` of every
+  envelope) on every step. The serialized history is now maintained
+  incrementally alongside the in-memory one.
+- **`EventLog.flush()` after `close()` no longer stalls.** Pushing a
+  flush sentinel to a queue whose writer thread has exited blocked for
+  the full timeout; `flush()` is now a no-op once closed or when the
+  writer thread is not alive.
+- **`EncryptedStoreAdapter` context manager + keyed bulk-read errors.**
+  The adapter now implements `__enter__`/`__exit__` (parity with the base
+  `Store`), and `read_all()` / `items()` name the offending key when they
+  hit a plaintext row in a mixed store.
 - **Shared-engine event misattribution.** An engine is a shareable object,
   but `Agent.__init__` stamped `engine._agent_name = self.name` — so with
   two Agents on one engine, *every* event and usage row was attributed to
@@ -51,6 +89,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   (unchanged — we never steal a session), but the second construction now
   emits a `UserWarning` explaining where the child's events flow and how
   to choose explicitly.
+
+### Documentation
+- **ReplanEngine checkpoint granularity made explicit.** Checkpoints are
+  per-ROUND, not per-task: a crash mid-round re-executes the entire round
+  on `resume=True` (planner re-asked, every task re-dispatched), so tasks
+  with external side effects must be idempotent. This was always the
+  behaviour; it is now documented on the engine.
 
 ### Changed
 - **BREAKING — exhausted output validation is now an error, not a silent

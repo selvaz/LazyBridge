@@ -194,8 +194,20 @@ class EncryptedStoreAdapter:
             agent_id=entry.agent_id,
         )
 
+    def _decrypt_at(self, key: str, stored: Any) -> Any:
+        """Like :meth:`_decrypt`, but names the offending key on failure.
+
+        Bulk reads (``read_all`` / ``items`` / ``to_text``) raise on the
+        first plaintext row; without the key in the message the user
+        can't tell which row to migrate.
+        """
+        try:
+            return self._decrypt(stored)
+        except ValueError as exc:
+            raise ValueError(f"{exc}  (offending key: {key!r})") from None
+
     def read_all(self) -> dict[str, Any]:
-        return {k: self._decrypt(v) for k, v in self._inner.read_all().items()}
+        return {k: self._decrypt_at(k, v) for k, v in self._inner.read_all().items()}
 
     def delete(self, key: str) -> None:
         self._inner.delete(key)
@@ -209,7 +221,7 @@ class EncryptedStoreAdapter:
     def items(self, *, prefix: str | None = None) -> list[tuple[str, Any]]:
         """Return ``(key, decrypted-value)`` pairs, optionally restricted to
         keys starting with ``prefix``."""
-        return [(k, self._decrypt(v)) for k, v in self._inner.items(prefix=prefix)]
+        return [(k, self._decrypt_at(k, v)) for k, v in self._inner.items(prefix=prefix)]
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
@@ -274,6 +286,14 @@ class EncryptedStoreAdapter:
 
     def close(self) -> None:
         self._inner.close()
+
+    # Context-manager protocol — parity with the base ``Store`` so
+    # ``with EncryptedStoreAdapter(...) as s:`` works interchangeably.
+    def __enter__(self) -> EncryptedStoreAdapter:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     # Expose the inner Store for callers that need to drop down (e.g.
     # backup / migration tooling).  Read-only by convention — mutating

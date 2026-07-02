@@ -604,10 +604,14 @@ def test_after_branches_serialises_and_deserialises() -> None:
             "urgent": urgent,
             "normal": normal,
             "archive": archive,
+            "type:Triage": Triage,
         },
     )
     triage_step = next(s for s in plan2.steps if s.name == "triage")
     assert triage_step.after_branches == "archive"
+    # v2 serialisation carries output= through the round-trip (it used to
+    # silently degrade to str, breaking routes_by recompilation).
+    assert triage_step.output is Triage
 
 
 # ---------------------------------------------------------------------------
