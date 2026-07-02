@@ -13,6 +13,15 @@ from typing import Any
 
 @dataclass
 class StoreEntry:
+    """One row as returned by :meth:`Store.read_entry`.
+
+    ``written_at`` (epoch seconds) and ``agent_id`` are *informational
+    metadata* for consumers — the Store itself never consults them.
+    There is no TTL/expiry mechanism: nothing is evicted based on
+    ``written_at``.  ``agent_id`` carries provenance stamps such as
+    Plan's ``plan-run:<run_uid>`` (see ``Plan.store_write_is_current``).
+    """
+
     key: str
     value: Any
     written_at: float = field(default_factory=time.time)

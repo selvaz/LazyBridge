@@ -20,12 +20,12 @@ class-level tables (`_PROVIDER_ALIASES`, `_PROVIDER_RULES`,
 `_PROVIDER_DEFAULT`) and are documented under the engine class itself
 — see [Engines → LLMEngine](engines.md#lazybridge.LLMEngine) for the
 full method list.  For read-only introspection from caller code, use
-the public **`PROVIDER_ALIASES`** snapshot or
 **`LLMEngine.provider_aliases()`** (returns a fresh `dict[str, str]`
 copy of the routing aliases — safe to mutate without affecting the
-framework).
-
-::: lazybridge.PROVIDER_ALIASES
+framework).  The old top-level `PROVIDER_ALIASES` constant was an
+import-time snapshot that silently diverged from the live registry
+after `register_provider_alias`; it is deprecated (0.10) and will be
+removed in 1.0.
 
 Registry mutation entry points (quick reference):
 

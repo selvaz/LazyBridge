@@ -19,9 +19,12 @@ The guard fires on check_input only (output is left untouched).
 
 from __future__ import annotations
 
+import logging
 import re
 
 from lazybridge.guardrails import Guard, GuardAction
+
+_logger = logging.getLogger(__name__)
 
 
 def _normalise(text: str) -> str:
@@ -125,7 +128,10 @@ class DeduplicateGuard(Guard):
         Blocks shorter than this are never deduplicated (avoids removing
         short repeated phrases like "Yes" or "Certo").  Default 40.
     verbose:
-        If True, prints a one-line summary when blocks are removed.
+        If True, logs a one-line summary (INFO on this module's logger)
+        when blocks are removed.  Default False — library code must not
+        write to stdout unsolicited.  The summary is always available at
+        DEBUG level regardless of this flag.
     """
 
     def __init__(
@@ -133,7 +139,7 @@ class DeduplicateGuard(Guard):
         *,
         similarity_chars: int = 60,
         min_block_chars: int = 40,
-        verbose: bool = True,
+        verbose: bool = False,
     ) -> None:
         self._sim_chars = similarity_chars
         self._min_chars = min_block_chars
@@ -153,10 +159,13 @@ class DeduplicateGuard(Guard):
             return GuardAction.allow()
 
         reduction_pct = round((1 - len(cleaned) / max(len(text), 1)) * 100)
-        if self._verbose:
-            print(
-                f"  [DeduplicateGuard] removed {n_removed} duplicate block(s) "
-                f"— {len(text):,} → {len(cleaned):,} chars (-{reduction_pct}%)"
-            )
+        _logger.log(
+            logging.INFO if self._verbose else logging.DEBUG,
+            "DeduplicateGuard removed %d duplicate block(s) — %s → %s chars (-%d%%)",
+            n_removed,
+            f"{len(text):,}",
+            f"{len(cleaned):,}",
+            reduction_pct,
+        )
 
         return GuardAction.modify(cleaned)

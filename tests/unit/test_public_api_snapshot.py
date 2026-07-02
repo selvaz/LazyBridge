@@ -62,7 +62,6 @@ _EXPECTED: frozenset[str] = frozenset(
         "LLMGuard",
         # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
         "LLMEngine",
-        "PROVIDER_ALIASES",
         "Plan",
         "Step",
         "ConcurrentPlanRunError",
@@ -71,7 +70,7 @@ _EXPECTED: frozenset[str] = frozenset(
         "PlanRuntimeError",
         "ReplanEngine",
         "PlanRound",
-        "Task",
+        "ReplanTask",
         "ToolTimeoutError",
         "StreamStallError",
         # Graph
@@ -91,8 +90,6 @@ _EXPECTED: frozenset[str] = frozenset(
         # Multimodal content blocks
         "ImageContent",
         "AudioContent",
-        # Cache configuration (kept — internal repr for LLMEngine cache)
-        "CacheConfig",
         # Testing
         "MockAgent",
     }

@@ -612,7 +612,13 @@ class EventLog:
         queue's ``task_done`` accounting.  Returns early if ``timeout``
         elapses; the queue may still have items in that case.
         """
-        if not self._batched or self._writer_queue is None:
+        if not self._batched or self._writer_queue is None or self._closed:
+            # After close() the writer thread has exited — pushing a
+            # sentinel would just stall here for the full timeout waiting
+            # for an ack that never comes.
+            return
+        if self._writer_thread is not None and not self._writer_thread.is_alive():
+            # Writer died (or already joined) — same no-ack stall as above.
             return
         try:
             self._writer_queue.put_nowait(_FLUSH_SENTINEL)

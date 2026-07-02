@@ -6,9 +6,215 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.10.0] — 2026-07-02 — v1 stabilization bridge
+
+The bridge release before 1.0: every finding from the v1 deep audit of
+the core is fixed here, the plan runtime is decomposed into focused
+modules, and the public API gets its final pre-1.0 cleanup.  Package
+stability moves **alpha → beta** (`Development Status :: 4`).  The plan:
+this release settles across the dependent Lazy* projects, then 1.0.0 is
+tagged from it without further changes.
+
+**Migration summary (breaking / deprecated):**
+
+1. `Agent(output=Model)` that exhausts `max_output_retries` now returns
+   `ok=False` with `error.type == "OutputValidationError"` instead of
+   `ok=True` with the raw string. Check the error type; the raw payload
+   is preserved on the envelope.
+2. `Agent.stream(timeout=)` is now a total-stream deadline (was
+   per-chunk); the stream also enforces the output guard on completion
+   and fails over to `fallback=` when the engine dies before the first
+   token.
+3. `lazybridge.Task` → `lazybridge.ReplanTask` (deprecated alias warns,
+   removed in 1.0). `CacheConfig` → import from `lazybridge.core.types`.
+   `PROVIDER_ALIASES` → call `LLMEngine.provider_aliases()`.
+4. Routing (`routes=` / `routes_by=`) into a `parallel=True` step is now
+   a `PlanCompileError` (it silently lost the rejoin jump at runtime).
+5. `Plan.to_dict()` is now v2 (records `Step.output` / `Step.input` by
+   name); pass the types in the `from_dict` registry
+   (`{"type:<Name>": <class>}`). v1 payloads still load.
+
+### Added
+- **No-extras test environment is green.** The suite now passes with no
+  provider SDK installed: `tests/conftest.py` installs a MagicMock
+  `openai` stub *before* any lazybridge import (the per-file
+  `sys.modules` stubs came too late once the provider module was
+  imported, leaving `_openai = None` bound forever — 15 failures), and
+  `test_store_encryption.py`'s skip guard no longer crashes collection
+  on hosts where `cryptography`'s Rust extension panics (the pyo3
+  `PanicException` is matched by name; the old import-then-catch bound
+  `()` into the except clause and raised `TypeError`).
+
+### Fixed
+- **Memory summaries now accumulate across compressions.** Repeated
+  compression overwrote the previous summary — the summarizer never saw
+  it, so the second compression permanently discarded everything the
+  first had captured (the oldest context), silently. Both the LLM path
+  and the keyword-extraction fallback now fold the prior summary into the
+  new one.
+- **Unannotated tool params survive strict mode.** In signature mode an
+  unannotated parameter produced an empty `{}` subschema (bypassing
+  `_annotation_to_schema`'s documented `{"type": "string"}` fallback);
+  strict-mode validators on OpenAI/Gemini reject or drop `{}`, making the
+  parameter vanish from the tool signature.
+- **`$defs` name collisions fail loud on flatten.** `_flatten_refs`
+  merged same-named definitions last-write-wins, silently inlining the
+  wrong shape when two distinct models shared a class name. Conflicting
+  shapes now raise `ValueError` with a rename hint (identical duplicates
+  still merge).
+- **LLMGuard async timeout enforced once.** `_ajudge`'s sync-callable
+  fallback routed through `_judge`, which enforces `timeout` again on its
+  own daemon thread — double enforcement, plus a leaked daemon thread per
+  call whenever the outer deadline fired first. The async path now calls
+  a single untimed judging round-trip under the outer `asyncio.wait_for`.
+- **`DeduplicateGuard` is silent by default.** `verbose` defaulted to
+  `True` and wrote to *stdout* via `print()` from library code; it now
+  defaults to `False` and routes through `logging` (INFO when verbose,
+  DEBUG otherwise). The module also gains behavioral test coverage
+  (block splitting, near-dup prefixes, short-block preservation).
+- **`__version__` source-tree fallback re-aligned** with
+  `pyproject.toml` (was stale at 0.9.0), with a test guarding the sync.
+- **Cancelled Plan/Replan runs no longer poison the checkpoint key.**
+  A run unwound by cancellation (e.g. a consumer breaking out of
+  `plan.stream()` early), by `conclude()`, or by an unexpected exception
+  escaped past the per-step checkpointing and left the key stuck in
+  `claimed`/`running` under a dead `run_uid` — every subsequent
+  `on_concurrent="fail"` run raised `ConcurrentPlanRunError` until the key
+  was manually cleared. Both engines now write a best-effort terminal
+  checkpoint on non-local exits (`cancelled` on cancellation, `done` on
+  conclude — with the conclude answer cached for Replan — and `failed` on
+  unexpected exceptions), and `_claim_checkpoint` treats `cancelled` as
+  claimable by fresh runs and adoptable by `resume=True` (which continues
+  from the recorded `next_step` / round).
+- **Plan serialization carries `Step.output` / `Step.input` (to_dict v2).**
+  `to_dict()` silently dropped both, so `from_dict()` rebuilt every step
+  with `output=str`: structured steps degraded to raw strings and any
+  `routes_by=` plan failed recompilation (`PlanCompileError`) after a
+  round-trip. Types are now recorded by name and rebound via the
+  `from_dict` registry (`"type:<Name>"` or bare `"<Name>"` key) with a
+  loud `KeyError` when missing. v1 payloads still load (missing keys
+  default to `str` / `Any`).
+- **Routing into a parallel band is now a compile error.** `routes=` /
+  `routes_by=` targeting a `parallel=True` step compiled cleanly but the
+  band dispatcher advances linearly and never consults the
+  `after_branches` rejoin state — the jump was silently lost and a stale
+  entry leaked. `PlanCompiler` now rejects it with a fix hint (wrap the
+  parallel work in an `Agent(engine=Plan(...))` branch step).
+- **Per-step checkpoint cost no longer quadratic.** `_save_checkpoint`
+  re-serialized the entire growing history (`model_dump` of every
+  envelope) on every step. The serialized history is now maintained
+  incrementally alongside the in-memory one.
+- **`EventLog.flush()` after `close()` no longer stalls.** Pushing a
+  flush sentinel to a queue whose writer thread has exited blocked for
+  the full timeout; `flush()` is now a no-op once closed or when the
+  writer thread is not alive.
+- **`EncryptedStoreAdapter` context manager + keyed bulk-read errors.**
+  The adapter now implements `__enter__`/`__exit__` (parity with the base
+  `Store`), and `read_all()` / `items()` name the offending key when they
+  hit a plaintext row in a mixed store.
+- **Shared-engine event misattribution.** An engine is a shareable object,
+  but `Agent.__init__` stamped `engine._agent_name = self.name` — so with
+  two Agents on one engine, *every* event and usage row was attributed to
+  whichever agent was constructed last, deterministically. The identity is
+  now bound per-invocation via a context variable
+  (`lazybridge.engines.base.bind_agent_name` / `resolve_agent_name`):
+  `Agent` binds its name around each `engine.run()` / `engine.stream()`
+  call and all engines (LLM, Plan, Replan, Supervisor, Human) resolve the
+  context-bound name first. The `_agent_name` attribute is kept as a
+  fallback for code that drives an engine directly.
+- **Structured output on the streaming path.** `LLMEngine._stream_turn`
+  rebuilt the `CompletionResponse` from stream chunks without ever reading
+  `chunk.parsed` / `chunk.validation_error` / `chunk.validated`, so any
+  streamed run with `output=Model` silently degraded to a raw string (and
+  burned the output-validation retries). The reconstructed response now
+  carries all three fields through.
+- **`Agent.stream()` pipeline parity with `run()`.** Streaming applied only
+  the *input* guard. Now: the **output guard** runs on the accumulated text
+  when the stream completes (a block raises `ValueError` and skips the
+  Store write — tokens already delivered cannot be retracted, but buffering
+  consumers can discard); the **fallback agent** takes over when the engine
+  fails before the first token (after tokens, the error propagates); and
+  `timeout=` is now a **total-stream deadline**, the same meaning it has in
+  `run()` (it was per-chunk, i.e. effectively unbounded — stall detection
+  between chunks remains `LLMEngine(stream_idle_timeout=)`). `verify=` and
+  `output=` validation remain run()-only and are documented as such.
+- **Executor retry classification.** The last-resort string scan in
+  `_is_retryable` could retry *permanent* client errors whose message
+  merely contained "timeout" / "connection" (e.g. a 400
+  `invalid 'timeout' parameter`). A structured 4xx status (other than
+  408/429) now short-circuits to non-retryable before the string scan.
+- **Memory records the answer actually returned.** When a
+  structured-output correction retry produced the accepted answer, memory
+  kept the first (rejected) draft — history diverged from the returned
+  Envelope. `Agent._validate_and_retry` now amends the last turn via the
+  new `Memory.amend_last(assistant)`.
+- **Cross-session sub-agent pinning is now visible.** A sub-agent that
+  inherited its session from one orchestrator and is then passed to a
+  second orchestrator with a *different* session stays pinned to the first
+  (unchanged — we never steal a session), but the second construction now
+  emits a `UserWarning` explaining where the child's events flow and how
+  to choose explicitly.
+
+### Refactoring (no behaviour change)
+- **`_plan.py` split into focused submodules.** The 1,700-line runtime
+  monolith is now `_plan.py` (scheduler/orchestration, ~1,180 lines) plus
+  `_checkpoint.py` (the CAS checkpoint state machine, as
+  `CheckpointMixin`), `_resolve.py` (sentinel resolution + band
+  aggregation, `ResolveMixin`), and `_fanout.py` (`run_many` /
+  `arun_many`, `FanoutMixin`). `Plan` inherits all three, so every method
+  keeps its original name and signature. The 170-line inline
+  parallel-band block in `_run_impl` is now the `_run_parallel_band`
+  method with an explicit state contract.
+- **One provider registry.** The provider-name → class map lived in two
+  hand-maintained copies (`Executor._resolve_provider` and
+  `LLMEngine._provider_class`) that had already drifted on the `litellm`
+  special case. Both now resolve through
+  `lazybridge.core.providers._registry.provider_class` (lazy per-provider
+  import preserved).
+- **`Executor` retry loops deduplicated** into a shared
+  `_next_retry_delay` (classification + backoff + warning), keeping sync
+  and async semantics in lock-step.
+- **`_parse_data_uri` shared** by `ImageContent.from_data_uri` and
+  `AudioContent.from_data_uri` (byte-identical copies collapsed).
+- **`_safe_register_agent` / `_safe_register_tool_edge`** collapsed onto
+  a single warn-on-failure `_safe_graph_call` helper.
+
+### Documentation
+- **ReplanEngine checkpoint granularity made explicit.** Checkpoints are
+  per-ROUND, not per-task: a crash mid-round re-executes the entire round
+  on `resume=True` (planner re-asked, every task re-dispatched), so tasks
+  with external side effects must be idempotent. This was always the
+  behaviour; it is now documented on the engine.
 
 ### Changed
+- **v1 API pass — three top-level names deprecated (removal in 1.0).**
+  - `Task` → renamed **`ReplanTask`** (the bare name was too generic for
+    a top-level export and collided with user code).
+    `lazybridge.engines.replan.Task` remains a plain alias;
+    `lazybridge.Task` still resolves but emits a `DeprecationWarning`.
+  - `CacheConfig` → import from **`lazybridge.core.types`** (it is
+    engine configuration, not primary API). Top-level access warns.
+  - `PROVIDER_ALIASES` → call **`LLMEngine.provider_aliases()`**. The
+    constant was an import-time snapshot that silently diverged from the
+    live registry after `register_provider_alias`. Top-level access
+    warns and now returns a *fresh* snapshot.
+  All three are out of `__all__` (star-imports no longer pick them up);
+  the public-API snapshot test, SKILL.md, and reference docs are updated.
+- **`StoreEntry.written_at` documented as informational metadata.** The
+  Store has no TTL/expiry mechanism and never consults `written_at`;
+  the docstring now says so explicitly (`agent_id` carries provenance
+  stamps such as Plan's `plan-run:<run_uid>`).
+- **BREAKING — exhausted output validation is now an error, not a silent
+  success.** `Agent(output=Model)` used to return `ok=True` with the raw,
+  unvalidated *string* payload after `max_output_retries` failed correction
+  attempts — callers could not distinguish "validated" from "gave up", and
+  `result.payload.field` blew up downstream. The final envelope now carries
+  `error.type == "OutputValidationError"` (`ok=False`, `retryable=False`)
+  with the raw payload preserved on the envelope for inspection.
+  **Migration:** code that relied on receiving the unvalidated string on
+  `ok=True` should check for `error.type == "OutputValidationError"` and
+  read `result.payload` (still the raw model output) from the error
+  envelope.
 - **Deduplicated the encrypted-Store CAS equality check.**
   `EncryptedStoreAdapter.compare_and_swap` compared the decrypted
   plaintext against `expected` through a private `_plain_eq` that was a

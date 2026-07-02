@@ -8,6 +8,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal
 
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -589,7 +590,7 @@ class HumanEngine:
     ) -> Envelope:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
-        agent_name = getattr(self, "_agent_name", "human")
+        agent_name = resolve_agent_name(self, "human")
 
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)

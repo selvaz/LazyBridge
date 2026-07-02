@@ -1,11 +1,13 @@
-"""ReplanEngine dataclasses: Task and PlanRound.
+"""ReplanEngine dataclasses: ReplanTask and PlanRound.
 
 These are the only types the user needs to interact with ReplanEngine:
 
 - :class:`PlanRound` — structured output schema for the planner agent.
   Pass ``output=PlanRound`` when building the planner.
-- :class:`Task` — one tool call within a round.  The planner emits a list
-  of these; ReplanEngine dispatches them, parallelising where flagged.
+- :class:`ReplanTask` — one tool call within a round.  The planner emits a
+  list of these; ReplanEngine dispatches them, parallelising where flagged.
+  (Renamed from ``Task`` for v1 — the bare name was too generic for a
+  top-level export; ``Task`` remains as a deprecated alias until 1.0.)
 
 Example::
 
@@ -26,7 +28,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class Task(BaseModel):
+class ReplanTask(BaseModel):
     """A single tool call planned for this round.
 
     ``tool`` must match a key in the parent Agent's tool_map — an agent, a
@@ -36,9 +38,9 @@ class Task(BaseModel):
 
     Examples::
 
-        Task(tool="analyst",  kwargs={"task": "analyse the auth module"})
-        Task(tool="route",    kwargs={"agent_name": "alice", "task": "write tests"})
-        Task(tool="add",      kwargs={"a": 3, "b": 7})
+        ReplanTask(tool="analyst",  kwargs={"task": "analyse the auth module"})
+        ReplanTask(tool="route",    kwargs={"agent_name": "alice", "task": "write tests"})
+        ReplanTask(tool="add",      kwargs={"a": 3, "b": 7})
     """
 
     tool: str = Field(..., description="Name of the tool in the tool_map.")
@@ -71,7 +73,7 @@ class PlanRound(BaseModel):
         ...,
         description="Why this set of tasks was chosen for this round.",
     )
-    tasks: list[Task] = Field(
+    tasks: list[ReplanTask] = Field(
         default_factory=list,
         description="Tasks to execute this round.",
     )
@@ -83,3 +85,10 @@ class PlanRound(BaseModel):
         None,
         description="The user-facing answer. Required when done=True.",
     )
+
+
+#: Deprecated alias — renamed to :class:`ReplanTask` for v1 (the bare
+#: ``Task`` was too generic for a top-level export).  Kept through the
+#: 0.10 series; scheduled for removal in 1.0.  Importing
+#: ``lazybridge.Task`` emits a ``DeprecationWarning``.
+Task = ReplanTask

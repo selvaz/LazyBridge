@@ -38,38 +38,12 @@ def _resolve_provider(
     if isinstance(provider, BaseProvider):
         return provider
 
-    from lazybridge.core.providers.anthropic import AnthropicProvider
-    from lazybridge.core.providers.deepseek import DeepSeekProvider
-    from lazybridge.core.providers.google import GoogleProvider
-    from lazybridge.core.providers.lmstudio import LMStudioProvider
-    from lazybridge.core.providers.openai import OpenAIProvider
+    from lazybridge.core.providers._registry import known_provider_keys, provider_class
 
-    registry: dict[str, type[BaseProvider]] = {
-        "anthropic": AnthropicProvider,
-        "claude": AnthropicProvider,
-        "openai": OpenAIProvider,
-        "gpt": OpenAIProvider,
-        "google": GoogleProvider,
-        "gemini": GoogleProvider,
-        "deepseek": DeepSeekProvider,
-        "lmstudio": LMStudioProvider,
-        "lm-studio": LMStudioProvider,
-        "lm_studio": LMStudioProvider,
-        "local": LMStudioProvider,
-    }
-    key = provider.lower().strip()
-
-    # LiteLLM is optional; import lazily so the provider module isn't a
-    # hard dependency for every Agent() construction. Only paid with
-    # ``pip install lazybridge[litellm]``.
-    if key == "litellm":
-        from lazybridge.core.providers.litellm import LiteLLMProvider
-
-        return LiteLLMProvider(api_key=api_key, model=model, **kwargs)
-
-    if key not in registry:
-        raise ValueError(f"Unknown provider '{provider}'. Supported: {', '.join(sorted(set(registry.keys())))}.")
-    return registry[key](api_key=api_key, model=model, **kwargs)
+    cls = provider_class(provider)
+    if cls is None:
+        raise ValueError(f"Unknown provider '{provider}'. Supported: {', '.join(known_provider_keys())}.")
+    return cls(api_key=api_key, model=model, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -108,11 +82,18 @@ _RETRYABLE_EXC_CLASSES = frozenset(
 
 def _is_retryable(exc: Exception) -> bool:
     # 1. Structured: HTTP-status-bearing exceptions.  Cheapest and most
-    #    reliable signal across SDKs.
+    #    reliable signal across SDKs.  A definite client error (4xx other
+    #    than 408/429) is permanent — short-circuit False so the string
+    #    scan below can't resurrect it just because the *message* happens
+    #    to contain a word like "timeout" or "connection" (e.g. a 400
+    #    ``invalid 'timeout' parameter``).
     for attr in ("status_code", "status", "http_status", "code"):
         code = getattr(exc, attr, None)
-        if isinstance(code, int) and (code == 429 or 500 <= code < 600):
-            return True
+        if isinstance(code, int):
+            if code == 429 or code == 408 or 500 <= code < 600:
+                return True
+            if 400 <= code < 500:
+                return False
     # 2. Structured: known transient class names (provider-SDK agnostic).
     #    Walk the MRO so subclasses (``ConnectionResetError`` →
     #    ``ConnectionError``) match without per-class enumeration.
@@ -198,6 +179,29 @@ class Executor:
             return False
         return _is_retryable(exc)
 
+    def _next_retry_delay(self, attempt: int, exc: Exception) -> float | None:
+        """Backoff delay for a retryable failure, or ``None`` to re-raise.
+
+        Shared by the sync and async retry loops so classification,
+        exponential backoff (base_delay * 2^attempt with ±10% jitter),
+        and the retry warning can never drift between them.
+        """
+        if attempt >= self._max_retries or not self._should_retry(exc):
+            return None
+        delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
+        warnings.warn(
+            _RETRY_WARN.format(
+                attempt=attempt + 1,
+                total=self._max_retries + 1,
+                exc_type=type(exc).__name__,
+                exc=exc,
+                delay=delay,
+            ),
+            UserWarning,
+            stacklevel=3,
+        )
+        return delay
+
     # ------------------------------------------------------------------
     # Sync
     # ------------------------------------------------------------------
@@ -208,21 +212,9 @@ class Executor:
             try:
                 return self._provider.complete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not self._should_retry(exc):
+                delay = self._next_retry_delay(attempt, exc)
+                if delay is None:
                     raise
-                # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
-                delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
-                warnings.warn(
-                    _RETRY_WARN.format(
-                        attempt=attempt + 1,
-                        total=self._max_retries + 1,
-                        exc_type=type(exc).__name__,
-                        exc=exc,
-                        delay=delay,
-                    ),
-                    UserWarning,
-                    stacklevel=2,
-                )
                 time.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover
 
@@ -240,21 +232,9 @@ class Executor:
             try:
                 return await self._provider.acomplete(request)
             except Exception as exc:
-                if attempt >= self._max_retries or not self._should_retry(exc):
+                delay = self._next_retry_delay(attempt, exc)
+                if delay is None:
                     raise
-                # exponential backoff: base_delay * 2^attempt, with ±10% random jitter
-                delay = self._retry_delay * (2**attempt) * (0.9 + random.random() * 0.2)
-                warnings.warn(
-                    _RETRY_WARN.format(
-                        attempt=attempt + 1,
-                        total=self._max_retries + 1,
-                        exc_type=type(exc).__name__,
-                        exc=exc,
-                        delay=delay,
-                    ),
-                    UserWarning,
-                    stacklevel=2,
-                )
                 await asyncio.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover
 

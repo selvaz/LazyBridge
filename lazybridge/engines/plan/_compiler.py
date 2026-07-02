@@ -405,6 +405,16 @@ class PlanCompiler:
                             f"references unknown step.  Known steps: "
                             f"{sorted(pos)}."
                         )
+                    if is_parallel.get(target_name, False):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes={{{target_name!r}: ...}} targets a "
+                            f"parallel=True step.  Routing into a parallel band is not "
+                            f"supported: the band dispatcher advances linearly and ignores "
+                            f"routing / after_branches rejoin state, so the jump would be "
+                            f"silently lost.  Route to a non-parallel step instead — for "
+                            f"parallel branch work, use an Agent whose engine is a Plan "
+                            f"containing the parallel steps."
+                        )
                     if not callable(predicate):
                         raise PlanCompileError(
                             f"Step {step.name!r}: routes[{target_name!r}] is "
@@ -452,6 +462,17 @@ class PlanCompiler:
                             f"includes Literal value {value!r} which is not "
                             f"a known step name.  Known steps: "
                             f"{sorted(pos)}."
+                        )
+                    if is_parallel.get(value, False):
+                        raise PlanCompileError(
+                            f"Step {step.name!r}: routes_by={step.routes_by!r} includes "
+                            f"Literal value {value!r} which names a parallel=True step.  "
+                            f"Routing into a parallel band is not supported: the band "
+                            f"dispatcher advances linearly and ignores routing / "
+                            f"after_branches rejoin state, so the jump would be silently "
+                            f"lost.  Route to a non-parallel step instead — for parallel "
+                            f"branch work, use an Agent whose engine is a Plan containing "
+                            f"the parallel steps."
                         )
 
             # after_branches= — exclusive-branch rejoin point.

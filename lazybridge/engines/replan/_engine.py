@@ -29,6 +29,15 @@ Pass ``store=`` and ``checkpoint_key=`` to persist round state after every
 round.  Pass ``resume=True`` to continue from the last checkpoint on the
 next call.  Semantics match :class:`Plan`: the first call claims the key via
 CAS; a second concurrent call raises :class:`ConcurrentPlanRunError`.
+
+**Granularity caveat — checkpoints are per-ROUND, not per-task.**  Unlike
+:class:`Plan` (which checkpoints after every step), the checkpoint is
+written only *between* rounds.  A crash after some of a round's tasks
+have executed but before the round's save re-executes the **entire
+round** on ``resume=True`` — the planner is re-asked and every task is
+re-dispatched.  Tasks with external side effects (payments, sends,
+non-idempotent writes) must therefore be idempotent, or must guard
+themselves (e.g. an idempotency key derived from the round input).
 """
 
 from __future__ import annotations
@@ -43,9 +52,10 @@ from lazybridge.core.streaming import (
     stream_envelope_run,
     suppress_ambient_token_sink,
 )
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.plan._serialisation import _first_arg_kwargs
 from lazybridge.engines.plan._types import ConcurrentPlanRunError
-from lazybridge.engines.replan._types import PlanRound, Task
+from lazybridge.engines.replan._types import PlanRound, ReplanTask
 from lazybridge.envelope import Envelope
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -77,7 +87,7 @@ def _format_history(history: list[dict[str, Any]]) -> str:
 
 
 def _reinterleave(
-    tasks: list[Task],
+    tasks: list[ReplanTask],
     par_results: list[Any],
     seq_results: list[Any],
 ) -> list[Any]:
@@ -115,7 +125,7 @@ class ReplanEngine:
     not need a static system prompt that lists worker names.
 
     See :class:`lazybridge.engines.replan.PlanRound` and
-    :class:`lazybridge.engines.replan.Task` for the planner output schema.
+    :class:`lazybridge.engines.replan.ReplanTask` for the planner output schema.
     """
 
     def __init__(
@@ -149,7 +159,7 @@ class ReplanEngine:
         plan_state: Any | None = None,
     ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "replan")
+        agent_name = resolve_agent_name(self, "replan")
         if session:
             session.emit(
                 EventType.AGENT_START,
@@ -243,6 +253,14 @@ class ReplanEngine:
             if not store.compare_and_swap(effective_key, existing, claimed):
                 raise ConcurrentPlanRunError(f"Lost race re-claiming completed key {effective_key!r}.  Retry.")
             return claimed
+        if status == "cancelled" and not self.resume:
+            # Terminal state left by a cancelled run (e.g. a stream()
+            # consumer disconnecting) — no live owner, so a fresh run
+            # claims over it; resume=True adopts it below and continues
+            # from the recorded round.
+            if not store.compare_and_swap(effective_key, existing, claimed):
+                raise ConcurrentPlanRunError(f"Lost race claiming cancelled key {effective_key!r}.  Retry.")
+            return claimed
         if status is None:
             raise ConcurrentPlanRunError(
                 f"Checkpoint key {effective_key!r} holds a value with no 'status' field; "
@@ -294,6 +312,39 @@ class ReplanEngine:
                 f"per concurrent run."
             )
         return new_snap
+
+    def _terminal_checkpoint(
+        self,
+        last_snap: dict[str, Any] | None,
+        effective_key: str | None,
+        run_uid: str,
+        *,
+        round: int,
+        history: list[dict[str, Any]],
+        status: str,
+        final_answer: str | None = None,
+    ) -> None:
+        """Best-effort terminal checkpoint on a non-local exit.
+
+        Failures are swallowed — the exit that triggered us must
+        propagate unmasked, and a CAS loss means another run owns the
+        key now.
+        """
+        try:
+            self._save_checkpoint(
+                last_snap,
+                effective_key,
+                run_uid,
+                round=round,
+                history=history,
+                status=status,
+                final_answer=final_answer,
+            )
+        except Exception:
+            # Deliberately swallowed: the non-local exit that triggered this
+            # terminal write must propagate unmasked, and a CAS loss just
+            # means another run legitimately owns the key now.
+            pass
 
     # ------------------------------------------------------------------
     # Planner input builder
@@ -363,143 +414,25 @@ class ReplanEngine:
                 )
             )
 
-        for round_num in range(round_start, self.max_rounds):
-            # ── Ask the planner ───────────────────────────────────────────
-            planner_input = self._build_planner_input(env.task or "", history, tool_map)
-            # Streaming: the planner emits structured loop-control output
-            # (PlanRound JSON), not user-facing text — keep it out of the
-            # ambient token stream.
-            _sink_suppress = suppress_ambient_token_sink()
-            try:
-                planner_raw = await planner_tool.run(
-                    **{"task": planner_input}
-                    if "task" in planner_tool.definition().parameters.get("properties", {})
-                    else _first_arg_kwargs(planner_tool, planner_input)
-                )
-            except ConcludeSignal:
-                raise
-            except Exception as exc:
-                self._save_checkpoint(
-                    last_snap,
-                    effective_key,
-                    run_uid,
-                    round=round_num,
-                    history=history,
-                    status="failed",
-                )
-                return Envelope.error_envelope(exc)
-            finally:
-                restore_ambient_token_sink(_sink_suppress)
-
-            plan: PlanRound | None = planner_raw.payload if isinstance(planner_raw, Envelope) else planner_raw
-
-            if plan is None:
-                err_info = planner_raw.error if isinstance(planner_raw, Envelope) else None
-                self._save_checkpoint(
-                    last_snap,
-                    effective_key,
-                    run_uid,
-                    round=round_num,
-                    history=history,
-                    status="failed",
-                )
-                if err_info is not None:
-                    return Envelope(
-                        task=env.task,
-                        error=err_info,
-                    )
-                return Envelope.error_envelope(
-                    RuntimeError(
-                        f"ReplanEngine: planner returned no PlanRound payload "
-                        f"at round {round_num}.  "
-                        f"Ensure the planner Agent is built with output=PlanRound."
-                    )
-                )
-
-            if plan.done:
-                # P2: reject missing final_answer before writing a permanent "done" checkpoint.
-                # A None answer cached as "done" would silently short-circuit every future
-                # resume=True call with an empty payload.
-                if plan.final_answer is None:
-                    self._save_checkpoint(
-                        last_snap,
-                        effective_key,
-                        run_uid,
-                        round=round_num,
-                        history=history,
-                        status="failed",
-                    )
-                    return Envelope.error_envelope(
-                        RuntimeError(
-                            "ReplanEngine: planner set done=True but omitted final_answer.  "
-                            "Set final_answer to a non-None string when done=True."
-                        )
-                    )
-                self._save_checkpoint(
-                    last_snap,
-                    effective_key,
-                    run_uid,
-                    round=round_num,
-                    history=history,
-                    status="done",
-                    final_answer=plan.final_answer,
-                )
-                return Envelope(task=env.task, payload=plan.final_answer)
-
-            if not plan.tasks:
-                self._save_checkpoint(
-                    last_snap,
-                    effective_key,
-                    run_uid,
-                    round=round_num,
-                    history=history,
-                    status="failed",
-                )
-                return Envelope.error_envelope(
-                    RuntimeError(
-                        f"ReplanEngine: round {round_num}: planner emitted no tasks "
-                        f"and done=False.  Possible infinite loop — check the planner."
-                    )
-                )
-
-            # ── Dispatch round ────────────────────────────────────────────
-            parallel_tasks = [t for t in plan.tasks if t.parallel]
-            seq_tasks = [t for t in plan.tasks if not t.parallel]
-
-            # Parallel band — same gather/error-scan pattern as Plan.
-            par_results: list[Any] = []
-            if parallel_tasks:
-                # Streaming: suppressed for the band — concurrent workers
-                # would interleave tokens (same rule as Plan's parallel band).
-                _band_suppress = suppress_ambient_token_sink()
+        # Non-local exits (cancellation, conclude) unwind past the normal
+        # between-rounds checkpointing; leave a terminal checkpoint so the
+        # key isn't stuck 'claimed'/'running' under a dead run_uid (same
+        # contract as Plan._run_impl).
+        round_num = round_start
+        try:
+            for round_num in range(round_start, self.max_rounds):
+                # ── Ask the planner ───────────────────────────────────────────
+                planner_input = self._build_planner_input(env.task or "", history, tool_map)
+                # Streaming: the planner emits structured loop-control output
+                # (PlanRound JSON), not user-facing text — keep it out of the
+                # ambient token stream.
+                _sink_suppress = suppress_ambient_token_sink()
                 try:
-                    par_raw = await asyncio.gather(
-                        *[self._dispatch(t, tool_map, session, run_id, agent_name) for t in parallel_tasks],
-                        return_exceptions=True,
+                    planner_raw = await planner_tool.run(
+                        **{"task": planner_input}
+                        if "task" in planner_tool.definition().parameters.get("properties", {})
+                        else _first_arg_kwargs(planner_tool, planner_input)
                     )
-                finally:
-                    restore_ambient_token_sink(_band_suppress)
-                for r in par_raw:
-                    if isinstance(r, ConcludeSignal):
-                        raise r
-                for r in par_raw:
-                    if isinstance(r, BaseException):
-                        self._save_checkpoint(
-                            last_snap,
-                            effective_key,
-                            run_uid,
-                            round=round_num,
-                            history=history,
-                            status="failed",
-                        )
-                        return Envelope.error_envelope(r)
-                par_results = list(par_raw)
-
-            # Sequential tasks.
-            seq_results: list[Any] = []
-            for t in seq_tasks:
-                try:
-                    seq_results.append(await self._dispatch(t, tool_map, session, run_id, agent_name))
                 except ConcludeSignal:
                     raise
                 except Exception as exc:
@@ -512,18 +445,168 @@ class ReplanEngine:
                         status="failed",
                     )
                     return Envelope.error_envelope(exc)
+                finally:
+                    restore_ambient_token_sink(_sink_suppress)
 
-            outputs = _reinterleave(plan.tasks, par_results, seq_results)
-            history = list(history) + [{"task": t.model_dump(), "output": o} for t, o in zip(plan.tasks, outputs)]
+                plan: PlanRound | None = planner_raw.payload if isinstance(planner_raw, Envelope) else planner_raw
 
-            last_snap = self._save_checkpoint(
+                if plan is None:
+                    err_info = planner_raw.error if isinstance(planner_raw, Envelope) else None
+                    self._save_checkpoint(
+                        last_snap,
+                        effective_key,
+                        run_uid,
+                        round=round_num,
+                        history=history,
+                        status="failed",
+                    )
+                    if err_info is not None:
+                        return Envelope(
+                            task=env.task,
+                            error=err_info,
+                        )
+                    return Envelope.error_envelope(
+                        RuntimeError(
+                            f"ReplanEngine: planner returned no PlanRound payload "
+                            f"at round {round_num}.  "
+                            f"Ensure the planner Agent is built with output=PlanRound."
+                        )
+                    )
+
+                if plan.done:
+                    # P2: reject missing final_answer before writing a permanent "done" checkpoint.
+                    # A None answer cached as "done" would silently short-circuit every future
+                    # resume=True call with an empty payload.
+                    if plan.final_answer is None:
+                        self._save_checkpoint(
+                            last_snap,
+                            effective_key,
+                            run_uid,
+                            round=round_num,
+                            history=history,
+                            status="failed",
+                        )
+                        return Envelope.error_envelope(
+                            RuntimeError(
+                                "ReplanEngine: planner set done=True but omitted final_answer.  "
+                                "Set final_answer to a non-None string when done=True."
+                            )
+                        )
+                    self._save_checkpoint(
+                        last_snap,
+                        effective_key,
+                        run_uid,
+                        round=round_num,
+                        history=history,
+                        status="done",
+                        final_answer=plan.final_answer,
+                    )
+                    return Envelope(task=env.task, payload=plan.final_answer)
+
+                if not plan.tasks:
+                    self._save_checkpoint(
+                        last_snap,
+                        effective_key,
+                        run_uid,
+                        round=round_num,
+                        history=history,
+                        status="failed",
+                    )
+                    return Envelope.error_envelope(
+                        RuntimeError(
+                            f"ReplanEngine: round {round_num}: planner emitted no tasks "
+                            f"and done=False.  Possible infinite loop — check the planner."
+                        )
+                    )
+
+                # ── Dispatch round ────────────────────────────────────────────
+                parallel_tasks = [t for t in plan.tasks if t.parallel]
+                seq_tasks = [t for t in plan.tasks if not t.parallel]
+
+                # Parallel band — same gather/error-scan pattern as Plan.
+                par_results: list[Any] = []
+                if parallel_tasks:
+                    # Streaming: suppressed for the band — concurrent workers
+                    # would interleave tokens (same rule as Plan's parallel band).
+                    _band_suppress = suppress_ambient_token_sink()
+                    try:
+                        par_raw = await asyncio.gather(
+                            *[self._dispatch(t, tool_map, session, run_id, agent_name) for t in parallel_tasks],
+                            return_exceptions=True,
+                        )
+                    finally:
+                        restore_ambient_token_sink(_band_suppress)
+                    for r in par_raw:
+                        if isinstance(r, ConcludeSignal):
+                            raise r
+                    for r in par_raw:
+                        if isinstance(r, BaseException):
+                            self._save_checkpoint(
+                                last_snap,
+                                effective_key,
+                                run_uid,
+                                round=round_num,
+                                history=history,
+                                status="failed",
+                            )
+                            return Envelope.error_envelope(r)
+                    par_results = list(par_raw)
+
+                # Sequential tasks.
+                seq_results: list[Any] = []
+                for t in seq_tasks:
+                    try:
+                        seq_results.append(await self._dispatch(t, tool_map, session, run_id, agent_name))
+                    except ConcludeSignal:
+                        raise
+                    except Exception as exc:
+                        self._save_checkpoint(
+                            last_snap,
+                            effective_key,
+                            run_uid,
+                            round=round_num,
+                            history=history,
+                            status="failed",
+                        )
+                        return Envelope.error_envelope(exc)
+
+                outputs = _reinterleave(plan.tasks, par_results, seq_results)
+                history = list(history) + [{"task": t.model_dump(), "output": o} for t, o in zip(plan.tasks, outputs)]
+
+                last_snap = self._save_checkpoint(
+                    last_snap,
+                    effective_key,
+                    run_uid,
+                    round=round_num + 1,
+                    history=history,
+                    status="running",
+                )
+        except ConcludeSignal as sig:
+            # conclude() ends the task with an answer — record it as done
+            # so a later resume short-circuits to the cached answer.
+            self._terminal_checkpoint(
                 last_snap,
                 effective_key,
                 run_uid,
-                round=round_num + 1,
+                round=round_num,
                 history=history,
-                status="running",
+                status="done",
+                final_answer=str(sig.message),
             )
+            raise
+        except asyncio.CancelledError:
+            self._terminal_checkpoint(
+                last_snap,
+                effective_key,
+                run_uid,
+                round=round_num,
+                history=history,
+                status="cancelled",
+            )
+            raise
+        except ConcurrentPlanRunError:
+            # Another writer owns the key now — don't clobber their state.
+            raise
 
         # max_rounds exceeded.
         self._save_checkpoint(
@@ -544,7 +627,7 @@ class ReplanEngine:
 
     async def _dispatch(
         self,
-        task: Task,
+        task: ReplanTask,
         tool_map: dict[str, Tool],
         session: Session | None,
         run_id: str,

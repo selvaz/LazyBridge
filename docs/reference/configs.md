@@ -25,12 +25,14 @@ writer     = Agent(**PROD_DEFAULTS, engine=LLMEngine("model"), name="write")
 
 Same end-user value, no precedence-game complexity, no sentinel.
 
-## Cache config (kept)
+## Cache config
 
-``CacheConfig`` is intentionally kept — it carries real semantic
-value (``enabled``, ``ttl``) consumed inside ``LLMEngine``.
+``CacheConfig`` carries real semantic value (``enabled``, ``ttl``)
+consumed inside ``LLMEngine``.  As of the v1 API pass it lives under
+``lazybridge.core.types`` (import it from there); the top-level
+re-export is deprecated (0.10) and will be removed in 1.0.
 
-::: lazybridge.CacheConfig
+::: lazybridge.core.types.CacheConfig
 
 ## Testing
 

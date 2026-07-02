@@ -74,6 +74,42 @@ def _target_from_ref(ref: dict[str, str], registry: dict[str, Any]) -> Any:
     )
 
 
+def _type_to_name(tp: Any) -> str:
+    """Serialise a Step ``output=`` / ``input=`` type annotation by name.
+
+    Types (Pydantic models, builtins, generics) live in Python and cannot
+    be JSON-serialised — like callables/Agents they are recorded by name
+    and rebound at load time via the ``from_dict`` registry.
+    """
+    name = getattr(tp, "__name__", None)
+    return name if isinstance(name, str) and name else str(tp)
+
+
+def _type_from_name(
+    name: str,
+    registry: dict[str, Any],
+    *,
+    step_name: Any,
+    slot: str,
+) -> Any:
+    """Rebind a serialised type name to a live type via the registry.
+
+    Looks up ``f"type:{name}"`` first (collision-proof against target
+    names), then the bare ``name``.  Missing entries raise ``KeyError``
+    so the load fails loud instead of silently degrading the step to
+    ``output=str`` — which used to break ``routes_by`` plans at
+    recompile time and downgrade every structured step to a raw string.
+    """
+    for key in (f"type:{name}", name):
+        if key in registry:
+            return registry[key]
+    raise KeyError(
+        f"Plan.from_dict: no entry in registry for {slot} type {name!r} "
+        f"of step {step_name!r}.  Pass registry={{'type:{name}': <class>}} "
+        f"(or {name!r}: <class>) to rebind."
+    )
+
+
 def _sentinel_to_ref(sentinel: Any) -> dict[str, Any] | None:
     if sentinel is None:
         return None
@@ -217,6 +253,15 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
             d["context"] = _sentinel_to_ref(step.context)
     if step.writes:
         d["writes"] = step.writes
+    # ``output=`` / ``input=`` are types — recorded by name (rebound via
+    # the from_dict registry, exactly like callable/Agent targets).
+    # Omitting them was silently lossy: every structured step degraded
+    # to ``output=str`` on reload and ``routes_by`` plans failed to
+    # recompile (routes_by requires a Pydantic model output).
+    if step.output is not str:
+        d["output"] = _type_to_name(step.output)
+    if step.input is not Any:
+        d["input"] = _type_to_name(step.input)
     if step.routes is not None:
         # Predicates can't be JSON-serialised — record only target step
         # names; ``from_dict`` rebinds via ``registry["routes:<step>:<target>"]``.
@@ -256,11 +301,19 @@ def _step_from_dict(data: dict[str, Any], registry: dict[str, Any]) -> Step:
                     f"Pass registry={{{key!r}: predicate}} to rebind."
                 )
             routes[target_name] = registry[key]
+    output: Any = str
+    if "output" in data:
+        output = _type_from_name(str(data["output"]), registry, step_name=data.get("name"), slot="output")
+    input_: Any = Any
+    if "input" in data:
+        input_ = _type_from_name(str(data["input"]), registry, step_name=data.get("name"), slot="input")
     return Step(
         target=target,
         task=task,
         context=context,
         writes=data.get("writes"),
+        input=input_,
+        output=output,
         parallel=data.get("parallel", False),
         name=data.get("name"),
         routes=routes,

@@ -694,7 +694,21 @@ def _flatten_refs(schema: dict[str, Any]) -> dict[str, Any]:
         if isinstance(node, dict):
             d = node.get("$defs")
             if isinstance(d, dict):
-                defs.update(d)
+                for def_name, def_schema in d.items():
+                    existing = defs.get(def_name)
+                    if existing is not None and existing != def_schema:
+                        # Two distinct definitions share a name (e.g. two
+                        # unrelated ``Config`` inner models on different
+                        # params).  Silent last-write-wins would inline the
+                        # wrong shape into one of the $refs — fail loud so
+                        # the user renames one of the models.
+                        raise ValueError(
+                            f"flatten_refs: conflicting $defs entries named {def_name!r} "
+                            f"with different shapes.  Two distinct models sharing a class "
+                            f"name cannot be flattened into one namespace — rename one of "
+                            f"the models (or give it a distinct __name__)."
+                        )
+                    defs[def_name] = def_schema
             for v in node.values():
                 _collect_defs(v)
         elif isinstance(node, list):
@@ -1119,7 +1133,12 @@ class ToolSchemaBuilder:
             ):
                 continue
             annotation = resolved_hints.get(param_name, inspect.Parameter.empty)
-            prop: dict[str, Any] = {} if annotation is inspect.Parameter.empty else _annotation_to_schema(annotation)
+            # Route unannotated params through _annotation_to_schema too:
+            # its documented fallback emits {"type": "string"} for
+            # Parameter.empty.  An empty ``{}`` subschema is rejected (or
+            # silently dropped) by OpenAI/Gemini strict-mode validators, so
+            # the parameter would vanish from the tool signature.
+            prop: dict[str, Any] = _annotation_to_schema(annotation)
             if "description" not in prop and param_name in doc_params:
                 prop["description"] = doc_params[param_name]
             properties[param_name] = prop

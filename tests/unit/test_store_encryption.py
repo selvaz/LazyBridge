@@ -24,19 +24,23 @@ import pytest
 # triggers a ``pyo3_runtime.PanicException`` — a ``BaseException`` subclass
 # that would otherwise abort *collection* of this whole file, breaking
 # ``pytest --collect-only`` for everyone whenever the optional [encryption]
-# extra is half-installed.  Name that panic type explicitly (falling back to
-# an empty tuple when pyo3 isn't present) so the module skips without a broad
-# ``except BaseException``.
-try:
-    from pyo3_runtime import PanicException
-except ImportError:  # pyo3 not in play — nothing extra to catch
-    PanicException = ()  # type: ignore[assignment, misc]
-
+# extra is half-installed.  The panic type's module (``pyo3_runtime``) is
+# often NOT itself importable on exactly those hosts, so it must be matched
+# by NAME from a narrow ``except BaseException`` — the previous
+# import-then-catch approach bound ``PanicException = ()`` and made the
+# except clause itself raise ``TypeError`` at collection time.
 try:
     from cryptography.fernet import Fernet, InvalidToken
-except (ImportError, PanicException) as _exc:  # type: ignore[misc]
+except ImportError as _exc:
     pytest.skip(
-        f"cryptography unavailable or failed to import ({_exc!r}); skipping EncryptedStoreAdapter tests.",
+        f"cryptography unavailable ({_exc!r}); skipping EncryptedStoreAdapter tests.",
+        allow_module_level=True,
+    )
+except BaseException as _exc:
+    if type(_exc).__name__ != "PanicException":
+        raise
+    pytest.skip(
+        f"cryptography failed to import ({_exc!r}); skipping EncryptedStoreAdapter tests.",
         allow_module_level=True,
     )
 

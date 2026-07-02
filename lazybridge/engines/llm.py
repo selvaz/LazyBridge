@@ -21,6 +21,7 @@ from lazybridge.core.types import (
     StructuredOutputConfig,
     ToolCall,
 )
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -516,7 +517,7 @@ class LLMEngine:
     ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
@@ -619,33 +620,20 @@ class LLMEngine:
         class-level — they read the model name and consult provider
         capability tables.  Going through ``Executor._resolve_provider``
         would needlessly construct an SDK client (and demand an API key)
-        just to read static metadata.
+        just to read static metadata.  Resolution goes through the shared
+        registry (``providers._registry``) so this map can never drift
+        from the Executor's again; unknown/absent keys keep the historic
+        Anthropic default (capability checks must not crash).
         """
-        from lazybridge.core.providers.anthropic import AnthropicProvider
-        from lazybridge.core.providers.deepseek import DeepSeekProvider
-        from lazybridge.core.providers.google import GoogleProvider
-        from lazybridge.core.providers.lmstudio import LMStudioProvider
-        from lazybridge.core.providers.openai import OpenAIProvider
+        from lazybridge.core.providers._registry import provider_class
 
-        registry = {
-            "anthropic": AnthropicProvider,
-            "claude": AnthropicProvider,
-            "openai": OpenAIProvider,
-            "gpt": OpenAIProvider,
-            "google": GoogleProvider,
-            "gemini": GoogleProvider,
-            "deepseek": DeepSeekProvider,
-            "lmstudio": LMStudioProvider,
-            "lm-studio": LMStudioProvider,
-            "lm_studio": LMStudioProvider,
-            "local": LMStudioProvider,
-        }
-        key = self.provider.lower().strip() if isinstance(self.provider, str) else "anthropic"
-        if key == "litellm":
-            from lazybridge.core.providers.litellm import LiteLLMProvider
+        key = self.provider if isinstance(self.provider, str) else "anthropic"
+        cls = provider_class(key)
+        if cls is None:
+            from lazybridge.core.providers.anthropic import AnthropicProvider
 
-            return LiteLLMProvider
-        return registry.get(key, AnthropicProvider)
+            return AnthropicProvider
+        return cls
 
     def _filter_by_vision(self, images: list[Any]) -> list[Any]:
         if not images:
@@ -710,7 +698,7 @@ class LLMEngine:
 
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         executor = self._make_executor()
 
@@ -1017,6 +1005,9 @@ class LLMEngine:
         stop_reason = "end_turn"
         usage = UsageStats()
         model_out: str | None = None
+        parsed: Any = None
+        validation_error: str | None = None
+        validated: bool | None = None
 
         async for chunk in self._idle_guarded_stream(executor.astream(req)):
             if chunk.delta:
@@ -1028,6 +1019,16 @@ class LLMEngine:
                 stop_reason = chunk.stop_reason
             if chunk.usage:
                 usage = chunk.usage
+            # Structured output arrives on the final chunk for providers
+            # that validate server/stream-side.  Without carrying it over,
+            # the streaming path always returned ``parsed=None`` and
+            # ``output=Model`` silently degraded to a raw string.
+            if getattr(chunk, "parsed", None) is not None:
+                parsed = chunk.parsed
+            if getattr(chunk, "validation_error", None) is not None:
+                validation_error = chunk.validation_error
+            if getattr(chunk, "validated", None) is not None:
+                validated = chunk.validated
             if chunk.is_final:
                 model_out = getattr(chunk, "model", None)
 
@@ -1037,6 +1038,9 @@ class LLMEngine:
             stop_reason=stop_reason,
             usage=usage,
             model=model_out,
+            parsed=parsed,
+            validation_error=validation_error,
+            validated=validated,
         )
 
     async def _idle_guarded_stream(self, agen: Any) -> AsyncGenerator[Any, None]:
@@ -1193,7 +1197,7 @@ class LLMEngine:
         This means token output is continuous across tool-call boundaries.
         """
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
