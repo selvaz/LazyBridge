@@ -150,6 +150,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   behaviour; it is now documented on the engine.
 
 ### Changed
+- **v1 API pass — three top-level names deprecated (removal in 1.0).**
+  - `Task` → renamed **`ReplanTask`** (the bare name was too generic for
+    a top-level export and collided with user code).
+    `lazybridge.engines.replan.Task` remains a plain alias;
+    `lazybridge.Task` still resolves but emits a `DeprecationWarning`.
+  - `CacheConfig` → import from **`lazybridge.core.types`** (it is
+    engine configuration, not primary API). Top-level access warns.
+  - `PROVIDER_ALIASES` → call **`LLMEngine.provider_aliases()`**. The
+    constant was an import-time snapshot that silently diverged from the
+    live registry after `register_provider_alias`. Top-level access
+    warns and now returns a *fresh* snapshot.
+  All three are out of `__all__` (star-imports no longer pick them up);
+  the public-API snapshot test, SKILL.md, and reference docs are updated.
+- **`StoreEntry.written_at` documented as informational metadata.** The
+  Store has no TTL/expiry mechanism and never consults `written_at`;
+  the docstring now says so explicitly (`agent_id` carries provenance
+  stamps such as Plan's `plan-run:<run_uid>`).
 - **BREAKING — exhausted output validation is now an error, not a silent
   success.** `Agent(output=Model)` used to return `ok=True` with the raw,
   unvalidated *string* payload after `max_output_retries` failed correction

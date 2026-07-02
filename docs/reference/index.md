@@ -41,7 +41,7 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 
 ## Configuration & testing
 
-- [Runtime configs & testing](configs.md) — `CacheConfig` (kept) and
+- [Runtime configs & testing](configs.md) — `CacheConfig` (now under `lazybridge.core.types`) and
   `MockAgent`.  The 0.7-era ``AgentRuntimeConfig`` /
   ``ResilienceConfig`` / ``ObservabilityConfig`` were deleted in 0.7.9;
   fleet config uses a flat-kwarg dict spread now.

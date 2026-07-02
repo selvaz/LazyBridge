@@ -55,7 +55,7 @@ from lazybridge.core.streaming import (
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.plan._serialisation import _first_arg_kwargs
 from lazybridge.engines.plan._types import ConcurrentPlanRunError
-from lazybridge.engines.replan._types import PlanRound, Task
+from lazybridge.engines.replan._types import PlanRound, ReplanTask
 from lazybridge.envelope import Envelope
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -87,7 +87,7 @@ def _format_history(history: list[dict[str, Any]]) -> str:
 
 
 def _reinterleave(
-    tasks: list[Task],
+    tasks: list[ReplanTask],
     par_results: list[Any],
     seq_results: list[Any],
 ) -> list[Any]:
@@ -125,7 +125,7 @@ class ReplanEngine:
     not need a static system prompt that lists worker names.
 
     See :class:`lazybridge.engines.replan.PlanRound` and
-    :class:`lazybridge.engines.replan.Task` for the planner output schema.
+    :class:`lazybridge.engines.replan.ReplanTask` for the planner output schema.
     """
 
     def __init__(
@@ -624,7 +624,7 @@ class ReplanEngine:
 
     async def _dispatch(
         self,
-        task: Task,
+        task: ReplanTask,
         tool_map: dict[str, Tool],
         session: Session | None,
         run_id: str,

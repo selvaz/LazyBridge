@@ -401,7 +401,7 @@ work where each round's tasks depend on the previous round's results.
 
 ```python
 from lazybridge import Agent, LLMEngine, ReplanEngine, Store
-from lazybridge.engines.replan import PlanRound, Task
+from lazybridge.engines.replan import PlanRound, ReplanTask
 
 planner = Agent(
     engine=LLMEngine("claude-opus-4-8", system="You are a task planner."),
@@ -423,7 +423,7 @@ guardian("refactor the auth module")   # first session
 guardian("continue")                    # resumes from last checkpoint
 ```
 
-`Task` uses `tool + kwargs` so dispatch is `tool_map[task.tool].run(**task.kwargs)` —
+`ReplanTask` uses `tool + kwargs` so dispatch is `tool_map[task.tool].run(**task.kwargs)` —
 no special-casing for pools, agents, or functions.  The planner receives the
 available tool schemas and accumulated history dynamically so its system prompt
 needs no hardcoded worker names.  Same checkpoint/resume semantics as `Plan`.

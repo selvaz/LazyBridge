@@ -3,7 +3,7 @@
 `LLMEngine` is the LLM-driven tool-calling loop; `Plan` is the
 deterministic-DAG engine and `Step` is its unit; `ReplanEngine` is the
 adaptive counterpart to `Plan` for pipelines whose shape is decided at
-runtime by a planner agent (`PlanRound` / `Task` are its output schema).
+runtime by a planner agent (`PlanRound` / `ReplanTask` are its output schema).
 `PlanCompileError` fires at construction for invalid DAGs;
 `ToolTimeoutError` and `StreamStallError` surface from the LLM engine's
 safety nets.
@@ -60,7 +60,7 @@ narrative usage.
 
 ::: lazybridge.PlanRound
 
-::: lazybridge.Task
+::: lazybridge.ReplanTask
 
 ## Engine errors
 

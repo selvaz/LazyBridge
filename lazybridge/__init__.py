@@ -122,25 +122,16 @@ from lazybridge.agent import Agent, ParallelAgent
 from lazybridge.core.providers import BaseProvider, Tier, UnsupportedFeatureError, UnsupportedNativeToolError
 from lazybridge.core.types import (
     AudioContent,
-    CacheConfig,
     ImageContent,
     NativeTool,
 )
 
+# Graph / Guards
+from lazybridge.dedup_guard import DeduplicateGuard
+
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
 # live under ``lazybridge.ext.{hil,evals,otel}``).
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
-
-#: Snapshot of the model-string → provider routing aliases recognised
-#: by ``LLMEngine`` at import time.  Documenting the canonical surface
-#: at the top level so callers (and LLM assistants) can validate a
-#: user-supplied alias without reaching into the engine internals.
-#: For runtime extension use ``LLMEngine.register_provider_alias`` /
-#: ``LLMEngine.provider_aliases()`` instead — this constant is a
-#: snapshot, not a live view.
-PROVIDER_ALIASES: dict[str, str] = LLMEngine.provider_aliases()
-# Graph / Guards
-from lazybridge.dedup_guard import DeduplicateGuard
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
     Plan,
@@ -149,7 +140,7 @@ from lazybridge.engines.plan import (
     PlanRuntimeError,
     Step,
 )
-from lazybridge.engines.replan import PlanRound, ReplanEngine, Task
+from lazybridge.engines.replan import PlanRound, ReplanEngine, ReplanTask
 from lazybridge.envelope import Envelope
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
@@ -224,7 +215,6 @@ __all__ = [
     "LLMGuard",
     # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
     "LLMEngine",
-    "PROVIDER_ALIASES",
     "Plan",
     "Step",
     "ConcurrentPlanRunError",
@@ -233,7 +223,7 @@ __all__ = [
     "PlanRuntimeError",
     "ReplanEngine",
     "PlanRound",
-    "Task",
+    "ReplanTask",
     "ToolTimeoutError",
     "StreamStallError",
     # Graph
@@ -253,8 +243,54 @@ __all__ = [
     # Multimodal content blocks
     "ImageContent",
     "AudioContent",
-    # Cache configuration (kept — internal repr for LLMEngine cache)
-    "CacheConfig",
     # Testing
     "MockAgent",
 ]
+
+
+# --- Deprecated top-level names (v1 API pass) -------------------------------
+#
+# Removed from ``__all__`` but kept reachable through this module-level
+# ``__getattr__`` with a ``DeprecationWarning`` for the 0.10 series;
+# scheduled for removal in 1.0.
+#
+# * ``Task``            → renamed to :class:`ReplanTask` (the bare name was
+#                         too generic for a top-level export).
+# * ``CacheConfig``     → import from :mod:`lazybridge.core.types` (it is
+#                         engine configuration, not primary API).
+# * ``PROVIDER_ALIASES`` → was an import-time snapshot that silently
+#                         diverged from the live registry after
+#                         ``LLMEngine.register_provider_alias``.  Call
+#                         ``LLMEngine.provider_aliases()`` instead.
+
+
+def __getattr__(name: str):
+    import warnings as _warnings
+
+    if name == "Task":
+        _warnings.warn(
+            "lazybridge.Task was renamed to lazybridge.ReplanTask and will be removed in 1.0.  Update the import.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return ReplanTask
+    if name == "CacheConfig":
+        _warnings.warn(
+            "lazybridge.CacheConfig moved off the top level and will be removed "
+            "from it in 1.0.  Import it from lazybridge.core.types instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from lazybridge.core.types import CacheConfig
+
+        return CacheConfig
+    if name == "PROVIDER_ALIASES":
+        _warnings.warn(
+            "lazybridge.PROVIDER_ALIASES was an import-time snapshot that could "
+            "silently diverge from the live registry; it will be removed in 1.0. "
+            "Call LLMEngine.provider_aliases() for a fresh copy.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return LLMEngine.provider_aliases()
+    raise AttributeError(f"module 'lazybridge' has no attribute {name!r}")
