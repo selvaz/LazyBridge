@@ -503,7 +503,14 @@ class Agent:
         if self.verify:
             from lazybridge._verify import verify_with_retry
 
-            result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify)
+            # ``run=self._run_engine`` — NOT the default ``agent.run``:
+            # this branch IS ``run()``'s body, so the helper calling back
+            # into ``run()`` would re-enter here and recurse until
+            # RecursionError on any ``Agent(verify=...)`` invocation.
+            # Guard/sources have already been applied above; the engine
+            # (plus structured-output validation) is what each verify
+            # attempt must re-execute.
+            result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify, run=self._run_engine)
         else:
             result = await self._run_engine(env)
 

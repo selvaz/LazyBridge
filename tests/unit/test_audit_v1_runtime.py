@@ -439,3 +439,85 @@ def test_no_warning_when_child_session_set_explicitly():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         Agent(engine=_StubEngine(), name="orch", tools=[child], session=sess_b)
+
+
+# ---------------------------------------------------------------------------
+# Agent(verify=...) recursion — found live by the pre-v1 stress notebook
+# ---------------------------------------------------------------------------
+
+
+def test_agent_verify_kwarg_does_not_recurse():
+    """``Agent(verify=judge).run()`` used to recurse infinitely:
+    ``_run_body`` → ``verify_with_retry`` → ``agent.run()`` → ``_run_body``
+    → the same verify branch again, until RecursionError.  The helper now
+    runs the engine-only pipeline inside the verify loop."""
+    engine = _StubEngine(results=[Envelope(task="t", payload="answer one")])
+
+    judge_calls: list[str] = []
+
+    def judge(text: str) -> str:
+        judge_calls.append(text)
+        return "approved"
+
+    agent = Agent(engine=engine, name="verified", verify=judge)
+    result = asyncio.run(agent.run("t"))
+    assert result.ok and result.payload == "answer one"
+    assert judge_calls == ["answer one"]
+    assert len(engine.calls) == 1
+
+
+def test_agent_verify_retry_feeds_judge_feedback_back():
+    engine = _StubEngine(
+        results=[
+            Envelope(task="t", payload="draft"),
+            Envelope(task="t", payload="final"),
+        ]
+    )
+    verdicts = iter(["rejected: too short", "approved"])
+
+    def judge(text: str) -> str:
+        return next(verdicts)
+
+    agent = Agent(engine=engine, name="verified", verify=judge, max_verify=3)
+    result = asyncio.run(agent.run("t"))
+    assert result.ok and result.payload == "final"
+    assert len(engine.calls) == 2
+    # The retry env must carry the judge's feedback as context.
+    retry_env = engine.calls[1]["env"]
+    assert "too short" in (retry_env.context or "")
+
+
+def test_agent_verify_with_agent_judge_does_not_recurse():
+    # Judge that is itself an Agent — the shape the stress notebook used.
+    judge = Agent(engine=_StubEngine(results=[Envelope(task="j", payload="approved")]), name="judge")
+    engine = _StubEngine(results=[Envelope(task="t", payload="content")])
+    agent = Agent(engine=engine, name="verified", verify=judge)
+    result = asyncio.run(agent.run("t"))
+    assert result.ok and result.payload == "content"
+
+
+def test_agent_verify_retry_preserves_attachments_and_payload():
+    """Codex P2 on PR #110: the rebuilt retry envelope dropped the
+    original env's images/audio/payload, so every post-rejection attempt
+    ran without the input the first attempt had."""
+    from lazybridge.core.types import ImageContent
+
+    engine = _StubEngine(
+        results=[
+            Envelope(task="t", payload="draft"),
+            Envelope(task="t", payload="final"),
+        ]
+    )
+    verdicts = iter(["rejected: look at the image again", "approved"])
+    agent = Agent(engine=engine, name="verified", verify=lambda text: next(verdicts), max_verify=3)
+
+    img = ImageContent(base64_data="aGk=", media_type="image/png")
+    original = Envelope(task="describe", images=[img], payload="user-input")
+    result = asyncio.run(agent.run(original))
+
+    assert result.ok and result.payload == "final"
+    assert len(engine.calls) == 2
+    retry_env = engine.calls[1]["env"]
+    assert retry_env.images == [img], "images dropped on verify retry"
+    assert retry_env.payload == "user-input", "payload dropped on verify retry"
+    assert "look at the image again" in (retry_env.context or "")

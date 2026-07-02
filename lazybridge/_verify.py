@@ -85,12 +85,20 @@ async def verify_with_retry(
     verify_agent: Any,
     *,
     max_verify: int = 3,
+    run: Any = None,
 ) -> Any:
     """Run ``agent`` and gate its output through ``verify_agent``.
 
     If the judge rejects, retry the ORIGINAL task with the judge's
     feedback appended as context.  Up to ``max_verify`` attempts; the
     last attempt is returned as-is even if still rejected.
+
+    ``run`` overrides the coroutine used to produce each attempt
+    (default: ``agent.run``).  ``Agent._run_body`` MUST pass its
+    engine-only runner here: its ``verify=`` branch calls this helper,
+    and this helper calling back into the full ``agent.run()`` would
+    re-enter that same branch — infinite mutual recursion
+    (``RecursionError`` on any ``Agent(verify=...).run()``).
 
     The pristine task / context are cached outside the loop and a
     clean envelope is rebuilt every attempt — so feedback flows via
@@ -112,9 +120,10 @@ async def verify_with_retry(
     original_context = getattr(env, "context", None)
     current_env = env
     result: Any = None
+    runner = run if run is not None else agent.run
 
     for attempt in range(max_verify):
-        result = await agent.run(current_env)
+        result = await runner(current_env)
 
         if not hasattr(verify_agent, "run"):
             # Plain callable judge.
@@ -134,10 +143,19 @@ async def verify_with_retry(
 
         # Rebuild from the pristine original task.  Feedback goes into
         # the context slot rather than concatenated onto the task so
-        # the judge always sees the user's real question.
+        # the judge always sees the user's real question.  Attachments
+        # and payload are carried over from the ORIGINAL env — dropping
+        # them meant every post-rejection attempt ran without the
+        # images/audio/input the first attempt had.
         feedback = str(verdict)
         feedback_ctx = f"Feedback from judge: {feedback}"
         merged_context = f"{original_context}\n\n{feedback_ctx}" if original_context else feedback_ctx
-        current_env = Envelope(task=original_task, context=merged_context)
+        current_env = Envelope(
+            task=original_task,
+            context=merged_context,
+            images=getattr(env, "images", None),
+            audio=getattr(env, "audio", None),
+            payload=getattr(env, "payload", None),
+        )
 
     return result
