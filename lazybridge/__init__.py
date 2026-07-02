@@ -100,10 +100,11 @@ try:
     try:
         __version__ = _dist_version("lazybridge")
     except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
-        __version__ = "0.9.0"
+        # Keep in sync with pyproject.toml [project] version.
+        __version__ = "0.9.2"
     del _dist_version, PackageNotFoundError
 except ImportError:  # pragma: no cover — Python < 3.8, not supported
-    __version__ = "0.9.0"
+    __version__ = "0.9.2"
 
 __stability__ = "alpha"
 

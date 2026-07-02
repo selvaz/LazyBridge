@@ -169,11 +169,18 @@ class Memory:
         # in ``finally`` so an exception path can't leave it stuck.
         if plan is not None:
             head_turns, drop_count = plan
+            # Fold the previous summary into the new one — replacing it
+            # outright would permanently discard everything the earlier
+            # compression captured (the oldest context) with no warning.
+            # The ``_compressing`` flag guarantees no concurrent writer
+            # to ``_summary``, but read it under the lock for visibility.
+            with self._lock:
+                prior_summary = self._summary
             try:
                 if self._summarizer is not None:
-                    new_summary = self._llm_summary(head_turns)
+                    new_summary = self._llm_summary(head_turns, prior=prior_summary)
                 else:
-                    new_summary = self._rule_summary(head_turns)
+                    new_summary = self._rule_summary(head_turns, prior=prior_summary)
                 with self._lock:
                     self._summary = new_summary
                     # Drop the first ``drop_count`` turns; any turns
@@ -253,8 +260,13 @@ class Memory:
         self._compressing = True
         return head, len(head)
 
-    def _llm_summary(self, turns: list[_Turn]) -> str:
+    def _llm_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.
+
+        ``prior`` is the summary produced by the previous compression (if
+        any).  It is included in the material to summarise so repeated
+        compressions ACCUMULATE context instead of silently replacing the
+        oldest history.
 
         If ``summarizer`` is an async callable (returns a coroutine),
         the coroutine is driven to completion here rather than left
@@ -274,6 +286,9 @@ class Memory:
         """
         assert self._summarizer is not None
         lines: list[str] = []
+        if prior:
+            lines.append(f"Summary of even earlier conversation (fold this in): {prior}")
+            lines.append("")
         for t in turns:
             lines.append(f"User: {t.user}")
             lines.append(f"Assistant: {t.assistant}")
@@ -304,12 +319,16 @@ class Memory:
                     UserWarning,
                     stacklevel=4,
                 )
-            return self._rule_summary(turns)
+            return self._rule_summary(turns, prior=prior)
         except Exception:
-            return self._rule_summary(turns)
+            return self._rule_summary(turns, prior=prior)
 
-    def _rule_summary(self, turns: list[_Turn]) -> str:
+    def _rule_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
         topics: set[str] = set()
+        # Fold the prior summary's topics in so repeated compressions
+        # accumulate instead of dropping the oldest context.
+        if prior:
+            topics.update(w.lower().strip(",]") for w in prior.split() if len(w.strip(",]")) > 5)
         for t in turns:
             words = (t.user + " " + t.assistant).split()
             topics.update(w.lower() for w in words if len(w) > 5)

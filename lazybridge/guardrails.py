@@ -284,11 +284,17 @@ class LLMGuard(Guard):
         safe = self._scrub_tags(text)
         return self._PROMPT_TEMPLATE.format(policy=self._policy, content=safe)
 
-    def _judge(self, text: str) -> GuardAction:
+    def _judge_once(self, text: str) -> GuardAction:
+        """One judging round-trip with NO deadline — the caller owns the
+        timeout.  Shared by the sync path (daemon-thread timeout in
+        :meth:`_judge`) and the async path (``asyncio.wait_for`` in
+        :meth:`_ajudge`) so the deadline is enforced exactly once."""
         prompt = self._prompt(text)
+        return self._verdict(self._agent(prompt).text())
+
+    def _judge(self, text: str) -> GuardAction:
         if self._timeout is None:
-            verdict = self._agent(prompt).text()
-            return self._verdict(verdict)
+            return self._judge_once(text)
         # Enforce the timeout on the sync path via a daemon thread so a
         # hung judge doesn't block the calling thread indefinitely.
         result: list[GuardAction] = []
@@ -296,7 +302,7 @@ class LLMGuard(Guard):
 
         def _run() -> None:
             try:
-                result.append(self._verdict(self._agent(prompt).text()))
+                result.append(self._judge_once(text))
             except BaseException as exc:
                 exc_holder.append(exc)
 
@@ -327,7 +333,12 @@ class LLMGuard(Guard):
                 env = await run(prompt)
                 return self._verdict(env.text() if hasattr(env, "text") else str(env))
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, self._judge, text)
+            # ``_judge_once`` (not ``_judge``): the outer ``wait_for``
+            # below already enforces ``self._timeout``.  Routing through
+            # ``_judge`` would enforce it twice and spawn an extra daemon
+            # thread per call that keeps running after the outer deadline
+            # fires.
+            return await loop.run_in_executor(None, self._judge_once, text)
 
         if self._timeout is None:
             return await _drive()

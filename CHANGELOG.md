@@ -9,6 +9,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Memory summaries now accumulate across compressions.** Repeated
+  compression overwrote the previous summary — the summarizer never saw
+  it, so the second compression permanently discarded everything the
+  first had captured (the oldest context), silently. Both the LLM path
+  and the keyword-extraction fallback now fold the prior summary into the
+  new one.
+- **Unannotated tool params survive strict mode.** In signature mode an
+  unannotated parameter produced an empty `{}` subschema (bypassing
+  `_annotation_to_schema`'s documented `{"type": "string"}` fallback);
+  strict-mode validators on OpenAI/Gemini reject or drop `{}`, making the
+  parameter vanish from the tool signature.
+- **`$defs` name collisions fail loud on flatten.** `_flatten_refs`
+  merged same-named definitions last-write-wins, silently inlining the
+  wrong shape when two distinct models shared a class name. Conflicting
+  shapes now raise `ValueError` with a rename hint (identical duplicates
+  still merge).
+- **LLMGuard async timeout enforced once.** `_ajudge`'s sync-callable
+  fallback routed through `_judge`, which enforces `timeout` again on its
+  own daemon thread — double enforcement, plus a leaked daemon thread per
+  call whenever the outer deadline fired first. The async path now calls
+  a single untimed judging round-trip under the outer `asyncio.wait_for`.
+- **`DeduplicateGuard` is silent by default.** `verbose` defaulted to
+  `True` and wrote to *stdout* via `print()` from library code; it now
+  defaults to `False` and routes through `logging` (INFO when verbose,
+  DEBUG otherwise). The module also gains behavioral test coverage
+  (block splitting, near-dup prefixes, short-block preservation).
+- **`__version__` source-tree fallback re-aligned** with
+  `pyproject.toml` (was stale at 0.9.0), with a test guarding the sync.
 - **Cancelled Plan/Replan runs no longer poison the checkpoint key.**
   A run unwound by cancellation (e.g. a consumer breaking out of
   `plan.stream()` early), by `conclude()`, or by an unexpected exception
