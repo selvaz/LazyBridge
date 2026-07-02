@@ -43,6 +43,7 @@ from lazybridge.core.streaming import (
     stream_envelope_run,
     suppress_ambient_token_sink,
 )
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.plan._serialisation import _first_arg_kwargs
 from lazybridge.engines.plan._types import ConcurrentPlanRunError
 from lazybridge.engines.replan._types import PlanRound, Task
@@ -149,7 +150,7 @@ class ReplanEngine:
         plan_state: Any | None = None,
     ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "replan")
+        agent_name = resolve_agent_name(self, "replan")
         if session:
             session.emit(
                 EventType.AGENT_START,

@@ -108,11 +108,18 @@ _RETRYABLE_EXC_CLASSES = frozenset(
 
 def _is_retryable(exc: Exception) -> bool:
     # 1. Structured: HTTP-status-bearing exceptions.  Cheapest and most
-    #    reliable signal across SDKs.
+    #    reliable signal across SDKs.  A definite client error (4xx other
+    #    than 408/429) is permanent — short-circuit False so the string
+    #    scan below can't resurrect it just because the *message* happens
+    #    to contain a word like "timeout" or "connection" (e.g. a 400
+    #    ``invalid 'timeout' parameter``).
     for attr in ("status_code", "status", "http_status", "code"):
         code = getattr(exc, attr, None)
-        if isinstance(code, int) and (code == 429 or 500 <= code < 600):
-            return True
+        if isinstance(code, int):
+            if code == 429 or code == 408 or 500 <= code < 600:
+                return True
+            if 400 <= code < 500:
+                return False
     # 2. Structured: known transient class names (provider-SDK agnostic).
     #    Walk the MRO so subclasses (``ConnectionResetError`` →
     #    ``ConnectionError``) match without per-class enumeration.

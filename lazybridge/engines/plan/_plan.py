@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._serialisation import (
     _first_arg_kwargs,
@@ -540,7 +541,7 @@ class Plan:
         # and AGENT_FINISH like every other engine so replay mode (which
         # rebuilds the graph from events alone) can see the parent node.
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "plan")
+        agent_name = resolve_agent_name(self, "plan")
         if session:
             session.emit(
                 EventType.AGENT_START,

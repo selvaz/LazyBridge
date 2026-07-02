@@ -294,6 +294,11 @@ class Agent:
         #: an explicit identity before an Agent is used as a sub-agent tool.
         self._name_explicit: bool = _name_explicit_flag
 
+        #: True when this agent's ``session`` was inherited from a parent
+        #: orchestrator (not passed by the user).  Lets a second
+        #: orchestrator warn instead of silently misattributing events.
+        self._session_inherited: bool = False
+
         # Private per-agent console exporter when verbose= is set without
         # an explicit Session. Attached when we bind to a session below.
         self._verbose = verbose
@@ -306,6 +311,12 @@ class Agent:
             session = Session(console=True)
         self.session = session
 
+        # Fallback identity for code that drives the engine directly (tests,
+        # custom callers).  When the engine runs through this Agent, the
+        # per-invocation binding in ``_run_engine``/``_stream_engine`` wins —
+        # see ``lazybridge.engines.base.resolve_agent_name`` — so two Agents
+        # sharing one engine no longer misattribute events to whichever was
+        # constructed last.
         self.engine._agent_name = self.name
 
         # Register with session graph so it's visible in session.graph.to_json()
@@ -326,8 +337,11 @@ class Agent:
 
                 if child_session is None:
                     # Propagate parent session down to child and register both
-                    # the agent node and the parent → child edge.
+                    # the agent node and the parent → child edge.  The flag
+                    # records that the session was inherited (not set by the
+                    # user) so a later orchestrator can tell the difference.
                     agent_raw.session = self.session
+                    agent_raw._session_inherited = True
                     _safe_register_agent(self.session, agent_raw)
                     _safe_register_tool_edge(self.session, self, agent_raw, label=agent_raw.name)
                 elif child_session is self.session:
@@ -337,7 +351,24 @@ class Agent:
                     # ``session is None`` only.
                     _safe_register_agent(self.session, agent_raw)
                     _safe_register_tool_edge(self.session, self, agent_raw, label=agent_raw.name)
-                # else: child belongs to a different session — don't steal it.
+                else:
+                    # Child belongs to a different session — don't steal it.
+                    # But if that session was itself *inherited* from another
+                    # orchestrator (not chosen by the user), the child's
+                    # events will silently flow to the other session's log.
+                    # Surface the misattribution instead of hiding it.
+                    if getattr(agent_raw, "_session_inherited", False):
+                        import warnings
+
+                        warnings.warn(
+                            f"Sub-agent {agent_raw.name!r} already inherited a session from "
+                            f"another orchestrator; its events will flow there, not to "
+                            f"{self.name!r}'s session.  Pass session= explicitly on the "
+                            f"sub-agent (or build a fresh instance per orchestrator) to "
+                            f"choose where its events go.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
             # ``fallback=`` and ``verify=`` Agents inherit the same
             # session + graph-registration the tools list gets, so any
             # events they produce (errors handled by the fallback, judge
@@ -517,13 +548,23 @@ class Agent:
         return result
 
     async def _run_engine(self, env: Envelope) -> Envelope:
-        result = await self.engine.run(
-            env,
-            tools=list(self._tool_map.values()),
-            output_type=self.output,
-            memory=self.memory,
-            session=self.session,
-        )
+        from lazybridge.engines.base import bind_agent_name, unbind_agent_name
+
+        # Bind this agent's identity for the duration of the engine call so
+        # events/usage are attributed to the agent actually running — engines
+        # are shareable objects, so an attribute stamped at construction time
+        # would report whichever agent was built last.
+        _name_token = bind_agent_name(self.name)
+        try:
+            result = await self.engine.run(
+                env,
+                tools=list(self._tool_map.values()),
+                output_type=self.output,
+                memory=self.memory,
+                session=self.session,
+            )
+        finally:
+            unbind_agent_name(_name_token)
         # Structured output retry loop.  When ``output=`` declares a
         # concrete type (``SomeModel``, ``list[SomeModel]``, …) and the
         # engine returned a plain string instead of the expected
@@ -538,11 +579,36 @@ class Agent:
 
     async def _validate_and_retry(self, original_env: Envelope, first: Envelope) -> Envelope:
         from lazybridge.core.structured import validate_payload_against_output_type
+        from lazybridge.engines.base import bind_agent_name, unbind_agent_name
+        from lazybridge.envelope import ErrorInfo
 
         # Initialise feedback before the loop so any code path that
         # reaches attempt ≥ 1 always has a defined value.
         feedback: str = ""
         current = first
+
+        def _exhausted(exc: Exception, kind: str) -> Envelope:
+            # Retries used up and the payload still doesn't satisfy
+            # ``output=``.  Surface an error envelope — a typed-output
+            # contract must never degrade to an ``ok=True`` result whose
+            # payload is the raw, unvalidated string.  The raw payload is
+            # kept on the envelope so callers can inspect what the model
+            # actually produced.
+            return current.model_copy(
+                update={
+                    "error": ErrorInfo(
+                        type="OutputValidationError",
+                        message=(
+                            f"Output did not satisfy output="
+                            f"{_describe_output_type(self.output)} after "
+                            f"{self.max_output_retries} retr"
+                            f"{'y' if self.max_output_retries == 1 else 'ies'} "
+                            f"({kind}): {exc}"
+                        ),
+                        retryable=False,
+                    ),
+                }
+            )
 
         for attempt in range(self.max_output_retries + 1):
             if attempt > 0:
@@ -550,13 +616,17 @@ class Agent:
                 # private feedback loop and must not be stored as real
                 # conversation turns.  Only the final successful result
                 # (returned below) contributes to memory history.
-                current = await self.engine.run(
-                    _feedback_env(original_env, feedback),
-                    tools=list(self._tool_map.values()),
-                    output_type=self.output,
-                    memory=None,
-                    session=self.session,
-                )
+                _name_token = bind_agent_name(self.name)
+                try:
+                    current = await self.engine.run(
+                        _feedback_env(original_env, feedback),
+                        tools=list(self._tool_map.values()),
+                        output_type=self.output,
+                        memory=None,
+                        session=self.session,
+                    )
+                finally:
+                    unbind_agent_name(_name_token)
                 if not current.ok:
                     return current
 
@@ -570,7 +640,7 @@ class Agent:
                 validated = validate_payload_against_output_type(current.payload, self.output)
             except Exception as exc:
                 if attempt == self.max_output_retries:
-                    return current
+                    return _exhausted(exc, "schema validation")
                 feedback = (
                     f"The previous response did not satisfy the required "
                     f"output schema ({_describe_output_type(self.output)}). "
@@ -586,7 +656,7 @@ class Agent:
                     validated = maybe if maybe is not None else validated
                 except Exception as exc:
                     if attempt == self.max_output_retries:
-                        return current
+                        return _exhausted(exc, "domain validation")
                     feedback = (
                         f"The previous response passed schema validation but "
                         f"failed domain validation for "
@@ -594,6 +664,13 @@ class Agent:
                         f"Validator rejected with: {exc}. Please respond again."
                     )
                     continue
+
+            # A correction retry produced the accepted answer: the first
+            # attempt (already recorded by the engine's memory hook) is the
+            # rejected one, so amend the last turn to the response actually
+            # returned — memory history must match the returned Envelope.
+            if attempt > 0 and self.memory is not None and hasattr(self.memory, "amend_last"):
+                self.memory.amend_last(current.text())
 
             # Swap the validated payload back in; keep metadata/error unchanged.
             return current.model_copy(update={"payload": validated})
@@ -610,23 +687,36 @@ class Agent:
         """Stream LLM tokens across the full tool-calling loop.
 
         **Guard enforcement.** ``self.guard`` is checked via
-        ``acheck_input`` before the first token is emitted.  A blocked
-        input raises :class:`ValueError` immediately; a modified input
-        (``GuardAction.modify``) replaces the task in the envelope sent
-        to the provider.  This is identical to the guard contract in
-        :meth:`run` — streaming mode does not bypass the guard.
+        ``acheck_input`` before the first token is emitted — a blocked
+        input raises :class:`ValueError`; a modified input replaces the
+        task sent to the provider.  When the stream completes,
+        ``acheck_output`` runs on the accumulated text: a block raises
+        :class:`ValueError` *after* the tokens have been delivered
+        (streaming is irrevocable) and skips the Store write, so
+        consumers that buffer the stream can still discard it.
 
-        Honours ``self.timeout`` between chunks so a stalled provider
-        can't hang the caller.  Each ``__anext__`` is wrapped in
-        ``asyncio.wait_for`` (per-chunk, not whole-stream) so short
-        chunks don't consume the deadline budget.
+        **Fallback.** When the engine fails before the first token is
+        emitted and ``fallback=`` is configured, the fallback agent's
+        ``stream()`` takes over — same contract as :meth:`run`, with the
+        primary's failure threaded into the fallback's context.  Once
+        tokens have been yielded the error propagates instead (the
+        partial output cannot be retracted).
+
+        **Timeout.** ``self.timeout`` is the *total* deadline for the
+        stream — the same meaning it has in :meth:`run`.  Stall
+        detection between chunks is the engine's job
+        (``LLMEngine(stream_idle_timeout=...)``).
+
+        **Not applied in streaming** (use :meth:`run` when you need
+        them): ``verify=`` and ``output=`` validation — tokens are
+        emitted as they arrive, so there is no pre-delivery result to
+        judge or validate.
 
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
         env = self._to_envelope(task, images=images, audio=audio)
         env = self._inject_sources(env)
-        timeout = getattr(self, "timeout", None)
 
         # Apply input guard before the first token is emitted.  A blocked
         # task must never reach the provider even in streaming mode.
@@ -637,6 +727,63 @@ class Agent:
             if action.modified_text is not None:
                 env = env.model_copy(update={"task": action.modified_text, "payload": action.modified_text})
 
+        chunks: list[str] = []
+        try:
+            async for chunk in self._stream_engine(env):
+                yield chunk
+                chunks.append(chunk)
+        except (asyncio.CancelledError, TimeoutError):
+            raise
+        except Exception as exc:
+            # ``getattr`` keeps this safe for Agents built via ``__new__``
+            # (test helpers, custom subclasses) that haven't set fallback.
+            fallback = getattr(self, "fallback", None)
+            if chunks or fallback is None:
+                raise
+            # Primary engine failed before any token reached the consumer:
+            # hand over to the fallback's own stream() pipeline — same
+            # contract as run(), with the failure mode threaded into the
+            # fallback's context so it can adapt.
+            note = f"Previous attempt failed with {type(exc).__name__}: {exc}"
+            merged_context = f"{env.context}\n\n{note}" if env.context else note
+            fallback_env: Envelope[Any] = Envelope(
+                task=env.task,
+                context=merged_context,
+                images=env.images,
+                audio=env.audio,
+                payload=env.payload,
+            )
+            async for chunk in fallback.stream(fallback_env):
+                yield chunk
+            return  # the fallback ran its own guard / store pipeline
+
+        text = "".join(chunks)
+        if self.guard:
+            action = await self.guard.acheck_output(text)
+            if not action.allowed:
+                raise ValueError(action.message or "Output blocked by guard")
+
+        _store = getattr(self, "store", None)
+        if _store is not None and getattr(self, "name", None) and chunks:
+            from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+            _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, text)
+
+    async def _stream_engine(self, env: Envelope) -> AsyncGenerator[str, None]:
+        """Drive ``engine.stream`` with total-deadline timeout and cleanup.
+
+        ``self.timeout`` is enforced as a whole-stream deadline (matching
+        :meth:`run`'s total-run semantics).  The agent's identity is bound
+        around every generator resume so engine events are attributed to
+        this agent even when the engine object is shared.
+        """
+        from lazybridge.engines.base import bind_agent_name, unbind_agent_name
+
+        timeout = getattr(self, "timeout", None)
+        agent_name = str(getattr(self, "name", None) or "agent")
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+
         gen = self.engine.stream(
             env,
             tools=list(self._tool_map.values()),
@@ -644,20 +791,28 @@ class Agent:
             memory=self.memory,
             session=self.session,
         ).__aiter__()
-        chunks: list[str] = []
-        _completed = False
         try:
             while True:
+                # Bind/unbind inside each resume: set() and reset() must pair
+                # within one context, and generator finalisation can run in a
+                # different context than the resumes.
+                _name_token = bind_agent_name(agent_name)
                 try:
-                    if timeout is None:
+                    if deadline is None:
                         chunk = await gen.__anext__()
                     else:
-                        chunk = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
+                        remaining = deadline - loop.time()
+                        if remaining <= 0:
+                            raise TimeoutError(f"Agent.stream() exceeded timeout={timeout}s")
+                        try:
+                            chunk = await asyncio.wait_for(gen.__anext__(), timeout=remaining)
+                        except TimeoutError:
+                            raise TimeoutError(f"Agent.stream() exceeded timeout={timeout}s") from None
                 except StopAsyncIteration:
-                    _completed = True
                     return
+                finally:
+                    unbind_agent_name(_name_token)
                 yield chunk
-                chunks.append(chunk)
         finally:
             aclose = getattr(gen, "aclose", None)
             if aclose is not None:
@@ -678,12 +833,6 @@ class Agent:
                         f"stream() aclose raised {type(exc).__name__}: {exc}.",
                         stacklevel=2,
                     )
-            if _completed:
-                _store = getattr(self, "store", None)
-                if _store is not None and self.name and chunks:
-                    from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
-
-                    _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, "".join(chunks))
 
     # ------------------------------------------------------------------
     # Sync API

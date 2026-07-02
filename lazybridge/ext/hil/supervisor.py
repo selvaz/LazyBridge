@@ -49,6 +49,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -111,7 +112,7 @@ class SupervisorEngine:
             effective_tools.setdefault(t.name, t)
 
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "supervisor")
+        agent_name = resolve_agent_name(self, "supervisor")
         t_start = time.monotonic()
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)

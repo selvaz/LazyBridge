@@ -8,7 +8,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Shared-engine event misattribution.** An engine is a shareable object,
+  but `Agent.__init__` stamped `engine._agent_name = self.name` — so with
+  two Agents on one engine, *every* event and usage row was attributed to
+  whichever agent was constructed last, deterministically. The identity is
+  now bound per-invocation via a context variable
+  (`lazybridge.engines.base.bind_agent_name` / `resolve_agent_name`):
+  `Agent` binds its name around each `engine.run()` / `engine.stream()`
+  call and all engines (LLM, Plan, Replan, Supervisor, Human) resolve the
+  context-bound name first. The `_agent_name` attribute is kept as a
+  fallback for code that drives an engine directly.
+- **Structured output on the streaming path.** `LLMEngine._stream_turn`
+  rebuilt the `CompletionResponse` from stream chunks without ever reading
+  `chunk.parsed` / `chunk.validation_error` / `chunk.validated`, so any
+  streamed run with `output=Model` silently degraded to a raw string (and
+  burned the output-validation retries). The reconstructed response now
+  carries all three fields through.
+- **`Agent.stream()` pipeline parity with `run()`.** Streaming applied only
+  the *input* guard. Now: the **output guard** runs on the accumulated text
+  when the stream completes (a block raises `ValueError` and skips the
+  Store write — tokens already delivered cannot be retracted, but buffering
+  consumers can discard); the **fallback agent** takes over when the engine
+  fails before the first token (after tokens, the error propagates); and
+  `timeout=` is now a **total-stream deadline**, the same meaning it has in
+  `run()` (it was per-chunk, i.e. effectively unbounded — stall detection
+  between chunks remains `LLMEngine(stream_idle_timeout=)`). `verify=` and
+  `output=` validation remain run()-only and are documented as such.
+- **Executor retry classification.** The last-resort string scan in
+  `_is_retryable` could retry *permanent* client errors whose message
+  merely contained "timeout" / "connection" (e.g. a 400
+  `invalid 'timeout' parameter`). A structured 4xx status (other than
+  408/429) now short-circuits to non-retryable before the string scan.
+- **Memory records the answer actually returned.** When a
+  structured-output correction retry produced the accepted answer, memory
+  kept the first (rejected) draft — history diverged from the returned
+  Envelope. `Agent._validate_and_retry` now amends the last turn via the
+  new `Memory.amend_last(assistant)`.
+- **Cross-session sub-agent pinning is now visible.** A sub-agent that
+  inherited its session from one orchestrator and is then passed to a
+  second orchestrator with a *different* session stays pinned to the first
+  (unchanged — we never steal a session), but the second construction now
+  emits a `UserWarning` explaining where the child's events flow and how
+  to choose explicitly.
+
 ### Changed
+- **BREAKING — exhausted output validation is now an error, not a silent
+  success.** `Agent(output=Model)` used to return `ok=True` with the raw,
+  unvalidated *string* payload after `max_output_retries` failed correction
+  attempts — callers could not distinguish "validated" from "gave up", and
+  `result.payload.field` blew up downstream. The final envelope now carries
+  `error.type == "OutputValidationError"` (`ok=False`, `retryable=False`)
+  with the raw payload preserved on the envelope for inspection.
+  **Migration:** code that relied on receiving the unvalidated string on
+  `ok=True` should check for `error.type == "OutputValidationError"` and
+  read `result.payload` (still the raw model output) from the error
+  envelope.
 - **Deduplicated the encrypted-Store CAS equality check.**
   `EncryptedStoreAdapter.compare_and_swap` compared the decrypted
   plaintext against `expected` through a private `_plain_eq` that was a

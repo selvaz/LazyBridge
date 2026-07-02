@@ -337,6 +337,26 @@ class Memory:
                 parts.append(f"User: {t.user}\nAssistant: {t.assistant}")
             return "\n\n".join(parts)
 
+    def amend_last(self, assistant: str) -> None:
+        """Replace the assistant half of the most recent turn.
+
+        Used by ``Agent``'s structured-output retry loop: the engine
+        records the *first* response when it completes, but a correction
+        retry may produce the answer actually returned to the caller.
+        Amending keeps memory history consistent with the returned
+        Envelope instead of preserving the rejected draft.  No-op when
+        no turns are recorded (e.g. the last turn was already compressed
+        away).
+        """
+        with self._lock:
+            if self._turns:
+                last = self._turns[-1]
+                self._turns[-1] = _Turn(
+                    user=last.user,
+                    assistant=assistant,
+                    token_estimate=last.token_estimate,
+                )
+
     def clear(self) -> None:
         with self._lock:
             self._turns.clear()

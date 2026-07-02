@@ -21,6 +21,7 @@ from lazybridge.core.types import (
     StructuredOutputConfig,
     ToolCall,
 )
+from lazybridge.engines.base import resolve_agent_name
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -516,7 +517,7 @@ class LLMEngine:
     ) -> Envelope[Any]:
         run_id = str(uuid.uuid4())
         t_start = time.monotonic()
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
@@ -710,7 +711,7 @@ class LLMEngine:
 
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         executor = self._make_executor()
 
@@ -1017,6 +1018,9 @@ class LLMEngine:
         stop_reason = "end_turn"
         usage = UsageStats()
         model_out: str | None = None
+        parsed: Any = None
+        validation_error: str | None = None
+        validated: bool | None = None
 
         async for chunk in self._idle_guarded_stream(executor.astream(req)):
             if chunk.delta:
@@ -1028,6 +1032,16 @@ class LLMEngine:
                 stop_reason = chunk.stop_reason
             if chunk.usage:
                 usage = chunk.usage
+            # Structured output arrives on the final chunk for providers
+            # that validate server/stream-side.  Without carrying it over,
+            # the streaming path always returned ``parsed=None`` and
+            # ``output=Model`` silently degraded to a raw string.
+            if getattr(chunk, "parsed", None) is not None:
+                parsed = chunk.parsed
+            if getattr(chunk, "validation_error", None) is not None:
+                validation_error = chunk.validation_error
+            if getattr(chunk, "validated", None) is not None:
+                validated = chunk.validated
             if chunk.is_final:
                 model_out = getattr(chunk, "model", None)
 
@@ -1037,6 +1051,9 @@ class LLMEngine:
             stop_reason=stop_reason,
             usage=usage,
             model=model_out,
+            parsed=parsed,
+            validation_error=validation_error,
+            validated=validated,
         )
 
     async def _idle_guarded_stream(self, agen: Any) -> AsyncGenerator[Any, None]:
@@ -1193,7 +1210,7 @@ class LLMEngine:
         This means token output is continuous across tool-call boundaries.
         """
         run_id = str(uuid.uuid4())
-        agent_name = getattr(self, "_agent_name", "agent")
+        agent_name = resolve_agent_name(self, "agent")
 
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
