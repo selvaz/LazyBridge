@@ -620,33 +620,20 @@ class LLMEngine:
         class-level — they read the model name and consult provider
         capability tables.  Going through ``Executor._resolve_provider``
         would needlessly construct an SDK client (and demand an API key)
-        just to read static metadata.
+        just to read static metadata.  Resolution goes through the shared
+        registry (``providers._registry``) so this map can never drift
+        from the Executor's again; unknown/absent keys keep the historic
+        Anthropic default (capability checks must not crash).
         """
-        from lazybridge.core.providers.anthropic import AnthropicProvider
-        from lazybridge.core.providers.deepseek import DeepSeekProvider
-        from lazybridge.core.providers.google import GoogleProvider
-        from lazybridge.core.providers.lmstudio import LMStudioProvider
-        from lazybridge.core.providers.openai import OpenAIProvider
+        from lazybridge.core.providers._registry import provider_class
 
-        registry = {
-            "anthropic": AnthropicProvider,
-            "claude": AnthropicProvider,
-            "openai": OpenAIProvider,
-            "gpt": OpenAIProvider,
-            "google": GoogleProvider,
-            "gemini": GoogleProvider,
-            "deepseek": DeepSeekProvider,
-            "lmstudio": LMStudioProvider,
-            "lm-studio": LMStudioProvider,
-            "lm_studio": LMStudioProvider,
-            "local": LMStudioProvider,
-        }
-        key = self.provider.lower().strip() if isinstance(self.provider, str) else "anthropic"
-        if key == "litellm":
-            from lazybridge.core.providers.litellm import LiteLLMProvider
+        key = self.provider if isinstance(self.provider, str) else "anthropic"
+        cls = provider_class(key)
+        if cls is None:
+            from lazybridge.core.providers.anthropic import AnthropicProvider
 
-            return LiteLLMProvider
-        return registry.get(key, AnthropicProvider)
+            return AnthropicProvider
+        return cls
 
     def _filter_by_vision(self, images: list[Any]) -> list[Any]:
         if not images:

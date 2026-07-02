@@ -101,6 +101,28 @@ def _detect_audio_mime(data: bytes) -> str | None:
     return None
 
 
+def _parse_data_uri(data_uri: str, *, default_mime: str) -> tuple[str, str]:
+    """Parse a ``data:<mime>[;params];base64,<payload>`` URI.
+
+    Returns ``(media_type, base64_payload)``.  Shared by
+    ``ImageContent.from_data_uri`` and ``AudioContent.from_data_uri`` —
+    the two used to carry byte-identical copies of this logic.
+    """
+    if not data_uri.startswith("data:"):
+        raise ValueError("expected a data: URI")
+    header, _, body = data_uri[5:].partition(",")
+    if not body:
+        raise ValueError("malformed data URI: missing payload")
+    media_type, _, params = header.partition(";")
+    media_type = media_type or default_mime
+    # ``base64`` may not be the first parameter (e.g.
+    # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
+    # otherwise the payload gets re-encoded (double base64).
+    if any(p.strip() == "base64" for p in params.split(";")):
+        return media_type, body
+    return media_type, base64.b64encode(body.encode()).decode("ascii")
+
+
 class NativeTool(StrEnum):
     """Provider-native server-side tools (run on provider infrastructure)."""
 
@@ -165,19 +187,8 @@ class ImageContent:
     @classmethod
     def from_data_uri(cls, data_uri: str) -> ImageContent:
         """Parse ``data:image/png;base64,<...>`` style URIs."""
-        if not data_uri.startswith("data:"):
-            raise ValueError("expected a data: URI")
-        header, _, body = data_uri[5:].partition(",")
-        if not body:
-            raise ValueError("malformed data URI: missing payload")
-        media_type, _, params = header.partition(";")
-        media_type = media_type or "image/jpeg"
-        # ``base64`` may not be the first parameter (e.g.
-        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
-        # otherwise the payload gets re-encoded (double base64).
-        if any(p.strip() == "base64" for p in params.split(";")):
-            return cls(base64_data=body, media_type=media_type)
-        return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
+        media_type, b64 = _parse_data_uri(data_uri, default_mime="image/jpeg")
+        return cls(base64_data=b64, media_type=media_type)
 
 
 @dataclass
@@ -229,19 +240,8 @@ class AudioContent:
     @classmethod
     def from_data_uri(cls, data_uri: str) -> AudioContent:
         """Parse ``data:audio/flac;base64,<...>`` style URIs."""
-        if not data_uri.startswith("data:"):
-            raise ValueError("expected a data: URI")
-        header, _, body = data_uri[5:].partition(",")
-        if not body:
-            raise ValueError("malformed data URI: missing payload")
-        media_type, _, params = header.partition(";")
-        media_type = media_type or "audio/wav"
-        # ``base64`` may not be the first parameter (e.g.
-        # ``data:image/png;charset=utf-8;base64,...``) — check all of them,
-        # otherwise the payload gets re-encoded (double base64).
-        if any(p.strip() == "base64" for p in params.split(";")):
-            return cls(base64_data=body, media_type=media_type)
-        return cls(base64_data=base64.b64encode(body.encode()).decode("ascii"), media_type=media_type)
+        media_type, b64 = _parse_data_uri(data_uri, default_mime="audio/wav")
+        return cls(base64_data=b64, media_type=media_type)
 
 
 @dataclass

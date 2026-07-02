@@ -118,6 +118,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   emits a `UserWarning` explaining where the child's events flow and how
   to choose explicitly.
 
+### Refactoring (no behaviour change)
+- **`_plan.py` split into focused submodules.** The 1,700-line runtime
+  monolith is now `_plan.py` (scheduler/orchestration, ~1,180 lines) plus
+  `_checkpoint.py` (the CAS checkpoint state machine, as
+  `CheckpointMixin`), `_resolve.py` (sentinel resolution + band
+  aggregation, `ResolveMixin`), and `_fanout.py` (`run_many` /
+  `arun_many`, `FanoutMixin`). `Plan` inherits all three, so every method
+  keeps its original name and signature. The 170-line inline
+  parallel-band block in `_run_impl` is now the `_run_parallel_band`
+  method with an explicit state contract.
+- **One provider registry.** The provider-name → class map lived in two
+  hand-maintained copies (`Executor._resolve_provider` and
+  `LLMEngine._provider_class`) that had already drifted on the `litellm`
+  special case. Both now resolve through
+  `lazybridge.core.providers._registry.provider_class` (lazy per-provider
+  import preserved).
+- **`Executor` retry loops deduplicated** into a shared
+  `_next_retry_delay` (classification + backoff + warning), keeping sync
+  and async semantics in lock-step.
+- **`_parse_data_uri` shared** by `ImageContent.from_data_uri` and
+  `AudioContent.from_data_uri` (byte-identical copies collapsed).
+- **`_safe_register_agent` / `_safe_register_tool_edge`** collapsed onto
+  a single warn-on-failure `_safe_graph_call` helper.
+
 ### Documentation
 - **ReplanEngine checkpoint granularity made explicit.** Checkpoints are
   per-ROUND, not per-task: a crash mid-round re-executes the entire round

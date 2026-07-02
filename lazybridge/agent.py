@@ -1185,23 +1185,29 @@ class Agent:
         )
 
 
-def _safe_register_agent(session: Any, agent: Agent) -> None:
-    """Register ``agent`` on ``session.graph`` if possible, warning on failure.
+def _safe_graph_call(session: Any, method: str, described_as: str, *args: Any, **kwargs: Any) -> None:
+    """Invoke a graph-registration method on ``session``, warning on failure.
 
-    A buggy ``register_agent`` on a custom Session subclass surfaces as
-    a ``UserWarning`` rather than silently dropping graph entries.
+    A buggy registration hook on a custom Session subclass surfaces as a
+    ``UserWarning`` rather than silently dropping graph entries.  No-op
+    when the session is ``None`` or lacks the method.  ``described_as``
+    renders the call in the warning message.
     """
-    if session is None or not hasattr(session, "register_agent"):
+    if session is None or not hasattr(session, method):
         return
     try:
-        session.register_agent(agent)
+        getattr(session, method)(*args, **kwargs)
     except Exception as exc:
         import warnings
 
         warnings.warn(
-            f"session.register_agent({getattr(agent, 'name', '?')!r}) raised {type(exc).__name__}: {exc}",
-            stacklevel=2,
+            f"session.{method}({described_as}) raised {type(exc).__name__}: {exc}",
+            stacklevel=3,
         )
+
+
+def _safe_register_agent(session: Any, agent: Agent) -> None:
+    _safe_graph_call(session, "register_agent", repr(getattr(agent, "name", "?")), agent)
 
 
 def _safe_register_tool_edge(
@@ -1211,20 +1217,14 @@ def _safe_register_tool_edge(
     *,
     label: str,
 ) -> None:
-    """Register a graph edge between two agents, warning on failure."""
-    if session is None or not hasattr(session, "register_tool_edge"):
-        return
-    try:
-        session.register_tool_edge(outer, inner, label=label)
-    except Exception as exc:
-        import warnings
-
-        warnings.warn(
-            f"session.register_tool_edge({getattr(outer, 'name', '?')!r}→"
-            f"{getattr(inner, 'name', '?')!r}) raised "
-            f"{type(exc).__name__}: {exc}",
-            stacklevel=2,
-        )
+    _safe_graph_call(
+        session,
+        "register_tool_edge",
+        f"{getattr(outer, 'name', '?')!r}→{getattr(inner, 'name', '?')!r}",
+        outer,
+        inner,
+        label=label,
+    )
 
 
 def _feedback_env(original: Envelope, feedback: str) -> Envelope:

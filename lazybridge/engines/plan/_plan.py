@@ -20,7 +20,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
 from lazybridge.engines.base import resolve_agent_name
+from lazybridge.engines.plan._checkpoint import _WRITE_STAMP_PREFIX, CheckpointMixin
 from lazybridge.engines.plan._compiler import PlanCompiler
+from lazybridge.engines.plan._fanout import FanoutMixin
+from lazybridge.engines.plan._resolve import ResolveMixin
 from lazybridge.engines.plan._serialisation import (
     _first_arg_kwargs,
     _step_from_dict,
@@ -35,17 +38,6 @@ from lazybridge.engines.plan._types import (
     StepResult,
 )
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
-from lazybridge.sentinels import (
-    _AGENT_OUTPUT_KEY_PREFIX,
-    Sentinel,
-    _FromAgent,
-    _FromMemory,
-    _FromParallel,
-    _FromParallelAll,
-    _FromPrev,
-    _FromStart,
-    _FromStep,
-)
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
 
@@ -55,15 +47,8 @@ if TYPE_CHECKING:
     from lazybridge.store import Store
     from lazybridge.tools import Tool
 
-#: ``agent_id`` stamp prefix on every durable ``Step(writes=...)`` Store
-#: write.  The full stamp is ``f"{_WRITE_STAMP_PREFIX}{run_uid}"`` where
-#: ``run_uid`` is the same value persisted in the checkpoint snapshot —
-#: which is what lets a sidecar consumer detect the crash-window staleness
-#: documented in ``Plan.__init__`` (see ``Plan.store_write_is_current``).
-_WRITE_STAMP_PREFIX = "plan-run:"
 
-
-class Plan:
+class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
     """Structured multi-step execution engine.
 
     Steps run sequentially by default.  Routing is **explicit** at the
@@ -253,333 +238,6 @@ class Plan:
     # Checkpoint helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def store_write_is_current(store: Store, *, checkpoint_key: str, key: str) -> bool:
-        """Can a sidecar consumer trust ``store[key]`` right now?
-
-        Closes the documented crash-window blind spot: each step's
-        checkpoint is written *before* its durable ``Step(writes=...)``
-        Store write, so after a crash in that gap the checkpoint claims
-        the step completed while ``store[key]`` still holds a stale value
-        from an earlier run (or nothing).  Every plan Store write is
-        therefore stamped with the owning run's ``run_uid``; this helper
-        compares that stamp against the checkpoint's recorded ``run_uid``.
-
-        Returns ``True`` only when ``key`` exists and was written by the
-        run the checkpoint at ``checkpoint_key`` describes.  ``False``
-        means "reconcile against the checkpoint's ``kv`` snapshot instead"
-        (the value there is always consistent with ``completed_steps``).
-
-        With ``on_concurrent="fork"``, pass the *effective* key
-        (``f"{checkpoint_key}:{run_uid}"``) the run actually used.
-        """
-        snap = store.read(checkpoint_key)
-        if not isinstance(snap, dict) or not snap.get("run_uid"):
-            return False
-        entry = store.read_entry(key)
-        if entry is None:
-            return False
-        return entry.agent_id == _WRITE_STAMP_PREFIX + str(snap["run_uid"])
-
-    def _checkpoint_store(self) -> Store | None:
-        return self.store if self.checkpoint_key else None
-
-    def _effective_key(self, run_uid: str) -> str | None:
-        """Return the store key actually used for this run's checkpoint.
-
-        * ``on_concurrent="fail"`` → the user-supplied ``checkpoint_key``
-          (single-writer semantics; two concurrent runs collide → CAS
-          raises :class:`ConcurrentPlanRunError`).
-        * ``on_concurrent="fork"`` → ``f"{checkpoint_key}:{run_uid}"`` so
-          every ``.run()`` lives in its own namespace.
-        """
-        if self.checkpoint_key is None:
-            return None
-        if self.on_concurrent == "fork":
-            return f"{self.checkpoint_key}:{run_uid}"
-        return self.checkpoint_key
-
-    #: Checkpoint schema version.  Bumped when the on-disk layout
-    #: changes in a non-additive way.  v1 = no ``history`` key (pre-W1.3);
-    #: v2 = adds ``history`` (serialised StepResult list) so resume can
-    #: re-aggregate ``from_parallel_all`` and nested-cost rollup against
-    #: completed upstream steps.  Older checkpoints are read as v1 with
-    #: an empty in-memory ``history`` — degrades to pre-W1.3 behaviour
-    #: (the parallel band aggregator falls back to ``start_env``) without
-    #: crashing.
-    CHECKPOINT_VERSION: int = 2
-
-    @staticmethod
-    def _history_to_payload(history: list[StepResult]) -> list[dict[str, Any]]:
-        """JSON-friendly serialisation of the step-result history.
-
-        ``Envelope`` is a Pydantic model; ``model_dump(mode="json")``
-        produces a JSON-compatible dict.  Non-Pydantic payloads fall
-        through to ``str`` via Pydantic's default serialisation (best
-        effort).  On reload we accept whatever shape comes back —
-        ``Envelope.text()`` is JSON-aware so ``from_parallel_all``
-        renders correctly regardless of the original payload type.
-        """
-        out: list[dict[str, Any]] = []
-        for sr in history:
-            try:
-                env_dump = sr.envelope.model_dump(mode="json")
-            except Exception:
-                # Best-effort: a payload that isn't Pydantic/JSON-clean
-                # falls back to its string form; the envelope's
-                # metadata, task, and error survive.
-                env_dump = {
-                    "task": sr.envelope.task,
-                    "context": sr.envelope.context,
-                    "payload": str(sr.envelope.payload) if sr.envelope.payload is not None else None,
-                    "metadata": sr.envelope.metadata.model_dump(mode="json"),
-                    "error": sr.envelope.error.model_dump(mode="json") if sr.envelope.error else None,
-                }
-            out.append({"step_name": sr.step_name, "envelope": env_dump, "ts": sr.ts})
-        return out
-
-    @staticmethod
-    def _payload_to_history(data: Any) -> list[StepResult]:
-        """Inverse of :meth:`_history_to_payload`.  Tolerant of missing
-        / malformed entries — drops them silently rather than failing
-        the whole resume.
-        """
-        if not isinstance(data, list):
-            return []
-        out: list[StepResult] = []
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            env_data = item.get("envelope")
-            if not isinstance(env_data, dict):
-                continue
-            try:
-                env: Envelope[Any] = Envelope.model_validate(env_data)
-            except Exception:
-                continue
-            out.append(
-                StepResult(
-                    step_name=str(item.get("step_name") or ""),
-                    envelope=env,
-                    ts=float(item.get("ts") or 0.0),
-                )
-            )
-        return out
-
-    def _save_checkpoint(
-        self,
-        *,
-        effective_key: str | None,
-        last_snapshot: dict[str, Any] | None,
-        next_step: str | None,
-        kv: dict[str, Any],
-        completed: list[str],
-        status: str,
-        run_uid: str,
-        history_payload: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any] | None:
-        """CAS-aware checkpoint write.  Returns the snapshot written, or
-        ``None`` when no checkpoint store is configured.
-
-        Each call executes ``compare_and_swap(checkpoint_key, last_snapshot,
-        new_snapshot)`` so two concurrent Plan runs sharing a key
-        deterministically converge: the first writer wins, the second
-        raises :class:`ConcurrentPlanRunError` instead of silently
-        overwriting.  ``last_snapshot`` is the value we previously wrote
-        (or read via :meth:`_claim_checkpoint`) — threading it through
-        avoids a read-modify-write window.
-
-        ``history_payload`` is the *pre-serialised* step-result history
-        (see :meth:`_history_to_payload`), maintained incrementally by
-        ``_run_impl`` as steps complete.  Taking the serialised form —
-        rather than re-dumping the whole ``list[StepResult]`` on every
-        save — keeps per-step checkpoint cost from growing quadratically
-        with plan length.  Persisting it lets a resumed run re-aggregate
-        ``from_parallel_all`` and nested-cost rollup against upstream
-        steps that completed before the crash.
-        """
-        store = self._checkpoint_store()
-        if store is None or effective_key is None:
-            return None
-        # Snapshot the mutable buckets at write time.  Without these
-        # copies, the returned ``new_snap`` would share its ``kv`` /
-        # ``completed_steps`` references with the live mutating values
-        # in ``Plan.run``.  The next iteration's mutation (``kv[step
-        # .writes] = ...``) would change ``last_snap`` retroactively;
-        # the subsequent CAS would compare the mutated last_snap to
-        # the previously-written-to-disk JSON and report a false
-        # collision (``ConcurrentPlanRunError`` against our own
-        # run_uid).  The fix is mechanical — break the aliasing.
-        new_snap: dict[str, Any] = {
-            "next_step": next_step,
-            "kv": dict(kv),
-            "completed_steps": list(completed),
-            "status": status,
-            "run_uid": run_uid,
-            "checkpoint_version": self.CHECKPOINT_VERSION,
-            "history": list(history_payload) if history_payload else [],
-        }
-        if not store.compare_and_swap(effective_key, last_snapshot, new_snap):
-            raise ConcurrentPlanRunError(
-                f"Checkpoint {effective_key!r} was modified by another "
-                f"writer mid-run (our run_uid={run_uid!r}).  Two Plan runs "
-                f"appear to share this key — use a unique checkpoint_key "
-                f"per concurrent run, or pass on_concurrent='fork'."
-            )
-        return new_snap
-
-    def _terminal_checkpoint(
-        self,
-        *,
-        effective_key: str | None,
-        last_snapshot: dict[str, Any] | None,
-        next_step: str | None,
-        kv: dict[str, Any],
-        completed: list[str],
-        status: str,
-        run_uid: str,
-        history_payload: list[dict[str, Any]] | None,
-    ) -> None:
-        """Best-effort terminal checkpoint on a non-local exit.
-
-        Used when the run is unwound by something other than a normal
-        return — cancellation (a ``stream()`` consumer disconnecting),
-        a ``conclude()`` signal, or an unexpected exception.  Without
-        this, the key stays ``claimed``/``running`` under a dead
-        ``run_uid`` and every subsequent ``on_concurrent="fail"`` run
-        raises :class:`ConcurrentPlanRunError` until the key is
-        manually cleared.  Failures here are swallowed: the exit that
-        triggered us must propagate unmasked, and a CAS loss simply
-        means another run already took over the key.
-        """
-        try:
-            self._save_checkpoint(
-                effective_key=effective_key,
-                last_snapshot=last_snapshot,
-                next_step=next_step,
-                kv=kv,
-                completed=completed,
-                status=status,
-                run_uid=run_uid,
-                history_payload=history_payload,
-            )
-        except Exception:
-            pass
-
-    def _load_checkpoint(self, effective_key: str | None) -> dict[str, Any] | None:
-        store = self._checkpoint_store()
-        if store is None or effective_key is None or not self.resume:
-            return None
-        saved = store.read(effective_key)
-        if not isinstance(saved, dict):
-            return None
-        return saved
-
-    def _claim_checkpoint(
-        self,
-        effective_key: str | None,
-        run_uid: str,
-    ) -> dict[str, Any] | None:
-        """Acquire ownership of ``checkpoint_key`` for this run.
-
-        * Fresh run, key absent or a prior ``status=="done"`` checkpoint
-          → CAS-write a ``status="claimed"`` placeholder up-front so
-          two concurrent fresh runs collide here, before either has
-          executed any step.
-        * ``resume=True`` and an in-flight checkpoint exists → adopt it,
-          stamping our ``run_uid`` via CAS so subsequent saves compare
-          against us rather than the crashed run.
-        * In-flight checkpoint and ``resume=False`` → raise
-          :class:`ConcurrentPlanRunError`.
-        """
-        store = self._checkpoint_store()
-        if store is None or effective_key is None:
-            return None
-        existing = store.read(effective_key)
-        # Build a "claimed" placeholder snapshot.  next_step / kv /
-        # completed_steps are intentionally empty — the first real
-        # ``_save_checkpoint`` after the first step will overwrite via
-        # CAS that compares against this placeholder.
-        first_step = self.steps[0].name if self.steps else None
-        claimed_snap: dict[str, Any] = {
-            "next_step": first_step,
-            "kv": {},
-            "completed_steps": [],
-            "status": "claimed",
-            "run_uid": run_uid,
-        }
-        if not isinstance(existing, dict):
-            # Fresh run — claim via CAS from "key must not exist" (None).
-            # A second concurrent fresh run loses this CAS and fails fast.
-            if not store.compare_and_swap(effective_key, None, claimed_snap):
-                raise ConcurrentPlanRunError(
-                    f"Lost race claiming {effective_key!r} — another fresh "
-                    f"run wrote the key between our read and claim.  Retry "
-                    f"with a unique checkpoint_key, or pass "
-                    f"on_concurrent='fork'."
-                )
-            return claimed_snap
-        status = existing.get("status")
-        if status == "done":
-            # Prior run finished cleanly.  Two sub-cases:
-            #  * resume=True → DO NOT claim; return the done snap so the
-            #    caller short-circuits to the cached ``kv`` (this is the
-            #    documented "resume after done" no-op).
-            #  * resume=False → claim by CAS-overwriting the done snap
-            #    so concurrent fresh re-runs serialise on the same key.
-            if self.resume:
-                return existing
-            if not store.compare_and_swap(effective_key, existing, claimed_snap):
-                raise ConcurrentPlanRunError(
-                    f"Lost race claiming completed key {effective_key!r} — "
-                    f"another run moved past 'done' before we could claim. "
-                    f"Retry."
-                )
-            return claimed_snap
-        if status == "cancelled" and not self.resume:
-            # Terminal state left by a prior run that was cancelled
-            # mid-flight (e.g. its ``stream()`` consumer disconnected).
-            # Unlike "claimed"/"running" there is no live owner, so a
-            # fresh run claims over it; ``resume=True`` falls through to
-            # the adopt path below and continues from the recorded
-            # ``next_step``.
-            if not store.compare_and_swap(effective_key, existing, claimed_snap):
-                raise ConcurrentPlanRunError(
-                    f"Lost race claiming cancelled key {effective_key!r} — "
-                    f"another run claimed it between our read and CAS.  Retry."
-                )
-            return claimed_snap
-        if status is None:
-            # Key holds a non-plan value (user mis-configured the store).
-            # Don't try to CAS over arbitrary data — surface clearly.
-            raise ConcurrentPlanRunError(
-                f"Checkpoint key {effective_key!r} holds a value with no "
-                f"'status' field; refusing to overwrite.  Use a different "
-                f"checkpoint_key or a dedicated Store."
-            )
-        if not self.resume:
-            hint = (
-                "Pass on_concurrent='fork' to give each run its own key, "
-                "or use a unique checkpoint_key per concurrent run."
-                if self.on_concurrent == "fail"
-                else "This key should not be shared under fork mode — "
-                "investigate the code path that produced the collision."
-            )
-            raise ConcurrentPlanRunError(
-                f"Checkpoint {effective_key!r} is already held by "
-                f"run_uid={existing.get('run_uid')!r} (status={status!r}).  "
-                f"{hint}"
-            )
-        # Adopt: CAS from the existing state to the same shape with our
-        # run_uid stamped in, so concurrent saves compare against us.
-        adopted = {**existing, "run_uid": run_uid}
-        if not store.compare_and_swap(effective_key, existing, adopted):
-            raise ConcurrentPlanRunError(
-                f"Lost race claiming {effective_key!r} for resume — "
-                f"another run stamped it between our read and claim.  Retry."
-            )
-        return adopted
-
     async def run(
         self,
         env: Envelope[Any],
@@ -741,193 +399,29 @@ class Plan:
                 if not step:
                     break
 
-                # ──────────────────────────────────────────────────────────────
-                # Parallel branch dispatch
-                # ──────────────────────────────────────────────────────────────
-                # When the current step is ``parallel=True``, collect every
-                # consecutive ``parallel=True`` step in the DECLARED order and
-                # run them concurrently via ``asyncio.gather``.  Each branch
-                # sees the SAME ``prev_env`` / ``history`` / ``kv`` snapshot —
-                # a branch cannot observe its siblings' effects.  State updates
-                # apply sequentially after the gather so ``writes`` are
-                # deterministic.  Routing (``routes`` / ``routes_by``) is
-                # ignored on parallel branches — control flow after the group
-                # falls through to the
-                # next declared step in linear order (the conventional "join").
+                # Parallel branch dispatch — see _run_parallel_band.
                 if step.parallel:
-                    try:
-                        idx = all_step_names.index(step.name)
-                    except ValueError:
-                        idx = -1
-                    group = [step]
-                    while idx + 1 < len(all_step_names):
-                        idx += 1
-                        nxt = step_map.get(all_step_names[idx] or "")
-                        if nxt and nxt.parallel:
-                            group.append(nxt)
-                        else:
-                            idx -= 1  # don't consume the non-parallel step
-                            break
-
-                    # Each branch gets an isolated snapshot of history/kv.
-                    hist_snap = list(history)
-                    kv_snap = dict(kv)
-                    # Streaming: unbind the ambient token sink around the band —
-                    # gather's tasks snapshot the suppressed context, so
-                    # concurrent branches cannot interleave tokens (see
-                    # lazybridge/core/streaming.py).
-                    _sink_suppress = suppress_ambient_token_sink()
-                    try:
-                        raw = await asyncio.gather(
-                            *[
-                                self._execute_one(
-                                    s,
-                                    prev_env,
-                                    start_env,
-                                    hist_snap,
-                                    kv_snap,
-                                    tool_map=tool_map,
-                                    session=session,
-                                    run_id=run_id,
-                                    branch_id=s.name,
-                                    agent_name=agent_name,
-                                )
-                                for s in group
-                            ],
-                            return_exceptions=True,
-                        )
-                    finally:
-                        restore_ambient_token_sink(_sink_suppress)
-
-                    # Atomicity: scan ALL branches for failure first.  If any
-                    # branch errored we return WITHOUT applying any writes to
-                    # ``kv`` / ``effective_store`` / ``history`` / ``completed``
-                    # — so a later resume re-runs the whole band cleanly
-                    # instead of partially-double-applying side-effects from
-                    # siblings that succeeded earlier in the iteration order.
-                    # Cooperative pause: any branch raising PlanPaused halts
-                    # the whole band atomically.  Same atomicity as failure —
-                    # no writes from succeeded siblings are applied; resume
-                    # re-runs the whole band cleanly.
-                    # A ``conclude`` from any branch ends the whole task: re-raise
-                    # so it unwinds the plan to the top-level caller (the band's
-                    # other branch results are discarded), the same non-local exit
-                    # sequential steps get.
-                    for r in raw:
-                        if isinstance(r, ConcludeSignal):
-                            raise r
-
-                    paused_branch: tuple[Step, PlanPaused] | None = None
-                    for _s, r in zip(group, raw):
-                        if isinstance(r, PlanPaused):
-                            paused_branch = (_s, r)
-                            break
-                    if paused_branch is not None:
-                        last_snap = self._save_checkpoint(
-                            effective_key=effective_key,
-                            last_snapshot=last_snap,
-                            next_step=group[0].name,  # whole band re-runs on resume
-                            kv=kv,
-                            completed=completed,
-                            status="paused",
-                            run_uid=run_uid,
-                            history_payload=history_payload,
-                        )
-                        paused_env: Envelope[Any] = Envelope(
-                            task=prev_env.task,
-                            context=prev_env.context,
-                            payload=prev_env.payload,
-                            metadata=prev_env.metadata,
-                            error=ErrorInfo(
-                                type="PlanPaused",
-                                message=(
-                                    f"Plan paused at parallel step {paused_branch[0].name!r}: {paused_branch[1].message}"
-                                ),
-                                retryable=True,
-                            ),
-                        )
-                        return self._aggregate_nested_metadata(paused_env, history)
-
-                    first_failure_env: Envelope[Any] | None = None
-                    for _s, r in zip(group, raw):
-                        if isinstance(r, BaseException):
-                            first_failure_env = Envelope.error_envelope(r)
-                            break
-                        if r.error is not None:
-                            first_failure_env = r
-                            break
-                    if first_failure_env is not None:
-                        # Point the checkpoint at the band's FIRST step, not the
-                        # failing step.  On resume the whole band must re-run so
-                        # all siblings produce fresh writes; resuming mid-band
-                        # would silently skip earlier siblings and leave kv stale.
-                        last_snap = self._save_checkpoint(
-                            effective_key=effective_key,
-                            last_snapshot=last_snap,
-                            next_step=group[0].name,
-                            kv=kv,
-                            completed=completed,
-                            status="failed",
-                            run_uid=run_uid,
-                            history_payload=history_payload,
-                        )
-                        return self._aggregate_nested_metadata(first_failure_env, history)
-
-                    # All branches succeeded — collect results, update in-memory kv,
-                    # checkpoint FIRST, then flush to the durable store.  This ordering
-                    # ensures that a crash between the checkpoint and the store.write()
-                    # does NOT replay the step on resume (the checkpoint already records
-                    # next_step as the step after this band), so no double-write occurs.
-                    #
-                    # Trade-off: the inverse failure mode is a *lost durable write* —
-                    # if we crash between checkpoint and store.write, the resumed run
-                    # advances past the band and never retries the durable write.
-                    # The values still live in the checkpoint's serialised ``kv``, so
-                    # Plan replay reads them correctly via ``_load_checkpoint``; only
-                    # sidecar consumers reading the Store directly would observe the
-                    # gap.  See ``Plan.run`` doc above for the full contract.
-                    last_ok: Envelope[Any] | None = None
-                    for s, r in zip(group, raw):
-                        step_name = s.name or ""
-                        # Type-narrow: failure-scan above already returned on
-                        # BaseException / r.error; remaining ``r`` are Envelopes.
-                        assert isinstance(r, Envelope)
-                        if s.writes and r.payload is not None:
-                            kv[s.writes] = r.payload  # in-memory; goes into checkpoint below
-                        sr = StepResult(step_name=step_name, envelope=r)
-                        history.append(sr)
-                        history_payload.extend(self._history_to_payload([sr]))
-                        completed.append(step_name)
-                        last_ok = r
-
-                    # Advance past the whole parallel group.  Routing
-                    # primitives (``routes`` / ``routes_by``) are NOT
-                    # consulted on parallel branches — control flow after
-                    # a band always falls through linearly.
-                    current_name = all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
-                    prev_env = last_ok or prev_env
-                    last_snap = self._save_checkpoint(
-                        effective_key=effective_key,
-                        last_snapshot=last_snap,
-                        next_step=current_name,
+                    terminal_env, current_name, prev_env, last_snap = await self._run_parallel_band(
+                        step,
+                        all_step_names=all_step_names,
+                        step_map=step_map,
+                        prev_env=prev_env,
+                        start_env=start_env,
+                        history=history,
+                        history_payload=history_payload,
                         kv=kv,
                         completed=completed,
-                        status="running" if current_name else "done",
+                        tool_map=tool_map,
+                        session=session,
+                        run_id=run_id,
+                        agent_name=agent_name,
+                        effective_key=effective_key,
+                        effective_store=effective_store,
+                        last_snap=last_snap,
                         run_uid=run_uid,
-                        history_payload=history_payload,
                     )
-                    # Durable store writes AFTER checkpoint — crash here is safe because
-                    # the checkpoint already points to the next step.
-                    if effective_store:
-                        for s, r in zip(group, raw):
-                            # Same narrowing as the loop at line 706: the
-                            # failure scan above already returned on
-                            # BaseException, so every remaining ``r`` is an
-                            # Envelope.  Repeat the assert to keep mypy happy
-                            # in this scope.
-                            assert isinstance(r, Envelope)
-                            if s.writes and r.payload is not None:
-                                effective_store.write(s.writes, r.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
+                    if terminal_env is not None:
+                        return terminal_env
                     continue
 
                 # ──────────────────────────────────────────────────────────────
@@ -1096,6 +590,219 @@ class Plan:
 
         return self._aggregate_nested_metadata(prev_env, history)
 
+    async def _run_parallel_band(
+        self,
+        step: Step,
+        *,
+        all_step_names: list[str | None],
+        step_map: dict[str, Step],
+        prev_env: Envelope[Any],
+        start_env: Envelope[Any],
+        history: list[StepResult],
+        history_payload: list[dict[str, Any]],
+        kv: dict[str, Any],
+        completed: list[str],
+        tool_map: dict[str, Tool],
+        session: Session | None,
+        run_id: str,
+        agent_name: str,
+        effective_key: str | None,
+        effective_store: Store | None,
+        last_snap: dict[str, Any] | None,
+        run_uid: str,
+    ) -> tuple[Envelope[Any] | None, str | None, Envelope[Any], dict[str, Any] | None]:
+        """Dispatch one contiguous ``parallel=True`` band and apply its state.
+
+        Collects every consecutive ``parallel=True`` step from ``step`` in
+        DECLARED order and runs them concurrently via ``asyncio.gather``.
+        Each branch sees the SAME ``prev_env`` / ``history`` / ``kv``
+        snapshot — a branch cannot observe its siblings' effects.  State
+        updates apply sequentially after the gather so ``writes`` are
+        deterministic.  Routing (``routes`` / ``routes_by``) is ignored on
+        parallel branches — control flow after the band falls through to
+        the next declared step in linear order (the conventional "join").
+
+        Mutates ``history`` / ``history_payload`` / ``kv`` / ``completed``
+        in place (all-success path only — atomicity on failure/pause).
+        Returns ``(terminal_env, next_name, prev_env, last_snap)``:
+        ``terminal_env`` is non-``None`` when the band paused or failed
+        (the caller returns it as the run result); otherwise the loop
+        continues at ``next_name`` with the updated ``prev_env`` /
+        ``last_snap``.  A ``ConcludeSignal`` from any branch propagates.
+        """
+        try:
+            idx = all_step_names.index(step.name)
+        except ValueError:
+            idx = -1
+        group = [step]
+        while idx + 1 < len(all_step_names):
+            idx += 1
+            nxt = step_map.get(all_step_names[idx] or "")
+            if nxt and nxt.parallel:
+                group.append(nxt)
+            else:
+                idx -= 1  # don't consume the non-parallel step
+                break
+
+        # Each branch gets an isolated snapshot of history/kv.
+        hist_snap = list(history)
+        kv_snap = dict(kv)
+        # Streaming: unbind the ambient token sink around the band —
+        # gather's tasks snapshot the suppressed context, so
+        # concurrent branches cannot interleave tokens (see
+        # lazybridge/core/streaming.py).
+        _sink_suppress = suppress_ambient_token_sink()
+        try:
+            raw = await asyncio.gather(
+                *[
+                    self._execute_one(
+                        s,
+                        prev_env,
+                        start_env,
+                        hist_snap,
+                        kv_snap,
+                        tool_map=tool_map,
+                        session=session,
+                        run_id=run_id,
+                        branch_id=s.name,
+                        agent_name=agent_name,
+                    )
+                    for s in group
+                ],
+                return_exceptions=True,
+            )
+        finally:
+            restore_ambient_token_sink(_sink_suppress)
+
+        # Atomicity: scan ALL branches for failure first.  If any
+        # branch errored we return WITHOUT applying any writes to
+        # ``kv`` / ``effective_store`` / ``history`` / ``completed``
+        # — so a later resume re-runs the whole band cleanly
+        # instead of partially-double-applying side-effects from
+        # siblings that succeeded earlier in the iteration order.
+        # Cooperative pause: any branch raising PlanPaused halts
+        # the whole band atomically.  Same atomicity as failure —
+        # no writes from succeeded siblings are applied; resume
+        # re-runs the whole band cleanly.
+        # A ``conclude`` from any branch ends the whole task: re-raise
+        # so it unwinds the plan to the top-level caller (the band's
+        # other branch results are discarded), the same non-local exit
+        # sequential steps get.
+        for r in raw:
+            if isinstance(r, ConcludeSignal):
+                raise r
+
+        paused_branch: tuple[Step, PlanPaused] | None = None
+        for _s, r in zip(group, raw):
+            if isinstance(r, PlanPaused):
+                paused_branch = (_s, r)
+                break
+        if paused_branch is not None:
+            last_snap = self._save_checkpoint(
+                effective_key=effective_key,
+                last_snapshot=last_snap,
+                next_step=group[0].name,  # whole band re-runs on resume
+                kv=kv,
+                completed=completed,
+                status="paused",
+                run_uid=run_uid,
+                history_payload=history_payload,
+            )
+            paused_env: Envelope[Any] = Envelope(
+                task=prev_env.task,
+                context=prev_env.context,
+                payload=prev_env.payload,
+                metadata=prev_env.metadata,
+                error=ErrorInfo(
+                    type="PlanPaused",
+                    message=(f"Plan paused at parallel step {paused_branch[0].name!r}: {paused_branch[1].message}"),
+                    retryable=True,
+                ),
+            )
+            return self._aggregate_nested_metadata(paused_env, history), None, prev_env, last_snap
+
+        first_failure_env: Envelope[Any] | None = None
+        for _s, r in zip(group, raw):
+            if isinstance(r, BaseException):
+                first_failure_env = Envelope.error_envelope(r)
+                break
+            if r.error is not None:
+                first_failure_env = r
+                break
+        if first_failure_env is not None:
+            # Point the checkpoint at the band's FIRST step, not the
+            # failing step.  On resume the whole band must re-run so
+            # all siblings produce fresh writes; resuming mid-band
+            # would silently skip earlier siblings and leave kv stale.
+            last_snap = self._save_checkpoint(
+                effective_key=effective_key,
+                last_snapshot=last_snap,
+                next_step=group[0].name,
+                kv=kv,
+                completed=completed,
+                status="failed",
+                run_uid=run_uid,
+                history_payload=history_payload,
+            )
+            return self._aggregate_nested_metadata(first_failure_env, history), None, prev_env, last_snap
+
+        # All branches succeeded — collect results, update in-memory kv,
+        # checkpoint FIRST, then flush to the durable store.  This ordering
+        # ensures that a crash between the checkpoint and the store.write()
+        # does NOT replay the step on resume (the checkpoint already records
+        # next_step as the step after this band), so no double-write occurs.
+        #
+        # Trade-off: the inverse failure mode is a *lost durable write* —
+        # if we crash between checkpoint and store.write, the resumed run
+        # advances past the band and never retries the durable write.
+        # The values still live in the checkpoint's serialised ``kv``, so
+        # Plan replay reads them correctly via ``_load_checkpoint``; only
+        # sidecar consumers reading the Store directly would observe the
+        # gap.  See ``Plan.run`` doc above for the full contract.
+        last_ok: Envelope[Any] | None = None
+        for s, r in zip(group, raw):
+            step_name = s.name or ""
+            # Type-narrow: failure-scan above already returned on
+            # BaseException / r.error; remaining ``r`` are Envelopes.
+            assert isinstance(r, Envelope)
+            if s.writes and r.payload is not None:
+                kv[s.writes] = r.payload  # in-memory; goes into checkpoint below
+            sr = StepResult(step_name=step_name, envelope=r)
+            history.append(sr)
+            history_payload.extend(self._history_to_payload([sr]))
+            completed.append(step_name)
+            last_ok = r
+
+        # Advance past the whole parallel group.  Routing
+        # primitives (``routes`` / ``routes_by``) are NOT
+        # consulted on parallel branches — control flow after
+        # a band always falls through linearly.
+        current_name = all_step_names[idx + 1] if idx + 1 < len(all_step_names) else None
+        prev_env = last_ok or prev_env
+        last_snap = self._save_checkpoint(
+            effective_key=effective_key,
+            last_snapshot=last_snap,
+            next_step=current_name,
+            kv=kv,
+            completed=completed,
+            status="running" if current_name else "done",
+            run_uid=run_uid,
+            history_payload=history_payload,
+        )
+        # Durable store writes AFTER checkpoint — crash here is safe because
+        # the checkpoint already points to the next step.
+        if effective_store:
+            for s, r in zip(group, raw):
+                # Same narrowing as the loop at line 706: the
+                # failure scan above already returned on
+                # BaseException, so every remaining ``r`` is an
+                # Envelope.  Repeat the assert to keep mypy happy
+                # in this scope.
+                assert isinstance(r, Envelope)
+                if s.writes and r.payload is not None:
+                    effective_store.write(s.writes, r.payload, agent_id=_WRITE_STAMP_PREFIX + run_uid)
+        return None, current_name, prev_env, last_snap
+
     async def _execute_one(
         self,
         step: Step,
@@ -1182,186 +889,6 @@ class Plan:
             payload=result_env if not isinstance(result_env, Envelope) else result_env.payload,
             metadata=result_env.metadata if isinstance(result_env, Envelope) else EnvelopeMetadata(),
             error=result_env.error if isinstance(result_env, Envelope) else None,
-        )
-
-    def _resolve_sentinel(
-        self,
-        sentinel: Sentinel | str,
-        prev: Envelope[Any],
-        start: Envelope[Any],
-        history: list[StepResult],
-        kv: dict[str, Any],
-        tool_map: dict[str, Any],
-    ) -> Envelope[Any]:
-        # ``from_prev`` means "the previous step's *output* becomes the next
-        # step's task" — i.e. real chain semantics.  Without this promotion
-        # the default behaviour was for every step to receive the original
-        # user task, so ``Plan(Step(a), Step(b))`` was NOT actually a chain.
-        # We carry metadata AND ``.error`` through so downstream code can
-        # short-circuit rather than silently feed an errored payload into
-        # the next step.
-        if isinstance(sentinel, _FromPrev):
-            # Multimodal: preserve attachments — for step 0 ``prev`` is
-            # the user-supplied input envelope and the user expects
-            # images / audio to reach the first agent.  For step N>0
-            # ``prev`` is an upstream LLM result which doesn't populate
-            # attachments, so this defaults to ``None`` automatically.
-            return Envelope(
-                task=prev.text(),
-                context=prev.context,
-                images=prev.images,
-                audio=prev.audio,
-                payload=prev.payload,
-                metadata=prev.metadata,
-                error=prev.error,
-            )
-        if isinstance(sentinel, _FromStart):
-            return start
-        # from_step / from_parallel also forward the referenced step's
-        # output as the next step's task for consistency with from_prev.
-        if isinstance(sentinel, _FromStep):
-            for r in reversed(history):
-                if r.step_name == sentinel.name:
-                    e = r.envelope
-                    return Envelope(
-                        task=e.text(),
-                        context=e.context,
-                        images=e.images,
-                        audio=e.audio,
-                        payload=e.payload,
-                        metadata=e.metadata,
-                        error=e.error,
-                    )
-            # Compile-time validation already rejects ``from_step`` whose
-            # target isn't a Step name; getting here means the named step
-            # exists in the Plan but didn't run (routing skipped it, or
-            # the run is mid-band on a not-yet-completed parallel sibling).
-            # Either way, falling back to ``start`` would silently mask
-            # the misconfigured wiring — raise instead.
-            known = sorted({r.step_name for r in history})
-            raise PlanRuntimeError(
-                f"from_step({sentinel.name!r}) found no matching step in this run's history.\n"
-                f"  History so far: {known}.\n"
-                f"  Likely cause: the named step was skipped by routing, or you're inside a\n"
-                f"  parallel band trying to read from a sibling that hasn't completed.\n"
-                f"  Fix: reorder the Plan so the referenced step runs before this one, or use\n"
-                f"  ``from_parallel_all`` to aggregate parallel siblings after the band."
-            )
-        if isinstance(sentinel, _FromParallel):
-            for r in reversed(history):
-                if r.step_name == sentinel.name:
-                    e = r.envelope
-                    return Envelope(
-                        task=e.text(),
-                        context=e.context,
-                        images=e.images,
-                        audio=e.audio,
-                        payload=e.payload,
-                        metadata=e.metadata,
-                        error=e.error,
-                    )
-            known = sorted({r.step_name for r in history})
-            raise PlanRuntimeError(
-                f"from_parallel({sentinel.name!r}) found no matching step in this run's history.\n"
-                f"  History so far: {known}.\n"
-                f"  Fix: reorder the Plan so the referenced parallel step runs before this one."
-            )
-        if isinstance(sentinel, _FromParallelAll):
-            return self._aggregate_parallel_band(sentinel.name, history, fallback=start)
-        if isinstance(sentinel, _FromMemory):
-            # Resolved at execution time — reads the live memory of the agent
-            # registered under sentinel.name in the tool map.  Empty if the
-            # agent has no memory or hasn't run yet (silent no-op, no error).
-            tool = tool_map.get(sentinel.name)
-            memory = getattr(tool, "agent_memory", None) if tool else None
-            if memory is not None:
-                mem_text = memory.text()
-                if mem_text:
-                    return Envelope(task=mem_text, context=mem_text, payload=mem_text)
-            return Envelope(task="", context=None, payload="")
-        if isinstance(sentinel, _FromAgent):
-            # Reads the last output of the named agent from the shared Store.
-            # Written by Agent._run_body after a successful run under key
-            # "__agent_output__:{name}".  Silent no-op if not yet written.
-            tool = tool_map.get(sentinel.name)
-            agent_store = getattr(tool, "agent_store", None) if tool else None
-            if agent_store is not None:
-                value = agent_store.read(_AGENT_OUTPUT_KEY_PREFIX + sentinel.name)
-                if value is not None:
-                    text = str(value)
-                    return Envelope(task=text, context=text, payload=text)
-            return Envelope(task="", context=None, payload="")
-        if isinstance(sentinel, str):
-            return Envelope(task=sentinel, payload=sentinel)
-        return prev
-
-    def _aggregate_parallel_band(
-        self,
-        start_name: str,
-        history: list[StepResult],
-        *,
-        fallback: Envelope[Any],
-    ) -> Envelope[Any]:
-        """Build a single Envelope from every consecutive parallel sibling
-        starting at ``start_name`` (in declared order).
-
-        Returns an envelope where ``task`` and ``payload`` are both a
-        labelled-text join — ``"[branch_a]\\n<text>\\n\\n[branch_b]\\n<text>..."``
-        — so the next step's agent reads all branches via ``env.text()``
-        without any change to its tool. The first non-None branch error
-        is propagated so downstream can short-circuit.
-
-        Per-branch cost is already accumulated by the engine via
-        ``_aggregate_nested_metadata`` from ``history``, so this function
-        does not re-sum tokens (would double-count).
-
-        If the named step isn't found in the plan, returns ``fallback``.
-        Compile-time validation rejects non-parallel start names, so the
-        runtime degenerate case (band of size 1) shouldn't fire — but the
-        function tolerates it to keep the engine non-crashy.
-        """
-        # Find the contiguous parallel band starting at start_name.
-        names = [s.name or "" for s in self.steps]
-        try:
-            start_idx = names.index(start_name)
-        except ValueError:
-            return fallback
-
-        # Walk forward while consecutive steps remain parallel.
-        band_names: list[str] = []
-        for i in range(start_idx, len(self.steps)):
-            s = self.steps[i]
-            if i > start_idx and not s.parallel:
-                break
-            band_names.append(s.name or "")
-            if not s.parallel:
-                # Degenerate single-step case (compiler should have rejected).
-                break
-
-        # For each band member, pick the most recent matching history entry.
-        branch_envs: list[tuple[str, Envelope[Any]]] = []
-        for n in band_names:
-            for r in reversed(history):
-                if r.step_name == n:
-                    branch_envs.append((n, r.envelope))
-                    break
-
-        if not branch_envs:
-            return fallback
-
-        # Labelled-text join — both ``task`` (next step's prompt) and
-        # ``payload`` (so ``Envelope.text()`` returns it) carry the join.
-        sections = [f"[{n}]\n{e.text() if not e.error else f'(error) {e.error.message}'}" for n, e in branch_envs]
-        joined = "\n\n".join(sections)
-
-        # Short-circuit: first error wins so downstream can detect failure.
-        first_error = next((e.error for _, e in branch_envs if e.error), None)
-
-        return Envelope(
-            task=joined,
-            context=None,
-            payload=joined,
-            error=first_error,
         )
 
     async def _exec_step(
@@ -1554,116 +1081,6 @@ class Plan:
     # ``checkpoint_key`` per run) or default single-key runs — and the
     # Plan already knows which it is via ``on_concurrent``.  ``run_many``
     # picks the right asyncio shape on the caller's behalf.
-
-    def run_many(
-        self,
-        tasks: list[str | Envelope[Any]],
-        *,
-        concurrency: int | None = None,
-        tools: list[Any] | None = None,
-        memory: Any = None,
-        session: Any = None,
-        output_type: type = str,
-    ) -> list[Envelope[Any]]:
-        """Run this Plan concurrently against ``N`` inputs; sync return.
-
-        Each ``task`` is dispatched as its own ``Plan.run`` invocation
-        on a fresh asyncio task; results are returned as a list in
-        input order.  Pair with ``Plan(on_concurrent="fork", ...)`` for
-        true fan-out workflows where each input claims its own
-        per-run keyspace.
-
-        Errors are returned as error envelopes in the corresponding
-        slot — the call never raises (matches ``Agent.parallel``
-        semantics).
-
-        ``concurrency`` caps the number of in-flight runs via an
-        asyncio semaphore.  ``None`` (default) lets every task fire
-        immediately.
-
-        Pass ``tools`` when the Plan's steps use string-name targets that
-        must be resolved against a live tool map.  Omitting ``tools``
-        (or passing ``[]``) works only when every step target is an
-        ``Agent`` object rather than a string alias.
-
-        See :meth:`arun_many` for the async variant when the caller is
-        already inside an event loop.
-        """
-        # Re-use the shared sync↔async bridge — it propagates contextvars
-        # (OTel spans, request ids, …) into the worker loop so observability
-        # flows through fan-outs, and handles nest_asyncio / loop-closed
-        # cleanup uniformly.  See ``lazybridge._asyncbridge``.
-        from lazybridge._asyncbridge import run_coroutine_blocking
-
-        result: list[Envelope[Any]] = run_coroutine_blocking(
-            lambda: self.arun_many(
-                tasks,
-                concurrency=concurrency,
-                tools=tools,
-                memory=memory,
-                session=session,
-                output_type=output_type,
-            )
-        )
-        return result
-
-    async def arun_many(
-        self,
-        tasks: list[str | Envelope[Any]],
-        *,
-        concurrency: int | None = None,
-        tools: list[Any] | None = None,
-        memory: Any = None,
-        session: Any = None,
-        output_type: type = str,
-    ) -> list[Envelope[Any]]:
-        """Async counterpart to :meth:`run_many`.
-
-        Use this directly when you're already inside an event loop and
-        want to ``await`` the fan-out without the sync-bridge overhead.
-
-        Pass ``tools`` when the Plan's steps use string-name targets that
-        must be resolved against a live tool map.  Omitting ``tools``
-        (or passing ``[]``) works only when every step target is an
-        ``Agent`` object rather than a string alias.
-        """
-        sem = asyncio.Semaphore(concurrency) if concurrency else None
-        resolved_tools: list[Any] = tools or []
-
-        async def _one(task: str | Envelope[Any]) -> Envelope[Any]:
-            # ``Envelope.from_task`` populates BOTH ``task`` and
-            # ``payload`` so the first step's ``from_prev`` resolves to
-            # the user's input rather than an empty string.
-            env = task if isinstance(task, Envelope) else Envelope.from_task(str(task))
-
-            async def _go() -> Envelope[Any]:
-                return await self.run(
-                    env,
-                    tools=resolved_tools,
-                    output_type=output_type,
-                    memory=memory,
-                    session=session,
-                )
-
-            if sem is None:
-                return await _go()
-            async with sem:
-                return await _go()
-
-        raw = await asyncio.gather(
-            *[_one(t) for t in tasks],
-            return_exceptions=True,
-        )
-        # Wrap raised exceptions as error envelopes so the contract is
-        # "list of envelopes in input order".  Plan.run normally
-        # returns an error envelope itself, so this branch only fires
-        # for genuine framework bugs / cancellations.
-        return [
-            r
-            if isinstance(r, Envelope)
-            else Envelope.error_envelope(r if isinstance(r, BaseException) else RuntimeError(str(r)))
-            for r in raw
-        ]
 
     # ------------------------------------------------------------------
     # Serialisation — to_dict / from_dict  (Plan round-trip)
