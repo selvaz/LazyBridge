@@ -21,6 +21,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   structured-output validation) without re-entering the guard/verify
   pipeline. Regression tests cover the callable-judge, Agent-judge, and
   retry-with-feedback paths.
+- **Verify retries keep the original attachments and payload.** The
+  rebuilt post-rejection envelope carried only `task` + feedback
+  `context`, silently dropping the original env's `images`, `audio`,
+  and `payload` — every retry ran without the input the first attempt
+  had (Codex review finding on the recursion-fix PR).
 
 ## [0.10.0] — 2026-07-02 — v1 stabilization bridge
 
