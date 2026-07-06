@@ -10,7 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 Version starts at `1.0.1`, not `1.0.0`: an earlier `1.0.0` shipped in
 April 2026 under the old `LazyAgent`/`LazyTool` namespace and was
-rolled back (see [Migrating from 1.0.0](docs/migrations/1.0-to-0.7.md)).
+rolled back (see [Migrating from 1.0.0](migrations/1.0-to-0.7.md)).
 That version number is retired for good — this release starts clean at
 `1.0.1` rather than reusing it.
 
