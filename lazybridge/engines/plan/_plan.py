@@ -959,9 +959,10 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 # context silently drops those values.
                 import asyncio as _asyncio
                 import contextvars as _contextvars
+                import inspect as _inspect
 
                 arg = env.task or env.text()
-                if _asyncio.iscoroutinefunction(target):
+                if _inspect.iscoroutinefunction(target):
                     raw = await target(arg)
                 else:
                     loop = _asyncio.get_running_loop()

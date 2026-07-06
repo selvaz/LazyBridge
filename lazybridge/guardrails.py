@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 import threading
 from collections.abc import Callable
@@ -329,7 +330,7 @@ class LLMGuard(Guard):
         run = getattr(self._agent, "run", None)
 
         async def _drive() -> GuardAction:
-            if run is not None and asyncio.iscoroutinefunction(run):
+            if run is not None and inspect.iscoroutinefunction(run):
                 env = await run(prompt)
                 return self._verdict(env.text() if hasattr(env, "text") else str(env))
             loop = asyncio.get_running_loop()

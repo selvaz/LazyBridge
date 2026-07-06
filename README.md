@@ -6,9 +6,10 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-> **Status: alpha (0.9.x).** API is intentionally fluid pre-1.0 — see
-> [CHANGELOG](CHANGELOG.md) for breaking changes between minor releases .
-> Pin a minor (`lazybridge>=0.9,<0.10`) in production until 1.0.
+> **Status: stable (1.0.1+).** The core public API (`Agent`, `Plan`,
+> `Tool`, `Envelope`) will not break without a major version bump — see
+> [CHANGELOG](CHANGELOG.md) and the [Maturity table](https://lazybridge.com/#maturity)
+> for which subsystems are still Alpha/Experimental.
 
 **Zero-boilerplate, multi-provider Python framework for LLM agents.** One
 `Agent` class, swappable engines (LLM / Plan / Human / Supervisor), and one
@@ -68,12 +69,14 @@ for a flowchart.
 
 ## Install
 
-> **PyPI version note.** Older releases on PyPI (0.4.x) expose the
-> **legacy `LazyAgent` / `LazyTool` / `LazySession` API and do not match
-> this README**. Pin `lazybridge>=0.9,<0.10`, or install from source:
+> **PyPI version note.** Releases before `0.7.0` (`0.4.x` and the
+> withdrawn `1.0.0`) expose the **legacy `LazyAgent` / `LazyTool` /
+> `LazySession` API and do not match this README** — see
+> [Migrating from 1.0.0](https://lazybridge.com/migrations/1.0-to-0.7/)
+> if you have one of those installed. Pin `lazybridge>=1.0.1`:
 >
 > ```bash
-> pip install "git+https://github.com/selvaz/LazyBridge.git#egg=lazybridge[anthropic]"
+> pip install "lazybridge[anthropic]"
 > ```
 
 ```bash

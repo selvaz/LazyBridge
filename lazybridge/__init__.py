@@ -101,12 +101,12 @@ try:
         __version__ = _dist_version("lazybridge")
     except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
         # Keep in sync with pyproject.toml [project] version.
-        __version__ = "0.10.0"
+        __version__ = "1.0.1"
     del _dist_version, PackageNotFoundError
 except ImportError:  # pragma: no cover — Python < 3.8, not supported
-    __version__ = "0.10.0"
+    __version__ = "1.0.1"
 
-__stability__ = "beta"
+__stability__ = "stable"
 
 # Public API.  Symbols a user constructs, passes as a kwarg, or catches as
 # an exception are re-exported from this top-level module.  Internals

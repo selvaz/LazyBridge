@@ -6,9 +6,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [1.0.1] — 2026-07-06 — first Stable release
+
+Version starts at `1.0.1`, not `1.0.0`: an earlier `1.0.0` shipped in
+April 2026 under the old `LazyAgent`/`LazyTool` namespace and was
+rolled back (see [Migrating from 1.0.0](docs/migrations/1.0-to-0.7.md)).
+That version number is retired for good — this release starts clean at
+`1.0.1` rather than reusing it.
+
+`lazybridge.__stability__` moves `"beta"` → `"stable"`; PyPI classifier
+moves `Development Status :: 4 - Beta` → `Development Status :: 5 -
+Production/Stable`. The core public API contract (`Agent`, `Plan`,
+`Tool`, `Envelope`, Guardrails, Checkpoint/resume) will not break
+without a major version bump going forward.
+
+### Changed
+- **Guardrails and Checkpoint/resume promoted Alpha → Stable** in the
+  maturity table (`docs/index.md`), backed by a live adversarial/load
+  stress-testing pass: `LLMGuard` resisted a deliberate tag-injection
+  smuggling attempt, `GuardChain` correctly threads modifications and
+  blocks across chained guards, and `Plan` checkpoint/resume correctly
+  resumed after a forced step failure without re-invoking (re-billing)
+  the already-completed step. Native tools, `HumanEngine`/
+  `SupervisorEngine`, Evals, and the Visualizer remain Alpha/Experimental
+  — not exercised by this pass, unchanged. The two Planned items
+  (provider fallback chains, automatic PII redaction beyond credential
+  shapes) remain unimplemented; still explicitly listed rather than
+  quietly dropped.
 
 ### Fixed
+- **`asyncio.iscoroutinefunction` replaced with `inspect.iscoroutinefunction`**
+  in `lazybridge/tools.py`, `lazybridge/guardrails.py`, and
+  `lazybridge/engines/plan/_plan.py`. The `asyncio` version is deprecated
+  and slated for removal in Python 3.16; behavior is identical. Found via
+  DeprecationWarning surfaced by the live stress-test suite.
 - **`Agent(verify=...)` no longer recurses infinitely.** Found live by the
   pre-v1 stress notebook: `_run_body`'s verify branch called
   `verify_with_retry`, which called back into the full `agent.run()` —

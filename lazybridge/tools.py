@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
@@ -168,7 +169,7 @@ class Tool:
 
     async def run(self, **kwargs: Any) -> Any:
         kwargs = self._coerce_arguments(kwargs)
-        if asyncio.iscoroutinefunction(self.func):
+        if inspect.iscoroutinefunction(self.func):
             return await self.func(**kwargs)
         # ``asyncio.get_event_loop`` is deprecated in 3.10+ and errors on
         # 3.13+ when no loop is running.  ``run`` is always called from an
@@ -193,7 +194,7 @@ class Tool:
           0x...>"`` instead of the result.
         """
         kwargs = self._coerce_arguments(kwargs)
-        if not asyncio.iscoroutinefunction(self.func):
+        if not inspect.iscoroutinefunction(self.func):
             return self.func(**kwargs)
         return run_coroutine_blocking(lambda: self.func(**kwargs))
 

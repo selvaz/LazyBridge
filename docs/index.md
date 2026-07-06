@@ -109,13 +109,18 @@ LazyBridge is meant to feel like a bridge, not a cage.
 
 ## Maturity
 
-LazyBridge 0.10 is on PyPI as **Beta** (`Development Status :: 4` in
-PyPI metadata, `lazybridge.__stability__ = "beta"`) — the stabilization
-bridge release before 1.0.  The public API
-is stable enough that breaking changes go through the migration guides
-under [`docs/migrations/`](migrations/0.7-to-0.79.md), but production
-hardening is uneven by subsystem.  The labels below describe the
-state of each feature area in this release.
+LazyBridge is on PyPI as **Stable** starting at `1.0.1` (`Development
+Status :: 5` in PyPI metadata, `lazybridge.__stability__ = "stable"`).
+The version starts at `1.0.1`, not `1.0.0` — an earlier, incompatible
+`1.0.0` was published in April 2026 under the old `LazyAgent`/`LazyTool`
+namespace and rolled back; see [Migrating from 1.0.0](migrations/1.0-to-0.7.md)
+for that history. "Stable" means the core public API contract —
+`Agent`, `Plan`, `Tool`, `Envelope`, and the rows marked Stable below —
+will not break without a major version bump. It does not mean every
+subsystem is finished: a handful of peripheral areas remain
+Alpha/Experimental/Planned, called out explicitly below rather than
+glossed over. Breaking changes go through the migration guides under
+[`docs/migrations/`](migrations/0.7-to-0.79.md).
 
 | Subsystem | Status | Notes |
 |---|---|---|
@@ -124,16 +129,17 @@ state of each feature area in this release.
 | `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
 | `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled (`redact_secrets`). |
 | Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters are stable; model/price tables drift with provider releases. |
+| `Checkpoint` / `resume` | **Stable** | Verified under live adversarial/load testing (forced step failures, resume correctness, no re-billed steps). *External* side-effect rollback is still not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)) — that limitation is unchanged, only the internal-state contract is now Stable. |
+| Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Stable** | Verified under live adversarial testing, including a prompt-injection / tag-smuggling attempt against `LLMGuard`. Default rule libraries are still growing, but the behavior contract is settled. |
 | MCP / external tool gateway | **Moved** | Migrated to the `lazytoolkit` package in 0.8 (`lazytools.connectors.{mcp,gateway}`) — see [tools.lazybridge.com](https://tools.lazybridge.com). The old `lazybridge.ext.{mcp,gateway}` deprecation shims were removed in 0.9. |
 | Native tools (`NativeTool`) | **Alpha** | Provider-hosted capabilities (web search, code interpreter). Surface area changes when providers add new tools. |
-| `Checkpoint` / `resume`  | **Alpha** | Internal-state atomic across parallel `Plan` bands; *external* side-effect rollback is not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)). |
-| Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Alpha** | Behaviour is stable; default rule libraries are still growing. |
 | `HumanEngine`, `SupervisorEngine` | **Alpha** | Public API stable; UX polish continues. |
-| Evals (`lazybridge.ext.evals`) | **Experimental** | Scoring helpers are stable; the runner API may consolidate before 1.0. |
+| Evals (`lazybridge.ext.evals`) | **Experimental** | Scoring helpers are stable; the runner API may consolidate. |
 | Visualizer (`lazybridge.ext.viz`) | **Experimental** | Useful for debugging; not part of the runtime path. |
 | Provider model fallback chains (`_FALLBACKS`) | **Planned** | Data tables exist; the retry path that consumes them is not implemented yet. |
 | Automatic PII redaction | **Planned** | Default redactor masks credential shapes only.  Compose your own for emails / phone numbers / SSNs. |
 
-The roadmap toward a 1.0 stable surface is to lift each Alpha row to
-Stable, ship the Planned items where the design is settled, and either
-implement or remove the experimental modules based on user feedback.
+Post-1.0, the plan is to lift the remaining Alpha rows to Stable, ship
+the Planned items once their design is settled, and either implement or
+remove the Experimental modules based on user feedback — all as 1.x
+releases under the same stability contract, not as breaking changes.
