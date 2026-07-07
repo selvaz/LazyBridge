@@ -105,9 +105,12 @@ Confirm you're on the modern API:
 
 ```python
 import lazybridge
-assert lazybridge.__version__.startswith(("0.7", "0.8", "0.9", "1.")), (
+assert lazybridge.__version__ != "1.0.0" and lazybridge.__version__.startswith(
+    ("0.7", "0.8", "0.9", "1.")
+), (
     f"LazyBridge {lazybridge.__version__} predates the modern API — this "
-    f"README requires >=0.7.9.  See https://github.com/selvaz/LazyBridge."
+    f"README requires >=0.7.9 and not the withdrawn 1.0.0.  "
+    f"See https://github.com/selvaz/LazyBridge."
 )
 ```
 
