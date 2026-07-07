@@ -171,3 +171,41 @@ jobs:
           # ``packages-dir`` defaults to ``dist/`` — explicit for
           # readability.  No password / token: OIDC handles auth.
           packages-dir: dist/
+
+  github-release:
+    name: publish GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to create a release
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download distribution artefacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract this version's CHANGELOG section
+        # v1.0.1 shipped with only a git tag and no GitHub Release — the
+        # tag/PyPI publish had run standalone with no step that also
+        # published release notes. Pull the matching "## [x.y.z] — ..."
+        # block out of CHANGELOG.md so the release body isn't blank.
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          VERSION="${TAG#v}"
+          awk -v ver="[$VERSION]" '
+            $0 ~ "^## \\[" { if (found) exit; if (index($0, ver)) found=1; next }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::no CHANGELOG.md section found for ${TAG}"; exit 1
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "LazyBridge ${{ github.ref_name }}"
+          body_path: release_notes.md
+          files: dist/*
