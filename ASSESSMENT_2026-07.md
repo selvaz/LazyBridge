@@ -29,7 +29,7 @@ stesso repo ha), (c) un paio di bug di resume/cancellazione nel runtime Plan/LLM
 
 | Dimensione | Voto | Motivazione |
 |---|---|---|
-| Correttezza | **B+** | 1937 test verdi; però: resume da `plan_state` riesegue plan completati (`_plan.py:367-375`), `BaseException` dei tool inghiottite nel tool-loop (`llm.py:941-947`), stream provider non chiusi su early-exit (§3 M-11) |
+| Correttezza | **B+** | 1937 test verdi; però: `BaseException` dei tool inghiottite nel tool-loop (`llm.py:942-947`), stream provider non chiusi su early-exit (§3 M-7), resume da `plan_state` ignora `status` (`_plan.py:367-375`, M-13) |
 | Sicurezza | **B** | Ottimo di base (redazione secrets di default, LLMGuard anti-injection con scrub tag, viz server con token+CSP+traversal-proof, CodeQL settimanale); ma Web UI HIL senza auth né cap sul body (`human.py:461-509`) |
 | Test | **B+** | Coverage 80.4% (gate 73%), regression test per ogni bug-fix storico; però encryption/OTel/litellm skippano SEMPRE in CI (22 skip), replan 51%, google 58%, openai 65% |
 | Docs | **A-** | Docs eccezionalmente coerenti col codice (nav mkdocs 102/102, esempi README tutti validi — verificato); drift residuo: `llms.json` fermo a 0.7.9/alpha con contratti errati, IMPLEMENTATION.md contraddice la 1.0.1, 2 tabelle native-tools discordanti |
@@ -82,7 +82,8 @@ stesso repo ha), (c) un paio di bug di resume/cancellazione nel runtime Plan/LLM
 - **LAZYTOOLS_EXTRACTION.md**: estrazione completata — i tool kit e l'MCP connector vivono
   nel package esterno `lazytoolkit`, gli shim sono stati rimossi in 0.9 come dichiarato;
   resta un esempio che dipende dal package esterno
-  (`examples/llm_assistant/05_mcp_allowlisted.py:12`), correttamente documentato.
+  (`examples/llm_assistant/05_mcp_allowlisted.py:3`, `from lazytools.connectors.mcp
+  import MCP` — import name `lazytools`, PyPI `lazytoolkit`), correttamente documentato.
 - **Cross-cutting principles** (`IMPLEMENTATION.md:434-438`): il lint CI che collega i
   marker `(bug fix)` del CHANGELOG a un test non esiste in `.github/workflows/`.
 - Item dichiarati "Planned" e correttamente non implementati (nessuna falsa promessa):
@@ -97,30 +98,24 @@ stesso repo ha), (c) un paio di bug di resume/cancellazione nel runtime Plan/LLM
 Nessuna issue **CRITICA** (RCE, perdita dati sistematica, secrets hardcoded, injection
 SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.load unsafe).
 
-### ALTA
+Conteggio post-revisione: **0 CRITICA · 3 ALTA · 14 MEDIA · 21 BASSA** (le ex A-1 e A-5
+sono state declassate a M-13 e M-14 — vedi Nota di revisione in fondo).
 
-**A-1 — Resume di un Plan da `plan_state` esplicito ignora lo status: un plan completato riparte da step 0**
-- File: `lazybridge/engines/plan/_plan.py:367-375`.
-- La scala di selezione del punto di ripresa testa solo `plan_state.next_step` (:367); un
-  `PlanState` completato ha `next_step=None`, quindi il flusso cade su `elif checkpoint...`
-  (che è `None` quando `plan_state` è passato, vedi :328) e infine su
-  `elif self.steps: current_name = self.steps[0].name` (:374-375). Lo short-circuit "già
-  finito" (:371-373) esiste solo per il percorso checkpoint; `PlanState.status`
-  (`_types.py:178`) non viene mai consultato.
-- Impatto: ri-esecuzione integrale della pipeline (side effect sui Store, costi LLM
-  ri-fatturati) ri-sottomettendo lo stato di un run concluso.
-- Riproduzione: `state = (await plan.run(env, ...)).<stato finale>`; richiamare
-  `plan.run(env, plan_state=stato_completato)` → tutti gli step rieseguiti.
+### ALTA
 
 **A-2 — Nel tool-loop di LLMEngine una `BaseException` catturata da gather diventa risultato "riuscito" del tool**
 - File: `lazybridge/engines/llm.py:902-947`.
-- `asyncio.gather(..., return_exceptions=True)` (:902) cattura anche `BaseException`
-  sollevate dentro un tool (`CancelledError` interna, `KeyboardInterrupt`, `SystemExit`,
-  una `PlanPaused` vagante). Il re-raise esplicito (:913-915) gestisce solo
-  `ConcludeSignal`; la classificazione a valle testa `isinstance(tr, Exception)` (:941),
-  falso per le `BaseException`, che finiscono in `else: content = str(tr); is_err = False`
-  (:945-947). Un tool cancellato o in errore fatale viene quindi presentato al modello come
-  risultato normale non-errore (per `CancelledError` la stringa è vuota) e il loop continua.
+- `asyncio.gather(..., return_exceptions=True)` (:902) cattura anche le `BaseException`
+  sollevate dentro un tool: `CancelledError` interna e le `BaseException` custom del
+  framework (`PlanPaused`, `_types.py:219`, è deliberatamente `BaseException`). Il re-raise
+  esplicito (:913-915) gestisce solo `ConcludeSignal`; la classificazione a valle testa
+  `isinstance(tr, Exception)` (:942), falso per le `BaseException`, che finiscono in
+  `else: content = str(tr); is_err = False` (:945-947). Un tool cancellato o una
+  `PlanPaused` vagante vengono quindi presentati al modello come risultato normale
+  non-errore (per `CancelledError` la stringa è vuota) e il loop continua.
+- Precisazione (verifica adversariale): `KeyboardInterrupt`/`SystemExit` non rientrano
+  davvero in questo scenario — `Task.__step` le ri-solleva anche nell'event loop, che
+  quindi si interrompe comunque. Il caso concreto è `CancelledError` interna / `PlanPaused`.
 
 **A-3 — La Web UI human-in-the-loop non ha autenticazione (asimmetria col viz server)**
 - File: `lazybridge/ext/hil/human.py:505-509`
@@ -142,26 +137,10 @@ SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.lo
   numerico solleva `ValueError` non gestita nel handler. Il viz server protegge esattamente
   questo caso (`ext/viz/server.py:244-247`): l'omissione qui è un'incoerenza oggettiva.
 
-**A-5 — Anthropic forza lo streaming su praticamente tutti i modelli attuali, disattivando in silenzio `raw` e il parse nativo strutturato**
-- File: `lazybridge/core/providers/anthropic.py:67`
-  (`_FORCE_STREAM_MAX_TOKENS = 20_000`), :283-294 (`get_default_max_tokens` → 128k per
-  opus-4-8/4-7/4-6, 64k per sonnet-4-6/haiku-4-5/…), :730-746 (`_should_force_streaming`
-  confronta il max *effettivo* col threshold), :810-811 (`complete()` devia su
-  `_collect_streamed_response`).
-- Con i default, ogni chiamata non-streaming ai modelli moderni viene convertita in
-  streaming raccolto: `CompletionResponse.raw` è sempre `None` (:767) e il percorso
-  `messages.parse()` con idratazione Pydantic nativa (:834-846) è di fatto codice morto —
-  l'output strutturato degrada in silenzio a `output_config` + validazione client-side.
-  Il force-streaming in sé è un workaround legittimo del limite API Anthropic (richieste
-  lunghe richiedono streaming), ma la degradazione delle feature non è documentata né
-  segnalata a runtime.
-- Riproduzione: `AnthropicProvider.complete()` su `claude-sonnet-4-6` senza `max_tokens`
-  esplicito → `resp.raw is None`.
-
 ### MEDIA
 
 **M-1 — Gli extra opzionali non sono mai testati in CI (encryption/OTel/litellm sempre skip)**
-- File: `.github/workflows/test.yml:106-108` — il job unit installa solo
+- File: `.github/workflows/test.yml:108-110` — il job unit installa solo
   `.[anthropic,openai,google,test]`. Di conseguenza `tests/unit/test_store_encryption.py`
   (tutto il file), `test_otel_exception_logging.py`, parti di `test_audit_short_term.py`,
   `test_resolution_fixes.py`, `test_audit_amend.py`, `test_audit_deep.py`,
@@ -186,12 +165,13 @@ SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.lo
   riformula la scadenza (es. "in 2.0").
 
 **M-4 — `lazybridge/llms.json` (spedito nel wheel, pensato per i code-generator LLM) è fermo a 0.7.9/alpha e documenta contratti sbagliati**
-- File: `lazybridge/llms.json:4-5` — `"version": "0.7.9", "stability": "alpha"`.
+- File: `lazybridge/llms.json:3-4` — `"version": "0.7.9", "stability": "alpha"`.
   Inoltre: `canonical_patterns.parallel_fanout` (:14) afferma `env.payload → list[Envelope]`,
   ma `ParallelAgent._join_branches` (agent.py:1360-1367) imposta `payload=joined` (stringa;
-  l'accesso tipizzato è `run_branches()`); `envelope_contract.error` (:28) dichiara
+  l'accesso tipizzato è `run_branches()`); `envelope_contract.error` (:27) dichiara
   `Exception | None` mentre è `ErrorInfo | None` (envelope.py:69); il pattern `mcp_server`
-  (:19) usa `MCP` che dal 0.8 vive nel package esterno `lazytoolkit` senza indicarlo.
+  (:18) usa `MCP` che dal 0.8 vive nel package esterno `lazytoolkit` (import `lazytools`)
+  senza indicarlo.
   Questo file esiste apposta per guidare gli assistenti LLM: contenuto stale = codice
   generato sbagliato.
 
@@ -210,7 +190,8 @@ SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.lo
 - (a) Per i modelli V4 `_is_reasoning_model` → `False`, quindi il `_build_chat_params`
   ereditato emette "OpenAI model 'deepseek-v4-flash' is not a reasoning model —
   ThinkingConfig is ignored" (openai.py:648-654) **e poi** `_apply_thinking_params`
-  abilita davvero il thinking via `extra_body`: warning falso a ogni chiamata.
+  abilita davvero il thinking via `extra_body`: warning falso (emesso una volta per
+  call-site, dato il filtro warnings di default — comunque fuorviante).
 - (b) Per `deepseek-reasoner` il ramo reasoning imposta `reasoning_effort` e
   `max_completion_tokens` (parametri OpenAI) che non vengono mai rimossi
   (early-return in deepseek.py:294) e arrivano ad `api.deepseek.com`, che non li prevede.
@@ -220,9 +201,12 @@ SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.lo
   `google.py:836,946` — iterazione diretta `for`/`async for` sullo stream SDK senza
   context-manager/`aclose()`: se il caller interrompe l'iterazione la connessione httpx
   resta aperta fino al GC. Anthropic invece usa `with ctx as s:` (anthropic.py:911,1076).
-  Aggravante: `lazybridge/engines/llm.py:1058-1070` (`_idle_guarded_stream`) su idle-timeout
-  solleva `StreamStallError` senza chiamare `aclose()` sul generatore provider — proprio il
-  percorso pensato per gli stream appesi lascia lo stream appeso aperto.
+  Aggravante: su idle-timeout `_idle_guarded_stream` (`lazybridge/engines/llm.py:1058-1070`)
+  solleva `StreamStallError`; la cancellazione di `wait_for` chiude sì il frame del
+  generatore provider, ma senza `try/finally` nei provider lo stream SDK/httpx sottostante
+  viene solo abbandonato al GC — proprio il percorso pensato per gli stream appesi non
+  chiude deterministicamente la connessione (tranne che su Anthropic, dove il `with`
+  interno chiude in unwind).
 
 **M-8 — Un judge `verify=` async (plain callable) viene silenziosamente sempre rifiutato**
 - File: `lazybridge/_verify.py:128-130` — per un judge senza `.run` il verdetto è
@@ -256,8 +240,53 @@ SQL — tutte le query Store/EventLog sono parametrizzate; nessun pickle/yaml.lo
 - File: `docs/guides/basic/native-tools.md:31` dichiara `COMPUTER_USE` solo Anthropic, ma
   `OpenAIProvider.supported_native_tools` (openai.py:298-305) lo include
   (`computer_use_preview`, openai.py:67). La tabella auto-generata in
-  `docs/reference/providers.md` (via `lazybridge/matrix.py`) dice il contrario della
+  `docs/reference/providers.md` (resa a build-time da mkdocstrings su
+  `lazybridge.matrix.native_tool_support`, providers.md:62) dice il contrario della
   tabella manuale nella stessa documentazione.
+
+**M-13 (ex A-1, declassata in revisione) — Resume di un Plan da `plan_state` esplicito ignora `status`: uno stato "done" riparte da step 0**
+- File: `lazybridge/engines/plan/_plan.py:367-375`.
+- La scala di selezione del punto di ripresa testa solo `plan_state.next_step` (:367); un
+  `PlanState` con `status="done"` ha `next_step=None`, quindi il flusso cade su
+  `elif checkpoint...` (che è `None` quando `plan_state` è passato, vedi :328) e infine su
+  `elif self.steps: current_name = self.steps[0].name` (:374-375). Lo short-circuit "già
+  finito" (:371-373) esiste solo per il percorso checkpoint; `PlanState.status`
+  (`_types.py:178`) non viene mai consultato in `_plan.py`.
+- Impatto (ridimensionato in revisione): ri-esecuzione integrale della pipeline (side
+  effect sui Store, costi LLM ri-fatturati) — ma il caso è raggiungibile solo con un
+  `PlanState` **costruito a mano**: la libreria non restituisce mai istanze di `PlanState`
+  (`plan.run()` ritorna un `Envelope`; nessun helper checkpoint→`PlanState` esiste — grep
+  su `PlanState(` nel package: zero costruzioni). `PlanState` è però esportato e
+  documentato come API pubblica (`docs/guides/full/plan.md:36`), quindi il footgun è
+  reale ma non "resume normale di un run concluso".
+- Riproduzione corretta: costruire `PlanState(..., next_step=None, status="done",
+  history=..., store=...)` e chiamare `plan.run(env, plan_state=stato)` → tutti gli step
+  rieseguiti. (La riproduzione della prima stesura era errata: `plan.run()` non restituisce
+  alcuno "stato finale".)
+
+**M-14 (ex A-5, declassata in revisione) — Anthropic forza lo streaming sui modelli moderni: `raw=None` e `messages.parse()` mai usato, comportamento non documentato**
+- File: `lazybridge/core/providers/anthropic.py:67`
+  (`_FORCE_STREAM_MAX_TOKENS = 20_000`), :283-294 (`get_default_max_tokens` → 128k per
+  opus-4-8/4-7/4-6, 64k per sonnet-4-6/haiku-4-5/…), :730-746 (`_should_force_streaming`
+  confronta il max *effettivo* col threshold), :810-811 (`complete()` devia su
+  `_collect_streamed_response`).
+- Con i default, ogni chiamata non-streaming ai modelli moderni viene convertita in
+  streaming raccolto: `CompletionResponse.raw` è sempre `None` (:767) e il percorso
+  `messages.parse()` con idratazione Pydantic nativa (:834-846) non viene di fatto mai
+  eseguito su questi modelli. Il force-streaming in sé è un workaround legittimo del
+  limite API Anthropic (richieste lunghe richiedono streaming).
+- Mitigazioni esistenti che la prima stesura ignorava (motivo del declassamento):
+  (1) il percorso streaming invia comunque `output_config` sul wire (enforcement
+  server-side dello schema, anthropic.py:888-896) e applica
+  `apply_structured_validation` sul final chunk (:960-963), quindi `parsed`/`validated`
+  sono popolati anche in force-stream — l'output strutturato NON degrada, cambia solo il
+  meccanismo; (2) esiste il knob `force_stream_threshold` nel costruttore
+  (anthropic.py:303) per alzare/disattivare la soglia — però non documentato in docs/README;
+  (3) il force-stream È segnalato a runtime, ma solo a livello DEBUG (:740-744).
+- Residuo reale dell'issue: `raw=None` silenzioso (rompe chi legge `resp.raw`),
+  knob non documentato, nessuna documentazione utente del comportamento.
+- Riproduzione: `AnthropicProvider.complete()` su `claude-sonnet-4-6` senza `max_tokens`
+  esplicito → `resp.raw is None`.
 
 ### BASSA
 
@@ -389,7 +418,8 @@ convenzione più comune e con flussi di onboarding che assumono `[dev]`.
     sostituire la tabella manuale di `docs/guides/basic/native-tools.md` con quella
     generata da `lazybridge.matrix` (stessa fonte di `docs/reference/providers.md`).
 13. Documentare su `docs/reference/providers.md` l'effetto collaterale del force-streaming
-    Anthropic (`raw=None`, niente `messages.parse()`) finché A-5 non è risolta.
+    Anthropic (`raw=None`, niente `messages.parse()`) e il knob `force_stream_threshold`
+    finché M-14 non è risolta.
 
 ---
 
@@ -397,16 +427,16 @@ convenzione più comune e con flussi di onboarding che assumono `[dev]`.
 
 ### Fase 1 — Correttezza runtime (priorità massima, ~2-3 giorni)
 
-**Step 1.1 — Fix resume `plan_state` (A-1)** — effort **S**
+**Step 1.1 — Fix resume `plan_state` (M-13) e stub checkpoint-done (M-11)** — effort **S**
 - File: `lazybridge/engines/plan/_plan.py:367-375`.
 - Cosa fare: prima del ladder, aggiungere il ramo
   `if plan_state is not None and (plan_state.status == "done" or plan_state.next_step is None): return <envelope aggregato>`
   riusando la logica del ramo checkpoint-done, ma passando per `_aggregate_nested_metadata`
   (risolve anche M-11 per il percorso checkpoint: sostituire il return :371-373 con lo
   stesso helper).
-- Test: nuovo `tests/unit/test_plan_resume_done_state.py` — run completo → resume con lo
-  stesso `plan_state` → assert nessuna ri-esecuzione (contatore sul tool) e metadata
-  aggregata.
+- Test: nuovo `tests/unit/test_plan_resume_done_state.py` — costruire un `PlanState`
+  con `status="done"` (la libreria non ne emette: crearlo nel test) → resume → assert
+  nessuna ri-esecuzione (contatore sul tool) e metadata aggregata.
 - Completamento: test verde + `pytest tests/unit -q` verde.
 
 **Step 1.2 — Classificare le `BaseException` nel tool-loop (A-2)** — effort **S**
@@ -477,12 +507,13 @@ Web UI HIL (localhost multiutente) e il token.
   thinking-capable e rimuovere `reasoning_effort`/`max_completion_tokens` dai param per
   `deepseek-reasoner` (sostituire con `max_tokens`).
 
-**Step 4.3 — Force-streaming Anthropic (A-5)** — effort **M**
+**Step 4.3 — Force-streaming Anthropic (M-14)** — effort **M**
 - Opzioni (in ordine di preferenza): (a) popolare `raw` con l'ultimo evento/response
   ricostruita e tentare comunque `messages.parse()` quando `structured_output` è una classe
-  Pydantic e l'effective max consente il non-streaming; (b) warn/log INFO documentato al
-  primo force-stream con structured_output; (c) alzare il threshold al limite reale
-  dell'API. In ogni caso: documentare in `docs/reference/providers.md`.
+  Pydantic e l'effective max consente il non-streaming; (b) alzare il log DEBUG esistente
+  (anthropic.py:740-744) a INFO/warn documentato al primo force-stream; (c) alzare il
+  threshold al limite reale dell'API. In ogni caso: documentare in
+  `docs/reference/providers.md` anche il knob `force_stream_threshold` (anthropic.py:303).
 
 **Step 4.4 — Fix minori provider (B-4…B-10)** — effort **M** — no-choices raise coerente
 (openai.py:857-876), messaggio misto tool_use+result (openai.py:584-598), dedup/naming
@@ -568,3 +599,61 @@ $ python -m pytest -q tests/unit/test_store_encryption.py tests/unit/test_otel_e
 
 Conclusione test: **nessun test fallito**; l'unico rilievo è che gli skip per extra
 opzionali sono permanenti anche in CI (issue M-1).
+
+---
+
+## Scartate in revisione
+
+Nessuna issue è risultata *falsa* alla verifica sul codice: tutte le affermazioni
+meccaniche (file:riga, comportamento del codice) sono state riscontrate. Due issue ALTA
+erano però **esagerate** e sono state declassate a MEDIA invece che eliminate:
+
+- **A-1 → M-13**: il difetto (`PlanState.status` mai consultato) è reale, ma la
+  riproduzione dichiarata era errata (`plan.run()` ritorna un `Envelope`, non uno stato) e
+  la libreria non produce mai istanze di `PlanState`: lo scenario richiede uno stato
+  costruito a mano dall'utente. Impatto reale = footgun su API pubblica di nicchia, non
+  "ri-esecuzione ri-sottomettendo lo stato di un run concluso".
+- **A-5 → M-14**: la prima stesura ignorava tre mitigazioni presenti nel codice: l'output
+  strutturato NON degrada (il percorso force-stream invia comunque `output_config`
+  server-side e popola `parsed`/`validated` via `apply_structured_validation`,
+  anthropic.py:888-896,960-963); esiste un knob `force_stream_threshold` nel costruttore
+  (anthropic.py:303); il comportamento è loggato a DEBUG (:740-744). Residuo reale:
+  `raw=None` silenzioso e assenza totale di documentazione utente.
+
+---
+
+## Nota di revisione (verifica adversariale)
+
+Seconda passata (2026-07-08) di verifica contro il codice reale, con ricerca attiva di
+controprove (grep di guardie/validazioni/chiamanti, lettura dei percorsi citati).
+
+- **Issue verificate**: 38 su 38 — tutte le 5 ALTA, tutte le 12 MEDIE (oltre la metà
+  richiesta), tutte le 21 BASSE (almeno a livello di riferimento e meccanismo).
+- **Confermate senza modifiche sostanziali**: 32 (A-3, A-4, M-1–M-3, M-5, M-8–M-12,
+  B-1–B-21).
+- **Corrette/precisate**: 6 —
+  - A-2: eliminati `KeyboardInterrupt`/`SystemExit` dallo scenario (fanno comunque
+    crashare l'event loop); il caso reale è `CancelledError` interna / `PlanPaused`.
+  - A-1 e A-5: declassate a M-13/M-14 (vedi "Scartate in revisione").
+  - M-6: "warning falso a ogni chiamata" → una volta per call-site (filtro warnings).
+  - M-7: precisata la semantica dell'aggravante stall-path (il generatore provider viene
+    chiuso dalla cancellazione; è lo stream SDK/httpx a restare al GC).
+  - M-4: riferimenti riga corretti (llms.json:3-4, :27, :18) + nome import `lazytools`.
+- **Riferimenti file:riga corretti**: `test.yml:106-108`→`:108-110` (M-1),
+  `05_mcp_allowlisted.py:12`→`:3` (§2), cross-reference errato in §1
+  ("stream non chiusi (§3 M-11)" → M-7).
+- **Eliminate**: 0. **Nuove issue gravi**: 0 — verifica mirata su XSS nella Web UI HIL
+  (l'HTML escapa correttamente task/campi via `html.escape`, human.py:234-252), su
+  produttori di `PlanState`, su chiusura stream e su TODO/FIXME residui: nessun nuovo
+  rilievo ALTA/CRITICA.
+- **Coerenza §6**: numeri test/coverage internamente coerenti (9006−1765 = 80.40%;
+  1937+22+7 costanti tra i run; gli 88 test extra citati in M-1 tornano col run dedicato).
+  Non rieseguiti.
+- **Conteggi finali**: 0 CRITICA · 3 ALTA (A-2, A-3, A-4) · 14 MEDIA (M-1–M-14) ·
+  21 BASSA. **Voti invariati** (il declassamento di A-1/A-5 è compensato dalla conferma
+  integrale di A-2/A-3/A-4; Correttezza B+, Sicurezza B, Test B+, Docs A-,
+  Manutenibilità A- restano motivati).
+- **Piano §5**: verificato coerente ed eseguibile; aggiornati i riferimenti degli step
+  1.1 (M-13/M-11) e 4.3 (M-14, con menzione del log DEBUG esistente e del knob
+  `force_stream_threshold`); comandi e percorsi file controllati (pyproject.toml:94
+  `addopts`, :221 `fail_under=73`, `ext/viz/server.py:113-117,244-247` come modello).
