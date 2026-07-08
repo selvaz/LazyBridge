@@ -8,48 +8,62 @@
 
 ---
 
+> **Aggiornato dopo la revisione adversariale.** Ogni singolo `ASSESSMENT_2026-07.md` è stato passato a un
+> secondo revisore indipendente con l'ordine esplicito di verificare ogni issue contro il codice reale,
+> smontare le esagerazioni e cercare attivamente issue sfuggite. Risultato: 2 issue ALTE declassate a MEDIA
+> (esagerate), 1 declassata a BASSA (irraggiungibile a runtime), decine di riferimenti file:riga corretti,
+> e 6 issue nuove trovate (incluse 2 riprodotte a runtime nel venv). I numeri sotto sono quelli **post-revisione**.
+
 ## 1. Sintesi esecutiva
 
 L'ecosistema è **in buona salute complessiva**: tutte le suite di test sono verdi (3.343 test eseguiti
 realmente in totale, 0 falliti), gli audit precedenti risultano effettivamente applicati nel codice
-(verificato riga per riga), e nessuna repo è in stato critico strutturale. Restano però **2 issue
-CRITICHE** (entrambe in LazyHMM), **20 issue ALTE** distribuite su 7 repo, e alcuni **temi trasversali**
-(supply chain, error handling che maschera i fallimenti, lock/concorrenza) che vanno chiusi in modo
-sistematico.
+(verificato riga per riga, due volte), e nessuna repo è in stato critico strutturale. Restano però **2 issue
+CRITICHE** (entrambe in LazyHMM, riconfermate con repro end-to-end in sede di revisione), **17 issue ALTE**
+distribuite su 7 repo, e alcuni **temi trasversali** (supply chain, error handling che maschera i
+fallimenti, lock/concorrenza) che vanno chiusi in modo sistematico.
 
-**Totale issue trovate: 156** — 2 CRITICHE · 20 ALTE · 51 MEDIE · 83 BASSE.
+**Totale issue trovate (post-revisione): 165** — 2 CRITICHE · 17 ALTE · 59 MEDIE · 87 BASSE.
 
 ## 2. Quadro riassuntivo per repository
 
 | Repo | Salute | Critiche | Alte | Medie | Basse | Test eseguiti | Coverage |
 |---|---|---|---|---|---|---|---|
-| **LazyTools** | A- | 0 | 0 | 3 | 8 | 362 passed | 90% |
-| **LazyFin** | A- | 0 | 2 | 7 | 12 | 204 passed | 96% |
-| **LazyPulse** | B+/A- | 0 | 1 | 6 | 8 | 269 passed | 93% |
-| **LazyCrawler** | B+ (pre-1.0) | 0 | 2 | 6 | 10 | 221 passed | 73% |
-| **LazyBridge** | B+ | 0 | 5 | 12 | 21 | 1937 passed | 80% |
-| **lazybridgewebsite** | B+ (manutenz. C) | 0 | 2 | 3 | 5 | build strict OK | n/a |
-| **market-data-hub** | B | 0 | 3 | 6 | 10 | 105 passed | n/d |
-| **LazyHMM** | B- | **2** | 5 | 8 | 9 | 245 passed | 65% |
+| **LazyTools** | A- | 0 | 0 | 5 | 9 | 362 passed | 90% |
+| **LazyFin** | A- | 0 | 2 | 8 | 13 | 204 passed | 96% |
+| **LazyPulse** | B+/A- | 0 | 1 | 7 | 8 | 269 passed | 93% |
+| **LazyCrawler** | B+ (pre-1.0) | 0 | 1 | 6 | 11 | 221 passed | 73% |
+| **LazyBridge** | B+ | 0 | 3 | 14 | 21 | 1937 passed | 80% |
+| **lazybridgewebsite** | B+ (manutenz. C) | 0 | 2 | 4 | 5 | build strict OK | n/a |
+| **market-data-hub** | B | 0 | 3 | 7 | 10 | 105 passed | n/d |
+| **LazyHMM** | B- | **2** | 5 | 8 | 10 | 245 passed | 65% |
 
 Voti di dettaglio (correttezza / sicurezza / test / docs / manutenibilità) nel §1 di ogni
-`ASSESSMENT_2026-07.md`.
+`ASSESSMENT_2026-07.md`. Nota: in LazyTools il voto Sicurezza è stato abbassato da A- a B+ in sede di
+revisione (nuove issue di concorrenza/permessi trovate, vedi §3).
 
 ## 3. Le issue più gravi dell'ecosistema (da risolvere per prime)
 
-### CRITICHE (2 — entrambe LazyHMM, rotture reali con le dipendenze correnti)
-1. **LazyHMM** — `load_ticker` rotto: `show_errors` rimosso da yfinance → TypeError garantito (`db.py:945`). Fix da una riga.
-2. **LazyHMM** — round-trip SQLite perde il tipo di modello: scrive chiave `model`, rilegge `mode` → metadati persi dopo ogni restart (`db.py:360` vs `tools.py:1252`). Fix da una riga.
+### CRITICHE (2 — entrambe LazyHMM, riconfermate in revisione con repro end-to-end)
+1. **LazyHMM** — `load_ticker` rotto: `show_errors` rimosso da yfinance (verificato: `pip show` → yfinance 1.5.1, la firma non ha più il parametro) → TypeError garantito (`db.py:945`). Fix da una riga.
+2. **LazyHMM** — round-trip SQLite perde il tipo di modello: scrive chiave `model`, rilegge `mode` → metadati persi dopo ogni restart (`db.py:360` vs `tools.py:1252`; repro rieseguito: `model=None, mode=''`). Fix da una riga.
 
-### ALTE più impattanti (selezione cross-repo)
-3. **lazybridgewebsite** — supply chain nella pipeline di deploy: `requirements.txt` non pinnato installa una `mkdocs-redirects` **ripubblicata da terzi** ("ProperDocs") che si esegue nella build con token `contents: write`. Oggi innocua, rischio di esecuzione arbitraria a ogni release futura.
-4. **LazyBridge** — Web UI human-in-the-loop **senza autenticazione**: qualunque processo locale può forgiare approvazioni (`ext/hil/human.py:505`) + DoS memoria via Content-Length illimitato (`:462`).
-5. **LazyPulse** — `asyncio.Lock` condiviso tra due event loop nel `WebhookAdapter`: sotto contesa **congela l'intero tick loop** (hang riprodotto, >120 s) (`adapters/webhook.py:77,83,145`).
-6. **market-data-hub** — HTTP 429/5xx di Yahoo esauriscono i retry e finiscono loggati come "empty": **un outage del provider è invisibile** (`sources/yahoo_direct.py:99-118`); aggravato da `run_daily.py` che ritorna exit 0 anche a download completamente fallito.
-7. **LazyCrawler** — fallback PDF via `urllib` **bypassa le protezioni SSRF**, i retry e il proxy (`pdf.py:118-142`).
-8. **LazyBridge** — resume da `plan_state` completato riesegue l'intero Plan da step 0 (`engines/plan/_plan.py:367-375`); `BaseException` dei tool trasformate in output "riuscito" (`engines/llm.py:941-947`).
-9. **LazyFin** — workflow rebalance senza freshness gate, senza ADV e senza prezzi nel record: il limite di liquidità non può mai bocciare (`workflows/rebalance.py:129-146`).
-10. **market-data-hub** — `custom.store_series/delete_series` scrivono **senza writer lock**: il publish da LazyFin concorrente al run schedulato causa IO error DuckDB (`custom.py:106,115`).
+### ALTE più impattanti (selezione cross-repo, post-revisione)
+3. **lazybridgewebsite** — supply chain nella pipeline di deploy: `requirements.txt` non pinnato installa `mkdocs-redirects==1.2.3`, ripubblicata da terzi ("ProperDocs") — verificata su PyPI live: richiede `properdocs>=1.6.5`, un **fork completo di MkDocs 1.6.x** con hook di aliasing dormiente. Oggi solo un warning su stderr, ma è nella pipeline di deploy con token `contents: write`.
+4. **LazyBridge** — Web UI human-in-the-loop **senza autenticazione**: qualunque processo locale può forgiare approvazioni (`ext/hil/human.py:505`, confermata in revisione) + DoS memoria via Content-Length illimitato (`:462`, confermata).
+5. **LazyPulse** — `asyncio.Lock` condiviso tra due event loop nel `WebhookAdapter`: sotto contesa **congela l'intero tick loop** (hang riprodotto **due volte** in sede di revisione, >120 s, Python 3.11.15) (`adapters/webhook.py:77,83,145`).
+6. **market-data-hub** — HTTP 429/5xx di Yahoo esauriscono i retry e finiscono loggati come "empty": **un outage del provider è invisibile** (confermato: nessun retry a livello runner, nessuna mitigazione a monte) (`sources/yahoo_direct.py:99-118`); aggravato da `run_daily.py` che ritorna exit 0 anche a download completamente fallito.
+7. **LazyFin** — workflow rebalance senza freshness gate, senza ADV e senza prezzi nel record: il limite di liquidità non può mai bocciare (`workflows/rebalance.py:129-146`, confermata al 100% in revisione).
+8. **market-data-hub** — `custom.store_series/delete_series` scrivono **senza writer lock**: il publish da LazyFin concorrente al run schedulato causa IO error DuckDB (`custom.py:106,115`, confermata: nessun lock lato LazyFin).
+9. **LazyBridge** — Anthropic forza streaming su tutti i modelli moderni: `raw=None` sempre e comportamento non documentato quando `output_config` e la validazione restano attivi in force-stream (`core/providers/anthropic.py:67,730-746,810`, precisata in revisione).
+10. **LazyFin** — segno di `Transaction.amount` mai validato: un BUY con importo positivo *aggiunge* cassa invece di sottrarla e azzera il cost basis, in silenzio — **riprodotta a runtime** nel venv durante la revisione (`kernel/portfolio.py:358-362,416`).
+
+> Due issue della prima stesura sono state **smontate dalla revisione** e non compaiono più tra le ALTE:
+> il presunto bypass SSRF via fallback PDF in LazyCrawler (`pdf.py:118-142`) è risultato **irraggiungibile**
+> a guardia SSRF attiva (branch mutuamente esclusivo con la protezione) — declassato a BASSA; il resume
+> di `plan_state` e la gestione di `BaseException` in LazyBridge sono stati ridimensionati a MEDIA dopo
+> verifica puntuale dei percorsi di codice. Dettagli nelle rispettive sezioni "Nota di revisione" dei
+> singoli assessment.
 
 ## 4. Temi trasversali (pattern ricorrenti da chiudere ovunque)
 
@@ -93,7 +107,7 @@ su 8 durante l'esecuzione reale dei test). Fix banale, da fare ovunque.
 | # | Repo | Intervento |
 |---|---|---|
 | 1.1 | LazyBridge | Token auth + cap Content-Length sulla Web UI HIL (pattern già pronto nel viz server) |
-| 1.2 | LazyCrawler | Migrare fallback PDF sul client HTTP condiviso (guardia SSRF) + allowlist schemi http/https |
+| 1.2 | LazyCrawler | Migrare fallback PDF sul client HTTP condiviso (debito di consistenza, non più bypass sfruttabile: la revisione ha confermato che il branch è irraggiungibile a guardia attiva — comunque da chiudere per difesa in profondità) + allowlist schemi http/https |
 | 1.3 | lazybridgewebsite | Hardening workflow: permessi minimi, SHA-pin actions, build di verifica su PR |
 | 1.4 | market-data-hub | Scritture `custom_series` dentro `db_write_lock()` (chiude anche il gap col publish LazyFin) |
 | 1.5 | market-data-hub | Correggere README: FRED API key solo via env, mai nel `settings.yaml` tracciato |
@@ -149,3 +163,14 @@ su 8 durante l'esecuzione reale dei test). Fix banale, da fare ovunque.
 - Ogni repo: **`ASSESSMENT_2026-07.md`** = guida operativa autonoma (issue con file:riga → piano §5 con comandi, criteri di completamento ed effort S/M/L). Si può seguire senza altro contesto.
 - Questo documento = ordine di lavoro tra le repo e temi da chiudere in modo uniforme.
 - Tutti i numeri di test/coverage citati provengono da **esecuzioni reali** effettuate durante l'assessment (venv dedicati, comandi e output nel §6 di ogni documento).
+
+## 8. Nota sul processo di verifica (revisione adversariale)
+
+Ogni documento è stato prodotto in due passate indipendenti:
+
+1. **Prima stesura** — un auditor analizza la repo da zero (codice, test eseguiti realmente, CI, docs) e scrive l'assessment.
+2. **Revisione adversariale** — un secondo agente, senza fidarsi della prima stesura, riapre ogni file:riga citato, cerca attivamente controprove (mitigazioni ignorate, guardie esistenti, percorsi irraggiungibili), rilancia repro a runtime dove possibile, e corregge il documento **in place**: elimina le issue che non reggono, le sposta in una sezione "Scartate in revisione" con motivazione, corregge i riferimenti imprecisi, e — quando trova qualcosa di grave sfuggito alla prima passata — lo aggiunge.
+
+Risultato della revisione su tutte le 8 repo: **165 issue verificate** (partenza: 156), **6 issue nuove** trovate (2 riprodotte a runtime: LazyFin/portfolio.py e LazyPulse/adapters/webhook.py), **3 issue declassate** per esagerazione o irraggiungibilità (2 in LazyBridge da ALTA a MEDIA, 1 in LazyCrawler da ALTA a BASSA), **nessuna issue eliminata per infondatezza totale** — ogni claim della prima stesura si è rivelato quantomeno un problema reale, solo talvolta di severità inferiore a quanto scritto inizialmente. Ogni documento riporta la propria sezione "Nota di revisione (verifica adversariale)" con il dettaglio.
+
+**In sintesi: i numeri e le priorità di questo documento sono quelli emersi dopo doppia verifica, non dalla prima stesura.**
