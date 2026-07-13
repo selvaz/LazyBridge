@@ -114,9 +114,7 @@ def test_run_many_with_fork_keeps_each_run_isolated() -> None:
     def respond(env: Envelope) -> str:
         return f"out-{env.task}"
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "fork.sqlite"))
-    ) as store:
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "fork.sqlite"))) as store:
         agent = MockAgent(respond, name="agent")
         plan = Plan(
             Step(agent, name="step", writes="result"),

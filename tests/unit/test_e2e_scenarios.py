@@ -201,9 +201,7 @@ def test_e2e_parallel_band_atomicity_under_branch_error() -> None:
     synth = MockAgent("synthesised", name="synth")
     finalise = MockAgent("done", name="finalise")
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "atomic.sqlite"))
-    ) as store:
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "atomic.sqlite"))) as store:
         plan = Plan(
             Step(load, name="load", writes="loaded"),
             Step(a, name="a", parallel=True, writes="band_a", output=_ParallelOut),
@@ -289,10 +287,7 @@ def test_e2e_resume_picks_up_at_failed_step_after_simulated_crash() -> None:
             resume=True,
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "resume.sqlite"))
-    ) as store:
-
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "resume.sqlite"))) as store:
         # Run 1: transform crashes on first attempt.
         plan1 = make_plan(store)
         plan1._validate({})
@@ -357,9 +352,7 @@ def test_e2e_resume_preserves_from_prev_chain_value() -> None:
             resume=True,
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "chain.sqlite"))
-    ) as store:
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "chain.sqlite"))) as store:
         # Run 1: a, b complete; c crashes on first attempt.
         plan1 = make_plan(store)
         plan1._validate({})
@@ -395,9 +388,7 @@ def test_e2e_concurrent_fork_runs_have_isolated_keyspaces() -> None:
     def processor_response(env: Envelope) -> str:
         return f"processed-{env.task}"
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "fork.sqlite"))
-    ) as store:
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "fork.sqlite"))) as store:
         processor = MockAgent(processor_response, name="processor")
         scorer = MockAgent("scored", name="scorer")
 
@@ -423,9 +414,7 @@ def test_e2e_concurrent_runs_without_fork_collide() -> None:
     losing run(s)."""
     import asyncio  # only inside this test for a slow MockAgent response
 
-    with tempfile.TemporaryDirectory() as tmpdir, closing(
-        Store(db=str(Path(tmpdir) / "collision.sqlite"))
-    ) as store:
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "collision.sqlite"))) as store:
 
         async def slow_response(env: Envelope) -> str:
             await asyncio.sleep(0.1)
