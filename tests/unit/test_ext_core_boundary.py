@@ -31,7 +31,7 @@ def _python_files(root: pathlib.Path) -> list[pathlib.Path]:
 
 def _imports_into_core(path: pathlib.Path) -> list[tuple[int, str]]:
     """Return [(lineno, statement)] for any forbidden import in *path*."""
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
@@ -88,7 +88,7 @@ def _module_level_imports(path: pathlib.Path) -> list[tuple[int, str]]:
     module-level imports are forbidden. (A future ``lazytools`` re-export
     would have to be lazy, inside ``__getattr__``, to stay legal.)
     """
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     def walk(body: list[ast.stmt]) -> list[tuple[int, str]]:
         found: list[tuple[int, str]] = []

@@ -376,7 +376,37 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         else:
             return env
 
-        prev_env = env
+        # On resume the previous step's output lives in the restored
+        # ``history`` (rebuilt above from the checkpoint), NOT in ``env`` —
+        # ``env`` is the plan's *start* input.  Seeding ``prev_env`` from
+        # ``env`` would make the first resumed step's implicit ``from_prev``
+        # resolve to the original task instead of the last completed step's
+        # output, silently severing the chain across the checkpoint boundary
+        # (a fresh ``Plan(Step(a), Step(b), ...)`` would feed step N+1 the
+        # user task rather than step N's result).
+        #
+        # Two resume shapes need different upstreams:
+        #   * Advancing to a not-yet-run step → feed it ``history[-1]`` (the
+        #     last completed step's output).
+        #   * Retrying a step that already *succeeded* but whose post-success
+        #     stage failed (``_routing()`` / the durable write raised after
+        #     the step was appended to history) → the failure checkpoint
+        #     records ``next_step`` as that same step, so ``history[-1]`` is
+        #     the step's OWN output.  Its ``from_prev`` must instead be the
+        #     upstream step's output (``history[-2]``), else the retry
+        #     reprocesses its own result.  Only store-backed ``failed`` /
+        #     ``cancelled`` checkpoints can land here; a clean ``running``
+        #     checkpoint pointing a step at itself is a legitimate self-loop
+        #     whose ``from_prev`` *is* its prior output, so it keeps
+        #     ``history[-1]``.
+        # Fresh runs have an empty history and fall back to ``env``.
+        resumed_status = checkpoint.get("status") if checkpoint else None
+        if history and history[-1].step_name == current_name and resumed_status in ("failed", "cancelled"):
+            prev_env = history[-2].envelope if len(history) >= 2 else env
+        elif history:
+            prev_env = history[-1].envelope
+        else:
+            prev_env = env
         start_env = env
         iterations = 0
         # Maps branch-step name → after_branches rejoin target.  Populated
