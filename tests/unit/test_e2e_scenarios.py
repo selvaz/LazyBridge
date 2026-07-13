@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lazybridge import Agent, Plan, Step, Store, when
+from lazybridge import Agent, Plan, PlanRuntimeError, Step, Store, when
 from lazybridge.envelope import Envelope
 from lazybridge.session import EventType, Session
 from lazybridge.testing import MockAgent
@@ -369,6 +369,62 @@ def test_e2e_resume_preserves_from_prev_chain_value() -> None:
         assert result2.text() == "C:B:A:GO", (
             f"resumed chain lost the from_prev value: got {result2.text()!r}, "
             f"expected 'C:B:A:GO' (start input 'GO' leaked into step c)"
+        )
+
+
+def test_e2e_resume_after_post_success_routing_failure_uses_upstream() -> None:
+    """A step that succeeds but whose *post-success* routing raises must, on
+    resume, retry with the UPSTREAM step's output — not its own.
+
+    Edge of the from_prev-on-resume fix (flagged in review): ``_routing()``
+    runs *after* the step is appended to ``history`` and before
+    ``current_name`` advances, so a raising ``routes`` predicate lands a
+    ``failed`` checkpoint whose ``next_step`` still points at the just-
+    completed step.  Reconstructing ``prev_env`` as ``history[-1]`` would
+    then feed the retried step its OWN recorded output (``C:B:B:A:GO``);
+    it must instead use ``history[-2]`` (the upstream step) → ``C:B:A:GO``.
+    A clean ``running`` self-loop is unaffected (it keeps ``history[-1]``).
+    """
+    route_attempts = {"n": 0}
+
+    def route_to_c(env: Envelope) -> bool:
+        # Fails once *after* b has already succeeded, then recovers.
+        route_attempts["n"] += 1
+        if route_attempts["n"] == 1:
+            raise RuntimeError("routing blip after b succeeded")
+        return True
+
+    a = MockAgent(lambda env: "A:" + env.text(), name="a")
+    b = MockAgent(lambda env: "B:" + env.text(), name="b")
+    c = MockAgent(lambda env: "C:" + env.text(), name="c")
+
+    def make_plan(store: Store) -> Plan:
+        return Plan(
+            Step(a, name="a"),
+            Step(b, name="b", routes={"c": route_to_c}),
+            Step(c, name="c"),
+            store=store,
+            checkpoint_key="post-success-routing",
+            resume=True,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir, closing(Store(db=str(Path(tmpdir) / "route.sqlite"))) as store:
+        # Run 1: a, b succeed; b's routing predicate raises → the failure
+        # propagates and the checkpoint records next_step=b (status=failed).
+        try:
+            Agent(engine=make_plan(store), name="_test_agent_route_1")("GO")
+            raise AssertionError("expected the routing failure to propagate")
+        except PlanRuntimeError:
+            pass
+        snap = store.read("post-success-routing")
+        assert snap["next_step"] == "b" and snap["status"] == "failed"
+
+        # Run 2: resume. b re-runs and must see a's output "A:GO" (upstream),
+        # so the chain is "C:B:A:GO" — not "C:B:B:A:GO" (its own output).
+        result2 = Agent(engine=make_plan(store), name="_test_agent_route_2")("GO")
+        assert result2.ok, f"expected resume to succeed; got {result2.error}"
+        assert result2.text() == "C:B:A:GO", (
+            f"retry reprocessed the step's own output: got {result2.text()!r}, expected 'C:B:A:GO'"
         )
 
 
