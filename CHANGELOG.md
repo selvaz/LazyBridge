@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`Plan` crash-resume now feeds the first resumed step the previous
+  step's output, not the plan's start input.** `_run_impl` seeded
+  `prev_env` from the *start* envelope, so a resumed step whose implicit
+  `from_prev` input came from a step that completed *before* the crash
+  silently received the original task instead of the upstream result — a
+  plain `Plan(Step(a), Step(b), …)` chain with no `writes=` lost the link
+  across the checkpoint boundary (no error, wrong data). It now
+  reconstructs `prev_env` from the restored step-result history. Steps
+  that pass data via `writes=`/`kv`, or that reference
+  `from_start`/`from_step`/`from_parallel`, were never affected. This
+  complements the 1.0.1 fix (which stopped resume from *re-invoking*
+  completed steps but did not restore the chain *value*). Regression test
+  added: `test_e2e_resume_preserves_from_prev_chain_value`.
+- **Windows-only test failures resolved.** e2e / `run_many` tests now
+  close their `Store` (via `contextlib.closing`) so the temp SQLite file
+  unlocks before `TemporaryDirectory` cleanup, and `test_ext_core_boundary`
+  reads package sources as UTF-8. Five tests that failed only on Windows
+  (`PermissionError [WinError 32]` / `UnicodeDecodeError` under cp1252) now
+  pass; CI on Linux was already green.
+
+---
+
 ## [1.0.1] — 2026-07-06 — first Stable release
 
 Version starts at `1.0.1`, not `1.0.0`: an earlier `1.0.0` shipped in

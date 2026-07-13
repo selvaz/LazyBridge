@@ -376,7 +376,16 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         else:
             return env
 
-        prev_env = env
+        # On resume the previous step's output lives in the restored
+        # ``history`` (rebuilt above from the checkpoint), NOT in ``env`` —
+        # ``env`` is the plan's *start* input.  Seeding ``prev_env`` from
+        # ``env`` would make the first resumed step's implicit ``from_prev``
+        # resolve to the original task instead of the last completed step's
+        # output, silently severing the chain across the checkpoint boundary
+        # (a fresh ``Plan(Step(a), Step(b), ...)`` would feed step N+1 the
+        # user task rather than step N's result).  Fresh runs have an empty
+        # history and correctly fall back to ``env``.
+        prev_env = history[-1].envelope if history else env
         start_env = env
         iterations = 0
         # Maps branch-step name → after_branches rejoin target.  Populated

@@ -21,6 +21,7 @@ not framework internals.
 from __future__ import annotations
 
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -200,8 +201,9 @@ def test_e2e_parallel_band_atomicity_under_branch_error() -> None:
     synth = MockAgent("synthesised", name="synth")
     finalise = MockAgent("done", name="finalise")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store = Store(db=str(Path(tmpdir) / "atomic.sqlite"))
+    with tempfile.TemporaryDirectory() as tmpdir, closing(
+        Store(db=str(Path(tmpdir) / "atomic.sqlite"))
+    ) as store:
         plan = Plan(
             Step(load, name="load", writes="loaded"),
             Step(a, name="a", parallel=True, writes="band_a", output=_ParallelOut),
@@ -287,8 +289,9 @@ def test_e2e_resume_picks_up_at_failed_step_after_simulated_crash() -> None:
             resume=True,
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store = Store(db=str(Path(tmpdir) / "resume.sqlite"))
+    with tempfile.TemporaryDirectory() as tmpdir, closing(
+        Store(db=str(Path(tmpdir) / "resume.sqlite"))
+    ) as store:
 
         # Run 1: transform crashes on first attempt.
         plan1 = make_plan(store)
@@ -315,6 +318,67 @@ def test_e2e_resume_picks_up_at_failed_step_after_simulated_crash() -> None:
         assert len(load.calls) == 1
 
 
+def test_e2e_resume_preserves_from_prev_chain_value() -> None:
+    """Resume must feed the first resumed step the *previous step's output*,
+    not the plan's original start input.
+
+    Regression for the crash-resume data-flow bug: ``_run_impl`` seeded
+    ``prev_env`` from the start envelope, so a resumed step whose implicit
+    ``from_prev`` input came from a step that completed *before* the crash
+    silently received the original task instead.  Steps here declare no
+    ``writes=`` — the chain value flows only through ``from_prev``, exactly
+    the path the checkpoint's restored ``history`` must reconstruct.  The
+    sibling ``..._after_simulated_crash`` test misses this because its steps
+    pass data via ``writes=``/``kv`` and its resumed step ignores its input.
+    """
+    attempts = {"c": 0}
+
+    # Each step prefixes its own letter onto the text it receives, so the
+    # final output encodes the entire chain — any lost link is visible.
+    a = MockAgent(lambda env: "A:" + env.text(), name="a")
+    b = MockAgent(lambda env: "B:" + env.text(), name="b")
+
+    def c_response(env: Envelope) -> str:
+        attempts["c"] += 1
+        if attempts["c"] == 1:
+            raise RuntimeError("simulated crash at step c")
+        return "C:" + env.text()
+
+    c = MockAgent(c_response, name="c")
+
+    def make_plan(store: Store) -> Plan:
+        # No writes= anywhere: data flows purely via the implicit from_prev chain.
+        return Plan(
+            Step(a, name="a"),
+            Step(b, name="b"),
+            Step(c, name="c"),
+            store=store,
+            checkpoint_key="from-prev-resume",
+            resume=True,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir, closing(
+        Store(db=str(Path(tmpdir) / "chain.sqlite"))
+    ) as store:
+        # Run 1: a, b complete; c crashes on first attempt.
+        plan1 = make_plan(store)
+        plan1._validate({})
+        result1 = Agent(engine=plan1, name="_test_agent_chain_1")("GO")
+        assert not result1.ok, "expected first run to fail at c"
+        assert attempts["c"] == 1
+
+        # Run 2: resume. c re-runs and must see b's output "B:A:GO"
+        # (from the restored history), NOT the start input "GO".
+        plan2 = make_plan(store)
+        plan2._validate({})
+        result2 = Agent(engine=plan2, name="_test_agent_chain_2")("GO")
+        assert result2.ok, f"expected resume to succeed; got {result2.error}"
+        assert result2.text() == "C:B:A:GO", (
+            f"resumed chain lost the from_prev value: got {result2.text()!r}, "
+            f"expected 'C:B:A:GO' (start input 'GO' leaked into step c)"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Scenario 3 — N concurrent fork runs (no asyncio / ThreadPoolExecutor)
 # ---------------------------------------------------------------------------
@@ -331,8 +395,9 @@ def test_e2e_concurrent_fork_runs_have_isolated_keyspaces() -> None:
     def processor_response(env: Envelope) -> str:
         return f"processed-{env.task}"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store = Store(db=str(Path(tmpdir) / "fork.sqlite"))
+    with tempfile.TemporaryDirectory() as tmpdir, closing(
+        Store(db=str(Path(tmpdir) / "fork.sqlite"))
+    ) as store:
         processor = MockAgent(processor_response, name="processor")
         scorer = MockAgent("scored", name="scorer")
 
@@ -358,8 +423,9 @@ def test_e2e_concurrent_runs_without_fork_collide() -> None:
     losing run(s)."""
     import asyncio  # only inside this test for a slow MockAgent response
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store = Store(db=str(Path(tmpdir) / "collision.sqlite"))
+    with tempfile.TemporaryDirectory() as tmpdir, closing(
+        Store(db=str(Path(tmpdir) / "collision.sqlite"))
+    ) as store:
 
         async def slow_response(env: Envelope) -> str:
             await asyncio.sleep(0.1)
