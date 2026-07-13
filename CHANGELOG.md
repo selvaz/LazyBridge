@@ -6,7 +6,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [1.0.2] — 2026-07-13
+
+Found by a targeted cross-process stress-testing pass over the checkpoint /
+resume machinery (`Plan` crash-resume, `ReplanEngine` failure-recovery).
 
 ### Fixed
 - **`Plan` crash-resume now feeds the first resumed step the previous
@@ -22,12 +25,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   complements the 1.0.1 fix (which stopped resume from *re-invoking*
   completed steps but did not restore the chain *value*). Regression test
   added: `test_e2e_resume_preserves_from_prev_chain_value`.
+- **Resuming a step that failed *after* it already succeeded no longer
+  reprocesses its own output.** Edge of the fix above: `_routing()` (or a
+  durable-write) can raise *after* a step is appended to the checkpoint's
+  `history` and before `next_step` advances, so the resulting `failed`
+  checkpoint's `next_step` still points at that just-completed step.
+  Reconstructing `prev_env` unconditionally from `history[-1]` there fed
+  the retried step its own recorded output instead of the upstream step's.
+  Now only steps back to `history[-2]` when resuming a `failed`/
+  `cancelled` checkpoint whose `next_step` equals the last history entry
+  (the retry-of-a-succeeded-step signature); a clean `running` self-loop
+  is unaffected. Regression test added:
+  `test_e2e_resume_after_post_success_routing_failure_uses_upstream`.
 - **Windows-only test failures resolved.** e2e / `run_many` tests now
   close their `Store` (via `contextlib.closing`) so the temp SQLite file
   unlocks before `TemporaryDirectory` cleanup, and `test_ext_core_boundary`
   reads package sources as UTF-8. Five tests that failed only on Windows
   (`PermissionError [WinError 32]` / `UnicodeDecodeError` under cp1252) now
   pass; CI on Linux was already green.
+
+### Testing
+- **`ReplanEngine` failure→resume→recover contract pinned.** Failure
+  injection (a transient worker, a parallel-band branch, or the planner
+  itself failing) confirmed the engine already recovers correctly via
+  `resume=True` — re-running only the failed round, never a completed one
+  — and that an error `Envelope` from a worker surfaces as an error rather
+  than a phantom-empty success. No behaviour change; added as regression
+  coverage since no existing test exercised this path.
 
 ---
 
