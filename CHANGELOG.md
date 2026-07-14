@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+- **Auto-derived tool description now uses the docstring's first paragraph,
+  not just its first physical line** (`ToolSchemaBuilder.build_artifact`,
+  only when `Tool.wrap`/`.build()` receives no explicit `description=`).
+  Wrapped lines within that paragraph are collapsed to single spaces. A
+  well-formed Google-style docstring (one-line summary, blank line, then
+  `Args:`/extended prose) is unaffected — this only changes tools whose
+  summary itself wraps across multiple physical lines before the blank
+  line. Text after the first blank line (extended description, `Args:`,
+  internal notes) was never included and still isn't. The old comment
+  claiming this protected the compile-artifact fingerprint was incorrect:
+  `func_source_hash` already hashes the full function source, docstring
+  included, so any docstring edit already invalidates the fingerprint
+  regardless of how much of it becomes the description.
+
 ## [1.0.2] — 2026-07-13
 
 Found by a targeted cross-process stress-testing pass over the checkpoint /

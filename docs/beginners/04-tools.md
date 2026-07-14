@@ -66,7 +66,7 @@ generates a JSON schema for the model automatically:
 | Source in your code | Becomes |
 |---|---|
 | Function name (`get_weather`) | Tool name the model calls |
-| Docstring first line | Tool description (helps the model decide *when* to call) |
+| Docstring first paragraph | Tool description (helps the model decide *when* to call) |
 | Parameter type hints (`city: str`) | JSON schema property types |
 | Default values / `Optional` | Required vs optional fields |
 | Return annotation (`-> str`) | Documentation only — the LLM gets `str(return_value)` |
@@ -315,7 +315,7 @@ The function still does the work; the model only sees the `name` and
 
 - The Python function name is generic (`fetch`, `get_data`) but the model needs
   a specific cue
-- You want to override the docstring's first line for the model without
+- You want to override the docstring's first paragraph for the model without
   rewriting the function
 - You're building a library of reusable tools and want clean external names
 

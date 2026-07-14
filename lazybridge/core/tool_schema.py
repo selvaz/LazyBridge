@@ -426,6 +426,19 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     return {"type": "string"}
 
 
+def _first_paragraph(doc: str) -> str:
+    """Text up to the first blank line, wrapped newlines collapsed to single spaces.
+
+    Used as the auto-derived tool description when the caller passes no
+    explicit ``description=``. A well-formed Google-style docstring (one-line
+    summary, blank line, then ``Args:``/extended prose) is unaffected by this
+    over the old first-line-only behaviour; it only picks up more text when
+    the summary itself wraps across multiple physical lines.
+    """
+    paragraph = doc.split("\n\n", 1)[0]
+    return " ".join(line.strip() for line in paragraph.splitlines() if line.strip())
+
+
 def _parse_docstring_params(doc: str) -> dict[str, str]:
     """Extract {param: description} from Google-style or Sphinx-style docstrings."""
     if not doc:
@@ -904,9 +917,16 @@ class ToolSchemaBuilder:
             effective_desc = description
         else:
             doc = inspect.getdoc(func) or ""
-            # Use only the first line (summary sentence) of the docstring so
-            # minor docstring edits don't invalidate the fingerprint.
-            effective_desc = doc.splitlines()[0].strip() if doc else ""
+            # The first paragraph (up to the first blank line), not just the
+            # first physical line: a well-formed Google-style docstring puts
+            # its one-line summary right before that blank line anyway, so
+            # this only changes anything for a summary that itself wraps
+            # across multiple lines. Note this is unrelated to fingerprint
+            # stability — func_source_hash already hashes the whole function
+            # source (docstring included), so any docstring edit invalidates
+            # the fingerprint regardless of how much of it becomes the
+            # description.
+            effective_desc = _first_paragraph(doc) if doc else ""
 
         compile_input = _make_compile_input(
             func, effective_name, effective_desc, mode, strict, schema_llm, flatten_refs=self._flatten_refs
