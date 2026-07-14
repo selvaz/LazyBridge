@@ -51,11 +51,7 @@ def test_wrapped_sphinx_style_param_is_fully_captured() -> None:
 
 
 def test_wrapped_numpy_style_param_is_fully_captured() -> None:
-    doc = (
-        "Summary.\n\n"
-        "Parameters\n----------\n"
-        "a : int\n    this description wraps across\n    two physical lines\n"
-    )
+    doc = "Summary.\n\nParameters\n----------\na : int\n    this description wraps across\n    two physical lines\n"
     assert _parse_docstring_params(doc)["a"] == "this description wraps across two physical lines"
 
 

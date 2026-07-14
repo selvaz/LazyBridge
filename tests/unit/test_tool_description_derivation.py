@@ -73,7 +73,5 @@ def test_explicit_description_always_wins_over_the_docstring() -> None:
         two lines.
         """
 
-    defn = _builder.build(
-        fn, name="fn", description="Explicit override.", strict=False, mode=ToolSchemaMode.SIGNATURE
-    )
+    defn = _builder.build(fn, name="fn", description="Explicit override.", strict=False, mode=ToolSchemaMode.SIGNATURE)
     assert defn.description == "Explicit override."
