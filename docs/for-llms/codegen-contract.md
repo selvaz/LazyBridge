@@ -48,6 +48,18 @@ this page is the same information annotated for human review.
   [Guides → Basic → Tool → Schema modes](../guides/basic/tool.md#schema-modes-signature-hybrid-llm)
   for when each mode is appropriate and the cost / determinism
   trade-offs.
+- Don't write a bridging class that re-declares a library function's
+  parameters just to turn it into a tool. If the function already has
+  type hints (ideally `Annotated[type, "description"]` per parameter),
+  `Tool.wrap(fn, name="...")` on the function itself is the whole
+  implementation. When several tools need the same loaded/expensive
+  state, share it via a store-key parameter (one tool loads and returns
+  the key, every other tool reads by that key) instead of each tool
+  loading its own copy. A wrapper is only justified to add something
+  the library function genuinely lacks — an LLM-context output cap, or
+  an envelope/provenance shape — and even then it should call the
+  unmodified function, not reimplement it. See
+  [Decisions → Tool wrapping](../decisions/tool-wrapping.md).
 - Don't call `MCP.stdio(...)` without `allow=` or `deny=` — it's
   deny-by-default since 0.7.9 and will raise `ValueError`. Pass
   `allow=["*"]` after auditing the surface, or a glob list like
