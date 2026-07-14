@@ -8,6 +8,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **New extra `lazybridge[docparse]` (`griffe`)** for multi-line-aware
+  docstring parameter parsing, same library used by PydanticAI and the
+  OpenAI Agents SDK. Auto-detects Google/NumPy/Sphinx style. Included in
+  the `test` and `all` extras so CI exercises it, not just its fallback.
+
+### Fixed
+- **A parameter description wrapped across multiple physical lines is no
+  longer silently truncated to its first line.** `_parse_docstring_params`
+  now tries `griffe` first (when `lazybridge[docparse]` is installed),
+  which correctly joins wrapped continuation lines (collapsed to single
+  spaces, consistent with the first-paragraph tool description below);
+  the previous regex-only parser — kept as the fallback when griffe isn't
+  installed — only ever captured a single physical line per parameter and
+  dropped the rest with no warning. New
+  `tests/unit/test_docstring_multiline_params.py` covers Google/NumPy/
+  Sphinx wrapped params, the griffe-unavailable fallback path, and a
+  regression guard for short/ambiguous docstrings where style
+  auto-detection itself returns nothing (falls back to the same
+  `:param`-marker heuristic the regex parser already used, not blindly to
+  Google).
+
 ### Changed
 - **Auto-derived tool description now uses the docstring's first paragraph,
   not just its first physical line** (`ToolSchemaBuilder.build_artifact`,

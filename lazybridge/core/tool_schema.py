@@ -2,7 +2,9 @@
 
 Owns everything between a raw Python callable and a provider-ready ToolDefinition:
   - Type annotation → JSON Schema conversion
-  - Docstring parameter description extraction
+  - Docstring parameter description extraction (via ``griffe`` when the
+    ``lazybridge[docparse]`` extra is installed, multi-line aware; a
+    narrower single-line regex parser otherwise)
   - Pydantic-backed argument validation + coercion
   - SIGNATURE / LLM / HYBRID compilation modes
   - Compilation fingerprinting (deterministic hash of all inputs)
@@ -440,7 +442,69 @@ def _first_paragraph(doc: str) -> str:
 
 
 def _parse_docstring_params(doc: str) -> dict[str, str]:
-    """Extract {param: description} from Google-style or Sphinx-style docstrings."""
+    """Extract {param: description} from a docstring, multi-line aware.
+
+    Tries ``griffe`` first when installed (extra: ``lazybridge[docparse]``):
+    it correctly joins a parameter description wrapped across several
+    physical lines and auto-detects Google/NumPy/Sphinx style. Falls back to
+    :func:`_parse_docstring_params_regex` otherwise, which only captures a
+    single physical line per parameter — a wrapped continuation line is
+    silently not part of the description there.
+    """
+    if not doc:
+        return {}
+    via_griffe = _parse_docstring_params_griffe(doc)
+    if via_griffe is not None:
+        return via_griffe
+    return _parse_docstring_params_regex(doc)
+
+
+def _parse_docstring_params_griffe(doc: str) -> dict[str, str] | None:
+    """Multi-line-aware parameter extraction via griffe, or ``None`` if unavailable.
+
+    ``None`` specifically means "griffe isn't installed or failed to parse"
+    (the caller falls back to the regex parser); an empty dict is a real,
+    authoritative "this docstring documents no parameters" and must not
+    trigger that fallback.
+    """
+    try:
+        import griffe
+    except ImportError:
+        return None
+
+    docstring = griffe.Docstring(doc)
+    detected, _ = griffe.infer_docstring_style(docstring)
+    if detected is not None:
+        parser = detected
+    else:
+        # Auto-detection needs enough of the docstring to recognise a style
+        # confidently; on a short/ambiguous one, fall back to the same
+        # heuristic _parse_docstring_params_regex uses: a ":param" marker
+        # means Sphinx, otherwise assume Google (this ecosystem's
+        # convention — see docstring_style: google in every mkdocs.yml).
+        parser = griffe.Parser.sphinx if re.search(r":param\b", doc) else griffe.Parser.google
+    try:
+        sections = docstring.parse(parser, warnings=False)
+    except Exception as exc:  # pragma: no cover - griffe should not raise on plain text
+        _logger.debug("griffe failed to parse docstring, falling back to regex: %s", exc)
+        return None
+
+    params: dict[str, str] = {}
+    for section in sections:
+        if section.kind is griffe.DocstringSectionKind.parameters:
+            for parameter in section.value:
+                params[parameter.name] = " ".join(parameter.description.split())
+    return params
+
+
+def _parse_docstring_params_regex(doc: str) -> dict[str, str]:
+    """Extract {param: description} from Google-style or Sphinx-style docstrings.
+
+    Fallback used only when ``griffe`` isn't installed. Captures a single
+    physical line per parameter — a wrapped continuation line is silently
+    not part of the description. Install ``lazybridge[docparse]`` to avoid
+    this limitation.
+    """
     if not doc:
         return {}
     params: dict[str, str] = {}
