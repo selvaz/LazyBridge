@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge._asyncbridge import run_coroutine_blocking
 from lazybridge.envelope import Envelope
-from lazybridge.tools import Tool, build_tool_map
+from lazybridge.tools import Tool, ToolProvider, build_tool_map
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
@@ -108,7 +108,7 @@ class Agent:
     def __init__(
         self,
         engine: str | Any | None = None,
-        tools: list[Tool | Callable | Agent] | None = None,
+        tools: list[Tool | Callable | Agent | ToolProvider] | None = None,
         output: type = str,
         memory: Any | None = None,
         store: Any | None = None,
