@@ -13,6 +13,8 @@ and pointers to the deep guides for the chosen option.
 - [Return type](return-type.md) — `.text()` vs `.payload` vs
   `.metadata`.
 - [State layer](state-layer.md) — `Memory`, `Store`, or `sources=`.
+- [Tool wrapping](tool-wrapping.md) — `Tool.wrap(fn, ...)` directly, a
+  shared-state handle, or a bridging class (usually: not the class).
 
 ## Composing Agents
 

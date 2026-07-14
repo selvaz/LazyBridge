@@ -24,8 +24,9 @@ full method list.  For read-only introspection from caller code, use
 copy of the routing aliases — safe to mutate without affecting the
 framework).  The old top-level `PROVIDER_ALIASES` constant was an
 import-time snapshot that silently diverged from the live registry
-after `register_provider_alias`; it is deprecated (0.10) and will be
-removed in 1.0.
+after `register_provider_alias`; it is deprecated since 0.10 and still
+present (with a `DeprecationWarning`) as of 1.0.1 — pending removal in
+a future major version, not yet scheduled.
 
 Registry mutation entry points (quick reference):
 

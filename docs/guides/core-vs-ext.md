@@ -116,9 +116,15 @@ Ship in the sibling **`lazytoolkit`** package (`import lazytools`) when:
 
 ## Stability
 
-All three layers are `alpha` pre-1.0 (`lazybridge.__stability__ ==
-"alpha"`).  Promotion to `beta` and `stable` happens per-symbol after
-1.0; the import boundary doesn't change.
+`lazybridge.__stability__ == "stable"` as of 1.0.1 — but that's a
+package-level flag, not a per-symbol guarantee. Promotion happens
+per-subsystem: core (`Agent`, `Plan`, `Tool`, `Envelope`, Guardrails,
+Checkpoint/resume) is Stable; several `ext` modules (`ext.hil`'s
+`HumanEngine`/`SupervisorEngine`, `NativeTool`) remain Alpha, and
+`ext.evals`/`ext.viz` remain Experimental. See the
+[Maturity table](../index.md#maturity) for the current status of each
+subsystem — the import boundary between core/ext/lazytoolkit described
+above doesn't change based on any of this.
 
 ## See also
 
