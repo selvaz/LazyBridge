@@ -3,7 +3,8 @@
 Routes all requests through the Responses API (OpenAI's recommended path since 2025).
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
 
-Default model: gpt-5.5. Pass model= to override.
+No implicit default model (``default_model = None``) — pass model= explicitly,
+or use ``Agent.from_provider("openai", tier="top")`` for gpt-5.6-sol.
 """
 
 from __future__ import annotations
@@ -87,6 +88,14 @@ _EFFORT_MAP = {
 # are billed at 2x input / 1.5x output for the session; cost values returned by
 # this table will under-count in that regime.
 _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
+    # GPT-5.6 (released 2026-07-09): three tiers instead of a single
+    # flagship + "-pro".  "gpt-5.6" is a bare alias that routes to Sol —
+    # kept last among the 5.6 rows so the more specific tier names match
+    # first for their own full model strings.
+    "gpt-5.6-sol": (5.0, 0.50, 30.0),
+    "gpt-5.6-terra": (2.50, 0.25, 15.0),
+    "gpt-5.6-luna": (1.0, 0.10, 6.0),
+    "gpt-5.6": (5.0, 0.50, 30.0),
     "gpt-5.5-pro": (30.0, None, 180.0),
     "gpt-5.5": (5.0, 0.50, 30.0),
     "gpt-5.4-pro": (30.0, None, 180.0),
@@ -273,16 +282,23 @@ class OpenAIProvider(BaseProvider):
     # want a safety net.
     default_model: str | None = None
 
-    # Tier aliases.  GPT-5.5 family ships only `gpt-5.5` and `gpt-5.5-pro`; no -mini/-nano yet,
-    # so medium/cheap continue to point at the GPT-5.4 family.
+    # Tier aliases.  GPT-5.6 (2026-07-09) ships three tiers — Sol (best
+    # coding/reasoning), Terra (balanced flagship), Luna (fast/light) —
+    # replacing the old flagship+"-pro" shape.  Luna is priced close to
+    # gpt-5.4-mini but is the newer model, so it now takes "medium";
+    # cheap/super_cheap still point at the 5.4/4o family since Luna isn't
+    # actually cheaper per-token than gpt-5.4-nano.
     _TIER_ALIASES = {
-        "top": "gpt-5.5-pro",  # extended reasoning flagship
-        "expensive": "gpt-5.5",  # general flagship (released 2026-04-23)
-        "medium": "gpt-5.4-mini",  # fast mid-range; no 5.5-mini yet
-        "cheap": "gpt-5.4-nano",  # best value; no 5.5-nano yet
+        "top": "gpt-5.6-sol",  # best coding / hardest reasoning tier
+        "expensive": "gpt-5.6-terra",  # balanced general flagship
+        "medium": "gpt-5.6-luna",  # fast tier, newer than 5.4-mini
+        "cheap": "gpt-5.4-nano",  # best value; no 5.6-nano yet
         "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
+        "gpt-5.6-sol": ["gpt-5.6-terra", "gpt-5.5-pro", "gpt-5.5"],
+        "gpt-5.6-terra": ["gpt-5.6-luna", "gpt-5.5"],
+        "gpt-5.6-luna": ["gpt-5.4-mini", "gpt-5.4"],
         "gpt-5.5-pro": ["gpt-5.5", "gpt-5.4-pro", "gpt-5.4"],
         "gpt-5.5": ["gpt-5.4", "gpt-5"],
         "gpt-5.4-pro": ["gpt-5.5", "gpt-5.4", "gpt-5"],

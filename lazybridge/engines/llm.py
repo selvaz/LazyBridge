@@ -19,6 +19,7 @@ from lazybridge.core.types import (
     NativeTool,
     Role,
     StructuredOutputConfig,
+    ThinkingConfig,
     ToolCall,
 )
 from lazybridge.engines.base import resolve_agent_name
@@ -64,6 +65,9 @@ _USE_DEFAULT_STREAM_IDLE: Any = object()
 #: thinking pauses on Opus / Gemini Pro without false positives.
 DEFAULT_STREAM_IDLE_TIMEOUT: float = 90.0
 
+#: Valid ``thinking=`` string shorthands — mirrors ``ThinkingConfig.effort``.
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
 
 class LLMEngine:
     """Drives the LLM ↔ tool-call loop for a single agent invocation.
@@ -74,6 +78,17 @@ class LLMEngine:
         Model string, e.g. "claude-opus-4-7". Provider is inferred automatically.
     thinking:
         Enable extended thinking (Anthropic) or reasoning (OpenAI o-series).
+        Accepts three shapes:
+
+        - ``bool`` — ``True`` enables thinking at the provider's default
+          effort ("high").
+        - ``str`` — one of ``"low"``/``"medium"``/``"high"``/``"xhigh"``/
+          ``"max"``; shorthand for ``ThinkingConfig(enabled=True, effort=...)``.
+          This is the primary lever for Claude 5 (Fable 5 / Opus 5 / Sonnet 5)
+          and GPT-5.x reasoning effort — both providers read
+          ``ThinkingConfig.effort``.
+        - :class:`~lazybridge.core.types.ThinkingConfig` — full control
+          (``display``, ``budget_tokens`` for pre-4.6 Anthropic models, etc.).
     max_turns:
         Maximum tool-call rounds before giving up with MaxTurnsExceeded error.
         Default 20 — a plain tool-using task typically completes in 2-5 rounds;
@@ -158,7 +173,7 @@ class LLMEngine:
         model: str,
         *,
         provider: str | None = None,
-        thinking: bool = False,
+        thinking: bool | str | ThinkingConfig = False,
         max_turns: int = 20,
         tool_choice: Literal["auto", "any"] = "auto",
         temperature: float | None = None,
@@ -177,6 +192,11 @@ class LLMEngine:
         strict_multimodal: bool = False,
     ) -> None:
         self.model = model
+        if isinstance(thinking, str) and thinking not in _EFFORT_LEVELS:
+            raise ValueError(
+                f"LLMEngine(thinking={thinking!r}) is not a recognised effort level. "
+                f"Pass one of {sorted(_EFFORT_LEVELS)}, a bool, or a ThinkingConfig instance."
+            )
         self.thinking = thinking
         self.max_turns = max_turns
         self.max_retries = max_retries
@@ -694,7 +714,7 @@ class LLMEngine:
         _stream_sink: asyncio.Queue[str | None] | None = None,
     ) -> Envelope[Any]:
 
-        from lazybridge.core.types import TextContent, ThinkingConfig, ToolResultContent, ToolUseContent
+        from lazybridge.core.types import TextContent, ToolResultContent, ToolUseContent
 
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
@@ -742,7 +762,14 @@ class LLMEngine:
             if isinstance(output_type, type) or get_origin(output_type) is not None:
                 structured_cfg = StructuredOutputConfig(schema=output_type)
 
-        thinking_cfg = ThinkingConfig(enabled=True) if self.thinking else None
+        if isinstance(self.thinking, ThinkingConfig):
+            thinking_cfg = self.thinking
+        elif isinstance(self.thinking, str):
+            thinking_cfg = ThinkingConfig(enabled=True, effort=self.thinking)
+        elif self.thinking:
+            thinking_cfg = ThinkingConfig(enabled=True)
+        else:
+            thinking_cfg = None
         # "parallel" is our asyncio strategy; provider always gets "auto"
         provider_tc = self.tool_choice
 

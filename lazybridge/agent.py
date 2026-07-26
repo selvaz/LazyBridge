@@ -187,10 +187,10 @@ class Agent:
             )
 
         # Canonical: Agent(engine=LLMEngine(...)) or Agent(engine=Plan(...))
-        # Sugar:     Agent("claude-opus-4-7") → engine is a model string → auto-builds LLMEngine
-        #            Agent() → engine is None → defaults to "claude-opus-4-7"
+        # Sugar:     Agent("claude-opus-5") → engine is a model string → auto-builds LLMEngine
+        #            Agent() → engine is None → defaults to "claude-opus-5"
         if engine is None or isinstance(engine, str):
-            model_str = model or engine or "claude-opus-4-7"
+            model_str = model or engine or "claude-opus-5"
             self.engine: Any = LLMEngine(
                 model_str,
                 native_tools=native_tools,
@@ -895,7 +895,7 @@ class Agent:
         invocation is vetted before returning::
 
             judge = Agent(engine=LLMEngine(
-                "claude-opus-4-7",
+                "claude-opus-5",
                 system="Reply 'approved' or 'rejected: <reason>'.",
             ))
             synth = Agent(name="synth", engine=LLMEngine(...))

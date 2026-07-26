@@ -139,10 +139,10 @@ def test_string_shortcut_produces_llm_engine():
 
 
 def test_none_shortcut_defaults_to_claude():
-    """Agent() → Agent(engine=LLMEngine("claude-opus-4-7"))."""
+    """Agent() → Agent(engine=LLMEngine("claude-opus-5"))."""
     agent = Agent()
     assert isinstance(agent.engine, LLMEngine)
-    assert agent.engine.model == "claude-opus-4-7"
+    assert agent.engine.model == "claude-opus-5"
 
 
 # ---------------------------------------------------------------------------

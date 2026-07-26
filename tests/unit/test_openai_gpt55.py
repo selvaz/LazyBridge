@@ -48,9 +48,12 @@ def test_no_default_model_raises_on_missing_model() -> None:
         provider._resolve_model(req)
 
 
-def test_tier_aliases_route_to_gpt_5_5_family() -> None:
-    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-5.5-pro"
-    assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-5.5"
+def test_gpt_5_5_no_longer_tier_aliased_but_still_pinnable() -> None:
+    """GPT-5.6 (see test_openai_gpt56.py) superseded GPT-5.5 as the tier-alias
+    target; gpt-5.5 / gpt-5.5-pro remain valid pinned ids with their original
+    pricing (asserted below) and fallback targets (test_fallback_chains_...)."""
+    assert OpenAIProvider._TIER_ALIASES["top"] != "gpt-5.5-pro"
+    assert OpenAIProvider._TIER_ALIASES["expensive"] != "gpt-5.5"
 
 
 def test_price_table_has_gpt_5_5_entries() -> None:

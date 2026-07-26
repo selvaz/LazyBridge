@@ -9,6 +9,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Anthropic Claude 5 family** (`claude-fable-5`, `claude-opus-5`,
+  `claude-sonnet-5`) and restricted-access `claude-mythos-5` added to
+  `AnthropicProvider._PRICE_TABLE` / `_TIER_ALIASES` / `_FALLBACKS`.
+  `top` now resolves to `claude-fable-5` (Anthropic's most capable
+  generally-available model), `expensive` to `claude-opus-5`, `medium`
+  to `claude-sonnet-5`. `claude-mythos-5` is priced but deliberately
+  **not** tier-aliased — it's restricted to vetted partners (Project
+  Glasswing) and unreachable with an ordinary API key.
+- **OpenAI GPT-5.6 family** (`gpt-5.6-sol` / `gpt-5.6-terra` /
+  `gpt-5.6-luna`, plus the bare `gpt-5.6` alias routing to Sol) added to
+  `OpenAIProvider._PRICE_TABLE` / `_TIER_ALIASES` / `_FALLBACKS`,
+  replacing the old flagship+`-pro` shape. `top` → `gpt-5.6-sol`,
+  `expensive` → `gpt-5.6-terra`, `medium` → `gpt-5.6-luna` (`cheap` /
+  `super_cheap` unchanged — Luna isn't cheaper per-token than
+  `gpt-5.4-nano`). OpenAI's realtime voice models (GPT-Live-1) are a
+  separate Realtime API and out of scope for `OpenAIProvider`.
+- **Anthropic `effort` parameter** (`output_config.effort` —
+  `"low"`/`"medium"`/`"high"`/`"xhigh"`/`"max"`) is now wired up in
+  `AnthropicProvider._build_effort` for every model that supports it
+  (Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 5,
+  Sonnet 4.6, Opus 4.5) — previously `ThinkingConfig.effort` was read by
+  `OpenAIProvider`/`GoogleProvider` but silently ignored by
+  `AnthropicProvider`. Unsupported models get a warning instead of a
+  400; `"xhigh"` on a model that only goes up to `"max"` (Opus 4.6 /
+  Sonnet 4.6 / Opus 4.5) is downgraded to `"max"` with a warning.
+  `LLMEngine(model, thinking="low")` is new shorthand for
+  `LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort="low"))`
+  and works on both providers since both read `ThinkingConfig.effort`.
 - **New extra `lazybridge[docparse]` (`griffe`)** for multi-line-aware
   docstring parameter parsing, same library used by PydanticAI and the
   OpenAI Agents SDK. Auto-detects Google/NumPy/Sphinx style. Included in

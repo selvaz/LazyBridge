@@ -671,7 +671,7 @@ class Session:
         *,
         db: str | None = None,
         exporters: list[Any] | None = None,
-        redact: Callable[[dict[str, Any]], dict[str, Any]] | None | Any = _REDACT_UNSET,
+        redact: Callable[[dict[str, Any]], dict[str, Any]] | Any | None = _REDACT_UNSET,
         redact_on_error: Literal["fallback", "strict"] = "strict",
         unsafe_log_payloads: bool = False,
         console: bool = False,

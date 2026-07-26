@@ -30,7 +30,7 @@ miss in the auto-generated signature below. Quick reference:
 | `stream_idle_timeout` | `90.0` | Idle gap between streaming chunks before `StreamStallError`; pass `None` to disable (a one-shot `UserWarning` is emitted at `LLMEngine.__init__` time, not at stream time). |
 | `stream_buffer` | `64` | Bounded queue for streaming producers. Must be ≥1 |
 | `allow_dangerous_native_tools` | `False` | Security gate for `CODE_EXECUTION` / `COMPUTER_USE`; opt-in required |
-| `thinking` | `False` / `ThinkingConfig` | Extended-thinking opt-in.  Anthropic Opus 4.6+ / Claude 4.7 use adaptive thinking (server-managed budget; pass `display="omitted"` to hide thoughts).  OpenAI `o1`/`o3`/`o4`/`gpt-5` and Gemini 2.5+ surface `reasoning_tokens` automatically; passing a `ThinkingConfig(effort=...)` is forwarded where the provider supports it.  See provider-capability matrix in `lazybridge.matrix`. |
+| `thinking` | `False` / `bool` / `str` / `ThinkingConfig` | Extended-thinking opt-in.  `True` enables at the default effort ("high"); a `str` (`"low"`/`"medium"`/`"high"`/`"xhigh"`/`"max"`) is shorthand for `ThinkingConfig(enabled=True, effort=...)`.  Anthropic Claude 5 (Fable 5 / Opus 5 / Sonnet 5) and Opus 4.6+ use adaptive thinking (server-managed budget; pass `display="omitted"` to hide thoughts) and read `effort` as `output_config.effort`.  OpenAI `o1`/`o3`/`o4`/`gpt-5.x` and Gemini 2.5+ surface `reasoning_tokens` automatically and read `effort` as `reasoning_effort` / `reasoning.effort`.  See provider-capability matrix in `lazybridge.matrix`. |
 | `strict_multimodal` | `False` | Raise `UnsupportedFeatureError` when the model doesn't support an attachment modality |
 
 `strict_native_tools` is **not** an `LLMEngine` knob — it lives on
