@@ -51,8 +51,8 @@ from lazybridge import Agent, LLMEngine
 agent = Agent(
     engine=LLMEngine("claude-opus-5"),
 )
-result = agent("hello")           # sync — returns Envelope
-print(result.text())              # str payload
+result = agent("hello")  # sync — returns Envelope
+print(result.text())  # str payload
 ```
 
 Async and streaming forms exist (`await agent.run(task)`,
@@ -206,9 +206,11 @@ factory variants. Default model is `claude-opus-5`.
 ```python
 from lazybridge import Agent, LLMEngine
 
+
 def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
     ...
+
 
 agent = Agent(
     engine=LLMEngine("claude-opus-5"),
@@ -229,16 +231,18 @@ For legacy callables you can't annotate, switch the mode to `"llm"` or
 from pydantic import BaseModel
 from lazybridge import Agent, LLMEngine
 
+
 class Summary(BaseModel):
     headline: str
     bullets: list[str]
+
 
 agent = Agent(
     engine=LLMEngine("claude-opus-5"),
     output=Summary,
 )
 result = agent("Summarise the news")
-print(result.payload.headline)    # read .payload, not .text()
+print(result.payload.headline)  # read .payload, not .text()
 ```
 
 ### Sequential / parallel composition
@@ -302,12 +306,10 @@ the topology is decided by the LLM at runtime (not a fixed DAG), use
 from lazybridge import Agent, AgentPool, LLMEngine, conclude
 
 pool = AgentPool()  # registry exposed as a single `route(agent_name, task)` tool
-alice = Agent(engine=LLMEngine("claude-opus-5"), name="alice",
-              tools=[pool.as_tool(), conclude])
-bob = Agent(engine=LLMEngine("claude-opus-5"), name="bob",
-            tools=[pool.as_tool(), conclude])
-pool.register(alice, bob)            # register AFTER construction (breaks the cycle)
-result = alice.run("...")            # alice may route("bob", …); any agent may conclude(…)
+alice = Agent(engine=LLMEngine("claude-opus-5"), name="alice", tools=[pool.as_tool(), conclude])
+bob = Agent(engine=LLMEngine("claude-opus-5"), name="bob", tools=[pool.as_tool(), conclude])
+pool.register(alice, bob)  # register AFTER construction (breaks the cycle)
+result = alice.run("...")  # alice may route("bob", …); any agent may conclude(…)
 ```
 
 - `pool.as_tool()` is an ordinary `Tool` named `route` — the engine does not
@@ -363,10 +365,13 @@ Step("write", task=from_prev, context=from_step("research"))
 ```python
 from lazybridge import when
 
-Step("triage", routes={
-    "legal":     when.field("category").equals("legal"),
-    "technical": when.field("category").equals("technical"),
-})
+Step(
+    "triage",
+    routes={
+        "legal": when.field("category").equals("legal"),
+        "technical": when.field("category").equals("technical"),
+    },
+)
 ```
 
 Or let an LLM decide via a structured field on the step's `output=`:
@@ -419,8 +424,8 @@ guardian = Agent(
     name="guardian",
 )
 
-guardian("refactor the auth module")   # first session
-guardian("continue")                    # resumes from last checkpoint
+guardian("refactor the auth module")  # first session
+guardian("continue")  # resumes from last checkpoint
 ```
 
 `ReplanTask` uses `tool + kwargs` so dispatch is `tool_map[task.tool].run(**task.kwargs)` —
@@ -435,7 +440,7 @@ from lazybridge import Agent
 from lazybridge.ext.hil import HumanEngine, SupervisorEngine
 
 approval = Agent(engine=HumanEngine(timeout=300), name="approve")
-repl     = Agent(engine=SupervisorEngine(tools=[...]), name="repl")
+repl = Agent(engine=SupervisorEngine(tools=[...]), name="repl")
 ```
 
 `human_agent(timeout=300, name="approve")` and
