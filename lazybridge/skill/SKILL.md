@@ -49,7 +49,7 @@ as separate classes; use plain `Agent` with different engines and tools.
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
 )
 result = agent("hello")           # sync — returns Envelope
 print(result.text())              # str payload
@@ -91,7 +91,7 @@ build extra structure or return different types. Read the
 
 | Sugar | Canonical | Differences |
 |---|---|---|
-| `Agent("claude-opus-4-7", **kw)` | `Agent(engine=LLMEngine("claude-opus-4-7"), **kw)` | **Pure alias.** First positional arg is interpreted as a model string and threaded into ``LLMEngine(...)``.  Hides which engine drives the agent at the call site; canonical form is preferred in tutorials and code reviews. |
+| `Agent("claude-opus-5", **kw)` | `Agent(engine=LLMEngine("claude-opus-5"), **kw)` | **Pure alias.** First positional arg is interpreted as a model string and threaded into ``LLMEngine(...)``.  Hides which engine drives the agent at the call site; canonical form is preferred in tutorials and code reviews. |
 | `Agent.from_provider("anthropic", tier="top", **kw)` | `Agent(engine=LLMEngine("top", provider="anthropic"), **kw)` | **Not pure sugar** — uses tier-alias model strings (`super_cheap`/`cheap`/`medium`/`expensive`/`top`) resolved via the provider's tier map. Use when you want freshest-in-tier without pinning a date-stamped name. |
 
 **Build an Agent with a Plan engine**
@@ -159,12 +159,12 @@ pipeline = Agent(
 | `result = await agent.run(task)` | Inside an existing `async def` caller. |
 | `async for chunk in agent.stream(task):` | Incremental tokens / events. |
 
-Default model in examples: `claude-opus-4-7`. When a user is learning,
+Default model in examples: `claude-opus-5`. When a user is learning,
 err on the side of the longer canonical form — even if a one-liner
 works, the canonical version teaches the shape they will need at every
 later rung.
 
-**Default-model fallback** — when `claude-opus-4-7` is sunset (or any
+**Default-model fallback** — when `claude-opus-5` is sunset (or any
 date-pinned model id stops resolving), reach for the **tier alias**
 path instead of guessing the next model id:
 
@@ -190,16 +190,16 @@ Full reference with worked examples for each row:
 from lazybridge import Agent, LLMEngine
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
 )
 result = agent("hello")
 print(result.text())
 ```
 
-`LLMEngine("claude-opus-4-7")` is what makes this an LLM-driven agent.
-Configure the engine in place — `LLMEngine("claude-opus-4-7", system=
+`LLMEngine("claude-opus-5")` is what makes this an LLM-driven agent.
+Configure the engine in place — `LLMEngine("claude-opus-5", system=
 "...", max_turns=10, thinking=True, ...)` — instead of reaching for
-factory variants. Default model is `claude-opus-4-7`.
+factory variants. Default model is `claude-opus-5`.
 
 ### Agent with a tool
 
@@ -211,7 +211,7 @@ def get_weather(city: str) -> str:
     ...
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     tools=[get_weather],
 )
 result = agent("Weather in Paris?")
@@ -234,7 +234,7 @@ class Summary(BaseModel):
     bullets: list[str]
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     output=Summary,
 )
 result = agent("Summarise the news")
@@ -277,12 +277,12 @@ dispatch instead of running all of them.
 from lazybridge import Agent, LLMEngine
 
 researcher = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     name="research",
     tools=[search],
 )
 supervisor = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     tools=[researcher],
 )
 ```
@@ -302,9 +302,9 @@ the topology is decided by the LLM at runtime (not a fixed DAG), use
 from lazybridge import Agent, AgentPool, LLMEngine, conclude
 
 pool = AgentPool()  # registry exposed as a single `route(agent_name, task)` tool
-alice = Agent(engine=LLMEngine("claude-opus-4-8"), name="alice",
+alice = Agent(engine=LLMEngine("claude-opus-5"), name="alice",
               tools=[pool.as_tool(), conclude])
-bob = Agent(engine=LLMEngine("claude-opus-4-8"), name="bob",
+bob = Agent(engine=LLMEngine("claude-opus-5"), name="bob",
             tools=[pool.as_tool(), conclude])
 pool.register(alice, bob)            # register AFTER construction (breaks the cycle)
 result = alice.run("...")            # alice may route("bob", …); any agent may conclude(…)
@@ -404,7 +404,7 @@ from lazybridge import Agent, LLMEngine, ReplanEngine, Store
 from lazybridge.engines.replan import PlanRound, ReplanTask
 
 planner = Agent(
-    engine=LLMEngine("claude-opus-4-8", system="You are a task planner."),
+    engine=LLMEngine("claude-opus-5", system="You are a task planner."),
     output=PlanRound,
     name="planner",
 )
@@ -466,7 +466,7 @@ http = MCP.http(
 )
 
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     tools=[fs, http],
 )
 ```
@@ -481,7 +481,7 @@ from lazybridge import Agent, JsonFileExporter, LLMEngine, Session
 
 session = Session(exporters=[JsonFileExporter("events.jsonl")])
 agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+    engine=LLMEngine("claude-opus-5"),
     session=session,
 )
 ```
@@ -499,7 +499,7 @@ their own.
   exists. The signature path is the default and covers >95% of real
   callables.
 - **Hiding the engine behind sugar.** `Agent(...)`, the
-  string-positional `Agent("claude-opus-4-7")`, and `Agent(engine=...)`
+  string-positional `Agent("claude-opus-5")`, and `Agent(engine=...)`
   all save a line of code at the cost of hiding which engine the agent
   actually runs. Lead with `Agent(engine=LLMEngine("..."), ...)`,
   especially in tutorials and code reviews.

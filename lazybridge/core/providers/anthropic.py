@@ -87,6 +87,18 @@ _BETA_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*-\d{4}-\d{2}-\d{2}$")
 # Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
+    # Claude 5 family (Jun-Jul 2026).  Fable 5 is Anthropic's most capable
+    # generally-available model; Mythos 5 is the same underlying model
+    # without Fable's safety guardrails, restricted to vetted partners
+    # (Project Glasswing / US government cyber defenders) — kept in the
+    # price table for callers with access, but deliberately NOT wired
+    # into _TIER_ALIASES since ordinary API keys can't reach it.
+    "claude-fable-5": (10.0, 50.0),
+    "claude-mythos-5": (10.0, 50.0),  # restricted access — see comment above
+    "claude-opus-5": (5.0, 25.0),
+    # Sonnet 5 introductory pricing runs through 2026-08-31, then rises to
+    # $3.00 / $15.00 per million tokens — update this row after that date.
+    "claude-sonnet-5": (2.0, 10.0),
     "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-6": (5.0, 25.0),
@@ -102,11 +114,59 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-3-haiku": (0.25, 1.25),
 }
 
-# Models where temperature/top_p/top_k are not supported (returns 400)
-_NO_SAMPLING_MODELS = frozenset({"claude-opus-4-8", "claude-opus-4-7"})
+# Models where temperature/top_p/top_k are not supported (returns 400).
+# Fable 5 / Mythos 5 are adaptive-thinking-only by family design (same
+# underlying model); Opus 5 continues the Opus 4.7/4.8 pattern.
+_NO_SAMPLING_MODELS = frozenset(
+    {"claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5"}
+)
 
 # Models that use adaptive thinking only (no budget_tokens)
-_ADAPTIVE_ONLY_MODELS = frozenset({"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"})
+_ADAPTIVE_ONLY_MODELS = frozenset(
+    {
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+    }
+)
+
+# Models supporting the ``effort`` request parameter (output_config.effort) —
+# see https://platform.claude.com/docs/en/build-with-claude/effort.  Distinct
+# from _ADAPTIVE_ONLY_MODELS: effort also applies to Opus 4.5, which still
+# uses manual budget_tokens thinking.
+_EFFORT_CAPABLE_MODELS = frozenset(
+    {
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-opus-4-5",
+    }
+)
+
+# Subset of _EFFORT_CAPABLE_MODELS that additionally supports "xhigh" (not
+# just "max").  Opus 4.6 / Sonnet 4.6 / Opus 4.5 top out at "max".
+_XHIGH_CAPABLE_MODELS = frozenset(
+    {
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-sonnet-5",
+    }
+)
+
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 
 class AnthropicProvider(BaseProvider):
@@ -122,9 +182,15 @@ class AnthropicProvider(BaseProvider):
     - Streaming
 
     Model-specific behavior:
-    - Opus 4.8 / Opus 4.7: adaptive thinking only, no temperature/sampling params
+    - Fable 5 / Mythos 5: adaptive thinking only, no temperature/sampling params;
+      Mythos 5 is restricted to vetted partners (Project Glasswing)
+    - Opus 5 / Opus 4.8 / Opus 4.7: adaptive thinking only, no temperature/sampling params
+    - Sonnet 5: adaptive thinking only, no temperature/sampling params
     - Opus 4.6 / Sonnet 4.6: adaptive thinking, full sampling support
-    - Older models: extended thinking with budget_tokens
+    - Opus 4.5 and older: extended thinking with budget_tokens
+    - Effort parameter (output_config.effort — "low"/"medium"/"high"/"xhigh"/"max"):
+      Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 5,
+      Sonnet 4.6, Opus 4.5.  See ``_build_effort``.
     """
 
     # No default — forces explicit model= to avoid silent paid fallback.
@@ -133,14 +199,21 @@ class AnthropicProvider(BaseProvider):
 
     # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
     # resolves here.  Update this table when new models ship.
+    #
+    # "top" is Fable 5, Anthropic's most capable generally-available model
+    # (released 2026-06-09) — NOT Mythos 5, which is restricted to vetted
+    # partners and unreachable with an ordinary API key.
     _TIER_ALIASES = {
-        "top": "claude-opus-4-8",
-        "expensive": "claude-opus-4-7",  # second tier, same quality family as top
-        "medium": "claude-sonnet-4-6",
+        "top": "claude-fable-5",
+        "expensive": "claude-opus-5",  # second tier: near-Fable quality, ~half the price
+        "medium": "claude-sonnet-5",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-3-haiku",
     }
     _FALLBACKS = {
+        "claude-fable-5": ["claude-opus-5", "claude-sonnet-5"],
+        "claude-opus-5": ["claude-sonnet-5", "claude-opus-4-8"],
+        "claude-sonnet-5": ["claude-sonnet-4-6", "claude-3-5-sonnet"],
         "claude-opus-4-8": ["claude-opus-4-7", "claude-sonnet-4-6"],
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
@@ -169,6 +242,8 @@ class AnthropicProvider(BaseProvider):
             "claude-opus",
             "claude-sonnet",
             "claude-haiku",
+            "claude-fable",
+            "claude-mythos",
         }
     )
 
@@ -181,6 +256,10 @@ class AnthropicProvider(BaseProvider):
             "claude-opus-4",
             "claude-sonnet-4",
             "claude-haiku-4",
+            "claude-fable-5",
+            "claude-mythos-5",
+            "claude-opus-5",
+            "claude-sonnet-5",
         }
     )
 
@@ -283,7 +362,9 @@ class AnthropicProvider(BaseProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for a given Anthropic model."""
         resolved = (model or self.model or self.default_model or "").lower()
-        if any(x in resolved for x in ("opus-4-8", "opus-4-7", "opus-4-6")):
+        if any(
+            x in resolved for x in ("fable-5", "mythos-5", "opus-5", "sonnet-5", "opus-4-8", "opus-4-7", "opus-4-6")
+        ):
             return 128_000
         if any(x in resolved for x in ("sonnet-4-6", "haiku-4-5", "opus-4-5", "sonnet-4-5")):
             return 64_000
@@ -546,16 +627,17 @@ class AnthropicProvider(BaseProvider):
 
         if is_adaptive:
             if request.thinking.budget_tokens is not None:
-                # I5 (audit) — the previous message said "Use 'effort' instead"
-                # but Opus 4.7 only accepts the ``display`` knob; ``effort`` is
-                # not a valid parameter for adaptive-thinking models.  Surface
-                # what's actually supported.
+                # Adaptive-thinking models manage their own token budget
+                # server-side; ``budget_tokens`` has no effect.  Depth is
+                # instead steered via ``ThinkingConfig.effort`` (sent as
+                # ``output_config.effort`` — see ``_build_effort``), which
+                # every adaptive model in _ADAPTIVE_ONLY_MODELS also supports.
                 warnings.warn(
                     f"ThinkingConfig.budget_tokens is ignored for model {model!r} "
                     f"(adaptive thinking only — token budget is server-managed).  "
-                    f"Set ``ThinkingConfig.display`` to ``'omitted'`` if you want "
-                    f"to hide thinking output; there is no token-budget knob for "
-                    f"this model family.",
+                    f"Use ``ThinkingConfig.effort`` ('low'/'medium'/'high'/'xhigh'/'max') "
+                    f"to control reasoning depth instead, and "
+                    f"``ThinkingConfig.display='omitted'`` to hide thinking output.",
                     DeprecationWarning,
                     stacklevel=4,
                 )
@@ -585,6 +667,50 @@ class AnthropicProvider(BaseProvider):
             )
             budget = max_budget
         return {"type": "enabled", "budget_tokens": budget}
+
+    def _build_effort(self, request: CompletionRequest, model: str) -> str | None:
+        """Resolve ``request.thinking.effort`` into an ``output_config.effort`` value.
+
+        Returns ``None`` when nothing should be sent: no ``ThinkingConfig`` was
+        passed, or the effective level is ``"high"`` (the API default — sending
+        it explicitly is a documented no-op, see
+        https://platform.claude.com/docs/en/build-with-claude/effort).  A model
+        that doesn't support ``effort`` at all gets a warning and ``None`` so
+        the request still goes through instead of failing with a 400.
+        """
+        if not request.thinking:
+            return None
+        effort = request.thinking.effort
+        if effort == "high":
+            return None
+        if effort not in _EFFORT_LEVELS:
+            warnings.warn(
+                f"ThinkingConfig.effort={effort!r} is not a recognised level "
+                f"({sorted(_EFFORT_LEVELS)}); passing it through as-is — the "
+                f"API is the source of truth for newly-added levels.",
+                UserWarning,
+                stacklevel=4,
+            )
+            return effort
+        if not any(key in model for key in _EFFORT_CAPABLE_MODELS):
+            warnings.warn(
+                f"ThinkingConfig.effort={effort!r} is ignored for model {model!r} — "
+                f"this model does not support the effort parameter. See "
+                f"https://platform.claude.com/docs/en/build-with-claude/effort "
+                f"for the list of supported models.",
+                UserWarning,
+                stacklevel=4,
+            )
+            return None
+        if effort == "xhigh" and not any(key in model for key in _XHIGH_CAPABLE_MODELS):
+            warnings.warn(
+                f"ThinkingConfig.effort='xhigh' is not supported on model {model!r} "
+                f"(this model tops out at 'max'); using 'max' instead.",
+                UserWarning,
+                stacklevel=4,
+            )
+            return "max"
+        return effort
 
     def _build_params(self, request: CompletionRequest) -> dict[str, Any]:
         model = self._resolve_model(request)
@@ -668,6 +794,13 @@ class AnthropicProvider(BaseProvider):
         thinking = self._build_thinking(request)
         if thinking:
             params["thinking"] = thinking
+        effort = self._build_effort(request, model)
+        if effort:
+            # Merge into output_config rather than assigning — the
+            # structured-output paths in complete()/stream()/acomplete()/
+            # astream() also write output_config (the "format" key) and must
+            # not clobber "effort" set here, or vice versa.
+            params.setdefault("output_config", {})["effort"] = effort
         return params
 
     def _parse_response(self, response: Any) -> CompletionResponse:
@@ -821,7 +954,7 @@ class AnthropicProvider(BaseProvider):
             schema = request.structured_output.schema
             if isinstance(schema, dict):
                 schema = normalize_json_schema(schema)
-                params["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
+                params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": schema}
                 response = self._client.beta.messages.create(**params, **self._beta_kwargs(betas))
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
@@ -864,7 +997,7 @@ class AnthropicProvider(BaseProvider):
                     # messages.parse().  Convert to JSON schema and pass via
                     # output_config so the API enforces the structure server-side.
                     json_schema = normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
-                    params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+                    params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": json_schema}
                     if betas:
                         response = self._client.beta.messages.create(**params, **self._beta_kwargs(betas))
                     else:
@@ -896,7 +1029,7 @@ class AnthropicProvider(BaseProvider):
                 if isinstance(schema, dict)
                 else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
             )
-            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+            params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": json_schema}
 
         ctx: Any
         if betas or "output_config" in params:
@@ -996,7 +1129,7 @@ class AnthropicProvider(BaseProvider):
             if isinstance(schema, dict):
                 # Always use beta endpoint — output_config requires it.
                 schema = normalize_json_schema(schema)
-                params["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
+                params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": schema}
                 response = await self._async_client.beta.messages.create(**params, **self._beta_kwargs(betas))
                 resp = self._parse_response(response)
                 apply_structured_validation(resp, resp.content, schema)
@@ -1029,7 +1162,7 @@ class AnthropicProvider(BaseProvider):
                     # output_config (same as sync path). Plain messages.create() without
                     # output_config silently ignores the schema and returns free-form text.
                     json_schema = normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
-                    params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+                    params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": json_schema}
                     if betas:
                         response = await self._async_client.beta.messages.create(**params, **self._beta_kwargs(betas))
                     else:
@@ -1061,7 +1194,7 @@ class AnthropicProvider(BaseProvider):
                 if isinstance(schema, dict)
                 else normalize_json_schema(schema.model_json_schema())  # type: ignore[attr-defined]
             )
-            params["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+            params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": json_schema}
 
         ctx: Any
         if betas or "output_config" in params:

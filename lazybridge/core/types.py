@@ -413,7 +413,9 @@ class ThinkingConfig:
 
     enabled: bool = True
     display: str | None = None  # Anthropic 4.6+: e.g. "omitted" to hide thinking text in streams
-    effort: str = "high"  # "low"|"medium"|"high"|"xhigh" — maps to provider equivalent
+    effort: str = "high"  # "low"|"medium"|"high"|"xhigh"|"max" — maps to provider equivalent
+    # "max" maps to OpenAI's "xhigh" (OpenAI has no separate max tier);
+    # Anthropic sends "max" as-is (Claude 5 / Opus 4.6+ / Sonnet 4.6 / Opus 4.5).
     # For older Anthropic models only (budget_tokens deprecated on claude-*-4-6):
     budget_tokens: int | None = None
 

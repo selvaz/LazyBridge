@@ -197,9 +197,9 @@ def test_fallback_targets_have_pricing(provider_cls):
 @pytest.mark.parametrize(
     "provider_cls,tier,expected_substring",
     [
-        (OpenAIProvider, "top", "gpt-5.5"),
+        (OpenAIProvider, "top", "gpt-5.6-sol"),
         (OpenAIProvider, "cheap", "gpt-5.4-nano"),
-        (AnthropicProvider, "top", "claude-opus-4-8"),
+        (AnthropicProvider, "top", "claude-fable-5"),
         (AnthropicProvider, "cheap", "claude-haiku"),
         (GoogleProvider, "top", "gemini-3.1-pro"),
         (DeepSeekProvider, "top", "deepseek-v4-pro"),
