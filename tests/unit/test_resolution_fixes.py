@@ -8,6 +8,7 @@ Sections:
   S6  — Session warns on every exporter failure (see also test_audit_fixes.py)
   A5  — Agent: fallback= cycle detected at construction time
   C6  — tool_schema: TypedDict and NamedTuple annotations → object schema
+  C7  — tool_schema: dict[str, Any] is an open object; strict=True rejects it
   A2  — stream() writes to store on completion
 """
 
@@ -324,6 +325,115 @@ def test_typeddict_used_as_function_param_schema():
     defn = t.definition()
     query_schema = defn.parameters.get("properties", {}).get("query", {})
     assert query_schema.get("type") == "object", f"Expected object schema for TypedDict param; got {query_schema}"
+
+
+# ---------------------------------------------------------------------------
+# C7 — tool_schema: dict[str, Any] is an open object; strict=True must reject it
+# ---------------------------------------------------------------------------
+
+
+def test_dict_str_any_produces_open_object_schema_non_strict():
+    """Non-strict: dict[str, Any] stays a bare, permissive object schema."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    schema = _annotation_to_schema(dict[str, typing.Any])
+    assert schema == {"type": "object"}
+
+
+def test_dict_str_any_param_non_strict_builds_fine():
+    from lazybridge import tool
+
+    def configure(payload: dict[str, typing.Any]) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure")
+    defn = t.definition()
+    payload_schema = defn.parameters["properties"]["payload"]
+    assert payload_schema == {"type": "object"}
+
+
+def test_dict_str_any_param_strict_raises():
+    """strict=True can't express an arbitrary-keyed dict as a closed schema --
+    must fail loudly at build time, not silently forward an invalid schema
+    that OpenAI's strict validator would reject at call time."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: dict[str, typing.Any]) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_bare_dict_param_strict_raises():
+    """Same as dict[str, Any]: an unsubscripted dict is equally open."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: dict) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_dict_str_int_param_non_strict_builds_fine():
+    from lazybridge import tool
+
+    def configure(counts: dict[str, int]) -> str:
+        """Accept named counts."""
+        return ""
+
+    t = tool(configure, name="configure")
+    defn = t.definition()
+    counts_schema = defn.parameters["properties"]["counts"]
+    assert counts_schema == {"type": "object", "additionalProperties": {"type": "integer"}}
+
+
+def test_bare_dict_produces_object_schema_not_string():
+    """Regression: a bare (unsubscripted) dict annotation has no __origin__
+    and was silently falling through to the string fallback."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    assert _annotation_to_schema(dict) == {"type": "object"}
+
+
+def test_dict_str_int_param_strict_raises():
+    """A value-typed dict (dict[str, int]) is JUST AS open as dict[str, Any]
+    under OpenAI strict mode: strict mode requires additionalProperties to be
+    the literal `false`, not a value-type schema -- the *set of keys* is what
+    must be closed, and a dict's keys are never enumerable. Only a
+    TypedDict/pydantic model (fixed, named keys) can satisfy strict mode."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(counts: dict[str, int]) -> str:
+        """Accept named counts."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="counts"):
+        t.definition()
+
+
+def test_typeddict_param_strict_builds_fine():
+    """A TypedDict is already closed (additionalProperties: False) and must
+    not be flagged as an open object under strict=True."""
+    from lazybridge import tool
+
+    def search(query: _MovieQuery) -> str:
+        """Search for a movie."""
+        return ""
+
+    t = tool(search, name="search", strict=True)
+    defn = t.definition()  # must not raise
+    assert defn.parameters["properties"]["query"]["additionalProperties"] is False
 
 
 def test_namedtuple_used_as_function_param_schema():

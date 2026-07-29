@@ -349,7 +349,13 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # applied as a dict's value schema it would force every value to be a
     # string, rejecting the real nested objects/arrays/numbers a dict[str,
     # Any] parameter (e.g. an inline config blob) is meant to carry.
-    if origin is dict:
+    #
+    # A bare, unsubscripted ``dict`` has no ``__origin__`` (it's just the
+    # builtin class, not a generic alias), so it must be matched explicitly
+    # here too -- otherwise it falls all the way through to the final
+    # permissive-string fallback below, silently turning a dict parameter
+    # into a string-typed schema.
+    if origin is dict or annotation is dict:
         if len(args) == 2:
             if args[1] is typing.Any:
                 return {"type": "object"}
@@ -435,6 +441,34 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     # confusing ``ToolArgumentValidationError`` at call time.  Defaulting
     # to string keeps unannotated parameters visible and round-trippable.
     return {"type": "string"}
+
+
+def _find_open_objects(schema: Any, path: str = "") -> list[str]:
+    """Dotted paths to every nested object schema missing ``additionalProperties: false``.
+
+    OpenAI's strict tool-calling mode requires *every* object in the schema
+    tree to be closed (all keys enumerated in ``properties``, no unbounded
+    ``additionalProperties``), not just the top-level parameter object --
+    ``_build_signature_mode`` only closes the top level. An arbitrary-keyed
+    ``dict[str, Any]`` (or bare ``dict``) parameter is fundamentally
+    unrepresentable as a closed schema, so it can't be silently patched;
+    the caller building a ``strict=True`` tool needs to know before the
+    provider rejects the request.
+    """
+    if not isinstance(schema, dict):
+        return []
+    found: list[str] = []
+    if schema.get("type") == "object" and schema.get("additionalProperties") is not False:
+        found.append(path or "<root>")
+    for prop_name, prop_schema in schema.get("properties", {}).items():
+        found.extend(_find_open_objects(prop_schema, f"{path}.{prop_name}" if path else prop_name))
+    items = schema.get("items")
+    if isinstance(items, dict):
+        found.extend(_find_open_objects(items, f"{path}[]"))
+    for key in ("anyOf", "oneOf", "allOf", "prefixItems"):
+        for i, sub in enumerate(schema.get(key) or ()):
+            found.extend(_find_open_objects(sub, f"{path}|{key}[{i}]"))
+    return found
 
 
 def _first_paragraph(doc: str) -> str:
@@ -1258,6 +1292,23 @@ class ToolSchemaBuilder:
             # for the full rule set.
             json_schema.setdefault("required", [])
 
+            open_paths = [
+                p
+                for prop_name, prop_schema in properties.items()
+                for p in _find_open_objects(prop_schema, prop_name)
+            ]
+            if open_paths:
+                raise ToolSchemaBuildError(
+                    f"Tool '{name}' cannot be built with strict=True: parameter path(s) "
+                    f"{open_paths!r} resolve to an open object schema (unbounded/arbitrary "
+                    "keys -- e.g. a dict[str, Any] or bare dict parameter). Strict-mode "
+                    "providers (OpenAI) require every object in the schema to be closed "
+                    "at every nesting level, not just the tool's top-level parameters, and "
+                    "an arbitrary-keyed dict cannot be expressed as a closed schema. Build "
+                    "this tool with strict=False, or replace the open dict with a "
+                    "TypedDict/pydantic model that enumerates its keys."
+                )
+
         return ToolDefinition(
             name=name,
             description=description,
@@ -1344,6 +1395,20 @@ class ToolSchemaBuilder:
         if strict:
             json_schema["additionalProperties"] = False
             json_schema.setdefault("required", [])
+
+            open_paths = [
+                p for prop_name, prop_schema in properties.items() for p in _find_open_objects(prop_schema, prop_name)
+            ]
+            if open_paths:
+                raise ToolSchemaBuildError(
+                    f"Tool '{name or result.name}' cannot be built with strict=True: "
+                    f"parameter path(s) {open_paths!r} resolve to an open object schema "
+                    "(the LLM described this parameter's type as \"object\" with no "
+                    "enumerated keys). Strict-mode providers (OpenAI) require every "
+                    "object in the schema to be closed at every nesting level. Build "
+                    "this tool with strict=False, or give the parameter a concrete "
+                    "TypedDict/pydantic annotation via SIGNATURE/HYBRID mode instead."
+                )
 
         return (
             ToolDefinition(
