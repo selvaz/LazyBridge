@@ -341,9 +341,18 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
             "items": False,
         }
 
-    # dict[K, V] — object with typed values (JSON keys are always strings)
+    # dict[K, V] — object with typed values (JSON keys are always strings).
+    # dict[K, Any] is special-cased to a bare {"type": "object"} (no
+    # additionalProperties restriction): the Any -> {"type": "string"} fallback
+    # below exists for a *top-level* Any parameter (where a JSON schema needs
+    # some declared type to stay visible in strict mode) and is wrong here --
+    # applied as a dict's value schema it would force every value to be a
+    # string, rejecting the real nested objects/arrays/numbers a dict[str,
+    # Any] parameter (e.g. an inline config blob) is meant to carry.
     if origin is dict:
         if len(args) == 2:
+            if args[1] is typing.Any:
+                return {"type": "object"}
             return {"type": "object", "additionalProperties": _annotation_to_schema(args[1])}
         return {"type": "object"}
 
