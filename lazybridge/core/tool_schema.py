@@ -49,7 +49,11 @@ _logger = logging.getLogger(__name__)
 # Bump these when compile logic or LLM prompt templates change.
 # v2: fingerprint now includes flatten_refs (a flattening builder and a
 # non-flattening builder sharing one ArtifactStore used to collide).
-_COMPILER_VERSION = "2"
+# v3: strict=True now rejects open object schemas (_find_open_objects) and
+# bare dict no longer falls through to a string schema -- a persisted
+# ArtifactStore's pre-v3 cached artifact for the same (func, strict=True)
+# input must not be returned as-is, or the new checks are silently skipped.
+_COMPILER_VERSION = "3"
 _LLM_PROMPT_VERSION = "1"
 
 
@@ -454,6 +458,15 @@ def _find_open_objects(schema: Any, path: str = "") -> list[str]:
     unrepresentable as a closed schema, so it can't be silently patched;
     the caller building a ``strict=True`` tool needs to know before the
     provider rejects the request.
+
+    A pydantic ``BaseModel`` parameter's schema (via ``model_json_schema()``)
+    puts nested models under a ``$defs``/``definitions`` map with only a
+    ``$ref`` pointer left inline in ``properties`` -- an open nested model
+    living there would otherwise never be visited by the ``properties``/
+    ``items``/``anyOf`` walk above. Rather than resolve each ``$ref``
+    individually (circular refs, scope rules), every entry under any
+    ``$defs``/``definitions`` map found anywhere in the tree is scanned
+    directly: if it's defined, it's reachable, so this is sound and simpler.
     """
     if not isinstance(schema, dict):
         return []
@@ -468,6 +481,11 @@ def _find_open_objects(schema: Any, path: str = "") -> list[str]:
     for key in ("anyOf", "oneOf", "allOf", "prefixItems"):
         for i, sub in enumerate(schema.get(key) or ()):
             found.extend(_find_open_objects(sub, f"{path}|{key}[{i}]"))
+    for defs_key in ("$defs", "definitions"):
+        for def_name, def_schema in (schema.get(defs_key) or {}).items():
+            found.extend(
+                _find_open_objects(def_schema, f"{path}${defs_key}.{def_name}" if path else f"${defs_key}.{def_name}")
+            )
     return found
 
 

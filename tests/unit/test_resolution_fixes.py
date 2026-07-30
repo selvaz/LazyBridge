@@ -19,6 +19,8 @@ import typing
 from typing import NamedTuple
 
 import pytest
+from pydantic import BaseModel as _BaseModel
+from pydantic import ConfigDict as _ConfigDict
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -289,6 +291,33 @@ class _Point(NamedTuple):
     y: float
 
 
+# Module-level (not function-local): this file has `from __future__ import
+# annotations`, so a function-local class referenced by a nested function's
+# annotation can't be resolved by typing.get_type_hints (it's not in
+# func.__globals__) -- that failure is silently swallowed by
+# _build_signature_mode, which falls back to a bare string schema instead of
+# raising, defeating these tests' purpose entirely.
+class _OpenInner(_BaseModel):
+    x: int
+
+
+class _ClosedOuterWithOpenInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    inner: _OpenInner
+    y: str
+
+
+class _ClosedInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    x: int
+
+
+class _ClosedOuterWithClosedInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    inner: _ClosedInner
+    y: str
+
+
 def test_typeddict_annotation_produces_object_schema():
     from lazybridge.core.tool_schema import _annotation_to_schema
 
@@ -434,6 +463,35 @@ def test_typeddict_param_strict_builds_fine():
     t = tool(search, name="search", strict=True)
     defn = t.definition()  # must not raise
     assert defn.parameters["properties"]["query"]["additionalProperties"] is False
+
+
+def test_open_object_in_pydantic_defs_is_caught_under_strict():
+    """A pydantic BaseModel param can itself be closed (extra="forbid") while
+    a NESTED model it references is not -- pydantic emits that nested model
+    under $defs with only a $ref left inline in properties, so a scan that
+    only walks properties/items/anyOf never sees it. Must still be caught."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: _ClosedOuterWithOpenInner) -> str:
+        """Accept a nested config."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_closed_nested_pydantic_model_strict_builds_fine():
+    """The same shape, but the nested model is ALSO closed -- must not raise."""
+    from lazybridge import tool
+
+    def configure(payload: _ClosedOuterWithClosedInner) -> str:
+        """Accept a nested config."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    t.definition()  # must not raise
 
 
 def test_namedtuple_used_as_function_param_schema():
