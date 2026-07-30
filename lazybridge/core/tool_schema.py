@@ -1293,9 +1293,7 @@ class ToolSchemaBuilder:
             json_schema.setdefault("required", [])
 
             open_paths = [
-                p
-                for prop_name, prop_schema in properties.items()
-                for p in _find_open_objects(prop_schema, prop_name)
+                p for prop_name, prop_schema in properties.items() for p in _find_open_objects(prop_schema, prop_name)
             ]
             if open_paths:
                 raise ToolSchemaBuildError(
@@ -1403,7 +1401,7 @@ class ToolSchemaBuilder:
                 raise ToolSchemaBuildError(
                     f"Tool '{name or result.name}' cannot be built with strict=True: "
                     f"parameter path(s) {open_paths!r} resolve to an open object schema "
-                    "(the LLM described this parameter's type as \"object\" with no "
+                    '(the LLM described this parameter\'s type as "object" with no '
                     "enumerated keys). Strict-mode providers (OpenAI) require every "
                     "object in the schema to be closed at every nesting level. Build "
                     "this tool with strict=False, or give the parameter a concrete "
