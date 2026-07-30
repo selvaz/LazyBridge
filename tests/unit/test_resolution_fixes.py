@@ -8,6 +8,7 @@ Sections:
   S6  — Session warns on every exporter failure (see also test_audit_fixes.py)
   A5  — Agent: fallback= cycle detected at construction time
   C6  — tool_schema: TypedDict and NamedTuple annotations → object schema
+  C7  — tool_schema: dict[str, Any] is an open object; strict=True rejects it
   A2  — stream() writes to store on completion
 """
 
@@ -18,6 +19,8 @@ import typing
 from typing import NamedTuple
 
 import pytest
+from pydantic import BaseModel as _BaseModel
+from pydantic import ConfigDict as _ConfigDict
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -288,6 +291,33 @@ class _Point(NamedTuple):
     y: float
 
 
+# Module-level (not function-local): this file has `from __future__ import
+# annotations`, so a function-local class referenced by a nested function's
+# annotation can't be resolved by typing.get_type_hints (it's not in
+# func.__globals__) -- that failure is silently swallowed by
+# _build_signature_mode, which falls back to a bare string schema instead of
+# raising, defeating these tests' purpose entirely.
+class _OpenInner(_BaseModel):
+    x: int
+
+
+class _ClosedOuterWithOpenInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    inner: _OpenInner
+    y: str
+
+
+class _ClosedInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    x: int
+
+
+class _ClosedOuterWithClosedInner(_BaseModel):
+    model_config = _ConfigDict(extra="forbid")
+    inner: _ClosedInner
+    y: str
+
+
 def test_typeddict_annotation_produces_object_schema():
     from lazybridge.core.tool_schema import _annotation_to_schema
 
@@ -324,6 +354,144 @@ def test_typeddict_used_as_function_param_schema():
     defn = t.definition()
     query_schema = defn.parameters.get("properties", {}).get("query", {})
     assert query_schema.get("type") == "object", f"Expected object schema for TypedDict param; got {query_schema}"
+
+
+# ---------------------------------------------------------------------------
+# C7 — tool_schema: dict[str, Any] is an open object; strict=True must reject it
+# ---------------------------------------------------------------------------
+
+
+def test_dict_str_any_produces_open_object_schema_non_strict():
+    """Non-strict: dict[str, Any] stays a bare, permissive object schema."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    schema = _annotation_to_schema(dict[str, typing.Any])
+    assert schema == {"type": "object"}
+
+
+def test_dict_str_any_param_non_strict_builds_fine():
+    from lazybridge import tool
+
+    def configure(payload: dict[str, typing.Any]) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure")
+    defn = t.definition()
+    payload_schema = defn.parameters["properties"]["payload"]
+    assert payload_schema == {"type": "object"}
+
+
+def test_dict_str_any_param_strict_raises():
+    """strict=True can't express an arbitrary-keyed dict as a closed schema --
+    must fail loudly at build time, not silently forward an invalid schema
+    that OpenAI's strict validator would reject at call time."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: dict[str, typing.Any]) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_bare_dict_param_strict_raises():
+    """Same as dict[str, Any]: an unsubscripted dict is equally open."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: dict) -> str:
+        """Accept an arbitrary config blob."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_dict_str_int_param_non_strict_builds_fine():
+    from lazybridge import tool
+
+    def configure(counts: dict[str, int]) -> str:
+        """Accept named counts."""
+        return ""
+
+    t = tool(configure, name="configure")
+    defn = t.definition()
+    counts_schema = defn.parameters["properties"]["counts"]
+    assert counts_schema == {"type": "object", "additionalProperties": {"type": "integer"}}
+
+
+def test_bare_dict_produces_object_schema_not_string():
+    """Regression: a bare (unsubscripted) dict annotation has no __origin__
+    and was silently falling through to the string fallback."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    assert _annotation_to_schema(dict) == {"type": "object"}
+
+
+def test_dict_str_int_param_strict_raises():
+    """A value-typed dict (dict[str, int]) is JUST AS open as dict[str, Any]
+    under OpenAI strict mode: strict mode requires additionalProperties to be
+    the literal `false`, not a value-type schema -- the *set of keys* is what
+    must be closed, and a dict's keys are never enumerable. Only a
+    TypedDict/pydantic model (fixed, named keys) can satisfy strict mode."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(counts: dict[str, int]) -> str:
+        """Accept named counts."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="counts"):
+        t.definition()
+
+
+def test_typeddict_param_strict_builds_fine():
+    """A TypedDict is already closed (additionalProperties: False) and must
+    not be flagged as an open object under strict=True."""
+    from lazybridge import tool
+
+    def search(query: _MovieQuery) -> str:
+        """Search for a movie."""
+        return ""
+
+    t = tool(search, name="search", strict=True)
+    defn = t.definition()  # must not raise
+    assert defn.parameters["properties"]["query"]["additionalProperties"] is False
+
+
+def test_open_object_in_pydantic_defs_is_caught_under_strict():
+    """A pydantic BaseModel param can itself be closed (extra="forbid") while
+    a NESTED model it references is not -- pydantic emits that nested model
+    under $defs with only a $ref left inline in properties, so a scan that
+    only walks properties/items/anyOf never sees it. Must still be caught."""
+    from lazybridge import tool
+    from lazybridge.core.tool_schema import ToolSchemaBuildError
+
+    def configure(payload: _ClosedOuterWithOpenInner) -> str:
+        """Accept a nested config."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    with pytest.raises(ToolSchemaBuildError, match="payload"):
+        t.definition()
+
+
+def test_closed_nested_pydantic_model_strict_builds_fine():
+    """The same shape, but the nested model is ALSO closed -- must not raise."""
+    from lazybridge import tool
+
+    def configure(payload: _ClosedOuterWithClosedInner) -> str:
+        """Accept a nested config."""
+        return ""
+
+    t = tool(configure, name="configure", strict=True)
+    t.definition()  # must not raise
 
 
 def test_namedtuple_used_as_function_param_schema():
