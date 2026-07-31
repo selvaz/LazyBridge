@@ -53,7 +53,7 @@ otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
 # ``cryptography`` (Fernet = AES-128-CBC + HMAC-SHA256, key rotation via
 # MultiFernet).  Opt-in because cryptography is a C-extension; the rest
 # of LazyBridge stays pure-Python by default.
-encryption = ["cryptography>=42,<49"]
+encryption = ["cryptography>=42,<50"]
 # Multi-line-aware docstring parsing for auto-derived tool schemas
 # (Google/NumPy/Sphinx, via the same library PydanticAI and the OpenAI
 # Agents SDK use). Imported lazily inside ToolSchemaBuilder; without it,
@@ -72,7 +72,7 @@ docs      = [
     "mkdocs-llmstxt>=0.3,<1.0",
     "pymdown-extensions>=10.0,<11.0",
 ]
-all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "cryptography>=42,<49", "griffe>=1.0,<3.0"]
+all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "cryptography>=42,<50", "griffe>=1.0,<3.0"]
 
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
