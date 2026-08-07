@@ -252,18 +252,29 @@ class ClaudeCodeEngine:
         Mirrors ``LLMEngine``/``Executor``'s ``max_retries``/``retry_delay``
         with exponential backoff and jitter, at the coarse whole-call
         granularity available here (see ``_is_transient``).
+
+        ``request_timeout`` bounds the *entire* retry loop, not each
+        individual attempt — resetting the deadline per attempt would let
+        ``max_retries`` stalled attempts plus backoff block for a multiple
+        of the advertised timeout (e.g. ~4x with the defaults) instead of
+        the deadline actually enforced.
         """
-        attempt = 0
-        while True:
-            call = make_call()
-            try:
-                return await asyncio.wait_for(call, timeout=self.request_timeout) if self.request_timeout is not None else await call
-            except BaseException as exc:
-                if attempt >= self.max_retries or not _is_transient(exc):
-                    raise
-                delay = self.retry_delay * (2**attempt) * (0.9 + 0.2 * random.random())
-                attempt += 1
-                await asyncio.sleep(delay)
+
+        async def _attempt_loop() -> _T:
+            attempt = 0
+            while True:
+                try:
+                    return await make_call()
+                except BaseException as exc:
+                    if attempt >= self.max_retries or not _is_transient(exc):
+                        raise
+                    delay = self.retry_delay * (2**attempt) * (0.9 + 0.2 * random.random())
+                    attempt += 1
+                    await asyncio.sleep(delay)
+
+        if self.request_timeout is None:
+            return await _attempt_loop()
+        return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
 
     def _options(self, tools: list[Any], observe: Any, *, partial: bool = False, resume: str | None = None) -> ClaudeSdkOptions:
         builtin_tools = (

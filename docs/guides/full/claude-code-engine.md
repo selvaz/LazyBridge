@@ -324,9 +324,6 @@ Common issues:
   provider exposes `as_tools()`, and check for duplicate names.
 - **A tool fails**: the error is available to Claude and in `Session` events;
   check the tool signature, schema, and implementation.
-- **`ImportError` mentioning `pip install '.[sdk]'`**: install the extra as
-  `pip install "lazybridge[claude-code]"` instead — that message is inherited
-  from the pre-merge prototype's own install instructions.
 
 ## 9. What this integration intentionally does not do
 

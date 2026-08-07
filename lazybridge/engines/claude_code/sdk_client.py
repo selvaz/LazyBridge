@@ -74,7 +74,7 @@ class AgentSdkClient(ClaudeSdkClient):
         except ImportError as exc:  # pragma: no cover - exercised by users without the extra
             raise ImportError(
                 "Claude Code support requires the optional dependencies. "
-                "Install this prototype with: pip install '.[sdk]'"
+                'Install with: pip install "lazybridge[claude-code]"'
             ) from exc
 
         if not _shadow_warning_filtered:
@@ -205,6 +205,7 @@ class AgentSdkClient(ClaudeSdkClient):
             raise ImportError("Claude Agent SDK is not installed") from exc
 
         saw_text = False
+        saw_result = False
         stream_options = ClaudeSdkOptions(
             cwd=options.cwd,
             model=options.model,
@@ -238,6 +239,7 @@ class AgentSdkClient(ClaudeSdkClient):
                         saw_text = True
                         yield ClaudeSdkStreamEvent(text=delta["text"])
             elif isinstance(message, ResultMessage):
+                saw_result = True
                 if message.is_error:
                     detail = "; ".join(message.errors or []) or message.result or message.subtype
                     raise ClaudeSdkRequestError(f"Claude Agent SDK failed: {detail}", status=message.api_error_status)
@@ -253,3 +255,10 @@ class AgentSdkClient(ClaudeSdkClient):
                     cost_usd=float(message.total_cost_usd or 0.0),
                     final=True,
                 )
+        if not saw_result:
+            # Mirrors AgentSdkClient.run(): the SDK iterator ended without a
+            # ResultMessage. Silently returning here would let the engine
+            # record an empty/partial stream as a successful turn (stale
+            # memory write, false AGENT_FINISH, and — in session_mode=
+            # "runtime" — a resume ID that was never actually confirmed).
+            raise RuntimeError("Claude Agent SDK stream ended without a ResultMessage")
