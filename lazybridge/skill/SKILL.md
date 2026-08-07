@@ -30,8 +30,8 @@ framework moves quickly, and the public docs at
 An `Agent` is the composition of three things — and only these three:
 
 - **Engine** — `LLMEngine` (default), `Plan`, `HumanEngine`,
-  `SupervisorEngine`, or a custom `BaseEngine`. The engine decides what
-  happens next.
+  `SupervisorEngine`, `ClaudeCodeEngine`, or a custom `BaseEngine`. The
+  engine decides what happens next.
 - **Tools** — a list of `Tool` objects. A tool can wrap a Python function,
   another agent (just pass it in `tools=[...]`), an MCP server, a
   `NativeTool` (provider-hosted), or a pre-built JSON schema
@@ -432,6 +432,34 @@ guardian("continue")  # resumes from last checkpoint
 no special-casing for pools, agents, or functions.  The planner receives the
 available tool schemas and accumulated history dynamically so its system prompt
 needs no hardcoded worker names.  Same checkpoint/resume semantics as `Plan`.
+
+### Claude Code as the model loop — ClaudeCodeEngine
+
+`ClaudeCodeEngine` is a standard `Engine` that runs the model/tool loop
+through the locally authenticated Claude Code runtime (Claude Agent SDK)
+instead of a raw provider API call — same `Agent`/`Memory`/`Session`/`tools=`
+surface as `LLMEngine`, no separate integration code. Requires the optional
+`lazybridge[claude-code]` extra.
+
+```python
+from lazybridge import Agent, ClaudeCodeEngine
+
+agent = Agent(
+    name="research",
+    engine=ClaudeCodeEngine(model="sonnet", cwd="C:/work/project"),
+    tools=[search, specialist_agent],
+)
+```
+
+`cwd`/`file_roots` opt into read-only `Read`/`Glob`/`Grep` scoped to those
+directories; `web=True` (default) enables `WebSearch`/`WebFetch`. `Bash`,
+`Write`, `Edit`, and native Claude Code subagents are never exposed. Full
+setup (Claude Code sign-in, install, config knobs, session modes,
+troubleshooting): [Claude Code Engine guide](../../docs/guides/full/claude-code-engine.md).
+
+A `CodexEngine` (same `Engine` contract, backed by the Codex App Server) is
+planned but not yet in this repo — it will follow the same shape once it has
+been verified against a real `codex app-server` process.
 
 ### Human-in-the-loop
 

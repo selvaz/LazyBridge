@@ -62,6 +62,22 @@ narrative usage.
 
 ::: lazybridge.ReplanTask
 
+## Claude Code engine
+
+`ClaudeCodeEngine` runs the model/tool loop through the locally
+authenticated Claude Code runtime (Claude Agent SDK) instead of a raw
+provider API call — same `Agent`/`Memory`/`Session`/`tools=` surface as
+`LLMEngine`. Requires the optional `lazybridge[claude-code]` extra to
+actually run (the class itself is always importable). See
+[Guides → Full → Claude Code Engine](../guides/full/claude-code-engine.md)
+for setup, configuration, and troubleshooting.
+
+::: lazybridge.ClaudeCodeEngine
+
+A `CodexEngine` (same `Engine` contract, backed by the Codex App Server) is
+planned but not yet shipped — see the
+[roadmap note](../guides/full/claude-code-engine.md#roadmap-codex-engine).
+
 ## Engine errors
 
 ::: lazybridge.PlanCompileError

@@ -9,6 +9,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`ClaudeCodeEngine`** (`lazybridge.engines.claude_code`, re-exported as
+  `lazybridge.ClaudeCodeEngine`) — a standard `Engine` that runs the
+  model/tool loop through the locally authenticated Claude Code runtime
+  (Claude Agent SDK) instead of a raw provider API call, with the same
+  `Agent`/`Memory`/`Session`/`tools=` surface as `LLMEngine`: in-process MCP
+  tool exposure, read-only `Read`/`Glob`/`Grep` scoped to `file_roots`,
+  `WebSearch`/`WebFetch`, retries/timeouts mirroring `LLMEngine`'s policy,
+  `session_mode="runtime"` for a persistent Claude Code session inside one
+  LazyBridge `Session`. Merged from the standalone feasibility prototype
+  (live-verified against the real Claude Agent SDK); new optional extra
+  `lazybridge[claude-code]` (`claude-agent-sdk`, `mcp`). See
+  [Claude Code Engine guide](docs/guides/full/claude-code-engine.md). A
+  `CodexEngine` (same contract, backed by Codex App Server) is planned but
+  not yet merged — its prototype is unit-tested but not yet verified
+  against a real `codex app-server` process.
+
+### Fixed
+- `tests/unit/test_examples_import.py`: `_example_id()` used `str(Path)`
+  instead of `.as_posix()`, producing backslash-separated ids/module names
+  on Windows; combined with an example using `@dataclass` under
+  `from __future__ import annotations`, the backslash broke dataclasses'
+  postponed-annotation resolution. Also register the synthetic module in
+  `sys.modules` before `exec_module()` (required for that same resolution
+  path), removing it afterward. No prior example both lived in a
+  subdirectory and imported cleanly under this test, so this never
+  surfaced before `examples/claude_code/`.
+
 - **Anthropic Claude 5 family** (`claude-fable-5`, `claude-opus-5`,
   `claude-sonnet-5`) and restricted-access `claude-mythos-5` added to
   `AnthropicProvider._PRICE_TABLE` / `_TIER_ALIASES` / `_FALLBACKS`.

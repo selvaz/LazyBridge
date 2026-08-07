@@ -60,6 +60,12 @@ encryption = ["cryptography>=42,<49"]
 # signature-mode falls back to a narrower regex parser that only captures
 # a single physical line per parameter.
 docparse  = ["griffe>=1.0,<3.0"]
+# ClaudeCodeEngine — runs the model/tool loop through the locally
+# authenticated Claude Code runtime instead of a raw provider API call.
+# Imported lazily inside lazybridge.engines.claude_code.sdk_client; the
+# engine class itself is always importable, this extra is only needed to
+# actually construct/run one. See docs/guides/full/claude-code-engine.md.
+claude-code = ["claude-agent-sdk", "mcp"]
 # ``pydantic`` is a runtime dependency but tests import it directly
 # (fixtures, dataclass coercion, schema validation).  Including it in
 # the [test] extra makes ``pip install -e '.[test]'`` a one-step
@@ -72,7 +78,7 @@ docs      = [
     "mkdocs-llmstxt>=0.3,<1.0",
     "pymdown-extensions>=10.0,<11.0",
 ]
-all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "cryptography>=42,<49", "griffe>=1.0,<3.0"]
+all       = ["anthropic>=0.49.0,<1.0.0", "openai>=1.70.0,<3.0.0", "google-genai>=1.10.0,<2.0.0", "litellm>=1.40.0,<2.0.0", "pyyaml>=6.0,<7.0", "opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0", "cryptography>=42,<49", "griffe>=1.0,<3.0", "claude-agent-sdk", "mcp"]
 
 [project.urls]
 Homepage      = "https://github.com/selvaz/LazyBridge"
@@ -198,6 +204,22 @@ module = [
 disallow_untyped_defs = true
 check_untyped_defs = true
 warn_unused_ignores = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_return_any = true
+
+# ``lazybridge.engines.claude_code.sdk_client`` is the sole optional-import
+# boundary for ``claude_agent_sdk`` (same shape as ``core.providers.*``
+# above) — its ``# type: ignore`` directives targeting the SDK's own
+# Literal/TypedDict types are necessary when the SDK is installed but
+# appear unused when it isn't. Listed after the ``lazybridge.engines.*``
+# glob above so this more specific override wins for this one module.
+[[tool.mypy.overrides]]
+module = [
+    "lazybridge.engines.claude_code.sdk_client",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
 disallow_any_generics = true
 no_implicit_optional = true
 warn_return_any = true

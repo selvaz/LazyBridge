@@ -131,6 +131,9 @@ from lazybridge.dedup_guard import DeduplicateGuard
 
 # Engines (HumanEngine, SupervisorEngine, eval helpers, and OTelExporter
 # live under ``lazybridge.ext.{hil,evals,otel}``).
+# ClaudeCodeEngine is always importable; constructing one requires the
+# optional ``lazybridge[claude-code]`` extra (``claude-agent-sdk`` + ``mcp``).
+from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
@@ -215,6 +218,7 @@ __all__ = [
     "LLMGuard",
     # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
     "LLMEngine",
+    "ClaudeCodeEngine",
     "Plan",
     "Step",
     "ConcurrentPlanRunError",
