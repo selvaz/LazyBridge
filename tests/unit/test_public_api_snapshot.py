@@ -62,6 +62,7 @@ _EXPECTED: frozenset[str] = frozenset(
         "LLMGuard",
         # Engines (HumanEngine, SupervisorEngine in lazybridge.ext.hil)
         "LLMEngine",
+        "ClaudeCodeEngine",
         "Plan",
         "Step",
         "ConcurrentPlanRunError",

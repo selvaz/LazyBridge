@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import py_compile
+import sys
 from pathlib import Path
 
 import pytest
@@ -76,7 +77,14 @@ def _all_example_files() -> list[Path]:
 
 
 def _example_id(path: Path) -> str:
-    return str(path.relative_to(_EXAMPLES_DIR))
+    # ``.as_posix()`` — plain ``str()`` yields backslash-separated ids on
+    # Windows, which corrupts the synthetic module name built from it in
+    # ``test_example_imports`` (breaks stringified-annotation resolution
+    # for any example using ``from __future__ import annotations`` plus a
+    # dataclass). No prior example lived in a subdirectory that also
+    # imported cleanly (the ones that do are all skipped via
+    # ``_OPTIONAL_TOP_LEVEL_PACKAGES``), so this never surfaced before.
+    return path.relative_to(_EXAMPLES_DIR).as_posix()
 
 
 _EXAMPLE_FILES = _all_example_files()
@@ -117,7 +125,15 @@ def test_example_imports(path: Path) -> None:
     spec = importlib.util.spec_from_file_location(module_name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Register before exec: an example combining ``@dataclass`` with
+    # ``from __future__ import annotations`` needs ``sys.modules[module.__name__]``
+    # to exist so dataclasses can resolve the postponed string annotations
+    # against the module's globals — without this it dies on
+    # ``sys.modules.get(cls.__module__)`` returning ``None``.
+    sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except Exception as exc:  # pragma: no cover - failure path
         pytest.fail(f"{_example_id(path)} failed to import: {exc!r}")
+    finally:
+        del sys.modules[module_name]

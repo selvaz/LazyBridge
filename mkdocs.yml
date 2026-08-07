@@ -194,6 +194,7 @@ nav:
           - Exporters: guides/full/exporters.md
           - GraphSchema: guides/full/graph-schema.md
           - SupervisorEngine: guides/full/supervisor.md
+          - Claude Code Engine: guides/full/claude-code-engine.md
       - Advanced:
           - Core vs Ext boundary: guides/core-vs-ext.md
           - Engine protocol: guides/advanced/engine-protocol.md

@@ -68,6 +68,15 @@ class TestBuildWebForm:
 
 # =============================================================================
 # Web UI — _WebUI class
+#
+# NOTE: these tests exercise the real HTTP server and call ``prompt()``
+# for real, which means ``_WebUI``'s unconditional ``webbrowser.open()``
+# (human.py, first ``prompt()`` call per instance) really fires here —
+# nothing in this module mocks ``webbrowser``. Confirmed 2026-08-07: a
+# full ``pytest`` run opens a real browser tab per test in this class.
+# Harmless (each server is on an OS-assigned ``port=0`` and torn down),
+# but noisy. Known gap, not fixed here — mock ``webbrowser.open`` in this
+# class if/when it's worth the churn.
 # =============================================================================
 
 
