@@ -213,7 +213,13 @@ warn_return_any = true
 # above) — its ``# type: ignore`` directives targeting the SDK's own
 # Literal/TypedDict types are necessary when the SDK is installed but
 # appear unused when it isn't. Listed after the ``lazybridge.engines.*``
-# glob above so this more specific override wins for this one module.
+# glob above so this more specific override applies for this one module —
+# but mypy MERGES overrides in file order rather than "most specific
+# wins": a key this section doesn't set keeps whatever an earlier
+# matching section set, it does not reset to the global default. Since
+# ``lazybridge.engines.*`` above also matches this module and sets
+# ``warn_unused_ignores = true``, it must be set back to ``false`` here
+# explicitly — leaving it unset does NOT undo the earlier section.
 [[tool.mypy.overrides]]
 module = [
     "lazybridge.engines.claude_code.sdk_client",
@@ -223,6 +229,7 @@ check_untyped_defs = true
 disallow_any_generics = true
 no_implicit_optional = true
 warn_return_any = true
+warn_unused_ignores = false
 
 # ---------------------------------------------------------------------------
 # Coverage

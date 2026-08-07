@@ -137,7 +137,9 @@ class AgentSdkClient(ClaudeSdkClient):
             # this engine did not declare via ``builtin_tools`` — deny it.
             return PermissionResultDeny(message=f"Built-in tool {name!r} is not enabled")
 
-        async def keep_permission_stream_open(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        async def keep_permission_stream_open(
+            input_data: dict[str, Any], tool_use_id: str | None, context: Any
+        ) -> dict[str, Any]:
             return {"continue_": True}
 
         use_callback = bool(options.builtin_tools)
@@ -227,9 +229,7 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         async for message in query(
             prompt=sdk_prompt,
-            options=self._sdk_options(
-                stream_options
-            ),
+            options=self._sdk_options(stream_options),
         ):
             if isinstance(message, StreamEvent):
                 event = message.event

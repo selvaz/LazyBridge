@@ -31,7 +31,12 @@ _TRANSIENT_ERROR_TYPES: tuple[type[BaseException], ...] = (TimeoutError, Connect
 #: OSError subclasses that indicate a permanent configuration problem
 #: (missing/unreadable ``claude`` executable) rather than a transient
 #: connection blip — must not be retried.
-_NON_TRANSIENT_OS_TYPES: tuple[type[OSError], ...] = (FileNotFoundError, PermissionError, NotADirectoryError, IsADirectoryError)
+_NON_TRANSIENT_OS_TYPES: tuple[type[OSError], ...] = (
+    FileNotFoundError,
+    PermissionError,
+    NotADirectoryError,
+    IsADirectoryError,
+)
 #: HTTP status codes on ``ClaudeSdkRequestError.status`` treated as
 #: transient provider failures — mirrors LLMEngine's "429/5xx" policy.
 _TRANSIENT_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
@@ -276,10 +281,11 @@ class ClaudeCodeEngine:
             return await _attempt_loop()
         return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
 
-    def _options(self, tools: list[Any], observe: Any, *, partial: bool = False, resume: str | None = None) -> ClaudeSdkOptions:
-        builtin_tools = (
-            (("Read", "Glob", "Grep") if self.file_roots else ())
-            + (("WebSearch", "WebFetch") if self.web else ())
+    def _options(
+        self, tools: list[Any], observe: Any, *, partial: bool = False, resume: str | None = None
+    ) -> ClaudeSdkOptions:
+        builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
+            ("WebSearch", "WebFetch") if self.web else ()
         )
         return ClaudeSdkOptions(
             cwd=self.cwd,
@@ -313,6 +319,7 @@ class ClaudeCodeEngine:
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         try:
+
             def observe(kind: str, payload: dict[str, Any]) -> None:
                 if not session:
                     return
@@ -369,7 +376,11 @@ class ClaudeCodeEngine:
         except Exception as exc:
             out = Envelope.error_envelope(exc)
         if session:
-            payload = {"agent_name": agent_name, "payload": out.text(), "latency_ms": (time.monotonic() - started) * 1000}
+            payload = {
+                "agent_name": agent_name,
+                "payload": out.text(),
+                "latency_ms": (time.monotonic() - started) * 1000,
+            }
             if not out.ok:
                 payload["error"] = out.error.message if out.error else "unknown"
             session.emit(EventType.AGENT_FINISH, payload, run_id=run_id)
@@ -391,10 +402,16 @@ class ClaudeCodeEngine:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         chunks: list[str] = []
         try:
+
             def observe(kind: str, payload: dict[str, Any]) -> None:
                 if session:
                     session.emit(
-                        {"call": EventType.TOOL_CALL, "result": EventType.TOOL_RESULT, "error": EventType.TOOL_ERROR, "timeout": EventType.TOOL_TIMEOUT}[kind],
+                        {
+                            "call": EventType.TOOL_CALL,
+                            "result": EventType.TOOL_RESULT,
+                            "error": EventType.TOOL_ERROR,
+                            "timeout": EventType.TOOL_TIMEOUT,
+                        }[kind],
                         payload,
                         run_id=run_id,
                     )

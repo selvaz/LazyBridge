@@ -20,7 +20,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   LazyBridge `Session`. Merged from the standalone feasibility prototype
   (live-verified against the real Claude Agent SDK); new optional extra
   `lazybridge[claude-code]` (`claude-agent-sdk`, `mcp`). See
-  [Claude Code Engine guide](docs/guides/full/claude-code-engine.md). A
+  `docs/guides/full/claude-code-engine.md`. A
   `CodexEngine` (same contract, backed by Codex App Server) is planned but
   not yet merged — its prototype is unit-tested but not yet verified
   against a real `codex app-server` process.

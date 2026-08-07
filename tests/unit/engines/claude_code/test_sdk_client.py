@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from lazybridge.engines.claude_code.mcp_adapter import to_mcp_tools
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
+
+# Both tests below call AgentSdkClient._sdk_options() directly, which builds
+# a real claude_agent_sdk.ClaudeAgentOptions — needs lazybridge[claude-code].
+# CI's standard test job does not install that optional extra.
+pytest.importorskip("claude_agent_sdk", reason="needs lazybridge[claude-code]")
 
 
 class _Definition:
