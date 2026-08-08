@@ -327,7 +327,8 @@ class DeepSeekProvider(OpenAIProvider):
         DeepSeek rejects a thinking-mode tool follow-up unless the preceding
         assistant message carries its full ``reasoning_content``.
         """
-        return block.thinking
+        thinking = getattr(block, "thinking", None)
+        return thinking if isinstance(thinking, str) else None
 
     # ------------------------------------------------------------------
     # Override: extract reasoning_content from DeepSeek responses
