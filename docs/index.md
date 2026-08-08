@@ -57,10 +57,11 @@ mental model is the same.
   [Parallel](guides/mid/parallel.md), [As tool](guides/mid/as-tool.md),
   [HumanEngine](guides/mid/human-engine.md), [MCP](https://tools.lazybridge.com/mcp/),
   [Multimodal](guides/mid/multimodal.md), [Evals](guides/mid/evals.md).
-- **Guides → Full** — nine pages on production pipelines:
+- **Guides → Full** — production guides for pipelines and runtime engines:
   [Plan](guides/full/plan.md), [Step](guides/full/step.md),
   [Sentinels](guides/full/sentinels.md), [Routing](guides/full/routing.md),
   [Parallel plan steps](guides/full/parallel-plan-steps.md),
+  [Claude Code Engine](guides/full/claude-code-engine.md),
   [Checkpoint & resume](guides/full/checkpoint.md),
   [Exporters](guides/full/exporters.md),
   [GraphSchema](guides/full/graph-schema.md),
