@@ -56,6 +56,17 @@ _THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
 # Parameters silently ignored by the API when thinking mode is active.
 _THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penalty", "frequency_penalty"})
 
+# Unified LazyBridge effort values -> the DeepSeek Chat Completions API.
+# DeepSeek accepts low/high/max.  For Flash, xhigh is mapped to high; for
+# compatibility medium maps to the documented high level.
+_THINKING_EFFORT_MAP = {
+    "low": "low",
+    "medium": "high",
+    "high": "high",
+    "xhigh": "high",
+    "max": "max",
+}
+
 # Price per 1M tokens (input, output). Verify at platform.deepseek.com/api-docs/pricing.
 # V4 Pro: the 75%-off promo became the permanent standard rate (announced 2026-05).
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
@@ -260,6 +271,10 @@ class DeepSeekProvider(OpenAIProvider):
     def _is_reasoning_model(self, model: str) -> bool:
         return model in _REASONING_MODELS
 
+    def _supports_chat_reasoning_effort(self, model: str) -> bool:
+        """DeepSeek V4 accepts ``reasoning_effort`` in thinking mode."""
+        return model in _THINKING_CAPABLE_MODELS
+
     def _is_thinking_active(self, request: CompletionRequest, model: str) -> bool:
         """True when the request will run in thinking/reasoning mode."""
         if model in _REASONING_MODELS:
@@ -295,6 +310,7 @@ class DeepSeekProvider(OpenAIProvider):
             return
         if request.thinking and request.thinking.enabled:
             params.setdefault("extra_body", {})["thinking"] = {"type": "enabled"}
+            params["reasoning_effort"] = _THINKING_EFFORT_MAP.get(request.thinking.effort, "high")
             # Strip params the API silently ignores in thinking mode.
             for p in _THINKING_SUPPRESSED_PARAMS:
                 params.pop(p, None)
@@ -303,6 +319,15 @@ class DeepSeekProvider(OpenAIProvider):
             # in non-thinking calls — avoids passback errors on multi-turn
             # tool-calling loops.
             params.setdefault("extra_body", {})["thinking"] = {"type": "disabled"}
+
+    @staticmethod
+    def _thinking_content_to_openai(block: Any) -> str | None:
+        """Replay DeepSeek V4 reasoning in subsequent tool-loop turns.
+
+        DeepSeek rejects a thinking-mode tool follow-up unless the preceding
+        assistant message carries its full ``reasoning_content``.
+        """
+        return block.thinking
 
     # ------------------------------------------------------------------
     # Override: extract reasoning_content from DeepSeek responses

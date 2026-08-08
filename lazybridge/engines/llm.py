@@ -714,7 +714,12 @@ class LLMEngine:
         _stream_sink: asyncio.Queue[str | None] | None = None,
     ) -> Envelope[Any]:
 
-        from lazybridge.core.types import TextContent, ToolResultContent, ToolUseContent
+        from lazybridge.core.types import (
+            TextContent,
+            ThinkingContent,
+            ToolResultContent,
+            ToolUseContent,
+        )
 
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
@@ -896,6 +901,8 @@ class LLMEngine:
 
             # Append assistant turn with tool calls
             assistant_blocks: list[Any] = []
+            if resp.thinking:
+                assistant_blocks.append(ThinkingContent(thinking=resp.thinking))
             if resp.content:
                 assistant_blocks.append(TextContent(text=resp.content))
             for tc in resp.tool_calls:
@@ -1028,6 +1035,7 @@ class LLMEngine:
         from lazybridge.core.types import CompletionResponse, UsageStats
 
         content_parts: list[str] = []
+        thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         stop_reason = "end_turn"
         usage = UsageStats()
@@ -1037,6 +1045,8 @@ class LLMEngine:
         validated: bool | None = None
 
         async for chunk in self._idle_guarded_stream(executor.astream(req)):
+            if chunk.thinking_delta:
+                thinking_parts.append(chunk.thinking_delta)
             if chunk.delta:
                 content_parts.append(chunk.delta)
                 await sink.put(chunk.delta)
@@ -1061,6 +1071,7 @@ class LLMEngine:
 
         return CompletionResponse(
             content="".join(content_parts),
+            thinking="".join(thinking_parts) or None,
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             usage=usage,

@@ -120,7 +120,7 @@ def test_stream_turn_preserves_parsed_and_validation_fields():
 
     parsed_obj = _Point(x=1, y=2)
     chunks = [
-        StreamChunk(delta='{"x": 1, '),
+        StreamChunk(delta='{"x": 1, ', thinking_delta="I should produce a point."),
         StreamChunk(
             delta='"y": 2}',
             stop_reason="end_turn",
@@ -150,6 +150,7 @@ def test_stream_turn_preserves_parsed_and_validation_fields():
     assert resp.validated is True
     assert resp.validation_error is None
     assert resp.content == '{"x": 1, "y": 2}'
+    assert resp.thinking == "I should produce a point."
 
 
 # ---------------------------------------------------------------------------

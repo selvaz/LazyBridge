@@ -52,6 +52,10 @@ from lazybridge.core.types import (
     Message,
     NativeTool,
     Role,
+    ThinkingConfig,
+    ThinkingContent,
+    ToolDefinition,
+    ToolUseContent,
 )
 
 _STANDARD_TIERS = ("top", "expensive", "medium", "cheap", "super_cheap")
@@ -563,11 +567,45 @@ def test_deepseek_apply_thinking_params_activates_extra_body():
     params: dict = {"temperature": 0.5, "top_p": 0.9, "max_tokens": 100}
     p._apply_thinking_params(params, "deepseek-v4-flash", req)
     assert params["extra_body"]["thinking"] == {"type": "enabled"}
+    assert params["reasoning_effort"] == "high"
     # Suppressed params are stripped to avoid silent ignore by the API.
     assert "temperature" not in params
     assert "top_p" not in params
     # Non-suppressed params survive.
     assert params["max_tokens"] == 100
+
+
+def test_deepseek_replays_reasoning_content_in_tool_history():
+    p = _bare(DeepSeekProvider)
+    request = CompletionRequest(
+        messages=[
+            Message(
+                role=Role.ASSISTANT,
+                content=[
+                    ThinkingContent(thinking="I need the weather first."),
+                    ToolUseContent(id="call_1", name="weather", input={"city": "Rome"}),
+                ],
+            )
+        ],
+        tools=[ToolDefinition(name="weather", description="Weather", parameters={"type": "object"})],
+        thinking=ThinkingConfig(enabled=True),
+    )
+
+    messages = p._messages_to_openai(request)
+
+    assert messages == [
+        {
+            "role": "assistant",
+            "reasoning_content": "I need the weather first.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": '{"city": "Rome"}'},
+                }
+            ],
+        }
+    ]
 
 
 def test_deepseek_apply_thinking_params_no_op_for_legacy_reasoner():

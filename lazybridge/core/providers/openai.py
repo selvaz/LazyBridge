@@ -533,11 +533,15 @@ class OpenAIProvider(BaseProvider):
                 parts: list[dict[str, Any]] = []
                 tool_calls_in_msg: list[dict[str, Any]] = []
                 tool_results_in_msg: list[dict[str, Any]] = []
+                reasoning_content: str | None = None
                 for block in msg.content:
                     if isinstance(block, TextContent):
                         parts.append({"type": "text", "text": block.text})
                     elif isinstance(block, ThinkingContent):
-                        pass  # OpenAI doesn't expose reasoning in messages
+                        # Most OpenAI-compatible APIs do not accept replayed
+                        # chain-of-thought. Providers which require it for a
+                        # tool loop (DeepSeek V4) opt in via this hook.
+                        reasoning_content = self._thinking_content_to_openai(block)
                     elif isinstance(block, ImageContent):
                         if block.url:
                             parts.append(
@@ -609,19 +613,32 @@ class OpenAIProvider(BaseProvider):
                         messages.append({"role": "tool", **tr})
                 elif tool_calls_in_msg:
                     m: dict[str, Any] = {"role": "assistant", "tool_calls": tool_calls_in_msg}
+                    if reasoning_content:
+                        m["reasoning_content"] = reasoning_content
                     if parts:
                         m["content"] = parts
                     messages.append(m)
                 else:
-                    messages.append(
-                        {
-                            "role": msg.role.value,
-                            "content": parts[0]["text"]
-                            if (len(parts) == 1 and parts[0].get("type") == "text")
-                            else (parts if parts else ""),
-                        }
-                    )
+                    m = {
+                        "role": msg.role.value,
+                        "content": parts[0]["text"]
+                        if (len(parts) == 1 and parts[0].get("type") == "text")
+                        else (parts if parts else ""),
+                    }
+                    if reasoning_content and msg.role == Role.ASSISTANT:
+                        m["reasoning_content"] = reasoning_content
+                    messages.append(m)
         return messages
+
+    @staticmethod
+    def _thinking_content_to_openai(block: Any) -> str | None:
+        """Return provider-specific replayable thinking, if supported.
+
+        OpenAI Chat Completions does not accept raw chain-of-thought in
+        conversation history.  DeepSeek overrides this for V4 tool loops,
+        where ``reasoning_content`` must be replayed verbatim.
+        """
+        return None
 
     def _build_function_tools(self, request: CompletionRequest) -> list[dict[str, Any]]:
         tools = []
@@ -658,7 +675,7 @@ class OpenAIProvider(BaseProvider):
         # Reasoning effort — only valid on reasoning models; sending it for
         # e.g. gpt-4o (or LM Studio backends) produces a 400/ignored param.
         if request.thinking and request.thinking.enabled:
-            if self._is_reasoning_model(model):
+            if self._supports_chat_reasoning_effort(model):
                 effort = _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)
                 params["reasoning_effort"] = effort
             else:
@@ -703,6 +720,10 @@ class OpenAIProvider(BaseProvider):
                     }
 
         return params
+
+    def _supports_chat_reasoning_effort(self, model: str) -> bool:
+        """Whether this provider accepts ``reasoning_effort`` on Chat Completions."""
+        return self._is_reasoning_model(model)
 
     def _messages_to_responses_input(self, request: CompletionRequest) -> list[dict[str, Any]]:
         """Convert conversation history to Responses API input format.
