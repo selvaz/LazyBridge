@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
+
+import pytest
 
 from lazybridge.core.types import Role
 from lazybridge.memory import Memory
+from lazybridge.store import Store
 
 # ── basic add / text ──────────────────────────────────────────────────────────
 
@@ -250,3 +254,142 @@ def test_summarizer_object_with_text_method_is_stringified():
     for u, a in _force_compression_turns():
         m.add(u, a)
     assert m._summary == "FROM-TEXT"
+
+
+# ── store= / key= persistence ────────────────────────────────────────────
+
+
+def test_store_without_key_raises():
+    store = Store()
+    with pytest.raises(ValueError):
+        Memory(store=store)
+
+
+def test_store_persists_across_instances():
+    """New Memory instance, same store + key — simulates a process restart."""
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("hi, I'm Marco", "Nice to meet you, Marco.")
+
+    m2 = Memory(store=store, key="agent-a")
+    assert "Marco" in m2.text()
+
+
+def test_store_different_keys_do_not_collide():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("agent a turn", "a-reply")
+    m2 = Memory(store=store, key="agent-b")
+    m2.add("agent b turn", "b-reply")
+
+    reloaded_a = Memory(store=store, key="agent-a")
+    reloaded_b = Memory(store=store, key="agent-b")
+    assert "agent a turn" in reloaded_a.text()
+    assert "agent b turn" not in reloaded_a.text()
+    assert "agent b turn" in reloaded_b.text()
+
+
+def test_store_session_key_separates_conversations_for_same_key():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a", session_key="user-1")
+    m1.add("user 1 says hi", "hello user 1")
+    m2 = Memory(store=store, key="agent-a", session_key="user-2")
+    m2.add("user 2 says hi", "hello user 2")
+
+    reloaded_1 = Memory(store=store, key="agent-a", session_key="user-1")
+    assert "user 1 says hi" in reloaded_1.text()
+    assert "user 2 says hi" not in reloaded_1.text()
+
+
+def test_store_fresh_key_is_empty():
+    """A key that was never written looks like a brand-new Memory — no crash."""
+    store = Store()
+    m = Memory(store=store, key="never-seen-before")
+    assert m.text() == ""
+
+
+def test_store_clear_persists_the_wipe():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("q", "a")
+    m1.clear()
+
+    m2 = Memory(store=store, key="agent-a")
+    assert m2.text() == ""
+
+
+def test_store_amend_last_persists():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("q", "draft answer")
+    m1.amend_last("corrected answer")
+
+    m2 = Memory(store=store, key="agent-a")
+    assert "corrected answer" in m2.text()
+    assert "draft answer" not in m2.text()
+
+
+class _SlowFirstWriteStore:
+    """Wraps a real Store; the FIRST write_memory() call sleeps before
+    delegating, every later call is immediate. Used to prove persistence
+    stays ordered with mutations: if a later add() (fast write) could ever
+    land before an earlier add()'s (slow) write, the earlier write would
+    finish last and silently overwrite the newer state — the exact race
+    flagged in review on lazybridge/memory.py's Memory._persist_locked.
+    """
+
+    def __init__(self, inner: Store) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+        self._call_count = 0
+
+    def read_memory(self, *args, **kwargs):
+        return self._inner.read_memory(*args, **kwargs)
+
+    def write_memory(self, *args, **kwargs):
+        with self._lock:
+            self._call_count += 1
+            is_first_call = self._call_count == 1
+        if is_first_call:
+            time.sleep(0.05)
+        self._inner.write_memory(*args, **kwargs)
+
+
+def test_persist_stays_ordered_with_mutations_under_concurrency():
+    """Regression test: a slow first write must not overwrite a fast second one."""
+    inner = Store()
+    slow_store = _SlowFirstWriteStore(inner)
+    mem = Memory(store=slow_store, key="agent-a")
+
+    def first_add():
+        mem.add("first question", "first reply")
+
+    def second_add():
+        time.sleep(0.01)  # let first_add() start, and hit the slow write, first
+        mem.add("second question", "second reply")
+
+    t1 = threading.Thread(target=first_add)
+    t2 = threading.Thread(target=second_add)
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    persisted = inner.read_memory("agent-a")
+    assert persisted is not None
+    users = [t["user"] for t in persisted["turns"]]
+    assert "first question" in users
+    assert "second question" in users
+
+
+def test_store_survives_compression():
+    """Persisted state after compression carries the summary, not just raw turns."""
+    store = Store()
+    m1 = Memory(strategy="sliding", store=store, key="agent-a")
+    for i in range(15):
+        m1.add(f"q{i}", f"a{i}")
+
+    m2 = Memory(strategy="sliding", store=store, key="agent-a")
+    # Sliding keeps only the most recent turns in `_turns`, but the reloaded
+    # instance must still see the recent tail — not an empty buffer.
+    assert "q14" in m2.text()

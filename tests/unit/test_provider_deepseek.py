@@ -170,3 +170,50 @@ def test_tier_aliases_resolve_to_concrete_model_ids():
     for tier_name in ("super_cheap", "cheap", "medium", "expensive", "top"):
         assert tier_name in tiers, f"missing tier alias: {tier_name}"
         assert "deepseek" in tiers[tier_name].lower()
+
+
+# ---------------------------------------------------------------------------
+# _strip_unsupported_tool_choice — live-verified against the real API
+# (2026-08-09, deepseek-v4-flash): thinking mode 400s only on a *forced*
+# tool_choice ("required" or a named function); "auto"/"none"/omitted all
+# return 200, and "none" is genuinely honoured. Only the two broken values
+# may be popped — passing through "none" matters because dropping it lets
+# the API's implicit "auto" default (present whenever tools are attached)
+# silently override a caller's explicit "don't call tools" instruction.
+# ---------------------------------------------------------------------------
+
+
+def test_strip_tool_choice_removes_required():
+    p = _bare_deepseek()
+    params = {"tool_choice": "required", "tools": [{"type": "function"}]}
+    p._strip_unsupported_tool_choice(params)
+    assert "tool_choice" not in params
+
+
+def test_strip_tool_choice_removes_named_function():
+    p = _bare_deepseek()
+    params = {"tool_choice": {"type": "function", "function": {"name": "search"}}}
+    p._strip_unsupported_tool_choice(params)
+    assert "tool_choice" not in params
+
+
+def test_strip_tool_choice_keeps_none():
+    """DeepSeek honours tool_choice='none' in thinking mode — must NOT be dropped."""
+    p = _bare_deepseek()
+    params = {"tool_choice": "none", "tools": [{"type": "function"}]}
+    p._strip_unsupported_tool_choice(params)
+    assert params["tool_choice"] == "none"
+
+
+def test_strip_tool_choice_keeps_auto():
+    p = _bare_deepseek()
+    params = {"tool_choice": "auto", "tools": [{"type": "function"}]}
+    p._strip_unsupported_tool_choice(params)
+    assert params["tool_choice"] == "auto"
+
+
+def test_strip_tool_choice_noop_when_absent():
+    p = _bare_deepseek()
+    params = {"tools": [{"type": "function"}]}
+    p._strip_unsupported_tool_choice(params)
+    assert "tool_choice" not in params

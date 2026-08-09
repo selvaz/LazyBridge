@@ -14,7 +14,9 @@ Memory(
     strategy="auto",               # "auto" | "sliding" | "summary" | "none"
     max_tokens=4000,               # token budget that triggers compression
     max_turns=1000,                # hard backstop on retained turns
-    store=None,                    # reserved — durable persistence (1.1+)
+    store=None,                    # Store — persist across process restarts
+    key=None,                      # required with store= — stable identity (e.g. agent name)
+    session_key="default",         # secondary identity — distinguishes conversations under the same key
     summarizer=None,               # Agent or callable used by strategy="summary"
     summarizer_timeout=30.0,       # deadline for async summarisers (None = unbounded)
 )
@@ -46,9 +48,18 @@ several agents that share the instance). The default `"auto"` strategy
 keeps the memory bounded without any tuning — sliding window first,
 LLM summary of the older turns once the token budget is exceeded.
 
-`Memory` is **not** durable. The whole buffer lives in the agent's
-process and disappears when the process exits. For state that must
-survive a crash or be shared across processes, use [Store](store.md).
+By default `Memory` is **not** durable — the whole buffer lives in the
+agent's process and disappears when the process exits. Pass
+`store=` (a [Store](store.md)) and `key=` (a stable identifier, typically
+the owning agent's `name`) to persist the compressed turns/summary across
+restarts: `Memory` reloads them in `__init__` and writes the full current
+state back after every `add()`, `amend_last()`, and `clear()`. Under the
+hood this lands in a dedicated `agent_memory` table on the Store, keyed by
+`(key, session_key)` — not the generic `store.write(key, value)` blackboard
+— so persisted conversations have real identity instead of a
+string-key naming convention. `session_key` (default `"default"`) lets
+one `key` (e.g. one agent) hold several independent conversations — one
+per user, one per thread — without colliding.
 
 ## When to use it
 
@@ -65,8 +76,9 @@ survive a crash or be shared across processes, use [Store](store.md).
 
 ## When NOT to use it
 
-- **Durable cross-run state.** `Memory` doesn't survive process exit
-  and isn't shared across machines. Use `Store` instead.
+- **Durable cross-run state without `store=`.** Plain `Memory()`
+  doesn't survive process exit. Pass `store=` + `key=` (see Example 4)
+  when the agent needs to resume where it left off after a restart.
 - **Pipeline data passing.** A `Plan` step's output flows to the next
   step via the envelope and sentinels (`from_prev`, `from_step("…")`),
   not via memory. Memory is for conversational context, not workflow
@@ -131,6 +143,30 @@ judge = Agent(
 
 chat("explain LazyBridge in one sentence")
 print(judge("grade the last turn").text())
+
+
+# 4) Persistent memory — survives an agent restart.
+from lazybridge import Store
+
+store = Store(db="agents.sqlite")
+
+support_memory = Memory(
+    strategy="auto",
+    max_tokens=3000,
+    store=store,
+    key="support-agent",           # stable identity — pass the agent's own name
+)
+support = Agent(
+    engine=LLMEngine("claude-opus-4-7"),
+    memory=support_memory,
+    name="support-agent",
+)
+
+support("my order #4821 hasn't arrived")
+# ...process restarts...
+support_memory_2 = Memory(strategy="auto", max_tokens=3000, store=store, key="support-agent")
+support_2 = Agent(engine=LLMEngine("claude-opus-4-7"), memory=support_memory_2, name="support-agent")
+support_2("any update?")           # still has order #4821 in context
 ```
 
 ## Pitfalls
@@ -139,8 +175,16 @@ print(judge("grade the last turn").text())
   keyword extraction — bounded, but lossy. Pass a cheap agent for
   production-quality summaries.
 - **`memory.clear()`** wipes everything *including* the in-process
-  summary; it does not persist across restarts. For durable memory
-  use `Store`.
+  summary. With `store=` set, the wipe is persisted too — a restart
+  right after `clear()` comes back empty, not with the pre-clear state.
+- **`store=` without `key=` raises `ValueError`** at construction —
+  identity must be explicit; there's no auto-generated fallback that
+  would silently make two `Memory` instances collide or fail to find
+  each other.
+- **Every `add()` writes the full state to the Store**, not a delta.
+  Fine at single-user / low-throughput scale; if a single agent calls
+  `add()` at high frequency, that's a SQLite upsert on every turn — profile
+  before assuming it's free.
 - **`max_turns`** is a hard backstop, not the primary compression
   knob. When it fires you get a one-shot warning — that's the signal
   to switch from `strategy="none"` to `"auto"`.

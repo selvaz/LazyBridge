@@ -52,6 +52,8 @@ class Store:
         self._closed = False
         if not db:
             self._mem: dict[str, StoreEntry] = {}
+            # Keyed by (agent_id, session_key) — see write_memory/read_memory.
+            self._agent_memory: dict[tuple[str, str], dict[str, Any]] = {}
         self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:
@@ -144,6 +146,25 @@ class Store:
                 value TEXT NOT NULL,
                 written_at REAL NOT NULL,
                 agent_id TEXT
+            )
+            """
+        )
+        # Dedicated table for Memory(store=...) persistence — deliberately
+        # separate from the generic ``store`` blackboard table above.  A
+        # composite (agent_id, session_key) primary key gives conversational
+        # state real identity (indexable, queryable) instead of relying on a
+        # string-key naming convention (e.g. "memory:<agent>") inside the
+        # generic KV table, which has no schema enforcement and no way to
+        # list "every agent with saved memory" without a prefix scan.
+        self._conn().execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_memory (
+                agent_id TEXT NOT NULL,
+                session_key TEXT NOT NULL DEFAULT 'default',
+                turns TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (agent_id, session_key)
             )
             """
         )
@@ -379,6 +400,88 @@ class Store:
         if keys:
             data = {k: v for k, v in data.items() if k in keys}
         return "\n".join(f"{k}: {json.dumps(v, default=str)}" for k, v in data.items())
+
+    # -- agent memory -----------------------------------------------------
+    #
+    # Separate from the generic write/read/read_all above — backs
+    # ``Memory(store=..., key=...)`` in lazybridge/memory.py.  Identity is
+    # the (agent_id, session_key) pair rather than a caller-composed string
+    # key, so persisted conversation state can be found, listed, and
+    # overwritten deterministically across process restarts.
+
+    def write_memory(
+        self,
+        agent_id: str,
+        *,
+        turns: list[dict[str, Any]],
+        summary: str = "",
+        session_key: str = "default",
+    ) -> None:
+        """Upsert the full compressed conversation state for ``agent_id``.
+
+        ``turns`` is the complete current list (not a delta) — callers
+        overwrite the whole row on every call, mirroring how ``Memory``
+        already holds its state in full in-process.
+        """
+        if self._db:
+            self._conn().execute(
+                """
+                INSERT INTO agent_memory (agent_id, session_key, turns, summary, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (agent_id, session_key) DO UPDATE SET
+                    turns = excluded.turns,
+                    summary = excluded.summary,
+                    updated_at = excluded.updated_at
+                """,
+                (agent_id, session_key, json.dumps(turns, default=str), summary, time.time()),
+            )
+            self._conn().commit()
+        else:
+            with self._lock:
+                self._agent_memory[(agent_id, session_key)] = {
+                    "turns": _deep_copy_safe(turns),
+                    "summary": summary,
+                    "updated_at": time.time(),
+                }
+
+    def read_memory(self, agent_id: str, *, session_key: str = "default") -> dict[str, Any] | None:
+        """Return ``{"turns": [...], "summary": ..., "updated_at": ...}`` or ``None``."""
+        if self._db:
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT turns, summary, updated_at FROM agent_memory WHERE agent_id=? AND session_key=?",
+                    (agent_id, session_key),
+                )
+                .fetchone()
+            )
+            if not row:
+                return None
+            return {
+                "turns": json.loads(row["turns"]),
+                "summary": row["summary"],
+                "updated_at": row["updated_at"],
+            }
+        with self._lock:
+            entry = self._agent_memory.get((agent_id, session_key))
+            if entry is None:
+                return None
+            return {
+                "turns": _deep_copy_safe(entry["turns"]),
+                "summary": entry["summary"],
+                "updated_at": entry["updated_at"],
+            }
+
+    def delete_memory(self, agent_id: str, *, session_key: str = "default") -> None:
+        if self._db:
+            self._conn().execute(
+                "DELETE FROM agent_memory WHERE agent_id=? AND session_key=?",
+                (agent_id, session_key),
+            )
+            self._conn().commit()
+        else:
+            with self._lock:
+                self._agent_memory.pop((agent_id, session_key), None)
 
 
 def _json_eq(a: Any, b: Any) -> bool:

@@ -16,7 +16,12 @@ Thinking mode (V4 models):
   - The API receives extra_body={"thinking": {"type": "enabled"}}.
   - Chain-of-thought surfaces in the ``reasoning_content`` field (streaming and non-streaming).
   - temperature, top_p, presence_penalty, frequency_penalty are ignored in thinking mode.
-  - tool_choice is not supported in thinking mode.
+  - tool_choice: "auto"/"none"/omitted work in thinking mode (and "none" is
+    genuinely honoured, not just accepted). Only a *forced* tool_choice —
+    "required" or a named function — 400s ("Thinking mode does not support
+    this tool_choice"); those two are stripped, see
+    ``_strip_unsupported_tool_choice``. Live-verified against the API
+    2026-08-09 — undocumented in DeepSeek's official docs either way.
 
 Thinking mode (legacy deepseek-reasoner):
   - Always in thinking mode; reasoning_content is always present.
@@ -281,6 +286,25 @@ class DeepSeekProvider(OpenAIProvider):
             return True
         return model in _THINKING_CAPABLE_MODELS and bool(request.thinking and request.thinking.enabled)
 
+    def _strip_unsupported_tool_choice(self, params: dict[str, Any]) -> None:
+        """Drop ``tool_choice`` from ``params`` only when thinking mode would 400 on it.
+
+        Live-verified against the DeepSeek API (2026-08-09, deepseek-v4-flash):
+        thinking mode rejects a *forced* tool_choice — ``"required"`` or a named
+        function (``{"type": "function", "function": {...}}``) — with 400
+        "Thinking mode does not support this tool_choice". ``"auto"``,
+        ``"none"``, and an omitted tool_choice all return 200, and ``"none"``
+        is genuinely honoured (the model answers in text instead of calling
+        the tool) — not just accepted-and-ignored. Only pop the two values
+        that actually 400; passing through "none" unmodified matters because
+        popping it re-introduces the API's implicit "auto" default when tools
+        are present, silently overriding a caller's explicit "don't call
+        tools" instruction.
+        """
+        tool_choice = params.get("tool_choice")
+        if tool_choice == "required" or isinstance(tool_choice, dict):
+            params.pop("tool_choice", None)
+
     def _resolve_thinking(self, request: CompletionRequest) -> CompletionRequest:
         """Validate that thinking is only requested on models that support it.
 
@@ -448,7 +472,7 @@ class DeepSeekProvider(OpenAIProvider):
         params = self._build_chat_params(request)
 
         if self._is_thinking_active(request, model):
-            params.pop("tool_choice", None)
+            self._strip_unsupported_tool_choice(params)
 
         self._apply_thinking_params(params, model, request)
         self._apply_structured_output_params(params, request, model)
@@ -472,7 +496,7 @@ class DeepSeekProvider(OpenAIProvider):
         params["stream_options"] = {"include_usage": True}
 
         if self._is_thinking_active(request, model):
-            params.pop("tool_choice", None)
+            self._strip_unsupported_tool_choice(params)
 
         self._apply_thinking_params(params, model, request)
         self._apply_structured_output_params(params, request, model)
@@ -489,7 +513,7 @@ class DeepSeekProvider(OpenAIProvider):
         params = self._build_chat_params(request)
 
         if self._is_thinking_active(request, model):
-            params.pop("tool_choice", None)
+            self._strip_unsupported_tool_choice(params)
 
         self._apply_thinking_params(params, model, request)
         self._apply_structured_output_params(params, request, model)
@@ -513,7 +537,7 @@ class DeepSeekProvider(OpenAIProvider):
         params["stream_options"] = {"include_usage": True}
 
         if self._is_thinking_active(request, model):
-            params.pop("tool_choice", None)
+            self._strip_unsupported_tool_choice(params)
 
         self._apply_thinking_params(params, model, request)
         self._apply_structured_output_params(params, request, model)
