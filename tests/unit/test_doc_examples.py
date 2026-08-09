@@ -143,7 +143,19 @@ def test_memory_guide_shared_judge_example():
 def test_memory_guide_persistent_store():
     """Memory(store=...) persistence path — survives restarts via the Store."""
     store = Store()
-    Memory(strategy="auto", max_tokens=4000, store=store)
+    mem1 = Memory(strategy="auto", max_tokens=4000, store=store, key="support-agent")
+    mem1.add(user="my order #4821 hasn't arrived", assistant="Looking into it.")
+
+    # Simulate a restart: brand-new Memory instance, same store + key.
+    mem2 = Memory(strategy="auto", max_tokens=4000, store=store, key="support-agent")
+    assert "4821" in mem2.text()
+
+
+def test_memory_guide_persistent_store_requires_key():
+    """store= without key= can't be found again after a restart — must raise."""
+    store = Store()
+    with pytest.raises(ValueError):
+        Memory(strategy="auto", max_tokens=4000, store=store)
 
 
 def test_memory_guide_manual_methods():

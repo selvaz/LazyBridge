@@ -73,6 +73,8 @@ class Memory:
         max_tokens: int | None = 4000,
         max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
+        key: str | None = None,
+        session_key: str = "default",
         summarizer: Any | None = None,
         summarizer_timeout: float | None = _DEFAULT_SUMMARIZER_TIMEOUT,
     ) -> None:
@@ -100,7 +102,22 @@ class Memory:
             sessions).  Default: :attr:`_DEFAULT_MAX_TURNS` (1000).
         store:
             Optional :class:`~lazybridge.store.Store` for persistent
-            memory across sessions.
+            memory across process restarts.  Existing turns/summary
+            under ``key`` (if any) are loaded during ``__init__``;
+            every subsequent ``add()``, ``amend_last()``, and
+            ``clear()`` writes the full current state back via
+            :meth:`Store.write_memory`.  Requires ``key=``.
+        key:
+            Stable identifier (typically the owning agent's ``name``)
+            used as ``agent_id`` in :meth:`Store.write_memory` /
+            :meth:`Store.read_memory`.  Required when ``store`` is set —
+            without it, persisted state can't be found again after a
+            restart.
+        session_key:
+            Secondary identifier for distinguishing multiple
+            conversations for the same ``key`` (e.g. per user, per
+            thread).  Only meaningful together with ``store``.  Default
+            ``"default"``.
         summarizer:
             Callable used by ``strategy="summary"`` — typically an
             :class:`~lazybridge.agent.Agent`.  See the class docstring
@@ -111,10 +128,18 @@ class Memory:
             warning is emitted via :attr:`_summarizer_warned`.  ``None``
             disables the deadline.  Default: 30 s.
         """
+        if store is not None and key is None:
+            raise ValueError(
+                "Memory(store=...) requires key= — a stable identifier (e.g. the "
+                "owning agent's name) so persisted turns can be found again after "
+                "a restart. Pass key=<agent_name>."
+            )
         self.strategy = strategy
         self.max_tokens = max_tokens
         self.max_turns = max_turns
         self.store = store
+        self.key = key
+        self.session_key = session_key
         self._turns: list[_Turn] = []
         self._lock = threading.Lock()
         self._summary: str = ""
@@ -146,6 +171,41 @@ class Memory:
         # a summariser timeout doesn't silence the turn-cap warning and
         # vice versa.
         self._summarizer_warned = False
+        if self.store is not None:
+            self._load_from_store()
+
+    def _load_from_store(self) -> None:
+        """Reload turns/summary previously persisted under (key, session_key).
+
+        Called once from ``__init__``, only when ``store`` was passed.  No-op
+        (fresh Memory) when nothing was ever written for this identity — a
+        first run and a restart after an empty history look identical.
+        """
+        assert self.store is not None
+        loaded = self.store.read_memory(self.key, session_key=self.session_key)
+        if loaded is None:
+            return
+        self._turns = [
+            _Turn(user=t["user"], assistant=t["assistant"], token_estimate=t.get("token_estimate", 0))
+            for t in loaded["turns"]
+        ]
+        self._summary = loaded["summary"]
+
+    def _persist(self) -> None:
+        """Write the full current state back to the Store. No-op without store=."""
+        if self.store is None:
+            return
+        with self._lock:
+            turns_snapshot = [
+                {"user": t.user, "assistant": t.assistant, "token_estimate": t.token_estimate} for t in self._turns
+            ]
+            summary_snapshot = self._summary
+        self.store.write_memory(
+            self.key,
+            turns=turns_snapshot,
+            summary=summary_snapshot,
+            session_key=self.session_key,
+        )
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
         if tokens == 0 and (user or assistant):
@@ -195,6 +255,12 @@ class Memory:
         # bypassed by a long-running summariser.
         with self._lock:
             self._enforce_turn_cap()
+
+        # Phase 4 — persist the settled state (post-compression, post-cap)
+        # to the Store, if any.  Outside every lock above so a slow Store
+        # write can't hold up a concurrent add() the way a slow summariser
+        # is already guarded against.
+        self._persist()
 
     def _enforce_turn_cap(self) -> None:
         """Hard cap on total retained turns — unconditional backstop.
@@ -375,11 +441,15 @@ class Memory:
                     assistant=assistant,
                     token_estimate=last.token_estimate,
                 )
+        self._persist()
 
     def clear(self) -> None:
         with self._lock:
             self._turns.clear()
             self._summary = ""
+        # Persist the wipe too — otherwise a restart right after clear()
+        # would reload the pre-clear state from the Store.
+        self._persist()
 
 
 def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:

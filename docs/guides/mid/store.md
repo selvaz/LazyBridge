@@ -24,9 +24,24 @@ store.delete(key)
 store.clear()                    # drop every key (irreversible, no resume)
 store.to_text(keys=None)         # render as "key: <json>" lines for sources=
 store.compare_and_swap(key, expected, new)   # atomic CAS — internal to checkpoint, also useful for cross-process locks
+
+# Agent memory — dedicated table, separate from the generic key/value pairs above.
+# Backs Memory(store=..., key=...); see guides/mid/memory.md.
+store.write_memory(agent_id, *, turns, summary="", session_key="default")
+store.read_memory(agent_id, *, session_key="default")    # {"turns", "summary", "updated_at"} | None
+store.delete_memory(agent_id, *, session_key="default")
 ```
 
 `StoreEntry` is a dataclass `(key, value, written_at, agent_id)`.
+
+`write_memory` / `read_memory` live in their own `agent_memory` table
+(SQLite backend) or their own dict (in-memory backend), keyed by
+`(agent_id, session_key)` — not the generic `store` table. Conversational
+state gets real identity (composite primary key) instead of relying on a
+key-naming convention like `"memory:<agent>"` inside the generic blackboard,
+which has no schema enforcement and no way to enumerate "every agent with
+saved memory" without a prefix scan. You will rarely call these directly —
+`Memory(store=..., key=...)` is the intended entry point.
 
 ## Synopsis
 

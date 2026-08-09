@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from lazybridge.core.types import Role
 from lazybridge.memory import Memory
+from lazybridge.store import Store
 
 # ── basic add / text ──────────────────────────────────────────────────────────
 
@@ -250,3 +253,89 @@ def test_summarizer_object_with_text_method_is_stringified():
     for u, a in _force_compression_turns():
         m.add(u, a)
     assert m._summary == "FROM-TEXT"
+
+
+# ── store= / key= persistence ────────────────────────────────────────────
+
+
+def test_store_without_key_raises():
+    store = Store()
+    with pytest.raises(ValueError):
+        Memory(store=store)
+
+
+def test_store_persists_across_instances():
+    """New Memory instance, same store + key — simulates a process restart."""
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("hi, I'm Marco", "Nice to meet you, Marco.")
+
+    m2 = Memory(store=store, key="agent-a")
+    assert "Marco" in m2.text()
+
+
+def test_store_different_keys_do_not_collide():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("agent a turn", "a-reply")
+    m2 = Memory(store=store, key="agent-b")
+    m2.add("agent b turn", "b-reply")
+
+    reloaded_a = Memory(store=store, key="agent-a")
+    reloaded_b = Memory(store=store, key="agent-b")
+    assert "agent a turn" in reloaded_a.text()
+    assert "agent b turn" not in reloaded_a.text()
+    assert "agent b turn" in reloaded_b.text()
+
+
+def test_store_session_key_separates_conversations_for_same_key():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a", session_key="user-1")
+    m1.add("user 1 says hi", "hello user 1")
+    m2 = Memory(store=store, key="agent-a", session_key="user-2")
+    m2.add("user 2 says hi", "hello user 2")
+
+    reloaded_1 = Memory(store=store, key="agent-a", session_key="user-1")
+    assert "user 1 says hi" in reloaded_1.text()
+    assert "user 2 says hi" not in reloaded_1.text()
+
+
+def test_store_fresh_key_is_empty():
+    """A key that was never written looks like a brand-new Memory — no crash."""
+    store = Store()
+    m = Memory(store=store, key="never-seen-before")
+    assert m.text() == ""
+
+
+def test_store_clear_persists_the_wipe():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("q", "a")
+    m1.clear()
+
+    m2 = Memory(store=store, key="agent-a")
+    assert m2.text() == ""
+
+
+def test_store_amend_last_persists():
+    store = Store()
+    m1 = Memory(store=store, key="agent-a")
+    m1.add("q", "draft answer")
+    m1.amend_last("corrected answer")
+
+    m2 = Memory(store=store, key="agent-a")
+    assert "corrected answer" in m2.text()
+    assert "draft answer" not in m2.text()
+
+
+def test_store_survives_compression():
+    """Persisted state after compression carries the summary, not just raw turns."""
+    store = Store()
+    m1 = Memory(strategy="sliding", store=store, key="agent-a")
+    for i in range(15):
+        m1.add(f"q{i}", f"a{i}")
+
+    m2 = Memory(strategy="sliding", store=store, key="agent-a")
+    # Sliding keeps only the most recent turns in `_turns`, but the reloaded
+    # instance must still see the recent tail — not an empty buffer.
+    assert "q14" in m2.text()
