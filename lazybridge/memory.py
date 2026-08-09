@@ -191,19 +191,32 @@ class Memory:
         ]
         self._summary = loaded["summary"]
 
-    def _persist(self) -> None:
-        """Write the full current state back to the Store. No-op without store=."""
+    def _persist_locked(self) -> None:
+        """Write the current state to the Store. Caller MUST hold ``self._lock``.
+
+        Persisting *inside* the same critical section that made the mutation
+        (rather than snapshotting under the lock and writing after releasing
+        it) is what keeps concurrent ``add()``/``amend_last()``/``clear()``
+        calls persisting in the same order they mutated in. With the
+        snapshot-then-release-then-write shape, two concurrent mutations
+        could race their Store writes independently of their mutation
+        order — a slower write from an earlier mutation completing after a
+        faster write from a later one silently overwrites the durable row
+        with stale data (turns lost, or a clear() undone, on the next
+        restart). A local SQLite upsert (WAL mode, no network) is fast
+        enough that holding the lock across it is a non-issue — unlike the
+        LLM summariser call in ``add()``'s Phase 2, which deliberately runs
+        outside the lock because it can take seconds.
+        """
         if self.store is None:
             return
-        with self._lock:
-            turns_snapshot = [
-                {"user": t.user, "assistant": t.assistant, "token_estimate": t.token_estimate} for t in self._turns
-            ]
-            summary_snapshot = self._summary
+        turns_snapshot = [
+            {"user": t.user, "assistant": t.assistant, "token_estimate": t.token_estimate} for t in self._turns
+        ]
         self.store.write_memory(
             self.key,
             turns=turns_snapshot,
-            summary=summary_snapshot,
+            summary=self._summary,
             session_key=self.session_key,
         )
 
@@ -252,15 +265,12 @@ class Memory:
                     self._compressing = False
 
         # Phase 3 — enforce the hard turn cap last so it can never be
-        # bypassed by a long-running summariser.
+        # bypassed by a long-running summariser, then persist the settled
+        # state in the SAME critical section — see _persist_locked for why
+        # that matters for write ordering under concurrent add() calls.
         with self._lock:
             self._enforce_turn_cap()
-
-        # Phase 4 — persist the settled state (post-compression, post-cap)
-        # to the Store, if any.  Outside every lock above so a slow Store
-        # write can't hold up a concurrent add() the way a slow summariser
-        # is already guarded against.
-        self._persist()
+            self._persist_locked()
 
     def _enforce_turn_cap(self) -> None:
         """Hard cap on total retained turns — unconditional backstop.
@@ -441,15 +451,15 @@ class Memory:
                     assistant=assistant,
                     token_estimate=last.token_estimate,
                 )
-        self._persist()
+            self._persist_locked()
 
     def clear(self) -> None:
         with self._lock:
             self._turns.clear()
             self._summary = ""
-        # Persist the wipe too — otherwise a restart right after clear()
-        # would reload the pre-clear state from the Store.
-        self._persist()
+            # Persist the wipe too — otherwise a restart right after clear()
+            # would reload the pre-clear state from the Store.
+            self._persist_locked()
 
 
 def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:
