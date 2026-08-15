@@ -27,6 +27,7 @@ single agent → tools → composition → planning → production.
 - [Plan tool](plan-tool.md) — `examples/patterns/plan_tool.py`
 - [Agent builds a plan](agent-builds-plan.md) — `examples/patterns/agent_builds_plan.py`
 - [Blackboard planner](blackboard-planner.md) — `examples/patterns/blackboard_planner.py`
+- [Durable blackboard](durable-blackboard.md) — `examples/patterns/durable_blackboard.py`
 - [Dynamic re-planning](dynamic-replanning.md) — `examples/patterns/dynamic_planner.py`
 
 ## Composition shapes
