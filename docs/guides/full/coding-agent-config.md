@@ -113,4 +113,3 @@ Without a `Session` there is nowhere to persist a grant, so it degrades to
 | Hard denial | `disallowed_tools` | sandbox plus gate denial |
 | Human callback | `can_use_tool` | App Server approval requests and dynamic tools |
 | Ambient configuration | `setting_sources` | local Codex configuration plus thread overrides |
-
