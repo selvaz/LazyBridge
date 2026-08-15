@@ -214,6 +214,7 @@ nav:
       - Plan tool: recipes/plan-tool.md
       - Agent builds a plan: recipes/agent-builds-plan.md
       - Blackboard planner: recipes/blackboard-planner.md
+      - Durable blackboard: recipes/durable-blackboard.md
       - Dynamic re-planning: recipes/dynamic-replanning.md
       - Live visualization: recipes/live-visualization.md
       - Visualization mock: recipes/visualization-mock.md

@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`durable_blackboard_agent`** and **`DurableBlackboard`**
+  (`lazybridge.ext.planners`) — the blackboard planner for agents that stay
+  up. The to-do list lives in a `Store` under a stable `plan_id` instead of a
+  closure, so it survives the run, the process, and the crash. Adds the three
+  things a resumable worker needs on top of the flat list: `claim_next` hands
+  out exactly one task under compare-and-swap (two workers never take the
+  same item); a claimed task carries a **lease**, so work interrupted by a
+  crash returns to the queue instead of staying "in progress" forever; and
+  each claim counts against `max_attempts`, after which the task is parked as
+  `failed` rather than stalling the plan forever. Verified live across three
+  separate processes sharing only the SQLite file. See
+  `docs/recipes/durable-blackboard.md`.
+
 - **`ClaudeCodeEngine`** (`lazybridge.engines.claude_code`, re-exported as
   `lazybridge.ClaudeCodeEngine`) — a standard `Engine` that runs the
   model/tool loop through the locally authenticated Claude Code runtime

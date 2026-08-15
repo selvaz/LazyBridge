@@ -49,6 +49,12 @@ from lazybridge.ext.planners.builder import (
     make_planner,
     orchestrator_agent,
 )
+from lazybridge.ext.planners.durable_blackboard import (
+    DURABLE_BLACKBOARD_GUIDANCE,
+    BlackboardSnapshot,
+    DurableBlackboard,
+    durable_blackboard_agent,
+)
 
 __all__ = [
     # Canonical names (post unified-surface rename).
@@ -65,4 +71,9 @@ __all__ = [
     "PlanSpec",
     "StepSpec",
     "BLACKBOARD_PLANNER_GUIDANCE",
+    # Durable variant — plan lives in a Store and survives restarts.
+    "durable_blackboard_agent",
+    "DurableBlackboard",
+    "BlackboardSnapshot",
+    "DURABLE_BLACKBOARD_GUIDANCE",
 ]

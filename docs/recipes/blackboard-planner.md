@@ -33,9 +33,12 @@ front and the LLM iterates on a checklist.
 
 ## Variations
 
-- Persist the blackboard via `Store(db="planner.sqlite")` so a
-  long-running task can be paused and resumed. The to-do list
-  survives across runs.
+- **Need the list to survive the run?** This factory deliberately
+  resets its state on every invocation, so it cannot be persisted by
+  swapping in a `Store`. Use
+  [`durable_blackboard_agent`](durable-blackboard.md) instead — same
+  verbs, plan kept in a `Store`, plus claiming, leases and attempt
+  limits for always-on workers.
 - Add a `verify=judge` to gate `mark_done` — useful when the
   planner tends to over-claim completion.
 - Wrap as a sub-agent (`tools=[planner]`) of a higher-level
@@ -48,4 +51,6 @@ front and the LLM iterates on a checklist.
   decision tree instead of a flat list.
 - [Agent builds a plan](agent-builds-plan.md) — typed `PlanSpec`
   alternative when the structure IS known.
+- [Durable blackboard](durable-blackboard.md) — same verbs, but the
+  plan lives in a `Store` and survives restarts.
 - [Store](../guides/mid/store.md) — backs the blackboard state.
