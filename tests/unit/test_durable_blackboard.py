@@ -252,3 +252,56 @@ def test_isinstance_of_agent():
     store = Store()
     agent = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
     assert isinstance(agent, Agent)
+
+
+def test_a_stale_worker_cannot_overwrite_a_finished_task():
+    """The hole an ``owner is None`` allowance leaves open.
+
+    Closing a task clears its owner, so a task that a replacement worker has
+    already completed looks unowned again — and the run whose lease expired
+    would be free to overwrite the newer result.
+    """
+    store = Store()
+    board = _board(store, lease_seconds=0.05)
+    board.set_plan("handover", ["long task"])
+    board.claim_next(owner="slow-worker")
+
+    import time
+
+    time.sleep(0.06)
+    board.claim_next(owner="fresh-worker")
+    board.mark_done(0, "the replacement finished it", owner="fresh-worker")
+
+    late = board.mark_done(0, "the stale worker's answer", owner="slow-worker")
+
+    assert late.startswith("REJECTED")
+    assert board.snapshot().tasks[0]["result"] == "the replacement finished it"
+
+
+def test_a_task_cannot_be_closed_without_being_claimed():
+    store = Store()
+    board = _board(store)
+    board.set_plan("no shortcuts", ["do the thing"])
+
+    assert board.mark_done(0, "pretending").startswith("REJECTED")
+    assert board.mark_failed(0, "pretending").startswith("REJECTED")
+    assert board.snapshot().tasks[0]["status"] == "todo"
+
+
+def test_each_planner_instance_claims_under_its_own_identity():
+    """Two runs built from the same ``name`` are still different workers."""
+    store = Store()
+    DurableBlackboard(store, "p1").set_plan("shared", ["a", "b"])
+
+    first = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
+    second = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
+
+    asyncio.run(first._tool_map["claim_next"].run())
+    asyncio.run(second._tool_map["claim_next"].run())
+
+    owners = [t["owner"] for t in DurableBlackboard(store, "p1").snapshot().tasks]
+    assert owners[0] != owners[1]
+    # ...and the second worker cannot close the first worker's task.
+    assert str(asyncio.run(second._tool_map["mark_done"].run(task_index=0, result_summary="not mine"))).startswith(
+        "REJECTED"
+    )

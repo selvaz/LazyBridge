@@ -25,6 +25,11 @@ invocation, which is exactly what this one must not do.
 | `mark_done(index, summary)` | Closes a task with its result. |
 | `mark_failed(index, error)` | Hands a task back after a genuine failure. |
 
+Closing requires an **active claim**: a task that was never claimed, or one
+already closed, is refused. Each planner instance also claims under its own
+identity, so a run whose lease expired cannot come back and overwrite the
+result of the run that replaced it.
+
 `claim_next` is the difference from the ephemeral version. A plan you can only
 read is not resumable: two workers would take the same task, and a worker that
 dies mid-task would leave it "in progress" forever.

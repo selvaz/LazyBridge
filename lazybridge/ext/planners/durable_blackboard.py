@@ -286,7 +286,18 @@ class DurableBlackboard:
             if not 0 <= task_index < len(tasks):
                 return None, f"REJECTED: task_index out of range (valid: 0..{len(tasks) - 1})."
             task = tasks[task_index]
-            if owner is not None and task.get("owner") not in (None, owner):
+            # Closing requires an *active* claim. Accepting ``owner is None``
+            # as "unowned, therefore anyone may close it" would let a worker
+            # whose lease expired come back and overwrite the result of the
+            # run that replaced it — the closing worker clears ``owner``, so
+            # by then the task looks unowned again. It would also let a task
+            # be ticked without ever being claimed.
+            if task.get("status") != "claimed":
+                return None, (
+                    f"REJECTED: task {task_index} is {task.get('status')}, not claimed — "
+                    "call claim_next() before closing a task."
+                )
+            if owner is not None and task.get("owner") != owner:
                 return None, (
                     f"REJECTED: task {task_index} is held by another worker — "
                     "its lease was reassigned while you were working."
@@ -311,6 +322,7 @@ def durable_blackboard_agent(
     model: str = "claude-opus-4-7",
     system: str | None = None,
     name: str = "durable_blackboard",
+    worker_id: str | None = None,
     lease_seconds: float = 900.0,
     max_attempts: int = 3,
     verbose: bool = False,
@@ -329,6 +341,12 @@ def durable_blackboard_agent(
             ``LLMEngine(model)``. A pre-built engine carries its own system
             prompt, so pass ``DURABLE_BLACKBOARD_GUIDANCE`` (or your own
             equivalent) to it yourself — this factory will not reach into it.
+        worker_id: Identity this run claims tasks under. Defaults to a fresh
+            random id per factory call, which is what separate runs need: two
+            planners built from the same ``name`` are different workers, and a
+            run whose lease expired must not be able to close the claim of the
+            run that replaced it. Pin it only if something outside owns the
+            identity.
         lease_seconds: How long a claimed task stays claimed before another
             run may take it over.
         max_attempts: Attempts per task before it is parked as ``failed``.
@@ -340,6 +358,7 @@ def durable_blackboard_agent(
         raise ValueError(f"agents must have unique names; got {names}")
 
     board = DurableBlackboard(store, plan_id, lease_seconds=lease_seconds, max_attempts=max_attempts)
+    holder = worker_id or f"{name}-{uuid.uuid4().hex[:8]}"
 
     def set_plan(reasoning: str, tasks: list[str]) -> str:
         """Create the plan: 3-6 coarse tasks in execution order. Refused if one is already open."""
@@ -351,7 +370,7 @@ def durable_blackboard_agent(
 
     def claim_next() -> str:
         """Take the next task to work on. Do only that task this run."""
-        claimed = board.claim_next(owner=name)
+        claimed = board.claim_next(owner=holder)
         if claimed is None:
             snapshot = board.snapshot()
             if not snapshot.tasks:
@@ -364,11 +383,11 @@ def durable_blackboard_agent(
 
     def mark_done(task_index: int, result_summary: str) -> str:
         """Close a task with a 1-3 sentence summary of what was produced."""
-        return board.mark_done(task_index, result_summary, owner=name)
+        return board.mark_done(task_index, result_summary, owner=holder)
 
     def mark_failed(task_index: int, error: str) -> str:
         """Give a task back after a real failure; it is retried on a later run."""
-        return board.mark_failed(task_index, error, owner=name)
+        return board.mark_failed(task_index, error, owner=holder)
 
     return Agent(
         engine=engine if engine is not None else LLMEngine(model, system=system or DURABLE_BLACKBOARD_GUIDANCE),
