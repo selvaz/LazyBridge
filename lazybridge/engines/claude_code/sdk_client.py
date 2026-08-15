@@ -6,6 +6,7 @@ the sole optional-import boundary for the external SDK.
 
 from __future__ import annotations
 
+import json
 import warnings
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -46,16 +47,25 @@ class AgentSdkClient(ClaudeSdkClient):
     """
 
     @staticmethod
-    async def _prompt_stream(prompt: str) -> AsyncIterator[dict[str, Any]]:
+    async def _prompt_stream(
+        prompt: str, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> AsyncIterator[dict[str, Any]]:
         """Yield one user message for SDK permission-callback mode.
 
         The Agent SDK requires an async prompt stream whenever ``can_use_tool``
         is configured.  Keeping this conversion here lets the engine retain
         its simple string-in/string-out contract.
+
+        It is also the only way to send attachments: a plain-string prompt has
+        nowhere to put an image block, so ``content`` becomes the block list
+        ``[text, image...]`` whenever the run carries any.
         """
+        content: str | list[dict[str, Any]] = (
+            [{"type": "text", "text": prompt}, *attachments] if attachments else prompt
+        )
         yield {
             "type": "user",
-            "message": {"role": "user", "content": prompt},
+            "message": {"role": "user", "content": content},
         }
 
     @staticmethod
@@ -168,9 +178,12 @@ class AgentSdkClient(ClaudeSdkClient):
             hooks={"PreToolUse": [HookMatcher(hooks=[keep_permission_stream_open])]} if use_callback else None,  # type: ignore[list-item]
             setting_sources=[],
             include_partial_messages=options.include_partial_messages,
+            output_format=options.output_format,
         )
 
-    async def run(self, prompt: str, *, options: ClaudeSdkOptions) -> ClaudeSdkResult:
+    async def run(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> ClaudeSdkResult:
         try:
             from claude_agent_sdk import ResultMessage, query
         except ImportError as exc:  # pragma: no cover
@@ -179,7 +192,7 @@ class AgentSdkClient(ClaudeSdkClient):
         final: Any | None = None
         sdk_options = self._sdk_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt) if options.builtin_tools else prompt
+            self._prompt_stream(prompt, attachments) if options.builtin_tools or attachments else prompt
         )
         async for message in query(prompt=sdk_prompt, options=sdk_options):
             if isinstance(message, ResultMessage):
@@ -192,7 +205,12 @@ class AgentSdkClient(ClaudeSdkClient):
 
         usage = final.usage or {}
         return ClaudeSdkResult(
-            text=final.result or "",
+            # With ``output_format`` set, the CLI returns the schema-validated
+            # object on ``structured_output``; ``result`` holds the same JSON
+            # as text on current versions but is not guaranteed to. Serialising
+            # the parsed object keeps this adapter's string contract while
+            # giving ``Agent._validate_and_retry`` something that always parses.
+            text=json.dumps(final.structured_output) if final.structured_output is not None else (final.result or ""),
             session_id=final.session_id,
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
@@ -200,7 +218,9 @@ class AgentSdkClient(ClaudeSdkClient):
             model=None,
         )
 
-    async def stream(self, prompt: str, *, options: ClaudeSdkOptions) -> AsyncIterator[ClaudeSdkStreamEvent]:
+    async def stream(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> AsyncIterator[ClaudeSdkStreamEvent]:
         try:
             from claude_agent_sdk import ResultMessage, StreamEvent, query
         except ImportError as exc:  # pragma: no cover
@@ -225,7 +245,7 @@ class AgentSdkClient(ClaudeSdkClient):
             include_partial_messages=True,
         )
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt) if stream_options.builtin_tools else prompt
+            self._prompt_stream(prompt, attachments) if stream_options.builtin_tools or attachments else prompt
         )
         async for message in query(
             prompt=sdk_prompt,
@@ -245,8 +265,14 @@ class AgentSdkClient(ClaudeSdkClient):
                     raise ClaudeSdkRequestError(f"Claude Agent SDK failed: {detail}", status=message.api_error_status)
                 # Some SDK/CLI versions do not emit partial text for a short
                 # response. Yield the final response exactly once in that case.
-                if not saw_text and message.result:
-                    yield ClaudeSdkStreamEvent(text=message.result)
+                if not saw_text:
+                    final_text = (
+                        json.dumps(message.structured_output)
+                        if message.structured_output is not None
+                        else (message.result or "")
+                    )
+                    if final_text:
+                        yield ClaudeSdkStreamEvent(text=final_text)
                 usage = message.usage or {}
                 yield ClaudeSdkStreamEvent(
                     session_id=message.session_id,

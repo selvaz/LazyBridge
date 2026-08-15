@@ -50,3 +50,14 @@ def test_readonly_builtins_are_configured_separately_from_application_tools():
 
     assert sdk_options.tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
     assert sdk_options.permission_mode == "default"
+
+
+def test_output_format_reaches_the_sdk_options():
+    schema = {"type": "object", "properties": {"symbol": {"type": "string"}}}
+    options = ClaudeSdkOptions(output_format={"type": "json_schema", "schema": schema})
+
+    sdk_options = AgentSdkClient._sdk_options(options)
+
+    # The SDK turns this into the CLI's --json-schema flag; dropping it here
+    # would silently downgrade structured output to "hope it answers JSON".
+    assert sdk_options.output_format == {"type": "json_schema", "schema": schema}

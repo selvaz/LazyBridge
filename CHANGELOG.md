@@ -20,10 +20,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   LazyBridge `Session`. Merged from the standalone feasibility prototype
   (live-verified against the real Claude Agent SDK); new optional extra
   `lazybridge[claude-code]` (`claude-agent-sdk`, `mcp`). See
-  `docs/guides/full/claude-code-engine.md`. A
-  `CodexEngine` (same contract, backed by Codex App Server) is planned but
-  not yet merged — its prototype is unit-tested but not yet verified
-  against a real `codex app-server` process.
+  `docs/guides/full/claude-code-engine.md`.
+- **`CodexEngine`** (`lazybridge.engines.codex`, re-exported as
+  `lazybridge.CodexEngine`) — the same `Engine` contract driven by the
+  locally authenticated Codex CLI, talking to `codex app-server` over
+  JSON-RPC (never `codex exec`, which cancels non-interactive MCP tool calls
+  unless the sandbox-removing bypass flag is used). LazyBridge tools are
+  exposed as App Server *dynamic tools* on one ephemeral, read-only,
+  approval-free thread per run; retries/timeouts/`tool_timeout`/streaming
+  mirror `LLMEngine`, and `reasoning_effort` maps to `turn/start`'s
+  `effort`. Needs no Python extra — only the `codex` CLI, which it also
+  finds in the Codex desktop app's install directory when it is not on
+  `PATH` (`CODEX_BIN` overrides). Verified live against codex-cli 0.148.0,
+  which corrected three protocol assumptions carried over from the
+  prototype: `sandbox` is the kebab-case `"read-only"` (`"readOnly"` is
+  rejected outright), token usage comes from `thread/tokenUsage/updated`
+  rather than `turn/completed`, and server→client request ids are numbered
+  independently of the client's, so the read loop dispatches on `method`.
+  Note `cost_usd` is structurally `0.0`: ChatGPT-plan auth reports
+  rate-limit percentages, not per-turn prices. See
+  `docs/guides/full/codex-engine.md`.
+- **Multimodal input for both local-CLI engines.** `Envelope.images` now
+  reaches Claude Code (as Anthropic base64 image content blocks; URL-only
+  images are dropped with a warning because the CLI rejects `url` sources)
+  and Codex (as `image` UserInput items, inline bytes sent as a `data:`
+  URL). `Envelope.audio` is still dropped, now with an accurate reason per
+  engine: Claude accepts no audio input, and Codex accepts the shape but the
+  model cannot read it.
+
+### Changed
+- `ClaudeCodeEngine` now enforces `output=<type>` **natively** through the
+  Agent SDK's `output_format` (the CLI's `--json-schema`) and reads the
+  parsed object back from `ResultMessage.structured_output`, instead of
+  pasting the schema into the prompt and relying on
+  `Agent._validate_and_retry` to repair prose answers — the same
+  server-side guarantee `LLMEngine` gets from `StructuredOutputConfig`.
+  `CodexEngine` keeps the prompt-priming approach: `turn/start`'s native
+  `outputSchema` accepts only OpenAI-strict schemas, which a plain Pydantic
+  schema does not satisfy.
 
 ### Fixed
 - `tests/unit/test_examples_import.py`: `_example_id()` used `str(Path)`

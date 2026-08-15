@@ -74,9 +74,18 @@ for setup, configuration, and troubleshooting.
 
 ::: lazybridge.ClaudeCodeEngine
 
-A `CodexEngine` (same `Engine` contract, backed by the Codex App Server) is
-planned but not yet shipped — see the
-[roadmap note](../guides/full/claude-code-engine.md#roadmap-codex-engine).
+## Codex engine
+
+`CodexEngine` runs the model/tool loop through the locally authenticated
+Codex CLI (`codex app-server` over JSON-RPC) — same
+`Agent`/`Memory`/`Session`/`tools=` surface as `LLMEngine`. It needs no
+Python extra, only the `codex` CLI itself. Note that `cost_usd` is always
+`0.0`: under ChatGPT-plan auth the App Server reports rate-limit
+percentages, not a per-turn price. See
+[Guides → Full → Codex Engine](../guides/full/codex-engine.md) for setup,
+protocol notes, and current limits.
+
+::: lazybridge.CodexEngine
 
 ## Engine errors
 

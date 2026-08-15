@@ -14,8 +14,19 @@ is always importable; actually constructing one requires the optional
 
 from lazybridge.engines.base import Engine
 from lazybridge.engines.claude_code import ClaudeCodeEngine
+from lazybridge.engines.codex import CodexEngine
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.engines.plan import Plan, Step
 from lazybridge.engines.replan import PlanRound, ReplanEngine, Task
 
-__all__ = ["ClaudeCodeEngine", "Engine", "LLMEngine", "Plan", "ReplanEngine", "PlanRound", "Step", "Task"]
+__all__ = [
+    "ClaudeCodeEngine",
+    "CodexEngine",
+    "Engine",
+    "LLMEngine",
+    "Plan",
+    "ReplanEngine",
+    "PlanRound",
+    "Step",
+    "Task",
+]

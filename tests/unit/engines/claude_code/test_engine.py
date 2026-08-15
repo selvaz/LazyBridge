@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+from pydantic import BaseModel
+
 from lazybridge import Agent, Envelope, Memory, Session, Tool
+from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
 
@@ -11,10 +15,14 @@ class FakeSdk:
     def __init__(self):
         self.options: list[ClaudeSdkOptions] = []
         self.prompts: list[str] = []
+        self.attachments: list[tuple[dict, ...]] = []
 
-    async def run(self, prompt: str, *, options: ClaudeSdkOptions) -> ClaudeSdkResult:
+    async def run(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict, ...] = ()
+    ) -> ClaudeSdkResult:
         self.options.append(options)
         self.prompts.append(prompt)
+        self.attachments.append(attachments)
         assert options.builtin_tools == ("WebSearch", "WebFetch")
         assert len(options.mcp_tools) == 1
         tool = options.mcp_tools[0]
@@ -23,9 +31,10 @@ class FakeSdk:
         assert tool_result["content"]
         return ClaudeSdkResult(text="AMZN is available", session_id="fake-session", input_tokens=11, output_tokens=7)
 
-    async def stream(self, prompt: str, *, options: ClaudeSdkOptions):
+    async def stream(self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict, ...] = ()):
         self.options.append(options)
         self.prompts.append(prompt)
+        self.attachments.append(attachments)
         yield ClaudeSdkStreamEvent(text="streamed ")
         yield ClaudeSdkStreamEvent(text="answer")
         yield ClaudeSdkStreamEvent(session_id="fake-stream-session", final=True)
@@ -145,3 +154,85 @@ def test_standard_tool_provider_is_expanded_before_the_engine_runs():
     )
 
     assert agent("Find AMZN through the provider").ok
+
+
+class StructuredSdk:
+    """Answers with the CLI's parsed ``structured_output``, not prose."""
+
+    def __init__(self):
+        self.options: list[ClaudeSdkOptions] = []
+        self.prompts: list[str] = []
+        self.attachments: list[tuple[dict, ...]] = []
+
+    async def run(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict, ...] = ()
+    ) -> ClaudeSdkResult:
+        self.options.append(options)
+        self.prompts.append(prompt)
+        self.attachments.append(attachments)
+        return ClaudeSdkResult(text='{"symbol": "AMZN", "price": 123.45}', session_id="fake-session")
+
+    async def stream(self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict, ...] = ()):
+        self.options.append(options)
+        self.attachments.append(attachments)
+        yield ClaudeSdkStreamEvent(text='{"symbol": "AMZN", "price": 123.45}')
+        yield ClaudeSdkStreamEvent(final=True)
+
+
+class Quote(BaseModel):
+    symbol: str
+    price: float
+
+
+def test_output_type_is_enforced_natively_not_asked_for_in_the_prompt():
+    client = StructuredSdk()
+    agent = Agent(name="quoter", engine=ClaudeCodeEngine(client=client), output=Quote)
+
+    result = agent("AMZN trades at 123.45")
+
+    assert result.ok
+    assert result.payload == Quote(symbol="AMZN", price=123.45)
+    # Constrained server-side by the SDK (--json-schema), so the schema must
+    # reach the options — and must NOT be pasted into the prompt.
+    assert client.options[-1].output_format == {"type": "json_schema", "schema": Quote.model_json_schema()}
+    assert "json schema" not in client.prompts[-1].lower()
+
+
+def test_plain_text_output_sets_no_output_format():
+    client = FakeSdk()
+    agent = Agent(name="plain", engine=ClaudeCodeEngine(client=client), tools=[get_quote])
+
+    assert agent("Find AMZN").ok
+    assert client.options[-1].output_format is None
+
+
+def test_inline_images_become_content_blocks_and_url_images_warn():
+    client = FakeSdk()
+    agent = Agent(name="viewer", engine=ClaudeCodeEngine(client=client), tools=[get_quote])
+
+    with pytest.warns(UserWarning, match="inline image bytes only"):
+        result = agent(
+            "What is in these images?",
+            images=[
+                ImageContent(base64_data="aGk=", media_type="image/png"),
+                ImageContent(url="https://example.com/chart.png", media_type="image/png"),
+            ],
+        )
+
+    assert result.ok
+    # The CLI accepts a base64 source but rejects a url one, so only the
+    # inline image survives — and it must not be dropped silently.
+    assert client.attachments[-1] == (
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aGk="}},
+    )
+
+
+def test_audio_is_dropped_with_a_warning_because_claude_takes_no_audio():
+    client = FakeSdk()
+    agent = Agent(name="listener", engine=ClaudeCodeEngine(client=client), tools=[get_quote])
+
+    with pytest.warns(UserWarning, match="does not forward Envelope.audio"):
+        result = agent("Transcribe this", audio=AudioContent(base64_data="aGk=", media_type="audio/wav"))
+
+    assert result.ok
+    assert client.attachments[-1] == ()

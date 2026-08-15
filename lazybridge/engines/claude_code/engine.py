@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import time
 import uuid
@@ -63,19 +62,14 @@ def _is_transient(exc: BaseException) -> bool:
     return type(exc) is Exception and str(exc).startswith(_SDK_RESULT_RACE_PREFIX)
 
 
-def _structured_output_instructions(output_type: Any) -> str | None:
-    """Build a prompt block asking for JSON matching ``output_type``.
+def _output_schema(output_type: Any) -> dict[str, Any] | None:
+    """Derive the JSON schema for ``output_type``, or ``None``.
 
     ``output_type`` reaches ``run``/``stream`` on every call (it can change
     turn to turn, e.g. during ``Agent._validate_and_retry``'s correction
-    loop) but there is no SDK/CLI knob here to *enforce* structured output
-    server-side the way ``LLMEngine`` does via ``StructuredOutputConfig``.
-    Without this, the model would just chat in prose, fail
-    ``Agent._validate_and_retry``'s post-hoc JSON parse
-    (``lazybridge.core.structured``), and burn output-retry turns on tasks
-    that would otherwise succeed on the first attempt. Returns ``None`` for
-    the default ``str``/``Any`` output type (nothing to add) or when the
-    schema can't be derived (falls back to the existing post-hoc retry).
+    loop). Returns ``None`` for the default ``str``/``Any`` output type
+    (nothing to constrain) or when the schema can't be derived — in which
+    case the run falls back to LazyBridge's post-hoc JSON parse and retry.
     """
     if output_type is str or output_type is Any:
         return None
@@ -85,16 +79,26 @@ def _structured_output_instructions(output_type: Any) -> str | None:
         from pydantic import BaseModel, TypeAdapter
 
         if isinstance(output_type, type) and issubclass(output_type, BaseModel):
-            schema = output_type.model_json_schema()
-        else:
-            schema = TypeAdapter(output_type).json_schema()
+            return dict(output_type.model_json_schema())
+        return dict(TypeAdapter(output_type).json_schema())
     except Exception:
         return None
-    return (
-        "Respond with valid JSON only — no prose, no markdown code fences — "
-        "matching exactly this JSON schema:\n"
-        f"{json.dumps(schema, indent=2)}"
-    )
+
+
+def _output_format(output_type: Any) -> dict[str, Any] | None:
+    """Native structured output for the Agent SDK, mirroring ``LLMEngine``.
+
+    The SDK's ``output_format`` (``--json-schema`` on the CLI) constrains the
+    final message server-side and returns the parsed object on
+    ``ResultMessage.structured_output`` — the same guarantee ``LLMEngine``
+    gets from ``StructuredOutputConfig``, and strictly better than asking for
+    JSON in the prompt: no prose to strip, no wasted ``_validate_and_retry``
+    turns. Verified live (claude_agent_sdk 0.2.128) to accept a plain Pydantic
+    schema, optional fields and ``$defs`` included — no strict-mode rewrite
+    needed, unlike Codex's ``turn/start`` ``outputSchema``.
+    """
+    schema = _output_schema(output_type)
+    return {"type": "json_schema", "schema": schema} if schema is not None else None
 
 
 class ClaudeCodeEngine:
@@ -187,19 +191,48 @@ class ClaudeCodeEngine:
             session._lazybridge_runtime_sessions = state
         state[self._runtime_slot(agent_name)] = runtime_id
 
-    def _prompt(self, env: Envelope[Any], memory: Any | None, output_type: type = str) -> str:
-        if env.images or env.audio is not None:
-            # No multimodal wiring yet: the Agent SDK prompt built here is
-            # plain text (see AgentSdkClient._prompt_stream). Unlike
-            # LLMEngine._build_user_content, which either forwards
-            # images/audio or raises under strict_multimodal, attachments
-            # here would otherwise vanish with no signal to the caller.
+    def _attachments(self, env: Envelope[Any]) -> tuple[dict[str, Any], ...]:
+        """Convert ``Envelope.images`` into Anthropic image content blocks.
+
+        Only inline bytes are forwarded: the CLI accepts a ``base64`` source
+        (verified live) but rejects a ``url`` one, so URL-only images are
+        dropped with a warning rather than silently costing a turn — pass a
+        path or bytes and LazyBridge's ``_coerce_image`` inlines them.
+
+        ``Envelope.audio`` is never forwarded: Claude accepts no audio input.
+        """
+        blocks: list[dict[str, Any]] = []
+        for image in env.images or []:
+            data = getattr(image, "base64_data", None)
+            if data:
+                blocks.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": getattr(image, "media_type", None) or "image/png",
+                            "data": data,
+                        },
+                    }
+                )
+            else:
+                warnings.warn(
+                    f"{type(self).__name__}: Claude Code accepts inline image bytes only — "
+                    f"the URL image {getattr(image, 'url', None)!r} was dropped from this run. "
+                    "Pass a local path or bytes instead (ImageContent.from_path).",
+                    UserWarning,
+                    stacklevel=4,
+                )
+        if env.audio is not None:
             warnings.warn(
-                f"{type(self).__name__} does not forward Envelope.images/.audio to "
-                "Claude Code yet — attachment(s) dropped from this run.",
+                f"{type(self).__name__} does not forward Envelope.audio: Claude accepts no "
+                "audio input — attachment dropped from this run.",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
+        return tuple(blocks)
+
+    def _prompt(self, env: Envelope[Any], memory: Any | None) -> str:
         parts: list[str] = []
         if memory is not None:
             history = self._memory_text(memory)
@@ -208,9 +241,6 @@ class ClaudeCodeEngine:
         if env.context:
             parts.append(f"Additional context:\n{env.context}")
         parts.append(env.task or env.text())
-        instructions = _structured_output_instructions(output_type)
-        if instructions:
-            parts.append(instructions)
         return "\n\n".join(part for part in parts if part)
 
     @staticmethod
@@ -282,7 +312,13 @@ class ClaudeCodeEngine:
         return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
 
     def _options(
-        self, tools: list[Any], observe: Any, *, partial: bool = False, resume: str | None = None
+        self,
+        tools: list[Any],
+        observe: Any,
+        *,
+        output_type: type = str,
+        partial: bool = False,
+        resume: str | None = None,
     ) -> ClaudeSdkOptions:
         builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
             ("WebSearch", "WebFetch") if self.web else ()
@@ -300,6 +336,7 @@ class ClaudeCodeEngine:
             file_roots=self.file_roots,
             mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
             include_partial_messages=partial,
+            output_format=_output_format(output_type),
         )
 
     async def run(
@@ -331,9 +368,14 @@ class ClaudeCodeEngine:
                 }[kind]
                 session.emit(event_type, payload, run_id=run_id)
 
-            prompt = self._prompt(env, None if self.session_mode == "runtime" and session else memory, output_type)
-            options = self._options(tools, observe, resume=self._resume_id(session, agent_name))
-            result = await self._call_with_retries(lambda: self._client.run(prompt, options=options))
+            prompt = self._prompt(env, None if self.session_mode == "runtime" and session else memory)
+            options = self._options(
+                tools, observe, output_type=output_type, resume=self._resume_id(session, agent_name)
+            )
+            attachments = self._attachments(env)
+            result = await self._call_with_retries(
+                lambda: self._client.run(prompt, options=options, attachments=attachments)
+            )
             self._remember_session(session, agent_name, result.session_id)
             if session:
                 # Mirrors LLMEngine's MODEL_RESPONSE payload shape so
@@ -420,8 +462,15 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             async for event in self._idle_guarded_stream(
                 self._client.stream(
-                    self._prompt(env, None if self.session_mode == "runtime" and session else memory, output_type),
-                    options=self._options(tools, observe, partial=True, resume=self._resume_id(session, agent_name)),
+                    self._prompt(env, None if self.session_mode == "runtime" and session else memory),
+                    options=self._options(
+                        tools,
+                        observe,
+                        output_type=output_type,
+                        partial=True,
+                        resume=self._resume_id(session, agent_name),
+                    ),
+                    attachments=self._attachments(env),
                 )
             ):
                 if event.text:

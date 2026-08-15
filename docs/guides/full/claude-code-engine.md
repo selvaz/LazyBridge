@@ -336,13 +336,52 @@ Common issues:
 These limits are intentional: they keep the engine replaceable, configuration
 predictable, and the security boundary small.
 
-## Roadmap: Codex Engine
+## Structured output
 
-A `CodexEngine` — the same `Engine` contract, backed by the **Codex App
-Server** (`codex app-server` over JSON-RPC, not `codex exec`) instead of
-Claude Code — is planned and will work the same way: a normal
-`lazybridge.Agent`, `Agent(engine=CodexEngine(...), tools=[...])`, no
-Codex-specific tool wrapper. It is not in this repository yet — its
-JSON-RPC field assumptions have been unit-tested against a fake
-`codex app-server` fixture but not yet run against a real one, so it is
-held back until that live verification pass happens.
+`Agent(output=<type>)` is enforced by the model, not by prompt discipline. The
+engine derives the JSON schema and passes it as the Agent SDK's
+`output_format` (`{"type": "json_schema", "schema": ...}`, the CLI's
+`--json-schema`); the CLI returns the validated object on
+`ResultMessage.structured_output`, so `Envelope.payload` is the parsed model.
+
+```python
+class Quote(BaseModel):
+    symbol: str
+    price: float
+
+agent = Agent(name="quoter", engine=ClaudeCodeEngine(model="sonnet"), output=Quote)
+```
+
+This is the same server-side guarantee `LLMEngine` gets from
+`StructuredOutputConfig`. Verified live (claude_agent_sdk 0.2.128) with a
+plain Pydantic schema including an optional field and a nested model
+(`$defs`) — no strict-mode rewrite needed, unlike Codex's `turn/start`
+`outputSchema`. `output=str` (the default) sets no `output_format`; if the
+schema cannot be derived, the run falls back to LazyBridge's post-hoc JSON
+parse and retry.
+
+## Multimodal
+
+`images=` is forwarded as Anthropic image content blocks. Because a
+plain-string prompt has nowhere to carry an attachment, a run with images
+switches to the SDK's async user-message stream and sends `content` as
+`[{"type": "text", ...}, {"type": "image", ...}]`.
+
+```python
+agent("What is in this chart?", images=["C:/work/chart.png"])
+```
+
+Inline bytes only: the CLI accepts a `base64` source but rejects a `url` one,
+so URL-only images are dropped with a `UserWarning` naming the URL rather than
+being fetched behind the caller's back — pass a path or bytes and LazyBridge
+inlines them. `audio=` is never forwarded, since Claude accepts no audio
+input; it is dropped with a warning too.
+
+## See also: Codex Engine
+
+[`CodexEngine`](codex-engine.md) is the same `Engine` contract backed by the
+**Codex App Server** (`codex app-server` over JSON-RPC, not `codex exec`).
+Both engines compose identically with LazyBridge — the differences are
+documented in that guide: Codex reports no dollar cost, primes structured
+output in the prompt rather than enforcing it, and has no persistent-thread
+equivalent of `session_mode="runtime"`.
