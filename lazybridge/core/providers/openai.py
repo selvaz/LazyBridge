@@ -31,6 +31,7 @@ from lazybridge.core.types import (
 
 _logger = logging.getLogger(__name__)
 
+
 def _require_openai() -> Any:
     """Resolve the ``openai`` SDK at call time.
 
@@ -45,6 +46,7 @@ def _require_openai() -> Any:
     except ImportError as exc:
         raise ImportError("openai package not installed. Run: pip install openai") from exc
     return openai
+
 
 # Reasoning models that use `reasoning_effort` instead of `temperature`
 _REASONING_MODELS = frozenset(
