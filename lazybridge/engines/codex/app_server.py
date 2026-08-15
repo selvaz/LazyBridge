@@ -295,6 +295,11 @@ class CodexAppServerClient:
             try:
                 await reader
             except asyncio.CancelledError:
+                # Expected: we cancelled the reader on the line above, and
+                # awaiting it is only how that cancellation is collected. Any
+                # real reader failure has already been routed to the caller
+                # through fail_waiters(), so there is nothing to re-raise here
+                # — and re-raising would mask the original error.
                 pass
             if process.returncode is None:
                 process.terminate()

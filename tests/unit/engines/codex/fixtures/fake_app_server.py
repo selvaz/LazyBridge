@@ -171,6 +171,11 @@ def main() -> None:
                 },
             }
         )
+    elif scenario == "exit_mid_turn":
+        # Acknowledged turn/start, then died without ever sending
+        # turn/completed — the path that hangs forever when the client has no
+        # request_timeout, unless the reader resolves the completion waiter.
+        return
     elif scenario == "turn_failed":
         write_message(
             {

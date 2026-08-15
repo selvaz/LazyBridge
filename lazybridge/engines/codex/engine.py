@@ -412,7 +412,13 @@ class CodexEngine:
             except asyncio.CancelledError:
                 raise
             except BaseException:
-                await sink.put(None)  # wake the consumer so the error surfaces
+                # Deliberately broader than ``Exception``: whatever ends this
+                # task — including KeyboardInterrupt/SystemExit — the consumer
+                # is parked on ``sink.get()`` and would wait out the whole
+                # stream_idle_timeout before noticing. The sentinel wakes it so
+                # the error surfaces immediately, and the exception is
+                # re-raised untouched on the next line.
+                await sink.put(None)
                 raise
             else:
                 await sink.put(None)  # sentinel — loop done

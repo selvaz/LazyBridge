@@ -168,6 +168,30 @@ def test_server_exit_before_initialize_fails_immediately():
         asyncio.run(asyncio.wait_for(run(), timeout=2.0))
 
 
+def test_server_exit_mid_turn_fails_instead_of_hanging():
+    """The turn waiter must be resolved too, not just in-flight requests.
+
+    ``turn/start`` is acknowledged immediately, so by the time the App Server
+    dies there is usually nothing left in ``pending`` — only the completion
+    future. Leaving it unresolved is invisible under the default
+    ``request_timeout`` (it just looks like a slow turn) and hangs forever
+    with ``request_timeout=None`` or ``stream_idle_timeout=None``.
+    """
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "exit_mid_turn"))
+        return await client.run(
+            prompt="quote AMZN",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+        )
+
+    with pytest.raises(ConnectionError, match="exited before completing"):
+        asyncio.run(asyncio.wait_for(run(), timeout=5.0))
+
+
 def test_native_command_approval_is_forwarded_to_the_shared_gate():
     seen = []
 
