@@ -56,7 +56,15 @@ with Store(db="planner.sqlite") as store:
 ```
 
 Call that from a scheduler, a loop, or a LazyPulse tick. Nothing is held open
-between runs, so the agent can be restarted at any moment.
+between runs, so the agent can be restarted at any moment — a scheduler that
+rebuilds the whole agent on every firing needs nothing else from you, as long
+as it hands the same `Store` back in.
+
+**Size `lease_seconds` above the real task duration.** The lease exists to
+recover work from a dead worker, and it cannot tell "dead" from "slow": if a
+task takes longer than its lease, the next firing will reclaim it and two
+workers will run the same item. Rule of thumb: longer than the slowest task,
+and longer than the interval between firings.
 
 ## Using it without an agent
 
