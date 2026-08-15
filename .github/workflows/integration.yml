@@ -58,7 +58,7 @@ jobs:
       LB_LIVE_MODEL: ${{ matrix.cheap_model }}
       LB_LIVE_MODEL_CAPABLE: ${{ matrix.capable_model }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
