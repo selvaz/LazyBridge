@@ -24,12 +24,21 @@ import types
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock
 
-# openai stub so providers can be imported/instantiated without the SDK.
-if "openai" not in sys.modules:
-    openai_pkg = types.ModuleType("openai")
-    openai_pkg.OpenAI = MagicMock(name="OpenAI")
-    openai_pkg.AsyncOpenAI = MagicMock(name="AsyncOpenAI")
-    sys.modules["openai"] = openai_pkg
+# openai stub so providers can be instantiated without the SDK. Installed
+# per-test with cleanup (a module-level sys.modules entry would leak into
+# the whole session and turn importorskip("openai") elsewhere into a fake
+# pass).
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _openai_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    if "openai" not in sys.modules:
+        openai_pkg = types.ModuleType("openai")
+        openai_pkg.OpenAI = MagicMock(name="OpenAI")
+        openai_pkg.AsyncOpenAI = MagicMock(name="AsyncOpenAI")
+        monkeypatch.setitem(sys.modules, "openai", openai_pkg)
+
 
 from lazybridge.core.providers.deepseek import DeepSeekProvider
 from lazybridge.core.providers.openai import OpenAIProvider
