@@ -109,6 +109,14 @@ Without a `Session` there is nowhere to persist a grant, so it degrades to
 |---|---|---|
 | Runtime sandbox | `file_roots`, built-in tool selection | `sandbox` |
 | Native approval mode | `permission_mode` | `approval_policy` |
+
+`ClaudeCodePolicy.permission_mode` defaults to `None`, which lets the engine
+pick per run: `"dontAsk"` when nothing needs gating (application tools only,
+all pre-approved) and `"default"` when something does — built-in tools, an
+approval gate, or `preapprove_application_tools=False`. Pin a value only when
+you want to override that; a hardcoded `"default"` would put a fully
+pre-approved, tool-only agent into prompting mode with no callback able to
+answer.
 | Pre-approved app tools | `allowed_tools` / MCP allow rules | `preapprove_dynamic_tools` |
 | Hard denial | `disallowed_tools` | sandbox plus gate denial |
 | Human callback | `can_use_tool` | App Server approval requests and dynamic tools |

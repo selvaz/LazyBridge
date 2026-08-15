@@ -166,7 +166,13 @@ class TerminalApprovalGate:
 class ClaudeCodePolicy:
     """Claude Agent SDK-specific controls."""
 
-    permission_mode: Literal["default", "dontAsk", "acceptEdits", "bypassPermissions", "plan", "auto"] = "default"
+    #: ``None`` lets the engine pick per run: ``"default"`` when something
+    #: actually needs gating (built-in tools, an approval gate, un-preapproved
+    #: application tools) and ``"dontAsk"`` when nothing does. Pinning a value
+    #: here overrides that choice — note that a hardcoded ``"default"`` would
+    #: put a fully pre-approved, tool-only agent into prompting mode with no
+    #: callback able to answer.
+    permission_mode: Literal["default", "dontAsk", "acceptEdits", "bypassPermissions", "plan", "auto"] | None = None
     preapprove_application_tools: bool = True
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()

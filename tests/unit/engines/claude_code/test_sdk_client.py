@@ -115,3 +115,23 @@ def test_unapproved_application_tool_without_gate_fails_closed():
     assert sdk_options.can_use_tool is not None
     result = asyncio.run(sdk_options.can_use_tool("mcp__lazybridge__ping", {}, object()))
     assert result.behavior == "deny"
+
+
+def test_permission_mode_is_chosen_per_run_when_the_policy_leaves_it_open():
+    """A fully pre-approved, tool-only agent must not be put in prompting mode.
+
+    ``permission_mode`` defaulting to a literal ``"default"`` in the policy
+    would make the engine's own choice unreachable: nothing can answer a
+    prompt when no ``can_use_tool`` callback is configured.
+    """
+    tool_only = ClaudeSdkOptions(mcp_tools=to_mcp_tools([_Tool()]))
+    with_builtins = ClaudeSdkOptions(builtin_tools=("Read",), file_roots=(r"C:\workspace",))
+
+    assert AgentSdkClient._sdk_options(tool_only).permission_mode == "dontAsk"
+    assert AgentSdkClient._sdk_options(with_builtins).permission_mode == "default"
+
+
+def test_an_explicit_permission_mode_still_wins():
+    options = ClaudeSdkOptions(mcp_tools=to_mcp_tools([_Tool()]), permission_mode="acceptEdits")
+
+    assert AgentSdkClient._sdk_options(options).permission_mode == "acceptEdits"
