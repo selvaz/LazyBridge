@@ -2,7 +2,7 @@
 
 Run only from a terminal already authenticated with Claude Code:
 
-    .venv\\Scripts\\python.exe examples\\live_mcp_smoke.py
+    .venv\\Scripts\\python.exe examples\\claude_code\\live_mcp_smoke.py
 """
 
 from __future__ import annotations

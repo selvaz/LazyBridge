@@ -69,18 +69,26 @@ class TestBuildWebForm:
 # =============================================================================
 # Web UI — _WebUI class
 #
-# NOTE: these tests exercise the real HTTP server and call ``prompt()``
-# for real, which means ``_WebUI``'s unconditional ``webbrowser.open()``
-# (human.py, first ``prompt()`` call per instance) really fires here —
-# nothing in this module mocks ``webbrowser``. Confirmed 2026-08-07: a
-# full ``pytest`` run opens a real browser tab per test in this class.
-# Harmless (each server is on an OS-assigned ``port=0`` and torn down),
-# but noisy. Known gap, not fixed here — mock ``webbrowser.open`` in this
-# class if/when it's worth the churn.
+# These tests exercise the real HTTP server and call ``prompt()`` for real,
+# so ``_WebUI``'s unconditional ``webbrowser.open()`` (human.py, first
+# ``prompt()`` call per instance) fires with them. Left unmocked until
+# 2026-08-15, that opened a real browser tab per test — and since each
+# server is on an OS-assigned ``port=0`` that dies with the test, every
+# tab was left pointing at a dead ``127.0.0.1:<port>``. A developer
+# running the suite a few times ends up with a screenful of error pages.
+# The autouse fixture below keeps the launch *attempt* on the tested code
+# path while stopping the side effect from escaping the test process.
 # =============================================================================
 
 
 class TestWebUIClass:
+    @pytest.fixture(autouse=True)
+    def _no_real_browser(self, monkeypatch):
+        """Record the browser launch instead of performing it."""
+        opened: list[str] = []
+        monkeypatch.setattr("webbrowser.open", lambda url, *args, **kwargs: opened.append(url) or True)
+        return opened
+
     def test_instantiation(self):
         ui = _WebUI(timeout=30, port=0)
         assert ui._timeout == 30

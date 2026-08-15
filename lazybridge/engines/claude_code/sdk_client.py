@@ -6,10 +6,14 @@ the sole optional-import boundary for the external SDK.
 
 from __future__ import annotations
 
+import json
 import warnings
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
+
+from lazybridge.engines.coding import ApprovalRequest, ask_approval
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 
@@ -46,16 +50,25 @@ class AgentSdkClient(ClaudeSdkClient):
     """
 
     @staticmethod
-    async def _prompt_stream(prompt: str) -> AsyncIterator[dict[str, Any]]:
+    async def _prompt_stream(
+        prompt: str, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> AsyncIterator[dict[str, Any]]:
         """Yield one user message for SDK permission-callback mode.
 
         The Agent SDK requires an async prompt stream whenever ``can_use_tool``
         is configured.  Keeping this conversion here lets the engine retain
         its simple string-in/string-out contract.
+
+        It is also the only way to send attachments: a plain-string prompt has
+        nowhere to put an image block, so ``content`` becomes the block list
+        ``[text, image...]`` whenever the run carries any.
         """
+        content: str | list[dict[str, Any]] = (
+            [{"type": "text", "text": prompt}, *attachments] if attachments else prompt
+        )
         yield {
             "type": "user",
-            "message": {"role": "user", "content": prompt},
+            "message": {"role": "user", "content": content},
         }
 
     @staticmethod
@@ -103,9 +116,9 @@ class AgentSdkClient(ClaudeSdkClient):
             version="0.1.0",
             tools=sdk_tools,
         )
-        allowed = list(options.allowed_tools) or [
-            f"mcp__{options.mcp_server_name}__{item.name}" for item in options.mcp_tools
-        ]
+        allowed = list(options.allowed_tools)
+        if options.preapprove_application_tools:
+            allowed.extend(f"mcp__{options.mcp_server_name}__{item.name}" for item in options.mcp_tools)
 
         roots = tuple(Path(root).resolve() for root in options.file_roots)
 
@@ -117,15 +130,34 @@ class AgentSdkClient(ClaudeSdkClient):
             return any(resolved.is_relative_to(root) for root in roots)
 
         async def can_use_tool(name: str, arguments: dict[str, Any], context: Any) -> Any:
-            # Only ever consulted for Claude's built-in tools
-            # (Read/Glob/Grep/WebSearch/WebFetch). MCP tool calls
-            # (``mcp__{mcp_server_name}__*``) are already covered by the
-            # ``allowed_tools`` allowlist above, so the SDK auto-approves
-            # them before this callback runs (that's the intentional,
-            # filtered-out ``CanUseToolShadowedWarning`` case — see the
-            # filter registered in ``_sdk_options`` above): MCP tools here
-            # are exactly the LazyBridge tools this engine run was given,
-            # so a second gate in this callback would be redundant.
+            # In the compatibility profile MCP tools are pre-approved and do
+            # not reach this callback. Gated profiles deliberately omit those
+            # allow rules, so application tools and unmatched built-ins share
+            # this one normalized approval path.
+            if options.approval_gate is not None:
+                decision = await ask_approval(
+                    options.approval_gate,
+                    ApprovalRequest(
+                        provider="claude-code",
+                        kind="tool",
+                        name=name,
+                        arguments=arguments,
+                        reason=getattr(context, "decision_reason", None),
+                        cwd=options.cwd,
+                        raw={
+                            "tool_use_id": getattr(context, "tool_use_id", None),
+                            "title": getattr(context, "title", None),
+                            "description": getattr(context, "description", None),
+                        },
+                    ),
+                )
+                if decision.action in {"allow", "allow_session"}:
+                    updates = getattr(context, "suggestions", None) if decision.action == "allow_session" else None
+                    return PermissionResultAllow(updated_permissions=updates or None)
+                return PermissionResultDeny(
+                    message=decision.message or "Action denied by approval gate",
+                    interrupt=decision.action == "cancel",
+                )
             if name in {"WebSearch", "WebFetch"}:
                 return PermissionResultAllow()
             if name in {"Read", "Glob", "Grep"}:
@@ -133,16 +165,18 @@ class AgentSdkClient(ClaudeSdkClient):
                 if allowed_path(path):
                     return PermissionResultAllow()
                 return PermissionResultDeny(message="File access is outside ClaudeCodeEngine.file_roots")
-            # Defensive: any other built-in tool name reaching here is one
-            # this engine did not declare via ``builtin_tools`` — deny it.
-            return PermissionResultDeny(message=f"Built-in tool {name!r} is not enabled")
+            # Defensive fail-closed path: either an application tool has no
+            # gate, or an undeclared built-in reached the callback.
+            return PermissionResultDeny(message=f"Tool {name!r} is not pre-approved and no approval gate allowed it")
 
         async def keep_permission_stream_open(
             input_data: dict[str, Any], tool_use_id: str | None, context: Any
         ) -> dict[str, Any]:
             return {"continue_": True}
 
-        use_callback = bool(options.builtin_tools)
+        use_callback = (
+            bool(options.builtin_tools) or options.approval_gate is not None or not options.preapprove_application_tools
+        )
         return ClaudeAgentOptions(
             model=options.model,
             fallback_model=options.fallback_model,
@@ -158,19 +192,23 @@ class AgentSdkClient(ClaudeSdkClient):
             resume=options.resume,
             tools=list(options.builtin_tools),
             allowed_tools=allowed,
+            disallowed_tools=list(options.disallowed_tools),
             mcp_servers={options.mcp_server_name: server},
             strict_mcp_config=True,
-            permission_mode="default" if use_callback else "dontAsk",
+            permission_mode=options.permission_mode or ("default" if use_callback else "dontAsk"),
             can_use_tool=can_use_tool if use_callback else None,
             # ``keep_permission_stream_open`` intentionally uses the generic
             # (dict, str | None, Any) shape rather than the SDK's per-hook
             # TypedDict union — this hook only ever fires for PreToolUse.
             hooks={"PreToolUse": [HookMatcher(hooks=[keep_permission_stream_open])]} if use_callback else None,  # type: ignore[list-item]
-            setting_sources=[],
+            setting_sources=list(options.setting_sources),
             include_partial_messages=options.include_partial_messages,
+            output_format=options.output_format,
         )
 
-    async def run(self, prompt: str, *, options: ClaudeSdkOptions) -> ClaudeSdkResult:
+    async def run(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> ClaudeSdkResult:
         try:
             from claude_agent_sdk import ResultMessage, query
         except ImportError as exc:  # pragma: no cover
@@ -179,7 +217,7 @@ class AgentSdkClient(ClaudeSdkClient):
         final: Any | None = None
         sdk_options = self._sdk_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt) if options.builtin_tools else prompt
+            self._prompt_stream(prompt, attachments) if options.builtin_tools or attachments else prompt
         )
         async for message in query(prompt=sdk_prompt, options=sdk_options):
             if isinstance(message, ResultMessage):
@@ -192,7 +230,12 @@ class AgentSdkClient(ClaudeSdkClient):
 
         usage = final.usage or {}
         return ClaudeSdkResult(
-            text=final.result or "",
+            # With ``output_format`` set, the CLI returns the schema-validated
+            # object on ``structured_output``; ``result`` holds the same JSON
+            # as text on current versions but is not guaranteed to. Serialising
+            # the parsed object keeps this adapter's string contract while
+            # giving ``Agent._validate_and_retry`` something that always parses.
+            text=json.dumps(final.structured_output) if final.structured_output is not None else (final.result or ""),
             session_id=final.session_id,
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
@@ -200,7 +243,14 @@ class AgentSdkClient(ClaudeSdkClient):
             model=None,
         )
 
-    async def stream(self, prompt: str, *, options: ClaudeSdkOptions) -> AsyncIterator[ClaudeSdkStreamEvent]:
+    @staticmethod
+    def _stream_options(options: ClaudeSdkOptions) -> ClaudeSdkOptions:
+        """Enable partial events without dropping any per-run SDK option."""
+        return replace(options, include_partial_messages=True)
+
+    async def stream(
+        self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
+    ) -> AsyncIterator[ClaudeSdkStreamEvent]:
         try:
             from claude_agent_sdk import ResultMessage, StreamEvent, query
         except ImportError as exc:  # pragma: no cover
@@ -208,24 +258,9 @@ class AgentSdkClient(ClaudeSdkClient):
 
         saw_text = False
         saw_result = False
-        stream_options = ClaudeSdkOptions(
-            cwd=options.cwd,
-            model=options.model,
-            fallback_model=options.fallback_model,
-            reasoning_effort=options.reasoning_effort,
-            thinking=options.thinking,
-            system_prompt=options.system_prompt,
-            max_turns=options.max_turns,
-            resume=options.resume,
-            allowed_tools=options.allowed_tools,
-            builtin_tools=options.builtin_tools,
-            file_roots=options.file_roots,
-            mcp_server_name=options.mcp_server_name,
-            mcp_tools=options.mcp_tools,
-            include_partial_messages=True,
-        )
+        stream_options = self._stream_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt) if stream_options.builtin_tools else prompt
+            self._prompt_stream(prompt, attachments) if stream_options.builtin_tools or attachments else prompt
         )
         async for message in query(
             prompt=sdk_prompt,
@@ -245,8 +280,14 @@ class AgentSdkClient(ClaudeSdkClient):
                     raise ClaudeSdkRequestError(f"Claude Agent SDK failed: {detail}", status=message.api_error_status)
                 # Some SDK/CLI versions do not emit partial text for a short
                 # response. Yield the final response exactly once in that case.
-                if not saw_text and message.result:
-                    yield ClaudeSdkStreamEvent(text=message.result)
+                if not saw_text:
+                    final_text = (
+                        json.dumps(message.structured_output)
+                        if message.structured_output is not None
+                        else (message.result or "")
+                    )
+                    if final_text:
+                        yield ClaudeSdkStreamEvent(text=final_text)
                 usage = message.usage or {}
                 yield ClaudeSdkStreamEvent(
                     session_id=message.session_id,
