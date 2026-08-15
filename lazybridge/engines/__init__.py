@@ -15,12 +15,28 @@ is always importable; actually constructing one requires the optional
 from lazybridge.engines.base import Engine
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.codex import CodexEngine
+from lazybridge.engines.coding import (
+    ApprovalDecision,
+    ApprovalGate,
+    ApprovalRequest,
+    ClaudeCodePolicy,
+    CodexPolicy,
+    CodingAgentConfig,
+    TerminalApprovalGate,
+)
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.engines.plan import Plan, Step
 from lazybridge.engines.replan import PlanRound, ReplanEngine, Task
 
 __all__ = [
     "ClaudeCodeEngine",
+    "ApprovalDecision",
+    "ApprovalGate",
+    "ApprovalRequest",
+    "ClaudeCodePolicy",
+    "CodexPolicy",
+    "CodingAgentConfig",
+    "TerminalApprovalGate",
     "CodexEngine",
     "Engine",
     "LLMEngine",

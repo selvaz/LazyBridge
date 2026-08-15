@@ -9,6 +9,7 @@ from lazybridge import Agent, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.codex.app_server import CodexRunResult
 from lazybridge.engines.codex.engine import CodexEngine
+from lazybridge.engines.coding import ApprovalDecision, CodexPolicy, CodingAgentConfig
 from lazybridge.session import EventType
 
 
@@ -21,25 +22,42 @@ class FakeAppServer:
         self.dynamic_tools_seen: list[list[dict]] = []
         self.attachments_seen: list[list[dict]] = []
         self.effort_seen: list[str | None] = []
+        self.developer_instructions_seen: list[str | None] = []
         self.result = result or CodexRunResult(
             text="AMZN is available", input_tokens=11, output_tokens=7, cost_usd=0.002
         )
         self.fail_times = fail_times
         self.exc_factory = exc_factory or (lambda: ConnectionError("reset"))
+        self.tool_results: list[dict] = []
 
     async def run(
-        self, *, prompt, model, cwd, dynamic_tools, on_tool_call, on_text=None, attachments=None, effort=None
+        self,
+        *,
+        prompt,
+        model,
+        cwd,
+        dynamic_tools,
+        on_tool_call,
+        developer_instructions=None,
+        on_text=None,
+        attachments=None,
+        effort=None,
+        sandbox="read-only",
+        approval_policy="never",
+        approval_gate=None,
     ):
         self.calls += 1
         self.prompts.append(prompt)
         self.dynamic_tools_seen.append(dynamic_tools)
         self.attachments_seen.append(attachments or [])
         self.effort_seen.append(effort)
+        self.developer_instructions_seen.append(developer_instructions)
         if self.calls <= self.fail_times:
             raise self.exc_factory()
         if dynamic_tools:
-            tool_result = await on_tool_call(dynamic_tools[0]["name"], {"symbol": "AMZN"})
-            assert tool_result["success"] is True
+            # Recorded, not asserted: a gated run legitimately gets a
+            # success=False payload back instead of a tool result.
+            self.tool_results.append(await on_tool_call(dynamic_tools[0]["name"], {"symbol": "AMZN"}))
         if on_text:
             for chunk in ("streamed ", "answer"):
                 await on_text(chunk)
@@ -49,6 +67,27 @@ class FakeAppServer:
 def get_quote(symbol: str) -> dict[str, str]:
     """Return a deterministic quote lookup."""
     return {"symbol": symbol}
+
+
+def test_writer_profile_gates_dynamic_tools_before_dispatch():
+    seen = []
+
+    async def gate(request):
+        seen.append(request)
+        return ApprovalDecision.allow()
+
+    client = FakeAppServer()
+    agent = Agent(
+        name="gated-writer",
+        engine=CodexEngine(client=client, config=CodingAgentConfig.writer(gate)),
+        tools=[get_quote],
+    )
+
+    result = agent("Find AMZN")
+
+    assert result.ok
+    assert seen[0].kind == "tool"
+    assert seen[0].name == "get_quote"
 
 
 def test_engine_works_through_a_standard_agent_and_updates_memory():
@@ -195,3 +234,66 @@ def test_no_reasoning_effort_leaves_the_account_default():
 
     assert agent("Think normally").ok
     assert client.effort_seen == [None]
+
+
+def test_system_prompt_is_forwarded_as_developer_instructions_not_user_text_for_run_and_stream():
+    client = FakeAppServer()
+    agent = Agent(name="instructed", engine=CodexEngine(client=client, system="Never reveal secrets."))
+
+    assert agent("Summarize this").ok
+
+    async def collect() -> str:
+        return "".join([chunk async for chunk in agent.stream("Stream this")])
+
+    assert asyncio.run(collect()) == "streamed answer"
+
+    assert client.developer_instructions_seen == ["Never reveal secrets.", "Never reveal secrets."]
+    assert all("Never reveal secrets." not in prompt for prompt in client.prompts)
+
+
+def test_gated_tools_are_approved_once_per_agent_across_runs():
+    """End-to-end scope check through the engine, not just the helper."""
+    asked: list[str] = []
+
+    async def gate(request):
+        asked.append(request.name)
+        return ApprovalDecision.allow_for_session()
+
+    client = FakeAppServer()
+    session = Session()
+    engine = CodexEngine(
+        client=client,
+        config=CodingAgentConfig(codex=CodexPolicy(preapprove_dynamic_tools=False), approval_gate=gate),
+    )
+    agent = Agent(name="analyst", engine=engine, tools=[get_quote], session=session)
+
+    assert agent("Find AMZN").ok
+    assert agent("Find AMZN again").ok
+
+    assert asked == ["get_quote"]
+
+
+def test_a_denied_tool_never_runs_and_reports_back_to_the_model():
+    calls: list[str] = []
+
+    def tracked_quote(symbol: str) -> dict[str, str]:
+        """Return a deterministic quote lookup."""
+        calls.append(symbol)
+        return {"symbol": symbol}
+
+    async def gate(request):
+        return ApprovalDecision.deny("not allowed here")
+
+    client = FakeAppServer()
+    engine = CodexEngine(
+        client=client,
+        config=CodingAgentConfig(codex=CodexPolicy(preapprove_dynamic_tools=False), approval_gate=gate),
+    )
+    agent = Agent(name="blocked", engine=engine, tools=[tracked_quote])
+
+    assert agent("Find AMZN").ok
+    assert calls == []  # the tool body must never execute
+    assert client.tool_results[-1] == {
+        "success": False,
+        "contentItems": [{"type": "inputText", "text": "not allowed here"}],
+    }

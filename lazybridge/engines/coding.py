@@ -1,0 +1,232 @@
+"""Shared permission and approval configuration for coding engines.
+
+The provider runtimes keep enforcing their native sandbox and permission
+models.  This module supplies one application-facing approval contract so a
+CLI, web UI, queue, or chat integration can answer requests from either
+Claude Code or Codex without provider-specific branching.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol
+
+ApprovalAction = Literal["allow", "allow_session", "deny", "cancel"]
+
+
+@dataclass(frozen=True)
+class ApprovalRequest:
+    """A normalized request emitted before a coding agent performs an action."""
+
+    provider: Literal["claude-code", "codex"]
+    kind: Literal["tool", "command", "file_change", "permissions", "user_input"]
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    reason: str | None = None
+    cwd: str | None = None
+    thread_id: str | None = None
+    turn_id: str | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True)
+class ApprovalDecision:
+    """Provider-neutral approval result returned by an :class:`ApprovalGate`."""
+
+    action: ApprovalAction
+    message: str = ""
+    # Used by Codex's request_permissions tool.  A gate may grant a subset of
+    # the requested permissions instead of accepting the complete request.
+    permissions: Mapping[str, Any] | None = None
+
+    @classmethod
+    def allow(cls) -> ApprovalDecision:
+        return cls("allow")
+
+    @classmethod
+    def allow_for_session(cls) -> ApprovalDecision:
+        return cls("allow_session")
+
+    @classmethod
+    def deny(cls, message: str = "Action denied by approval gate") -> ApprovalDecision:
+        return cls("deny", message)
+
+    @classmethod
+    def cancel(cls, message: str = "Action cancelled by approval gate") -> ApprovalDecision:
+        return cls("cancel", message)
+
+
+class ApprovalGate(Protocol):
+    """Interface implemented by approval UIs and policy services."""
+
+    def __call__(self, request: ApprovalRequest) -> ApprovalDecision | Awaitable[ApprovalDecision]: ...
+
+
+ApprovalCallback = Callable[[ApprovalRequest], ApprovalDecision | Awaitable[ApprovalDecision]]
+
+
+async def ask_approval(gate: ApprovalGate | None, request: ApprovalRequest) -> ApprovalDecision:
+    """Invoke ``gate`` and fail closed when no gate is configured."""
+
+    if gate is None:
+        return ApprovalDecision.deny("No approval gate is configured")
+    result = gate(request)
+    if inspect.isawaitable(result):
+        result = await result
+    if not isinstance(result, ApprovalDecision):
+        raise TypeError(f"approval gate must return ApprovalDecision, got {type(result).__name__}")
+    return result
+
+
+#: Attribute used to park approval caches on a LazyBridge ``Session``.
+_APPROVALS_SLOT = "_lazybridge_tool_approvals"
+
+
+def session_approvals(session: Any, provider: str, agent_name: str) -> set[tuple[str, str]]:
+    """Return the ``allow_session`` cache for one agent inside one Session.
+
+    ``allow_session`` has to mean *session*, not *turn*: the cache is keyed by
+    ``(provider, agent_name)`` and parked on the ``Session`` object, so a
+    grant survives across runs of that agent while a second agent sharing the
+    same engine instance — engines are shared freely, which is why
+    ``resolve_agent_name`` exists — still gets asked separately.
+
+    Without a ``Session`` there is nowhere to persist the grant, so a fresh
+    per-run set is returned and ``allow_session`` degrades to "for the rest of
+    this run".
+    """
+    if session is None:
+        return set()
+    state = getattr(session, _APPROVALS_SLOT, None)
+    if state is None:
+        state = {}
+        try:
+            setattr(session, _APPROVALS_SLOT, state)
+        except AttributeError:  # pragma: no cover - exotic Session stand-ins
+            return set()
+    cache: set[tuple[str, str]] = state.setdefault((provider, agent_name), set())
+    return cache
+
+
+def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) -> ApprovalGate:
+    """Wrap ``gate`` so ``allow_session`` grants are not asked again.
+
+    Applies to every request kind — tool, command, file_change, permissions —
+    so one wrapper covers both the LazyBridge-side dynamic tool gate and the
+    provider-side approval requests arriving over the wire.
+    """
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        key = (request.kind, request.name)
+        if key in approved:
+            return ApprovalDecision.allow_for_session()
+        decision = await ask_approval(gate, request)
+        if decision.action == "allow_session":
+            approved.add(key)
+        return decision
+
+    return ask
+
+
+class TerminalApprovalGate:
+    """Small interactive gate suitable for local development.
+
+    ``input`` runs in a worker thread so it does not block the agent's asyncio
+    loop. Production applications should normally pass their own callback
+    backed by a web UI, message queue, or chat connector.
+    """
+
+    async def __call__(self, request: ApprovalRequest) -> ApprovalDecision:
+        summary = request.reason or f"{request.kind}: {request.name}"
+        if request.arguments:
+            summary += f"\nArguments: {dict(request.arguments)!r}"
+        answer = (
+            (
+                await asyncio.to_thread(
+                    input,
+                    f"\n[{request.provider}] {summary}\nApprove? [y]es / [s]ession / [n]o / [c]ancel: ",
+                )
+            )
+            .strip()
+            .lower()
+        )
+        if answer in {"y", "yes"}:
+            return ApprovalDecision.allow()
+        if answer in {"s", "session"}:
+            return ApprovalDecision.allow_for_session()
+        if answer in {"c", "cancel"}:
+            return ApprovalDecision.cancel()
+        return ApprovalDecision.deny()
+
+
+@dataclass(frozen=True)
+class ClaudeCodePolicy:
+    """Claude Agent SDK-specific controls."""
+
+    permission_mode: Literal["default", "dontAsk", "acceptEdits", "bypassPermissions", "plan", "auto"] = "default"
+    preapprove_application_tools: bool = True
+    allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
+    setting_sources: tuple[Literal["user", "project", "local"], ...] = ()
+
+
+@dataclass(frozen=True)
+class CodexPolicy:
+    """Codex App Server-specific controls."""
+
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
+    approval_policy: Literal["untrusted", "on-request", "never"] = "never"
+    preapprove_dynamic_tools: bool = True
+
+
+@dataclass(frozen=True)
+class CodingAgentConfig:
+    """Complete provider configuration plus a shared approval gate."""
+
+    claude: ClaudeCodePolicy = field(default_factory=ClaudeCodePolicy)
+    codex: CodexPolicy = field(default_factory=CodexPolicy)
+    approval_gate: ApprovalGate | None = None
+
+    @classmethod
+    def reviewer(cls) -> CodingAgentConfig:
+        """Read-only, non-interactive profile for code review agents."""
+
+        return cls(
+            claude=ClaudeCodePolicy(preapprove_application_tools=False),
+            codex=CodexPolicy(preapprove_dynamic_tools=False),
+        )
+
+    @classmethod
+    def writer(cls, approval_gate: ApprovalGate) -> CodingAgentConfig:
+        """Workspace writer profile: mutations require the supplied gate."""
+
+        return cls(
+            claude=ClaudeCodePolicy(
+                permission_mode="default",
+                preapprove_application_tools=False,
+            ),
+            codex=CodexPolicy(
+                sandbox="workspace-write",
+                approval_policy="on-request",
+                preapprove_dynamic_tools=False,
+            ),
+            approval_gate=approval_gate,
+        )
+
+
+__all__ = [
+    "ApprovalAction",
+    "ApprovalCallback",
+    "ApprovalDecision",
+    "ApprovalGate",
+    "ApprovalRequest",
+    "ClaudeCodePolicy",
+    "CodexPolicy",
+    "CodingAgentConfig",
+    "TerminalApprovalGate",
+    "remembering_gate",
+    "session_approvals",
+]

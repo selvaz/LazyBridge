@@ -9,9 +9,17 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, TypeVar, get_origin
+from typing import Any, TypeVar, cast, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
+from lazybridge.engines.coding import (
+    ApprovalGate,
+    ApprovalRequest,
+    CodingAgentConfig,
+    ask_approval,
+    remembering_gate,
+    session_approvals,
+)
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -105,6 +113,7 @@ class CodexEngine:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         tool_timeout: float | None = None,
+        config: CodingAgentConfig | None = None,
         client: CodexAppServerClient | None = None,
     ) -> None:
         self.model, self.cwd, self.system = model, cwd, system
@@ -127,7 +136,46 @@ class CodexEngine:
         if tool_timeout is not None and tool_timeout <= 0:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         self.tool_timeout = tool_timeout
+        self.config = config or CodingAgentConfig()
         self._client = client or CodexAppServerClient()
+
+    def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
+        """The configured gate, with ``allow_session`` scoped per agent+Session."""
+        return remembering_gate(self.config.approval_gate, session_approvals(session, "codex", agent_name))
+
+    def _tool_dispatcher(
+        self, tools: list[Any], observe: Any, gate: ApprovalGate
+    ) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+        dispatch = dispatcher(tools, observe, tool_timeout=self.tool_timeout)
+        if self.config.codex.preapprove_dynamic_tools:
+            return dispatch
+
+        async def gated(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            # ``gate`` already answers from the agent's session cache when the
+            # tool was approved with ``allow_session`` on an earlier run.
+            decision = await ask_approval(
+                gate,
+                ApprovalRequest(
+                    provider="codex",
+                    kind="tool",
+                    name=tool,
+                    arguments=arguments,
+                    cwd=self.cwd,
+                ),
+            )
+            if decision.action not in {"allow", "allow_session"}:
+                return {
+                    "success": False,
+                    "contentItems": [
+                        {
+                            "type": "inputText",
+                            "text": decision.message or "Tool call denied by approval gate",
+                        }
+                    ],
+                }
+            return cast("dict[str, Any]", await dispatch(tool, arguments))
+
+        return gated
 
     async def _call_with_retries(self, make_call: Callable[[], Awaitable[_T]]) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
@@ -149,7 +197,7 @@ class CodexEngine:
             while True:
                 try:
                     return await make_call()
-                except BaseException as exc:
+                except Exception as exc:
                     if attempt >= self.max_retries or not _is_transient(exc):
                         raise
                     delay = self.retry_delay * (2**attempt) * (0.9 + 0.2 * random.random())
@@ -201,7 +249,6 @@ class CodexEngine:
     def _prompt(self, env: Envelope[Any], memory: Any | None, output_type: type = str) -> str:
         history = str(memory.text()) if memory is not None else ""
         parts = [
-            self.system,
             f"LazyBridge conversation context:\n{history}" if history else "",
             env.context,
             env.task or env.text(),
@@ -261,6 +308,7 @@ class CodexEngine:
         out: Envelope[Any]
         try:
             observe = self._observer(session, run_id)
+            gate = self._scoped_gate(session, agent_name)
             attachments = self._attachments(env)
             result = await self._call_with_retries(
                 lambda: self._client.run(
@@ -268,9 +316,13 @@ class CodexEngine:
                     model=self.model,
                     cwd=self.cwd,
                     dynamic_tools=definitions(tools),
-                    on_tool_call=dispatcher(tools, observe, tool_timeout=self.tool_timeout),
+                    on_tool_call=self._tool_dispatcher(tools, observe, gate),
                     attachments=attachments,
                     effort=self.reasoning_effort,
+                    developer_instructions=self.system,
+                    sandbox=self.config.codex.sandbox,
+                    approval_policy=self.config.codex.approval_policy,
+                    approval_gate=gate,
                 )
             )
             if session:
@@ -338,15 +390,20 @@ class CodexEngine:
         async def _run_loop() -> None:
             try:
                 observe = self._observer(session, run_id)
+                gate = self._scoped_gate(session, agent_name)
                 result = await self._client.run(
                     prompt=self._prompt(env, memory, output_type),
                     model=self.model,
                     cwd=self.cwd,
                     dynamic_tools=definitions(tools),
-                    on_tool_call=dispatcher(tools, observe, tool_timeout=self.tool_timeout),
+                    on_tool_call=self._tool_dispatcher(tools, observe, gate),
                     on_text=on_text,
                     attachments=self._attachments(env),
                     effort=self.reasoning_effort,
+                    developer_instructions=self.system,
+                    sandbox=self.config.codex.sandbox,
+                    approval_policy=self.config.codex.approval_policy,
+                    approval_gate=gate,
                 )
                 if session:
                     self._emit_model_response(session, agent_name, result, run_id)

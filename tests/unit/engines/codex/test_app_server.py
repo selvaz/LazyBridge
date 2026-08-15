@@ -7,14 +7,12 @@ from pathlib import Path
 import pytest
 
 from lazybridge.engines.codex.app_server import CodexAppServerClient
+from lazybridge.engines.coding import ApprovalDecision
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "fake_app_server.py")
 
-# A broken fixture (protocol mismatch, unhandled exception) makes the real
-# client hang on ``await completed`` forever — there's no timeout inside
-# CodexAppServerClient itself (that's CodexEngine's job). Bound every test
-# here so a regression fails fast with a clear TimeoutError instead of
-# hanging CI.
+# Bound every subprocess test so a broken fixture or protocol regression
+# fails fast instead of hanging CI.
 _TIMEOUT = 10.0
 
 
@@ -136,3 +134,63 @@ def test_a_failed_turn_status_raises_with_the_reported_message():
 
     with pytest.raises(RuntimeError, match="rate limited"):
         asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+
+def test_developer_instructions_are_sent_on_thread_start():
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "developer_instructions"))
+        return await client.run(
+            prompt="just chat",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            developer_instructions="Be concise.",
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+    assert result.text == "AMZN is 123.45"
+
+
+def test_server_exit_before_initialize_fails_immediately():
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "exit_immediately"))
+        return await client.run(
+            prompt="just chat",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+        )
+
+    with pytest.raises(ConnectionError, match="exited before completing"):
+        asyncio.run(asyncio.wait_for(run(), timeout=2.0))
+
+
+def test_native_command_approval_is_forwarded_to_the_shared_gate():
+    seen = []
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "command_approval"))
+
+        async def gate(request):
+            seen.append(request)
+            return ApprovalDecision.allow_for_session()
+
+        return await client.run(
+            prompt="inspect",
+            model=None,
+            cwd="C:/work/project",
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            sandbox="workspace-write",
+            approval_policy="on-request",
+            approval_gate=gate,
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+    assert result.text == "approved"
+    assert seen[0].kind == "command"
+    assert seen[0].name == "git status"

@@ -138,6 +138,15 @@ from lazybridge.engines.claude_code import ClaudeCodeEngine
 # CodexEngine needs no Python dependency at all — only the `codex` CLI,
 # logged in locally (`npm install -g @openai/codex`, `codex --login`).
 from lazybridge.engines.codex import CodexEngine
+from lazybridge.engines.coding import (
+    ApprovalDecision,
+    ApprovalGate,
+    ApprovalRequest,
+    ClaudeCodePolicy,
+    CodexPolicy,
+    CodingAgentConfig,
+    TerminalApprovalGate,
+)
 from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
@@ -224,6 +233,13 @@ __all__ = [
     "LLMEngine",
     "ClaudeCodeEngine",
     "CodexEngine",
+    "ApprovalDecision",
+    "ApprovalGate",
+    "ApprovalRequest",
+    "ClaudeCodePolicy",
+    "CodexPolicy",
+    "CodingAgentConfig",
+    "TerminalApprovalGate",
     "Plan",
     "Step",
     "ConcurrentPlanRunError",

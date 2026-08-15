@@ -11,7 +11,8 @@ server numbers its own ``item/tool/call`` requests from 0 with a counter
 independent of the client's.
 
 Usage: ``python fake_app_server.py <scenario>`` where scenario is one of
-"happy", "turn_failed", "error_notification" or "id_collision" (see
+"happy", "turn_failed", "error_notification", "id_collision",
+"developer_instructions" or "exit_immediately" (see
 ``test_app_server.py``).
 """
 
@@ -63,6 +64,9 @@ def token_usage(input_tokens: int, output_tokens: int) -> dict:
 def main() -> None:
     scenario = sys.argv[1] if len(sys.argv) > 1 else "happy"
 
+    if scenario == "exit_immediately":
+        return
+
     init = read_message()
     assert init["method"] == "initialize", init
     write_message({"id": init["id"], "result": {"userAgent": "fake", "platformOs": "test"}})
@@ -75,9 +79,13 @@ def main() -> None:
     params = thread_start["params"]
     # Lock in the enum spelling the real CLI accepts — "readOnly" is
     # rejected live with "unknown variant `readOnly`".
-    assert params["sandbox"] == "read-only", params
-    assert params["approvalPolicy"] == "never", params
+    expected_sandbox = "workspace-write" if scenario == "command_approval" else "read-only"
+    expected_approval = "on-request" if scenario == "command_approval" else "never"
+    assert params["sandbox"] == expected_sandbox, params
+    assert params["approvalPolicy"] == expected_approval, params
     assert params["ephemeral"] is True, params
+    if scenario == "developer_instructions":
+        assert params["developerInstructions"] == "Be concise.", params
     dynamic_tools = params.get("dynamicTools", [])
     write_message({"id": thread_start["id"], "result": {"thread": {"id": "thread-1"}}})
 
@@ -89,7 +97,35 @@ def main() -> None:
         # the turn finishes.
         write_message(turn_started_result)
 
-    if scenario in ("happy", "id_collision"):
+    if scenario == "command_approval":
+        write_message(
+            {
+                "id": 0,
+                "method": "item/commandExecution/requestApproval",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "item-1",
+                    "command": "git status",
+                    "cwd": "C:/work/project",
+                    "reason": "Inspect the worktree",
+                },
+            }
+        )
+        approval = read_message()
+        assert approval == {"id": 0, "result": {"decision": "acceptForSession"}}, approval
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "text": "approved"}],
+                    }
+                },
+            }
+        )
+    elif scenario in ("happy", "id_collision", "developer_instructions"):
         if dynamic_tools:
             # Server-side request ids start at 0 and are independent of the
             # client's counter; under "id_collision" this id is deliberately

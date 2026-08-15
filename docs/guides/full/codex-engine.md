@@ -53,7 +53,8 @@ special-case the engine type.
 Constructor options mirror `LLMEngine`/`ClaudeCodeEngine` where the underlying
 runtime supports them: `model`, `cwd`, `system`, `reasoning_effort`,
 `request_timeout`, `stream_idle_timeout`, `max_retries`, `retry_delay`,
-`tool_timeout`.
+`tool_timeout`. The `system` value is sent as an App Server developer
+instruction, separately from the user task, so it retains instruction priority.
 
 ## Why not `codex exec`
 

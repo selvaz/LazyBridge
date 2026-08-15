@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+
+from lazybridge.engines.coding import ApprovalGate
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,11 @@ class ClaudeSdkOptions:
     max_turns: int = 20
     resume: str | None = None
     allowed_tools: tuple[str, ...] = ()
+    preapprove_application_tools: bool = True
+    disallowed_tools: tuple[str, ...] = ()
+    setting_sources: tuple[Literal["user", "project", "local"], ...] = ()
+    permission_mode: Literal["default", "dontAsk", "acceptEdits", "bypassPermissions", "plan", "auto"] | None = None
+    approval_gate: ApprovalGate | None = None
     builtin_tools: tuple[str, ...] = ()
     file_roots: tuple[str, ...] = ()
     mcp_server_name: str = "lazybridge"

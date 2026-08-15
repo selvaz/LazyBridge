@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, TypeVar, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
+from lazybridge.engines.coding import ApprovalGate, CodingAgentConfig, remembering_gate, session_approvals
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -128,6 +129,7 @@ class ClaudeCodeEngine:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         tool_timeout: float | None = None,
+        config: CodingAgentConfig | None = None,
         client: ClaudeSdkClient | None = None,
     ) -> None:
         self.model = model
@@ -149,6 +151,10 @@ class ClaudeCodeEngine:
         if tool_timeout is not None and tool_timeout <= 0:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         self.tool_timeout = tool_timeout
+        # No explicit config preserves the pre-1.1 behaviour. Choose
+        # ``CodingAgentConfig.reviewer()`` or ``.writer(gate)`` to opt into
+        # the fail-closed profiles.
+        self.config = config or CodingAgentConfig()
         roots = file_roots if file_roots is not None else ([cwd] if cwd else [])
         self.file_roots = tuple(str(Path(root).resolve()) for root in roots if root is not None)
         self.web = web
@@ -300,7 +306,7 @@ class ClaudeCodeEngine:
             while True:
                 try:
                     return await make_call()
-                except BaseException as exc:
+                except Exception as exc:
                     if attempt >= self.max_retries or not _is_transient(exc):
                         raise
                     delay = self.retry_delay * (2**attempt) * (0.9 + 0.2 * random.random())
@@ -311,6 +317,10 @@ class ClaudeCodeEngine:
             return await _attempt_loop()
         return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
 
+    def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
+        """The configured gate, with ``allow_session`` scoped per agent+Session."""
+        return remembering_gate(self.config.approval_gate, session_approvals(session, "claude-code", agent_name))
+
     def _options(
         self,
         tools: list[Any],
@@ -319,6 +329,7 @@ class ClaudeCodeEngine:
         output_type: type = str,
         partial: bool = False,
         resume: str | None = None,
+        gate: ApprovalGate | None = None,
     ) -> ClaudeSdkOptions:
         builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
             ("WebSearch", "WebFetch") if self.web else ()
@@ -332,6 +343,12 @@ class ClaudeCodeEngine:
             system_prompt=self.system,
             max_turns=self.max_turns,
             resume=resume,
+            allowed_tools=self.config.claude.allowed_tools,
+            preapprove_application_tools=self.config.claude.preapprove_application_tools,
+            disallowed_tools=self.config.claude.disallowed_tools,
+            setting_sources=self.config.claude.setting_sources,
+            permission_mode=self.config.claude.permission_mode,
+            approval_gate=gate if gate is not None else self.config.approval_gate,
             builtin_tools=builtin_tools,
             file_roots=self.file_roots,
             mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
@@ -370,7 +387,11 @@ class ClaudeCodeEngine:
 
             prompt = self._prompt(env, None if self.session_mode == "runtime" and session else memory)
             options = self._options(
-                tools, observe, output_type=output_type, resume=self._resume_id(session, agent_name)
+                tools,
+                observe,
+                output_type=output_type,
+                resume=self._resume_id(session, agent_name),
+                gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
             )
             attachments = self._attachments(env)
             result = await self._call_with_retries(
@@ -469,6 +490,7 @@ class ClaudeCodeEngine:
                         output_type=output_type,
                         partial=True,
                         resume=self._resume_id(session, agent_name),
+                        gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
                     ),
                     attachments=self._attachments(env),
                 )

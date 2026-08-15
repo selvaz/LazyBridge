@@ -457,9 +457,17 @@ directories; `web=True` (default) enables `WebSearch`/`WebFetch`. `Bash`,
 setup (Claude Code sign-in, install, config knobs, session modes,
 troubleshooting): [Claude Code Engine guide](../../docs/guides/full/claude-code-engine.md).
 
-A `CodexEngine` (same `Engine` contract, backed by the Codex App Server) is
-planned but not yet in this repo — it will follow the same shape once it has
-been verified against a real `codex app-server` process.
+A `CodexEngine` provides the same `Engine` contract through the locally
+authenticated Codex App Server. Configure either engine explicitly with
+`CodingAgentConfig.reviewer()` for a fail-closed read-only reviewer or
+`CodingAgentConfig.writer(approval_gate)` for a workspace writer whose native
+and LazyBridge tool actions pass through one `ApprovalRequest` /
+`ApprovalDecision` callback. Use `ClaudeCodePolicy` and `CodexPolicy` inside a
+custom `CodingAgentConfig` when the native permission mode, sandbox, allowlist,
+denylist, setting sources, or dynamic-tool policy needs to be set individually.
+Implement a custom `ApprovalGate` callback for production or use
+`TerminalApprovalGate` during local development.
+See [Coding-agent permissions](../../docs/guides/full/coding-agent-config.md).
 
 ### Human-in-the-loop
 
