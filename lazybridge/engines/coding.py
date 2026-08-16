@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+from weakref import WeakKeyDictionary
 
 ApprovalAction = Literal["allow", "allow_session", "deny", "cancel"]
 
@@ -79,6 +80,25 @@ async def ask_approval(gate: ApprovalGate | None, request: ApprovalRequest) -> A
     if not isinstance(result, ApprovalDecision):
         raise TypeError(f"approval gate must return ApprovalDecision, got {type(result).__name__}")
     return result
+
+
+#: Per-event-loop lock registries, keyed weakly so a finished loop's locks are
+#: collected with it. An ``asyncio.Lock`` binds to the loop that first waits on
+#: it and raises ``RuntimeError: bound to a different event loop`` anywhere
+#: else — and every synchronous ``Agent.__call__`` runs on a *fresh* loop, so a
+#: process-wide lock cache would break on the second such call.
+_LOOP_LOCKS: MutableMapping[Any, dict[str, asyncio.Lock]] = WeakKeyDictionary()
+
+
+def loop_scoped_lock(key: str) -> asyncio.Lock:
+    """A lock shared by everything using ``key`` **on the running loop**.
+
+    Serialisation across loops (or processes) is not offered and cannot be:
+    two event loops are two independent schedulers. Callers that need it must
+    coordinate outside the process.
+    """
+    loop = asyncio.get_running_loop()
+    return _LOOP_LOCKS.setdefault(loop, {}).setdefault(key, asyncio.Lock())
 
 
 #: Attribute used to park approval caches on a LazyBridge ``Session``.

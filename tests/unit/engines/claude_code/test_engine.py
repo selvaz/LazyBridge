@@ -236,3 +236,105 @@ def test_audio_is_dropped_with_a_warning_because_claude_takes_no_audio():
 
     assert result.ok
     assert client.attachments[-1] == ()
+
+
+class _PlainSdk:
+    """Minimal client: records what it was asked, needs no tools."""
+
+    def __init__(self, session_id: str = "sess-9"):
+        self.options: list[ClaudeSdkOptions] = []
+        self.prompts: list[str] = []
+        self.session_id = session_id
+
+    async def run(self, prompt, *, options, attachments=()):
+        self.options.append(options)
+        self.prompts.append(prompt)
+        return ClaudeSdkResult(text="ok", session_id=self.session_id)
+
+    @property
+    def resumes(self):
+        return [o.resume for o in self.options]
+
+
+class TestDurableSessions:
+    """``persist_session`` / ``session_id``: the mirror of Codex' durable
+    threads — a handle the caller keeps, not state parked on a Session."""
+
+    def test_default_starts_a_fresh_session_per_run(self):
+        sdk = _PlainSdk()
+        agent = Agent(ClaudeCodeEngine(client=sdk), name="a")
+
+        agent("one")
+        agent("two")
+
+        assert sdk.resumes == [None, None]
+
+    def test_the_session_id_is_kept_and_resumed(self):
+        sdk = _PlainSdk()
+        engine = ClaudeCodeEngine(client=sdk, persist_session=True)
+        agent = Agent(engine, name="a")
+
+        agent("first")
+        agent("second")
+
+        assert sdk.resumes == [None, "sess-9"]
+        assert engine.session_id == "sess-9"
+
+    def test_a_supplied_session_id_resumes_immediately(self):
+        sdk = _PlainSdk()
+        agent = Agent(ClaudeCodeEngine(client=sdk, session_id="sess-7"), name="a", memory=Memory())
+
+        agent("carry on")
+
+        assert sdk.resumes == ["sess-7"]
+        # No memory block: Claude owns the history on a resumed session.
+        assert sdk.prompts == ["carry on"]
+
+    def test_resuming_stops_re_sending_memory(self):
+        sdk = _PlainSdk()
+        agent = Agent(ClaudeCodeEngine(client=sdk, persist_session=True), name="a", memory=Memory())
+
+        agent("first question")
+        agent("second question")
+
+        assert sdk.prompts[1] == "second question"
+
+    def test_an_ordinary_engine_keeps_sending_memory(self):
+        sdk = _PlainSdk()
+        agent = Agent(ClaudeCodeEngine(client=sdk), name="a", memory=Memory())
+
+        agent("first question")
+        agent("second question")
+
+        assert "Conversation context from LazyBridge" in sdk.prompts[1]
+
+    def test_an_explicit_handle_beats_the_session_parked_one(self):
+        sdk = _PlainSdk()
+        engine = ClaudeCodeEngine(client=sdk, session_mode="runtime", session_id="explicit")
+        agent = Agent(engine, name="a", session=Session())
+
+        agent("one")
+        agent("two")
+
+        # First run resumes the handle given; the second follows the id the
+        # SDK reported, which for a resumed session need not be the same one.
+        assert sdk.resumes == ["explicit", "sess-9"]
+        assert engine.session_id == "sess-9"
+
+    def test_concurrent_first_runs_do_not_open_two_sessions(self):
+        # Without a lock before the first id exists, both runs start their own
+        # session and race to store the id: one conversation is orphaned.
+        class Slow(_PlainSdk):
+            async def run(self, prompt, *, options, attachments=()):
+                await asyncio.sleep(0.01)
+                return await super().run(prompt, options=options, attachments=attachments)
+
+        sdk = Slow()
+        agent = Agent(ClaudeCodeEngine(client=sdk, persist_session=True), name="a")
+
+        async def both():
+            await asyncio.gather(agent.run("one"), agent.run("two"))
+
+        asyncio.run(both())
+
+        assert sdk.resumes == [None, "sess-9"]

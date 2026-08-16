@@ -23,6 +23,9 @@ class FakeAppServer:
         self.attachments_seen: list[list[dict]] = []
         self.effort_seen: list[str | None] = []
         self.developer_instructions_seen: list[str | None] = []
+        self.thread_ids_seen: list[str | None] = []
+        self.ephemeral_seen: list[bool] = []
+        self.review_targets_seen: list[dict | None] = []
         self.result = result or CodexRunResult(
             text="AMZN is available", input_tokens=11, output_tokens=7, cost_usd=0.002
         )
@@ -45,9 +48,21 @@ class FakeAppServer:
         sandbox="read-only",
         approval_policy="never",
         approval_gate=None,
+        thread_id=None,
+        ephemeral=True,
+        review_target=None,
+        progress=None,
     ):
+        if progress is not None:
+            # What the real client publishes as it goes, so the engine can
+            # tell "nothing sent yet" from "turn accepted, fate unknown".
+            progress["thread_id"] = self.result.thread_id or "thread-live"
+            progress["turn_sent"] = True
         self.calls += 1
+        self.review_targets_seen.append(review_target)
         self.prompts.append(prompt)
+        self.thread_ids_seen.append(thread_id)
+        self.ephemeral_seen.append(ephemeral)
         self.dynamic_tools_seen.append(dynamic_tools)
         self.attachments_seen.append(attachments or [])
         self.effort_seen.append(effort)
@@ -67,6 +82,65 @@ class FakeAppServer:
 def get_quote(symbol: str) -> dict[str, str]:
     """Return a deterministic quote lookup."""
     return {"symbol": symbol}
+
+
+class TestDurableThreads:
+    """``persist_thread`` / ``thread_id``: Codex owns the transcript."""
+
+    def test_default_is_still_an_ephemeral_thread_per_run(self):
+        fake = FakeAppServer()
+        agent = Agent(CodexEngine(client=fake), name="a")
+
+        agent("hello")
+
+        assert fake.ephemeral_seen == [True]
+        assert fake.thread_ids_seen == [None]
+
+    def test_the_thread_id_is_kept_and_reused_across_runs(self):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        engine = CodexEngine(client=fake, persist_thread=True)
+        agent = Agent(engine, name="a")
+
+        agent("first")
+        agent("second")
+
+        assert fake.ephemeral_seen == [False, False]
+        # First run opens the thread, the second resumes it by id.
+        assert fake.thread_ids_seen == [None, "thread-9"]
+        assert engine.thread_id == "thread-9"
+
+    def test_resuming_does_not_re_send_lazybridge_memory(self):
+        # Codex already holds the history; prepending Memory would give the
+        # model two chronologies of the same conversation.
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        agent = Agent(CodexEngine(client=fake, persist_thread=True), name="a", memory=Memory())
+
+        agent("first question")
+        agent("second question")
+
+        # The second run resumes, so its prompt is the bare question — the
+        # ephemeral engine sends a "LazyBridge conversation context" block here
+        # (asserted in the next test).
+        assert fake.prompts[1] == "second question"
+
+    def test_an_ephemeral_engine_keeps_sending_memory(self):
+        fake = FakeAppServer()
+        agent = Agent(CodexEngine(client=fake), name="a", memory=Memory())
+
+        agent("first question")
+        agent("second question")
+
+        assert "LazyBridge conversation context" in fake.prompts[1]
+
+    def test_a_supplied_thread_id_resumes_from_the_first_run(self):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-7"))
+        agent = Agent(CodexEngine(client=fake, thread_id="thread-7"), name="a", memory=Memory())
+
+        agent("carry on")
+
+        assert fake.thread_ids_seen == ["thread-7"]
+        assert fake.ephemeral_seen == [False]
+        assert fake.prompts == ["carry on"]  # no memory block on a resumed thread
 
 
 def test_writer_profile_gates_dynamic_tools_before_dispatch():
@@ -297,3 +371,214 @@ def test_a_denied_tool_never_runs_and_reports_back_to_the_model():
         "success": False,
         "contentItems": [{"type": "inputText", "text": "not allowed here"}],
     }
+
+
+class TestDurableThreadSerialisation:
+    """Two turns must not be appended to one transcript at the same time."""
+
+    def test_concurrent_first_runs_do_not_open_two_threads(self):
+        # Without a lock before the first id exists, both runs start their own
+        # durable thread and race to store the id: one conversation is
+        # orphaned, and later turns resume only the survivor.
+        import asyncio as aio
+
+        class SlowFake(FakeAppServer):
+            async def run(self, **kwargs):
+                await aio.sleep(0.01)  # widen the window
+                return await super().run(**kwargs)
+
+        fake = SlowFake(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        agent = Agent(CodexEngine(client=fake, persist_thread=True), name="a")
+
+        async def both():
+            await aio.gather(agent.run("one"), agent.run("two"))
+
+        aio.run(both())
+
+        # Serialised: the first opens the thread, the second resumes it.
+        assert fake.thread_ids_seen == [None, "thread-9"]
+
+
+class TestDurableFailureHandling:
+    """What a durable thread needs when a turn does *not* come back."""
+
+    def test_a_timeout_after_the_turn_was_sent_is_not_retryable(self):
+        # asyncio.wait_for cancels with CancelledError, a BaseException that
+        # unwinds past the client's own uncertainty handling — so the engine is
+        # the last place that can say "this may already be committed".
+        import asyncio as aio
+
+        class HangingMidTurn(FakeAppServer):
+            async def run(self, *, progress=None, **kwargs):
+                progress.update({"thread_id": "thread-live", "turn_sent": True})
+                await aio.sleep(3600)
+
+        engine = CodexEngine(client=HangingMidTurn(), persist_thread=True, request_timeout=0.05)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert result.error.retryable is False
+        assert "unknown" in result.error.message.lower()
+        # ...and the handle survives, because inspecting the thread is the
+        # only way to find out what happened.
+        assert engine.thread_id == "thread-live"
+
+    def test_a_timeout_before_anything_was_sent_stays_retryable(self):
+        # A hang in startup/thread creation committed nothing: marking it
+        # non-retryable would make every slow launch look like data loss.
+        import asyncio as aio
+
+        class HangingAtStartup(FakeAppServer):
+            async def run(self, *, progress=None, **kwargs):
+                await aio.sleep(3600)
+
+        engine = CodexEngine(client=HangingAtStartup(), persist_thread=True, request_timeout=0.05)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert result.error.retryable is True
+
+    def test_an_ephemeral_timeout_stays_retryable(self):
+        # Nothing survives the subprocess there, so a retry is a clean restart.
+        import asyncio as aio
+
+        class Hanging(FakeAppServer):
+            async def run(self, **kwargs):
+                await aio.sleep(3600)
+
+        engine = CodexEngine(client=Hanging(), request_timeout=0.05, max_retries=0)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert result.error.retryable is True
+
+    def test_an_uncertain_first_turn_still_yields_the_thread_id(self):
+        # Inspecting the thread is the documented recovery path; losing the id
+        # would make the next call open a new thread instead.
+        from lazybridge.engines.codex.app_server import CodexTurnUncertain
+
+        class Uncertain(FakeAppServer):
+            async def run(self, **kwargs):
+                raise CodexTurnUncertain("lost", thread_id="thread-77", turn_id="turn-1")
+
+        engine = CodexEngine(client=Uncertain(), persist_thread=True)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert engine.thread_id == "thread-77"
+
+    def test_a_review_with_no_deltas_still_streams_its_findings(self):
+        # Inline native reviews emit no item/agentMessage/delta at all.
+        class Silent(FakeAppServer):
+            async def run(self, **kwargs):
+                return CodexRunResult(text="- [P1] something", thread_id="t")
+
+        agent = Agent(CodexEngine(client=Silent(), review_target={"type": "uncommittedChanges"}), name="a")
+
+        async def collect() -> str:
+            return "".join([chunk async for chunk in agent.stream("ignored")])
+
+        assert asyncio.run(collect()) == "- [P1] something"
+
+
+class TestLockScoping:
+    """Locks must survive the way LazyBridge actually calls engines."""
+
+    def test_a_durable_engine_works_across_separate_event_loops(self):
+        # Every synchronous Agent.__call__ runs on a FRESH loop, and an
+        # asyncio.Lock binds to the loop that first waits on it — a
+        # process-wide lock cache therefore raised "bound to a different event
+        # loop" on the second sync call (reproduced by the Claude reviewer).
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        engine = CodexEngine(client=fake, persist_thread=True)
+        agent = Agent(engine, name="a")
+
+        first = agent("one")  # loop A
+        second = agent("two")  # loop B, same thread id
+
+        assert first.ok and second.ok
+        assert fake.thread_ids_seen == [None, "thread-9"]
+
+    def test_a_run_starting_after_the_id_exists_still_queues(self):
+        # The hand-off hole: a run that begins once thread_id is set would key
+        # straight onto the shared lock and pass the run that created it.
+        import asyncio as aio
+
+        order: list[str] = []
+
+        class Tracking(FakeAppServer):
+            async def run(self, **kwargs):
+                order.append(f"enter:{kwargs.get('thread_id')}")
+                await aio.sleep(0.05)
+                order.append(f"exit:{kwargs.get('thread_id')}")
+                return self.result
+
+        fake = Tracking(result=CodexRunResult(text="ok", thread_id="T"))
+        agent = Agent(CodexEngine(client=fake, persist_thread=True), name="a")
+
+        async def three():
+            a = aio.create_task(agent.run("a"))
+            b = aio.create_task(agent.run("b"))
+            await aio.sleep(0.075)  # after a's turn opened T, while b waits
+            c = aio.create_task(agent.run("c"))
+            await aio.gather(a, b, c)
+
+        aio.run(three())
+
+        # Strict enter/exit alternation: never two turns inside at once.
+        assert order == [
+            "enter:None",
+            "exit:None",
+            "enter:T",
+            "exit:T",
+            "enter:T",
+            "exit:T",
+        ]
+
+
+class TestHandleRetention:
+    """The thread id is the recovery path: it must survive every exit."""
+
+    def test_an_external_cancellation_still_leaves_the_handle(self):
+        # CancelledError is a BaseException: it reaches none of run()'s
+        # handlers, yet the durable thread it started is real.
+        import asyncio as aio
+
+        class SlowAfterStart(FakeAppServer):
+            async def run(self, *, progress=None, **kwargs):
+                progress.update({"thread_id": "thread-live", "turn_sent": True})
+                await aio.sleep(3600)
+
+        engine = CodexEngine(client=SlowAfterStart(), persist_thread=True, request_timeout=None)
+        agent = Agent(engine, name="a")
+
+        async def cancel_it():
+            task = aio.create_task(agent.run("go"))
+            await aio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(aio.CancelledError):
+                # Awaited for the exception, not the value.
+                _ = await task
+
+        aio.run(cancel_it())
+
+        assert engine.thread_id == "thread-live"
+
+    def test_a_rejected_first_turn_keeps_the_id_but_not_the_history_flag(self):
+        # The thread exists but is empty: withholding Memory from the next
+        # call would starve a model that has never seen any.
+        from lazybridge.engines.codex.app_server import CodexRequestRejected
+
+        class Rejecting(FakeAppServer):
+            async def run(self, *, progress=None, **kwargs):
+                # Exactly what the real client records: the request WAS
+                # transmitted, and then refused.
+                progress.update({"thread_id": "thread-empty", "turn_sent": True, "rejected": True})
+                raise CodexRequestRejected("invalid review target")
+
+        engine = CodexEngine(client=Rejecting(), persist_thread=True)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert engine.thread_id == "thread-empty"
+        assert engine._resuming is False

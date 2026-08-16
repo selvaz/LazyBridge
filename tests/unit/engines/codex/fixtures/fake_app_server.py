@@ -12,7 +12,7 @@ independent of the client's.
 
 Usage: ``python fake_app_server.py <scenario>`` where scenario is one of
 "happy", "turn_failed", "error_notification", "id_collision",
-"developer_instructions" or "exit_immediately" (see
+"developer_instructions", "huge_message" or "exit_immediately" (see
 ``test_app_server.py``).
 """
 
@@ -34,12 +34,15 @@ def write_message(message: dict) -> None:
     sys.stdout.flush()
 
 
-def token_usage(input_tokens: int, output_tokens: int) -> dict:
+def token_usage(input_tokens: int, output_tokens: int, turn_id: str = "turn-1") -> dict:
+    # ``total`` is cumulative over the THREAD, not the turn (verified live:
+    # 15137 after turn 1, 30292 after turn 2), which is why it is tagged with
+    # a turn id and why the client subtracts a baseline on a resumed thread.
     return {
         "method": "thread/tokenUsage/updated",
         "params": {
             "threadId": "thread-1",
-            "turnId": "turn-1",
+            "turnId": turn_id,
             "tokenUsage": {
                 "total": {
                     "totalTokens": input_tokens + output_tokens,
@@ -61,8 +64,185 @@ def token_usage(input_tokens: int, output_tokens: int) -> dict:
     }
 
 
+def native_review_main() -> None:
+    """``review/start``: the typed-target review path.
+
+    Captured from codex-cli 0.148.0: the response carries a ``turn`` exactly
+    like ``turn/start``, the findings arrive as ONE ``agentMessage`` in
+    ``turn/completed`` (severity-tagged text, not a structured findings array),
+    and an inline review streams no ``item/agentMessage/delta`` at all.
+    """
+    init = read_message()
+    assert init["method"] == "initialize", init
+    write_message({"id": init["id"], "result": {"userAgent": "fake", "platformOs": "test"}})
+    assert read_message()["method"] == "initialized"
+
+    start = read_message()
+    assert start["method"] == "thread/start", start
+    write_message({"id": start["id"], "result": {"thread": {"id": "thread-1"}}})
+
+    review = read_message()
+    assert review["method"] == "review/start", review
+    params = review["params"]
+    assert params["threadId"] == "thread-1", params
+    assert params["target"] == {"type": "baseBranch", "branch": "main"}, params
+    # inline only: a detached review completes on ANOTHER thread and raises an
+    # approval request the parent never sees (measured — it hung).
+    assert params["delivery"] == "inline", params
+    write_message(
+        {"id": review["id"], "result": {"reviewThreadId": "thread-1", "turn": {"id": "turn-1", "status": "inProgress"}}}
+    )
+    write_message(token_usage(70, 9))
+    write_message(
+        {
+            "method": "turn/completed",
+            "params": {
+                "turn": {
+                    "id": "turn-1",
+                    "status": "completed",
+                    "items": [{"type": "agentMessage", "text": "- [P1] Preserve the empty-input result — stats.py:3"}],
+                }
+            },
+        }
+    )
+
+
+def resume_main(scenario: str) -> None:
+    """The ``thread/resume`` path: a durable thread being picked up again.
+
+    Mirrors what the live App Server does (captured from codex-cli 0.148.0):
+    on resume it replays a ``thread/tokenUsage/updated`` carrying the
+    *previous* turn's id and the thread-cumulative total, so this turn's cost
+    is only the delta on top of it.
+    """
+    init = read_message()
+    assert init["method"] == "initialize", init
+    write_message({"id": init["id"], "result": {"userAgent": "fake", "platformOs": "test"}})
+    assert read_message()["method"] == "initialized"
+
+    resume = read_message()
+    assert resume["method"] == "thread/resume", resume
+    params = resume["params"]
+    assert params["threadId"] == "thread-1", params
+    # Everything is re-supplied on resume — the tool callbacks in particular
+    # live in this process and cannot be inherited from the one that started
+    # the thread.
+    assert params["cwd"] is not None, params
+    assert params["sandbox"] == "read-only", params
+    assert "ephemeral" not in params, params
+    dynamic_tools = params.get("dynamicTools", [])
+    assert dynamic_tools, "resume must re-register dynamic tools"
+    write_message({"id": resume["id"], "result": {"thread": {"id": "thread-1"}}})
+    # History: 100 in / 20 out already spent on turn-1, before this turn.
+    write_message(token_usage(100, 20, turn_id="turn-1"))
+
+    turn_start = read_message()
+    assert turn_start["method"] == "turn/start", turn_start
+
+    if scenario == "resume_dies_before_ack":
+        # Accepted the request, died before answering it: from outside, "was
+        # this turn committed?" is unanswerable — so it must not be retried.
+        return
+
+    if scenario == "rejects_the_turn":
+        write_message({"id": turn_start["id"], "error": {"code": -32602, "message": "invalid review target"}})
+        return
+
+    if scenario == "resume_completed_before_ack":
+        # OUR completion outrunning its own acknowledgement. Dropping it hangs
+        # the call until timeout and then reports a turn that demonstrably
+        # finished as "outcome unknown" (reproduced by the Claude reviewer).
+        write_message(token_usage(155, 27, turn_id="turn-2"))
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {
+                        "id": "turn-2",
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "text": "resumed answer"}],
+                    }
+                },
+            }
+        )
+        write_message({"id": turn_start["id"], "result": {"turn": {"id": "turn-2", "status": "inProgress"}}})
+        return
+
+    if scenario == "resume_replay_before_ack":
+        # The window the ack normally closes: a completion for an OLD turn,
+        # replayed before we learn our own turn id.
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "text": "STALE"}],
+                    }
+                },
+            }
+        )
+
+    if scenario == "resume_usage_before_ack":
+        # ...and the mirror image: OUR turn's first usage report, arriving
+        # before the ack. Counting it as history would undercount the turn.
+        write_message(token_usage(140, 24, turn_id="turn-2"))
+
+    write_message({"id": turn_start["id"], "result": {"turn": {"id": "turn-2", "status": "inProgress"}}})
+
+    if scenario == "resume_dies_mid_turn":
+        # Accepted the turn, then died: outcome unknown, not retryable.
+        return
+
+    if scenario == "resume_stale_turn":
+        # A completion for the turn that ran *before* this one. Taking it
+        # would hand the caller a previous answer as this call's result.
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "text": "STALE"}],
+                    }
+                },
+            }
+        )
+
+    write_message(token_usage(155, 27, turn_id="turn-2"))
+    write_message(
+        {
+            "method": "turn/completed",
+            "params": {
+                "turn": {
+                    "id": "turn-2",
+                    "status": "completed",
+                    "items": [{"type": "agentMessage", "text": "resumed answer"}],
+                }
+            },
+        }
+    )
+
+
 def main() -> None:
     scenario = sys.argv[1] if len(sys.argv) > 1 else "happy"
+    if scenario == "native_review":
+        native_review_main()
+        return
+    if scenario in (
+        "resume",
+        "resume_stale_turn",
+        "resume_dies_mid_turn",
+        "resume_replay_before_ack",
+        "resume_dies_before_ack",
+        "resume_usage_before_ack",
+        "resume_completed_before_ack",
+        "rejects_the_turn",
+    ):
+        resume_main(scenario)
+        return
 
     if scenario == "exit_immediately":
         return
@@ -168,6 +348,29 @@ def main() -> None:
                         "error": None,
                         "items": [{"type": "agentMessage", "text": "AMZN is 123.45", "phase": "final_answer"}],
                     },
+                },
+            }
+        )
+    elif scenario == "huge_message":
+        # One notification far past StreamReader's 64 KiB default limit —
+        # what a real turn sends the moment it reads a large file or a real
+        # `git diff`. Without an explicit limit= on the subprocess, readline()
+        # raises "Separator is found, but chunk is longer than limit" and the
+        # whole turn dies.
+        write_message(
+            {
+                "method": "item/agentMessage/delta",
+                "params": {"delta": "x" * (256 * 1024)},
+            }
+        )
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "text": "big", "phase": "final_answer"}],
+                    }
                 },
             }
         )

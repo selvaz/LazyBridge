@@ -20,6 +20,16 @@ from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approva
 
 ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
+#: Max size of ONE JSON-RPC line from the App Server. ``StreamReader``'s
+#: default is 64 KiB, and a line over that makes ``readline()`` raise
+#: ``ValueError: Separator is found, but chunk is longer than limit`` — which
+#: surfaced live the first time a turn read a large file or a real ``git
+#: diff``: the App Server puts whole command outputs and file contents in a
+#: single ``item/...`` notification, so 64 KiB is routine, not exotic. 64 MiB
+#: is the ceiling on one *message*, not on the turn, and is only ever
+#: allocated for a line that actually arrives.
+_STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+
 
 def codex_executable() -> str:
     """Locate the ``codex`` CLI.
@@ -52,6 +62,36 @@ def codex_executable() -> str:
     )
 
 
+class CodexRequestRejected(RuntimeError):
+    """The App Server answered one of our requests with a JSON-RPC error.
+
+    A rejection is a *definitive* answer — an invalid review target, an unknown
+    thread id — so it must not be dressed up as :class:`CodexTurnUncertain`:
+    nothing was accepted, and the caller needs the server's actual message.
+    """
+
+
+class CodexTurnUncertain(RuntimeError):
+    """A turn on a **durable** thread failed after the server accepted it.
+
+    ``turn/start`` is not idempotent: once the App Server has acknowledged it,
+    a dropped connection leaves the turn possibly committed to the thread's
+    rollout — possibly with tool side effects already performed. Replaying the
+    prompt would duplicate it. This error is deliberately *not* in
+    :data:`~lazybridge.engines.codex.engine._TRANSIENT_ERROR_TYPES`, so the
+    engine surfaces "outcome unknown" instead of retrying blind. Resume the
+    thread and inspect it before deciding.
+
+    Ephemeral threads never raise this: nothing survives the subprocess, so a
+    retry is a clean restart.
+    """
+
+    def __init__(self, message: str, *, thread_id: str, turn_id: str | None) -> None:
+        super().__init__(message)
+        self.thread_id = thread_id
+        self.turn_id = turn_id
+
+
 @dataclass(frozen=True)
 class CodexRunResult:
     """Final result of one Codex App Server turn.
@@ -59,12 +99,17 @@ class CodexRunResult:
     ``cost_usd`` is always ``0.0``: under ChatGPT-plan auth the App Server
     reports plan rate-limit percentages, never a per-turn price. The field
     exists so ``Envelope.metadata`` stays uniform across engines.
+
+    ``thread_id`` is the thread the turn ran in — worth keeping only when the
+    thread is durable (``ephemeral=False``), since that is the handle
+    ``run(thread_id=...)`` resumes.
     """
 
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    thread_id: str = ""
 
 
 class CodexAppServerClient:
@@ -91,12 +136,60 @@ class CodexAppServerClient:
         sandbox: str = "read-only",
         approval_policy: str = "never",
         approval_gate: ApprovalGate | None = None,
+        thread_id: str | None = None,
+        ephemeral: bool = True,
+        review_target: dict[str, Any] | None = None,
+        progress: dict[str, Any] | None = None,
     ) -> CodexRunResult:
+        """Run one turn, in a fresh thread or in ``thread_id``.
+
+        ``thread_id`` resumes an existing durable thread (``thread/resume``)
+        instead of starting one, so Codex' own transcript carries the history
+        — its file reads and prior reasoning included — and the caller does not
+        have to re-send context. Resuming implies durability, so it also
+        forces ``ephemeral=False``.
+
+        Everything configurable is **re-supplied on resume** rather than left
+        to whatever the stored thread recorded: ``cwd``, ``sandbox``,
+        ``model``, ``developer_instructions`` and, above all, ``dynamic_tools``
+        — the tool *callbacks* live in this subprocess, so a resumed thread
+        cannot inherit them from the process that started it.
+
+        ``ephemeral=True`` (the default) keeps the old behaviour: the thread
+        exists only inside this subprocess and is unresumable afterwards —
+        verified live, ``thread/resume`` on it answers ``no rollout found for
+        thread id``.
+
+        ``progress``, if given, is filled in as the call proceeds:
+        ``thread_id`` as soon as the thread exists and ``turn_sent`` when the
+        turn request goes out. It exists because the caller's own timeout
+        cancels this coroutine outright — ``CancelledError`` unwinds past every
+        ``except Exception`` here — and without it the engine cannot tell a
+        hang during startup (nothing sent, safe to retry) from a hang after a
+        durable turn was accepted (outcome unknown), nor report the id of a
+        thread it never got a result from.
+
+        ``review_target`` switches the turn to Codex' **native review mode**
+        (``review/start``) instead of ``turn/start``: a typed target —
+        ``{"type": "uncommittedChanges"}``, ``{"type": "baseBranch",
+        "branch": "main"}`` or ``{"type": "commit", "sha": ...}`` — reviewed by
+        Codex' own review harness, which returns severity-tagged findings
+        (``[P1]``/``[P2]`` with file:line). The protocol has **no prompt slot**
+        there, so ``prompt`` is not sent and the review cannot be steered;
+        that is the trade for the harness. Delivery is always ``inline`` (the
+        review runs in this thread, so a follow-up turn can refer to it):
+        ``detached`` was measured to complete on a *different* thread and to
+        raise an approval request the parent thread never sees, which is not
+        usable non-interactively.
+        """
+        if thread_id:
+            ephemeral = False
         command = self.command or (codex_executable(), "app-server")
         # stderr is DEVNULL, not PIPE: nothing ever reads it here, and an
         # unread PIPE deadlocks the App Server once its stderr buffer fills.
         process = await asyncio.create_subprocess_exec(
             *command,
+            limit=_STDOUT_LINE_LIMIT,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -104,7 +197,28 @@ class CodexAppServerClient:
         assert process.stdin and process.stdout
         pending: dict[int, asyncio.Future[Any]] = {}
         completed: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-        usage: dict[str, Any] = {}
+        #: Last cumulative ``total`` seen per turn id. Keyed rather than
+        #: folded into one value because a notification can arrive *before*
+        #: the ``turn/start`` response tells us which id is ours: deciding
+        #: "history or mine" on arrival would then attribute our own first
+        #: usage report to the baseline and undercount the turn. Totals are
+        #: cumulative and monotonic, so at the end ours is ``totals[turn_id]``
+        #: and the baseline is the largest of the rest.
+        totals: dict[str, dict[str, Any]] = {}
+        #: Set from the ``turn/start`` response, which can land after the
+        #: server's first notifications about that same turn.
+        turn_id: str | None = None
+        turn_sent = False
+        turn_request_id: int | None = None
+        #: A resumed thread has a past: the server can replay a
+        #: ``turn/completed`` for a turn that finished long ago. On a fresh
+        #: thread there is nothing to replay, so an unnamed completion there
+        #: can only be ours.
+        replay_possible = bool(thread_id)
+        #: Completions seen on a resumed thread before the acknowledgement told
+        #: us which turn is ours. Either a replay of an older turn or our own
+        #: arriving early — only the id can say which, so they wait for it.
+        held_completions: list[dict[str, Any]] = []
         counter = 0
 
         async def send(message: dict[str, Any]) -> None:
@@ -112,12 +226,23 @@ class CodexAppServerClient:
             process.stdin.write((json.dumps(message) + "\n").encode())
             await process.stdin.drain()
 
-        async def request(method: str, params: dict[str, Any]) -> Any:
-            nonlocal counter
+        async def request(method: str, params: dict[str, Any], *, is_turn: bool = False) -> Any:
+            nonlocal counter, turn_request_id
             counter += 1
+            if is_turn:
+                # Recorded before the round-trip so the reader can pick our
+                # turn id out of the response itself: assigning it here, after
+                # ``await``, would lose a race with notifications the server
+                # already sent about that same turn.
+                turn_request_id = counter
             future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
             pending[counter] = future
             await send({"method": method, "id": counter, "params": params})
+            if is_turn and progress is not None:
+                # After the write, not before: serialising an unserialisable
+                # ``review_target`` raises here, and a request that never left
+                # the process must not count as a turn that may have run.
+                progress["turn_sent"] = True
             return await future
 
         def fail_waiters(exc: BaseException) -> None:
@@ -137,7 +262,7 @@ class CodexAppServerClient:
                     completed.set_exception(exc)
 
         async def read_loop() -> None:
-            nonlocal usage
+            nonlocal turn_id
             assert process.stdout
             try:
                 while line := await process.stdout.readline():
@@ -149,11 +274,41 @@ class CodexAppServerClient:
                         # matters: the App Server numbers its requests to us from
                         # 0 with a separate counter, so an ``item/tool/call`` id
                         # can collide with a still-pending client request id.
+                        if message.get("id") == turn_request_id and "error" not in message:
+                            # Learn our turn's id here, in message order, so
+                            # every later notification can be attributed...
+                            turn_id = ((message.get("result") or {}).get("turn") or {}).get("id")
+                            # ...and settle anything that arrived before it.
+                            # A completion can outrun its own acknowledgement;
+                            # dropping it would hang the call until timeout and
+                            # then report a turn that demonstrably finished as
+                            # "outcome unknown".
+                            if not completed.done():
+                                # An exact id match wins over an unnamed one:
+                                # taking the first unnamed completion would
+                                # hand back a stale turn that happened to
+                                # arrive before ours.
+                                match = next(
+                                    (h for h in held_completions if h.get("id") == turn_id),
+                                    None,
+                                ) or next(
+                                    (h for h in held_completions if h.get("id") is None),
+                                    None,
+                                )
+                                if match is not None:
+                                    completed.set_result(match)
+                            held_completions.clear()
                         future = pending.pop(message.get("id"), None)
                         if future is not None and not future.done():
                             if "error" in message:
+                                # Recorded HERE, as the rejection is read —
+                                # not where it is caught. Between the two the
+                                # awaiting task can be cancelled, and the fact
+                                # "this turn never ran" would be lost with it.
+                                if progress is not None and message.get("id") == turn_request_id:
+                                    progress["rejected"] = True
                                 future.set_exception(
-                                    RuntimeError(message["error"].get("message", "Codex App Server error"))
+                                    CodexRequestRejected(message["error"].get("message", "Codex App Server error"))
                                 )
                             else:
                                 future.set_result(message.get("result", {}))
@@ -220,20 +375,60 @@ class CodexAppServerClient:
                     elif method == "thread/tokenUsage/updated":
                         # The only place the App Server reports usage — the
                         # ``turn/completed`` payload carries none. ``total`` (not
-                        # ``last``) is the whole turn: the thread is ephemeral and
-                        # single-turn, and ``last`` would drop the model calls made
-                        # before each tool round-trip.
-                        total = message.get("params", {}).get("tokenUsage", {}).get("total")
+                        # ``last``) is used because ``last`` is only the final
+                        # model call and would drop the ones made before each
+                        # tool round-trip. But ``total`` is cumulative over the
+                        # *thread*, so on a resumed thread it includes every
+                        # earlier turn (verified live: 15137 after turn 1,
+                        # 30292 after turn 2). Hence the baseline below, and
+                        # the ``turnId`` filter: notifications tagged with an
+                        # older turn are history, not this turn's cost.
+                        params = message.get("params", {})
+                        total = params.get("tokenUsage", {}).get("total")
                         if isinstance(total, dict):
-                            usage = total
+                            # Recorded under its own turn id and attributed
+                            # later: classifying it now would have to guess
+                            # whose it is whenever it outruns the turn/start
+                            # response.
+                            totals[str(params.get("turnId"))] = total
                     elif method == "error" and not completed.done():
                         params = message.get("params", {})
                         if not params.get("willRetry"):
+                            # A terminal error notification is the server
+                            # *telling* us the turn failed — a usage limit, a
+                            # refused request. Definitive, like a JSON-RPC
+                            # rejection, so it must not be dressed up as "the
+                            # turn may have run": seen live as "You've hit your
+                            # usage limit" reported as an uncertain turn.
+                            if progress is not None:
+                                progress["rejected"] = True
                             completed.set_exception(
-                                RuntimeError(params.get("error", {}).get("message", "Codex App Server error"))
+                                CodexRequestRejected(params.get("error", {}).get("message", "Codex App Server error"))
                             )
                     elif method == "turn/completed" and not completed.done():
-                        completed.set_result(message["params"]["turn"])
+                        # Only *our* turn completes the run. On a resumed
+                        # thread the server can replay notifications for turns
+                        # that finished long ago; taking the first one would
+                        # return a previous answer as this call's result.
+                        turn = message["params"]["turn"]
+                        incoming = turn.get("id")
+                        if not turn_sent:
+                            continue  # nothing before we asked can be ours
+                        if turn_id is not None:
+                            # Our id is known: require a match, unless the
+                            # server sent no id at all (older fixtures do).
+                            if incoming is not None and incoming != turn_id:
+                                continue
+                        elif replay_possible:
+                            # Resumed thread, our id not yet known: this is
+                            # exactly the window where a replayed completion
+                            # from an older turn would be taken as the answer.
+                            # Held rather than dropped — it may equally be OUR
+                            # completion outrunning its acknowledgement — and
+                            # settled above once the id arrives.
+                            held_completions.append(turn)
+                            continue
+                        completed.set_result(turn)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -257,10 +452,13 @@ class CodexAppServerClient:
             # ``sandbox`` is the CLI's kebab-case ``SandboxMode`` enum
             # (read-only / workspace-write / danger-full-access); "readOnly"
             # is rejected outright with "unknown variant".
+            # Everything the thread runs with is sent on BOTH paths: a resumed
+            # thread must not silently inherit the cwd/sandbox/model recorded
+            # when it was created, and its dynamic-tool *callbacks* live in
+            # this subprocess, so they have to be registered again here.
             thread_params: dict[str, Any] = {
                 "model": model,
                 "cwd": cwd,
-                "ephemeral": True,
                 "approvalPolicy": approval_policy,
                 "sandbox": sandbox,
                 "dynamicTools": dynamic_tools,
@@ -269,27 +467,78 @@ class CodexAppServerClient:
                 # Preserve Codex's own base instructions while giving the
                 # application prompt the same priority as Engine.system.
                 thread_params["developerInstructions"] = developer_instructions
-            thread = await request("thread/start", thread_params)
+            if thread_id:
+                thread_params["threadId"] = thread_id
+                thread = await request("thread/resume", thread_params)
+            else:
+                thread_params["ephemeral"] = ephemeral
+                thread = await request("thread/start", thread_params)
+            active_thread = thread["thread"]["id"]
+            if progress is not None:
+                # Published before the turn: a durable thread that exists is
+                # worth reporting even if this call never returns a result.
+                progress["thread_id"] = active_thread
             # ``input`` is the App Server's UserInput union: the text turn plus
-            # any image attachments the engine converted.
+            # any image attachments the engine converted. (Unused in native
+            # review mode — ``review/start`` has no prompt slot.)
             turn_params: dict[str, Any] = {
-                "threadId": thread["thread"]["id"],
+                "threadId": active_thread,
                 "input": [{"type": "text", "text": prompt}, *(attachments or [])],
             }
             if effort is not None:
                 turn_params["effort"] = effort
-            await request("turn/start", turn_params)
-            turn = await completed
+            try:
+                # The uncertainty window opens when the request goes out, not
+                # when its response comes back: the server can accept the turn
+                # and then drop the connection before answering, and a retry
+                # would replay a turn already committed to a durable thread —
+                # tool side effects included.
+                turn_sent = True
+                if review_target is not None:
+                    await request(
+                        "review/start",
+                        {"threadId": active_thread, "target": review_target, "delivery": "inline"},
+                        is_turn=True,
+                    )
+                else:
+                    await request("turn/start", turn_params, is_turn=True)
+                turn = await completed
+            except CodexRequestRejected:
+                # The server said no. Nothing was accepted, so this is an
+                # ordinary error with an actionable message — not uncertainty.
+                # ``progress["rejected"]`` was already recorded by the reader,
+                # where a cancellation cannot lose it.
+                raise
+            except Exception as exc:
+                if ephemeral:
+                    raise  # nothing survives the subprocess: a retry is clean
+                raise CodexTurnUncertain(
+                    f"Turn was accepted but its outcome is unknown: {exc}. "
+                    f"Resume thread {active_thread} and inspect it before retrying.",
+                    thread_id=active_thread,
+                    turn_id=turn_id,
+                ) from exc
             if turn.get("status") != "completed":
                 raise RuntimeError(turn.get("error", {}).get("message", f"Codex turn {turn.get('status')}"))
-            input_tokens = int(usage.get("inputTokens") or 0)
-            output_tokens = int(usage.get("outputTokens") or 0)
+            # Ours by id; the baseline is the largest total reported for any
+            # other turn (they are cumulative, so the largest is the state
+            # immediately before this turn began).
+            usage = totals.get(str(turn_id), {})
+            others = [t for tid, t in totals.items() if tid != str(turn_id)]
+            baseline = max(others, key=lambda t: int(t.get("totalTokens") or 0), default={})
+            input_tokens = max(int(usage.get("inputTokens") or 0) - int(baseline.get("inputTokens") or 0), 0)
+            output_tokens = max(int(usage.get("outputTokens") or 0) - int(baseline.get("outputTokens") or 0), 0)
             text = ""
             for item in reversed(turn.get("items", [])):
                 if item.get("type") == "agentMessage":
                     text = item.get("text", "")
                     break
-            return CodexRunResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
+            return CodexRunResult(
+                text=text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                thread_id=active_thread,
+            )
         finally:
             reader.cancel()
             try:

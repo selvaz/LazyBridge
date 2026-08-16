@@ -17,6 +17,37 @@ engine starts **one ephemeral, read-only, approval-free thread** and exposes
 the current LazyBridge tool list to it as App Server *dynamic tools*; every
 call comes straight back to `Tool.run()`.
 
+## Durable threads
+
+`persist_thread=True` makes the thread outlive the subprocess, and
+`engine.thread_id` is then the handle another process can pick up:
+
+```python
+engine = CodexEngine(cwd=repo, persist_thread=True)
+Agent(engine, name="reviewer")("review src/parser.py")
+handle = engine.thread_id            # store it
+
+# ...later, another process entirely:
+Agent(CodexEngine(cwd=repo, thread_id=handle), name="reviewer")("and the retry path?")
+```
+
+The follow-up does not re-read what the first turn already read: Codex' own
+transcript carries it. That moves the conversation's home, so the engine also:
+
+- **stops prepending `Memory`** on a resumed thread (Codex has the history;
+  sending it again gives the model two chronologies of the same conversation).
+  `Memory` keeps recording for the application's own audit/recovery use;
+- **refuses to retry a turn lost after the request was sent**, raising
+  `CodexTurnUncertain` instead — `turn/start` is not idempotent, and the server
+  can accept a turn and then drop the connection *before answering*, so the
+  window opens at send, not at acknowledgement. Resume the thread and inspect
+  it before deciding;
+- **serialises runs per thread id** inside the process. A thread is one
+  transcript: two turns appended at once interleave.
+
+Durable threads are stored by the Codex CLI itself (they show up in its session
+history), and both processes must share the same Codex home and account.
+
 ## Setup
 
 ```bash
@@ -74,9 +105,22 @@ authoritative schema comes from `codex app-server generate-json-schema --out <di
 - `dynamicTools` on `thread/start` works but is **absent from the generated
   schema**, so it is the field most likely to break on a Codex upgrade. The
   test fixture asserts the exact request shape so a regression fails locally.
-- Token usage arrives only through `thread/tokenUsage/updated` notifications
-  (the engine keeps the latest cumulative `total`); `turn/completed` carries
-  none.
+- Token usage arrives only through `thread/tokenUsage/updated` notifications;
+  `turn/completed` carries none. `total` is cumulative **over the thread**, not
+  the turn (measured: 15137 after turn 1, 30292 after turn 2), so on a resumed
+  thread the engine subtracts the total reported before the turn began. `last`
+  is not used instead because it is only the final model call and would drop
+  the ones made before each tool round-trip.
+- Every notification carries `threadId`/`turnId`, and `turn/start` returns the
+  turn's id. The engine attributes usage by turn id and ignores a
+  `turn/completed` naming a different turn — on a resumed thread the server can
+  replay older ones, and taking the first would return a previous answer.
+- `thread/resume` restores a durable thread **in a different process**
+  (verified live), and accepts `dynamicTools` even though the generated schema
+  omits the field there too — a resumed thread must re-register them, since the
+  callbacks live in the new subprocess.
+- `ephemeral: true` means unresumable, not merely short-lived:
+  `thread/resume` on such a thread answers `no rollout found for thread id`.
 - **`cost_usd` is always `0.0`.** Under ChatGPT-plan auth the App Server
   reports plan rate-limit percentages, never a per-turn price. Token counts
   are populated, so `Session.usage_summary()` still attributes tokens per
@@ -120,9 +164,9 @@ rewrite that turns optional fields into nullable-required ones.
 - **No model validation.** `model=` is passed straight to `thread/start`
   without checking it against the account's `model/list`, so an invalid model
   surfaces as whatever error the App Server returns.
-- **No persistent thread.** There is no equivalent of
-  `ClaudeCodeEngine(session_mode="runtime")`; every run is a fresh ephemeral
-  thread, with LazyBridge `Memory` carrying the history.
+- **No cross-process locking.** `persist_thread=True` serialises runs against
+  one thread id *within* a process; two processes resuming the same thread at
+  once is still on the caller to prevent.
 - **No built-in file/web tools.** Claude's `Read`/`Glob`/`Grep`/`WebSearch`
   surface has no exposed counterpart here; Codex runs with its own read-only
   sandbox rooted at `cwd`.
