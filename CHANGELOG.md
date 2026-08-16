@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.1.0] — 2026-08-16
+
 ### Added
 - **`durable_blackboard_agent`** and **`DurableBlackboard`**
   (`lazybridge.ext.planners`) — the blackboard planner for agents that stay
