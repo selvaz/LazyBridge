@@ -129,6 +129,36 @@ class AgentSdkClient(ClaudeSdkClient):
             resolved = (Path(options.cwd) / path if not path.is_absolute() and options.cwd else path).resolve()
             return any(resolved.is_relative_to(root) for root in roots)
 
+        async def confine_file_access(
+            input_data: dict[str, Any], tool_use_id: str | None, context: Any
+        ) -> dict[str, Any]:
+            """Enforce ``file_roots`` on every file-reading call, always.
+
+            This lives in a ``PreToolUse`` hook rather than in ``can_use_tool``
+            because the SDK evaluates hooks *first* and consults the callback
+            *last* — a tool auto-approved by an allow rule, by ``acceptEdits``
+            or by ``bypassPermissions`` never reaches the callback at all
+            (documented in the Agent SDK permission flow). Confinement that
+            only ran there was therefore bypassable by configuration: any
+            caller passing ``allowed_tools=["Read"]`` silently removed it.
+            A hook deny holds even under ``bypassPermissions``.
+            """
+            if not roots:
+                return {}
+            arguments = input_data.get("tool_input") or {}
+            path = arguments.get("file_path") or arguments.get("path") or options.cwd
+            if allowed_path(path):
+                return {}
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"{path!r} is outside ClaudeCodeEngine.file_roots ({', '.join(str(root) for root in roots)})"
+                    ),
+                }
+            }
+
         async def can_use_tool(name: str, arguments: dict[str, Any], context: Any) -> Any:
             # In the compatibility profile MCP tools are pre-approved and do
             # not reach this callback. Gated profiles deliberately omit those
@@ -177,6 +207,20 @@ class AgentSdkClient(ClaudeSdkClient):
         use_callback = (
             bool(options.builtin_tools) or options.approval_gate is not None or not options.preapprove_application_tools
         )
+        matchers: list[Any] = []
+        if roots:
+            # Scoped to the tools that touch files — including ones this
+            # profile does not grant, so a future/settings-added Edit cannot
+            # slip past the confinement it was never checked against.
+            matchers.append(
+                HookMatcher(
+                    matcher="Read|Glob|Grep|Edit|Write|NotebookEdit",
+                    hooks=[confine_file_access],
+                )
+            )
+        if use_callback:
+            matchers.append(HookMatcher(hooks=[keep_permission_stream_open]))
+        pre_tool_use_hooks = {"PreToolUse": matchers} if matchers else {}
         return ClaudeAgentOptions(
             model=options.model,
             fallback_model=options.fallback_model,
@@ -197,10 +241,16 @@ class AgentSdkClient(ClaudeSdkClient):
             strict_mcp_config=True,
             permission_mode=options.permission_mode or ("default" if use_callback else "dontAsk"),
             can_use_tool=can_use_tool if use_callback else None,
-            # ``keep_permission_stream_open`` intentionally uses the generic
-            # (dict, str | None, Any) shape rather than the SDK's per-hook
-            # TypedDict union — this hook only ever fires for PreToolUse.
-            hooks={"PreToolUse": [HookMatcher(hooks=[keep_permission_stream_open])]} if use_callback else None,  # type: ignore[list-item]
+            # Both hooks intentionally use the generic (dict, str | None, Any)
+            # shape rather than the SDK's per-hook TypedDict union — they only
+            # ever fire for PreToolUse.
+            #
+            # The confinement hook is registered whenever file_roots exist,
+            # independently of ``use_callback``: it is the layer that survives
+            # an allow rule or a permissive mode, so it must not be tied to
+            # whether the callback is in play. It is scoped to the file-reading
+            # tools by matcher, so other tools pay nothing for it.
+            hooks=pre_tool_use_hooks or None,
             setting_sources=list(options.setting_sources),
             include_partial_messages=options.include_partial_messages,
             output_format=options.output_format,

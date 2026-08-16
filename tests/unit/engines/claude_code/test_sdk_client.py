@@ -135,3 +135,79 @@ def test_an_explicit_permission_mode_still_wins():
     options = ClaudeSdkOptions(mcp_tools=to_mcp_tools([_Tool()]), permission_mode="acceptEdits")
 
     assert AgentSdkClient._sdk_options(options).permission_mode == "acceptEdits"
+
+
+def _pre_tool_use_hook(sdk_options, matcher_contains: str):
+    """The PreToolUse callback whose matcher covers ``matcher_contains``."""
+    for entry in sdk_options.hooks["PreToolUse"]:
+        if entry.matcher and matcher_contains in entry.matcher:
+            return entry.hooks[0]
+    raise AssertionError(f"no PreToolUse matcher covering {matcher_contains!r}")
+
+
+class TestFileConfinement:
+    """``file_roots`` is enforced by a PreToolUse hook, not by can_use_tool.
+
+    The SDK evaluates hooks first and the callback last, and a tool approved
+    by an allow rule or a permissive mode never reaches the callback at all.
+    Confinement that only lived there was bypassable by configuration.
+    """
+
+    @staticmethod
+    def _options(tmp_path, **kwargs):
+        return ClaudeSdkOptions(
+            model="sonnet",
+            cwd=str(tmp_path),
+            file_roots=(str(tmp_path),),
+            builtin_tools=("Read", "Glob", "Grep"),
+            mcp_tools=to_mcp_tools([_Tool()]),
+            **kwargs,
+        )
+
+    def test_a_hook_guards_the_file_tools(self, tmp_path):
+        sdk_options = AgentSdkClient._sdk_options(self._options(tmp_path))
+
+        hook = _pre_tool_use_hook(sdk_options, "Read")
+        # Edit/Write are covered too although this profile does not grant
+        # them: a settings-added writer must not slip past the check.
+        matcher = next(e.matcher for e in sdk_options.hooks["PreToolUse"] if e.matcher)
+        assert "Edit" in matcher and "Write" in matcher
+
+        inside = asyncio.run(hook({"tool_input": {"file_path": str(tmp_path / "a.py")}}, None, object()))
+        assert inside == {}
+
+    def test_a_path_outside_the_roots_is_denied(self, tmp_path):
+        outside = tmp_path.parent / "elsewhere.env"
+        sdk_options = AgentSdkClient._sdk_options(self._options(tmp_path))
+
+        hook = _pre_tool_use_hook(sdk_options, "Read")
+        result = asyncio.run(hook({"tool_input": {"file_path": str(outside)}}, None, object()))
+
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "file_roots" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_confinement_survives_a_permissive_mode(self, tmp_path):
+        # bypassPermissions auto-approves everything that reaches the mode
+        # step, so can_use_tool is never consulted — the hook is the only
+        # layer left, and a hook deny holds even there.
+        sdk_options = AgentSdkClient._sdk_options(self._options(tmp_path, permission_mode="bypassPermissions"))
+
+        hook = _pre_tool_use_hook(sdk_options, "Read")
+        result = asyncio.run(hook({"tool_input": {"file_path": str(tmp_path.parent / "x")}}, None, object()))
+
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_confinement_survives_an_allow_rule(self, tmp_path):
+        # allowed_tools=["Read"] auto-approves Read before the callback.
+        sdk_options = AgentSdkClient._sdk_options(self._options(tmp_path, allowed_tools=("Read",)))
+
+        hook = _pre_tool_use_hook(sdk_options, "Read")
+        result = asyncio.run(hook({"tool_input": {"file_path": str(tmp_path.parent / "x")}}, None, object()))
+
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_no_roots_means_no_confinement_hook(self, tmp_path):
+        sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(model="sonnet", mcp_tools=to_mcp_tools([_Tool()])))
+
+        matchers = (sdk_options.hooks or {}).get("PreToolUse", [])
+        assert not [e for e in matchers if e.matcher]
