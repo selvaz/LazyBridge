@@ -557,7 +557,8 @@ class TestHandleRetention:
             await aio.sleep(0.05)
             task.cancel()
             with pytest.raises(aio.CancelledError):
-                await task
+                # Awaited for the exception, not the value.
+                _ = await task
 
         aio.run(cancel_it())
 
