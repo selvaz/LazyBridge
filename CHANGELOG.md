@@ -72,7 +72,66 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `outputSchema` accepts only OpenAI-strict schemas, which a plain Pydantic
   schema does not satisfy.
 
+### Added
+- **Durable Codex threads** — `CodexEngine(persist_thread=True)` keeps the
+  thread alive past the subprocess and exposes `engine.thread_id`;
+  `CodexEngine(thread_id=...)` resumes it, **from a different process**
+  (verified live), through `thread/resume`. Codex' own transcript then carries
+  the history — the files it read, the reasoning it did — so a follow-up
+  question is not a cold start. Everything is re-supplied on resume
+  (`cwd`/`sandbox`/`model`/`developerInstructions`/`dynamicTools`), since the
+  tool callbacks live in the new subprocess. Because the conversation's home
+  moves, resuming also: stops prepending LazyBridge `Memory` to the prompt (one
+  chronology, not two); raises the new `CodexTurnUncertain` instead of retrying
+  a turn lost *after* the server accepted it (`turn/start` is not idempotent, so
+  a durable turn may already be committed with its side effects); and serialises
+  runs per thread id within the process. Default behaviour is unchanged: one
+  ephemeral, unresumable thread per run. See `docs/guides/full/codex-engine.md`.
+- **Durable Claude Code sessions** — `ClaudeCodeEngine(persist_session=True)`
+  keeps the session and exposes `session_id`; `ClaudeCodeEngine(session_id=...)`
+  resumes it, **from a different process** (verified live), which
+  `session_mode="runtime"` could not do: that parks the id on a LazyBridge
+  `Session` object and never leaves the process. An explicit handle wins over
+  the parked one. As with durable Codex threads, resuming stops prepending
+  `Memory` (Claude holds the history) and serialises runs per session id —
+  including the run that *creates* the session, since two concurrent first runs
+  would otherwise open two sessions and race to store the id. Prompt and
+  options are now built inside that lock, because both read `session_id`.
+- **Native review mode** — `CodexEngine(review_target={"type": "baseBranch",
+  "branch": "main"})` (also `uncommittedChanges` / `commit`) runs the App
+  Server's `review/start` instead of a prompted turn, returning Codex' own
+  review harness output: severity-tagged findings with file:line. The protocol
+  has no prompt slot there, so the agent's prompt is not sent and the review
+  cannot be steered. Delivery is always `inline` — measured: a detached review
+  completes on a *different* thread and raises an approval request the parent
+  never sees. Pair with `persist_thread=True` and the review lands in the
+  thread, so a following turn can ask about it.
+- `CodexRunResult.thread_id`, and turn-id attribution throughout the App Server
+  client: usage is now the delta for *this* turn (`total` is cumulative over the
+  thread, so a resumed turn used to be reported with the whole history's cost),
+  and a `turn/completed` naming a different turn is ignored rather than returned
+  as this call's answer. The turn id arrives in a *response*, while
+  notifications about that turn do not wait for it, so attribution is resolved
+  at the end from per-turn records rather than guessed on arrival, completions
+  are not accepted on a resumed thread until the id is known, and the
+  "outcome unknown" boundary opens when the request is **sent** rather than when
+  it is answered. A timeout on a durable thread is likewise reported as
+  uncertain and *not* retryable — `asyncio.wait_for` cancels with
+  `CancelledError`, which unwinds past the client's own handling — and the
+  thread id survives an uncertain turn, since inspecting the thread is the
+  recovery path. A native review streamed through `stream()` now delivers its
+  findings as one chunk instead of nothing (an inline review emits no deltas).
+  (Every one of these windows was found by Codex reviewing this diff through
+  the very tool this change enables.)
+
 ### Fixed
+- `CodexEngine`: a turn died with `Codex App Server reader failed: ValueError:
+  Separator is found, but chunk is longer than limit` as soon as the App
+  Server sent one JSON-RPC line over `StreamReader`'s 64 KiB default — which
+  it does routinely, since whole file contents and command output (a real
+  `git diff`) arrive in a single notification. The subprocess is now created
+  with an explicit 64 MiB line limit. Found live, on the first diff-scoped
+  code review run through the engine.
 - `tests/unit/test_examples_import.py`: `_example_id()` used `str(Path)`
   instead of `.as_posix()`, producing backslash-separated ids/module names
   on Windows; combined with an example using `@dataclass` under

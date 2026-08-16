@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 import time
 import uuid
 import warnings
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any, TypeVar, get_origin
+from typing import Any, ClassVar, TypeVar, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import ApprovalGate, CodingAgentConfig, remembering_gate, session_approvals
@@ -108,7 +109,27 @@ class ClaudeCodeEngine:
     It deliberately accepts the same run parameters as ``LLMEngine`` and is
     stateless at the Claude SDK layer: LazyBridge ``Memory``
     remains the one conversation memory and is updated after a successful run.
+
+    **Durable sessions.** ``persist_session=True`` keeps the Claude Code
+    session and exposes :attr:`session_id`; ``ClaudeCodeEngine(session_id=...)``
+    resumes it — from a *later process*, since the SDK stores sessions on disk.
+    That is the mirror of ``CodexEngine(persist_thread=...)``, and it is what
+    makes a follow-up question cheap: Claude still has what it read.
+
+    It differs from ``session_mode="runtime"``, which parks the id on a
+    LazyBridge ``Session`` object and therefore never leaves the process. When
+    an explicit ``session_id`` is set it wins over the parked one.
+
+    Resuming moves where the conversation lives, so it also stops prepending
+    ``Memory`` to the prompt (Claude has the history; sending it again states
+    the same turns twice) and serialises runs per session id within the
+    process — one session is one transcript.
     """
+
+    #: One lock per durable session id, shared by every engine in the process:
+    #: two engines resuming the same session are the same hazard as one engine
+    #: doing it twice.
+    _session_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
     def __init__(
         self,
@@ -124,6 +145,8 @@ class ClaudeCodeEngine:
         fallback_model: str | None = None,
         session_mode: str = "memory",
         session_name: str | None = None,
+        session_id: str | None = None,
+        persist_session: bool = False,
         request_timeout: float | None = 120.0,
         stream_idle_timeout: float | None = 90.0,
         max_retries: int = 3,
@@ -167,6 +190,20 @@ class ClaudeCodeEngine:
             raise ValueError("session_mode must be 'memory' or 'runtime'")
         self.session_mode = session_mode
         self.session_name = session_name
+        #: Claude Code session to resume, and after each run the session the
+        #: run used. Unlike ``session_mode="runtime"`` — which parks the id on
+        #: a LazyBridge ``Session`` object and so only spans one process — this
+        #: is a plain handle the caller keeps, so a *later process* can resume
+        #: the same conversation (the SDK stores sessions on disk).
+        self.session_id = session_id
+        self.persist_session = persist_session or session_id is not None
+        #: True once this engine is continuing an existing session, so the
+        #: prompt stops carrying LazyBridge ``Memory``: Claude already has the
+        #: history, and sending it again states past turns twice.
+        self._resuming = session_id is not None
+        #: Guards the run that *creates* the session, before there is an id to
+        #: key the shared per-session lock on.
+        self._own_lock = asyncio.Lock()
         self._client = client or AgentSdkClient()
 
     @staticmethod
@@ -182,7 +219,26 @@ class ClaudeCodeEngine:
     def _runtime_slot(self, agent_name: str) -> str:
         return f"claude-code:{self.session_name or agent_name}"
 
+    def _session_lock(self) -> Any:
+        """Serialise runs that continue the same Claude Code session.
+
+        One session is one transcript: two turns appended at once interleave.
+        Before the first durable run there is no id to key on, and that is not
+        a free pass — two concurrent first runs would open two sessions and
+        race to store their ids — so persistent engines fall back to a lock of
+        their own until the id exists.
+        """
+        if not self.persist_session:
+            return contextlib.nullcontext()
+        if not self.session_id:
+            return self._own_lock
+        return type(self)._session_locks.setdefault(self.session_id, asyncio.Lock())
+
     def _resume_id(self, session: Any | None, agent_name: str) -> str | None:
+        # An explicit handle wins over the Session-parked one: the caller
+        # naming a session is a stronger statement than the ambient default.
+        if self.session_id:
+            return self.session_id
         if self.session_mode != "runtime" or session is None:
             return None
         state = getattr(session, "_lazybridge_runtime_sessions", {})
@@ -385,18 +441,30 @@ class ClaudeCodeEngine:
                 }[kind]
                 session.emit(event_type, payload, run_id=run_id)
 
-            prompt = self._prompt(env, None if self.session_mode == "runtime" and session else memory)
-            options = self._options(
-                tools,
-                observe,
-                output_type=output_type,
-                resume=self._resume_id(session, agent_name),
-                gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
-            )
             attachments = self._attachments(env)
-            result = await self._call_with_retries(
-                lambda: self._client.run(prompt, options=options, attachments=attachments)
-            )
+            async with self._session_lock():
+                # Prompt and options are built INSIDE the lock: both read
+                # ``session_id``, and reading it before waiting would let two
+                # concurrent first runs each see "no session yet" and open one.
+                carries_history = (self.session_mode == "runtime" and session) or self._resuming
+                prompt = self._prompt(env, None if carries_history else memory)
+                options = self._options(
+                    tools,
+                    observe,
+                    output_type=output_type,
+                    resume=self._resume_id(session, agent_name),
+                    gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
+                )
+                result = await self._call_with_retries(
+                    lambda: self._client.run(prompt, options=options, attachments=attachments)
+                )
+                if self.persist_session and result.session_id:
+                    # Inside the lock too: the next queued run must see it.
+                    # The SDK can return a NEW id for a resumed session, so
+                    # the engine follows the chain rather than pinning the
+                    # original — pinning would replay an ever-older session.
+                    self.session_id = result.session_id
+                    self._resuming = True
             self._remember_session(session, agent_name, result.session_id)
             if session:
                 # Mirrors LLMEngine's MODEL_RESPONSE payload shape so
@@ -483,7 +551,10 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             async for event in self._idle_guarded_stream(
                 self._client.stream(
-                    self._prompt(env, None if self.session_mode == "runtime" and session else memory),
+                    self._prompt(
+                        env,
+                        None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
+                    ),
                     options=self._options(
                         tools,
                         observe,
@@ -499,6 +570,9 @@ class ClaudeCodeEngine:
                     chunks.append(event.text)
                     yield event.text
                 if event.final:
+                    if self.persist_session and event.session_id:
+                        self.session_id = event.session_id
+                        self._resuming = True
                     self._remember_session(session, agent_name, event.session_id)
                     input_tokens, output_tokens = event.input_tokens, event.output_tokens
                     cost_usd = event.cost_usd
