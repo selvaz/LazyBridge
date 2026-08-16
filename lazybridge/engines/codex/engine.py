@@ -472,9 +472,7 @@ class CodexEngine:
             attachments = self._attachments(env)
             async with self._thread_lock():
                 call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
-                    **self._client_kwargs(
-                        env, tools, output_type, memory, observe, gate, attachments, progress
-                    )
+                    **self._client_kwargs(env, tools, output_type, memory, observe, gate, attachments, progress)
                 )
                 result = await self._call_with_retries(call)
                 self._absorb(result.thread_id)

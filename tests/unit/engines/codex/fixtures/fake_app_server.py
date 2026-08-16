@@ -145,9 +145,7 @@ def resume_main(scenario: str) -> None:
         return
 
     if scenario == "rejects_the_turn":
-        write_message(
-            {"id": turn_start["id"], "error": {"code": -32602, "message": "invalid review target"}}
-        )
+        write_message({"id": turn_start["id"], "error": {"code": -32602, "message": "invalid review target"}})
         return
 
     if scenario == "resume_completed_before_ack":

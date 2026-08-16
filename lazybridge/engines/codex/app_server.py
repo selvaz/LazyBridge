@@ -308,9 +308,7 @@ class CodexAppServerClient:
                                 if progress is not None and message.get("id") == turn_request_id:
                                     progress["rejected"] = True
                                 future.set_exception(
-                                    CodexRequestRejected(
-                                        message["error"].get("message", "Codex App Server error")
-                                    )
+                                    CodexRequestRejected(message["error"].get("message", "Codex App Server error"))
                                 )
                             else:
                                 future.set_result(message.get("result", {}))
@@ -405,9 +403,7 @@ class CodexAppServerClient:
                             if progress is not None:
                                 progress["rejected"] = True
                             completed.set_exception(
-                                CodexRequestRejected(
-                                    params.get("error", {}).get("message", "Codex App Server error")
-                                )
+                                CodexRequestRejected(params.get("error", {}).get("message", "Codex App Server error"))
                             )
                     elif method == "turn/completed" and not completed.done():
                         # Only *our* turn completes the run. On a resumed

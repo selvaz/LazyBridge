@@ -227,9 +227,7 @@ class TestDurableThreads:
         assert (result.input_tokens, result.output_tokens) == (55, 7)
 
     def test_a_completion_for_another_turn_is_ignored(self):
-        result = asyncio.run(
-            asyncio.wait_for(self._run("resume_stale_turn", thread_id="thread-1"), timeout=_TIMEOUT)
-        )
+        result = asyncio.run(asyncio.wait_for(self._run("resume_stale_turn", thread_id="thread-1"), timeout=_TIMEOUT))
 
         assert result.text == "resumed answer"  # not "STALE"
 
@@ -250,9 +248,7 @@ class TestDurableThreads:
         client = CodexAppServerClient(command=(sys.executable, FIXTURE, "exit_mid_turn"))
 
         async def run():
-            return await client.run(
-                prompt="hi", model=None, cwd=None, dynamic_tools=[], on_tool_call=_call_tool
-            )
+            return await client.run(prompt="hi", model=None, cwd=None, dynamic_tools=[], on_tool_call=_call_tool)
 
         with pytest.raises(ConnectionError):
             asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
@@ -414,7 +410,12 @@ class TestPreAckCompletion:
                 model=None,
                 cwd="C:/work/project",
                 dynamic_tools=[
-                    {"type": "function", "name": "get_quote", "description": "d", "inputSchema": _QuoteTool._Def.parameters}
+                    {
+                        "type": "function",
+                        "name": "get_quote",
+                        "description": "d",
+                        "inputSchema": _QuoteTool._Def.parameters,
+                    }
                 ],
                 on_tool_call=_call_tool,
                 thread_id="thread-1",

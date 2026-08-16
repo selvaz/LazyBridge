@@ -493,7 +493,7 @@ class TestLockScoping:
         engine = CodexEngine(client=fake, persist_thread=True)
         agent = Agent(engine, name="a")
 
-        first = agent("one")   # loop A
+        first = agent("one")  # loop A
         second = agent("two")  # loop B, same thread id
 
         assert first.ok and second.ok
@@ -527,9 +527,12 @@ class TestLockScoping:
 
         # Strict enter/exit alternation: never two turns inside at once.
         assert order == [
-            "enter:None", "exit:None",
-            "enter:T", "exit:T",
-            "enter:T", "exit:T",
+            "enter:None",
+            "exit:None",
+            "enter:T",
+            "exit:T",
+            "enter:T",
+            "exit:T",
         ]
 
 
