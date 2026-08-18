@@ -72,23 +72,25 @@ _THINKING_EFFORT_MAP = {
     "max": "max",
 }
 
-# Price per 1M tokens (input, output). Verify at platform.deepseek.com/api-docs/pricing.
-# V4 Pro: the 75%-off promo became the permanent standard rate (announced 2026-05).
+# Price per 1M tokens (input, output). Verify at api-docs.deepseek.com (Models & Pricing).
+# DeepSeek bills peak/off-peak (peak hours 01:00-04:00 and 06:00-10:00 UTC, 2x
+# off-peak); we always cost at the peak rate for a conservative estimate.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    "deepseek-v4-pro": (0.435, 0.87),
-    "deepseek-v4-flash": (0.14, 0.28),
+    "deepseek-v4-pro": (1.32, 3.96),
+    "deepseek-v4-flash": (0.44, 1.32),
     # Deprecated 2026-07-24; currently API-routed to deepseek-v4-flash.
-    "deepseek-reasoner": (0.14, 0.28),
-    "deepseek-chat": (0.14, 0.28),
+    "deepseek-reasoner": (0.44, 1.32),
+    "deepseek-chat": (0.44, 1.32),
 }
 
 # Cache-hit input rates per 1M tokens (automatic for repeated prefixes ≥1024 tokens,
 # same account). DeepSeek exposes hits via prompt_tokens_details.cached_tokens.
+# Peak rate, matching _PRICE_TABLE above.
 _CACHE_HIT_PRICE_TABLE: dict[str, float] = {
-    "deepseek-v4-pro": 0.003625,
-    "deepseek-v4-flash": 0.0028,
-    "deepseek-reasoner": 0.0028,
-    "deepseek-chat": 0.0028,
+    "deepseek-v4-pro": 0.044,
+    "deepseek-v4-flash": 0.014,
+    "deepseek-reasoner": 0.014,
+    "deepseek-chat": 0.014,
 }
 
 

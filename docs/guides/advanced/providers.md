@@ -150,10 +150,14 @@ Other supported models (passed verbatim, no tier alias):
 
 ### DeepSeek
 
+Prices below are peak-hour rates (01:00-04:00 and 06:00-10:00 UTC); LazyBridge
+always costs at the peak rate for a conservative estimate. Off-peak rates are
+exactly half.
+
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
-| `top` / `expensive` | `deepseek-v4-pro` | 1 M | 384 K | $0.435 | $0.003625 | $0.87 |
-| `medium` / `cheap` / `super_cheap` | `deepseek-v4-flash` | 1 M | 384 K | $0.14 | $0.0028 | $0.28 |
+| `top` / `expensive` | `deepseek-v4-pro` | 1 M | 384 K | $1.32 | $0.044 | $3.96 |
+| `medium` / `cheap` / `super_cheap` | `deepseek-v4-flash` | 1 M | 384 K | $0.44 | $0.014 | $1.32 |
 
 - **Thinking.** Both V4 models accept `ThinkingConfig` →
   `reasoning_content` field on the response. In thinking mode the

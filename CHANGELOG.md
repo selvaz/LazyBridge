@@ -8,6 +8,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **DeepSeek pricing** (`lazybridge.core.providers.deepseek`) — updated
+  `_PRICE_TABLE` and `_CACHE_HIT_PRICE_TABLE` to DeepSeek's current rates
+  (api-docs.deepseek.com). DeepSeek now bills peak/off-peak (peak hours
+  01:00-04:00 and 06:00-10:00 UTC, off-peak is half); LazyBridge costs at the
+  peak rate across the board for a conservative estimate. `deepseek-v4-pro`:
+  $1.32 / $0.044 (cached) / $3.96 per 1M tokens (in / cached-in / out), up
+  from $0.435 / $0.003625 / $0.87. `deepseek-v4-flash` (and the deprecated
+  `deepseek-reasoner` / `deepseek-chat` aliases): $0.44 / $0.014 / $1.32, up
+  from $0.14 / $0.0028 / $0.28.
+
 ---
 
 ## [1.1.0] — 2026-08-16
