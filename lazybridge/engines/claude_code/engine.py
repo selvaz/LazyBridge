@@ -390,6 +390,11 @@ class ClaudeCodeEngine:
         builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
             ("WebSearch", "WebFetch") if self.web else ()
         )
+        # Policy-granted additions (e.g. Write/Edit/Bash for a gated writer
+        # agent), deduplicated while preserving order.
+        for name in self.config.claude.extra_tools:
+            if name not in builtin_tools:
+                builtin_tools += (name,)
         return ClaudeSdkOptions(
             cwd=self.cwd,
             model=self.model,

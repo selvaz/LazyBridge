@@ -338,3 +338,31 @@ class TestDurableSessions:
         asyncio.run(both())
 
         assert sdk.resumes == [None, "sess-9"]
+
+
+def test_policy_extra_tools_extend_the_builtin_set_deduplicated(tmp_path):
+    # extra_tools is what lets a gated agent be granted Write/Edit/Bash at
+    # the SDK level: the engine used to hardcode the read-only set, so no
+    # approval gate could ever be asked about a write — the model simply
+    # never had the tool. Names already derived (Read here) must not repeat.
+    from lazybridge.engines.coding import ClaudeCodePolicy, CodingAgentConfig
+
+    class CapturingSdk(FakeSdk):
+        async def run(self, prompt, *, options, attachments=()):
+            self.options.append(options)
+            return ClaudeSdkResult(text="ok", session_id="s", input_tokens=1, output_tokens=1)
+
+    sdk = CapturingSdk()
+    engine = ClaudeCodeEngine(
+        client=sdk,
+        cwd=str(tmp_path),
+        file_roots=[str(tmp_path)],
+        web=False,
+        config=CodingAgentConfig(
+            claude=ClaudeCodePolicy(extra_tools=("Write", "Bash", "Read")),
+        ),
+    )
+    agent = Agent(name="writer-prototype", engine=engine)
+
+    assert agent("do something").ok
+    assert sdk.options[0].builtin_tools == ("Read", "Glob", "Grep", "Write", "Bash")
