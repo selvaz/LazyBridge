@@ -197,6 +197,24 @@ class ClaudeCodePolicy:
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
     setting_sources: tuple[Literal["user", "project", "local"], ...] = ()
+    #: Extra built-in tool names ADDED to the engine's derived set (Read/Glob/
+    #: Grep from ``file_roots``, WebSearch/WebFetch from ``web=``). This is
+    #: what lets a gated agent be granted ``Write``/``Edit``/``Bash``: the
+    #: SDK's ``tools=`` option controls which built-ins the model can call at
+    #: all, and the engine used to hardcode the read-only set — so no approval
+    #: gate could ever be *asked* about a write, because the model never had
+    #: the tool. Granting a name here does not pre-approve it: unless it is
+    #: also in ``allowed_tools``, every call still routes through
+    #: ``can_use_tool`` (the approval gate, or the fail-closed default).
+    #:
+    #: Confinement caveat — ``file_roots`` is enforced by a hook that matches
+    #: the FILE tools (Read/Glob/Grep/Edit/Write/NotebookEdit). ``Bash`` is
+    #: NOT path-confinable that way: an approved command can touch any path
+    #: its process can. The shell's only boundary is the approval gate's
+    #: policy, so the engine REFUSES to grant ``Bash`` (or any name outside
+    #: the hook-confined set and the web pair) unless an ``approval_gate`` is
+    #: configured — fail closed at construction, not at the first escape.
+    extra_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
