@@ -43,6 +43,92 @@ Code at every level of complexity uses the same `Agent` shape. Do not
 introduce per-pattern abstractions ("supervisor agent", "researcher agent")
 as separate classes; use plain `Agent` with different engines and tools.
 
+## Project architecture preflight
+
+The rules in this file mostly cover **one agent**. When the request is a
+*project* — a pipeline, a scheduled job, several stages, anything with
+persistence — run this checklist before writing code. Every claim below was
+executed against the framework, not read off the source; full detail and
+runnable proof: `docs/guides/project-patterns.md` in this repo.
+
+1. **Stages, phases, scheduled work, or resume** → one root
+   `Agent(engine=Plan(...))`. A plain Python function is a legal `Step`
+   target; never hand-roll `for step in steps: step()` over a mutable
+   `state` dict shared by closures — that re-implements `Plan` with no
+   checkpointing, no resume, no cost roll-up, no session events.
+2. **Name every `Step`.** The default name is `target.__name__`, so two
+   unnamed lambdas collide at compile time, and `routes=` / `from_step()` /
+   checkpoints all reference the name.
+3. **Two or more independent stages over the same input** → a parallel band
+   (`Step(..., parallel=True)`) or `Agent.parallel`. Never emit
+   `asyncio.gather` / `ThreadPoolExecutor` glue. **N inputs through the same
+   pipeline** → `plan.run_many(tasks, concurrency=...)` (preserves input
+   order; isolates a failing task to its own slot).
+4. **Branching** → `routes=` with a predicate for **every** branch, plus
+   `after_branches=` for the rejoin. Not cosmetic: an approval gate with
+   only an `"execute"` predicate lets a **rejection fall through into
+   execute** — verified. Adding a `halt` step afterward does not fix it;
+   the predicate must exist for both branches.
+5. **Scheduled + resumable** → `store=`, `resume=True`, and a
+   **run-specific** `checkpoint_key` (e.g. `f"job:{run_date}"`). A permanent
+   key with `resume=True` makes every run after the first a silent no-op —
+   verified: 3 runs, 1 execution.
+6. **Large data** → move a handle, never `json.dumps` the payload into a
+   prompt — this matters even between two plain-function steps, since a
+   step's typed payload collapses to `str` for any target that isn't an
+   `Agent`. If the pipeline is resumable, the depot behind the handle must
+   be durable, not a module-level dict — checkpoints don't preserve live
+   process state.
+7. **State crossing runs** → the shared `Store` with reconstructable keys
+   and `agent_id` provenance (`keys()`/`read_entry()`/`compare_and_swap()`
+   are enough to build a registry — don't invent new infrastructure). Do
+   not open a new `sqlite3` / `duckdb` file.
+8. **Irreversible effects** (send, publish, trade) → last in the plan, and
+   consciously pick one: reserve-before-acting via `compare_and_swap`
+   (at-most-once — a crash before the effect means it silently never
+   happens), or a receiver-side idempotency key (exactly-once *effect*,
+   only if the receiver atomically records the key with the effect — most
+   webhooks/bots offer neither). No check-then-act sequence in your own
+   process is safe on its own; check-then-effect-then-write has the same
+   crash window it claims to close, just narrower. Ideally also behind a
+   `HumanEngine` gate with a safe `default=`.
+9. **"Not ready yet"** → `raise PlanPaused(...)`, not a sleep loop and not a
+   failure — but it only persists with `store=` **and** `checkpoint_key=`
+   on the Plan; without both the pause is returned to the caller and then
+   lost. `resume=True` is what the *next* run needs to pick that checkpoint
+   back up and continue from the same step instead of starting over — it
+   is not required for the pause itself to be saved.
+10. **Always check the result.** A failed Plan *returns* an error envelope;
+    it does not raise. A script that ignores it exits 0 on a broken run:
+
+    ```python
+    result = pipeline(task)
+    if not result.ok:
+        raise SystemExit(f"pipeline failed: {result.error}")
+    ```
+
+11. **Emit a composition test with every new pipeline.** Build the pipeline
+    behind a factory that accepts its agents, so tests can inject doubles:
+
+    ```python
+    from lazybridge.testing import MockAgent
+
+    research = MockAgent(responses=["research-key"], name="research")
+    write = MockAgent(responses=["done"], name="write")
+
+    result = build_pipeline(research=research, write=write)("run-42")
+
+    research.assert_call_count(1)
+    write.assert_called_with(contains="research-key")
+    assert result.ok
+    ```
+
+12. **Before finishing, grep the generated diff** for `for step in`,
+    `state = {}`, `json.dumps(` inside a prompt string, `try:` around an
+    agent call, and new `sqlite3.connect(` / `duckdb.connect(`. Replace
+    each one with the declarative primitive above, or state explicitly why
+    it is domain logic.
+
 ## Calling convention — sync is canonical
 
 ```python
@@ -528,8 +614,12 @@ agent = Agent(
 ```
 
 For OpenTelemetry, install `lazybridge[otel]` and add `OTelExporter(...)`
-to the same list. Nested agents inherit the session unless they pass
-their own.
+to the same list. **Inheritance depends on how the sub-agent is nested,
+verified:** an agent passed via `tools=[...]` (and `fallback=`/`verify=`)
+inherits the parent's session automatically. An agent used **directly as a
+`Plan` `Step` target does not** — pass `session=` explicitly when building
+it, or its events (and those of anything it calls) never reach the log,
+making a multi-step pipeline look silently incomplete in its own trace.
 
 ## Anti-patterns to avoid
 
@@ -574,6 +664,25 @@ their own.
   deleted in 0.7.9 along with the `_UNSET` precedence game. Pass flat
   kwargs (`timeout=...`, `max_retries=...`, `session=...`, `name=...`)
   directly, or share a fleet default via `**PROD_DEFAULTS`.
+- **Wrapping an agent call in `try` / `except` to reach a backup**, when
+  the failure arrives as a *returned error envelope* — which includes a
+  `Plan` step that raises. Use `fallback=` instead. It does not reliably
+  fire on a **tool** raising inside an `LLMEngine`'s tool loop (that
+  becomes a tool result the model sees and may work around, not an error
+  envelope) — if a tool failure must abort the run, return a typed failure
+  and check it, don't rely on the exception to escalate. It also does not
+  fire when the agent's **own engine raises directly** rather than
+  returning an error envelope (a custom engine, most commonly) — keep
+  `try`/`except` around that call site; do not remove it in favor of
+  `fallback=` on the strength of this rule alone.
+- **A gate with a predicate for only one branch.** `routes={"execute": ...}`
+  with nothing for the rejection path executes anyway when the predicate is
+  false — routing falls through linearly. Every branch needs its own
+  predicate, always, especially on an approval gate.
+- **An agent used directly as a `Step` target does not inherit the
+  parent's `Session`** — only agents passed via `tools=[...]` do. Pass
+  `session=` explicitly when building a sub-agent for a `Step`, or its
+  events silently vanish from the run's log.
 
 ## Where to read more
 

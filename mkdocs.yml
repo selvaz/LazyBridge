@@ -162,6 +162,7 @@ nav:
       - Progressive complexity: concepts/progressive-complexity.md
       - Canonical vs sugar: concepts/canonical-vs-sugar.md
   - Guides:
+      - Project patterns: guides/project-patterns.md
       - Basic:
           - Agent: guides/basic/agent.md
           - Tool: guides/basic/tool.md
