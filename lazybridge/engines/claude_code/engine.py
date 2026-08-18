@@ -178,6 +178,19 @@ class ClaudeCodeEngine:
         # ``CodingAgentConfig.reviewer()`` or ``.writer(gate)`` to opt into
         # the fail-closed profiles.
         self.config = config or CodingAgentConfig()
+        # ``file_roots`` confinement is a hook over the FILE tools; names
+        # outside that set (and the web pair) — ``Bash`` above all — have no
+        # path sandbox, so their only boundary is the approval gate's policy.
+        # Granting one without a gate would advertise a confined writer that
+        # is not confined: refuse at construction, not at the first escape.
+        _hook_confined = {"Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebSearch", "WebFetch"}
+        unconfined = tuple(t for t in self.config.claude.extra_tools if t not in _hook_confined)
+        if unconfined and self.config.approval_gate is None:
+            raise ValueError(
+                f"extra_tools grants {unconfined} which file_roots cannot confine; "
+                "configure CodingAgentConfig.approval_gate so a policy governs them "
+                "(granting Bash without a gate would be an unconfined shell)"
+            )
         roots = file_roots if file_roots is not None else ([cwd] if cwd else [])
         self.file_roots = tuple(str(Path(root).resolve()) for root in roots if root is not None)
         self.web = web
