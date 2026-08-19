@@ -140,6 +140,7 @@ class CodexAppServerClient:
         ephemeral: bool = True,
         review_target: dict[str, Any] | None = None,
         progress: dict[str, Any] | None = None,
+        thread_source: str | None = None,
     ) -> CodexRunResult:
         """Run one turn, in a fresh thread or in ``thread_id``.
 
@@ -181,6 +182,25 @@ class CodexAppServerClient:
         ``detached`` was measured to complete on a *different* thread and to
         raise an approval request the parent thread never sees, which is not
         usable non-interactively.
+
+        ``thread_source`` is the protocol's own free-text
+        ``ThreadStartParams.threadSource`` — "an optional client-supplied
+        analytics source classification for this thread" (verified against
+        the App Server's generated schema). Live-verified landing on disk as
+        ``session_meta.payload.thread_source`` (snake_case) in the rollout
+        file — a DIFFERENT field from ``session_meta.payload.source``, which
+        is something else entirely (observed as ``"vscode"`` regardless of
+        this value, on every thread checked, LazyBridge or interactive).
+        Every LazyBridge-created thread is *already* identifiable without
+        this field at all, via ``session_meta.payload.originator`` — always
+        ``"lazybridge"``, set unconditionally by the ``initialize`` call's
+        ``clientInfo.name`` (see below), not configurable per instance.
+        ``thread_source`` adds a second, caller-chosen label for
+        distinguishing *which* LazyBridge-based application created a given
+        thread, on top of that. It is creation-time metadata: sent on
+        ``thread/start`` only, never on ``thread/resume`` — a resumed thread
+        already carries the value its creating call set, and Codex has no
+        endpoint to change it after the fact.
         """
         if thread_id:
             ephemeral = False
@@ -472,6 +492,11 @@ class CodexAppServerClient:
                 thread = await request("thread/resume", thread_params)
             else:
                 thread_params["ephemeral"] = ephemeral
+                if thread_source is not None:
+                    # Creation-time only: a resume must NOT resend this, or a
+                    # thread created under one source would appear to have
+                    # been reclassified under whatever resumed it.
+                    thread_params["threadSource"] = thread_source
                 thread = await request("thread/start", thread_params)
             active_thread = thread["thread"]["id"]
             if progress is not None:

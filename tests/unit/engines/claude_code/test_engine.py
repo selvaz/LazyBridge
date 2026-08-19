@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+import claude_agent_sdk
 import pytest
 from pydantic import BaseModel
 
@@ -9,6 +10,24 @@ from lazybridge import Agent, Envelope, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+
+
+@pytest.fixture
+def fake_tag_session(monkeypatch):
+    """Record ``tag_session`` calls instead of touching a real session file.
+
+    ``_tag_new_session`` resolves ``claude_agent_sdk.tag_session`` fresh on
+    every call (a deliberately lazy import), so patching the package
+    attribute — not anything in ``engine.py`` — is what the engine actually
+    sees.
+    """
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def fake(session_id, tag, *, directory=None):
+        calls.append((session_id, tag, directory))
+
+    monkeypatch.setattr(claude_agent_sdk, "tag_session", fake)
+    return calls
 
 
 class FakeSdk:
@@ -269,7 +288,7 @@ class TestDurableSessions:
 
         assert sdk.resumes == [None, None]
 
-    def test_the_session_id_is_kept_and_resumed(self):
+    def test_the_session_id_is_kept_and_resumed(self, fake_tag_session):
         sdk = _PlainSdk()
         engine = ClaudeCodeEngine(client=sdk, persist_session=True)
         agent = Agent(engine, name="a")
@@ -279,6 +298,32 @@ class TestDurableSessions:
 
         assert sdk.resumes == [None, "sess-9"]
         assert engine.session_id == "sess-9"
+        # Tagged once, on the run that CREATED the session — not on the one
+        # that resumed it (the SDK has no "already tagged" check of its own;
+        # tagging twice would just append a second, redundant JSONL line).
+        assert fake_tag_session == [("sess-9", "lazybridge", None)]
+
+    def test_tag_is_overridable_and_can_be_disabled(self, fake_tag_session):
+        sdk = _PlainSdk()
+        Agent(ClaudeCodeEngine(client=sdk, persist_session=True, tag="approval-lab", cwd="C:/work"), name="a")("hi")
+        assert fake_tag_session == [("sess-9", "approval-lab", "C:/work")]
+
+        fake_tag_session.clear()
+        sdk2 = _PlainSdk()
+        Agent(ClaudeCodeEngine(client=sdk2, persist_session=True, tag=None), name="a")("hi")
+        assert fake_tag_session == []
+
+    def test_a_tagging_failure_warns_but_does_not_fail_the_run(self, monkeypatch):
+        def broken(session_id, tag, *, directory=None):
+            raise FileNotFoundError("no such session file")
+
+        monkeypatch.setattr(claude_agent_sdk, "tag_session", broken)
+        sdk = _PlainSdk()
+
+        with pytest.warns(UserWarning, match="could not tag session"):
+            result = Agent(ClaudeCodeEngine(client=sdk, persist_session=True), name="a")("hi")
+
+        assert result.ok
 
     def test_a_supplied_session_id_resumes_immediately(self):
         sdk = _PlainSdk()
@@ -290,7 +335,7 @@ class TestDurableSessions:
         # No memory block: Claude owns the history on a resumed session.
         assert sdk.prompts == ["carry on"]
 
-    def test_resuming_stops_re_sending_memory(self):
+    def test_resuming_stops_re_sending_memory(self, fake_tag_session):
         sdk = _PlainSdk()
         agent = Agent(ClaudeCodeEngine(client=sdk, persist_session=True), name="a", memory=Memory())
 
@@ -321,7 +366,7 @@ class TestDurableSessions:
         assert sdk.resumes == ["explicit", "sess-9"]
         assert engine.session_id == "sess-9"
 
-    def test_concurrent_first_runs_do_not_open_two_sessions(self):
+    def test_concurrent_first_runs_do_not_open_two_sessions(self, fake_tag_session):
         # Without a lock before the first id exists, both runs start their own
         # session and race to store the id: one conversation is orphaned.
         class Slow(_PlainSdk):

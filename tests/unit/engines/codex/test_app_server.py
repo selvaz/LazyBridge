@@ -69,6 +69,52 @@ def test_full_turn_round_trip_including_a_tool_call():
     assert chunks == ["AMZN is ", "123.45"]
 
 
+def test_thread_source_is_sent_on_a_new_thread():
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
+
+        async def unexpected_tool_call(tool, arguments):
+            raise AssertionError("no tool call was expected")
+
+        return await client.run(
+            prompt="just chat",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=unexpected_tool_call,
+            thread_source="lazybridge",
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+    # The fixture's own assertion (threadSource == "lazybridge" in the
+    # thread/start params) is what actually proves the wire shape; reaching
+    # a normal result means it passed.
+    assert result.text == "AMZN is 123.45"
+
+
+def test_thread_source_is_never_resent_on_resume():
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "resume"))
+
+        async def unexpected_tool_call(tool, arguments):
+            raise AssertionError("no tool call was expected")
+
+        # Passing thread_source alongside thread_id must NOT put it on the
+        # wire — the fixture's resume_main asserts its absence.
+        return await client.run(
+            prompt="follow-up",
+            model=None,
+            cwd="C:/work",
+            dynamic_tools=[{"type": "function", "name": "noop", "description": "d", "inputSchema": {}}],
+            on_tool_call=unexpected_tool_call,
+            thread_id="thread-1",
+            thread_source="lazybridge",
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+    assert result.thread_id == "thread-1"
+
+
 def test_no_tools_requested_skips_the_tool_round_trip():
     async def run():
         client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))

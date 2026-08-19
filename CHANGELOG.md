@@ -8,6 +8,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`CodexEngine(thread_source=...)`** — sent as the App Server's own
+  `ThreadStartParams.threadSource` ("an optional client-supplied analytics
+  source classification for this thread", verified against the generated
+  protocol schema and against a real rollout file's `session_meta.payload.source`,
+  where the interactive CLI's own threads carry values like `"vscode"`).
+  Defaults to `"lazybridge"`, so every thread a `CodexEngine` creates is
+  distinguishable on disk from interactive/desktop-app sessions — pass
+  `None` to omit it, or a caller-specific label to tell your own callers
+  apart. Creation-time only: sent on `thread/start`, never on `thread/resume`
+  (the field cannot be changed after a thread exists).
+- **`ClaudeCodeEngine(tag=...)`** — the Agent SDK has no creation-time
+  equivalent of `threadSource`, but it does have a post-hoc, public tagging
+  API (`claude_agent_sdk.tag_session`, appending a `{"type":"tag",...}`
+  JSONL entry `list_sessions()` reads back as `.tag`). Every NEW durable
+  session (`persist_session=True` or a `session_id`) this engine creates is
+  now tagged — default `"lazybridge"`, once, never re-tagged on resume.
+  Live-verified: the tag lands in the real session file and round-trips
+  through `list_sessions()`. Pass `tag=None` to skip it. A tagging failure
+  warns (`UserWarning`) rather than failing the run.
+
 ### Changed
 - **DeepSeek pricing** (`lazybridge.core.providers.deepseek`) — updated
   `_PRICE_TABLE` and `_CACHE_HIT_PRICE_TABLE` to DeepSeek's current rates

@@ -298,6 +298,40 @@ An explicit `file_roots` list overrides the root inferred from `cwd`. Do not
 grant broad directories for convenience — declare only directories the agent
 needs to inspect.
 
+## Distinguishing LazyBridge sessions on disk
+
+Unlike `CodexEngine`'s `threadSource` (sent at thread creation, on the wire),
+the Agent SDK has no creation-time metadata field. It does have a public,
+post-hoc tagging API — `claude_agent_sdk.tag_session(session_id, tag,
+directory=...)`, appending a `{"type": "tag", ...}` JSONL line that
+`list_sessions()` reads back as `.tag` — and `ClaudeCodeEngine` uses it
+automatically:
+
+```python
+engine = ClaudeCodeEngine(persist_session=True)                    # tag="lazybridge" (default)
+engine = ClaudeCodeEngine(persist_session=True, tag="my-app")      # a caller-specific label
+engine = ClaudeCodeEngine(persist_session=True, tag=None)          # skip tagging
+```
+
+Tagging fires once, on the run that *creates* a durable session — not on
+every resume, since the SDK's "last tag wins" semantics make repeated calls
+redundant I/O, not idempotent no-ops. It requires `persist_session=True`
+(or an explicit `session_id`); an ephemeral session is never tagged, since
+there is nothing durable to tag. A tagging failure raises a `UserWarning`
+rather than failing the run — it is identification metadata, not something
+correctness should depend on.
+
+Finding and cleaning up tagged sessions later (`list_sessions()` has no
+server-side tag filter — filter the returned list):
+
+```python
+from claude_agent_sdk import delete_session, list_sessions
+
+mine = [s for s in list_sessions() if s.tag == "lazybridge"]
+for s in mine:
+    delete_session(s.session_id)
+```
+
 ## 8. Verification and troubleshooting
 
 ```bash

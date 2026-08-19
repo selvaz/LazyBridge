@@ -159,6 +159,29 @@ every object **and** `required` listing every property. A plain Pydantic schema
 fails the turn with `invalid_json_schema`, so wiring it needs a strict-mode
 rewrite that turns optional fields into nullable-required ones.
 
+## Distinguishing LazyBridge threads on disk
+
+Every thread a `CodexEngine` creates is tagged with the App Server's own
+`threadSource` field (`ThreadStartParams.threadSource` — verified against the
+generated protocol schema, and observed on disk as
+`session_meta.payload.source` in a real rollout file under
+`~/.codex/sessions/...`, alongside values like `"vscode"` the interactive CLI
+sets for its own sessions):
+
+```python
+engine = CodexEngine()                          # thread_source="lazybridge" (default)
+engine = CodexEngine(thread_source="my-app")     # a caller-specific label
+engine = CodexEngine(thread_source=None)         # omit it entirely
+```
+
+This is creation-time metadata only — sent on `thread/start`, never
+re-sent on `thread/resume` — because the protocol has no endpoint to change
+it after a thread exists. It has no bearing on `codex resume`'s picker
+(which titles sessions from their content, not this field); it exists so a
+script can tell LazyBridge-created threads apart from interactive ones by
+grepping rollout files for `"source": "lazybridge"`, e.g. as a starting point
+for a retention/cleanup pass.
+
 ## Not implemented yet
 
 - **No model validation.** `model=` is passed straight to `thread/start`

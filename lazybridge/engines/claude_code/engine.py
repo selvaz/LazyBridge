@@ -154,6 +154,7 @@ class ClaudeCodeEngine:
         tool_timeout: float | None = None,
         config: CodingAgentConfig | None = None,
         client: ClaudeSdkClient | None = None,
+        tag: str | None = "lazybridge",
     ) -> None:
         self.model = model
         self.cwd = cwd
@@ -214,6 +215,21 @@ class ClaudeCodeEngine:
         #: prompt stops carrying LazyBridge ``Memory``: Claude already has the
         #: history, and sending it again states past turns twice.
         self._resuming = session_id is not None
+        #: Applied, once, to every NEW durable session this engine creates —
+        #: never on resume, a tag already set stays set. Unlike Codex's
+        #: ``thread_source`` (sent at creation, on the wire), the Agent SDK
+        #: has no such field: this is instead appended post-hoc via the
+        #: SDK's own ``tag_session()`` (a ``{"type":"tag",...}`` JSONL entry
+        #: in the session file — the same mechanism ``list_sessions()``/the
+        #: interactive CLI's session picker read). Defaults to
+        #: ``"lazybridge"`` so every session this engine starts is
+        #: identifiable later — ``list_sessions()`` has no server-side tag
+        #: filter, so filter its returned list by ``.tag == "lazybridge"``,
+        #: then ``delete_session(s.session_id)`` for a retention/cleanup
+        #: pass. Pass ``None`` to skip tagging. Requires
+        #: ``persist_session=True`` (or a ``session_id``) — an ephemeral
+        #: session has nothing durable to tag.
+        self.tag = tag
         #: Guards the run that *creates* the session, before there is an id to
         #: key the shared per-session lock on.
         self._own_lock = asyncio.Lock()
@@ -256,6 +272,25 @@ class ClaudeCodeEngine:
             return None
         state = getattr(session, "_lazybridge_runtime_sessions", {})
         return state.get(self._runtime_slot(agent_name))
+
+    def _tag_new_session(self, session_id: str) -> None:
+        """Best-effort ``tag_session()`` call for a session just created.
+
+        Called only when this engine transitions from no-session to
+        having one — never on every turn of an already-tagged session,
+        since the SDK appends a JSONL line per call and "most recent tag
+        wins" makes repeat calls pointless I/O, not idempotent no-ops.
+        Failure is a warning, not a raised error: a tag is identification
+        metadata, not something a run's success should depend on.
+        """
+        if self.tag is None:
+            return
+        try:
+            from claude_agent_sdk import tag_session
+
+            tag_session(session_id, self.tag, directory=self.cwd)
+        except Exception as exc:  # defensive: tagging must never break a run
+            warnings.warn(f"ClaudeCodeEngine: could not tag session {session_id!r}: {exc}", stacklevel=2)
 
     def _remember_session(self, session: Any | None, agent_name: str, runtime_id: str | None) -> None:
         if self.session_mode != "runtime" or session is None or not runtime_id:
@@ -481,6 +516,8 @@ class ClaudeCodeEngine:
                     # The SDK can return a NEW id for a resumed session, so
                     # the engine follows the chain rather than pinning the
                     # original — pinning would replay an ever-older session.
+                    if not self._resuming:
+                        self._tag_new_session(result.session_id)
                     self.session_id = result.session_id
                     self._resuming = True
             self._remember_session(session, agent_name, result.session_id)
@@ -589,6 +626,8 @@ class ClaudeCodeEngine:
                     yield event.text
                 if event.final:
                     if self.persist_session and event.session_id:
+                        if not self._resuming:
+                            self._tag_new_session(event.session_id)
                         self.session_id = event.session_id
                         self._resuming = True
                     self._remember_session(session, agent_name, event.session_id)

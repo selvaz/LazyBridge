@@ -26,6 +26,7 @@ class FakeAppServer:
         self.thread_ids_seen: list[str | None] = []
         self.ephemeral_seen: list[bool] = []
         self.review_targets_seen: list[dict | None] = []
+        self.thread_sources_seen: list[str | None] = []
         self.result = result or CodexRunResult(
             text="AMZN is available", input_tokens=11, output_tokens=7, cost_usd=0.002
         )
@@ -52,6 +53,7 @@ class FakeAppServer:
         ephemeral=True,
         review_target=None,
         progress=None,
+        thread_source=None,
     ):
         if progress is not None:
             # What the real client publishes as it goes, so the engine can
@@ -60,6 +62,7 @@ class FakeAppServer:
             progress["turn_sent"] = True
         self.calls += 1
         self.review_targets_seen.append(review_target)
+        self.thread_sources_seen.append(thread_source)
         self.prompts.append(prompt)
         self.thread_ids_seen.append(thread_id)
         self.ephemeral_seen.append(ephemeral)
@@ -108,6 +111,30 @@ class TestDurableThreads:
         # First run opens the thread, the second resumes it by id.
         assert fake.thread_ids_seen == [None, "thread-9"]
         assert engine.thread_id == "thread-9"
+
+    def test_thread_source_defaults_to_lazybridge_and_only_on_new_threads(self):
+        # threadSource is creation-time metadata (verified against the App
+        # Server's schema + a real rollout file's session_meta.source): every
+        # NEW thread this engine opens gets tagged, but a resume must not
+        # resend it — the resumed thread already carries the value its
+        # creating call set.
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        agent = Agent(CodexEngine(client=fake, persist_thread=True), name="a")
+
+        agent("first")
+        agent("second")
+
+        assert fake.thread_ids_seen == [None, "thread-9"]
+        assert fake.thread_sources_seen == ["lazybridge", "lazybridge"]
+
+    def test_thread_source_is_overridable_and_can_be_disabled(self):
+        fake = FakeAppServer()
+        Agent(CodexEngine(client=fake, thread_source="approval-lab"), name="a")("hi")
+        assert fake.thread_sources_seen == ["approval-lab"]
+
+        fake2 = FakeAppServer()
+        Agent(CodexEngine(client=fake2, thread_source=None), name="a")("hi")
+        assert fake2.thread_sources_seen == [None]
 
     def test_resuming_does_not_re_send_lazybridge_memory(self):
         # Codex already holds the history; prepending Memory would give the

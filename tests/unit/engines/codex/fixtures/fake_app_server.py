@@ -130,6 +130,10 @@ def resume_main(scenario: str) -> None:
     assert params["cwd"] is not None, params
     assert params["sandbox"] == "read-only", params
     assert "ephemeral" not in params, params
+    # Creation-time only: even if the caller passed thread_source, a RESUME
+    # must never resend it — the resumed thread already carries whatever the
+    # creating call set, and there is no endpoint to change it after the fact.
+    assert "threadSource" not in params, params
     dynamic_tools = params.get("dynamicTools", [])
     assert dynamic_tools, "resume must re-register dynamic tools"
     write_message({"id": resume["id"], "result": {"thread": {"id": "thread-1"}}})
@@ -267,6 +271,10 @@ def main() -> None:
     if scenario == "developer_instructions":
         assert params["developerInstructions"] == "Be concise.", params
     dynamic_tools = params.get("dynamicTools", [])
+    # threadSource is opt-in: present only when the caller passed one. When
+    # present it must carry through unchanged (creation-time analytics tag).
+    if "threadSource" in params:
+        assert params["threadSource"] == "lazybridge", params
     write_message({"id": thread_start["id"], "result": {"thread": {"id": "thread-1"}}})
 
     turn_start = read_message()

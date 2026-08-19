@@ -158,6 +158,7 @@ class CodexEngine:
         thread_id: str | None = None,
         persist_thread: bool = False,
         review_target: dict[str, Any] | None = None,
+        thread_source: str | None = "lazybridge",
     ) -> None:
         self.model, self.cwd, self.system = model, cwd, system
         #: Thread to resume, and after each run the thread the run used —
@@ -170,6 +171,18 @@ class CodexEngine:
         #: When set, every run of this engine is a native ``review/start``
         #: against this target instead of a prompted turn — see ``run()``.
         self.review_target = review_target
+        #: Sent as ``ThreadStartParams.threadSource`` on every NEW thread this
+        #: engine creates (never on resume — see ``app_server.py``). Lands on
+        #: disk as ``session_meta.payload.thread_source`` (verified live) —
+        #: NOT the same field as ``session_meta.payload.source``, which is
+        #: something else and unaffected by this. Every LazyBridge thread is
+        #: already identifiable without this, via ``session_meta.payload
+        #: .originator == "lazybridge"`` (unconditional, from the
+        #: ``initialize`` call — see ``app_server.py``); this field adds a
+        #: second, caller-chosen label on top, e.g. to tell two different
+        #: LazyBridge-based applications' threads apart. Pass ``None`` to
+        #: omit it.
+        self.thread_source = thread_source
         #: Free-form per-model effort string (``"low"``/``"medium"``/``"high"``
         #: on current models); the App Server advertises each model's accepted
         #: values through ``model/list``, so it is passed through unvalidated.
@@ -226,6 +239,7 @@ class CodexEngine:
             "ephemeral": not self.persist_thread,
             "review_target": self.review_target,
             "progress": progress,
+            "thread_source": self.thread_source,
         }
         if on_text is not None:
             kwargs["on_text"] = on_text
