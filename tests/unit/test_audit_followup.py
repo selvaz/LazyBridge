@@ -25,6 +25,17 @@ import warnings
 
 import pytest
 
+#: These tests import ``opentelemetry.sdk``, which ships in a *separate*
+#: distribution from the ``opentelemetry`` API namespace — and other extras
+#: (``mcp``, via ``lazybridge[claude-code]``) pull the API in on its own. A
+#: guard on the namespace alone therefore lets these run in an environment
+#: that has the API but not the SDK, which is how they started failing in CI.
+#: Short-circuits: ``find_spec("opentelemetry.sdk")`` would raise, not return
+#: ``None``, when the parent namespace is missing entirely.
+_NO_OTEL_SDK = __import__("importlib").util.find_spec("opentelemetry") is None or (
+    __import__("importlib").util.find_spec("opentelemetry.sdk") is None
+)
+
 # ---------------------------------------------------------------------------
 # P0 — provider registration thread-safety
 # ---------------------------------------------------------------------------
@@ -73,7 +84,7 @@ def test_provider_alias_registration_concurrent_no_lost_writes():
 
 
 @pytest.mark.skipif(
-    not __import__("importlib").util.find_spec("opentelemetry"),
+    _NO_OTEL_SDK,
     reason="opentelemetry-sdk not installed",
 )
 def test_otel_on_agent_end_does_not_double_close_orphans():

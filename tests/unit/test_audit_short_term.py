@@ -268,7 +268,7 @@ async def test_engine_emits_tool_error_on_malformed_args() -> None:
 
 @pytest.mark.asyncio
 async def test_otel_exporter_emits_genai_attribute_names() -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from lazybridge.ext.otel import OTelExporter
@@ -330,7 +330,7 @@ async def test_otel_exporter_emits_genai_attribute_names() -> None:
 
 @pytest.mark.asyncio
 async def test_otel_exporter_parents_children_under_agent_span() -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from lazybridge.ext.otel import OTelExporter
@@ -354,7 +354,7 @@ async def test_otel_exporter_parents_children_under_agent_span() -> None:
 
 @pytest.mark.asyncio
 async def test_otel_exporter_close_flushes_orphans() -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from lazybridge.ext.otel import OTelExporter
