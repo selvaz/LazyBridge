@@ -11,11 +11,19 @@ import warnings
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge.engines.coding import ApprovalRequest, ask_approval
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Type-only: the SDK stays an optional runtime dependency (it is imported
+    # lazily inside the methods below). Under ``ignore_missing_imports`` these
+    # degrade to ``Any`` when the extra is absent, so a checkout without
+    # ``lazybridge[claude-code]`` still type-checks — it just checks less.
+    from claude_agent_sdk import HookContext, HookInput, HookJSONOutput
+    from claude_agent_sdk import HookMatcher as SdkHookMatcher
 
 #: Set once ``CanUseToolShadowedWarning`` has been added to the process-wide
 #: warnings filter (see ``_sdk_options``). A plain flag, not a per-call
@@ -130,8 +138,8 @@ class AgentSdkClient(ClaudeSdkClient):
             return any(resolved.is_relative_to(root) for root in roots)
 
         async def confine_file_access(
-            input_data: dict[str, Any], tool_use_id: str | None, context: Any
-        ) -> dict[str, Any]:
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
             """Enforce ``file_roots`` on every file-reading call, always.
 
             This lives in a ``PreToolUse`` hook rather than in ``can_use_tool``
@@ -145,7 +153,11 @@ class AgentSdkClient(ClaudeSdkClient):
             """
             if not roots:
                 return {}
-            arguments = input_data.get("tool_input") or {}
+            # ``HookInput`` is the union of every hook event's payload, so the
+            # value reads back as ``object``. This hook is registered under a
+            # ``PreToolUse`` matcher only, where ``tool_input`` is always the
+            # tool's argument mapping.
+            arguments = cast("dict[str, Any]", input_data.get("tool_input") or {})
             path = arguments.get("file_path") or arguments.get("path") or options.cwd
             if allowed_path(path):
                 return {}
@@ -200,14 +212,14 @@ class AgentSdkClient(ClaudeSdkClient):
             return PermissionResultDeny(message=f"Tool {name!r} is not pre-approved and no approval gate allowed it")
 
         async def keep_permission_stream_open(
-            input_data: dict[str, Any], tool_use_id: str | None, context: Any
-        ) -> dict[str, Any]:
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
             return {"continue_": True}
 
         use_callback = (
             bool(options.builtin_tools) or options.approval_gate is not None or not options.preapprove_application_tools
         )
-        matchers: list[Any] = []
+        matchers: list[SdkHookMatcher] = []
         if roots:
             # Scoped to the tools that touch files — including ones this
             # profile does not grant, so a future/settings-added Edit cannot
@@ -220,7 +232,6 @@ class AgentSdkClient(ClaudeSdkClient):
             )
         if use_callback:
             matchers.append(HookMatcher(hooks=[keep_permission_stream_open]))
-        pre_tool_use_hooks = {"PreToolUse": matchers} if matchers else {}
         return ClaudeAgentOptions(
             model=options.model,
             fallback_model=options.fallback_model,
@@ -250,7 +261,10 @@ class AgentSdkClient(ClaudeSdkClient):
             # an allow rule or a permissive mode, so it must not be tied to
             # whether the callback is in play. It is scoped to the file-reading
             # tools by matcher, so other tools pay nothing for it.
-            hooks=pre_tool_use_hooks or None,
+            # Built inline so the key types as the SDK's ``HookEvent`` literal
+            # rather than a plain ``str`` (dict key types are invariant, so a
+            # pre-built ``dict[str, ...]`` would not satisfy the parameter).
+            hooks={"PreToolUse": matchers} if matchers else None,
             setting_sources=list(options.setting_sources),
             include_partial_messages=options.include_partial_messages,
             output_format=options.output_format,
