@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import claude_agent_sdk
 import pytest
 from pydantic import BaseModel
 
@@ -16,17 +15,29 @@ from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkR
 def fake_tag_session(monkeypatch):
     """Record ``tag_session`` calls instead of touching a real session file.
 
-    ``_tag_new_session`` resolves ``claude_agent_sdk.tag_session`` fresh on
-    every call (a deliberately lazy import), so patching the package
-    attribute — not anything in ``engine.py`` — is what the engine actually
-    sees.
+    ``_tag_new_session`` does ``from claude_agent_sdk import tag_session``
+    fresh on every call (a deliberately lazy import), so this installs a
+    STUB MODULE in ``sys.modules`` rather than patching a real package
+    attribute. That is deliberate: the CI ``unit tests`` job installs
+    ``.[anthropic,openai,google,test]`` and never the ``claude-code``
+    extra, so the SDK is genuinely absent there — and these tests exercise
+    the engine against fakes, so they must run anyway. (An earlier version
+    imported the SDK at module level and would have broken collection for
+    the whole file in CI: Codex review finding on 181f33e.)
     """
+    import sys
+    import types
+
     calls: list[tuple[str, str | None, str | None]] = []
 
     def fake(session_id, tag, *, directory=None):
         calls.append((session_id, tag, directory))
 
-    monkeypatch.setattr(claude_agent_sdk, "tag_session", fake)
+    module = sys.modules.get("claude_agent_sdk")
+    if module is None:
+        module = types.ModuleType("claude_agent_sdk")
+        monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(module, "tag_session", fake, raising=False)
     return calls
 
 
@@ -314,10 +325,19 @@ class TestDurableSessions:
         assert fake_tag_session == []
 
     def test_a_tagging_failure_warns_but_does_not_fail_the_run(self, monkeypatch):
+        # Same stub-module approach as the fake_tag_session fixture: works
+        # whether or not the claude-code extra is installed.
+        import sys
+        import types
+
         def broken(session_id, tag, *, directory=None):
             raise FileNotFoundError("no such session file")
 
-        monkeypatch.setattr(claude_agent_sdk, "tag_session", broken)
+        module = sys.modules.get("claude_agent_sdk")
+        if module is None:
+            module = types.ModuleType("claude_agent_sdk")
+            monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+        monkeypatch.setattr(module, "tag_session", broken, raising=False)
         sdk = _PlainSdk()
 
         with pytest.warns(UserWarning, match="could not tag session"):
