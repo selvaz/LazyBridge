@@ -22,6 +22,14 @@ import pytest
 from pydantic import BaseModel as _BaseModel
 from pydantic import ConfigDict as _ConfigDict
 
+#: See the same constant in ``test_audit_followup.py``: ``opentelemetry.sdk``
+#: is a separate distribution from the ``opentelemetry`` API namespace, and
+#: another extra can supply the API alone. Short-circuits because
+#: ``find_spec("opentelemetry.sdk")`` raises when the parent is absent.
+_NO_OTEL_SDK = __import__("importlib").util.find_spec("opentelemetry") is None or (
+    __import__("importlib").util.find_spec("opentelemetry.sdk") is None
+)
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -180,7 +188,7 @@ def test_memory_add_no_estimation_for_empty_content():
 
 
 @pytest.mark.skipif(
-    not __import__("importlib").util.find_spec("opentelemetry"),
+    _NO_OTEL_SDK,
     reason="opentelemetry-sdk not installed",
 )
 def test_otel_exporter_default_uses_batch_span_processor():
@@ -197,7 +205,7 @@ def test_otel_exporter_default_uses_batch_span_processor():
 
 
 @pytest.mark.skipif(
-    not __import__("importlib").util.find_spec("opentelemetry"),
+    _NO_OTEL_SDK,
     reason="opentelemetry-sdk not installed",
 )
 def test_otel_exporter_batch_false_uses_simple_span_processor():
@@ -221,7 +229,7 @@ def test_otel_exporter_batch_false_uses_simple_span_processor():
 
 
 @pytest.mark.skipif(
-    not __import__("importlib").util.find_spec("opentelemetry"),
+    _NO_OTEL_SDK,
     reason="opentelemetry-sdk not installed",
 )
 def test_otel_exporter_does_not_set_global_provider():

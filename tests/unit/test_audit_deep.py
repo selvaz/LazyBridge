@@ -138,7 +138,7 @@ def test_h3_plan_short_circuits_on_upstream_error() -> None:
 
 
 def test_h4_otel_exporter_has_close_and_lock() -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from lazybridge.ext.otel import OTelExporter
 
     exp = OTelExporter()
@@ -152,7 +152,7 @@ def test_h4_otel_exporter_has_close_and_lock() -> None:
 
 
 def test_h4_otel_exporter_closes_on_agent_error() -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from lazybridge.ext.otel import OTelExporter
 
     exp = OTelExporter()

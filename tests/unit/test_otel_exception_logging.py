@@ -20,7 +20,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_otel_set_status_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from lazybridge.ext.otel import OTelExporter
@@ -45,7 +45,7 @@ async def test_otel_set_status_failure_is_logged(caplog: pytest.LogCaptureFixtur
 
 @pytest.mark.asyncio
 async def test_otel_span_end_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    pytest.importorskip("opentelemetry")
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from lazybridge.ext.otel import OTelExporter
