@@ -8,17 +8,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-19
+
 ### Added
+- **`ClaudeCodePolicy(extra_tools=...)`** — extra built-in tool names appended
+  to the engine's derived set (which the Agent SDK's `tools=` option
+  receives). The engine hardcoded that list to the read-only set, so a
+  *gated* agent could never even be **asked** about a write: the model
+  simply never had the tool. `extra_tools=("Write", "Edit", "Bash")` plus an
+  `approval_gate` gives a writer agent per-call human/policy approval.
+  Granting is not pre-approving — unless a name is also in `allowed_tools`,
+  every call still routes through `can_use_tool`. Because `file_roots`
+  confinement is a hook over the *file* tools only, the engine **refuses at
+  construction** to grant an unconfinable name (`Bash`) without an
+  `approval_gate`: its only boundary is that policy.
 - **`CodexEngine(thread_source=...)`** — sent as the App Server's own
   `ThreadStartParams.threadSource` ("an optional client-supplied analytics
   source classification for this thread", verified against the generated
-  protocol schema and against a real rollout file's `session_meta.payload.source`,
-  where the interactive CLI's own threads carry values like `"vscode"`).
-  Defaults to `"lazybridge"`, so every thread a `CodexEngine` creates is
-  distinguishable on disk from interactive/desktop-app sessions — pass
-  `None` to omit it, or a caller-specific label to tell your own callers
-  apart. Creation-time only: sent on `thread/start`, never on `thread/resume`
-  (the field cannot be changed after a thread exists).
+  protocol schema). Live-verified landing on disk as
+  `session_meta.payload.thread_source` in the rollout file — a *different*
+  field from `session_meta.payload.source`, which is something else and
+  unaffected. Defaults to `"lazybridge"`. Note that every LazyBridge-created
+  Codex thread was **already** identifiable via
+  `session_meta.payload.originator == "lazybridge"` (unconditional, from the
+  `initialize` call's `clientInfo.name`); `thread_source` adds a second,
+  caller-chosen label on top — e.g. to tell two LazyBridge-based
+  applications' threads apart. Creation-time only: sent on `thread/start`,
+  never on `thread/resume` (the field cannot be changed after a thread
+  exists).
 - **`ClaudeCodeEngine(tag=...)`** — the Agent SDK has no creation-time
   equivalent of `threadSource`, but it does have a post-hoc, public tagging
   API (`claude_agent_sdk.tag_session`, appending a `{"type":"tag",...}`
