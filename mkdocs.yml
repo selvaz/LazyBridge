@@ -197,6 +197,7 @@ nav:
           - SupervisorEngine: guides/full/supervisor.md
           - Claude Code Engine: guides/full/claude-code-engine.md
           - Codex Engine: guides/full/codex-engine.md
+          - Coding agents in practice: guides/full/coding-agents.md
           - Coding-agent permissions: guides/full/coding-agent-config.md
       - Advanced:
           - Core vs Ext boundary: guides/core-vs-ext.md

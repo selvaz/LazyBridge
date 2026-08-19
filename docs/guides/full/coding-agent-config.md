@@ -109,6 +109,11 @@ Without a `Session` there is nowhere to persist a grant, so it degrades to
 |---|---|---|
 | Runtime sandbox | `file_roots`, built-in tool selection | `sandbox` |
 | Native approval mode | `permission_mode` | `approval_policy` |
+| Granting more built-ins | `extra_tools` | (n/a — the sandbox decides) |
+| Pre-approved app tools | `allowed_tools` / MCP allow rules | `preapprove_dynamic_tools` |
+| Hard denial | `disallowed_tools` | sandbox plus gate denial |
+| Human callback | `can_use_tool` | App Server approval requests and dynamic tools |
+| Ambient configuration | `setting_sources` | local Codex configuration plus thread overrides |
 
 `ClaudeCodePolicy.permission_mode` defaults to `None`, which lets the engine
 pick per run: `"dontAsk"` when nothing needs gating (application tools only,
@@ -117,7 +122,32 @@ approval gate, or `preapprove_application_tools=False`. Pin a value only when
 you want to override that; a hardcoded `"default"` would put a fully
 pre-approved, tool-only agent into prompting mode with no callback able to
 answer.
-| Pre-approved app tools | `allowed_tools` / MCP allow rules | `preapprove_dynamic_tools` |
-| Hard denial | `disallowed_tools` | sandbox plus gate denial |
-| Human callback | `can_use_tool` | App Server approval requests and dynamic tools |
-| Ambient configuration | `setting_sources` | local Codex configuration plus thread overrides |
+
+## Granting write tools to a gated agent
+
+`ClaudeCodePolicy.extra_tools` adds names to the built-in set the SDK is
+allowed to offer the model. Without it, no approval gate can ever be *asked*
+about a write — the model simply never has `Write`/`Edit`/`Bash`:
+
+```python
+config = CodingAgentConfig(
+    claude=ClaudeCodePolicy(
+        preapprove_application_tools=False,
+        extra_tools=("Write", "Edit", "Bash"),
+    ),
+    approval_gate=my_gate,
+)
+```
+
+Granting is **not** pre-approving: unless a name is also in `allowed_tools`,
+every call still routes through the gate. One asymmetry matters — `file_roots`
+confinement is enforced by a hook over the *file* tools (`Read`/`Glob`/`Grep`/
+`Edit`/`Write`/`NotebookEdit`), and `Bash` is not path-confinable that way: an
+approved command can touch anything its process can. Its only boundary is the
+gate's policy, so the engine **refuses at construction** to grant `Bash`
+without an `approval_gate` rather than advertising a confinement it cannot
+deliver.
+
+A worked, end-to-end tiered policy (allow / ask-once / ask-every-time / deny,
+with a terminal or chat approval channel) lives in
+[Coding agents in practice](coding-agents.md#privileges-a-four-tier-policy).
