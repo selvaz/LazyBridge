@@ -645,3 +645,29 @@ async def test_an_overriding_subclasss_own_TimeoutError_is_not_relabelled():
     with pytest.raises(TimeoutError) as exc:
         await run_tool_bounded(Tracciato(lambda: "x", name="t"), {}, 30.0)
     assert not isinstance(exc.value, ToolTimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_ignores_cancellation_still_frees_the_caller(monkeypatch):
+    """Cancelling is a request, not a guarantee: a coroutine can catch
+    ``CancelledError`` and carry on, or spend arbitrarily long in cleanup.
+    Awaiting that unconditionally would put the hang back exactly where the
+    deadline was supposed to remove it."""
+    import time as _t
+
+    import lazybridge.tools as moduli
+
+    monkeypatch.setattr(moduli, "CANCEL_GRACE_SECONDS", 0.2)
+
+    async def _testardo() -> str:
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            await asyncio.sleep(1.0)  # slow cleanup that outlasts the grace
+        return "tardi"
+
+    inizio = _t.perf_counter()
+    with pytest.raises(ToolTimeoutError):
+        await Tool(_testardo, name="testardo", timeout=0.1).run()
+    assert _t.perf_counter() - inizio < 0.6
+    await asyncio.sleep(1.2)  # let the abandoned task finish before the loop closes

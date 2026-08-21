@@ -74,11 +74,33 @@ def check_timeout(value: float | None, label: str) -> float | None:
     return value
 
 
+#: How long a cancelled tool task is given to unwind before it is abandoned
+#: too.  A well-behaved coroutine unwinds in microseconds; anything slower is
+#: either doing heavy cleanup or ignoring cancellation outright.
+CANCEL_GRACE_SECONDS = 1.0
+
+
 async def _stop_task(task: asyncio.Task) -> None:
-    """Cancel a tool task and wait for it to actually unwind."""
+    """Cancel a tool task and give it a BOUNDED chance to unwind.
+
+    Bounded, because cancelling does not guarantee stopping: a coroutine may
+    catch ``CancelledError`` and carry on, or spend arbitrarily long in
+    cleanup.  Awaiting that unconditionally would put the hang back exactly
+    where the deadline was supposed to remove it.  Past the grace period the
+    task is abandoned like a sync worker — left running, with its eventual
+    outcome read so it cannot resurface as an unretrieved exception.
+
+    The one case this cannot reach is a coroutine that BLOCKS the loop rather
+    than yielding — CPU-bound work or a sync call inside ``async def``, body
+    or cleanup.  Nothing else runs while it does, including the clock below.
+    That is asyncio's nature, not a gap in the bound: such work belongs in a
+    ``def`` tool, where the thread in ``_run_bounded`` handles it.
+    """
     task.cancel()
     with contextlib.suppress(BaseException):
-        await task
+        await asyncio.wait({task}, timeout=CANCEL_GRACE_SECONDS)
+    if not task.done():
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
 
 
 async def _bounded_await(coro: Any, limit: float, on_timeout: Callable[[], Exception]) -> Any:
@@ -339,6 +361,10 @@ class Tool:
         def _worker() -> None:
             try:
                 esito = self.func(**kwargs)
+            # BaseException deliberately: whatever the tool raises has to reach
+            # the awaiting future.  Catching only Exception would let a
+            # SystemExit die with this thread, leaving the caller to wait out
+            # its whole timeout for an answer that is never coming.
             except BaseException as exc:
                 _settle(future.set_exception, exc)
             else:
