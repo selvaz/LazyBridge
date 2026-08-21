@@ -655,9 +655,7 @@ async def test_a_tool_that_ignores_cancellation_still_frees_the_caller(monkeypat
     deadline was supposed to remove it."""
     import time as _t
 
-    import lazybridge.tools as moduli
-
-    monkeypatch.setattr(moduli, "CANCEL_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr("lazybridge.tools.CANCEL_GRACE_SECONDS", 0.2)
 
     async def _testardo() -> str:
         try:
