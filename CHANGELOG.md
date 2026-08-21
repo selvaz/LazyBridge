@@ -45,12 +45,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `ToolTimeoutError`/`TOOL_TIMEOUT` and inviting the wrong recovery. The
   tool task is cancelled and awaited both when the bound expires and when the
   caller is cancelled from outside.
-- **Cancellation cleanup is bounded too** (`CANCEL_GRACE_SECONDS`, 1.0s).
+- **Cancellation cleanup is bounded too** (`Tool.cancel_grace_seconds`, 1.0s).
   Cancelling is a request, not a guarantee: a coroutine can catch
   `CancelledError` and carry on, or spend arbitrarily long in cleanup, and
   awaiting that unconditionally put the hang back exactly where the deadline
   was meant to remove it. Past the grace period the task is abandoned like a
-  sync worker.
+  sync worker, and the sync bridge no longer gathers a task already abandoned
+  — draining it would have handed a `run_sync()` caller back the very hang
+  its `timeout=` had just spared it.
 - **`ToolTimeoutError` moved** from `lazybridge.engines.llm` to
   `lazybridge.tools` — it is no longer specific to `LLMEngine`. The top-level
   `lazybridge.ToolTimeoutError` import is unchanged; it now carries

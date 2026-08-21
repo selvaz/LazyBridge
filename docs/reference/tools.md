@@ -34,8 +34,8 @@ its own deadline (`requests.get(..., timeout=)`) or run it in a subprocess.
 
 An **async** tool is cancelled rather than abandoned, but cancelling is a
 request and not a guarantee: a coroutine may catch `CancelledError` and carry
-on, or spend a long time in cleanup. It gets `CANCEL_GRACE_SECONDS` (1.0) to
-unwind, after which it too is abandoned.
+on, or spend a long time in cleanup. It gets `Tool.cancel_grace_seconds`
+(1.0) to unwind, after which it too is abandoned.
 
 One case no deadline can reach: a coroutine that blocks the event loop —
 CPU-bound work or a synchronous call inside `async def`, whether in the body
