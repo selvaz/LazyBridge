@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge._asyncbridge import run_coroutine_blocking
 from lazybridge.envelope import Envelope
-from lazybridge.tools import Tool, ToolProvider, build_tool_map
+from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
@@ -147,6 +147,12 @@ class Agent:
         max_output_retries: int = 2,
         # Total deadline (seconds) for ``run()``.  ``None`` disables.
         timeout: float | None = None,
+        # Per-tool deadline (seconds), applied to every tool that does not
+        # set its own ``Tool(timeout=...)``.  Needed independently of
+        # ``timeout``: a synchronous tool blocks the event loop's executor,
+        # and the agent's own deadline can only fire at an await point that
+        # then never arrives.  See ``Tool._run_bounded``.
+        tool_timeout: float | None = None,
         # Provider retry/backoff — forwarded to LLMEngine when the engine
         # is auto-created from a model string.  Ignored when ``engine=``
         # is supplied explicitly (configure on ``LLMEngine`` directly).
@@ -261,7 +267,8 @@ class Agent:
                     f'    agent.as_tool("research")\n'
                     f'    tool(agent, name="research")'
                 )
-        self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw)
+        self.tool_timeout = check_timeout(tool_timeout, "Agent(tool_timeout=)")
+        self._tool_map: dict[str, Tool] = build_tool_map(self._tools_raw, default_timeout=tool_timeout)
         self.output = output
         self.output_validator = output_validator
         self.max_output_retries = max_output_retries
@@ -1003,6 +1010,7 @@ class Agent:
             session=self.session,
             verbose=self._verbose,
             timeout=self.timeout,
+            tool_timeout=self.tool_timeout,
             output_validator=self.output_validator,
             max_output_retries=self.max_output_retries,
             fallback=self.fallback,

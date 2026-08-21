@@ -261,3 +261,387 @@ async def test_genuine_exception_still_emits_tool_error():
     timeout = sess.events.query(event_type=EventType.TOOL_TIMEOUT)
     assert len(err) == 1
     assert len(timeout) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tool-level bound: the only one that works for a BLOCKING synchronous tool
+# ---------------------------------------------------------------------------
+#
+# ``LLMEngine.tool_timeout`` above wraps ``tool.run()`` in ``wait_for``.  That
+# bounds an async tool, but a sync tool runs in the loop's executor and an
+# executor future that has already started ignores cancellation — ``wait_for``
+# then waits for a cancellation that never lands.  Measured before the fix: an
+# ``Agent(timeout=8)`` around a blocking ``web_search`` was still going two
+# minutes later.  ``Tool(timeout=)`` abandons the call instead.
+
+
+def _blocca(seconds: float = 2.0) -> str:
+    """Long enough to blow any bound below, short enough that the abandoned
+    workers these tests leave behind drain before the rest of the suite runs:
+    a thread still sleeping is real load, and a neighbouring test that budgets
+    two seconds for a subprocess will miss it."""
+    import time
+
+    time.sleep(seconds)
+    return "mai"
+
+
+@pytest.mark.asyncio
+async def test_sync_tool_timeout_returns_instead_of_blocking():
+    t = Tool(_blocca, name="blocca", timeout=0.2)
+    inizio = asyncio.get_running_loop().time()
+    with pytest.raises(ToolTimeoutError) as exc:
+        await t.run(seconds=2.0)
+    assert asyncio.get_running_loop().time() - inizio < 5.0
+    assert exc.value.tool_name == "blocca"
+    assert exc.value.timeout == 0.2
+
+
+@pytest.mark.asyncio
+async def test_sync_tool_timeout_leaves_the_loop_running():
+    """The abandoned worker must not be holding the event loop hostage:
+    other coroutines have to keep making progress while it runs on."""
+    tick = 0
+
+    async def _battito() -> None:
+        nonlocal tick
+        for _ in range(10):
+            await asyncio.sleep(0.02)
+            tick += 1
+
+    battito = asyncio.create_task(_battito())
+    with pytest.raises(ToolTimeoutError):
+        await Tool(_blocca, name="blocca", timeout=0.2).run(seconds=2.0)
+    await battito
+    assert tick == 10
+
+
+@pytest.mark.asyncio
+async def test_sync_tool_under_its_timeout_returns_normally():
+    t = Tool(lambda seconds=0.0: "fatto", name="rapido", timeout=5.0)
+    assert await t.run(seconds=0.0) == "fatto"
+
+
+@pytest.mark.asyncio
+async def test_sync_tool_exception_survives_the_thread_hop():
+    def _rompe() -> str:
+        raise ValueError("dal thread")
+
+    with pytest.raises(ValueError, match="dal thread"):
+        await Tool(_rompe, name="rompe", timeout=5.0).run()
+
+
+@pytest.mark.asyncio
+async def test_async_tool_honours_its_own_timeout():
+    async def _lento() -> str:
+        await asyncio.sleep(2)
+        return "mai"
+
+    with pytest.raises(ToolTimeoutError):
+        await Tool(_lento, name="lento", timeout=0.1).run()
+
+
+@pytest.mark.asyncio
+async def test_no_timeout_means_no_bound():
+    t = Tool(lambda: "fatto", name="libero")
+    assert t.timeout is None
+    assert await t.run() == "fatto"
+
+
+# ---------------------------------------------------------------------------
+# Agent(tool_timeout=) as the default for tools that declare nothing
+# ---------------------------------------------------------------------------
+
+
+def _agente(**kwargs):
+    from lazybridge import Agent
+
+    class _Engine:
+        async def run(self, *a, **k):  # pragma: no cover - never invoked
+            raise NotImplementedError
+
+    return Agent(engine=_Engine(), name="prova", **kwargs)
+
+
+def test_agent_tool_timeout_reaches_a_tool_that_declares_none():
+    agente = _agente(tools=[Tool(lambda: "x", name="a")], tool_timeout=7.0)
+    assert agente._tool_map["a"].timeout == 7.0
+
+
+def test_a_tools_own_timeout_beats_the_agent_default():
+    agente = _agente(tools=[Tool(lambda: "x", name="a", timeout=1.0)], tool_timeout=7.0)
+    assert agente._tool_map["a"].timeout == 1.0
+
+
+def test_agent_default_does_not_mutate_a_shared_tool():
+    """The same Tool object is routinely handed to several agents; the first
+    one's default must not become the tool's own."""
+    condiviso = Tool(lambda: "x", name="a")
+    primo = _agente(tools=[condiviso], tool_timeout=7.0)
+    secondo = _agente(tools=[condiviso])
+    assert primo._tool_map["a"].timeout == 7.0
+    assert condiviso.timeout is None
+    assert secondo._tool_map["a"].timeout is None
+
+
+def test_wrap_can_add_or_override_a_bound():
+    base = Tool(lambda: "x", name="a", timeout=1.0)
+    assert Tool.wrap(base, timeout=9.0).timeout == 9.0
+    assert Tool.wrap(base).timeout == 1.0
+    assert Tool.wrap(lambda: "x", name="b", timeout=9.0).timeout == 9.0
+
+
+# ---------------------------------------------------------------------------
+# Bounds that were quietly skipped — found by review, each one a real hole
+# ---------------------------------------------------------------------------
+
+
+def test_run_sync_honours_the_bound_too():
+    """A sync caller must not be able to outlast a deadline the async one
+    respects: ``run_sync`` is the REPL / SupervisorEngine entry point."""
+    import time as _t
+
+    t = Tool(_blocca, name="blocca", timeout=0.2)
+    inizio = _t.perf_counter()
+    with pytest.raises(ToolTimeoutError):
+        t.run_sync(seconds=2.0)
+    assert _t.perf_counter() - inizio < 5.0
+
+
+def test_run_sync_without_a_bound_is_unchanged():
+    assert Tool(lambda: "fatto", name="libero").run_sync() == "fatto"
+
+
+@pytest.mark.asyncio
+async def test_wrap_bounds_an_agent_used_as_a_tool():
+    from lazybridge import MockAgent
+
+    sub = MockAgent("risposta", name="sub", delay_ms=2000)
+    t = Tool.wrap(sub, name="sub", timeout=0.2)
+    assert t.timeout == 0.2
+    with pytest.raises(ToolTimeoutError):
+        await t.run(task="qualcosa")
+    # the alias is bounded, the agent everywhere else is not
+    assert Tool.wrap(sub, name="altro").timeout is None
+
+
+@pytest.mark.parametrize("valore", [0, -1, -0.5])
+def test_a_deadline_that_can_never_be_met_is_rejected(valore):
+    """Zero would fire on every call while a side-effecting tool ran on
+    regardless — a configuration error, not a runtime one."""
+    with pytest.raises(ValueError, match="must be > 0 or None"):
+        Tool(lambda: "x", name="a", timeout=valore)
+    with pytest.raises(ValueError, match="must be > 0 or None"):
+        _agente(tools=[Tool(lambda: "x", name="a")], tool_timeout=valore)
+    with pytest.raises(ValueError, match="must be > 0 or None"):
+        Tool.from_schema("a", "d", {"type": "object"}, lambda: "x", timeout=valore)
+
+
+# ---------------------------------------------------------------------------
+# What "timed out" must NOT be confused with
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_tools_own_TimeoutError_is_not_reported_as_our_timeout():
+    """An HTTP client reporting its own deadline is a tool failure.  Relabelling
+    it ``ToolTimeoutError`` would tell the model to retry smaller when the real
+    answer is that the endpoint is down."""
+
+    async def _client() -> str:
+        raise TimeoutError("read timed out")
+
+    with pytest.raises(TimeoutError) as exc:
+        await Tool(_client, name="client", timeout=30).run()
+    assert not isinstance(exc.value, ToolTimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_an_async_tool_that_times_out_is_cancelled_not_abandoned():
+    """Only the sync path has to abandon: a coroutine takes cancellation."""
+    cancellato = False
+
+    async def _lento() -> str:
+        nonlocal cancellato
+        try:
+            await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            cancellato = True
+            raise
+        return "mai"
+
+    with pytest.raises(ToolTimeoutError):
+        await Tool(_lento, name="lento", timeout=0.1).run()
+    assert cancellato
+
+
+@pytest.mark.asyncio
+async def test_a_late_failure_from_an_abandoned_worker_is_observed():
+    """Nobody is left holding the exception: an abandoned worker that raises
+    must not reach the loop's exception handler as "never retrieved", detached
+    from the run that caused it and looking like a framework bug."""
+    import gc
+    import time as _t
+
+    def _fallisce_tardi() -> str:
+        _t.sleep(0.3)
+        raise ValueError("tardi")
+
+    visti: list[dict] = []
+    loop = asyncio.get_running_loop()
+    originale = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, ctx: visti.append(ctx))
+    try:
+        with pytest.raises(ToolTimeoutError):
+            await Tool(_fallisce_tardi, name="tardi", timeout=0.1).run()
+        await asyncio.sleep(0.6)  # let the abandoned worker land its failure
+        gc.collect()  # the warning fires from Future.__del__
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(originale)
+    assert not [c for c in visti if "never retrieved" in str(c.get("message", ""))], visti
+
+
+@pytest.mark.asyncio
+async def test_abandoned_workers_do_not_pile_up_silently():
+    """Each caller gets its timely timeout, which is what makes the leak
+    invisible — the run looks healthy while the process fills up."""
+    from lazybridge.tools import _abbandonati
+
+    t = Tool(_blocca, name="blocca", timeout=0.05)
+    t.abandoned_worker_warning_threshold = 3
+    # A diagnostic counter, and every other test in this file leaves workers
+    # in it — count from zero rather than inherit an order-dependent baseline.
+    _abbandonati.clear()
+    for _ in range(2):
+        with pytest.raises(ToolTimeoutError):
+            await t.run(seconds=2.0)
+    assert len(_abbandonati) == 2
+
+    with pytest.warns(UserWarning, match="abandoned tool workers"), pytest.raises(ToolTimeoutError):
+        await t.run(seconds=2.0)
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_finished_is_not_counted_as_abandoned():
+    """Pruning is what keeps the warning honest: a slow-but-finishing tool
+    must not accumulate toward it."""
+    import time as _t
+
+    from lazybridge.tools import _abbandonati
+
+    def _quasi() -> str:
+        _t.sleep(0.15)
+        return "fatto"
+
+    t = Tool(_quasi, name="quasi", timeout=0.05)
+    with pytest.raises(ToolTimeoutError):
+        await t.run()
+    await asyncio.sleep(0.4)
+    prima = len(_abbandonati)
+    with pytest.raises(ToolTimeoutError):
+        await t.run()
+    # the earlier worker has returned; only the new one is outstanding
+    assert len(_abbandonati) <= prima + 1
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_caller_cancels_the_async_tool_too():
+    """``Agent(timeout=1)`` firing inside a longer ``Tool(timeout=30)`` must
+    not leave the tool running and free to land its side effect afterwards."""
+    effetto = []
+    cancellato = False
+
+    async def _lento() -> str:
+        nonlocal cancellato
+        try:
+            await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            cancellato = True
+            raise
+        effetto.append("side effect")
+        return "mai"
+
+    chiamata = asyncio.create_task(Tool(_lento, name="lento", timeout=30).run())
+    await asyncio.sleep(0.05)
+    chiamata.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await chiamata
+    assert cancellato
+    await asyncio.sleep(2.2)
+    assert effetto == []
+
+
+@pytest.mark.asyncio
+async def test_a_worker_abandoned_by_cancellation_is_counted_too():
+    """An outer bound shorter than the tool's own cancels here on EVERY call,
+    so this is the likelier of the two ways to leak a thread."""
+    from lazybridge.tools import _abbandonati
+
+    _abbandonati.clear()
+    chiamata = asyncio.create_task(Tool(_blocca, name="blocca", timeout=30).run(seconds=2.0))
+    await asyncio.sleep(0.05)
+    chiamata.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await chiamata
+    assert len(_abbandonati) == 1
+
+
+def test_adding_a_bound_keeps_an_explicit_schema():
+    """A deadline says nothing about a tool's shape.  Rebuilding the Tool to
+    attach one would regenerate the schema from the callable — and an imported
+    tool's callable is often ``**kwargs``, so the model would be shown a tool
+    with no parameters."""
+    schema = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+    base = Tool.from_schema("cerca", "Cerca.", schema, lambda **kw: "x")
+    limitato = Tool.wrap(base, timeout=5.0)
+    assert limitato.timeout == 5.0
+    assert limitato.definition().parameters == schema
+    assert base.timeout is None
+
+
+def test_the_lowercase_alias_forwards_the_bound():
+    from lazybridge import tool as tool_factory
+
+    assert tool_factory(lambda: "x", name="a", timeout=3.0).timeout == 3.0
+
+
+@pytest.mark.asyncio
+async def test_a_subclass_that_overrides_run_still_goes_through_its_override():
+    """Bounding a call must not reach past an override into the base dispatch:
+    a subclass overrides ``run`` precisely to add something — authorization,
+    tracing — that skipping it would silently drop."""
+    from lazybridge.tools import run_tool_bounded
+
+    passaggi = []
+
+    class Tracciato(Tool):
+        async def run(self, **kwargs):
+            passaggi.append(kwargs)
+            return await super().run(**kwargs)
+
+    t = Tracciato(lambda q="": f"ok:{q}", name="tracciato")
+    assert await run_tool_bounded(t, {"q": "x"}, 5.0) == "ok:x"
+    assert passaggi == [{"q": "x"}]
+
+
+def test_build_tool_map_rejects_a_deadline_that_can_never_be_met():
+    from lazybridge.tools import build_tool_map
+
+    with pytest.raises(ValueError, match="must be > 0 or None"):
+        build_tool_map([Tool(lambda: "x", name="a")], default_timeout=0)
+
+
+@pytest.mark.asyncio
+async def test_an_overriding_subclasss_own_TimeoutError_is_not_relabelled():
+    """The fallback path must draw the same distinction as the base one:
+    a client's own deadline is a tool failure, not our bound expiring."""
+    from lazybridge.tools import run_tool_bounded
+
+    class Tracciato(Tool):
+        async def run(self, **kwargs):
+            raise TimeoutError("read timed out")
+
+    with pytest.raises(TimeoutError) as exc:
+        await run_tool_bounded(Tracciato(lambda: "x", name="t"), {}, 30.0)
+    assert not isinstance(exc.value, ToolTimeoutError)

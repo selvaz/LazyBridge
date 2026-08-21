@@ -147,7 +147,7 @@ from lazybridge.engines.coding import (
     CodingAgentConfig,
     TerminalApprovalGate,
 )
-from lazybridge.engines.llm import LLMEngine, StreamStallError, ToolTimeoutError
+from lazybridge.engines.llm import LLMEngine, StreamStallError
 from lazybridge.engines.plan import (
     ConcurrentPlanRunError,
     Plan,
@@ -186,7 +186,7 @@ from lazybridge.session import EventLog, EventType, Session
 from lazybridge.signals import ConcludeSignal, conclude
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
-from lazybridge.tools import Tool, ToolProvider, tool
+from lazybridge.tools import Tool, ToolProvider, ToolTimeoutError, tool
 
 __all__ = [
     # Primary API
