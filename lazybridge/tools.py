@@ -112,11 +112,16 @@ async def _stop_task(task: asyncio.Task, grace: float) -> None:
     task is abandoned like a sync worker — left running, with its eventual
     outcome read so it cannot resurface as an unretrieved exception.
 
-    The one case this cannot reach is a coroutine that BLOCKS the loop rather
-    than yielding — CPU-bound work or a sync call inside ``async def``, body
-    or cleanup.  Nothing else runs while it does, including the clock below.
-    That is asyncio's nature, not a gap in the bound: such work belongs in a
-    ``def`` tool, where the thread in ``_run_bounded`` handles it.
+    Two things this cannot reach, both asyncio's nature rather than gaps in
+    the bound.  A coroutine that BLOCKS the loop instead of yielding — CPU
+    work or a sync call inside ``async def``, body or cleanup — stops
+    everything while it runs, including the clock below; such work belongs in
+    a ``def`` tool, where the thread in ``_run_bounded`` handles it.  And a
+    task abandoned on a loop we do not own still delays that loop's shutdown:
+    ``asyncio.run`` gathers every pending task on the way out.  Our own
+    bridge is taught to skip these (``_asyncbridge.abandoned_tasks``), so
+    ``run_sync`` returns on time; a caller awaiting inside their own
+    ``asyncio.run`` gets the exception on time but may wait at exit.
     """
     task.cancel()
     # Attached before the wait, not only after it: cleanup that raises INSIDE

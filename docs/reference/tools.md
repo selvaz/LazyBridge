@@ -45,6 +45,13 @@ the fix is to keep blocking work out of `async def` (declare the tool `def`
 and let `Tool(timeout=)` put it on its own thread, or use
 `run_in_executor`).
 
+The bound is on the **call**, not on process exit. An abandoned task still
+belongs to its event loop, and `asyncio.run` cancels *and gathers* every
+pending task on the way out — so an async tool that swallows `CancelledError`
+outright can delay shutdown even though the call itself returned on time.
+`run_sync()` is unaffected: LazyBridge owns that loop and skips draining what
+it has already abandoned.
+
 ::: lazybridge.Tool
 
 ::: lazybridge.tool
