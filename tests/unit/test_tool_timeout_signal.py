@@ -506,17 +506,17 @@ async def test_a_late_failure_from_an_abandoned_worker_is_observed():
 async def test_abandoned_workers_do_not_pile_up_silently():
     """Each caller gets its timely timeout, which is what makes the leak
     invisible — the run looks healthy while the process fills up."""
-    from lazybridge.tools import _abbandonati
+    from lazybridge.tools import _abandoned
 
     t = Tool(_blocca, name="blocca", timeout=0.05)
     t.abandoned_worker_warning_threshold = 3
     # A diagnostic counter, and every other test in this file leaves workers
     # in it — count from zero rather than inherit an order-dependent baseline.
-    _abbandonati.clear()
+    _abandoned.clear()
     for _ in range(2):
         with pytest.raises(ToolTimeoutError):
             await t.run(seconds=2.0)
-    assert len(_abbandonati) == 2
+    assert len(_abandoned) == 2
 
     with pytest.warns(UserWarning, match="abandoned tool workers"), pytest.raises(ToolTimeoutError):
         await t.run(seconds=2.0)
@@ -528,7 +528,7 @@ async def test_a_worker_that_finished_is_not_counted_as_abandoned():
     must not accumulate toward it."""
     import time as _t
 
-    from lazybridge.tools import _abbandonati
+    from lazybridge.tools import _abandoned
 
     def _quasi() -> str:
         _t.sleep(0.15)
@@ -538,11 +538,11 @@ async def test_a_worker_that_finished_is_not_counted_as_abandoned():
     with pytest.raises(ToolTimeoutError):
         await t.run()
     await asyncio.sleep(0.4)
-    prima = len(_abbandonati)
+    prima = len(_abandoned)
     with pytest.raises(ToolTimeoutError):
         await t.run()
     # the earlier worker has returned; only the new one is outstanding
-    assert len(_abbandonati) <= prima + 1
+    assert len(_abandoned) <= prima + 1
 
 
 @pytest.mark.asyncio
@@ -576,15 +576,15 @@ async def test_cancelling_the_caller_cancels_the_async_tool_too():
 async def test_a_worker_abandoned_by_cancellation_is_counted_too():
     """An outer bound shorter than the tool's own cancels here on EVERY call,
     so this is the likelier of the two ways to leak a thread."""
-    from lazybridge.tools import _abbandonati
+    from lazybridge.tools import _abandoned
 
-    _abbandonati.clear()
+    _abandoned.clear()
     chiamata = asyncio.create_task(Tool(_blocca, name="blocca", timeout=30).run(seconds=2.0))
     await asyncio.sleep(0.05)
     chiamata.cancel()
     with pytest.raises(asyncio.CancelledError):
         await chiamata
-    assert len(_abbandonati) == 1
+    assert len(_abandoned) == 1
 
 
 def test_adding_a_bound_keeps_an_explicit_schema():
@@ -645,3 +645,75 @@ async def test_an_overriding_subclasss_own_TimeoutError_is_not_relabelled():
     with pytest.raises(TimeoutError) as exc:
         await run_tool_bounded(Tracciato(lambda: "x", name="t"), {}, 30.0)
     assert not isinstance(exc.value, ToolTimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_ignores_cancellation_still_frees_the_caller():
+    """Cancelling is a request, not a guarantee: a coroutine can catch
+    ``CancelledError`` and carry on, or spend arbitrarily long in cleanup.
+    Awaiting that unconditionally would put the hang back exactly where the
+    deadline was supposed to remove it."""
+    import time as _t
+
+    async def _testardo() -> str:
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            await asyncio.sleep(1.0)  # slow cleanup that outlasts the grace
+        return "tardi"
+
+    testardo = Tool(_testardo, name="testardo", timeout=0.1)
+    testardo.cancel_grace_seconds = 0.2
+    inizio = _t.perf_counter()
+    with pytest.raises(ToolTimeoutError):
+        await testardo.run()
+    assert _t.perf_counter() - inizio < 0.6
+    await asyncio.sleep(1.2)  # let the abandoned task finish before the loop closes
+
+
+def test_run_sync_returns_even_when_the_tool_refuses_to_stop():
+    """The sync bridge drains the loop before returning, and gathering a task
+    that swallows cancellation would hand the caller back the very hang its
+    ``timeout=`` had just spared it."""
+    import time as _t
+
+    async def _immortale() -> str:
+        while True:
+            try:
+                await asyncio.sleep(0.05)
+            except asyncio.CancelledError:
+                pass  # refuses to stop, on purpose
+
+    immortale = Tool(_immortale, name="immortale", timeout=0.1)
+    immortale.cancel_grace_seconds = 0.2
+    inizio = _t.perf_counter()
+    with pytest.raises(ToolTimeoutError):
+        immortale.run_sync()
+    assert _t.perf_counter() - inizio < 3.0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_that_raises_inside_the_grace_is_still_observed():
+    """Done-with-an-exception is not the same as still-running: the task never
+    reaches the abandoned branch, so the callback has to be attached first."""
+    visti: list[dict] = []
+    loop = asyncio.get_running_loop()
+    originale = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, ctx: visti.append(ctx))
+
+    async def _crolla_pulendo() -> str:
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            raise ValueError("cleanup fallita") from None
+
+    try:
+        with pytest.raises(ToolTimeoutError):
+            await Tool(_crolla_pulendo, name="crolla", timeout=0.1).run()
+        import gc
+
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(originale)
+    assert not [c for c in visti if "never retrieved" in str(c.get("message", ""))], visti

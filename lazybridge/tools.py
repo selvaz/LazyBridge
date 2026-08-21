@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from lazybridge.envelope import Envelope
 
-from lazybridge._asyncbridge import run_coroutine_blocking
+from lazybridge._asyncbridge import abandoned_tasks, run_coroutine_blocking
 from lazybridge.core.tool_schema import ToolSchemaBuilder, ToolSchemaMode
 from lazybridge.core.types import ToolDefinition
 
@@ -35,10 +35,38 @@ class ToolProvider(Protocol):
     def as_tools(self) -> list[Tool]: ...
 
 
-#: Workers still running after the caller gave up on them.  A ``set`` of live
-#: threads: each worker drops itself on the way out, so the size is the number
-#: currently outstanding, not a running total.  Read by ``Tool._abandon``.
-_abbandonati: set[threading.Thread] = set()
+class _AbandonedWorkers:
+    """Census of workers still running after their caller gave up on them.
+
+    Process-wide on purpose: what matters operationally is how many threads
+    this process is leaking, not how many any single Tool leaked.
+    """
+
+    def __init__(self) -> None:
+        self._live: set[threading.Thread] = set()
+
+    def record(self, worker: threading.Thread) -> int:
+        """Register ``worker``; return how many abandoned workers still run.
+
+        Pruning belongs here, not in the worker itself: one that finished in
+        the instant between its deadline expiring and being recorded would
+        drop itself before it was ever added, then sit in the set as a dead
+        thread inflating the count forever.
+        """
+        self._live.add(worker)
+        for finished in tuple(self._live):
+            if not finished.is_alive():
+                self._live.discard(finished)
+        return len(self._live)
+
+    def __len__(self) -> int:
+        return len(self._live)
+
+    def clear(self) -> None:
+        self._live.clear()
+
+
+_abandoned = _AbandonedWorkers()
 
 #: Sentinel distinguishing "caller omitted strict=" from "caller passed strict=False".
 #: Needed so ``Tool.wrap(base, strict=False)`` can override a base with ``strict=True``.
@@ -74,14 +102,39 @@ def check_timeout(value: float | None, label: str) -> float | None:
     return value
 
 
-async def _stop_task(task: asyncio.Task) -> None:
-    """Cancel a tool task and wait for it to actually unwind."""
+async def _stop_task(task: asyncio.Task, grace: float) -> None:
+    """Cancel a tool task and give it a BOUNDED chance to unwind.
+
+    Bounded, because cancelling does not guarantee stopping: a coroutine may
+    catch ``CancelledError`` and carry on, or spend arbitrarily long in
+    cleanup.  Awaiting that unconditionally would put the hang back exactly
+    where the deadline was supposed to remove it.  Past the grace period the
+    task is abandoned like a sync worker — left running, with its eventual
+    outcome read so it cannot resurface as an unretrieved exception.
+
+    Two things this cannot reach, both asyncio's nature rather than gaps in
+    the bound.  A coroutine that BLOCKS the loop instead of yielding — CPU
+    work or a sync call inside ``async def``, body or cleanup — stops
+    everything while it runs, including the clock below; such work belongs in
+    a ``def`` tool, where the thread in ``_run_bounded`` handles it.  And a
+    task abandoned on a loop we do not own still delays that loop's shutdown:
+    ``asyncio.run`` gathers every pending task on the way out.  Our own
+    bridge is taught to skip these (``_asyncbridge.abandoned_tasks``), so
+    ``run_sync`` returns on time; a caller awaiting inside their own
+    ``asyncio.run`` gets the exception on time but may wait at exit.
+    """
     task.cancel()
+    # Attached before the wait, not only after it: cleanup that raises INSIDE
+    # the grace period leaves the task done with an exception nobody read,
+    # which asyncio reports much later and out of context.
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
     with contextlib.suppress(BaseException):
-        await task
+        await asyncio.wait({task}, timeout=grace)
+    if not task.done():
+        abandoned_tasks.add(task)
 
 
-async def _bounded_await(coro: Any, limit: float, on_timeout: Callable[[], Exception]) -> Any:
+async def _bounded_await(coro: Any, limit: float, on_timeout: Callable[[], Exception], *, grace: float) -> Any:
     """Await ``coro`` under ``limit``, telling the two timeouts apart.
 
     ``wait_for`` cannot: it raises ``TimeoutError`` for its own deadline and
@@ -99,10 +152,10 @@ async def _bounded_await(coro: Any, limit: float, on_timeout: Callable[[], Excep
         # from outside (an ``Agent(timeout=)`` firing inside a longer tool
         # bound) would otherwise leave the tool running and free to complete
         # its side effect afterwards.
-        await _stop_task(task)
+        await _stop_task(task, grace)
         raise
     if not done:
-        await _stop_task(task)
+        await _stop_task(task, grace)
         raise on_timeout()
     return task.result()
 
@@ -133,6 +186,7 @@ async def run_tool_bounded(tool: Any, arguments: dict[str, Any], timeout: float 
         tool.run(**arguments),
         limit,
         lambda: ToolTimeoutError(f"Tool {tool.name!r} timed out after {limit}s", tool_name=tool.name, timeout=limit),
+        grace=getattr(tool, "cancel_grace_seconds", Tool.cancel_grace_seconds),
     )
 
 
@@ -151,6 +205,11 @@ class Tool:
     #: Class-level so instances built via ``from_schema`` (``__new__``)
     #: inherit it; set ``tool.validate_args = False`` to opt out.
     validate_args: bool = True
+
+    #: How long a cancelled async tool is given to unwind before it is
+    #: abandoned too.  A well-behaved coroutine unwinds in microseconds;
+    #: anything slower is doing heavy cleanup or ignoring cancellation.
+    cancel_grace_seconds: float = 1.0
 
     #: How many abandoned workers may pile up before ``_abandon`` warns.
     #: A handful is ordinary — one slow call per turn, each finishing later.
@@ -294,7 +353,9 @@ class Tool:
             coro = self.func(**kwargs)
             if timeout is None:
                 return await coro
-            return await _bounded_await(coro, timeout, lambda: self._timeout_error(timeout))
+            return await _bounded_await(
+                coro, timeout, lambda: self._timeout_error(timeout), grace=self.cancel_grace_seconds
+            )
         # ``asyncio.get_event_loop`` is deprecated in 3.10+ and errors on
         # 3.13+ when no loop is running.  ``run`` is always called from an
         # already-running coroutine, so ``get_running_loop`` is the right
@@ -339,6 +400,10 @@ class Tool:
         def _worker() -> None:
             try:
                 esito = self.func(**kwargs)
+            # BaseException deliberately: whatever the tool raises has to reach
+            # the awaiting future.  Catching only Exception would let a
+            # SystemExit die with this thread, leaving the caller to wait out
+            # its whole timeout for an answer that is never coming.
             except BaseException as exc:
                 _settle(future.set_exception, exc)
             else:
@@ -384,19 +449,12 @@ class Tool:
         run looks healthy while the process fills up.  Warn rather than
         refuse, because the retry may well be the thing that recovers.
         """
-        _abbandonati.add(worker)
-        # Prune here rather than from the worker itself: a worker that
-        # finished in the instant between the wait expiring and this call
-        # would drop itself before being added, and stay in the set as a
-        # dead thread inflating the count forever.
-        for vecchio in tuple(_abbandonati):
-            if not vecchio.is_alive():
-                _abbandonati.discard(vecchio)
-        if len(_abbandonati) >= self.abandoned_worker_warning_threshold:
+        live = _abandoned.record(worker)
+        if live >= self.abandoned_worker_warning_threshold:
             import warnings
 
             warnings.warn(
-                f"{len(_abbandonati)} abandoned tool workers are still running "
+                f"{live} abandoned tool workers are still running "
                 f"(latest: {self.name!r}).  A tool that times out on every call "
                 f"leaks one thread per attempt — give the underlying call its own "
                 f"deadline, or stop retrying it.",

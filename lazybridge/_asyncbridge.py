@@ -32,10 +32,18 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextvars
+import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+
+#: Tasks whose caller has deliberately given up on them — see
+#: ``lazybridge.tools._stop_task``.  Shutdown cancels them like any other, but
+#: must not WAIT for them: they were abandoned precisely because cancelling
+#: did not stop them, and gathering them would hand the synchronous caller
+#: back the very hang its ``timeout=`` had just spared it.
+abandoned_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
 
 
 def _suppress_loop_closed(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
@@ -49,6 +57,10 @@ def _suppress_loop_closed(loop: asyncio.AbstractEventLoop, context: dict[str, An
     """
     exc = context.get("exception")
     if isinstance(exc, RuntimeError) and str(exc) == "Event loop is closed":
+        return
+    # "Task was destroyed but it is pending" is the expected epitaph of a task
+    # we chose to abandon, not a defect worth a traceback.
+    if context.get("task") in abandoned_tasks:
         return
     loop.default_exception_handler(context)
 
@@ -76,7 +88,11 @@ def _run_on_new_loop(coro: Awaitable[T]) -> T:
             if pending:
                 for task in pending:
                     task.cancel()
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                # Everything is cancelled, but only what was not already
+                # abandoned is waited for: see ``abandoned_tasks``.
+                draining = [task for task in pending if task not in abandoned_tasks]
+                if draining:
+                    loop.run_until_complete(asyncio.gather(*draining, return_exceptions=True))
             # Mirror asyncio.run()'s finally block: flush async generators and
             # the default thread-pool executor before the loop is torn down.
             loop.run_until_complete(loop.shutdown_asyncgens())

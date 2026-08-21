@@ -32,6 +32,26 @@ discarded. Anything with a side effect may therefore still complete after
 the timeout — for work that must actually stop, give the underlying library
 its own deadline (`requests.get(..., timeout=)`) or run it in a subprocess.
 
+An **async** tool is cancelled rather than abandoned, but cancelling is a
+request and not a guarantee: a coroutine may catch `CancelledError` and carry
+on, or spend a long time in cleanup. It gets `Tool.cancel_grace_seconds`
+(1.0) to unwind, after which it too is abandoned.
+
+One case no deadline can reach: a coroutine that blocks the event loop —
+CPU-bound work or a synchronous call inside `async def`, whether in the body
+or in cancellation cleanup. Nothing else runs while it does, including the
+clock that would end it. That is a property of `asyncio`, not of this bound;
+the fix is to keep blocking work out of `async def` (declare the tool `def`
+and let `Tool(timeout=)` put it on its own thread, or use
+`run_in_executor`).
+
+The bound is on the **call**, not on process exit. An abandoned task still
+belongs to its event loop, and `asyncio.run` cancels *and gathers* every
+pending task on the way out — so an async tool that swallows `CancelledError`
+outright can delay shutdown even though the call itself returned on time.
+`run_sync()` is unaffected: LazyBridge owns that loop and skips draining what
+it has already abandoned.
+
 ::: lazybridge.Tool
 
 ::: lazybridge.tool
