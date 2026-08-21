@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
+
+from lazybridge.tools import ToolTimeoutError, run_tool_bounded
 
 
 class ToolLike(Protocol):
@@ -55,9 +56,10 @@ def dispatcher(
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Create the callback App Server invokes for one dynamic tool call.
 
-    ``tool_timeout``, when set, wraps each ``tool.run()`` in
-    ``asyncio.wait_for`` — mirroring ``LLMEngine.tool_timeout`` — so one
-    hanging LazyBridge tool cannot block the whole Codex turn.
+    ``tool_timeout``, when set, bounds each ``tool.run()`` — mirroring
+    ``LLMEngine.tool_timeout``, and yielding to a tighter ``Tool(timeout=)``
+    where one is set — so a hanging LazyBridge tool cannot block the whole
+    Codex turn.
     """
     by_name = {tool.name: tool for tool in tools}
 
@@ -68,18 +70,15 @@ def dispatcher(
         if observer:
             observer("call", {"tool_name": name, "arguments": arguments})
         try:
-            if tool_timeout is not None:
-                result = await asyncio.wait_for(tool.run(**arguments), timeout=tool_timeout)
-            else:
-                result = await tool.run(**arguments)
+            result = await run_tool_bounded(tool, arguments, tool_timeout)
             text = _text(result)
             if observer:
                 observer("result", {"tool_name": name, "result": text})
             return {"success": True, "contentItems": [{"type": "inputText", "text": text}]}
-        except TimeoutError:
-            text = f"Tool {name!r} timed out after {tool_timeout}s"
+        except ToolTimeoutError as timeout_err:
+            text = str(timeout_err)
             if observer:
-                observer("timeout", {"tool_name": name, "error": text, "timeout_s": tool_timeout})
+                observer("timeout", {"tool_name": name, "error": text, "timeout_s": timeout_err.timeout})
             return {"success": False, "contentItems": [{"type": "inputText", "text": text}]}
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}"

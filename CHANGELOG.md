@@ -8,6 +8,48 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`Tool(timeout=N)` and `Agent(tool_timeout=N)`** — a per-tool deadline that
+  works on *synchronous* tools. `Agent(timeout=N)` can only fire at an
+  `await`, and a blocking sync tool never yields one: measured, an
+  `Agent(timeout=8)` whose tool called a blocking `web_search` was still
+  running two minutes later. `LLMEngine(tool_timeout=N)` did not help
+  either — it wrapped `tool.run()` in `asyncio.wait_for`, and an executor
+  future that has already started ignores cancellation, so `wait_for` waited
+  for a cancellation that never landed. A bounded sync tool now runs on a
+  daemon thread and is **abandoned** at the deadline: the caller is freed,
+  the work runs on until it returns by itself, and its result is discarded.
+  Precedence is most-specific-wins — `Tool(timeout=)` over
+  `Agent(tool_timeout=)` over `LLMEngine(tool_timeout=)`. `Tool.wrap()` and
+  `Tool.from_schema()` both accept `timeout=`, and `Tool.wrap(agent,
+  timeout=N)` bounds that alias without bounding the agent elsewhere.
+  `run_sync()` honours the bound too. A non-positive value is rejected at
+  construction rather than firing on every call.
+- **A warning when abandoned workers accumulate.** A tool that times out on
+  *every* call leaks one thread per attempt, and every caller still gets its
+  timely timeout — which is exactly what makes the leak silent. Past
+  `Tool.abandoned_worker_warning_threshold` (8) still-running abandoned
+  workers, `_abandon` emits a `UserWarning` naming the tool.
+
+### Changed
+- **`LLMEngine(tool_timeout=)` and the Claude Code / Codex tool bridges** now
+  dispatch through the shared `run_tool_bounded` helper instead of
+  `asyncio.wait_for`, so all three of the places documented as bounding a
+  tool call actually do. Behaviour for async tools is unchanged; the
+  `TOOL_TIMEOUT` session event and its payload keep their shape.
+- **A bounded async tool is now cancelled, not raced.** Every bounded path
+  applies the bound with `asyncio.wait` rather than `wait_for`, so a
+  `TimeoutError` raised by
+  the tool itself (an HTTP client reporting its own deadline) reaches the
+  model as the tool failure it is, instead of being relabelled
+  `ToolTimeoutError`/`TOOL_TIMEOUT` and inviting the wrong recovery. The
+  tool task is cancelled and awaited both when the bound expires and when the
+  caller is cancelled from outside.
+- **`ToolTimeoutError` moved** from `lazybridge.engines.llm` to
+  `lazybridge.tools` — it is no longer specific to `LLMEngine`. The top-level
+  `lazybridge.ToolTimeoutError` import is unchanged; it now carries
+  `.tool_name` and `.timeout`.
+
 ## [1.2.0] — 2026-08-19
 
 ### Added

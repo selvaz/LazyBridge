@@ -21,7 +21,7 @@ This page gathers the most common shapes for quick LLM lookup.
 | `UnsupportedFeatureError: provider X with structured_output + tools` | DeepSeek-legacy / OpenAI-image limits — provider can't combine both | Either drop ``output_type=`` for the tool-using turn, or drop the conflicting tool |
 | `ValueError: EncryptedStoreAdapter: stored value is not an lb-enc-v1 token` | Adapter pointed at a plaintext Store (mixed-mode reads are unsafe) | Either decrypt+re-encrypt the legacy rows, or unwrap the adapter to read them |
 | `StreamStallError: no token in 90s` | Provider stream went silent past ``stream_idle_timeout`` | Lower the timeout, or wrap the call in retry logic, or switch to non-streaming |
-| `ToolTimeoutError: tool X exceeded 30s` | Tool wall-clock exceeded ``tool_timeout`` | Raise the timeout on the ``LLMEngine``, or make the tool faster |
+| `ToolTimeoutError: Tool 'x' timed out after 30s` | Tool wall-clock exceeded its bound | Raise `Tool(timeout=)` / `Agent(tool_timeout=)`, or make the tool faster |
 | `RuntimeError: async def functions are not natively supported` | ``pytest-asyncio`` not installed in the test env | ``pip install -e '.[test]'`` (see [CONTRIBUTING.md](https://github.com/selvaz/LazyBridge/blob/main/CONTRIBUTING.md)) |
 | `ModuleNotFoundError: lazybridge.external_tools.report_builder` | Reporting moved to ``selvaz/LazyReport`` in 0.7.9 | ``pip install lazybridge-reports``, then ``import lazybridge_reports`` |
 | `ImportError: EncryptedStoreAdapter requires 'cryptography'` | Opt-in extra not installed | ``pip install 'lazybridge[encryption]'`` |

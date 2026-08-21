@@ -8,10 +8,11 @@ the real ``lazybridge.Tool`` class without a second tool registry.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
+
+from lazybridge.tools import ToolTimeoutError, run_tool_bounded
 
 from .protocol import McpTool
 
@@ -57,9 +58,10 @@ def to_mcp_tools(
 
     Failures from a tool are returned as MCP ``isError`` payloads, allowing
     Claude to recover in its own agent loop instead of terminating the whole
-    LazyBridge run.  ``tool_timeout``, when set, wraps each ``tool.run()``
-    in ``asyncio.wait_for`` — mirroring ``LLMEngine.tool_timeout`` — so one
-    hanging LazyBridge tool cannot block the whole Claude Code turn.
+    LazyBridge run.  ``tool_timeout``, when set, bounds each ``tool.run()`` — mirroring
+    ``LLMEngine.tool_timeout``, and yielding to a tighter ``Tool(timeout=)``
+    where one is set — so a hanging LazyBridge tool cannot block the whole
+    Claude Code turn.
     """
     adapted: list[McpTool] = []
     seen: set[str] = set()
@@ -72,10 +74,7 @@ def to_mcp_tools(
             if observer:
                 observer("call", {"tool_name": _tool.name, "arguments": arguments})
             try:
-                if tool_timeout is not None:
-                    result = await asyncio.wait_for(_tool.run(**arguments), timeout=tool_timeout)
-                else:
-                    result = await _tool.run(**arguments)
+                result = await run_tool_bounded(_tool, arguments, tool_timeout)
                 text, structured = _serialise_result(result)
                 if observer:
                     observer("result", {"tool_name": _tool.name, "result": text})
@@ -83,10 +82,10 @@ def to_mcp_tools(
                 if structured is not None:
                     response["structuredContent"] = structured
                 return response
-            except TimeoutError:
-                message = f"Tool {_tool.name!r} timed out after {tool_timeout}s"
+            except ToolTimeoutError as timeout_err:
+                message = str(timeout_err)
                 if observer:
-                    observer("timeout", {"tool_name": _tool.name, "error": message, "timeout_s": tool_timeout})
+                    observer("timeout", {"tool_name": _tool.name, "error": message, "timeout_s": timeout_err.timeout})
                 return {
                     "content": [{"type": "text", "text": message}],
                     "isError": True,

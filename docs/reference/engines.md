@@ -5,8 +5,9 @@ deterministic-DAG engine and `Step` is its unit; `ReplanEngine` is the
 adaptive counterpart to `Plan` for pipelines whose shape is decided at
 runtime by a planner agent (`PlanRound` / `ReplanTask` are its output schema).
 `PlanCompileError` fires at construction for invalid DAGs;
-`ToolTimeoutError` and `StreamStallError` surface from the LLM engine's
-safety nets.
+`StreamStallError` surfaces from the LLM engine's safety nets, and
+`ToolTimeoutError` from tool dispatch (documented under
+[Tool family](tools.md#timeouts)).
 
 For narrative usage see [Guides → Full → Plan](../guides/full/plan.md),
 [Step](../guides/full/step.md),
@@ -26,7 +27,7 @@ miss in the auto-generated signature below. Quick reference:
 | `max_retries` | `3` | Provider transient-error retries with exponential backoff + jitter |
 | `request_timeout` | `120.0` | Per-completion deadline. Distinct from `Agent(timeout=N)` (total run). `None` disables |
 | `max_parallel_tools` | `8` | Cap on concurrent tool calls within one turn. `None` = unbounded |
-| `tool_timeout` | `None` | Per-tool `asyncio.wait_for` deadline; on timeout reports `is_error=True` to the model loop |
+| `tool_timeout` | `None` | Per-tool deadline for tools that set no `Tool(timeout=)` of their own; on timeout reports `is_error=True` to the model loop. A synchronous tool is abandoned, not interrupted — see `Tool(timeout=)` |
 | `stream_idle_timeout` | `90.0` | Idle gap between streaming chunks before `StreamStallError`; pass `None` to disable (a one-shot `UserWarning` is emitted at `LLMEngine.__init__` time, not at stream time). |
 | `stream_buffer` | `64` | Bounded queue for streaming producers. Must be ≥1 |
 | `allow_dangerous_native_tools` | `False` | Security gate for `CODE_EXECUTION` / `COMPUTER_USE`; opt-in required |
@@ -97,6 +98,5 @@ protocol notes, and current limits.
 
 ::: lazybridge.ConcurrentPlanRunError
 
-::: lazybridge.ToolTimeoutError
 
 ::: lazybridge.StreamStallError

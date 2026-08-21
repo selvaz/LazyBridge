@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import copy
 import inspect
 import threading
 from collections.abc import Callable
@@ -33,9 +35,105 @@ class ToolProvider(Protocol):
     def as_tools(self) -> list[Tool]: ...
 
 
+#: Workers still running after the caller gave up on them.  A ``set`` of live
+#: threads: each worker drops itself on the way out, so the size is the number
+#: currently outstanding, not a running total.  Read by ``Tool._abandon``.
+_abbandonati: set[threading.Thread] = set()
+
 #: Sentinel distinguishing "caller omitted strict=" from "caller passed strict=False".
 #: Needed so ``Tool.wrap(base, strict=False)`` can override a base with ``strict=True``.
 _UNSET_BOOL: Any = object()
+
+
+class ToolTimeoutError(Exception):
+    """A tool ran past the time it was given and the caller stopped waiting.
+
+    Reported to the model loop as a failed tool result, not raised out of the
+    run: the model sees the timeout and carries on with what it does have.
+    Raised by ``Tool.timeout`` and, for the outer per-call bound, by
+    ``LLMEngine.tool_timeout``.  For a synchronous tool the work is abandoned
+    rather than stopped -- see :meth:`Tool._run_bounded`.
+    """
+
+    def __init__(self, message: str, *, tool_name: str | None = None, timeout: float | None = None) -> None:
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.timeout = timeout
+
+
+def check_timeout(value: float | None, label: str) -> float | None:
+    """Reject a deadline that can never be met, at configuration time.
+
+    Zero or negative would otherwise be accepted and then fire immediately on
+    every call — for a side-effecting tool that means the caller sees a
+    timeout while the work runs on anyway.  Mirrors the same check on
+    ``LLMEngine(tool_timeout=)``.
+    """
+    if value is not None and value <= 0:
+        raise ValueError(f"{label} must be > 0 or None, got {value!r}")
+    return value
+
+
+async def _stop_task(task: asyncio.Task) -> None:
+    """Cancel a tool task and wait for it to actually unwind."""
+    task.cancel()
+    with contextlib.suppress(BaseException):
+        await task
+
+
+async def _bounded_await(coro: Any, limit: float, on_timeout: Callable[[], Exception]) -> Any:
+    """Await ``coro`` under ``limit``, telling the two timeouts apart.
+
+    ``wait_for`` cannot: it raises ``TimeoutError`` for its own deadline and
+    relays one raised by the tool, and the two mean opposite things.  An HTTP
+    client reporting its own deadline is a tool failure the model should see
+    as such — reported as ``TOOL_TIMEOUT`` it would tell the model to retry
+    smaller when the real answer is that the endpoint is down.  Completion is
+    the test: only a coroutine that never finished timed out on OUR clock.
+    """
+    task = asyncio.ensure_future(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=limit)
+    except BaseException:
+        # ``wait`` does not touch the task it was given, so a caller cancelled
+        # from outside (an ``Agent(timeout=)`` firing inside a longer tool
+        # bound) would otherwise leave the tool running and free to complete
+        # its side effect afterwards.
+        await _stop_task(task)
+        raise
+    if not done:
+        await _stop_task(task)
+        raise on_timeout()
+    return task.result()
+
+
+async def run_tool_bounded(tool: Any, arguments: dict[str, Any], timeout: float | None) -> Any:
+    """Invoke ``tool`` under the tighter of its own bound and ``timeout``.
+
+    The one place engines should call a tool when they carry a per-call
+    deadline of their own.  ``asyncio.wait_for(tool.run(...))`` is not an
+    equivalent: a synchronous tool runs in an executor, and an executor
+    future that has already started ignores cancellation, so ``wait_for``
+    waits forever for a cancellation that never lands.
+
+    Raises :class:`ToolTimeoutError`.  Anything whose execution path we do
+    not own — a duck-typed tool, or a subclass that overrides ``run`` to add
+    authorization or tracing — falls back to ``wait_for``.  That still bounds
+    an async tool, and it is the honest limit: reaching past an override into
+    the base dispatch would silently skip what the override is there to do.
+    """
+    own = getattr(tool, "timeout", None)
+    limit = own if own is not None else timeout
+    if limit is None:
+        return await tool.run(**arguments)
+    dispatch = getattr(tool, "_dispatch", None)
+    if dispatch is not None and getattr(type(tool), "run", None) is Tool.run:
+        return await dispatch(arguments, limit)
+    return await _bounded_await(
+        tool.run(**arguments),
+        limit,
+        lambda: ToolTimeoutError(f"Tool {tool.name!r} timed out after {limit}s", tool_name=tool.name, timeout=limit),
+    )
 
 
 class Tool:
@@ -54,6 +152,11 @@ class Tool:
     #: inherit it; set ``tool.validate_args = False`` to opt out.
     validate_args: bool = True
 
+    #: How many abandoned workers may pile up before ``_abandon`` warns.
+    #: A handful is ordinary — one slow call per turn, each finishing later.
+    #: Sustained growth is a tool that hangs on every attempt.
+    abandoned_worker_warning_threshold: int = 8
+
     def __init__(
         self,
         func: Callable,
@@ -66,6 +169,7 @@ class Tool:
         returns_envelope: bool = False,
         agent_memory: Any | None = None,
         agent_store: Any | None = None,
+        timeout: float | None = None,
     ) -> None:
         if mode not in ("signature", "llm", "hybrid"):
             # ``"auto"`` was the 0.7-era default — removed in 0.7.9.
@@ -82,6 +186,10 @@ class Tool:
         self.name = name or func.__name__
         self.description = description
         self.mode = mode
+        #: Seconds this tool may take before the caller gives up on it, or
+        #: ``None`` for no bound.  ``Agent(tool_timeout=...)`` supplies a
+        #: default to tools that do not set their own.
+        self.timeout = check_timeout(timeout, "Tool(timeout=)")
         self.schema_llm = schema_llm
         self.strict = strict
         #: When ``True``, ``func`` returns an ``Envelope`` instead of a
@@ -112,6 +220,7 @@ class Tool:
         *,
         strict: bool = False,
         returns_envelope: bool = False,
+        timeout: float | None = None,
     ) -> Tool:
         """Create a Tool with a pre-built JSON Schema for parameters.
 
@@ -129,6 +238,7 @@ class Tool:
         tool.mode = "signature"  # unused — we set ``_definition`` directly
         tool.schema_llm = None
         tool.strict = strict
+        tool.timeout = check_timeout(timeout, "Tool.from_schema(timeout=)")
         tool.returns_envelope = returns_envelope
         tool.agent_memory = None
         tool.agent_store = None
@@ -168,15 +278,131 @@ class Tool:
         return _validate_and_coerce_arguments(self.func, kwargs)
 
     async def run(self, **kwargs: Any) -> Any:
+        return await self._dispatch(kwargs, self.timeout)
+
+    async def _dispatch(self, kwargs: dict[str, Any], timeout: float | None) -> Any:
+        """One invocation under an explicit bound.
+
+        Separate from :meth:`run` so a caller with a bound of its own —
+        ``LLMEngine(tool_timeout=...)`` and the two coding-engine tool
+        bridges — can apply it through the same machinery instead of
+        wrapping ``run()`` in ``wait_for``, which cannot interrupt a
+        synchronous tool.  See :func:`run_tool_bounded`.
+        """
         kwargs = self._coerce_arguments(kwargs)
         if inspect.iscoroutinefunction(self.func):
-            return await self.func(**kwargs)
+            coro = self.func(**kwargs)
+            if timeout is None:
+                return await coro
+            return await _bounded_await(coro, timeout, lambda: self._timeout_error(timeout))
         # ``asyncio.get_event_loop`` is deprecated in 3.10+ and errors on
         # 3.13+ when no loop is running.  ``run`` is always called from an
         # already-running coroutine, so ``get_running_loop`` is the right
         # primitive — it also avoids accidentally creating a second loop.
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: self.func(**kwargs))
+        if timeout is None:
+            return await loop.run_in_executor(None, lambda: self.func(**kwargs))
+        return await self._run_bounded(loop, kwargs, timeout)
+
+    def _timeout_error(self, timeout: float) -> ToolTimeoutError:
+        return ToolTimeoutError(
+            f"Tool {self.name!r} timed out after {timeout}s",
+            tool_name=self.name,
+            timeout=timeout,
+        )
+
+    async def _run_bounded(self, loop: Any, kwargs: dict[str, Any], timeout: float) -> Any:
+        """Run a synchronous tool, giving up on it when its time is out.
+
+        The bound has to be enforced by ABANDONING the call, not by
+        cancelling it: a synchronous function cannot be interrupted, and an
+        executor future that has already started ignores ``cancel()`` while
+        anyone awaiting it keeps waiting.  That is not a theoretical corner
+        -- an ``Agent(timeout=8)`` whose tool blocked was still running two
+        minutes later, because the agent's own timeout can only cancel at an
+        await point and this await never came back.
+
+        So the work goes to a daemon thread we own.  Daemon, because an
+        abandoned worker must not hold the interpreter open at exit: a
+        scheduled job that finishes its report and then hangs on shutdown is
+        the same outage by another name.
+        """
+        future: asyncio.Future = loop.create_future()
+        # Installed before anything can settle, and not only on the timeout
+        # path: the caller can also leave through cancellation (an
+        # ``Agent(timeout=)`` firing inside a longer ``Tool(timeout=)``), and
+        # a worker that raises after that would otherwise leave its exception
+        # on an unobserved future and surface much later, out of context, as
+        # asyncio's "Future exception was never retrieved".
+        future.add_done_callback(lambda f: f.cancelled() or f.exception())
+
+        def _worker() -> None:
+            try:
+                esito = self.func(**kwargs)
+            except BaseException as exc:
+                _settle(future.set_exception, exc)
+            else:
+                _settle(future.set_result, esito)
+
+        def _settle(setter: Callable, value: Any) -> None:
+            def _apply() -> None:
+                if not future.done():
+                    setter(value)
+
+            try:
+                loop.call_soon_threadsafe(_apply)
+            except RuntimeError:
+                pass  # the loop closed while we were abandoned; nobody is listening
+
+        worker = threading.Thread(target=_worker, daemon=True, name=f"lazybridge-tool-{self.name}")
+        worker.start()
+
+        try:
+            done, _ = await asyncio.wait({future}, timeout=timeout)
+        except BaseException:
+            # A caller cancelled from outside abandons the worker just as
+            # surely as our own deadline does, and it is the likelier of the
+            # two to repeat — an outer ``Agent(timeout=)`` shorter than the
+            # tool bound cancels here on EVERY call.  Untracked, that is
+            # exactly the leak the warning exists to catch.
+            self._abandon(worker)
+            raise
+        if not done:
+            # Deliberately not awaited and not cancelled: the thread runs on
+            # until it returns on its own, and the caller stops waiting.
+            self._abandon(worker)
+            raise self._timeout_error(timeout)
+        return future.result()
+
+    def _abandon(self, worker: threading.Thread) -> None:
+        """Give up on a worker, and say so out loud once there are too many.
+
+        An abandoned thread is never reclaimed until its call returns, so a
+        tool that hangs *every* time — an endpoint that black-holes, a lock
+        nobody releases — leaks one thread per retry.  Each caller still gets
+        its timely timeout, which is exactly what makes the leak silent: the
+        run looks healthy while the process fills up.  Warn rather than
+        refuse, because the retry may well be the thing that recovers.
+        """
+        _abbandonati.add(worker)
+        # Prune here rather than from the worker itself: a worker that
+        # finished in the instant between the wait expiring and this call
+        # would drop itself before being added, and stay in the set as a
+        # dead thread inflating the count forever.
+        for vecchio in tuple(_abbandonati):
+            if not vecchio.is_alive():
+                _abbandonati.discard(vecchio)
+        if len(_abbandonati) >= self.abandoned_worker_warning_threshold:
+            import warnings
+
+            warnings.warn(
+                f"{len(_abbandonati)} abandoned tool workers are still running "
+                f"(latest: {self.name!r}).  A tool that times out on every call "
+                f"leaks one thread per attempt — give the underlying call its own "
+                f"deadline, or stop retrying it.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def run_sync(self, **kwargs: Any) -> Any:
         """Blocking tool invocation.
@@ -193,6 +419,11 @@ class Tool:
           callers were previously getting ``"<coroutine object _run at
           0x...>"`` instead of the result.
         """
+        if self.timeout is not None:
+            # Through the async path so the bound is enforced by the same
+            # machinery, thread included: a blocking call must not be able
+            # to outlast its deadline just because the caller was sync.
+            return run_coroutine_blocking(lambda: self._dispatch(kwargs, self.timeout))
         kwargs = self._coerce_arguments(kwargs)
         if not inspect.iscoroutinefunction(self.func):
             return self.func(**kwargs)
@@ -211,6 +442,7 @@ class Tool:
         mode: Literal["signature", "hybrid", "llm"] = "signature",
         schema_llm: Any | None = None,
         strict: bool = _UNSET_BOOL,  # type: ignore[assignment]
+        timeout: float | None = None,
     ) -> Tool:
         """Canonical multi-input factory — accepts a callable, an Agent, or an
         existing :class:`Tool`, and returns a properly wrapped ``Tool``.
@@ -249,6 +481,10 @@ class Tool:
             Engine used when ``mode="hybrid"`` or ``mode="llm"``.
         strict:
             Enable JSON Schema strict mode.
+        timeout:
+            Seconds this tool may take before the caller gives up on it.
+            ``None`` leaves the tool unbounded, or keeps the bound a wrapped
+            ``Tool`` already carries.
 
         Notes
         -----
@@ -257,15 +493,25 @@ class Tool:
         """
         # ── Case 1: already a Tool ──────────────────────────────────────────
         if isinstance(obj, Tool):
-            has_overrides = (
+            reshapes_schema = (
                 name is not None
                 or description is not None
                 or mode != "signature"
                 or schema_llm is not None
                 or strict is not _UNSET_BOOL
             )
-            if not has_overrides:
-                return obj
+            if not reshapes_schema:
+                if timeout is None:
+                    return obj
+                # A deadline says nothing about the tool's shape, so copy
+                # rather than rebuild: reconstruction would regenerate the
+                # schema from the signature and throw away an explicit one
+                # set by ``from_schema`` — for an imported tool whose callable
+                # is ``lambda **kwargs`` that means showing the model a tool
+                # with no parameters.
+                clone = copy.copy(obj)
+                clone.timeout = check_timeout(timeout, "Tool.wrap(timeout=)")
+                return clone
             return cls(
                 obj.func,
                 name=name if name is not None else obj.name,
@@ -276,6 +522,7 @@ class Tool:
                 returns_envelope=obj.returns_envelope,
                 agent_memory=obj.agent_memory,
                 agent_store=obj.agent_store,
+                timeout=timeout if timeout is not None else obj.timeout,
             )
 
         # ── Case 2: Agent-like ──────────────────────────────────────────────
@@ -303,8 +550,14 @@ class Tool:
                     '    Agent(name="research", engine=LLMEngine(...))'
                 )
             if hasattr(obj, "as_tool"):
-                return obj.as_tool(effective_name, description=description)
-            return _agent_as_tool_named(obj, effective_name, description)
+                agent_tool = obj.as_tool(effective_name, description=description)
+            else:
+                agent_tool = _agent_as_tool_named(obj, effective_name, description)
+            if timeout is not None:
+                # ``as_tool`` builds a fresh Tool per call, so this bounds
+                # this alias only and not the agent everywhere it is used.
+                agent_tool.timeout = check_timeout(timeout, "Tool.wrap(timeout=)")
+            return agent_tool
 
         # ── Case 3: plain callable ──────────────────────────────────────────
         if callable(obj):
@@ -322,6 +575,7 @@ class Tool:
                 mode=mode,
                 schema_llm=schema_llm,
                 strict=strict_val,
+                timeout=timeout,
             )
 
         raise TypeError(f"Tool.wrap() cannot wrap {type(obj).__name__!r}")
@@ -347,6 +601,7 @@ def tool(
     mode: Literal["signature", "hybrid", "llm"] = "signature",
     schema_llm: Any | None = None,
     strict: bool = _UNSET_BOOL,  # type: ignore[assignment]
+    timeout: float | None = None,
 ) -> Tool:
     """Backwards-compatibility alias for :meth:`Tool.wrap`.
 
@@ -364,6 +619,7 @@ def tool(
         mode=mode,
         schema_llm=schema_llm,
         strict=strict,
+        timeout=timeout,
     )
 
 
@@ -424,6 +680,7 @@ def build_tool_map(
     tools: list[Any],
     *,
     collision_policy: Literal["raise", "replace"] = "raise",
+    default_timeout: float | None = None,
 ) -> dict[str, Tool]:
     """Wrap and index tools by name.
 
@@ -442,9 +699,14 @@ def build_tool_map(
             ``"replace"`` — keep the last registration and emit a
             ``UserWarning`` (previous behaviour, useful when composing MCP
             servers that may overlap on common names like ``search``).
+        default_timeout: Bound applied to every tool that does not carry one
+            of its own — ``Agent(tool_timeout=...)``.  Applied to a copy, so
+            a Tool shared between agents does not silently acquire the first
+            agent's bound.
     """
     import warnings
 
+    check_timeout(default_timeout, "build_tool_map(default_timeout=)")
     result: dict[str, Tool] = {}
     seen_warnings: set[str] = set()
     for t in tools:
@@ -453,6 +715,9 @@ def build_tool_map(
         else:
             expanded = [_wrap_tool(t)]
         for wrapped in expanded:
+            if default_timeout is not None and wrapped.timeout is None:
+                wrapped = copy.copy(wrapped)
+                wrapped.timeout = default_timeout
             if wrapped.name in result:
                 if collision_policy == "raise":
                     raise ValueError(

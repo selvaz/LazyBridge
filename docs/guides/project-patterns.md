@@ -635,7 +635,8 @@ re-implement by hand:
 | an `assert` + retry when output is malformed | `output_validator=`, `max_output_retries=` |
 | a second agent call to check the first | `verify=judge_agent`, `max_verify=` |
 | an input/output safety filter | `guard=` |
-| a wall-clock guard | `timeout=` |
+| a wall-clock guard on the run | `timeout=` |
+| a wall-clock guard on one tool | `tool_timeout=` / `Tool(timeout=)` — the only one that holds on a *sync* tool, see §4.5 |
 | hand-crafting provider cache-control blocks for the system prompt | `cache=True` / `CacheConfig(ttl="1h")` |
 
 ### 4.1 `fallback=` — and the boundary that will surprise you
@@ -861,6 +862,31 @@ half-empty in its own event log.
 Do **not** pass `runtime=`, `resilience=`, or `observability=` config
 objects — those were deleted in 0.7.9. Pass flat kwargs.
 
+### 4.5 `Agent(timeout=)` does not bound a blocking tool
+
+```python
+Agent(engine=..., tools=[web_search], timeout=8)      # will NOT come back in 8s
+Agent(engine=..., tools=[web_search], tool_timeout=8) # will
+```
+
+`timeout=` is a deadline on the *run*, and a deadline can only fire at an
+`await`. A **synchronous** tool — `requests.get`, a DB driver, anything
+using `time.sleep` — is dispatched to the loop's executor and yields no
+await point until it returns. Measured: an `Agent(timeout=8)` around a
+blocking `web_search` was still going two minutes later.
+
+`tool_timeout=` bounds the tool itself, and that is the one bound that
+holds; `Tool(timeout=N)` sets it per tool when one call is legitimately
+slower than the rest. A scheduled job wants **both**: the tool bound so no
+single call can wedge the run, and the run bound as the outer envelope.
+
+The bound is enforced by *abandoning* the call, not stopping it — a sync
+function cannot be interrupted. The caller is freed and the result
+discarded, but the work keeps running on its thread, so a tool with a side
+effect may still complete after its timeout. Where that matters, give the
+underlying library its own deadline (`requests.get(..., timeout=)`) or run
+it in a subprocess.
+
 ---
 
 ## Quick reference — pick the pattern
@@ -884,6 +910,7 @@ objects — those were deleted in 0.7.9. Pass flat kwargs.
 | a real LLM call in a unit test | `MockAgent` + a pipeline factory | 4.2 |
 | an irreversible action with no gate | `HumanEngine` with a safe `default=` | 4.3 |
 | `print()` in a scheduled job | one `Session` at the root | 4.4 |
+| `Agent(timeout=)` alone around a blocking tool | `tool_timeout=` as well | 4.5 |
 
 ---
 

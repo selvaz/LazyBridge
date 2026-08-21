@@ -26,21 +26,13 @@ from lazybridge.engines.base import resolve_agent_name
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
+from lazybridge.tools import ToolTimeoutError, run_tool_bounded
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import BaseProvider
     from lazybridge.memory import Memory
     from lazybridge.session import Session
     from lazybridge.tools import Tool
-
-
-class ToolTimeoutError(Exception):
-    """Raised when a tool exceeds ``LLMEngine.tool_timeout``.
-
-    The engine catches this internally and reports the failure to the
-    model loop as ``ToolResultContent(is_error=True)`` so the model
-    can recover; it does not abort the agent run.
-    """
 
 
 class StreamStallError(Exception):
@@ -1169,30 +1161,26 @@ class LLMEngine:
             return err
 
         try:
-            if self.tool_timeout is not None:
-                try:
-                    result = await asyncio.wait_for(tool.run(**tc.arguments), timeout=self.tool_timeout)
-                except TimeoutError:
-                    timeout_err = ToolTimeoutError(f"Tool {tc.name!r} timed out after {self.tool_timeout}s")
-                    if session:
-                        # Distinct event type so operators can filter
-                        # planned cancellations from genuine exceptions
-                        # in dashboards / alerting.
-                        session.emit(
-                            EventType.TOOL_TIMEOUT,
-                            {
-                                "agent_name": agent_name,
-                                "tool": tc.name,
-                                "tool_use_id": tc.id,
-                                "error": str(timeout_err),
-                                "type": "ToolTimeoutError",
-                                "timeout_s": self.tool_timeout,
-                            },
-                            run_id=run_id,
-                        )
-                    return timeout_err
-            else:
-                result = await tool.run(**tc.arguments)
+            try:
+                result = await run_tool_bounded(tool, tc.arguments, self.tool_timeout)
+            except ToolTimeoutError as timeout_err:
+                if session:
+                    # Distinct event type so operators can filter planned
+                    # cancellations from genuine exceptions in dashboards
+                    # / alerting.
+                    session.emit(
+                        EventType.TOOL_TIMEOUT,
+                        {
+                            "agent_name": agent_name,
+                            "tool": tc.name,
+                            "tool_use_id": tc.id,
+                            "error": str(timeout_err),
+                            "type": "ToolTimeoutError",
+                            "timeout_s": timeout_err.timeout,
+                        },
+                        run_id=run_id,
+                    )
+                return timeout_err
             if session:
                 session.emit(
                     EventType.TOOL_RESULT,
