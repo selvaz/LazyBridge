@@ -114,6 +114,7 @@ Without a `Session` there is nowhere to persist a grant, so it degrades to
 | Hard denial | `disallowed_tools` | sandbox plus gate denial |
 | Human callback | `can_use_tool` | App Server approval requests and dynamic tools |
 | Ambient configuration | `setting_sources` | local Codex configuration plus thread overrides |
+| When the agent compacts | `auto_compact_window` | `auto_compact_token_limit` |
 
 `ClaudeCodePolicy.permission_mode` defaults to `None`, which lets the engine
 pick per run: `"dontAsk"` when nothing needs gating (application tools only,
@@ -122,6 +123,52 @@ approval gate, or `preapprove_application_tools=False`. Pin a value only when
 you want to override that; a hardcoded `"default"` would put a fully
 pre-approved, tool-only agent into prompting mode with no callback able to
 answer.
+
+## Deciding when an agent compacts
+
+Both CLIs summarise their own history when it grows too long. Left alone they
+use a default tuned for the model, which is usually the right thing — but a
+long-running agent that keeps refilling its context can be told to compact
+earlier, per agent, without touching a machine-wide configuration file.
+
+```python
+from lazybridge.engines.coding import ClaudeCodePolicy, CodexPolicy, CodingAgentConfig
+
+claude = CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=140_000))
+codex = CodingAgentConfig(codex=CodexPolicy(auto_compact_token_limit=140_000))
+```
+
+The two numbers do **not** mean quite the same thing, and the difference is
+worth knowing before you copy one into the other.
+
+`auto_compact_window` is a *window*: Claude Code compacts when usage
+approaches it, and the effective threshold is the minimum of your value and
+the model's real context window. So it can bring compaction forward, never
+push it beyond what the model allows. It travels to the agent as the
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` environment variable, which outranks every
+settings file — deliberately, because an agent reads none of them by default
+(`setting_sources` is empty), and the alternative would be inheriting a
+human's personal settings wholesale to deliver one number.
+
+`auto_compact_token_limit` is a *trigger*: the token count at which Codex
+starts summarising. It travels as a `-c model_auto_compact_token_limit=<n>`
+override on that agent's own App Server subprocess, so the shared
+`~/.codex/config.toml` is never touched and no other Codex on the machine
+changes behaviour.
+
+Codex's companion setting `model_context_window` is deliberately not exposed.
+It describes the budget rather than enlarging the model's real limit, and
+setting it is reported upstream to break auto-compaction outright
+([openai/codex#16068](https://github.com/openai/codex/issues/16068)).
+
+Both paths are verified end to end rather than by construction: a Claude Code
+agent given `auto_compact_window=137000` echoes that value back from
+`$CLAUDE_CODE_AUTO_COMPACT_WINDOW` inside its own subprocess, and
+`codex app-server --strict-config -c model_auto_compact_token_limit=140000`
+starts cleanly where an invented key is rejected outright.
+
+Neither knob exists for `LLMEngine`: an API-backed agent has no compaction to
+schedule, and its budgets are turns and tool calls rather than tokens.
 
 ## Granting write tools to a gated agent
 

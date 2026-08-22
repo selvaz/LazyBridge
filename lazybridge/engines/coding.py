@@ -215,6 +215,18 @@ class ClaudeCodePolicy:
     #: the hook-confined set and the web pair) unless an ``approval_gate`` is
     #: configured — fail closed at construction, not at the first escape.
     extra_tools: tuple[str, ...] = ()
+    #: How much context this agent may fill before Claude Code compacts it,
+    #: in tokens. ``None`` leaves the CLI on its own tuned default.
+    #:
+    #: Two things to know before setting it. The number is a WINDOW, not a
+    #: trigger: Claude Code compacts when usage approaches it, and the
+    #: effective threshold is the minimum of this value and the model's real
+    #: context window — so it can bring compaction forward, never push it
+    #: past what the model allows. And an agent does not otherwise inherit
+    #: this from your own ``settings.json`` at all, because
+    #: ``setting_sources`` is empty by default; this is the per-agent way to
+    #: say it, without borrowing the rest of a human's personal settings.
+    auto_compact_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +236,17 @@ class CodexPolicy:
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     approval_policy: Literal["untrusted", "on-request", "never"] = "never"
     preapprove_dynamic_tools: bool = True
+    #: Token count at which Codex starts compacting this agent's history.
+    #: ``None`` leaves the CLI's own default. Forwarded as the App Server's
+    #: ``-c model_auto_compact_token_limit=<n>`` override, so it applies to
+    #: this agent's subprocess and to nothing else.
+    #:
+    #: Its companion ``model_context_window`` is deliberately NOT exposed:
+    #: setting it is reported upstream to break auto-compaction outright
+    #: (openai/codex#16068), and it describes the budget rather than
+    #: enlarging the model's real limit. Leave the window to Codex and move
+    #: only the point at which it summarises.
+    auto_compact_token_limit: int | None = None
 
 
 @dataclass(frozen=True)

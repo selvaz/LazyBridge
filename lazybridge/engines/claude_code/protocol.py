@@ -53,6 +53,10 @@ class ClaudeSdkOptions:
     #: object on ``ResultMessage.structured_output``.
     output_format: dict[str, Any] | None = None
 
+    #: See ``ClaudeCodePolicy.auto_compact_window``. Carried here as a plain
+    #: int so this module still never imports the SDK.
+    auto_compact_window: int | None = None
+
 
 @dataclass(frozen=True)
 class ClaudeSdkResult:
