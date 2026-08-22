@@ -456,6 +456,7 @@ class ClaudeCodeEngine:
             preapprove_application_tools=self.config.claude.preapprove_application_tools,
             disallowed_tools=self.config.claude.disallowed_tools,
             setting_sources=self.config.claude.setting_sources,
+            auto_compact_window=self.config.claude.auto_compact_window,
             permission_mode=self.config.claude.permission_mode,
             approval_gate=gate if gate is not None else self.config.approval_gate,
             builtin_tools=builtin_tools,
