@@ -539,7 +539,7 @@ def test_a_policy_override_reaches_this_subprocess_and_no_config_file():
     client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
     argv = client._spawn_command(("model_auto_compact_token_limit=140000",))
     assert argv[-2:] == ("-c", "model_auto_compact_token_limit=140000")
-    assert argv[: -2] == (sys.executable, FIXTURE, "happy")
+    assert argv[:-2] == (sys.executable, FIXTURE, "happy")
 
 
 def test_overrides_are_not_dropped_when_the_command_is_supplied():

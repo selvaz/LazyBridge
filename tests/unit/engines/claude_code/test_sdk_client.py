@@ -241,9 +241,7 @@ def test_the_policy_reaches_the_options_the_engine_builds():
     from lazybridge.engines.claude_code import ClaudeCodeEngine
     from lazybridge.engines.coding import ClaudeCodePolicy, CodingAgentConfig
 
-    engine = ClaudeCodeEngine(
-        config=CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=90_000))
-    )
+    engine = ClaudeCodeEngine(config=CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=90_000)))
     assert engine._options([], None).auto_compact_window == 90_000
 
 
