@@ -394,6 +394,52 @@ plain Pydantic schema including an optional field and a nested model
 schema cannot be derived, the run falls back to LazyBridge's post-hoc JSON
 parse and retry.
 
+## Reading the account's usage budget
+
+```python
+snapshot = await engine.usage()
+print(snapshot.session.used_percent, "% of the session")
+for label, window in snapshot.weekly.items():
+    print(label, window.used_percent, "%, resets", window.resets_at)
+```
+
+There is no typed field for this — verified live by scanning every message
+type of a normal run: the Agent SDK's `RateLimitEvent` arrives free on every
+run, but on a current account its `utilization` is `None`, and nothing else
+in the stream carries a percentage. The weekly figures exist in exactly one
+place: the prose Claude Code's own `/usage` slash command prints. So
+`engine.usage()` spends one small turn (~13s including process startup, no
+completion of its own since `/usage` is answered by the CLI directly) sending
+that command and parses the reply into a `ClaudeUsageSnapshot`
+(`lazybridge.engines.claude_code.usage`):
+
+- `session` — the current 5-hour-scale window.
+- `weekly` — one entry per label the CLI reports, keyed by that label
+  verbatim: `"all models"` plus, when the account has one, a per-model
+  breakdown (observed live: `"Fable"`). The key set is not fixed by this
+  library — a new label is a new dict key, not a version bump.
+- `most_used()` — the weekly window closest to its limit.
+
+Screen-scraping a CLI's human-facing text means the wording can drift, so
+every field this cannot extract is `None` rather than guessed, and
+`snapshot.parsed` says whether anything was recognised at all — `raw_text`
+always carries the untouched report underneath, for a caller that wants to
+fall back rather than trust an empty result. A reset date carries no year in
+the CLI's own text; one already in the past by more than a day is read as
+next year's, so a reading taken near 31 December does not report a window
+that already closed. A reset clause with no recognised timezone is left
+unparsed rather than assumed to be UTC or the machine's own zone.
+
+This is a different failure mode from the SDK ending the turn in error
+(authentication, no active session): that raises `RuntimeError` from
+`engine.usage()` directly, distinguishable from a successful call whose
+report just did not parse.
+
+The free function `fetch_claude_usage()` underneath takes an explicit
+`model=`/`cwd=`/`client=` for use outside an `Engine` — the standalone
+`parse_usage_report(text)` for a report captured elsewhere works with no SDK
+call at all.
+
 ## Multimodal
 
 `images=` is forwarded as Anthropic image content blocks. Because a

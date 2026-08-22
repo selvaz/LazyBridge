@@ -9,6 +9,7 @@ Requires the optional ``claude-agent-sdk``/``mcp`` dependencies:
 from .engine import ClaudeCodeEngine
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 from .sdk_client import AgentSdkClient
+from .usage import ClaudeUsageSnapshot, UsageWindow, fetch_claude_usage, parse_usage_report
 
 __all__ = [
     "AgentSdkClient",
@@ -17,5 +18,9 @@ __all__ = [
     "ClaudeSdkOptions",
     "ClaudeSdkResult",
     "ClaudeSdkStreamEvent",
+    "ClaudeUsageSnapshot",
     "McpTool",
+    "UsageWindow",
+    "fetch_claude_usage",
+    "parse_usage_report",
 ]
