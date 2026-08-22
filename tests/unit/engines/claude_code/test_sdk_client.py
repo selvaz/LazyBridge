@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 
 import pytest
@@ -211,3 +213,57 @@ class TestFileConfinement:
 
         matchers = (sdk_options.hooks or {}).get("PreToolUse", [])
         assert not [e for e in matchers if e.matcher]
+
+
+# --------------------------------------------------------------------------- #
+# Per-agent auto-compaction window
+# --------------------------------------------------------------------------- #
+def test_the_compaction_window_travels_as_an_env_var_not_a_settings_file():
+    """The env var is what an agent can actually be given privately.
+
+    Settings files are shared and, worse, an agent reads none of them by
+    default (``setting_sources`` is empty), so a value written there would
+    reach this agent only if it were also told to inherit a human's personal
+    settings wholesale.
+    """
+    sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(auto_compact_window=140_000))
+
+    assert sdk_options.env == {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "140000"}
+    assert sdk_options.setting_sources == []
+
+
+def test_no_window_means_no_environment_of_our_own():
+    """An empty dict, not a stray variable: the CLI keeps its tuned default."""
+    assert AgentSdkClient._sdk_options(ClaudeSdkOptions()).env == {}
+
+
+def test_the_policy_reaches_the_options_the_engine_builds():
+    """The field is useless if the engine does not carry it across."""
+    from lazybridge.engines.claude_code import ClaudeCodeEngine
+    from lazybridge.engines.coding import ClaudeCodePolicy, CodingAgentConfig
+
+    engine = ClaudeCodeEngine(
+        config=CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=90_000))
+    )
+    assert engine._options([], None).auto_compact_window == 90_000
+
+
+def test_a_new_policy_field_never_displaces_an_existing_positional_argument():
+    """These dataclasses accept positional construction, so field ORDER is API.
+
+    The first version of the compaction field was inserted in the middle:
+    `ClaudeCodePolicy(None, True, (), (), (), ("Write",))` then bound
+    `("Write",)` to the window and left `extra_tools` empty, which would have
+    shipped `CLAUDE_CODE_AUTO_COMPACT_WINDOW="('Write',)"` into a subprocess
+    without a word. Nothing raised. This pins the arrangement that made that
+    impossible: additions go last.
+    """
+    from lazybridge.engines.coding import ClaudeCodePolicy
+
+    policy = ClaudeCodePolicy(None, True, (), (), (), ("Write",))
+    assert policy.extra_tools == ("Write",)
+    assert policy.auto_compact_window is None
+
+    from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
+
+    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-1] == "auto_compact_window"

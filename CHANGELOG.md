@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`ClaudeCodePolicy(auto_compact_window=N)` / `CodexPolicy(auto_compact_token_limit=N)`** —
+  tell one coding agent when to compact its own context, without touching a
+  machine-wide configuration file. The two numbers are not interchangeable:
+  Claude Code's is a *window* it compacts within (the effective threshold is
+  the minimum of it and the model's real context window), Codex's is the
+  *token count* at which compaction starts. They travel as
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in that agent's subprocess environment
+  and as `-c model_auto_compact_token_limit=<n>` on that agent's own App
+  Server, so neither leaks to any other agent on the machine. Verified end to
+  end: an agent given `137000` echoes it back from its own environment.
+  Codex's `model_context_window` is deliberately not exposed — it describes
+  the budget rather than enlarging the model's limit, and setting it is
+  reported upstream to break auto-compaction (openai/codex#16068).
+  `LLMEngine` has no equivalent: an API-backed agent has no compaction to
+  schedule.
 - **`Tool(timeout=N)` and `Agent(tool_timeout=N)`** — a per-tool deadline that
   works on *synchronous* tools. `Agent(timeout=N)` can only fire at an
   `await`, and a blocking sync tool never yields one: measured, an

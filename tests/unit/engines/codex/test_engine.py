@@ -27,6 +27,7 @@ class FakeAppServer:
         self.ephemeral_seen: list[bool] = []
         self.review_targets_seen: list[dict | None] = []
         self.thread_sources_seen: list[str | None] = []
+        self.config_overrides_seen: list[tuple[str, ...]] = []
         self.result = result or CodexRunResult(
             text="AMZN is available", input_tokens=11, output_tokens=7, cost_usd=0.002
         )
@@ -54,6 +55,7 @@ class FakeAppServer:
         review_target=None,
         progress=None,
         thread_source=None,
+        config_overrides=(),
     ):
         if progress is not None:
             # What the real client publishes as it goes, so the engine can
@@ -63,6 +65,7 @@ class FakeAppServer:
         self.calls += 1
         self.review_targets_seen.append(review_target)
         self.thread_sources_seen.append(thread_source)
+        self.config_overrides_seen.append(tuple(config_overrides))
         self.prompts.append(prompt)
         self.thread_ids_seen.append(thread_id)
         self.ephemeral_seen.append(ephemeral)
@@ -609,3 +612,37 @@ class TestHandleRetention:
         assert not result.ok
         assert engine.thread_id == "thread-empty"
         assert engine._resuming is False
+
+
+class TestPerAgentCompaction:
+    """The policy has to reach the subprocess, or it is decoration."""
+
+    def test_the_token_limit_is_forwarded_as_a_config_override(self):
+        fake = FakeAppServer()
+        agent = Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(codex=CodexPolicy(auto_compact_token_limit=140_000)),
+            ),
+            name="a",
+        )
+        agent("hello")
+
+        assert fake.config_overrides_seen == [("model_auto_compact_token_limit=140000",)]
+
+    def test_an_unset_policy_sends_nothing(self):
+        """Codex keeps its own default; we do not pin one on its behalf."""
+        fake = FakeAppServer()
+        Agent(CodexEngine(client=fake), name="a")("hello")
+
+        assert fake.config_overrides_seen == [()]
+
+    def test_the_context_window_is_deliberately_not_exposed(self):
+        """openai/codex#16068: setting it breaks auto-compaction outright.
+
+        Pinned as a test because the field is an obvious-looking addition,
+        and the reason not to add it lives in an issue tracker rather than in
+        the type.
+        """
+        assert not hasattr(CodexPolicy(), "context_window")
+        assert not hasattr(CodexPolicy(), "model_context_window")

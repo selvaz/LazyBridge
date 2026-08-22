@@ -16,6 +16,7 @@ from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import (
     ApprovalGate,
     ApprovalRequest,
+    CodexPolicy,
     CodingAgentConfig,
     ask_approval,
     loop_scoped_lock,
@@ -98,6 +99,19 @@ def _structured_output_instructions(output_type: Any) -> str | None:
         "matching exactly this JSON schema:\n"
         f"{json.dumps(schema, indent=2)}"
     )
+
+
+def _config_overrides(policy: CodexPolicy) -> tuple[str, ...]:
+    """Per-agent ``-c key=value`` overrides for this agent's App Server.
+
+    One entry per policy field that maps to a Codex configuration key, so a
+    setting reaches only this agent's subprocess and never the shared
+    ``~/.codex/config.toml``.
+    """
+    overrides: list[str] = []
+    if policy.auto_compact_token_limit is not None:
+        overrides.append(f"model_auto_compact_token_limit={policy.auto_compact_token_limit}")
+    return tuple(overrides)
 
 
 class CodexEngine:
@@ -234,6 +248,7 @@ class CodexEngine:
             "developer_instructions": self.system,
             "sandbox": self.config.codex.sandbox,
             "approval_policy": self.config.codex.approval_policy,
+            "config_overrides": _config_overrides(self.config.codex),
             "approval_gate": gate,
             "thread_id": self.thread_id,
             "ephemeral": not self.persist_thread,

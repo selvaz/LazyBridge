@@ -524,3 +524,49 @@ def test_a_rejected_turn_is_recorded_as_not_having_run():
     assert progress["thread_id"] == "thread-1"
     assert progress["turn_sent"] is True
     assert progress["rejected"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Per-agent configuration overrides
+# --------------------------------------------------------------------------- #
+def test_a_policy_override_reaches_this_subprocess_and_no_config_file():
+    """`-c key=value` is how a setting stays scoped to one agent.
+
+    The alternative is `~/.codex/config.toml`, which every Codex on the
+    machine reads — so an agent that needed to compact earlier would change
+    the behaviour of every other one too.
+    """
+    client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
+    argv = client._spawn_command(("model_auto_compact_token_limit=140000",))
+    assert argv[-2:] == ("-c", "model_auto_compact_token_limit=140000")
+    assert argv[: -2] == (sys.executable, FIXTURE, "happy")
+
+
+def test_overrides_are_not_dropped_when_the_command_is_supplied():
+    """Losing them here would lose exactly what the caller asked for."""
+    client = CodexAppServerClient(command=("codex", "app-server"))
+    argv = client._spawn_command(("a=1", "b=2"))
+    assert argv == ("codex", "app-server", "-c", "a=1", "-c", "b=2")
+
+
+def test_no_override_leaves_the_command_untouched():
+    client = CodexAppServerClient(command=("codex", "app-server"))
+    assert client._spawn_command() == ("codex", "app-server")
+
+
+def test_a_turn_still_completes_with_overrides_on_the_command_line():
+    """The extra argv must not disturb the protocol itself."""
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
+        return await client.run(
+            prompt="quote AMZN",
+            model="gpt-5-codex",
+            cwd=".",
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            config_overrides=("model_auto_compact_token_limit=140000",),
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), _TIMEOUT))
+    assert result.text

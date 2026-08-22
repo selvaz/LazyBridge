@@ -266,6 +266,16 @@ class AgentSdkClient(ClaudeSdkClient):
             # pre-built ``dict[str, ...]`` would not satisfy the parameter).
             hooks={"PreToolUse": matchers} if matchers else None,
             setting_sources=list(options.setting_sources),
+            # The env var, not the settings file: it takes precedence over
+            # every settings source, so it says the same thing whether or not
+            # this agent was told to read the user's settings. The SDK merges
+            # this dict OVER the inherited environment rather than replacing
+            # it, so naming one variable does not strip the rest.
+            env=(
+                {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(options.auto_compact_window)}
+                if options.auto_compact_window is not None
+                else {}
+            ),
             include_partial_messages=options.include_partial_messages,
             output_format=options.output_format,
         )

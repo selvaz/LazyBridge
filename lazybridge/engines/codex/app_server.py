@@ -121,6 +121,22 @@ class CodexAppServerClient:
         #: engine error, not at construction.
         self.command = command
 
+    def _spawn_command(self, config_overrides: tuple[str, ...] = ()) -> tuple[str, ...]:
+        """The argv for this run's App Server, per-agent overrides included.
+
+        ``-c key=value`` is an App Server option and not merely an
+        interactive one (verified against ``codex app-server --help``), so a
+        setting given here lands on this subprocess and nowhere else — the
+        shared ``~/.codex/config.toml`` is never touched.
+
+        Overrides are appended to a caller-supplied ``command`` as well.
+        Dropping them there would silently lose exactly the setting the
+        caller asked for, which is worse than a custom command having to
+        tolerate two extra argv entries.
+        """
+        base = self.command or (codex_executable(), "app-server")
+        return (*base, *(part for value in config_overrides for part in ("-c", value)))
+
     async def run(
         self,
         *,
@@ -140,6 +156,7 @@ class CodexAppServerClient:
         ephemeral: bool = True,
         review_target: dict[str, Any] | None = None,
         progress: dict[str, Any] | None = None,
+        config_overrides: tuple[str, ...] = (),
         thread_source: str | None = None,
     ) -> CodexRunResult:
         """Run one turn, in a fresh thread or in ``thread_id``.
@@ -204,7 +221,7 @@ class CodexAppServerClient:
         """
         if thread_id:
             ephemeral = False
-        command = self.command or (codex_executable(), "app-server")
+        command = self._spawn_command(config_overrides)
         # stderr is DEVNULL, not PIPE: nothing ever reads it here, and an
         # unread PIPE deadlocks the App Server once its stderr buffer fills.
         process = await asyncio.create_subprocess_exec(
