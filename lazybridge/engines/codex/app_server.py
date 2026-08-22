@@ -133,9 +133,30 @@ class CodexAppServerClient:
         Dropping them there would silently lose exactly the setting the
         caller asked for, which is worse than a custom command having to
         tolerate two extra argv entries.
+
+        ``--strict-config`` is added, but ONLY when there is at least one
+        override to protect. Verified live: without it, ``-c`` with an
+        invented key exits cleanly and stderr is discarded (``DEVNULL``
+        below), so a key a running Codex build does not recognise is a
+        silent no-op — the agent keeps Codex's default despite an explicit
+        policy, and nothing says so. With it, the same invented key is a
+        startup error instead.
+
+        The flag is not applied unconditionally because it validates the
+        *entire* resolved configuration, file included, not just this call's
+        ``-c`` values — an agent that never sets a per-agent override should
+        see zero change in whether its existing ``config.toml`` is accepted.
+        Scoping it to "an override is present" means the stricter check only
+        ever applies to the one case it exists to protect.
         """
         base = self.command or (codex_executable(), "app-server")
-        return (*base, *(part for value in config_overrides for part in ("-c", value)))
+        if not config_overrides:
+            return base
+        return (
+            *base,
+            "--strict-config",
+            *(part for value in config_overrides for part in ("-c", value)),
+        )
 
     async def run(
         self,
