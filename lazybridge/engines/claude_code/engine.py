@@ -425,6 +425,26 @@ class ClaudeCodeEngine:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
         return remembering_gate(self.config.approval_gate, session_approvals(session, "claude-code", agent_name))
 
+    async def usage(self, *, timeout: float | None = None) -> Any:
+        """This engine's account usage, read from Claude Code's own ``/usage``.
+
+        A convenience over :func:`~lazybridge.engines.claude_code.usage.fetch_claude_usage`
+        that reuses this engine's ``model``/``cwd`` and — when this engine was
+        built with an injected test client — that same client, so a
+        ``ClaudeCodeEngine(client=FakeSdk())`` in a test never reaches the real
+        SDK here either. Nothing else about the engine's configuration (tools,
+        approval gate, policy) applies, since ``/usage`` is a CLI meta command,
+        not a turn this agent's tools or approvals could touch. See that
+        function for what can fail and why the SDK's own rate-limit event is
+        not used instead.
+        """
+        from lazybridge.engines.claude_code.usage import fetch_claude_usage
+
+        kwargs: dict[str, Any] = {"model": self.model, "cwd": self.cwd, "client": self._client}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return await fetch_claude_usage(**kwargs)
+
     def _options(
         self,
         tools: list[Any],

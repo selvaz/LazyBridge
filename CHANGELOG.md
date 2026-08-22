@@ -23,7 +23,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   the budget rather than enlarging the model's limit, and setting it is
   reported upstream to break auto-compaction (openai/codex#16068).
   `LLMEngine` has no equivalent: an API-backed agent has no compaction to
-  schedule.
+  schedule. Review caught that without `--strict-config`, an override key a
+  running Codex build does not recognise is a silent no-op with stderr
+  discarded; the flag is now added, but only when an override is present, so
+  it never changes whether an agent's own `~/.codex/config.toml` is accepted.
+- **`ClaudeCodeEngine.usage()`** — how much of the account's weekly and
+  session budget is used, and when each window resets. There is no typed
+  field for this: the Agent SDK's `RateLimitEvent` arrives free on every run
+  but its `utilization` was `None` on every account tested, and scanning
+  every message type of a live run finds the percentage nowhere else. The
+  weekly figures exist only in the prose Claude Code's own `/usage` slash
+  command prints, so `usage()` spends one small turn sending it and parses
+  the reply — every field it cannot extract is `None` rather than guessed,
+  and `snapshot.parsed`/`raw_text` let a caller detect and fall back from
+  wording drift instead of trusting a silently empty result. Goes through the
+  same `ClaudeSdkClient` boundary the engine's `run()`/`stream()` already
+  use, so a test engine built with an injected client never reaches the real
+  SDK here either. `fetch_claude_usage()` and `parse_usage_report()` are
+  exported standalone for use outside an `Engine`. The report carries no
+  year, and review caught two ways the parser's own year-inference could
+  produce a *wrong* timestamp rather than an absent one: deriving the year
+  from `now`'s own zone instead of the report's (an instant near midnight
+  UTC can already be a different calendar date in `America/Los_Angeles`,
+  turning "resets in 30 minutes" into "resets in a year") and silently
+  picking the first of the two wall-clock occurrences during a DST
+  fall-back, which the report's text has no offset to disambiguate. Both
+  now fall back to `resets_at=None` rather than guess. `tzdata` is now a
+  conditional dependency of the `claude-code` extra on Windows, which ships
+  no system IANA database — without it, every reset would have quietly come
+  back unparsed rather than erroring.
 - **`Tool(timeout=N)` and `Agent(tool_timeout=N)`** — a per-tool deadline that
   works on *synchronous* tools. `Agent(timeout=N)` can only fire at an
   `await`, and a blocking sync tool never yields one: measured, an

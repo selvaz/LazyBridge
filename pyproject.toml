@@ -65,7 +65,18 @@ docparse  = ["griffe>=1.0,<3.0"]
 # Imported lazily inside lazybridge.engines.claude_code.sdk_client; the
 # engine class itself is always importable, this extra is only needed to
 # actually construct/run one. See docs/guides/full/claude-code-engine.md.
-claude-code = ["claude-agent-sdk", "mcp"]
+claude-code = [
+    "claude-agent-sdk",
+    "mcp",
+    # ClaudeCodeEngine.usage() resolves IANA zone names (e.g.
+    # "America/Los_Angeles") from Claude Code's own /usage report via
+    # zoneinfo. Windows ships no system IANA database, so without this every
+    # reset timestamp on Windows would silently come back None -- not an
+    # error, just quietly absent. macOS/Linux carry one already; the marker
+    # keeps the extra a no-op there rather than a second copy of the same
+    # data.
+    "tzdata; sys_platform == 'win32'",
+]
 # ``pydantic`` is a runtime dependency but tests import it directly
 # (fixtures, dataclass coercion, schema validation).  Including it in
 # the [test] extra makes ``pip install -e '.[test]'`` a one-step
