@@ -68,10 +68,23 @@ _logger = logging.getLogger(__name__)
 # Price per 1M tokens (input, output). Approximate; verify at ai.google.dev/gemini-api/docs/pricing.
 # Ordered longest-prefix first so substring matching in _compute_cost is unambiguous.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
-    # Gemini 3 series (all preview as of 2026-04)
-    "gemini-3.1-flash-lite": (0.25, 1.50),  # gemini-3.1-flash-lite-preview
+    # Weekly pricing check, 2026-08-23: added the 4 models below (all real
+    # gaps -- verified at ai.google.dev/gemini-api/docs/pricing, not in this
+    # table at all before). "-lite"/more specific variants ordered before
+    # their shorter prefix (e.g. "gemini-3.5-flash-lite" before
+    # "gemini-3.5-flash") -- required by _compute_cost's substring match,
+    # not just style, since "gemini-3.5-flash" IS a substring of
+    # "gemini-3.5-flash-lite".
+    "gemini-3.7-flash": (0.75, 3.75),  # GA 2026-08-13; intro price through 2026-12-31, then $1.50/$7.50
+    "gemini-3.6-flash": (0.75, 3.75),  # GA 2026-07-21; same intro-price schedule as 3.7 Flash above
+    "gemini-3.5-flash-lite": (0.30, 2.50),  # GA
+    "gemini-3.5-flash": (1.50, 9.00),  # GA
+    # Gemini 3.1 series (gemini-3.1-flash-lite went GA; gemini-3.1-pro is
+    # still preview-only as of this check -- see ai.google.dev/gemini-api/docs/models)
+    "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-3.1-pro": (2.00, 12.0),  # gemini-3.1-pro-preview; ≤200K tier — >200K billed at $4/$18
-    "gemini-3-flash": (0.50, 3.00),  # gemini-3-flash-preview
+    "gemini-3-flash": (0.50, 3.00),  # gemini-3-flash-preview; still listed by Google despite some
+    # third-party integrations (e.g. GitHub Copilot) dropping it in favour of 3.6/3.7 on their own
     # Gemini 2.5 series (GA)
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),

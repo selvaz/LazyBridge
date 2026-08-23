@@ -104,10 +104,22 @@ _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
     # flagship + "-pro".  "gpt-5.6" is a bare alias that routes to Sol —
     # kept last among the 5.6 rows so the more specific tier names match
     # first for their own full model strings.
+    # 2026-07-30 update: Terra cut 20% ($2.50/$15 -> $2.00/$12) and Luna
+    # cut 80% ($1.00/$6 -> $0.20/$1.20); Sol was left unchanged.
+    # 2026-08-21: Sol got a temporary ~20% promo ($5/$30 -> $4/$20),
+    # advertised through ~2026-11-21 — NOT modeled below since it's a
+    # time-boxed promo on top of the list price; update if it's made
+    # permanent (weekly pricing check, verify at openai.com/api/pricing).
     "gpt-5.6-sol": (5.0, 0.50, 30.0),
-    "gpt-5.6-terra": (2.50, 0.25, 15.0),
-    "gpt-5.6-luna": (1.0, 0.10, 6.0),
+    "gpt-5.6-terra": (2.00, 0.20, 12.0),
+    "gpt-5.6-luna": (0.20, 0.02, 1.20),
     "gpt-5.6": (5.0, 0.50, 30.0),
+    # GPT-5.6-Cyber: purpose-trained cybersecurity variant, gated behind
+    # OpenAI's Daybreak program (identity verification + approved-use
+    # attestations). Kept in the price table for callers with access but
+    # deliberately NOT wired into _TIER_ALIASES — see claude-mythos-5 above
+    # for the same pattern on the Anthropic side.
+    "gpt-5.6-cyber": (12.50, 1.25, 75.0),
     "gpt-5.5-pro": (30.0, None, 180.0),
     "gpt-5.5": (5.0, 0.50, 30.0),
     "gpt-5.4-pro": (30.0, None, 180.0),

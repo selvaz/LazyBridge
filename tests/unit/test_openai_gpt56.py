@@ -31,8 +31,8 @@ def test_tier_aliases_route_to_gpt_5_6_family() -> None:
 
 def test_price_table_has_gpt_5_6_entries() -> None:
     assert _PRICE_TABLE["gpt-5.6-sol"] == (5.0, 0.50, 30.0)
-    assert _PRICE_TABLE["gpt-5.6-terra"] == (2.50, 0.25, 15.0)
-    assert _PRICE_TABLE["gpt-5.6-luna"] == (1.0, 0.10, 6.0)
+    assert _PRICE_TABLE["gpt-5.6-terra"] == (2.00, 0.20, 12.0)
+    assert _PRICE_TABLE["gpt-5.6-luna"] == (0.20, 0.02, 1.20)
 
 
 def test_bare_gpt_5_6_alias_matches_sol_pricing() -> None:
@@ -62,7 +62,7 @@ def test_compute_cost_gpt_5_6_luna_with_cache_hit() -> None:
         output_tokens=0,
         cached_input_tokens=400_000,
     )
-    expected = (600_000 * 1.0 + 400_000 * 0.10) / 1_000_000
+    expected = (600_000 * 0.20 + 400_000 * 0.02) / 1_000_000
     assert cost == pytest.approx(expected)
 
 
