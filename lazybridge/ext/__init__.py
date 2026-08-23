@@ -22,6 +22,7 @@ Available framework extensions::
     lazybridge.ext.evals     EvalSuite, EvalCase, llm_judge, assertion helpers
     lazybridge.ext.planners  Planner factories (DAG builder + blackboard)
     lazybridge.ext.viz       Live + replay pipeline visualizer
+    lazybridge.ext.approval  Tiered ApprovalGate policy (TieredGate, Rule, Channel)
 
 See ``docs/guides/core-vs-ext.md`` for the import boundary policy and
 https://lazybridge.com/ for the three-package layout.
