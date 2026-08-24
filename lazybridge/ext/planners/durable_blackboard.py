@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 from lazybridge import Agent, LLMEngine, Store, Tool
 
-TaskStatus = Literal["todo", "claimed", "done", "failed"]
+TaskStatus = Literal["todo", "claimed", "done", "failed", "cancelled"]
 
 #: Bumped when the persisted document shape changes incompatibly.
 BLACKBOARD_VERSION = 1
@@ -45,6 +45,8 @@ Tools:
 
 - ``get_plan()``                       — read the plan and see what is left.
 - ``set_plan(reasoning, tasks)``       — create the plan (only when there is none).
+- ``add_tasks(tasks)``                 — append newly-discovered tasks to the plan.
+- ``cancel_task(task_index, expected_text, reason)`` — drop a todo task that is no longer needed.
 - ``claim_next()``                     — take the next task; returns its index and text.
 - ``mark_done(task_index, summary)``   — close a task with a 1-3 sentence result.
 - ``mark_failed(task_index, error)``   — give a task back after a real failure.
@@ -65,6 +67,22 @@ Never invent progress: a task counts as done only once ``mark_done`` returns.
 """
 
 
+def _fresh_task(text: str) -> dict[str, Any]:
+    """A brand-new ``todo`` task record -- the one place the field list is
+    spelled out, so ``set_plan`` and ``add_tasks`` can never drift apart on
+    what a task looks like at creation."""
+    return {
+        "text": str(text),
+        "status": "todo",
+        "result": "",
+        "error": "",
+        "cancel_reason": "",
+        "attempts": 0,
+        "owner": None,
+        "claimed_at": None,
+    }
+
+
 @dataclass(frozen=True)
 class BlackboardSnapshot:
     """Read-only view of a plan, for callers that want data instead of text."""
@@ -75,7 +93,7 @@ class BlackboardSnapshot:
 
     @property
     def complete(self) -> bool:
-        return bool(self.tasks) and all(t["status"] in ("done", "failed") for t in self.tasks)
+        return bool(self.tasks) and all(t["status"] in ("done", "failed", "cancelled") for t in self.tasks)
 
     @property
     def open_tasks(self) -> list[int]:
@@ -158,20 +176,67 @@ class DurableBlackboard:
                 "plan_id": self.plan_id,
                 "reasoning": reasoning.strip(),
                 "created_at": time.time(),
-                "tasks": [
-                    {
-                        "text": str(t),
-                        "status": "todo",
-                        "result": "",
-                        "error": "",
-                        "attempts": 0,
-                        "owner": None,
-                        "claimed_at": None,
-                    }
-                    for t in tasks
-                ],
+                "tasks": [_fresh_task(t) for t in tasks],
             }
             return fresh, self._render(fresh)
+
+        return str(self._mutate(apply))
+
+    def add_tasks(self, tasks: list[str]) -> str:
+        """Append new tasks to an in-progress plan without touching any
+        existing task's index or status -- the low-risk half of "revise the
+        plan without discarding it": pure append never shifts an index a
+        worker may already be holding from ``claim_next``, unlike deletion
+        or reordering would.
+        """
+        clean = [str(t).strip() for t in tasks if str(t).strip()]
+        if not clean:
+            return "REJECTED: tasks must contain at least one non-empty item."
+
+        def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
+            if doc is None or not doc.get("tasks"):
+                return None, "REJECTED: no plan yet; call set_plan first."
+            new_doc = {**doc, "tasks": [*doc["tasks"], *(_fresh_task(t) for t in clean)]}
+            return new_doc, self._render(new_doc)
+
+        return str(self._mutate(apply))
+
+    def cancel_task(self, task_index: int, expected_text: str, reason: str) -> str:
+        """Permanently drop a not-yet-claimed task, without needing to claim
+        it first (unlike ``mark_done``/``mark_failed``, which require an
+        active claim).
+
+        ``expected_text`` must match the task's CURRENT text exactly. This
+        is the guard against acting on a stale rendering: an LLM that still
+        remembers an earlier ``get_plan()`` (before a concurrent
+        ``add_tasks``/``claim_next`` changed what index N refers to) gets a
+        clear rejection instead of silently cancelling the wrong task. Only
+        a ``todo`` task may be cancelled -- a claimed task belongs to its
+        worker until that worker closes it; cancel must never pre-empt it.
+        """
+        if not reason.strip():
+            return "REJECTED: a reason is required."
+
+        def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
+            if doc is None or not doc.get("tasks"):
+                return None, "REJECTED: no plan set; call set_plan first."
+            tasks = [dict(t) for t in doc["tasks"]]
+            if not 0 <= task_index < len(tasks):
+                return None, f"REJECTED: task_index out of range (valid: 0..{len(tasks) - 1})."
+            task = tasks[task_index]
+            if task["text"] != expected_text:
+                return None, (
+                    f"REJECTED: task {task_index}'s current text does not match expected_text -- "
+                    "call get_plan() to see the current state before cancelling."
+                )
+            if task.get("status") != "todo":
+                return None, (
+                    f"REJECTED: task {task_index} is {task.get('status')}, not todo -- "
+                    "only an unclaimed task can be cancelled."
+                )
+            task.update(status="cancelled", cancel_reason=reason.strip())
+            new_doc = {**doc, "tasks": tasks}
+            return new_doc, self._render(new_doc)
 
         return str(self._mutate(apply))
 
@@ -195,7 +260,7 @@ class DurableBlackboard:
     def _render(self, doc: dict[str, Any] | None) -> str:
         if doc is None or not doc.get("tasks"):
             return "(no plan yet; call set_plan)"
-        marks = {"todo": "[ ]", "claimed": "[~]", "done": "[x]", "failed": "[!]"}
+        marks = {"todo": "[ ]", "claimed": "[~]", "done": "[x]", "failed": "[!]", "cancelled": "[-]"}
         lines = [f"plan: {doc.get('plan_id')}", f"reasoning: {doc.get('reasoning', '')}"]
         for i, task in enumerate(doc["tasks"]):
             row = f"  {i}. {marks.get(task['status'], '[?]')} {task['text']}"
@@ -203,14 +268,18 @@ class DurableBlackboard:
                 row += f"\n       → {task['result']}"
             if task.get("error"):
                 row += f"\n       ! {task['error']} (attempts: {task.get('attempts', 0)})"
+            if task.get("cancel_reason"):
+                row += f"\n       (cancelled: {task['cancel_reason']})"
             lines.append(row)
         snapshot = self._snapshot_of(doc)
         if snapshot.complete:
             done = sum(1 for t in snapshot.tasks if t["status"] == "done")
-            failed = len(snapshot.tasks) - done
-            lines.append(
-                f"plan complete — {done} done, {failed} failed" if failed else "plan complete — all tasks done"
-            )
+            failed = sum(1 for t in snapshot.tasks if t["status"] == "failed")
+            cancelled = sum(1 for t in snapshot.tasks if t["status"] == "cancelled")
+            if failed or cancelled:
+                lines.append(f"plan complete — {done} done, {failed} failed, {cancelled} cancelled")
+            else:
+                lines.append("plan complete — all tasks done")
         else:
             nxt = next((i for i, t in enumerate(snapshot.tasks) if t["status"] == "todo"), None)
             lines.append(f"next claimable: {nxt}" if nxt is not None else "no free task right now (all claimed)")
@@ -232,18 +301,25 @@ class DurableBlackboard:
                 return None, None
             now = time.time()
             tasks = [dict(t) for t in doc["tasks"]]
-            index = next((i for i, t in enumerate(tasks) if t["status"] == "todo"), None)
-            if index is None:
-                index = next(
-                    (
-                        i
-                        for i, t in enumerate(tasks)
-                        if t["status"] == "claimed"
-                        and t.get("claimed_at") is not None
-                        and now - float(t["claimed_at"]) > self.lease_seconds
-                    ),
-                    None,
-                )
+            # Earliest ELIGIBLE index across todo *and* expired-claimed, not
+            # todo-always-first: preferring todo unconditionally means a
+            # plan that keeps growing via add_tasks() can starve reclaiming
+            # an abandoned worker's task forever, since a fresh todo item is
+            # always available before the scan ever reaches the expired
+            # claim sitting earlier in the list.
+            todo_index = next((i for i, t in enumerate(tasks) if t["status"] == "todo"), None)
+            expired_index = next(
+                (
+                    i
+                    for i, t in enumerate(tasks)
+                    if t["status"] == "claimed"
+                    and t.get("claimed_at") is not None
+                    and now - float(t["claimed_at"]) > self.lease_seconds
+                ),
+                None,
+            )
+            candidates = [i for i in (todo_index, expired_index) if i is not None]
+            index = min(candidates) if candidates else None
             if index is None:
                 return None, None
             task = tasks[index]
@@ -368,6 +444,15 @@ def durable_blackboard_agent(
         """Read the durable plan: what is done, what is claimed, what is next."""
         return board.render()
 
+    def add_tasks(tasks: list[str]) -> str:
+        """Append newly-discovered tasks to the plan without disturbing any existing task."""
+        return board.add_tasks(tasks)
+
+    def cancel_task(task_index: int, expected_text: str, reason: str) -> str:
+        """Drop a not-yet-claimed task that turned out to be unnecessary. expected_text must match
+        the task's current text exactly (call get_plan() first) -- a mismatch is refused."""
+        return board.cancel_task(task_index, expected_text, reason)
+
     def claim_next() -> str:
         """Take the next task to work on. Do only that task this run."""
         claimed = board.claim_next(owner=holder)
@@ -391,7 +476,16 @@ def durable_blackboard_agent(
 
     return Agent(
         engine=engine if engine is not None else LLMEngine(model, system=system or DURABLE_BLACKBOARD_GUIDANCE),
-        tools=[*agents, Tool(set_plan), Tool(get_plan), Tool(claim_next), Tool(mark_done), Tool(mark_failed)],
+        tools=[
+            *agents,
+            Tool(set_plan),
+            Tool(get_plan),
+            Tool(add_tasks),
+            Tool(cancel_task),
+            Tool(claim_next),
+            Tool(mark_done),
+            Tool(mark_failed),
+        ],
         name=name,
         store=store,
         verbose=verbose,

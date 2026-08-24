@@ -173,6 +173,114 @@ def test_marking_a_missing_or_out_of_range_task_is_refused():
 
 
 # ---------------------------------------------------------------------------
+# add_tasks / cancel_task (incremental plan revision)
+# ---------------------------------------------------------------------------
+
+
+def test_add_tasks_appends_without_disturbing_existing_indices():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="w")  # index 0 in flight
+
+    board.add_tasks(["a newly discovered task"])
+
+    snapshot = board.snapshot()
+    assert [t["text"] for t in snapshot.tasks] == [*TASKS, "a newly discovered task"]
+    assert snapshot.tasks[0]["status"] == "claimed"  # untouched by the append
+    # The in-flight claim from before the append still closes cleanly.
+    assert not board.mark_done(0, "finished").startswith("REJECTED")
+
+
+def test_add_tasks_is_rejected_without_a_plan():
+    store = Store()
+    board = _board(store)
+    assert board.add_tasks(["x"]).startswith("REJECTED")
+
+
+def test_add_tasks_rejects_an_empty_or_blank_list():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    assert board.add_tasks([]).startswith("REJECTED")
+    assert board.add_tasks(["   "]).startswith("REJECTED")
+    assert len(board.snapshot().tasks) == len(TASKS)
+
+
+def test_cancel_task_drops_an_unclaimed_task():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    result = board.cancel_task(1, TASKS[1], "no longer needed")
+
+    assert not result.startswith("REJECTED")
+    task = board.snapshot().tasks[1]
+    assert task["status"] == "cancelled"
+    assert task["cancel_reason"] == "no longer needed"
+
+
+def test_cancel_task_rejects_a_stale_text_mismatch():
+    """Guards against the LLM acting on an outdated get_plan() rendering."""
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    refusal = board.cancel_task(1, "a task that no longer matches", "stale")
+
+    assert refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[1]["status"] == "todo"
+
+
+def test_cancel_task_refuses_a_claimed_task():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="w")
+
+    refusal = board.cancel_task(0, TASKS[0], "changed my mind")
+
+    assert refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[0]["status"] == "claimed"
+
+
+def test_cancel_task_requires_a_reason():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    assert board.cancel_task(0, TASKS[0], "  ").startswith("REJECTED")
+
+
+def test_a_plan_of_only_cancelled_and_done_tasks_is_complete():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", ["do it", "skip it"])
+    board.claim_next(owner="w")
+    board.mark_done(0, "done")
+    board.cancel_task(1, "skip it", "not needed after all")
+
+    assert board.snapshot().complete
+    assert "1 cancelled" in board.render()
+
+
+def test_claim_next_does_not_starve_an_expired_claim_behind_new_todo_tasks():
+    """A plan that keeps growing via add_tasks() must not indefinitely delay
+    reclaiming an abandoned worker's task just because a fresher todo item
+    is always available first in scan order."""
+    store = Store()
+    board = _board(store, lease_seconds=0.05)
+    board.set_plan("shared", ["the abandoned task"])
+    board.claim_next(owner="doomed")
+
+    import time
+
+    time.sleep(0.06)
+    board.add_tasks(["a brand new task"])  # would starve the expired claim under naive todo-first scanning
+
+    assert board.claim_next(owner="rescuer") == (0, "the abandoned task")
+
+
+# ---------------------------------------------------------------------------
 # Agent wiring
 # ---------------------------------------------------------------------------
 
@@ -223,7 +331,16 @@ def test_the_agent_exposes_the_blackboard_verbs_alongside_sub_agents():
 
     tool_names = set(agent._tool_map)
 
-    assert {"set_plan", "get_plan", "claim_next", "mark_done", "mark_failed", "worker"} <= tool_names
+    assert {
+        "set_plan",
+        "get_plan",
+        "add_tasks",
+        "cancel_task",
+        "claim_next",
+        "mark_done",
+        "mark_failed",
+        "worker",
+    } <= tool_names
 
 
 def test_duplicate_sub_agent_names_are_rejected():
