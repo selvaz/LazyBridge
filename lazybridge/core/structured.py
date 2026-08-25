@@ -198,10 +198,13 @@ def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
     the *whole* schema unrepresentable: closing it would silently forbid
     dynamic fields the destination type actually accepts, and there is no
     single-property fix for either case that preserves the original
-    semantics. ``None`` propagates all the way up in both cases.
+    semantics. ``None`` propagates all the way up in both cases — as it
+    does for a fixed-length tuple (``prefixItems``, e.g. Pydantic's
+    ``tuple[str, int]``), a keyword outside the strict-mode subset with no
+    equivalent to translate it into.
 
     Recurses into ``$defs``/``definitions`` (Pydantic's nested-model schemas),
-    ``properties``, ``items``, ``prefixItems`` and ``anyOf``/``oneOf``/``allOf``.
+    ``properties``, ``items`` and ``anyOf``/``oneOf``/``allOf``.
 
     Callers should fall back to a non-native mechanism (e.g. prompt priming)
     on ``None`` rather than send a schema the provider will reject — or one
@@ -268,18 +271,14 @@ def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
                 return None
             out["items"] = converted_items
 
-        prefix_items = out.get("prefixItems")
-        if isinstance(prefix_items, list):
-            converted_prefix: list[Any] = []
-            for sub in prefix_items:
-                if not isinstance(sub, dict):
-                    converted_prefix.append(sub)
-                    continue
-                converted = convert(sub)
-                if converted is None:
-                    return None
-                converted_prefix.append(converted)
-            out["prefixItems"] = converted_prefix
+        if "prefixItems" in out:
+            # Fixed-length tuples (Pydantic's tuple[str, int] etc.) render as
+            # `prefixItems` — a keyword outside OpenAI/Codex's strict-mode
+            # subset. Recursing into and keeping it would hand back a
+            # schema that *looks* converted but turn/start still rejects
+            # with invalid_json_schema, defeating the fallback this whole
+            # function exists to provide.
+            return None
 
         for key in ("anyOf", "oneOf", "allOf"):
             variants = out.get(key)

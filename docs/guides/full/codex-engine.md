@@ -151,13 +151,37 @@ turn-based path.
 
 ## Structured output
 
-`output=<model>` works, but is asked for in the prompt rather than enforced by
-the server — the opposite of `ClaudeCodeEngine`, which uses the Agent SDK's
-native `output_format`. `turn/start` does expose an `outputSchema`, and it
-works, but only with OpenAI-*strict* schemas: `additionalProperties: false` on
-every object **and** `required` listing every property. A plain Pydantic schema
-fails the turn with `invalid_json_schema`, so wiring it needs a strict-mode
-rewrite that turns optional fields into nullable-required ones.
+`output=<model>` is enforced server-side via `turn/start`'s native
+`outputSchema` whenever the schema qualifies — the same guarantee
+`ClaudeCodeEngine` gets from the Agent SDK's `output_format`. `turn/start`
+only accepts OpenAI-*strict* schemas: `additionalProperties: false` on every
+object **and** `required` listing every property, which a plain Pydantic
+schema doesn't satisfy on its own (a bare schema fails the turn with
+`invalid_json_schema`). `lazybridge.core.structured.to_openai_strict_schema`
+does that rewrite: an optional property is carried into `required` only when
+it already accepts `null` as written (an `Optional[X] = None` field, a
+`Literal[..., None]`), since that's the only case where forcing it into
+`required` doesn't change what a round-trip through the model then accepts.
+
+Not every schema qualifies. The engine falls back to the old prompt-priming
+behavior — ask for the shape in the prompt, let
+`Agent._validate_and_retry`'s post-hoc repair catch drift — whenever the
+native rewrite would have to change accepted semantics instead of just
+restating them:
+
+- an optional property whose own type never admits `null` (e.g.
+  `count: int = 5` — forcing it into `required` would let the model legally
+  answer `null` there, which the destination model then rejects);
+- a model with `extra="allow"` (or any object whose `additionalProperties`
+  is explicitly `true`/typed) — closing it would forbid dynamic fields the
+  destination type actually accepts;
+- a fixed-length tuple (`tuple[str, int]`, rendered as `prefixItems`) — a
+  keyword outside the strict-mode subset with no equivalent to translate it
+  into;
+- the output type's top level isn't an object (e.g. `output=list[str]`).
+
+`output=str` (the default) and `output=Any` are unaffected either way — there
+is nothing to constrain.
 
 ## Distinguishing LazyBridge threads on disk
 
