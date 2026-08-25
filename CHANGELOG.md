@@ -8,7 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.3.0] — 2026-08-25
+## [1.2.1] — 2026-08-25
 
 ### Added
 - **`CodexEngine` structured output now goes through `turn/start`'s native
