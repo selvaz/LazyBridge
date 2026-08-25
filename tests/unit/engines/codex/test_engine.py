@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ class FakeAppServer:
         self.dynamic_tools_seen: list[list[dict]] = []
         self.attachments_seen: list[list[dict]] = []
         self.effort_seen: list[str | None] = []
+        self.output_schemas_seen: list[dict | None] = []
         self.developer_instructions_seen: list[str | None] = []
         self.thread_ids_seen: list[str | None] = []
         self.ephemeral_seen: list[bool] = []
@@ -47,6 +49,7 @@ class FakeAppServer:
         on_text=None,
         attachments=None,
         effort=None,
+        output_schema=None,
         sandbox="read-only",
         approval_policy="never",
         approval_gate=None,
@@ -72,6 +75,7 @@ class FakeAppServer:
         self.dynamic_tools_seen.append(dynamic_tools)
         self.attachments_seen.append(attachments or [])
         self.effort_seen.append(effort)
+        self.output_schemas_seen.append(output_schema)
         self.developer_instructions_seen.append(developer_instructions)
         if self.calls <= self.fail_times:
             raise self.exc_factory()
@@ -253,7 +257,7 @@ def test_non_transient_failure_is_not_retried():
     assert client.calls == 1
 
 
-def test_structured_output_type_injects_json_schema_into_prompt():
+def test_structured_output_type_uses_native_output_schema_not_prompt_priming():
     class Quote(BaseModel):
         symbol: str
         price: float
@@ -265,6 +269,33 @@ def test_structured_output_type_injects_json_schema_into_prompt():
 
     assert result.ok
     assert isinstance(result.payload, Quote)
+    # Every field is required and flat, so it's strict-representable as-is —
+    # sent as turn/start's native outputSchema, constraining the answer
+    # server-side. Priming the prompt too would just repeat the same shape
+    # as prose the model has to read twice.
+    schema = client.output_schemas_seen[0]
+    assert schema is not None
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"symbol", "price"}
+    assert "JSON schema" not in client.prompts[0]
+
+
+def test_structured_output_type_falls_back_to_prompt_priming_when_not_strict_representable():
+    class Report(BaseModel):
+        symbol: str
+        extra: dict[str, Any]  # arbitrary-keyed: cannot be closed for strict mode
+
+    client = FakeAppServer(result=CodexRunResult(text='{"symbol": "AMZN", "extra": {}}'))
+    agent = Agent(name="structured", engine=CodexEngine(client=client), output=Report)
+
+    result = agent("Get AMZN report")
+
+    assert result.ok
+    assert isinstance(result.payload, Report)
+    # An open dict[str, Any] field has no way to enumerate `required` for
+    # strict mode, so the engine falls back to asking in the prompt instead
+    # of sending turn/start a schema the App Server would reject.
+    assert client.output_schemas_seen[0] is None
     assert "JSON schema" in client.prompts[0]
 
 

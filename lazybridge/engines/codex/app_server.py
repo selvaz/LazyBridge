@@ -170,6 +170,7 @@ class CodexAppServerClient:
         on_text: Callable[[str], Awaitable[None]] | None = None,
         attachments: list[dict[str, Any]] | None = None,
         effort: str | None = None,
+        output_schema: dict[str, Any] | None = None,
         sandbox: str = "read-only",
         approval_policy: str = "never",
         approval_gate: ApprovalGate | None = None,
@@ -550,6 +551,11 @@ class CodexAppServerClient:
             }
             if effort is not None:
                 turn_params["effort"] = effort
+            if output_schema is not None:
+                # Native structured output: an OpenAI-strict schema, already
+                # rewritten by the engine (see CodexEngine._native_output_schema).
+                # Absent when the engine fell back to prompt priming instead.
+                turn_params["outputSchema"] = output_schema
             try:
                 # The uncertainty window opens when the request goes out, not
                 # when its response comes back: the server can accept the turn

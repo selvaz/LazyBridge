@@ -10,6 +10,7 @@ from lazybridge.core.structured import (
     build_repair_messages,
     normalize_json_schema,
     parse_structured_output,
+    to_openai_strict_schema,
 )
 from lazybridge.core.types import Message
 
@@ -213,3 +214,114 @@ def test_apply_structured_validation_failure():
     assert resp.validated is False
     assert resp.validation_error is not None
     assert resp.parsed is None
+
+
+# ---------------------------------------------------------------------------
+# to_openai_strict_schema — Codex/OpenAI native structured-output rewrite
+# ---------------------------------------------------------------------------
+
+
+def test_to_openai_strict_schema_leaves_an_already_required_flat_model_alone():
+    class Quote(BaseModel):
+        symbol: str
+        price: float
+
+    result = to_openai_strict_schema(Quote.model_json_schema())
+
+    assert result is not None
+    assert result["additionalProperties"] is False
+    assert set(result["required"]) == {"symbol", "price"}
+
+
+def test_to_openai_strict_schema_carries_an_already_nullable_optional_field():
+    class Profile(BaseModel):
+        name: str
+        nickname: str | None = None
+
+    result = to_openai_strict_schema(Profile.model_json_schema())
+
+    assert result is not None
+    assert set(result["required"]) == {"name", "nickname"}
+    nickname = result["properties"]["nickname"]
+    assert "default" not in nickname
+    assert any(v.get("type") == "null" for v in nickname["anyOf"])
+
+
+def test_to_openai_strict_schema_carries_a_nullable_literal_enum():
+    # Literal["auto", None] renders as a bare `enum` list with no `type` key
+    # at all (verified: model_json_schema() emits {"enum": ["auto", None]}) —
+    # _accepts_null must recognise None inside `enum`, not just `type`/`anyOf`.
+    from typing import Literal
+
+    class Config(BaseModel):
+        name: str
+        mode: Literal["auto", "manual", None] = None
+
+    result = to_openai_strict_schema(Config.model_json_schema())
+
+    assert result is not None
+    assert set(result["required"]) == {"name", "mode"}
+    assert "default" not in result["properties"]["mode"]
+
+
+def test_to_openai_strict_schema_rejects_null_in_enum_when_type_excludes_it():
+    # JSON Schema ANDs keywords together: {"type": "string", "enum": ["auto",
+    # None]} still rejects an actual null (it fails `type`), even though
+    # `enum` lists it. A sibling `type` that isn't itself null-inclusive must
+    # override the enum-based check, not be shadowed by it.
+    from lazybridge.core.structured import _accepts_null
+
+    assert _accepts_null({"type": "string", "enum": ["auto", None]}) is False
+    assert _accepts_null({"type": "string", "const": None}) is False
+    # And the true-positive still holds with no contradicting `type`.
+    assert _accepts_null({"enum": ["auto", None]}) is True
+
+
+def test_to_openai_strict_schema_rejects_an_optional_field_that_is_not_nullable():
+    # count has a default but its own type never admits null — forcing it
+    # into `required` would let Codex legally answer {"count": null}, which
+    # the destination model then rejects on model_validate. See the
+    # docstring: there is no single-property fix that preserves the
+    # original semantics, so the whole schema is unrepresentable.
+    class Tally(BaseModel):
+        label: str
+        count: int = 5
+
+    assert to_openai_strict_schema(Tally.model_json_schema()) is None
+
+
+def test_to_openai_strict_schema_rejects_extra_allow_models():
+    from pydantic import ConfigDict
+
+    class Flexible(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        name: str
+
+    schema = Flexible.model_json_schema()
+    assert schema.get("additionalProperties") is True  # sanity: this is what triggers the case
+    assert to_openai_strict_schema(schema) is None
+
+
+def test_to_openai_strict_schema_rejects_an_open_dict_field():
+    from typing import Any
+
+    class Report(BaseModel):
+        symbol: str
+        extra: dict[str, Any]
+
+    assert to_openai_strict_schema(Report.model_json_schema()) is None
+
+
+def test_to_openai_strict_schema_recurses_into_nested_defs():
+    class Inner(BaseModel):
+        note: str
+
+    class Outer(BaseModel):
+        inner: Inner
+
+    result = to_openai_strict_schema(Outer.model_json_schema())
+
+    assert result is not None
+    inner_def = result["$defs"]["Inner"]
+    assert inner_def["additionalProperties"] is False
+    assert inner_def["required"] == ["note"]

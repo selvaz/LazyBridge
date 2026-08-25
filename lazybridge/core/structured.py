@@ -143,6 +143,163 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _accepts_null(schema: dict[str, Any]) -> bool:
+    """Whether ``schema`` already admits ``null`` as a value, as written.
+
+    Used to decide whether an optional property can be safely forced into
+    ``required`` (see :func:`to_openai_strict_schema`): only a property
+    whose *original* type already tolerates ``null`` can be — inventing
+    null-acceptance for one that doesn't (e.g. ``count: int = 5``) would let
+    Codex legally answer ``{"count": null}``, which the destination Pydantic
+    model then rejects on ``model_validate`` where the old prompt-primed
+    path never had that failure mode.
+    """
+    for union_key in ("anyOf", "oneOf"):
+        variants = schema.get(union_key)
+        if isinstance(variants, list) and any(isinstance(v, dict) and v.get("type") == "null" for v in variants):
+            return True
+    schema_type = schema.get("type")
+    if schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type):
+        return True
+    # JSON Schema keywords are ANDed together: a sibling ``type`` that
+    # doesn't itself admit null overrides any ``null`` listed in ``enum``
+    # (e.g. ``{"type": "string", "enum": ["auto", null]}`` still rejects
+    # null — instance has to satisfy every keyword, and ``null`` fails
+    # ``type``). Only check enum/const once that possibility is ruled out.
+    if schema_type is not None:
+        return False
+    # A Literal[..., None] field (e.g. Literal["auto", None] = None) has no
+    # ``type`` at all — Pydantic renders it as a bare ``enum`` list carrying
+    # the Python ``None`` as one of its members (verified: model_json_schema()
+    # emits ``{"enum": ["auto", None]}`` with no "type" key). A single
+    # ``Literal[None]`` field renders as ``const: null`` instead.
+    enum_vals = schema.get("enum")
+    if isinstance(enum_vals, list) and any(v is None for v in enum_vals):
+        return True
+    return "const" in schema and schema["const"] is None
+
+
+def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
+    """Rewrite a JSON Schema into OpenAI/Codex "strict" form, or ``None``.
+
+    Strict mode (Codex's ``turn/start`` ``outputSchema``, and the OpenAI
+    Responses API's ``strict: true`` structured output) requires, on every
+    object node in the tree: ``additionalProperties: false`` **and** every
+    property name listed in ``required`` — including ones a plain Pydantic
+    schema marks optional by omitting them from ``required``.
+
+    An optional property is only carried into ``required`` (with its
+    ``default`` dropped — strict mode rejects that keyword) when it already
+    accepts ``null`` as written (see :func:`_accepts_null`): that is the only
+    case where forcing it into ``required`` doesn't change what a round-trip
+    through the destination type accepts. Any other optional property, or an
+    object whose ``additionalProperties`` was explicitly left open (``true``
+    or a sub-schema — e.g. a Pydantic model with ``extra="allow"``), makes
+    the *whole* schema unrepresentable: closing it would silently forbid
+    dynamic fields the destination type actually accepts, and there is no
+    single-property fix for either case that preserves the original
+    semantics. ``None`` propagates all the way up in both cases.
+
+    Recurses into ``$defs``/``definitions`` (Pydantic's nested-model schemas),
+    ``properties``, ``items``, ``prefixItems`` and ``anyOf``/``oneOf``/``allOf``.
+
+    Callers should fall back to a non-native mechanism (e.g. prompt priming)
+    on ``None`` rather than send a schema the provider will reject — or one
+    that quietly accepts less than the destination type does.
+    """
+
+    def convert(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out: dict[str, Any] = dict(node)
+
+        for key in ("$defs", "definitions"):
+            defs = out.get(key)
+            if isinstance(defs, dict):
+                converted_defs: dict[str, Any] = {}
+                for def_name, def_schema in defs.items():
+                    if not isinstance(def_schema, dict):
+                        converted_defs[def_name] = def_schema
+                        continue
+                    converted = convert(def_schema)
+                    if converted is None:
+                        return None
+                    converted_defs[def_name] = converted
+                out[key] = converted_defs
+
+        is_object = out.get("type") == "object" or ("properties" in out and "type" not in out)
+        if is_object:
+            existing_additional = out.get("additionalProperties")
+            if existing_additional is True or isinstance(existing_additional, dict):
+                # Extra keys are explicitly allowed (or typed) — closing the
+                # object would silently narrow what the destination type
+                # actually accepts, not just tighten a schema that was open
+                # by omission.
+                return None
+            properties = out.get("properties")
+            if properties is None:
+                if existing_additional is not False:
+                    return None  # arbitrary/open dict: unrepresentable in strict mode
+                out["properties"] = {}
+                out["required"] = []
+            else:
+                original_required = set(out.get("required") or [])
+                new_properties: dict[str, Any] = {}
+                for prop_name, prop_schema in properties.items():
+                    if isinstance(prop_schema, dict):
+                        converted = convert(prop_schema)
+                        if converted is None:
+                            return None
+                    else:
+                        converted = prop_schema
+                    if prop_name not in original_required:
+                        if not isinstance(converted, dict) or not _accepts_null(converted):
+                            return None
+                        converted = {k: v for k, v in converted.items() if k != "default"}
+                    new_properties[prop_name] = converted
+                out["properties"] = new_properties
+                out["required"] = list(properties.keys())
+            out["additionalProperties"] = False
+
+        items = out.get("items")
+        if isinstance(items, dict):
+            converted_items = convert(items)
+            if converted_items is None:
+                return None
+            out["items"] = converted_items
+
+        prefix_items = out.get("prefixItems")
+        if isinstance(prefix_items, list):
+            converted_prefix: list[Any] = []
+            for sub in prefix_items:
+                if not isinstance(sub, dict):
+                    converted_prefix.append(sub)
+                    continue
+                converted = convert(sub)
+                if converted is None:
+                    return None
+                converted_prefix.append(converted)
+            out["prefixItems"] = converted_prefix
+
+        for key in ("anyOf", "oneOf", "allOf"):
+            variants = out.get(key)
+            if isinstance(variants, list):
+                converted_variants: list[Any] = []
+                for sub in variants:
+                    if not isinstance(sub, dict):
+                        converted_variants.append(sub)
+                        continue
+                    converted = convert(sub)
+                    if converted is None:
+                        return None
+                    converted_variants.append(converted)
+                out[key] = converted_variants
+
+        return out
+
+    return convert(schema)
+
+
 def _enum_match(data: Any, value: Any) -> bool:
     """Return True iff data equals value, treating bool and int as distinct types."""
     if isinstance(data, bool) or isinstance(value, bool):
