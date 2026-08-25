@@ -143,6 +143,133 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    """``schema``, widened to also accept ``null``, with ``default`` dropped.
+
+    Used for a property that :func:`to_openai_strict_schema` must list in
+    ``required`` even though it was logically optional — strict mode has no
+    "the model may omit this key" and rejects ``default`` outright, so
+    ``null`` becomes the property's spelling of "nothing here". Wrapping in
+    ``anyOf`` (rather than special-casing ``type``/``enum``) is what stays
+    correct for every schema shape, including ``$ref``, ``enum`` and unions:
+    an enum widened via ``type: [X, "null"]`` alone would still reject an
+    actual ``null`` value, since ``enum`` is checked independently of ``type``.
+    """
+    schema = {k: v for k, v in schema.items() if k != "default"}
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list) and any(isinstance(v, dict) and v.get("type") == "null" for v in any_of):
+        return schema
+    schema_type = schema.get("type")
+    if schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type):
+        return schema
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
+    """Rewrite a JSON Schema into OpenAI/Codex "strict" form, or ``None``.
+
+    Strict mode (Codex's ``turn/start`` ``outputSchema``, and the OpenAI
+    Responses API's ``strict: true`` structured output) requires, on every
+    object node in the tree: ``additionalProperties: false`` **and** every
+    property name listed in ``required`` — including ones a plain Pydantic
+    schema marks optional by omitting them from ``required``. Those are kept
+    working by widening their type to admit ``null`` via :func:`_nullable`
+    rather than being dropped: a strict schema has no notion of an absent key.
+
+    Recurses into ``$defs``/``definitions`` (Pydantic's nested-model schemas),
+    ``properties``, ``items``, ``prefixItems`` and ``anyOf``/``oneOf``/``allOf``.
+
+    Returns ``None`` when the schema can't be expressed this way. The only
+    such case is an object with no enumerated ``properties`` and open
+    ``additionalProperties`` — a ``dict[str, Any]``/bare ``dict`` field, whose
+    unbounded keys have nothing to list in ``required``. Callers should fall
+    back to a non-native mechanism (e.g. prompt priming) rather than send a
+    schema the provider will reject.
+    """
+
+    def convert(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out: dict[str, Any] = dict(node)
+
+        for key in ("$defs", "definitions"):
+            defs = out.get(key)
+            if isinstance(defs, dict):
+                converted_defs: dict[str, Any] = {}
+                for def_name, def_schema in defs.items():
+                    if not isinstance(def_schema, dict):
+                        converted_defs[def_name] = def_schema
+                        continue
+                    converted = convert(def_schema)
+                    if converted is None:
+                        return None
+                    converted_defs[def_name] = converted
+                out[key] = converted_defs
+
+        is_object = out.get("type") == "object" or ("properties" in out and "type" not in out)
+        if is_object:
+            properties = out.get("properties")
+            if properties is None:
+                if out.get("additionalProperties") is not False:
+                    return None  # arbitrary/open dict: unrepresentable in strict mode
+                out["properties"] = {}
+                out["required"] = []
+            else:
+                original_required = set(out.get("required") or [])
+                new_properties: dict[str, Any] = {}
+                for prop_name, prop_schema in properties.items():
+                    if isinstance(prop_schema, dict):
+                        converted = convert(prop_schema)
+                        if converted is None:
+                            return None
+                    else:
+                        converted = prop_schema
+                    if prop_name not in original_required and isinstance(converted, dict):
+                        converted = _nullable(converted)
+                    new_properties[prop_name] = converted
+                out["properties"] = new_properties
+                out["required"] = list(properties.keys())
+            out["additionalProperties"] = False
+
+        items = out.get("items")
+        if isinstance(items, dict):
+            converted_items = convert(items)
+            if converted_items is None:
+                return None
+            out["items"] = converted_items
+
+        prefix_items = out.get("prefixItems")
+        if isinstance(prefix_items, list):
+            converted_prefix: list[Any] = []
+            for sub in prefix_items:
+                if not isinstance(sub, dict):
+                    converted_prefix.append(sub)
+                    continue
+                converted = convert(sub)
+                if converted is None:
+                    return None
+                converted_prefix.append(converted)
+            out["prefixItems"] = converted_prefix
+
+        for key in ("anyOf", "oneOf", "allOf"):
+            variants = out.get(key)
+            if isinstance(variants, list):
+                converted_variants: list[Any] = []
+                for sub in variants:
+                    if not isinstance(sub, dict):
+                        converted_variants.append(sub)
+                        continue
+                    converted = convert(sub)
+                    if converted is None:
+                        return None
+                    converted_variants.append(converted)
+                out[key] = converted_variants
+
+        return out
+
+    return convert(schema)
+
+
 def _enum_match(data: Any, value: Any) -> bool:
     """Return True iff data equals value, treating bool and int as distinct types."""
     if isinstance(data, bool) or isinstance(value, bool):

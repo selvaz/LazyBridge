@@ -64,22 +64,13 @@ def _is_transient(exc: BaseException) -> bool:
     return isinstance(exc, _TRANSIENT_ERROR_TYPES)
 
 
-def _structured_output_instructions(output_type: Any) -> str | None:
-    """Build a prompt block asking for JSON matching ``output_type``.
+def _raw_output_schema(output_type: Any) -> dict[str, Any] | None:
+    """The plain Pydantic-derived JSON schema for ``output_type``, or ``None``.
 
-    Unlike ``ClaudeCodeEngine``, which constrains the answer server-side via
-    the Agent SDK's ``output_format``, this engine primes the prompt. Codex's
-    ``turn/start`` *does* expose a native ``outputSchema``, but it accepts
-    only OpenAI-strict schemas — ``additionalProperties: false`` on every
-    object **and** ``required`` listing every property — which a plain
-    Pydantic schema does not satisfy (verified live: the turn fails with
-    ``invalid_json_schema``). Until a strict-mode rewrite exists, asking in
-    the prompt keeps arbitrary ``output=`` types working and merely falls
-    back to ``Agent._validate_and_retry``'s post-hoc repair when the model
-    strays.
-
-    Returns ``None`` for the default ``str``/``Any`` output type, or when the
-    schema can't be derived.
+    ``None`` for the default ``str``/``Any`` output type (nothing to
+    constrain), or when ``output_type`` isn't a Pydantic-representable shape.
+    Shared by both structured-output paths below — one derives a prompt
+    block from it, the other a native ``outputSchema``.
     """
     if output_type is str or output_type is Any:
         return None
@@ -89,10 +80,48 @@ def _structured_output_instructions(output_type: Any) -> str | None:
         from pydantic import BaseModel, TypeAdapter
 
         if isinstance(output_type, type) and issubclass(output_type, BaseModel):
-            schema = output_type.model_json_schema()
-        else:
-            schema = TypeAdapter(output_type).json_schema()
+            return dict(output_type.model_json_schema())
+        return dict(TypeAdapter(output_type).json_schema())
     except Exception:
+        return None
+
+
+def _native_output_schema(output_type: Any) -> dict[str, Any] | None:
+    """``output_type``'s schema rewritten for Codex's native ``outputSchema``.
+
+    ``turn/start`` accepts only an object-shaped, OpenAI-strict schema —
+    ``additionalProperties: false`` on every object **and** ``required``
+    listing every property (verified live: a plain Pydantic schema fails the
+    turn with ``invalid_json_schema``). :func:`~lazybridge.core.structured.
+    to_openai_strict_schema` does that rewrite; ``None`` comes back both when
+    it can't be done (an open ``dict[str, Any]`` somewhere in the tree) and
+    when the top level isn't an object (e.g. ``output=list[str]`` — every
+    structured-output API in this codebase requires an object at the root).
+    Either way the caller falls back to :func:`_structured_output_instructions`
+    instead of sending a schema the App Server will reject.
+    """
+    raw = _raw_output_schema(output_type)
+    if raw is None or raw.get("type") != "object":
+        return None
+    from lazybridge.core.structured import to_openai_strict_schema
+
+    return to_openai_strict_schema(raw)
+
+
+def _structured_output_instructions(output_type: Any) -> str | None:
+    """Build a prompt block asking for JSON matching ``output_type``.
+
+    The fallback for when :func:`_native_output_schema` returns ``None``:
+    asking in the prompt keeps arbitrary ``output=`` types working (any
+    shape, not just object-rooted, strict-representable ones) and merely
+    falls back further to ``Agent._validate_and_retry``'s post-hoc repair
+    when the model strays.
+
+    Returns ``None`` for the default ``str``/``Any`` output type, or when the
+    schema can't be derived.
+    """
+    schema = _raw_output_schema(output_type)
+    if schema is None:
         return None
     return (
         "Respond with valid JSON only — no prose, no markdown code fences — "
@@ -237,13 +266,15 @@ class CodexEngine:
         durable-thread handling drifted apart — the streaming path silently
         missed the handle write-back and the timeout classification.
         """
+        output_schema = _native_output_schema(output_type)
         kwargs: dict[str, Any] = {
-            "prompt": self._prompt(env, memory, output_type),
+            "prompt": self._prompt(env, memory, output_type, output_schema),
             "model": self.model,
             "cwd": self.cwd,
             "dynamic_tools": definitions(tools),
             "on_tool_call": self._tool_dispatcher(tools, observe, gate),
             "attachments": attachments,
+            "output_schema": output_schema,
             "effort": self.reasoning_effort,
             "developer_instructions": self.system,
             "sandbox": self.config.codex.sandbox,
@@ -430,17 +461,29 @@ class CodexEngine:
             )
         return items
 
-    def _prompt(self, env: Envelope[Any], memory: Any | None, output_type: type = str) -> str:
+    def _prompt(
+        self,
+        env: Envelope[Any],
+        memory: Any | None,
+        output_type: type = str,
+        native_output_schema: dict[str, Any] | None = None,
+    ) -> str:
         # On a resumed thread Codex' own transcript already holds the history:
         # prepending LazyBridge's Memory would re-state past user and assistant
         # turns as if they were new, giving the model two chronologies of the
         # same conversation. One authority per thread — see the class docstring.
         history = str(memory.text()) if memory is not None and not self._resuming else ""
+        # Only when there's no native schema for this turn: it already
+        # constrains the answer server-side, so priming the prompt too would
+        # just repeat the same shape as prose the model has to read twice.
+        structured_instructions = (
+            "" if native_output_schema is not None else (_structured_output_instructions(output_type) or "")
+        )
         parts = [
             f"LazyBridge conversation context:\n{history}" if history else "",
             env.context,
             env.task or env.text(),
-            _structured_output_instructions(output_type) or "",
+            structured_instructions,
         ]
         return "\n\n".join(part for part in parts if part)
 
