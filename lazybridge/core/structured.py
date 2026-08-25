@@ -154,11 +154,22 @@ def _accepts_null(schema: dict[str, Any]) -> bool:
     model then rejects on ``model_validate`` where the old prompt-primed
     path never had that failure mode.
     """
-    any_of = schema.get("anyOf")
-    if isinstance(any_of, list) and any(isinstance(v, dict) and v.get("type") == "null" for v in any_of):
-        return True
+    for union_key in ("anyOf", "oneOf"):
+        variants = schema.get(union_key)
+        if isinstance(variants, list) and any(isinstance(v, dict) and v.get("type") == "null" for v in variants):
+            return True
     schema_type = schema.get("type")
-    return schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type)
+    if schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type):
+        return True
+    # A Literal[..., None] field (e.g. Literal["auto", None] = None) has no
+    # ``type`` at all — Pydantic renders it as a bare ``enum`` list carrying
+    # the Python ``None`` as one of its members (verified: model_json_schema()
+    # emits ``{"enum": ["auto", None]}`` with no "type" key). A single
+    # ``Literal[None]`` field renders as ``const: null`` instead.
+    enum_vals = schema.get("enum")
+    if isinstance(enum_vals, list) and any(v is None for v in enum_vals):
+        return True
+    return "const" in schema and schema["const"] is None
 
 
 def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:

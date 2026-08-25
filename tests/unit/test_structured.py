@@ -247,6 +247,23 @@ def test_to_openai_strict_schema_carries_an_already_nullable_optional_field():
     assert any(v.get("type") == "null" for v in nickname["anyOf"])
 
 
+def test_to_openai_strict_schema_carries_a_nullable_literal_enum():
+    # Literal["auto", None] renders as a bare `enum` list with no `type` key
+    # at all (verified: model_json_schema() emits {"enum": ["auto", None]}) —
+    # _accepts_null must recognise None inside `enum`, not just `type`/`anyOf`.
+    from typing import Literal
+
+    class Config(BaseModel):
+        name: str
+        mode: Literal["auto", "manual", None] = None
+
+    result = to_openai_strict_schema(Config.model_json_schema())
+
+    assert result is not None
+    assert set(result["required"]) == {"name", "mode"}
+    assert "default" not in result["properties"]["mode"]
+
+
 def test_to_openai_strict_schema_rejects_an_optional_field_that_is_not_nullable():
     # count has a default but its own type never admits null — forcing it
     # into `required` would let Codex legally answer {"count": null}, which
