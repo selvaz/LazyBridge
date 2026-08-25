@@ -325,3 +325,14 @@ def test_to_openai_strict_schema_recurses_into_nested_defs():
     inner_def = result["$defs"]["Inner"]
     assert inner_def["additionalProperties"] is False
     assert inner_def["required"] == ["note"]
+
+
+def test_to_openai_strict_schema_rejects_a_fixed_length_tuple():
+    # tuple[str, int] renders as `prefixItems`, a keyword outside the
+    # OpenAI/Codex strict-mode subset (caught by Codex's automated PR
+    # review on #151: keeping it produced a schema that looked converted
+    # but turn/start still rejects with invalid_json_schema).
+    class Point(BaseModel):
+        coords: tuple[str, int]
+
+    assert to_openai_strict_schema(Point.model_json_schema()) is None
