@@ -143,26 +143,22 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
-    """``schema``, widened to also accept ``null``, with ``default`` dropped.
+def _accepts_null(schema: dict[str, Any]) -> bool:
+    """Whether ``schema`` already admits ``null`` as a value, as written.
 
-    Used for a property that :func:`to_openai_strict_schema` must list in
-    ``required`` even though it was logically optional — strict mode has no
-    "the model may omit this key" and rejects ``default`` outright, so
-    ``null`` becomes the property's spelling of "nothing here". Wrapping in
-    ``anyOf`` (rather than special-casing ``type``/``enum``) is what stays
-    correct for every schema shape, including ``$ref``, ``enum`` and unions:
-    an enum widened via ``type: [X, "null"]`` alone would still reject an
-    actual ``null`` value, since ``enum`` is checked independently of ``type``.
+    Used to decide whether an optional property can be safely forced into
+    ``required`` (see :func:`to_openai_strict_schema`): only a property
+    whose *original* type already tolerates ``null`` can be — inventing
+    null-acceptance for one that doesn't (e.g. ``count: int = 5``) would let
+    Codex legally answer ``{"count": null}``, which the destination Pydantic
+    model then rejects on ``model_validate`` where the old prompt-primed
+    path never had that failure mode.
     """
-    schema = {k: v for k, v in schema.items() if k != "default"}
     any_of = schema.get("anyOf")
     if isinstance(any_of, list) and any(isinstance(v, dict) and v.get("type") == "null" for v in any_of):
-        return schema
+        return True
     schema_type = schema.get("type")
-    if schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type):
-        return schema
-    return {"anyOf": [schema, {"type": "null"}]}
+    return schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type)
 
 
 def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
@@ -172,19 +168,26 @@ def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
     Responses API's ``strict: true`` structured output) requires, on every
     object node in the tree: ``additionalProperties: false`` **and** every
     property name listed in ``required`` — including ones a plain Pydantic
-    schema marks optional by omitting them from ``required``. Those are kept
-    working by widening their type to admit ``null`` via :func:`_nullable`
-    rather than being dropped: a strict schema has no notion of an absent key.
+    schema marks optional by omitting them from ``required``.
+
+    An optional property is only carried into ``required`` (with its
+    ``default`` dropped — strict mode rejects that keyword) when it already
+    accepts ``null`` as written (see :func:`_accepts_null`): that is the only
+    case where forcing it into ``required`` doesn't change what a round-trip
+    through the destination type accepts. Any other optional property, or an
+    object whose ``additionalProperties`` was explicitly left open (``true``
+    or a sub-schema — e.g. a Pydantic model with ``extra="allow"``), makes
+    the *whole* schema unrepresentable: closing it would silently forbid
+    dynamic fields the destination type actually accepts, and there is no
+    single-property fix for either case that preserves the original
+    semantics. ``None`` propagates all the way up in both cases.
 
     Recurses into ``$defs``/``definitions`` (Pydantic's nested-model schemas),
     ``properties``, ``items``, ``prefixItems`` and ``anyOf``/``oneOf``/``allOf``.
 
-    Returns ``None`` when the schema can't be expressed this way. The only
-    such case is an object with no enumerated ``properties`` and open
-    ``additionalProperties`` — a ``dict[str, Any]``/bare ``dict`` field, whose
-    unbounded keys have nothing to list in ``required``. Callers should fall
-    back to a non-native mechanism (e.g. prompt priming) rather than send a
-    schema the provider will reject.
+    Callers should fall back to a non-native mechanism (e.g. prompt priming)
+    on ``None`` rather than send a schema the provider will reject — or one
+    that quietly accepts less than the destination type does.
     """
 
     def convert(node: Any) -> Any:
@@ -208,9 +211,16 @@ def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
 
         is_object = out.get("type") == "object" or ("properties" in out and "type" not in out)
         if is_object:
+            existing_additional = out.get("additionalProperties")
+            if existing_additional is True or isinstance(existing_additional, dict):
+                # Extra keys are explicitly allowed (or typed) — closing the
+                # object would silently narrow what the destination type
+                # actually accepts, not just tighten a schema that was open
+                # by omission.
+                return None
             properties = out.get("properties")
             if properties is None:
-                if out.get("additionalProperties") is not False:
+                if existing_additional is not False:
                     return None  # arbitrary/open dict: unrepresentable in strict mode
                 out["properties"] = {}
                 out["required"] = []
@@ -224,8 +234,10 @@ def to_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
                             return None
                     else:
                         converted = prop_schema
-                    if prop_name not in original_required and isinstance(converted, dict):
-                        converted = _nullable(converted)
+                    if prop_name not in original_required:
+                        if not isinstance(converted, dict) or not _accepts_null(converted):
+                            return None
+                        converted = {k: v for k, v in converted.items() if k != "default"}
                     new_properties[prop_name] = converted
                 out["properties"] = new_properties
                 out["required"] = list(properties.keys())
