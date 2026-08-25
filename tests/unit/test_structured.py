@@ -264,6 +264,19 @@ def test_to_openai_strict_schema_carries_a_nullable_literal_enum():
     assert "default" not in result["properties"]["mode"]
 
 
+def test_to_openai_strict_schema_rejects_null_in_enum_when_type_excludes_it():
+    # JSON Schema ANDs keywords together: {"type": "string", "enum": ["auto",
+    # None]} still rejects an actual null (it fails `type`), even though
+    # `enum` lists it. A sibling `type` that isn't itself null-inclusive must
+    # override the enum-based check, not be shadowed by it.
+    from lazybridge.core.structured import _accepts_null
+
+    assert _accepts_null({"type": "string", "enum": ["auto", None]}) is False
+    assert _accepts_null({"type": "string", "const": None}) is False
+    # And the true-positive still holds with no contradicting `type`.
+    assert _accepts_null({"enum": ["auto", None]}) is True
+
+
 def test_to_openai_strict_schema_rejects_an_optional_field_that_is_not_nullable():
     # count has a default but its own type never admits null — forcing it
     # into `required` would let Codex legally answer {"count": null}, which

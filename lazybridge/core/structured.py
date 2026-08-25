@@ -161,6 +161,13 @@ def _accepts_null(schema: dict[str, Any]) -> bool:
     schema_type = schema.get("type")
     if schema_type == "null" or (isinstance(schema_type, list) and "null" in schema_type):
         return True
+    # JSON Schema keywords are ANDed together: a sibling ``type`` that
+    # doesn't itself admit null overrides any ``null`` listed in ``enum``
+    # (e.g. ``{"type": "string", "enum": ["auto", null]}`` still rejects
+    # null — instance has to satisfy every keyword, and ``null`` fails
+    # ``type``). Only check enum/const once that possibility is ruled out.
+    if schema_type is not None:
+        return False
     # A Literal[..., None] field (e.g. Literal["auto", None] = None) has no
     # ``type`` at all — Pydantic renders it as a bare ``enum`` list carrying
     # the Python ``None`` as one of its members (verified: model_json_schema()
