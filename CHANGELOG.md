@@ -8,7 +8,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-08-25
+
 ### Added
+- **`CodexEngine` structured output now goes through `turn/start`'s native
+  `outputSchema` when the schema allows it**, instead of always priming the
+  prompt. `to_openai_strict_schema()` (`lazybridge.core.structured`)
+  rewrites a Pydantic schema into OpenAI-strict form — `additionalProperties:
+  false` plus every property in `required` — carrying an optional property
+  into `required` only when it already accepts `null` as written; any other
+  optional property, an object with `additionalProperties` explicitly left
+  open (e.g. `extra="allow"`), or a fixed-length tuple (`prefixItems` has no
+  strict-mode equivalent) makes the whole schema unrepresentable and falls
+  back to the existing prompt-priming path exactly as before. Codex's own
+  review harness caught four ways an earlier draft would have changed
+  accepted semantics instead of degrading gracefully: forcing a non-nullable
+  optional field (e.g. `count: int = 5`) into `required` would let the model
+  legally answer `null` where the destination model then rejects it on
+  `model_validate`; an `extra="allow"` model was silently closed; a
+  `Literal[..., None]` enum needed the JSON-Schema-correct rule that a
+  sibling `type` excluding null overrides `null` listed in `enum`/`const`;
+  and `tuple[str, int]` was kept instead of falling back, producing a schema
+  that looked converted but that `turn/start` still rejects.
 - **`ClaudeCodePolicy(auto_compact_window=N)` / `CodexPolicy(auto_compact_token_limit=N)`** —
   tell one coding agent when to compact its own context, without touching a
   machine-wide configuration file. The two numbers are not interchangeable:
