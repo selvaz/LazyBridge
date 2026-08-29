@@ -441,6 +441,28 @@ def test_bare_dict_produces_object_schema_not_string():
     assert _annotation_to_schema(dict) == {"type": "object"}
 
 
+def test_bare_list_produces_array_schema_not_string():
+    """Regression: a bare (unsubscripted) list annotation -- e.g.
+    ``data: Annotated[list, "..."]``, the exact shape lazystats.regimes.
+    fit_regimes() uses for its raw-array parameter -- has no __origin__ and
+    was silently falling through to the string fallback. The tool then
+    advertised {"type": "string"} while the underlying function required an
+    actual list, so any real array a caller sent was rejected."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    assert _annotation_to_schema(list) == {"type": "array"}
+
+
+def test_bare_tuple_and_set_produce_array_schema_not_string():
+    """Same no-__origin__ gap as bare list/dict, for the other two bare
+    collection builtins."""
+    from lazybridge.core.tool_schema import _annotation_to_schema
+
+    assert _annotation_to_schema(tuple) == {"type": "array"}
+    assert _annotation_to_schema(set) == {"type": "array", "uniqueItems": True}
+    assert _annotation_to_schema(frozenset) == {"type": "array", "uniqueItems": True}
+
+
 def test_dict_str_int_param_strict_raises():
     """A value-typed dict (dict[str, int]) is JUST AS open as dict[str, Any]
     under OpenAI strict mode: strict mode requires additionalProperties to be
