@@ -322,19 +322,27 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
             return {"type": "integer", "enum": enum_vals}
         return {"enum": enum_vals}
 
-    # list[X]
-    if origin is list:
+    # list[X], or a bare (unsubscripted) list. A bare ``list`` annotation has
+    # no __origin__ (it's just the builtin class, not a generic alias) --
+    # same gap as the bare ``dict`` case handled below, and it must be
+    # matched explicitly here too, otherwise it falls all the way through to
+    # the final permissive-string fallback, silently turning a list
+    # parameter into a string-typed schema (the tool then rejects any real
+    # array the caller sends, since the underlying function still expects
+    # an actual list).
+    if origin is list or annotation is list:
         return {"type": "array", "items": _annotation_to_schema(args[0])} if args else {"type": "array"}
 
-    # set[X] / frozenset[X] — arrays with uniqueItems
-    if origin is set or origin is frozenset:
+    # set[X] / frozenset[X] — arrays with uniqueItems. Bare set/frozenset hit
+    # the same no-__origin__ gap as bare list/dict above.
+    if origin is set or origin is frozenset or annotation is set or annotation is frozenset:
         base = {"type": "array", "uniqueItems": True}
         if args:
             base["items"] = _annotation_to_schema(args[0])
         return base
 
-    # tuple[X, ...] (homogeneous) / tuple[X, Y, Z] (fixed-length)
-    if origin is tuple:
+    # tuple[X, ...] (homogeneous) / tuple[X, Y, Z] (fixed-length) / bare tuple
+    if origin is tuple or annotation is tuple:
         if not args:
             return {"type": "array"}
         if len(args) == 2 and args[1] is Ellipsis:
