@@ -53,7 +53,11 @@ _logger = logging.getLogger(__name__)
 # bare dict no longer falls through to a string schema -- a persisted
 # ArtifactStore's pre-v3 cached artifact for the same (func, strict=True)
 # input must not be returned as-is, or the new checks are silently skipped.
-_COMPILER_VERSION = "3"
+# v4: bare list/tuple/set/frozenset no longer fall through to a string
+# schema (same class of gap as the v3 bare-dict fix) -- a pre-v4 cached
+# artifact for a function with a bare collection parameter must not be
+# returned as-is, or the fix is silently skipped for already-cached tools.
+_COMPILER_VERSION = "4"
 _LLM_PROMPT_VERSION = "1"
 
 
