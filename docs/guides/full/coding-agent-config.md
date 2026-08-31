@@ -44,6 +44,28 @@ Omitting `config=` preserves the engines' original trusted behavior for
 backward compatibility. Security-sensitive applications should select a
 profile explicitly.
 
+## Native web search per agent
+
+Codex's hosted web search can be selected for one engine subprocess without
+changing the user's global Codex configuration:
+
+```python
+from lazybridge import CodexEngine, CodexPolicy, CodingAgentConfig
+
+research_config = CodingAgentConfig(
+    codex=CodexPolicy(
+        web_search="live",              # "live", "cached", "indexed", or "disabled"
+        preapprove_dynamic_tools=True,   # Store/blackboard tools may run
+    )
+)
+engine = CodexEngine(config=research_config)
+```
+
+`None` leaves the account default unchanged. LazyBridge forwards the selected
+mode as a per-process `codex app-server -c web_search=...` override; it does
+not edit `~/.codex/config.toml`. Use `preapprove_dynamic_tools=False` only when
+an approval gate is intentionally attached.
+
 ## Custom policy and approval UI
 
 ```python

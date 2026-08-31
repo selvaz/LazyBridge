@@ -138,6 +138,8 @@ def _config_overrides(policy: CodexPolicy) -> tuple[str, ...]:
     ``~/.codex/config.toml``.
     """
     overrides: list[str] = []
+    if policy.web_search is not None:
+        overrides.append(f'web_search="{policy.web_search}"')
     if policy.auto_compact_token_limit is not None:
         overrides.append(f"model_auto_compact_token_limit={policy.auto_compact_token_limit}")
     return tuple(overrides)
