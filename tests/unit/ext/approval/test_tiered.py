@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest
+from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest, remembering_gate
 from lazybridge.ext.approval import AuditRecord, Rule, TerminalChannel, TieredGate
 
 
@@ -109,6 +109,23 @@ async def test_session_tier_asks_once_then_allows():
     assert first.action == "allow_session"
     assert second.action == "allow"
     assert len(channel.prompts) == 1  # second call reused the grant
+
+
+async def test_engine_session_wrapper_preserves_tiered_scope_and_audit():
+    """The engines must not replace TieredGate's narrow key with tool name only."""
+    channel = FakeChannel(answers=[True, True])
+    gate = TieredGate(channel=channel, rules=DEFAULT_RULES)
+    wrapped = remembering_gate(gate, set())
+
+    first = await wrapped(_request(name="Write", cwd="C:/repo-a"))
+    second = await wrapped(_request(name="Write", cwd="C:/repo-b"))
+    repeated = await wrapped(_request(name="Write", cwd="C:/repo-a"))
+
+    assert first.action == "allow_session"
+    assert second.action == "allow_session"  # a separate cwd asks again
+    assert repeated.action == "allow"
+    assert len(channel.prompts) == 2
+    assert [record.cwd for record in gate.log] == ["C:/repo-a", "C:/repo-b", "C:/repo-a"]
 
 
 # --- default deny --------------------------------------------------------

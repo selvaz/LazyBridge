@@ -55,33 +55,10 @@ phase are fixed here, not carried forward:
    denied in the prototype; :mod:`tests.unit.ext.approval.test_tiered` pins
    that behaviour with a regression test rather than taking it on faith.
 
-**Known limitation, found in review, not yet closed: the engine's own outer
-cache can widen a ``session`` grant past what this module scopes it to.**
-``ClaudeCodeEngine``/``CodexEngine`` wrap *any* configured ``approval_gate``
-with :func:`lazybridge.engines.coding.remembering_gate`, whose own cache key
-is ``(request.kind, request.name)`` — no cwd, no policy fingerprint, no agent
-identity. That wrapper's cache is checked *before* the request ever reaches
-:class:`TieredGate`, so once it catches a hit, neither this gate's finer
-scoping nor its audit log sees the call. Two things bound the practical
-blast radius today, but neither is a fix:
-
-- The outer cache is per-``Session``+agent (:func:`session_approvals`); with
-  no ``Session`` attached (the common case for a short-lived, one-shot
-  worker), it starts empty on every ``run()`` call and only persists for the
-  *rest of that one run* — so it cannot leak a grant across separate agent
-  invocations, only across calls *within* one run.
-- Within one run, a caller whose cwd and rule never change for a given tool
-  name (e.g. one worktree per dispatch, one ``session`` rule for ``Write``)
-  sees no *scope* widening in practice, because there was only one scope to
-  begin with — the real cost is an **audit gap**: the 2nd+ approved call in
-  that run is allowed by the outer cache and never appended to
-  :attr:`TieredGate.log`.
-- A caller that DOES vary cwd, policy, or agent identity within one run (or
-  shares a ``Session`` across agents) gets the scope-widening bug this
-  module's docstring otherwise claims to have fixed. Prefer the ``ask`` tier
-  over ``session`` for any rule where per-call audit completeness matters
-  more than avoiding repeat prompts, until the outer wrapper is made scope-
-  aware.
+``TieredGate`` manages these grants itself and declares that fact to the
+coding engines. Their generic ``remembering_gate`` consequently leaves it
+unwrapped: every call returns to this policy table, so the narrower scope is
+preserved and every decision reaches the structured audit log.
 """
 
 from __future__ import annotations
@@ -95,7 +72,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from fnmatch import fnmatch
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest
 
@@ -245,6 +222,11 @@ class TieredGate:
     (structural typing — ``async def __call__(self, request) -> ApprovalDecision``
     is the whole contract): no bridge class re-declares the signature.
     """
+
+    #: The generic coding-engine wrapper caches only ``(kind, name)``. This
+    #: gate owns a narrower grant key and must see every request to preserve
+    #: its scope and audit trail.
+    manages_session_grants: ClassVar[bool] = True
 
     channel: Channel
     rules: tuple[Rule, ...]
