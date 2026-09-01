@@ -13,8 +13,6 @@ Covers the promotion fixes from ``approval-lab``:
 
 from __future__ import annotations
 
-import pytest
-
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest, remembering_gate
 from lazybridge.ext.approval import AuditRecord, Rule, TerminalChannel, TieredGate
 

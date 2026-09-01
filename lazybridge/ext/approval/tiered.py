@@ -177,9 +177,16 @@ def _canonical_cwd(cwd: str | None) -> str:
     if not cwd:
         return ""
     try:
-        return os.path.normcase(os.path.realpath(cwd))
+        normalized = os.path.normcase(os.path.realpath(cwd))
     except OSError:  # pragma: no cover - defensive; realpath rarely raises
-        return os.path.normcase(os.path.abspath(cwd))
+        normalized = os.path.normcase(os.path.abspath(cwd))
+    # CI can run on Linux while a policy legitimately names Windows working
+    # directories. ``normcase`` only folds case on Windows, so honour the
+    # semantics of a drive-qualified path independently of the host running
+    # the gate.
+    if re.match(r"^[A-Za-z]:[\\/]", cwd):
+        return normalized.casefold()
+    return normalized
 
 
 def _hash_arguments(arguments: Mapping[str, Any]) -> str:
