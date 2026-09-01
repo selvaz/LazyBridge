@@ -75,6 +75,30 @@ def test_compute_cost_accepts_cached_input_tokens_kwarg():
     assert p._compute_cost("not-a-gemini", 100, 100) is None
 
 
+def test_compute_cost_prices_the_new_flash_generations():
+    """Weekly pricing check, 2026-08-23: gemini-3.5/3.6/3.7 Flash were real
+    gaps (not in the table at all before this check) -- verified against
+    ai.google.dev/gemini-api/docs/pricing."""
+    p = _bare_provider()
+    assert p._compute_cost("gemini-3.7-flash", input_tokens=1_000_000, output_tokens=0) == 0.75
+    assert p._compute_cost("gemini-3.6-flash", input_tokens=1_000_000, output_tokens=0) == 0.75
+    assert p._compute_cost("gemini-3.5-flash", input_tokens=1_000_000, output_tokens=0) == 1.50
+
+
+def test_compute_cost_does_not_confuse_flash_with_flash_lite():
+    """``_compute_cost`` matches on substring ("key in model_l"), so
+    "gemini-3.5-flash" being a literal substring of "gemini-3.5-flash-lite"
+    is a real collision risk -- the more specific "-lite" key must be
+    ordered first in _PRICE_TABLE or a Flash-Lite call would be silently
+    billed at the (higher-output) plain Flash rate."""
+    p = _bare_provider()
+    lite_cost = p._compute_cost("gemini-3.5-flash-lite", input_tokens=0, output_tokens=1_000_000)
+    flash_cost = p._compute_cost("gemini-3.5-flash", input_tokens=0, output_tokens=1_000_000)
+    assert lite_cost == 2.50
+    assert flash_cost == 9.00
+    assert lite_cost != flash_cost
+
+
 def test_compute_cost_signature_is_polymorphic_with_base():
     """The ``BaseProvider._compute_cost`` signature was extended in 0.7.9
     to take ``cached_input_tokens=0``; every concrete provider matches

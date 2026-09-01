@@ -137,7 +137,14 @@ def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) 
     Applies to every request kind — tool, command, file_change, permissions —
     so one wrapper covers both the LazyBridge-side dynamic tool gate and the
     provider-side approval requests arriving over the wire.
+
+    A gate that manages a narrower session scope and its own audit trail may
+    opt out with ``manages_session_grants = True``. Caching such a gate here
+    would widen its scope back to ``(kind, name)`` and hide cache hits from
+    its audit log.
     """
+    if gate is not None and getattr(gate, "manages_session_grants", False):
+        return gate
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
         key = (request.kind, request.name)

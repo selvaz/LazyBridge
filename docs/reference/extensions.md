@@ -79,6 +79,26 @@ See the [Planners guide](../recipes/plan-tool.md).
 
 ::: lazybridge.ext.planners.StepSpec
 
+## Tiered approval gate
+
+Declarative, per-agent `ApprovalGate` policy for coding engines
+(`lazybridge.ext.approval`) — an ordered `Rule` table assigns each tool one of
+four tiers (`allow`/`session`/`ask`/`deny`); unmatched calls are denied by
+default. `TieredGate` implements `ApprovalGate` directly (no wrapper).
+Promoted from the `approval-lab` prototype, with session grants scoped to
+`(provider, kind, name, cwd, policy fingerprint)` and every decision recorded
+in a structured `AuditRecord`.
+
+::: lazybridge.ext.approval.TieredGate
+
+::: lazybridge.ext.approval.Rule
+
+::: lazybridge.ext.approval.AuditRecord
+
+::: lazybridge.ext.approval.Channel
+
+::: lazybridge.ext.approval.TerminalChannel
+
 ## OpenTelemetry exporter
 
 ::: lazybridge.ext.otel.OTelExporter
