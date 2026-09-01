@@ -666,17 +666,13 @@ class TestPerAgentCompaction:
         agent = Agent(
             CodexEngine(
                 client=fake,
-                config=CodingAgentConfig(
-                    codex=CodexPolicy(web_search="live", auto_compact_token_limit=140_000)
-                ),
+                config=CodingAgentConfig(codex=CodexPolicy(web_search="live", auto_compact_token_limit=140_000)),
             ),
             name="researcher",
         )
         agent("Find the primary filing")
 
-        assert fake.config_overrides_seen == [
-            ('web_search="live"', "model_auto_compact_token_limit=140000")
-        ]
+        assert fake.config_overrides_seen == [('web_search="live"', "model_auto_compact_token_limit=140000")]
 
     def test_native_web_search_can_be_disabled_per_agent(self):
         fake = FakeAppServer()
