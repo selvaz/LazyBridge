@@ -243,6 +243,10 @@ class CodexPolicy:
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     approval_policy: Literal["untrusted", "on-request", "never"] = "never"
     preapprove_dynamic_tools: bool = True
+    #: Native Codex web search mode for this agent's subprocess. ``None``
+    #: leaves the user's Codex configuration unchanged. Forwarded as a
+    #: per-process ``-c web_search=\"<mode>\"`` override.
+    web_search: Literal["disabled", "cached", "indexed", "live"] | None = None
     #: Token count at which Codex starts compacting this agent's history.
     #: ``None`` leaves the CLI's own default. Forwarded as the App Server's
     #: ``-c model_auto_compact_token_limit=<n>`` override, so it applies to

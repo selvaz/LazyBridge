@@ -661,6 +661,31 @@ class TestPerAgentCompaction:
 
         assert fake.config_overrides_seen == [("model_auto_compact_token_limit=140000",)]
 
+    def test_native_web_search_mode_is_forwarded_per_agent(self):
+        fake = FakeAppServer()
+        agent = Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(codex=CodexPolicy(web_search="live", auto_compact_token_limit=140_000)),
+            ),
+            name="researcher",
+        )
+        agent("Find the primary filing")
+
+        assert fake.config_overrides_seen == [('web_search="live"', "model_auto_compact_token_limit=140000")]
+
+    def test_native_web_search_can_be_disabled_per_agent(self):
+        fake = FakeAppServer()
+        Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(codex=CodexPolicy(web_search="disabled")),
+            ),
+            name="offline",
+        )("Do not browse")
+
+        assert fake.config_overrides_seen == [('web_search="disabled"',)]
+
     def test_an_unset_policy_sends_nothing(self):
         """Codex keeps its own default; we do not pin one on its behalf."""
         fake = FakeAppServer()
