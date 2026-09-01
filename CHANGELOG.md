@@ -8,6 +8,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-01
+
+### Added
+- **`CodexEngine`'s native web search is now configurable per agent**, via
+  `CodexPolicy.web_search` (`"disabled"` / `"cached"` / `"indexed"` /
+  `"live"`). It is forwarded as a per-process `-c web_search="<mode>"`
+  override, so it applies to that agent's subprocess and to nothing else;
+  left as `None` — the default — the user's own Codex configuration is
+  untouched, exactly as before. Until now an application that needed a
+  Codex agent to browse had to rely on whatever the machine's global Codex
+  config happened to say, which is a dependency that is invisible in the
+  code and breaks silently when the machine changes.
+- **`TieredGate`, a four-tier approval gate** (`lazybridge.ext.approval.tiered`),
+  promoted from approval-lab and conformant with the existing `ApprovalGate`
+  protocol. Session grants are scoped to `(provider, kind, name, cwd, policy
+  fingerprint)` rather than to the tool name alone, so a grant given for one
+  working directory or one policy does not silently carry into another. Every
+  decision lands in a structured `AuditRecord` log, with common secrets
+  redacted from both previews and prompts. The known interaction with
+  `remembering_gate`'s outer cache is documented rather than papered over.
+
+### Changed
+- **Provider pricing brought up to date** against each provider's published
+  table: OpenAI's `gpt-5.6-terra` ($2.50/$15 → $2.00/$12) and `gpt-5.6-luna`
+  ($1.00/$6 → $0.20/$1.20), plus `gpt-5.6-cyber`, which is kept out of
+  `_TIER_ALIASES` while it remains gated — the same treatment
+  `claude-mythos-5` already gets. Google's `gemini-3.5/3.6/3.7 Flash` were
+  missing from the price table altogether and are now present, with tests
+  that distinguish them from Flash-Lite: pricing is substring-matched, so
+  their absence was a live risk of charging one model's rate for another's.
+  A time-boxed promotional discount is deliberately not modelled, being a
+  promotion on top of list price rather than a change to it.
+
+### Fixed
+- **A bare `list` / `tuple` / `set` / `frozenset` annotation no longer
+  compiles to a string-typed schema.** `_annotation_to_schema()` special-cased
+  `list[X]` but not an unsubscripted `list` — which has no `__origin__` and so
+  fell through to the `{"type": "string"}` fallback, the same gap already
+  closed for bare `dict`. The tool then advertised a string parameter while
+  the function underneath still required a real list, and every array a caller
+  sent came back rejected as "Input should be a valid list".
+  `_COMPILER_VERSION` is bumped alongside the fix so a persisted
+  `ArtifactStore` cannot keep serving the stale pre-fix schema for a function
+  compiled earlier.
+
 ## [1.2.1] — 2026-08-25
 
 ### Added
