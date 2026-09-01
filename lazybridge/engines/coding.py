@@ -143,7 +143,7 @@ def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) 
     would widen its scope back to ``(kind, name)`` and hide cache hits from
     its audit log.
     """
-    if getattr(gate, "manages_session_grants", False):
+    if gate is not None and getattr(gate, "manages_session_grants", False):
         return gate
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
