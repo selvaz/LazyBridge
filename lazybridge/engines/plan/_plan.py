@@ -882,10 +882,25 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
             items = step.context if isinstance(step.context, list) else [step.context]
             for item in items:
                 ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv, tool_map)
-                if ctx_env.context:
+                # A resolved step carries its output in ``payload``; render it
+                # through ``text()`` so a typed ``output=`` model reaches the
+                # downstream step.  The previous ``isinstance(payload, str)``
+                # test dropped every non-str payload silently — a Pydantic
+                # model produced no context at all, and the ``ctx_env.context``
+                # line below then forwarded the *upstream step's own input*
+                # in its place.  ``elif`` because the two are alternatives,
+                # not additive: an envelope with a payload contributes its
+                # output, and only a payload-less one (``from_start``, whose
+                # context is the meaningful field) falls back to context.
+                # ``payload is not None`` rather than a truthiness test so an
+                # empty-string payload stays on this branch and contributes
+                # nothing, instead of reviving the upstream-context fallback.
+                if ctx_env.payload is not None:
+                    rendered = ctx_env.text()
+                    if rendered:
+                        ctx_parts.append(rendered)
+                elif ctx_env.context:
                     ctx_parts.append(ctx_env.context)
-                if ctx_env.payload and isinstance(ctx_env.payload, str):
-                    ctx_parts.append(ctx_env.payload)
         for src in step.sources:
             if hasattr(src, "text"):
                 ctx_parts.append(src.text())

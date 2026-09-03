@@ -8,6 +8,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`Step(context=...)` now delivers a step's output whatever its type.**
+  The resolver appended a referenced step's payload only when it was
+  already a `str`, so an agent declared with `output=SomeModel` contributed
+  no context at all — and the adjacent line then forwarded that step's own
+  *input* context in its place. Both halves were silent: a downstream step
+  looked correctly wired while receiving either nothing or the wrong
+  document. Payloads are now rendered through `Envelope.text()`, which
+  already knows how to serialise Pydantic models, dicts and lists.
+
+  **Behaviour change, by design.** A `str` payload previously contributed
+  *both* the upstream step's input context and its output; it now
+  contributes only the output. The context fallback is reached only when a
+  resolved envelope has no payload at all — `from_start`, whose meaning
+  lives in `context`. An empty-string payload counts as an output and
+  contributes nothing, rather than reviving the substitution.
+
+  `Envelope.text()` raises `TypeError` on a payload that is neither `str`,
+  `BaseModel`, nor JSON-serialisable; a `context=` referencing such a step
+  now surfaces that error instead of silently dropping the payload.
+
 ## [1.3.0] — 2026-09-01
 
 ### Added
