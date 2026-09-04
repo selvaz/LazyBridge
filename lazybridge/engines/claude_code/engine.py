@@ -482,6 +482,7 @@ class ClaudeCodeEngine:
             builtin_tools=builtin_tools,
             file_roots=self.file_roots,
             mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
+            tool_observer=observe,
             include_partial_messages=partial,
             output_format=_output_format(output_type),
         )

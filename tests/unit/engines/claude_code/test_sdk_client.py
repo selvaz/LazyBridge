@@ -138,6 +138,51 @@ def test_an_explicit_permission_mode_still_wins():
     assert AgentSdkClient._sdk_options(options).permission_mode == "acceptEdits"
 
 
+def _unmatched_hook(sdk_options, event: str):
+    """The all-tools hook, whose matcher intentionally is omitted."""
+    return next(entry.hooks[0] for entry in sdk_options.hooks[event] if entry.matcher is None)
+
+
+def test_native_tool_observer_receives_calls_and_results_without_observing_mcp_tools():
+    seen = []
+    sdk_options = AgentSdkClient._sdk_options(
+        ClaudeSdkOptions(tool_observer=lambda kind, payload: seen.append((kind, payload)))
+    )
+
+    assert set(sdk_options.hooks) >= {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
+    call_hook = _unmatched_hook(sdk_options, "PreToolUse")
+    result_hook = _unmatched_hook(sdk_options, "PostToolUse")
+    failure_hook = _unmatched_hook(sdk_options, "PostToolUseFailure")
+    assert asyncio.run(call_hook({"tool_name": "Bash", "tool_input": {"command": "git status"}}, "t1", object())) == {}
+    assert asyncio.run(result_hook({"tool_name": "Bash", "tool_response": {"stdout": "x"}}, "t1", object())) == {}
+    assert asyncio.run(failure_hook({"tool_name": "Bash", "error": "interrupted"}, "t1", object())) == {}
+    assert seen == [
+        ("call", {"tool_name": "Bash", "arguments": {"command": "git status"}, "tool_use_id": "t1", "native": True}),
+        ("result", {"tool_name": "Bash", "result": {"stdout": "x"}, "tool_use_id": "t1", "native": True}),
+        ("error", {"tool_name": "Bash", "error": "interrupted", "tool_use_id": "t1", "native": True}),
+    ]
+
+    assert asyncio.run(call_hook({"tool_name": "mcp__lazybridge__foo", "tool_input": {}}, "t2", object())) == {}
+    assert len(seen) == 3
+
+
+def test_native_tool_observer_errors_cannot_break_a_tool_call():
+    def broken(kind, payload):
+        raise ValueError("observer unavailable")
+
+    sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(tool_observer=broken))
+    call_hook = _unmatched_hook(sdk_options, "PreToolUse")
+
+    with pytest.warns(UserWarning, match="native tool observer raised ValueError"):
+        assert asyncio.run(call_hook({"tool_name": "Bash", "tool_input": {}}, "t1", object())) == {}
+
+
+def test_no_native_observer_leaves_post_tool_use_unregistered():
+    sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions())
+
+    assert "PostToolUse" not in (sdk_options.hooks or {})
+
+
 def _pre_tool_use_hook(sdk_options, matcher_contains: str):
     """The PreToolUse callback whose matcher covers ``matcher_contains``."""
     for entry in sdk_options.hooks["PreToolUse"]:
@@ -263,4 +308,4 @@ def test_a_new_policy_field_never_displaces_an_existing_positional_argument():
 
     from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 
-    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-1] == "auto_compact_window"
+    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-2:] == ["auto_compact_window", "tool_observer"]

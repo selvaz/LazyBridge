@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Native Claude Code tool calls and results are now emitted as Session
+  `TOOL_CALL`/`TOOL_RESULT` events (`native: True` in the payload).
+
 ### Fixed
 - **`Step(context=...)` now delivers a step's output whatever its type.**
   The resolver appended a referenced step's payload only when it was
