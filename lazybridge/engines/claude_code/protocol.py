@@ -57,6 +57,10 @@ class ClaudeSdkOptions:
     #: int so this module still never imports the SDK.
     auto_compact_window: int | None = None
 
+    #: Called for every native tool use via PreToolUse/PostToolUse hooks with
+    #: kind ``"call"`` / ``"result"``. In-process MCP tools are skipped.
+    tool_observer: Callable[[str, dict[str, Any]], None] | None = None
+
 
 @dataclass(frozen=True)
 class ClaudeSdkResult:

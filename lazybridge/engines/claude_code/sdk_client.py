@@ -11,7 +11,7 @@ import warnings
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 from lazybridge.engines.coding import ApprovalRequest, ask_approval
 
@@ -216,6 +216,74 @@ class AgentSdkClient(ClaudeSdkClient):
         ) -> HookJSONOutput:
             return {"continue_": True}
 
+        native_tool_prefix = f"mcp__{options.mcp_server_name}__"
+        observer_warning_types: set[type[BaseException]] = set()
+
+        def observe_native(kind: str, payload: dict[str, Any]) -> None:
+            """Notify observability without ever affecting a CLI tool call."""
+            if options.tool_observer is None:
+                return
+            try:
+                options.tool_observer(kind, payload)
+            except Exception as exc:
+                exception_type = type(exc)
+                if exception_type not in observer_warning_types:
+                    observer_warning_types.add(exception_type)
+                    warnings.warn(
+                        f"Claude Code native tool observer raised {exception_type.__name__}: {exc}. "
+                        "Further exceptions of this type will not be re-warned.",
+                        stacklevel=2,
+                    )
+
+        def is_native(input_data: HookInput) -> bool:
+            return not str(input_data.get("tool_name", "")).startswith(native_tool_prefix)
+
+        async def observe_native_call(
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
+            if is_native(input_data):
+                arguments = cast("dict[str, Any]", input_data.get("tool_input") or {})
+                observe_native(
+                    "call",
+                    {
+                        "tool_name": input_data.get("tool_name"),
+                        "arguments": dict(arguments),
+                        "tool_use_id": tool_use_id or input_data.get("tool_use_id"),
+                        "native": True,
+                    },
+                )
+            return {}
+
+        async def observe_native_result(
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
+            if is_native(input_data):
+                observe_native(
+                    "result",
+                    {
+                        "tool_name": input_data.get("tool_name"),
+                        "result": input_data.get("tool_response"),
+                        "tool_use_id": tool_use_id or input_data.get("tool_use_id"),
+                        "native": True,
+                    },
+                )
+            return {}
+
+        async def observe_native_failure(
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
+            if is_native(input_data):
+                observe_native(
+                    "error",
+                    {
+                        "tool_name": input_data.get("tool_name"),
+                        "error": input_data.get("error"),
+                        "tool_use_id": tool_use_id or input_data.get("tool_use_id"),
+                        "native": True,
+                    },
+                )
+            return {}
+
         use_callback = (
             bool(options.builtin_tools) or options.approval_gate is not None or not options.preapprove_application_tools
         )
@@ -232,6 +300,23 @@ class AgentSdkClient(ClaudeSdkClient):
             )
         if use_callback:
             matchers.append(HookMatcher(hooks=[keep_permission_stream_open]))
+        sdk_hooks: Any = {"PreToolUse": matchers} if matchers else None
+        if options.tool_observer is not None:
+            matchers.append(HookMatcher(hooks=[observe_native_call]))
+            sdk_hooks = {
+                "PreToolUse": matchers,
+                "PostToolUse": [HookMatcher(hooks=[observe_native_result])],
+            }
+            try:
+                from claude_agent_sdk.types import HookEvent
+
+                has_post_tool_use_failure = any(
+                    event == "PostToolUseFailure" for literal in get_args(HookEvent) for event in get_args(literal)
+                )
+            except (ImportError, AttributeError):
+                has_post_tool_use_failure = False
+            if has_post_tool_use_failure:
+                sdk_hooks["PostToolUseFailure"] = [HookMatcher(hooks=[observe_native_failure])]
         return ClaudeAgentOptions(
             model=options.model,
             fallback_model=options.fallback_model,
@@ -264,7 +349,7 @@ class AgentSdkClient(ClaudeSdkClient):
             # Built inline so the key types as the SDK's ``HookEvent`` literal
             # rather than a plain ``str`` (dict key types are invariant, so a
             # pre-built ``dict[str, ...]`` would not satisfy the parameter).
-            hooks={"PreToolUse": matchers} if matchers else None,
+            hooks=sdk_hooks,
             setting_sources=list(options.setting_sources),
             # The env var, not the settings file: it takes precedence over
             # every settings source, so it says the same thing whether or not

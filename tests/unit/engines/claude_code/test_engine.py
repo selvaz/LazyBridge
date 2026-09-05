@@ -9,6 +9,7 @@ from lazybridge import Agent, Envelope, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+from lazybridge.session import EventType
 
 
 @pytest.fixture
@@ -110,6 +111,30 @@ def test_engine_streams_incremental_chunks_and_records_memory():
 
     assert asyncio.run(collect()) == "streamed answer"
     assert "Stream this" in memory.text()
+
+
+def test_options_observe_native_tools_on_the_session_event_bus():
+    class NativeObservingSdk(_PlainSdk):
+        async def run(self, prompt, *, options, attachments=()):
+            self.options.append(options)
+            assert options.tool_observer is not None
+            options.tool_observer(
+                "call",
+                {"tool_name": "Bash", "arguments": {"command": "git status"}, "tool_use_id": "t1", "native": True},
+            )
+            return ClaudeSdkResult(text="ok", session_id="s")
+
+    session = Session(redact=None)
+    sdk = NativeObservingSdk()
+    assert Agent(name="observer", engine=ClaudeCodeEngine(client=sdk), session=session)("Observe tools").ok
+
+    events = session.events.query(event_type=EventType.TOOL_CALL)
+    assert events[-1]["payload"] == {
+        "tool_name": "Bash",
+        "arguments": {"command": "git status"},
+        "tool_use_id": "t1",
+        "native": True,
+    }
 
 
 def test_runtime_session_is_kept_on_lazybridge_session_and_skips_parent_memory():
