@@ -56,3 +56,4 @@ site/
 
 # Local experiments (never published)
 sandbox/
+pytest-tmp-*/
