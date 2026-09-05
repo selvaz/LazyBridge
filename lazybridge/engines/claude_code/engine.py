@@ -525,7 +525,7 @@ class ClaudeCodeEngine:
                 prompt = self._prompt(env, None if carries_history else memory)
                 options = self._options(
                     tools,
-                    observe,
+                    observe if session else None,
                     output_type=output_type,
                     resume=self._resume_id(session, agent_name),
                     gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
@@ -634,7 +634,7 @@ class ClaudeCodeEngine:
                     ),
                     options=self._options(
                         tools,
-                        observe,
+                        observe if session else None,
                         output_type=output_type,
                         partial=True,
                         resume=self._resume_id(session, agent_name),

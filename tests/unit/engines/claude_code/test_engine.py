@@ -137,6 +137,56 @@ def test_options_observe_native_tools_on_the_session_event_bus():
     }
 
 
+def test_no_session_means_no_tool_observer_reaches_the_sdk():
+    """The observer closure is a session-emitting no-op without a ``Session``.
+
+    ``ClaudeCodeEngine._options`` used to pass that closure to the SDK
+    options unconditionally, so ``AgentSdkClient._sdk_options`` registered
+    the native tool-observer hooks even when nothing would ever consume
+    what they emit — and, since the Problem 3 fix, an observer present
+    forces streaming input too, so this would also cost every session-less
+    run the richer message shape for zero benefit. A run with no ``Session``
+    must not carry a ``tool_observer`` at all.
+    """
+    client = _PlainSdk()
+    agent = Agent(name="sessionless", engine=ClaudeCodeEngine(client=client), tools=[get_quote])
+
+    assert agent("Find AMZN").ok
+    assert client.options[-1].tool_observer is None
+
+
+def test_no_session_means_no_tool_observer_reaches_the_sdk_while_streaming():
+    """Mirrors the previous test for the ``stream`` path."""
+
+    class StreamingPlainSdk:
+        def __init__(self):
+            self.options: list[ClaudeSdkOptions] = []
+
+        async def stream(self, prompt, *, options, attachments=()):
+            self.options.append(options)
+            yield ClaudeSdkStreamEvent(text="ok")
+            yield ClaudeSdkStreamEvent(session_id="s", final=True)
+
+    client = StreamingPlainSdk()
+    agent = Agent(name="sessionless-stream", engine=ClaudeCodeEngine(client=client), tools=[get_quote])
+
+    async def collect() -> str:
+        return "".join([chunk async for chunk in agent.stream("Find AMZN")])
+
+    assert asyncio.run(collect()) == "ok"
+    assert client.options[-1].tool_observer is None
+
+
+def test_a_real_session_still_gets_a_tool_observer():
+    """The already-working case: unaffected by the session-gating fix."""
+    client = _PlainSdk()
+    session = Session()
+    agent = Agent(name="observed", engine=ClaudeCodeEngine(client=client), tools=[get_quote], session=session)
+
+    assert agent("Find AMZN").ok
+    assert client.options[-1].tool_observer is not None
+
+
 def test_runtime_session_is_kept_on_lazybridge_session_and_skips_parent_memory():
     client = FakeSdk()
     memory = Memory()

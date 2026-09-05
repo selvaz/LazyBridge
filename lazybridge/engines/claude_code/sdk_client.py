@@ -376,7 +376,7 @@ class AgentSdkClient(ClaudeSdkClient):
         final: Any | None = None
         sdk_options = self._sdk_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt, attachments) if options.builtin_tools or attachments else prompt
+            self._prompt_stream(prompt, attachments) if self._needs_streaming_input(options, attachments) else prompt
         )
         async for message in query(prompt=sdk_prompt, options=sdk_options):
             if isinstance(message, ResultMessage):
@@ -407,6 +407,21 @@ class AgentSdkClient(ClaudeSdkClient):
         """Enable partial events without dropping any per-run SDK option."""
         return replace(options, include_partial_messages=True)
 
+    @staticmethod
+    def _needs_streaming_input(options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...]) -> bool:
+        """Whether this run must send the SDK a streaming (async-iterator) prompt.
+
+        The Agent SDK only supports ``can_use_tool``/permission negotiation and
+        hook callbacks — including the native ``tool_observer`` hooks
+        registered in ``_sdk_options`` — over streaming input; a plain string
+        prompt fails before the model is even queried. ``builtin_tools`` and
+        ``attachments`` already require the richer message shape for their own
+        reasons, and ``tool_observer`` joins them here so the two can never
+        drift apart again: whenever ``_sdk_options`` would register the
+        observer hooks, this must say streaming input is needed too.
+        """
+        return bool(options.builtin_tools) or bool(attachments) or options.tool_observer is not None
+
     async def stream(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]:
@@ -419,7 +434,9 @@ class AgentSdkClient(ClaudeSdkClient):
         saw_result = False
         stream_options = self._stream_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
-            self._prompt_stream(prompt, attachments) if stream_options.builtin_tools or attachments else prompt
+            self._prompt_stream(prompt, attachments)
+            if self._needs_streaming_input(stream_options, attachments)
+            else prompt
         )
         async for message in query(
             prompt=sdk_prompt,
