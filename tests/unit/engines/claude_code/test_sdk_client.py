@@ -183,6 +183,59 @@ def test_no_native_observer_leaves_post_tool_use_unregistered():
     assert "PostToolUse" not in (sdk_options.hooks or {})
 
 
+# --------------------------------------------------------------------------- #
+# Streaming input follows the SDK hooks (release/1.4.0 regression)
+#
+# ``_sdk_options`` registers the native ``tool_observer`` hooks whenever
+# ``options.tool_observer is not None`` — regardless of ``builtin_tools`` or
+# ``attachments``. But the Agent SDK only delivers hook callbacks (and
+# ``can_use_tool``) over STREAMING input; a plain string prompt is answered
+# without ever consulting them. A ``ClaudeCodeEngine`` used as a pure LLM
+# (no file_roots, no web, no extra_tools) but with a ``Session`` to observe
+# used to register the hooks in ``_sdk_options`` while ``run``/``stream``
+# still chose the plain-string prompt — hooks with nothing to invoke them,
+# which fails the SDK call before the model is even queried.
+# --------------------------------------------------------------------------- #
+def test_an_observer_alone_requires_streaming_input():
+    """No builtin tools, no attachments — only a tool_observer.
+
+    This is exactly the case from the fix spec's reproduction: a bare
+    ``ClaudeCodeEngine`` whose only reason to register hooks is the
+    (session-backed) observer. Streaming input must still be selected, or
+    the hooks ``_sdk_options`` just registered fire for nobody.
+    """
+    options = ClaudeSdkOptions(tool_observer=lambda kind, payload: None)
+
+    assert AgentSdkClient._needs_streaming_input(options, ()) is True
+
+
+def test_no_observer_no_builtins_no_attachments_stays_on_the_plain_prompt():
+    """The baseline case: nothing here needs the richer message shape."""
+    assert AgentSdkClient._needs_streaming_input(ClaudeSdkOptions(), ()) is False
+
+
+def test_builtin_tools_alone_still_require_streaming_input():
+    """Already-working case (e.g. ``file_roots`` or ``web``): unchanged."""
+    options = ClaudeSdkOptions(builtin_tools=("Read", "Glob", "Grep"))
+
+    assert AgentSdkClient._needs_streaming_input(options, ()) is True
+
+
+def test_attachments_alone_still_require_streaming_input():
+    """Already-working case: unaffected by the tool_observer addition."""
+    assert AgentSdkClient._needs_streaming_input(ClaudeSdkOptions(), ({"type": "image"},)) is True
+
+
+def test_builtin_tools_and_observer_together_still_require_streaming_input():
+    """The combined case must not regress either: still exactly one decision."""
+    options = ClaudeSdkOptions(
+        builtin_tools=("WebSearch", "WebFetch"),
+        tool_observer=lambda kind, payload: None,
+    )
+
+    assert AgentSdkClient._needs_streaming_input(options, ()) is True
+
+
 def _pre_tool_use_hook(sdk_options, matcher_contains: str):
     """The PreToolUse callback whose matcher covers ``matcher_contains``."""
     for entry in sdk_options.hooks["PreToolUse"]:
