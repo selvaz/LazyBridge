@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.4.0] — 2026-09-05
+
 ### Added
 - Native Claude Code tool calls and results are now emitted as Session
   `TOOL_CALL`/`TOOL_RESULT` events (`native: True` in the payload).
