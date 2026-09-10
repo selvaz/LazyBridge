@@ -7,6 +7,7 @@ the sole optional-import boundary for the external SDK.
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -16,6 +17,25 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 from lazybridge.engines.coding import ApprovalRequest, ask_approval
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
+
+logger = logging.getLogger(__name__)
+
+
+def _log_cli_stderr(line: str) -> None:
+    """Surface the underlying ``claude`` CLI subprocess's own stderr.
+
+    Without this, ``options.stderr`` stays unset, the SDK transport leaves
+    the child's stderr fd on ``None`` (inherit-from-parent) instead of
+    piping it, and a non-zero exit only ever surfaces as the SDK's generic
+    ``ProcessError("Command failed with exit code N", stderr="Check stderr
+    output for details")`` -- found live: inheritance did not reliably carry
+    the real message through on Windows (a redirected/piped parent stderr,
+    e.g. under a background-launched service), so a real crash left nothing
+    to diagnose beyond the exit code. Piping + logging here is the only way
+    to actually see why the CLI died, at the cost of these lines going
+    through Python logging instead of straight to the console.
+    """
+    logger.warning("claude CLI stderr: %s", line.rstrip())
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     # Type-only: the SDK stays an optional runtime dependency (it is imported
@@ -350,6 +370,7 @@ class AgentSdkClient(ClaudeSdkClient):
             # rather than a plain ``str`` (dict key types are invariant, so a
             # pre-built ``dict[str, ...]`` would not satisfy the parameter).
             hooks=sdk_hooks,
+            stderr=_log_cli_stderr,
             setting_sources=list(options.setting_sources),
             # The env var, not the settings file: it takes precedence over
             # every settings source, so it says the same thing whether or not
