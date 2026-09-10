@@ -37,6 +37,7 @@ def _log_cli_stderr(line: str) -> None:
     """
     logger.warning("claude CLI stderr: %s", line.rstrip())
 
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     # Type-only: the SDK stays an optional runtime dependency (it is imported
     # lazily inside the methods below). Under ``ignore_missing_imports`` these
