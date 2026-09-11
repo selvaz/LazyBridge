@@ -1,7 +1,7 @@
 """Regression tests for the GPT-5.6 model family addition (Sol / Terra / Luna).
 
 Covers:
-  * Tier aliases route ``top``/``expensive``/``medium`` to the GPT-5.6 family.
+  * Tier aliases retain GPT-5.6 below ``top`` after GPT-6 Astra is added.
   * ``_PRICE_TABLE`` returns the GPT-5.6 rates, including the bare ``gpt-5.6``
     alias (routes to Sol pricing).
   * More-specific keys (``gpt-5.6-sol``) match before the bare ``gpt-5.6`` key.
@@ -23,10 +23,11 @@ def _provider() -> OpenAIProvider:
     return OpenAIProvider.__new__(OpenAIProvider)
 
 
-def test_tier_aliases_route_to_gpt_5_6_family() -> None:
-    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-5.6-sol"
-    assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-5.6-terra"
-    assert OpenAIProvider._TIER_ALIASES["medium"] == "gpt-5.6-luna"
+def test_tier_aliases_retain_gpt_5_6_below_top() -> None:
+    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-6-astra"
+    assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-5.6-sol"
+    assert OpenAIProvider._TIER_ALIASES["medium"] == "gpt-5.6-terra"
+    assert OpenAIProvider._TIER_ALIASES["cheap"] == "gpt-5.6-luna"
 
 
 def test_price_table_has_gpt_5_6_entries() -> None:

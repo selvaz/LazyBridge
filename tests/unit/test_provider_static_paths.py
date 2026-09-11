@@ -130,6 +130,7 @@ def test_openai_compute_cost_clamps_cached_to_input():
 @pytest.mark.parametrize(
     "provider_cls,model,expected_min",
     [
+        (OpenAIProvider, "gpt-6-astra", 128_000),
         (OpenAIProvider, "gpt-5.5", 100_000),
         (OpenAIProvider, "gpt-4.1", 16_000),
         (OpenAIProvider, "gpt-4o", 8_000),
@@ -201,8 +202,8 @@ def test_fallback_targets_have_pricing(provider_cls):
 @pytest.mark.parametrize(
     "provider_cls,tier,expected_substring",
     [
-        (OpenAIProvider, "top", "gpt-5.6-sol"),
-        (OpenAIProvider, "cheap", "gpt-5.4-nano"),
+        (OpenAIProvider, "top", "gpt-6-astra"),
+        (OpenAIProvider, "cheap", "gpt-5.6-luna"),
         (AnthropicProvider, "top", "claude-fable-5"),
         (AnthropicProvider, "cheap", "claude-haiku"),
         (GoogleProvider, "top", "gemini-3.1-pro"),
@@ -494,7 +495,7 @@ def test_anthropic_messages_tool_role_demotes_to_user():
 @pytest.mark.parametrize(
     "model,expected",
     [
-        # Explicit o-series and gpt-5 family — all use ``reasoning_effort``.
+        # Explicit o-series, gpt-5, and gpt-6 families use ``reasoning_effort``.
         ("o1", True),
         ("o1-mini", True),
         ("o1-pro", True),
@@ -506,6 +507,7 @@ def test_anthropic_messages_tool_role_demotes_to_user():
         ("gpt-5.4", True),
         ("gpt-5.5", True),
         ("gpt-5.5-pro", True),
+        ("gpt-6-astra", True),
         # Non-reasoning families.
         ("gpt-4o", False),
         ("gpt-4.1", False),

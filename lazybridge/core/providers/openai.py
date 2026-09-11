@@ -4,7 +4,7 @@ Routes all requests through the Responses API (OpenAI's recommended path since 2
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
 
 No implicit default model (``default_model = None``) — pass model= explicitly,
-or use ``Agent.from_provider("openai", tier="top")`` for gpt-5.6-sol.
+or use ``Agent.from_provider("openai", tier="top")`` for gpt-6-astra.
 """
 
 from __future__ import annotations
@@ -92,14 +92,32 @@ _EFFORT_MAP = {
     "max": "xhigh",
 }
 
+
+def _reasoning_effort_for_model(model: str, effort: str) -> str:
+    """Map the unified effort vocabulary to the selected OpenAI model.
+
+    GPT-6 Astra accepts ``max`` natively. Older OpenAI reasoning models top
+    out at ``xhigh``, which remains the compatibility mapping for them.
+    Unknown values pass through so the API reports an invalid value instead
+    of LazyBridge silently changing it.
+    """
+    if effort == "max" and model.lower().startswith("gpt-6-astra"):
+        return "max"
+    return _EFFORT_MAP.get(effort, effort)
+
+
 # Price per 1M tokens: (input, cached_input, output). cached_input is None when
 # the model has no published cache-hit rate (or doesn't support input caching),
 # in which case cached tokens are billed at the full input rate.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
-# Long-context tier (>272K input on gpt-5.x) is NOT modeled here — those prompts
+# Long-context tier (>272K input on GPT-5.6 / GPT-6 Astra) is NOT modeled here — those prompts
 # are billed at 2x input / 1.5x output for the session; cost values returned by
 # this table will under-count in that regime.
 _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
+    # GPT-6 Astra (released 2026-09-03).  Cache writes are separately
+    # billed by OpenAI but are not exposed in UsageStats, so this table
+    # tracks the three token counters LazyBridge can observe.
+    "gpt-6-astra": (10.0, 1.0, 50.0),
     # GPT-5.6 (released 2026-07-09): three tiers instead of a single
     # flagship + "-pro".  "gpt-5.6" is a bare alias that routes to Sol —
     # kept last among the 5.6 rows so the more specific tier names match
@@ -297,7 +315,7 @@ class OpenAIProvider(BaseProvider):
     Supports:
     - Chat Completions (standard + function calling + structured outputs)
     - Responses API (native tools: web_search, code_interpreter, file_search, computer_use)
-    - Reasoning effort control for o-series and gpt-5.4+ models
+    - Reasoning effort control for o-series, gpt-5.4+, and GPT-6 Astra
     - Streaming
     """
 
@@ -306,20 +324,21 @@ class OpenAIProvider(BaseProvider):
     # want a safety net.
     default_model: str | None = None
 
-    # Tier aliases.  GPT-5.6 (2026-07-09) ships three tiers — Sol (best
+    # Tier aliases.  GPT-6 Astra is the most capable general model. GPT-5.6
+    # ships three tiers — Sol (best
     # coding/reasoning), Terra (balanced flagship), Luna (fast/light) —
     # replacing the old flagship+"-pro" shape.  Luna is priced close to
-    # gpt-5.4-mini but is the newer model, so it now takes "medium";
-    # cheap/super_cheap still point at the 5.4/4o family since Luna isn't
-    # actually cheaper per-token than gpt-5.4-nano.
+    # gpt-5.4-mini and is the newest low-cost model, so the family occupies
+    # the next three tiers.  gpt-4o-mini remains the super-cheap option.
     _TIER_ALIASES = {
-        "top": "gpt-5.6-sol",  # best coding / hardest reasoning tier
-        "expensive": "gpt-5.6-terra",  # balanced general flagship
-        "medium": "gpt-5.6-luna",  # fast tier, newer than 5.4-mini
-        "cheap": "gpt-5.4-nano",  # best value; no 5.6-nano yet
+        "top": "gpt-6-astra",  # most capable model for hardest end-to-end work
+        "expensive": "gpt-5.6-sol",  # strong coding / reasoning tier
+        "medium": "gpt-5.6-terra",  # balanced general flagship
+        "cheap": "gpt-5.6-luna",  # fast, current low-cost tier
         "super_cheap": "gpt-4o-mini",
     }
     _FALLBACKS = {
+        "gpt-6-astra": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5"],
         "gpt-5.6-sol": ["gpt-5.6-terra", "gpt-5.5-pro", "gpt-5.5"],
         "gpt-5.6-terra": ["gpt-5.6-luna", "gpt-5.5"],
         "gpt-5.6-luna": ["gpt-5.4-mini", "gpt-5.4"],
@@ -345,7 +364,7 @@ class OpenAIProvider(BaseProvider):
         }
     )
 
-    # Vision: gpt-4-turbo, gpt-4o, gpt-4.1, gpt-5+ are all multimodal.
+    # Vision: gpt-4-turbo, gpt-4o, gpt-4.1, gpt-5+, and GPT-6 Astra are multimodal.
     # Substring match on the model family covers every quant / mini /
     # nano variant uniformly.  ``gpt-3.5`` and ``gpt-4`` (no suffix)
     # are intentionally NOT in the list — they were the text-only
@@ -356,6 +375,7 @@ class OpenAIProvider(BaseProvider):
             "gpt-4o",
             "gpt-4.1",
             "gpt-5",
+            "gpt-6",
             "o1",  # reasoning models accept images on the multimodal variant
             "o3",
             "o4",
@@ -394,7 +414,7 @@ class OpenAIProvider(BaseProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for the given model."""
         resolved = (model or self.model or self.default_model or "").lower()
-        if resolved.startswith("gpt-5"):
+        if resolved.startswith(("gpt-5", "gpt-6")):
             return 128_000
         if resolved.startswith("gpt-4.1"):
             return 32_768
@@ -481,7 +501,7 @@ class OpenAIProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _is_reasoning_model(self, model: str) -> bool:
-        return model in _REASONING_MODELS or model.startswith(("o1", "o3", "o4", "gpt-5"))
+        return model in _REASONING_MODELS or model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
 
     @staticmethod
     def _populate_reasoning_tokens(usage: UsageStats, raw_usage: Any) -> UsageStats:
@@ -699,7 +719,7 @@ class OpenAIProvider(BaseProvider):
         # e.g. gpt-4o (or LM Studio backends) produces a 400/ignored param.
         if request.thinking and request.thinking.enabled:
             if self._supports_chat_reasoning_effort(model):
-                effort = _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)
+                effort = _reasoning_effort_for_model(model, request.thinking.effort)
                 params["reasoning_effort"] = effort
             else:
                 warnings.warn(
@@ -888,7 +908,7 @@ class OpenAIProvider(BaseProvider):
         if request.thinking and request.thinking.enabled:
             # Passthrough for unknown effort values (parity with the Chat
             # path): the API rejects them loudly instead of a silent "high".
-            params["reasoning"] = {"effort": _EFFORT_MAP.get(request.thinking.effort, request.thinking.effort)}
+            params["reasoning"] = {"effort": _reasoning_effort_for_model(model, request.thinking.effort)}
         # temperature is rejected by reasoning models — mirror the Chat-path
         # guard instead of silently dropping it whenever thinking is set.
         if request.temperature is not None and not self._is_reasoning_model(model):
