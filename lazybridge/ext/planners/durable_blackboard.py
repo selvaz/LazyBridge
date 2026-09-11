@@ -48,6 +48,7 @@ Tools:
 - ``add_tasks(tasks)``                 — append newly-discovered tasks to the plan.
 - ``cancel_task(task_index, expected_text, reason)`` — drop a todo task that is no longer needed.
 - ``claim_next()``                     — take the next task; returns its index and text.
+- ``claim_task(task_index, expected_text)`` — take a SPECIFIC task instead of "next", when you already know which one you need (expected_text must match get_plan()'s current text for that index exactly).
 - ``mark_done(task_index, summary)``   — close a task with a 1-3 sentence result.
 - ``mark_failed(task_index, error)``   — give a task back after a real failure.
 
@@ -344,6 +345,82 @@ class DurableBlackboard:
                 return None
         return None
 
+    def claim_task(self, task_index: int, expected_text: str, *, owner: str | None = None) -> tuple[int, str] | str:
+        """Take a SPECIFIC task instead of whichever is earliest-eligible --
+        for a caller that already knows which task it wants and does not
+        want to claim (and immediately close) every earlier todo task just
+        to advance ``claim_next``'s scan past them.
+
+        Found live: an agent whose plan had tasks like "[1] optional
+        cleanup, only if the user explicitly asks" sitting before the task
+        it actually needed to work on right now had no way to reach that
+        later task without claiming AND immediately closing [1] first --
+        polluting the plan's history with noisy, fake-looking "no action
+        taken, closing only to unblock the queue" result summaries that
+        were not real completions.
+
+        This is an alternate SELECTION, not a different claiming mechanism
+        -- ``claim_next`` remains the only way an unattended worker picks up
+        arbitrary work, and its own scan/lease/attempts behaviour is
+        unchanged by this method existing. A targeted task still ends up
+        ``claimed``, still counts an attempt, still parks as ``failed`` if
+        attempts are already exhausted, and a task actively claimed by
+        another (unexpired) worker is refused here exactly as ``claim_next``
+        would never hand it out to a second worker.
+
+        ``expected_text`` is required and must match the task's CURRENT
+        text -- the same stale-index guard ``cancel_task`` already uses: an
+        index the caller remembers from an earlier ``get_plan()`` may not
+        refer to the same task anymore after a concurrent
+        ``add_tasks()``/``claim_next()`` elsewhere changed what that index
+        holds.
+
+        Returns ``(index, text)`` on success, the same shape ``claim_next``
+        returns, or a ``"REJECTED: ..."`` string explaining why not --
+        distinguish the two with ``isinstance(result, str)``, the same
+        convention ``cancel_task``/``mark_done``/``mark_failed`` already use
+        for their own rejections.
+        """
+        holder = owner or uuid.uuid4().hex
+
+        def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, tuple[int, str] | str]:
+            if doc is None or not doc.get("tasks"):
+                return None, "REJECTED: no plan set; call set_plan first."
+            tasks = [dict(t) for t in doc["tasks"]]
+            if not 0 <= task_index < len(tasks):
+                return None, f"REJECTED: task_index out of range (valid: 0..{len(tasks) - 1})."
+            task = tasks[task_index]
+            if task["text"] != expected_text:
+                return None, (
+                    f"REJECTED: task {task_index}'s current text does not match expected_text -- "
+                    "call get_plan() to see the current state before claiming."
+                )
+            now = time.time()
+            if task.get("status") == "claimed":
+                claimed_at = task.get("claimed_at")
+                expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+                if not expired:
+                    return None, (
+                        f"REJECTED: task {task_index} is already claimed by another worker "
+                        "and its lease has not expired yet -- wait, or work on something else."
+                    )
+            elif task.get("status") != "todo":
+                return None, f"REJECTED: task {task_index} is {task.get('status')}, not claimable."
+            if task.get("attempts", 0) >= self.max_attempts:
+                # Same poison-task handling as claim_next: park it so the
+                # plan can finish instead of handing it out again.
+                task.update(status="failed", owner=None, claimed_at=None)
+                task["error"] = task.get("error") or f"exhausted {self.max_attempts} attempts"
+                new_doc = {**doc, "tasks": tasks}
+                return new_doc, (
+                    f"REJECTED: task {task_index} just exhausted its attempt budget and was parked as failed instead."
+                )
+            task.update(status="claimed", owner=holder, claimed_at=now, attempts=task.get("attempts", 0) + 1)
+            new_doc = {**doc, "tasks": tasks}
+            return new_doc, (task_index, str(task["text"]))
+
+        return self._mutate(apply)
+
     def mark_done(self, task_index: int, summary: str, *, owner: str | None = None) -> str:
         if not summary.strip():
             return "REJECTED: a 1-3 sentence summary is required."
@@ -466,6 +543,17 @@ def durable_blackboard_agent(
         index, text = claimed
         return f"claimed task {index}: {text}"
 
+    def claim_task(task_index: int, expected_text: str) -> str:
+        """Take a SPECIFIC task instead of whichever is next, when you
+        already know which one you need. expected_text must match the
+        task's CURRENT text exactly (call get_plan() first) -- a mismatch
+        is refused, same guard as cancel_task."""
+        result = board.claim_task(task_index, expected_text, owner=holder)
+        if isinstance(result, str):
+            return result
+        index, text = result
+        return f"claimed task {index}: {text}"
+
     def mark_done(task_index: int, result_summary: str) -> str:
         """Close a task with a 1-3 sentence summary of what was produced."""
         return board.mark_done(task_index, result_summary, owner=holder)
@@ -483,6 +571,7 @@ def durable_blackboard_agent(
             Tool(add_tasks),
             Tool(cancel_task),
             Tool(claim_next),
+            Tool(claim_task),
             Tool(mark_done),
             Tool(mark_failed),
         ],

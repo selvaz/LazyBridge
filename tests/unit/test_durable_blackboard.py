@@ -280,6 +280,99 @@ def test_claim_next_does_not_starve_an_expired_claim_behind_new_todo_tasks():
     assert board.claim_next(owner="rescuer") == (0, "the abandoned task")
 
 
+def test_claim_task_takes_a_specific_task_out_of_order():
+    """The fix for real friction: reaching task 2 must not require claiming
+    (and closing) task 0 and 1 first just to advance claim_next()'s scan."""
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    claimed = board.claim_task(2, TASKS[2], owner="w")
+
+    assert claimed == (2, TASKS[2])
+    statuses = [t["status"] for t in board.snapshot().tasks]
+    assert statuses == ["todo", "todo", "claimed"]
+    assert board.snapshot().tasks[2]["owner"] == "w"
+    assert board.snapshot().tasks[2]["attempts"] == 1
+
+
+def test_claim_task_rejects_a_stale_text_mismatch():
+    """Same stale-index guard as cancel_task."""
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    refusal = board.claim_task(1, "a task that no longer matches", owner="w")
+
+    assert isinstance(refusal, str) and refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[1]["status"] == "todo"
+
+
+def test_claim_task_rejects_out_of_range_index():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    refusal = board.claim_task(99, "does not matter", owner="w")
+
+    assert isinstance(refusal, str) and refusal.startswith("REJECTED")
+
+
+def test_claim_task_refuses_an_already_claimed_unexpired_task():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="first")
+
+    refusal = board.claim_task(0, TASKS[0], owner="second")
+
+    assert isinstance(refusal, str) and refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[0]["owner"] == "first"
+
+
+def test_claim_task_refuses_a_done_task():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="w")
+    board.mark_done(0, "already finished", owner="w")
+
+    refusal = board.claim_task(0, TASKS[0], owner="w")
+
+    assert isinstance(refusal, str) and refusal.startswith("REJECTED")
+
+
+def test_claim_task_reclaims_an_expired_lease_like_claim_next_does():
+    store = Store()
+    board = _board(store, lease_seconds=0.05)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="doomed")
+
+    import time
+
+    time.sleep(0.06)
+    claimed = board.claim_task(0, TASKS[0], owner="rescuer")
+
+    assert claimed == (0, TASKS[0])
+    assert board.snapshot().tasks[0]["owner"] == "rescuer"
+    assert board.snapshot().tasks[0]["attempts"] == 2  # doomed's attempt still counted
+
+
+def test_claim_task_parks_an_exhausted_task_as_failed_instead_of_reclaiming_it():
+    store = Store()
+    board = _board(store, lease_seconds=0.05, max_attempts=1)
+    board.set_plan("shared", ["only task"])
+    board.claim_next(owner="doomed")  # consumes the only attempt
+
+    import time
+
+    time.sleep(0.06)
+    refusal = board.claim_task(0, "only task", owner="rescuer")
+
+    assert isinstance(refusal, str) and refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[0]["status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Agent wiring
 # ---------------------------------------------------------------------------
@@ -337,10 +430,23 @@ def test_the_agent_exposes_the_blackboard_verbs_alongside_sub_agents():
         "add_tasks",
         "cancel_task",
         "claim_next",
+        "claim_task",
         "mark_done",
         "mark_failed",
         "worker",
     } <= tool_names
+
+
+def test_claim_task_tool_passes_through_a_successful_claim_and_a_rejection():
+    store = Store()
+    DurableBlackboard(store, "p1").set_plan("shared", TASKS)
+    agent = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
+
+    ok = asyncio.run(agent._tool_map["claim_task"].run(task_index=2, expected_text=TASKS[2]))
+    assert "claimed task 2" in str(ok)
+
+    rejected = asyncio.run(agent._tool_map["claim_task"].run(task_index=1, expected_text="wrong text"))
+    assert str(rejected).startswith("REJECTED")
 
 
 def test_duplicate_sub_agent_names_are_rejected():
