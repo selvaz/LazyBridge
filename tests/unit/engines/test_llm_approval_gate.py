@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 
@@ -15,7 +16,7 @@ from lazybridge.core.types import (
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.envelope import Envelope
-from lazybridge.ext.approval import TieredGate
+from lazybridge.ext.approval import Rule, TieredGate
 from lazybridge.session import EventType, Session
 from lazybridge.tools import Tool
 
@@ -64,6 +65,54 @@ async def test_allow_gate_executes_tool_once_with_normalized_request():
     assert result == "pong"
     assert calls == 1
     assert requests == [ApprovalRequest(provider="llm", kind="tool", name="ping", arguments={})]
+    assert requests[0].cwd is None
+
+
+@pytest.mark.asyncio
+async def test_cwd_is_resolved_and_forwarded_to_approval_request(tmp_path: Path):
+    requests: list[ApprovalRequest] = []
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        requests.append(request)
+        return ApprovalDecision.allow()
+
+    engine = LLMEngine("fake", provider="fake", approval_gate=gate, cwd=workspace)
+    result = await _run_tool(engine, Tool(lambda: "pong", name="ping"))
+
+    assert result == "pong"
+    assert engine.cwd == str(workspace.resolve())
+    assert requests[0].cwd == str(workspace.resolve())
+
+
+@pytest.mark.asyncio
+async def test_tiered_session_grant_does_not_cross_llm_engine_cwd(tmp_path: Path):
+    prompts: list[str] = []
+
+    class ApprovingChannel:
+        name = "test"
+
+        async def ask(self, prompt: str) -> bool:
+            prompts.append(prompt)
+            return True
+
+    gate = TieredGate(channel=ApprovingChannel(), rules=(Rule("session", "ping"),))
+    first_workspace = tmp_path / "first"
+    second_workspace = tmp_path / "second"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+    first = LLMEngine("fake", provider="fake", approval_gate=gate, cwd=first_workspace)
+    second = LLMEngine("fake", provider="fake", approval_gate=gate, cwd=second_workspace)
+    tool = Tool(lambda: "pong", name="ping")
+
+    assert await _run_tool(first, tool) == "pong"
+    assert await _run_tool(second, tool) == "pong"
+    assert await _run_tool(first, tool) == "pong"
+
+    assert len(prompts) == 2
+    assert [record.action for record in gate.log] == ["allow_session", "allow_session", "allow"]
+    assert [record.cwd for record in gate.log] == [first.cwd, second.cwd, first.cwd]
 
 
 @pytest.mark.asyncio

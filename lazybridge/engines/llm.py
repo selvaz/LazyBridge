@@ -8,6 +8,7 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.executor import Executor
@@ -115,6 +116,9 @@ class LLMEngine:
         Sampling temperature. None = provider default.
     system:
         Static system prompt. Agent.sources= / Envelope.context are added on top.
+    cwd:
+        Working directory used to scope approval grants. ``None`` leaves the
+        request unscoped.
     native_tools:
         Provider-native server-side tools, e.g. NativeTool.WEB_SEARCH.
     max_retries:
@@ -191,6 +195,7 @@ class LLMEngine:
         cache: bool | Any = False,
         strict_multimodal: bool = False,
         approval_gate: ApprovalGate | None = None,
+        cwd: str | Path | None = None,
     ) -> None:
         self.model = model
         if isinstance(thinking, str) and thinking not in _EFFORT_LEVELS:
@@ -296,6 +301,7 @@ class LLMEngine:
         # text-only models without crashing on edge cases.
         self.strict_multimodal = strict_multimodal
         self.approval_gate = approval_gate
+        self.cwd = str(Path(cwd).resolve()) if cwd is not None else None
         # Provider may be passed explicitly (used by Agent.from_provider
         # when the model is a tier alias like "top" / "cheap" that
         # _infer_provider can't route on its own).  Falls back to the
@@ -1184,6 +1190,7 @@ class LLMEngine:
                             kind="tool",
                             name=tc.name,
                             arguments=tc.arguments,
+                            cwd=self.cwd,
                         ),
                     )
                     if decision.action not in {"allow", "allow_session"}:
