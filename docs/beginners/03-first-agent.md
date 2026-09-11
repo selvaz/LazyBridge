@@ -68,7 +68,7 @@ The five tier aliases, ordered cheapest → smartest:
 | Tier | Use when | Anthropic | OpenAI | Google | DeepSeek |
 |---|---|---|---|---|---|
 | `super_cheap` | High-volume classification, simple extraction (legacy SKUs) | `claude-3-haiku` | `gpt-4o-mini` | `gemini-2.5-flash-lite` | `deepseek-v4-flash` |
-| `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-5.4-nano` | `gemini-3.1-flash-lite-preview` | `deepseek-v4-flash` |
+| `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-5.6-luna` | `gemini-3.1-flash-lite-preview` | `deepseek-v4-flash` |
 | `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
 | `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-4-7` | `gpt-5.5` | `gemini-2.5-pro` | `deepseek-v4-pro` |
 | `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-opus-4-8` | `gpt-5.5-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
