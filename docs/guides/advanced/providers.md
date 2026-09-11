@@ -21,7 +21,7 @@ Agent(engine=LLMEngine("gpt-5.6-luna"))
 
 # Tier-based selection — model never appears in app code.
 Agent.from_provider("anthropic", tier="top")     # → claude-fable-5
-Agent.from_provider("openai",    tier="medium")  # → gpt-5.6-luna
+Agent.from_provider("openai",    tier="medium")  # → gpt-5.6-terra
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
 
@@ -88,17 +88,19 @@ reachable with an ordinary API key. Older pinned ids
 
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
-| `top` | `gpt-5.6-sol` | 1.05 M | 128 K | $5.00 | $0.50 | $30.00 |
-| `expensive` | `gpt-5.6-terra` | 1.05 M | 128 K | $2.50 | $0.25 | $15.00 |
-| `medium` | `gpt-5.6-luna` | 1.05 M | 128 K | $1.00 | $0.10 | $6.00 |
-| `cheap` | `gpt-5.4-nano` | 400 K | 128 K | $0.20 | $0.02 | $1.25 |
+| `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
+| `expensive` | `gpt-5.6-sol` | 1.05 M | 128 K | $5.00 | $0.50 | $30.00 |
+| `medium` | `gpt-5.6-terra` | 1.05 M | 128 K | $2.00 | $0.20 | $12.00 |
+| `cheap` | `gpt-5.6-luna` | 1.05 M | 128 K | $0.20 | $0.02 | $1.20 |
 | `super_cheap` | `gpt-4o-mini` | 128 K | 16 K | $0.15 | — | $0.60 |
 
-GPT-5.6 (released 2026-07-09) replaced the old flagship+`-pro` shape
-with three tiers: Sol (best coding / hardest reasoning, OpenAI's
-"workhorse"), Terra (balanced general flagship), Luna (fast/light).
-The bare alias `gpt-5.6` routes to Sol. GPT-5.6 also introduces
-explicit prompt-cache breakpoints and a 30-minute minimum cache life.
+GPT-6 Astra (released 2026-09-03) is now the `top` tier; GPT-5.6's three
+tiers — Sol (best coding / hardest reasoning), Terra (balanced general
+flagship), Luna (fast/light) — each shift down one slot to
+`expensive`/`medium`/`cheap`. The bare alias `gpt-5.6` still routes to
+Sol. Astra accepts reasoning effort `max` natively (GPT-5.6 and earlier
+top out at `xhigh`). GPT-5.6 also introduces explicit prompt-cache
+breakpoints and a 30-minute minimum cache life.
 
 Other supported models (passed verbatim, no tier alias):
 `gpt-5.5-pro` ($30 / $180), `gpt-5.5` ($5 / $0.50 cache / $30),
@@ -223,9 +225,11 @@ don't have to switch on Gemini-specific values:
 - **DeepSeek tier collapse.** Three of the five tier aliases
   (`medium` / `cheap` / `super_cheap`) all map to
   `deepseek-v4-flash` — there's no smaller model in the lineup.
-- **`gpt-5.6-nano` doesn't exist.** The `cheap` tier stays on
-  `gpt-5.4-nano` — Luna is the fast/light GPT-5.6 tier but isn't
-  actually cheaper per-token than 5.4-nano.
+- **`cheap` now resolves to `gpt-5.6-luna`, not `gpt-5.4-nano`.**
+  Since Luna's 2026-07-30 price cut ($0.20 / $1.20 in/out per 1M) it is
+  effectively the same per-token cost as `gpt-5.4-nano` ($0.20 / $1.25)
+  — so the tier swap is now a model upgrade at no real cost penalty,
+  unlike when Luna first shipped at its original $1.00 / $6.00 pricing.
 - **`gemini-2.0-flash` deprecation** lands June 1 2026; switch to
   `gemini-2.5-flash-lite` before then.
 - **Adaptive thinking ignores `budget_tokens`.** Anthropic

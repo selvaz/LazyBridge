@@ -8,6 +8,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **OpenAI GPT-6 Astra** (`gpt-6-astra`) is now supported throughout the
+  OpenAI provider. The `top` tier resolves to Astra; GPT-5.6 Sol/Terra/Luna
+  now occupy `expensive`/`medium`/`cheap`, and `_FALLBACKS["gpt-6-astra"]`
+  lists Sol/Terra/gpt-5.5 as metadata for a future retry path -- like every
+  other entry in `_FALLBACKS`, this is not executed automatically today
+  (see `BaseProvider._FALLBACKS`'s docstring).
+  Reasoning effort (including Astra's native `max`), vision input, and the
+  published 128K maximum output are recognised by the provider core. Cost tracking uses the
+  Standard API rates of $10 input / $1 cached input / $50 output per 1M
+  tokens. As with GPT-5.6, the >272K-input long-context multiplier is not
+  modelled because LazyBridge's usage envelope does not expose the request's
+  billable long-context tier.
+
 ---
 
 ## [1.4.0] — 2026-09-05

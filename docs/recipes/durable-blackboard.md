@@ -15,13 +15,16 @@ invocation, which is exactly what this one must not do.
 --8<-- "examples/patterns/durable_blackboard.py"
 ```
 
-## The five verbs
+## The verbs
 
 | Tool | What it does |
 |---|---|
 | `set_plan(reasoning, tasks)` | Creates the plan. **Refuses** to discard one still in progress. |
 | `get_plan()` | The whole board: what is done, claimed, failed, and what is next. |
-| `claim_next()` | Takes exactly one task, atomically. |
+| `add_tasks(tasks)` | Appends newly-discovered tasks without touching any existing task's index or status. |
+| `cancel_task(index, expected_text, reason)` | Drops a not-yet-claimed task that turned out to be unnecessary. `expected_text` must match the task's current text. |
+| `claim_next()` | Takes exactly one task — whichever is earliest eligible — atomically. |
+| `claim_task(index, expected_text)` | Takes a SPECIFIC task instead of "next", for a caller that already knows which one it needs and doesn't want to claim-and-close every earlier task just to reach it. Same `expected_text` stale-index guard as `cancel_task`. |
 | `mark_done(index, summary)` | Closes a task with its result. |
 | `mark_failed(index, error)` | Hands a task back after a genuine failure. |
 
