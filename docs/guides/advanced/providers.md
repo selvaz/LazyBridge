@@ -21,7 +21,7 @@ Agent(engine=LLMEngine("gpt-5.6-luna"))
 
 # Tier-based selection — model never appears in app code.
 Agent.from_provider("anthropic", tier="top")     # → claude-fable-5
-Agent.from_provider("openai",    tier="medium")  # → gpt-5.6-luna
+Agent.from_provider("openai",    tier="medium")  # → gpt-5.6-terra
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
 
@@ -225,9 +225,12 @@ don't have to switch on Gemini-specific values:
 - **DeepSeek tier collapse.** Three of the five tier aliases
   (`medium` / `cheap` / `super_cheap`) all map to
   `deepseek-v4-flash` — there's no smaller model in the lineup.
-- **`gpt-5.6-nano` doesn't exist.** The `cheap` tier stays on
-  `gpt-5.4-nano` — Luna is the fast/light GPT-5.6 tier but isn't
-  actually cheaper per-token than 5.4-nano.
+- **`cheap` got pricier per-token.** As of the GPT-6 Astra tier
+  reshuffle, `cheap` resolves to `gpt-5.6-luna` ($1.00 / $6.00 in/out
+  per 1M), not `gpt-5.4-nano` ($0.20 / $1.25) — Luna is the fast/light
+  GPT-5.6 tier but isn't actually cheaper per-token than 5.4-nano was.
+  Pass `gpt-5.4-nano` directly (bypassing the tier alias) if per-token
+  cost matters more than using the newest model.
 - **`gemini-2.0-flash` deprecation** lands June 1 2026; switch to
   `gemini-2.5-flash-lite` before then.
 - **Adaptive thinking ignores `budget_tokens`.** Anthropic
