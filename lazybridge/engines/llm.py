@@ -8,6 +8,7 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.executor import Executor
@@ -23,6 +24,13 @@ from lazybridge.core.types import (
     ToolCall,
 )
 from lazybridge.engines.base import resolve_agent_name
+from lazybridge.engines.coding import (
+    ApprovalGate,
+    ApprovalRequest,
+    ask_approval,
+    remembering_gate,
+    session_approvals,
+)
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -108,6 +116,9 @@ class LLMEngine:
         Sampling temperature. None = provider default.
     system:
         Static system prompt. Agent.sources= / Envelope.context are added on top.
+    cwd:
+        Working directory used to scope approval grants. ``None`` leaves the
+        request unscoped.
     native_tools:
         Provider-native server-side tools, e.g. NativeTool.WEB_SEARCH.
     max_retries:
@@ -159,6 +170,7 @@ class LLMEngine:
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = DEFAULT_STREAM_IDLE_TIMEOUT
     stream_buffer: int = 64
+    approval_gate: ApprovalGate | None = None
 
     def __init__(
         self,
@@ -182,6 +194,8 @@ class LLMEngine:
         stream_buffer: int = 64,
         cache: bool | Any = False,
         strict_multimodal: bool = False,
+        approval_gate: ApprovalGate | None = None,
+        cwd: str | Path | None = None,
     ) -> None:
         self.model = model
         if isinstance(thinking, str) and thinking not in _EFFORT_LEVELS:
@@ -286,6 +300,8 @@ class LLMEngine:
         # Off by default so a single agent fleet can mix vision and
         # text-only models without crashing on edge cases.
         self.strict_multimodal = strict_multimodal
+        self.approval_gate = approval_gate
+        self.cwd = str(Path(cwd).resolve()) if cwd is not None else None
         # Provider may be passed explicitly (used by Agent.from_provider
         # when the model is a tier alias like "top" / "cheap" that
         # _infer_provider can't route on its own).  Falls back to the
@@ -716,6 +732,14 @@ class LLMEngine:
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
         agent_name = resolve_agent_name(self, "agent")
+        approval_gate = (
+            remembering_gate(
+                self.approval_gate,
+                session_approvals(session, "llm", agent_name),
+            )
+            if self.approval_gate is not None
+            else None
+        )
 
         executor = self._make_executor()
 
@@ -912,9 +936,23 @@ class LLMEngine:
 
             async def _run_one(tc: ToolCall, *, _sem: asyncio.Semaphore | None = sem) -> Any:
                 if _sem is None:
-                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
+                    return await self._exec_tool(
+                        tc,
+                        tool_map,
+                        agent_name=agent_name,
+                        session=session,
+                        run_id=run_id,
+                        approval_gate=approval_gate,
+                    )
                 async with _sem:
-                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
+                    return await self._exec_tool(
+                        tc,
+                        tool_map,
+                        agent_name=agent_name,
+                        session=session,
+                        run_id=run_id,
+                        approval_gate=approval_gate,
+                    )
 
             # ``max_tool_calls_per_turn`` caps how many calls actually run this
             # turn (distinct from ``max_parallel_tools``, which only bounds
@@ -1107,6 +1145,7 @@ class LLMEngine:
         agent_name: str,
         session: Session | None,
         run_id: str,
+        approval_gate: ApprovalGate | None = None,
     ) -> Any:
         if session:
             # ``tool_use_id`` is the provider-supplied call id; it lets
@@ -1162,6 +1201,27 @@ class LLMEngine:
 
         try:
             try:
+                if self.approval_gate is not None:
+                    gate = (
+                        approval_gate
+                        if approval_gate is not None
+                        else remembering_gate(
+                            self.approval_gate,
+                            session_approvals(session, "llm", agent_name),
+                        )
+                    )
+                    decision = await ask_approval(
+                        gate,
+                        ApprovalRequest(
+                            provider="llm",
+                            kind="tool",
+                            name=tc.name,
+                            arguments=tc.arguments,
+                            cwd=self.cwd,
+                        ),
+                    )
+                    if decision.action not in {"allow", "allow_session"}:
+                        raise PermissionError(decision.message or "Tool denied by approval gate")
                 result = await run_tool_bounded(tool, tc.arguments, self.tool_timeout)
             except ToolTimeoutError as timeout_err:
                 if session:

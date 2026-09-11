@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from lazybridge import Session
+from lazybridge.engines.claude_code import ClaudeCodeEngine
+from lazybridge.engines.codex import CodexEngine
 from lazybridge.engines.coding import (
     ApprovalDecision,
     ApprovalRequest,
@@ -99,3 +103,43 @@ def test_without_a_session_the_grant_degrades_to_the_current_run():
     first.add(("tool", "get_quote"))
 
     assert session_approvals(None, "codex", "analyst") == set()
+
+
+@pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
+def test_engines_accept_approval_gate_as_a_direct_keyword(engine_type):
+    async def gate(request):
+        return ApprovalDecision.allow()
+
+    engine = engine_type(approval_gate=gate)
+
+    assert engine.approval_gate is gate
+
+
+@pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
+def test_engines_preserve_a_falsy_direct_approval_gate(engine_type):
+    class FalsyGate:
+        def __len__(self):
+            return 0
+
+        async def __call__(self, request):
+            return ApprovalDecision.deny()
+
+    gate = FalsyGate()
+    engine = engine_type(approval_gate=gate)
+
+    assert engine.approval_gate is gate
+
+
+@pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
+def test_engines_reject_conflicting_direct_and_configured_gates(engine_type):
+    async def direct_gate(request):
+        return ApprovalDecision.allow()
+
+    async def configured_gate(request):
+        return ApprovalDecision.allow()
+
+    with pytest.raises(ValueError, match="approval_gate conflicts"):
+        engine_type(
+            approval_gate=direct_gate,
+            config=CodingAgentConfig(approval_gate=configured_gate),
+        )

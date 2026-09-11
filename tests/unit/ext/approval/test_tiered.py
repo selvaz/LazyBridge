@@ -71,6 +71,17 @@ async def test_allow_tier_runs_without_asking():
     assert channel.prompts == []  # never consulted
 
 
+async def test_llm_provider_request_matches_existing_rules():
+    channel = FakeChannel()
+    gate = TieredGate(channel=channel, rules=(Rule("allow", "get_plan"),))
+
+    decision = await gate(_request(provider="llm", name="get_plan"))
+
+    assert decision.action == "allow"
+    assert gate.log[0].provider == "llm"
+    assert channel.prompts == []
+
+
 async def test_deny_tier_never_asks():
     channel = FakeChannel()
     gate = TieredGate(channel=channel, rules=DEFAULT_RULES)

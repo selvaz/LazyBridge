@@ -22,7 +22,7 @@ ApprovalAction = Literal["allow", "allow_session", "deny", "cancel"]
 class ApprovalRequest:
     """A normalized request emitted before a coding agent performs an action."""
 
-    provider: Literal["claude-code", "codex"]
+    provider: Literal["claude-code", "codex", "llm"]
     kind: Literal["tool", "command", "file_change", "permissions", "user_input"]
     name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)

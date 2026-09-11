@@ -203,11 +203,12 @@ class AgentSdkClient(ClaudeSdkClient):
                     ApprovalRequest(
                         provider="claude-code",
                         kind="tool",
-                        name=name,
+                        name=name.removeprefix(native_tool_prefix),
                         arguments=arguments,
                         reason=getattr(context, "decision_reason", None),
                         cwd=options.cwd,
                         raw={
+                            "provider_tool_name": name,
                             "tool_use_id": getattr(context, "tool_use_id", None),
                             "title": getattr(context, "title", None),
                             "description": getattr(context, "description", None),
