@@ -195,3 +195,78 @@ async def test_denial_returns_an_error_tool_result_to_the_model():
     assert len(blocks) == 1
     assert blocks[0].is_error is True
     assert blocks[0].content == "Tool error: blocked by policy"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_allow_session_is_reused_within_a_sessionless_run(stream: bool):
+    requests: list[CompletionRequest] = []
+    approvals: list[ApprovalRequest] = []
+    tool_calls = 0
+
+    def ping() -> str:
+        nonlocal tool_calls
+        tool_calls += 1
+        return "pong"
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        approvals.append(request)
+        return ApprovalDecision.allow_for_session()
+
+    class FakeExecutor:
+        _provider = object()
+
+        async def aexecute(self, request: CompletionRequest) -> CompletionResponse:
+            requests.append(request)
+            if len(requests) <= 2:
+                return CompletionResponse(
+                    content="",
+                    tool_calls=[ToolCall(id=f"call-{len(requests)}", name="ping", arguments={})],
+                    stop_reason="tool_use",
+                    usage=UsageStats(),
+                    model="fake",
+                )
+            return CompletionResponse(content="done", usage=UsageStats(), model="fake")
+
+        async def astream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
+            response = await self.aexecute(request)
+            yield StreamChunk(
+                delta=response.content,
+                tool_calls=response.tool_calls,
+                stop_reason=response.stop_reason,
+                usage=response.usage,
+                is_final=True,
+            )
+
+    engine = LLMEngine("fake", provider="fake", approval_gate=gate)
+    engine._make_executor = lambda: FakeExecutor()  # type: ignore[assignment]
+    agent_tools = [Tool(ping)]
+
+    if stream:
+        assert (
+            "".join(
+                [
+                    chunk
+                    async for chunk in engine.stream(
+                        Envelope(task="call ping twice"),
+                        tools=agent_tools,
+                        output_type=str,
+                        memory=None,
+                        session=None,
+                    )
+                ]
+            )
+            == "done"
+        )
+    else:
+        result = await engine.run(
+            Envelope(task="call ping twice"),
+            tools=agent_tools,
+            output_type=str,
+            memory=None,
+            session=None,
+        )
+        assert result.text() == "done"
+
+    assert tool_calls == 2
+    assert [request.name for request in approvals] == ["ping"]

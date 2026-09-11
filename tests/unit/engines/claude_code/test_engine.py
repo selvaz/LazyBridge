@@ -9,6 +9,7 @@ from lazybridge import Agent, Envelope, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest, ask_approval
 from lazybridge.session import EventType
 
 
@@ -185,6 +186,51 @@ def test_a_real_session_still_gets_a_tool_observer():
 
     assert agent("Find AMZN").ok
     assert client.options[-1].tool_observer is not None
+
+
+def test_a_direct_gate_disables_default_application_tool_preapproval():
+    calls: list[str] = []
+    requests = []
+
+    def tracked_quote(symbol: str) -> dict[str, str]:
+        """Return a deterministic quote lookup."""
+        calls.append(symbol)
+        return {"symbol": symbol}
+
+    async def gate(request):
+        requests.append(request)
+        return ApprovalDecision.deny("blocked by direct gate")
+
+    class PermissionFlowSdk(_PlainSdk):
+        async def run(self, prompt, *, options, attachments=()):
+            self.options.append(options)
+            tool = options.mcp_tools[0]
+            if options.preapprove_application_tools:
+                await tool.handler({"symbol": "AMZN"})
+            else:
+                decision = await ask_approval(
+                    options.approval_gate,
+                    ApprovalRequest(
+                        provider="claude-code",
+                        kind="tool",
+                        name=tool.name,
+                        arguments={"symbol": "AMZN"},
+                    ),
+                )
+                if decision.action in {"allow", "allow_session"}:
+                    await tool.handler({"symbol": "AMZN"})
+            return ClaudeSdkResult(text="ok", session_id="s")
+
+    client = PermissionFlowSdk()
+    agent = Agent(
+        name="directly-gated",
+        engine=ClaudeCodeEngine(client=client, approval_gate=gate),
+        tools=[tracked_quote],
+    )
+
+    assert agent("Find AMZN").ok
+    assert calls == []
+    assert [request.name for request in requests] == ["tracked_quote"]
 
 
 def test_runtime_session_is_kept_on_lazybridge_session_and_skips_parent_memory():

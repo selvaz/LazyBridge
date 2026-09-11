@@ -116,6 +116,21 @@ def test_engines_accept_approval_gate_as_a_direct_keyword(engine_type):
 
 
 @pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
+def test_engines_preserve_a_falsy_direct_approval_gate(engine_type):
+    class FalsyGate:
+        def __len__(self):
+            return 0
+
+        async def __call__(self, request):
+            return ApprovalDecision.deny()
+
+    gate = FalsyGate()
+    engine = engine_type(approval_gate=gate)
+
+    assert engine.approval_gate is gate
+
+
+@pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
 def test_engines_reject_conflicting_direct_and_configured_gates(engine_type):
     async def direct_gate(request):
         return ApprovalDecision.allow()

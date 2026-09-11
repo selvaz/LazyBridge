@@ -434,6 +434,35 @@ def test_a_denied_tool_never_runs_and_reports_back_to_the_model():
     }
 
 
+def test_a_direct_gate_disables_default_dynamic_tool_preapproval():
+    calls: list[str] = []
+    requests = []
+
+    def tracked_quote(symbol: str) -> dict[str, str]:
+        """Return a deterministic quote lookup."""
+        calls.append(symbol)
+        return {"symbol": symbol}
+
+    async def gate(request):
+        requests.append(request)
+        return ApprovalDecision.deny("blocked by direct gate")
+
+    client = FakeAppServer()
+    agent = Agent(
+        name="directly-gated",
+        engine=CodexEngine(client=client, approval_gate=gate),
+        tools=[tracked_quote],
+    )
+
+    assert agent("Find AMZN").ok
+    assert calls == []
+    assert [request.name for request in requests] == ["tracked_quote"]
+    assert client.tool_results[-1] == {
+        "success": False,
+        "contentItems": [{"type": "inputText", "text": "blocked by direct gate"}],
+    }
+
+
 class TestDurableThreadSerialisation:
     """Two turns must not be appended to one transcript at the same time."""
 

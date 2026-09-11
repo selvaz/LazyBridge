@@ -183,7 +183,8 @@ class ClaudeCodeEngine:
         configured_gate = self.config.approval_gate
         if approval_gate is not None and configured_gate is not None and approval_gate is not configured_gate:
             raise ValueError("approval_gate conflicts with CodingAgentConfig.approval_gate")
-        self.approval_gate = approval_gate or configured_gate
+        self._direct_approval_gate = approval_gate is not None
+        self.approval_gate = approval_gate if approval_gate is not None else configured_gate
         # ``file_roots`` confinement is a hook over the FILE tools; names
         # outside that set (and the web pair) — ``Bash`` above all — have no
         # path sandbox, so their only boundary is the approval gate's policy.
@@ -478,7 +479,9 @@ class ClaudeCodeEngine:
             max_turns=self.max_turns,
             resume=resume,
             allowed_tools=self.config.claude.allowed_tools,
-            preapprove_application_tools=self.config.claude.preapprove_application_tools,
+            preapprove_application_tools=(
+                self.config.claude.preapprove_application_tools and not self._direct_approval_gate
+            ),
             disallowed_tools=self.config.claude.disallowed_tools,
             setting_sources=self.config.claude.setting_sources,
             auto_compact_window=self.config.claude.auto_compact_window,
@@ -533,7 +536,7 @@ class ClaudeCodeEngine:
                     observe if session else None,
                     output_type=output_type,
                     resume=self._resume_id(session, agent_name),
-                    gate=self._scoped_gate(session, agent_name) if self.approval_gate else None,
+                    gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
                 )
                 result = await self._call_with_retries(
                     lambda: self._client.run(prompt, options=options, attachments=attachments)
@@ -643,7 +646,7 @@ class ClaudeCodeEngine:
                         output_type=output_type,
                         partial=True,
                         resume=self._resume_id(session, agent_name),
-                        gate=self._scoped_gate(session, agent_name) if self.approval_gate else None,
+                        gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
                     ),
                     attachments=self._attachments(env),
                 )

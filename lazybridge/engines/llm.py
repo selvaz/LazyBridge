@@ -732,6 +732,14 @@ class LLMEngine:
         # Resolved once here so emit calls and the _exec_tool closure all see
         # the same value without re-computing it on every tool call.
         agent_name = resolve_agent_name(self, "agent")
+        approval_gate = (
+            remembering_gate(
+                self.approval_gate,
+                session_approvals(session, "llm", agent_name),
+            )
+            if self.approval_gate is not None
+            else None
+        )
 
         executor = self._make_executor()
 
@@ -928,9 +936,23 @@ class LLMEngine:
 
             async def _run_one(tc: ToolCall, *, _sem: asyncio.Semaphore | None = sem) -> Any:
                 if _sem is None:
-                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
+                    return await self._exec_tool(
+                        tc,
+                        tool_map,
+                        agent_name=agent_name,
+                        session=session,
+                        run_id=run_id,
+                        approval_gate=approval_gate,
+                    )
                 async with _sem:
-                    return await self._exec_tool(tc, tool_map, agent_name=agent_name, session=session, run_id=run_id)
+                    return await self._exec_tool(
+                        tc,
+                        tool_map,
+                        agent_name=agent_name,
+                        session=session,
+                        run_id=run_id,
+                        approval_gate=approval_gate,
+                    )
 
             # ``max_tool_calls_per_turn`` caps how many calls actually run this
             # turn (distinct from ``max_parallel_tools``, which only bounds
@@ -1123,6 +1145,7 @@ class LLMEngine:
         agent_name: str,
         session: Session | None,
         run_id: str,
+        approval_gate: ApprovalGate | None = None,
     ) -> Any:
         if session:
             # ``tool_use_id`` is the provider-supplied call id; it lets
@@ -1179,9 +1202,13 @@ class LLMEngine:
         try:
             try:
                 if self.approval_gate is not None:
-                    gate = remembering_gate(
-                        self.approval_gate,
-                        session_approvals(session, "llm", agent_name),
+                    gate = (
+                        approval_gate
+                        if approval_gate is not None
+                        else remembering_gate(
+                            self.approval_gate,
+                            session_approvals(session, "llm", agent_name),
+                        )
                     )
                     decision = await ask_approval(
                         gate,

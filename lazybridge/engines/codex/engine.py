@@ -252,7 +252,8 @@ class CodexEngine:
         configured_gate = self.config.approval_gate
         if approval_gate is not None and configured_gate is not None and approval_gate is not configured_gate:
             raise ValueError("approval_gate conflicts with CodingAgentConfig.approval_gate")
-        self.approval_gate = approval_gate or configured_gate
+        self._direct_approval_gate = approval_gate is not None
+        self.approval_gate = approval_gate if approval_gate is not None else configured_gate
         self._client = client or CodexAppServerClient()
 
     def _client_kwargs(
@@ -369,7 +370,7 @@ class CodexEngine:
         self, tools: list[Any], observe: Any, gate: ApprovalGate
     ) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
         dispatch = dispatcher(tools, observe, tool_timeout=self.tool_timeout)
-        if self.config.codex.preapprove_dynamic_tools:
+        if self.config.codex.preapprove_dynamic_tools and not self._direct_approval_gate:
             return dispatch
 
         async def gated(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
