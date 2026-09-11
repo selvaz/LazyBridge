@@ -23,6 +23,13 @@ from lazybridge.core.types import (
     ToolCall,
 )
 from lazybridge.engines.base import resolve_agent_name
+from lazybridge.engines.coding import (
+    ApprovalGate,
+    ApprovalRequest,
+    ask_approval,
+    remembering_gate,
+    session_approvals,
+)
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
@@ -159,6 +166,7 @@ class LLMEngine:
     tool_timeout: float | None = None
     stream_idle_timeout: float | None = DEFAULT_STREAM_IDLE_TIMEOUT
     stream_buffer: int = 64
+    approval_gate: ApprovalGate | None = None
 
     def __init__(
         self,
@@ -182,6 +190,7 @@ class LLMEngine:
         stream_buffer: int = 64,
         cache: bool | Any = False,
         strict_multimodal: bool = False,
+        approval_gate: ApprovalGate | None = None,
     ) -> None:
         self.model = model
         if isinstance(thinking, str) and thinking not in _EFFORT_LEVELS:
@@ -286,6 +295,7 @@ class LLMEngine:
         # Off by default so a single agent fleet can mix vision and
         # text-only models without crashing on edge cases.
         self.strict_multimodal = strict_multimodal
+        self.approval_gate = approval_gate
         # Provider may be passed explicitly (used by Agent.from_provider
         # when the model is a tier alias like "top" / "cheap" that
         # _infer_provider can't route on its own).  Falls back to the
@@ -1162,6 +1172,22 @@ class LLMEngine:
 
         try:
             try:
+                if self.approval_gate is not None:
+                    gate = remembering_gate(
+                        self.approval_gate,
+                        session_approvals(session, "llm", agent_name),
+                    )
+                    decision = await ask_approval(
+                        gate,
+                        ApprovalRequest(
+                            provider="llm",
+                            kind="tool",
+                            name=tc.name,
+                            arguments=tc.arguments,
+                        ),
+                    )
+                    if decision.action not in {"allow", "allow_session"}:
+                        raise PermissionError(decision.message or "Tool denied by approval gate")
                 result = await run_tool_bounded(tool, tc.arguments, self.tool_timeout)
             except ToolTimeoutError as timeout_err:
                 if session:

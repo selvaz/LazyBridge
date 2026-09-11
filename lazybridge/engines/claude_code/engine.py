@@ -153,6 +153,7 @@ class ClaudeCodeEngine:
         retry_delay: float = 1.0,
         tool_timeout: float | None = None,
         config: CodingAgentConfig | None = None,
+        approval_gate: ApprovalGate | None = None,
         client: ClaudeSdkClient | None = None,
         tag: str | None = "lazybridge",
     ) -> None:
@@ -179,6 +180,10 @@ class ClaudeCodeEngine:
         # ``CodingAgentConfig.reviewer()`` or ``.writer(gate)`` to opt into
         # the fail-closed profiles.
         self.config = config or CodingAgentConfig()
+        configured_gate = self.config.approval_gate
+        if approval_gate is not None and configured_gate is not None and approval_gate is not configured_gate:
+            raise ValueError("approval_gate conflicts with CodingAgentConfig.approval_gate")
+        self.approval_gate = approval_gate or configured_gate
         # ``file_roots`` confinement is a hook over the FILE tools; names
         # outside that set (and the web pair) — ``Bash`` above all — have no
         # path sandbox, so their only boundary is the approval gate's policy.
@@ -186,7 +191,7 @@ class ClaudeCodeEngine:
         # is not confined: refuse at construction, not at the first escape.
         _hook_confined = {"Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebSearch", "WebFetch"}
         unconfined = tuple(t for t in self.config.claude.extra_tools if t not in _hook_confined)
-        if unconfined and self.config.approval_gate is None:
+        if unconfined and self.approval_gate is None:
             raise ValueError(
                 f"extra_tools grants {unconfined} which file_roots cannot confine; "
                 "configure CodingAgentConfig.approval_gate so a policy governs them "
@@ -423,7 +428,7 @@ class ClaudeCodeEngine:
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
-        return remembering_gate(self.config.approval_gate, session_approvals(session, "claude-code", agent_name))
+        return remembering_gate(self.approval_gate, session_approvals(session, "claude-code", agent_name))
 
     async def usage(self, *, timeout: float | None = None) -> Any:
         """This engine's account usage, read from Claude Code's own ``/usage``.
@@ -478,7 +483,7 @@ class ClaudeCodeEngine:
             setting_sources=self.config.claude.setting_sources,
             auto_compact_window=self.config.claude.auto_compact_window,
             permission_mode=self.config.claude.permission_mode,
-            approval_gate=gate if gate is not None else self.config.approval_gate,
+            approval_gate=gate if gate is not None else self.approval_gate,
             builtin_tools=builtin_tools,
             file_roots=self.file_roots,
             mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
@@ -528,7 +533,7 @@ class ClaudeCodeEngine:
                     observe if session else None,
                     output_type=output_type,
                     resume=self._resume_id(session, agent_name),
-                    gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
+                    gate=self._scoped_gate(session, agent_name) if self.approval_gate else None,
                 )
                 result = await self._call_with_retries(
                     lambda: self._client.run(prompt, options=options, attachments=attachments)
@@ -638,7 +643,7 @@ class ClaudeCodeEngine:
                         output_type=output_type,
                         partial=True,
                         resume=self._resume_id(session, agent_name),
-                        gate=self._scoped_gate(session, agent_name) if self.config.approval_gate else None,
+                        gate=self._scoped_gate(session, agent_name) if self.approval_gate else None,
                     ),
                     attachments=self._attachments(env),
                 )

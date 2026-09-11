@@ -199,6 +199,7 @@ class CodexEngine:
         retry_delay: float = 1.0,
         tool_timeout: float | None = None,
         config: CodingAgentConfig | None = None,
+        approval_gate: ApprovalGate | None = None,
         client: CodexAppServerClient | None = None,
         thread_id: str | None = None,
         persist_thread: bool = False,
@@ -248,6 +249,10 @@ class CodexEngine:
             raise ValueError(f"tool_timeout must be > 0 or None, got {tool_timeout!r}")
         self.tool_timeout = tool_timeout
         self.config = config or CodingAgentConfig()
+        configured_gate = self.config.approval_gate
+        if approval_gate is not None and configured_gate is not None and approval_gate is not configured_gate:
+            raise ValueError("approval_gate conflicts with CodingAgentConfig.approval_gate")
+        self.approval_gate = approval_gate or configured_gate
         self._client = client or CodexAppServerClient()
 
     def _client_kwargs(
@@ -358,7 +363,7 @@ class CodexEngine:
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
-        return remembering_gate(self.config.approval_gate, session_approvals(session, "codex", agent_name))
+        return remembering_gate(self.approval_gate, session_approvals(session, "codex", agent_name))
 
     def _tool_dispatcher(
         self, tools: list[Any], observe: Any, gate: ApprovalGate

@@ -9,6 +9,7 @@ from lazybridge.engines.claude_code.mcp_adapter import to_mcp_tools
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
 from lazybridge.engines.coding import ApprovalDecision
+from lazybridge.ext.approval import Rule, TieredGate
 
 # Both tests below call AgentSdkClient._sdk_options() directly, which builds
 # a real claude_agent_sdk.ClaudeAgentOptions — needs lazybridge[claude-code].
@@ -102,7 +103,42 @@ def test_gated_application_tool_is_not_shadowed_by_allowed_tools():
     result = asyncio.run(sdk_options.can_use_tool("mcp__lazybridge__ping", {}, object()))
     assert result.behavior == "allow"
     assert seen[0].provider == "claude-code"
-    assert seen[0].name == "mcp__lazybridge__ping"
+    assert seen[0].name == "ping"
+    assert seen[0].raw["provider_tool_name"] == "mcp__lazybridge__ping"
+
+
+def test_bare_tiered_rule_matches_an_mcp_wrapped_application_tool():
+    gate = TieredGate(channel=object(), rules=(Rule("allow", "get_plan"),))
+    options = ClaudeSdkOptions(
+        mcp_tools=to_mcp_tools([_Tool()]),
+        preapprove_application_tools=False,
+        approval_gate=gate,
+        permission_mode="default",
+    )
+    callback = AgentSdkClient._sdk_options(options).can_use_tool
+
+    assert callback is not None
+    result = asyncio.run(callback("mcp__lazybridge__get_plan", {}, object()))
+
+    assert result.behavior == "allow"
+    assert gate.log[0].tool_name == "get_plan"
+
+
+def test_native_tool_name_is_unchanged_by_mcp_normalization():
+    seen = []
+
+    async def gate(request):
+        seen.append(request)
+        return ApprovalDecision.allow()
+
+    callback = AgentSdkClient._sdk_options(ClaudeSdkOptions(approval_gate=gate)).can_use_tool
+
+    assert callback is not None
+    result = asyncio.run(callback("Bash", {"command": "git status"}, object()))
+
+    assert result.behavior == "allow"
+    assert seen[0].name == "Bash"
+    assert seen[0].raw["provider_tool_name"] == "Bash"
 
 
 def test_unapproved_application_tool_without_gate_fails_closed():
