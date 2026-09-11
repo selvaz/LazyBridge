@@ -57,10 +57,16 @@ Tools:
 1. Always start with ``get_plan()``.
 2. If there is no plan, call ``set_plan`` with 3-6 coarse, self-contained
    tasks in execution order, then stop and report the plan.
-3. If there is a plan, call ``claim_next()``. If it returns a task: do **that
-   one task only**, then ``mark_done`` it and report what you did. Do not
-   claim a second task in the same run.
-4. If ``claim_next()`` says the plan is complete, report the final result.
+3. If there is a plan and you have no specific task in mind, call
+   ``claim_next()``. If you already know exactly which task you need (its
+   index and current text from ``get_plan()``) — for example to reach one
+   sitting behind others you deliberately are not doing yet — call
+   ``claim_task(task_index, expected_text)`` instead of claiming and closing
+   every earlier task just to advance past them. Either way: once a task is
+   claimed, do **that one task only**, then ``mark_done`` it and report what
+   you did. Do not claim a second task in the same run.
+4. If ``claim_next()``/``claim_task()`` says the plan is complete (or that
+   nothing is claimable), report the final result.
 5. If the work genuinely fails, call ``mark_failed`` with the reason —
    the task returns to the queue and is retried on a later run.
 
