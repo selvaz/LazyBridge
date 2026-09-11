@@ -88,17 +88,19 @@ reachable with an ordinary API key. Older pinned ids
 
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
-| `top` | `gpt-5.6-sol` | 1.05 M | 128 K | $5.00 | $0.50 | $30.00 |
-| `expensive` | `gpt-5.6-terra` | 1.05 M | 128 K | $2.50 | $0.25 | $15.00 |
-| `medium` | `gpt-5.6-luna` | 1.05 M | 128 K | $1.00 | $0.10 | $6.00 |
-| `cheap` | `gpt-5.4-nano` | 400 K | 128 K | $0.20 | $0.02 | $1.25 |
+| `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
+| `expensive` | `gpt-5.6-sol` | 1.05 M | 128 K | $5.00 | $0.50 | $30.00 |
+| `medium` | `gpt-5.6-terra` | 1.05 M | 128 K | $2.50 | $0.25 | $15.00 |
+| `cheap` | `gpt-5.6-luna` | 1.05 M | 128 K | $1.00 | $0.10 | $6.00 |
 | `super_cheap` | `gpt-4o-mini` | 128 K | 16 K | $0.15 | — | $0.60 |
 
-GPT-5.6 (released 2026-07-09) replaced the old flagship+`-pro` shape
-with three tiers: Sol (best coding / hardest reasoning, OpenAI's
-"workhorse"), Terra (balanced general flagship), Luna (fast/light).
-The bare alias `gpt-5.6` routes to Sol. GPT-5.6 also introduces
-explicit prompt-cache breakpoints and a 30-minute minimum cache life.
+GPT-6 Astra (released 2026-09-03) is now the `top` tier; GPT-5.6's three
+tiers — Sol (best coding / hardest reasoning), Terra (balanced general
+flagship), Luna (fast/light) — each shift down one slot to
+`expensive`/`medium`/`cheap`. The bare alias `gpt-5.6` still routes to
+Sol. Astra accepts reasoning effort `max` natively (GPT-5.6 and earlier
+top out at `xhigh`). GPT-5.6 also introduces explicit prompt-cache
+breakpoints and a 30-minute minimum cache life.
 
 Other supported models (passed verbatim, no tier alias):
 `gpt-5.5-pro` ($30 / $180), `gpt-5.5` ($5 / $0.50 cache / $30),

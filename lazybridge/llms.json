@@ -73,11 +73,11 @@
     "super_cheap": "claude-3-haiku",
     "note": "claude-mythos-5 exists (same model as Fable 5, fewer safety guardrails) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier."
   },
-  "tier_aliases_openai_2026_07": {
-    "top": "gpt-5.6-sol",
-    "expensive": "gpt-5.6-terra",
-    "medium": "gpt-5.6-luna",
-    "cheap": "gpt-5.4-nano",
+  "tier_aliases_openai_2026_09": {
+    "top": "gpt-6-astra",
+    "expensive": "gpt-5.6-sol",
+    "medium": "gpt-5.6-terra",
+    "cheap": "gpt-5.6-luna",
     "super_cheap": "gpt-4o-mini"
   },
   "effort_parameter": "ThinkingConfig.effort accepts 'low'|'medium'|'high'|'xhigh'|'max' and is read by both AnthropicProvider (sent as output_config.effort — Fable 5, Mythos 5, Opus 5, Opus 4.8/4.7/4.6, Sonnet 5/4.6, Opus 4.5) and OpenAIProvider (sent as reasoning.effort / reasoning_effort on every gpt-5.x and o-series model). LLMEngine(model, thinking='low') is shorthand for LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort='low')).",
