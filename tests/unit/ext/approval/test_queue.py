@@ -21,6 +21,20 @@ from lazybridge import Store
 from lazybridge.ext.approval import ApprovalQueue, ApprovalTicket, Rule, StoreApprovalChannel, TieredGate, ticket_gist
 
 
+async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
+    """Cancellation cleanup that races a cancelled `ask()` runs on its own,
+    independent task (see `queue.py`'s `_retire_if_unclaimed`) precisely so
+    that no amount of repeated cancellation can interrupt it -- which also
+    means `await task` no longer blocks until that cleanup is done. Tests
+    that assert on its effect (the ticket appearing / being retired) poll
+    for it instead of asserting immediately after `await task`."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_event_loop().time() >= deadline:
+            raise AssertionError("condition was not met before timeout")
+        await asyncio.sleep(interval)
+
+
 def test_ticket_gist_falls_back_to_first_line_without_an_objective_marker() -> None:
     """A plain 'ask'-tier ticket's prompt IS just the request -- nothing to
     skip past, unlike a caller whose template puts boilerplate before the
@@ -526,12 +540,82 @@ def test_poll_seconds_must_be_positive() -> None:
         StoreApprovalChannel(queue, task_id="t1", poll_seconds=-1)
 
 
+def test_renotify_interval_must_be_positive_or_none() -> None:
+    """None is already the documented way to disable reminders -- zero or
+    negative is not a smaller version of that, it's "always overdue":
+    the reminder condition is true on EVERY poll, so a reminder fires at
+    the full polling rate for up to the ticket's whole TTL. Found by
+    Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="renotify_interval"):
+        StoreApprovalChannel(queue, task_id="t1", renotify_interval=timedelta(0))
+    with pytest.raises(ValueError, match="renotify_interval"):
+        StoreApprovalChannel(queue, task_id="t1", renotify_interval=timedelta(seconds=-1))
+    # None itself must still be accepted -- it's the documented way to
+    # disable reminders, not rejected by this same guard.
+    StoreApprovalChannel(queue, task_id="t1", renotify_interval=None)
+
+
+async def test_ask_does_not_block_the_event_loop() -> None:
+    """ApprovalQueue's methods are synchronous Store I/O -- calling them
+    directly from this async method would block the WHOLE event loop for
+    as long as the call takes (Store's busy_timeout is 5s under write
+    contention -- a shared Store with many agents filing tickets/
+    heartbeats is exactly what produces that), freezing every other
+    coroutine sharing it, not just this ticket's own progress.
+
+    Asserts progress WHILE the slow call is still in flight, not just
+    the final tick count after both coroutines have finished -- a
+    gather()-then-check-the-total assertion passes either way (blocking
+    only delays when the ticks happen, not whether all of them
+    eventually do), so it wouldn't actually catch a regression back to
+    calling ApprovalQueue directly. Found by Codex review before this
+    ever shipped (twice: the production fix, and this test's own first
+    version not actually distinguishing blocking from non-blocking)."""
+    queue = ApprovalQueue(Store())
+    real_create_ticket = queue.create_ticket
+
+    def _slow_create_ticket(*args, **kwargs):
+        time.sleep(0.2)
+        return real_create_ticket(*args, **kwargs)
+
+    queue.create_ticket = _slow_create_ticket  # type: ignore[method-assign]
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
+    ticks = 0
+
+    async def _ticker() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    ask_task = asyncio.create_task(channel.ask("please approve"))
+    ticker_task = asyncio.create_task(_ticker())
+
+    # Checked at the halfway point of the 0.2s slow call, while it is
+    # still running: if create_ticket ran directly on this event loop,
+    # NOTHING else could execute until it returned, and ticks would
+    # still be exactly 0 here.
+    await asyncio.sleep(0.1)
+    assert ticks > 0
+
+    ticker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await ticker_task
+    with contextlib.suppress(Exception):
+        await ask_task
+
+
 async def test_ask_retires_the_ticket_on_a_non_cancellation_exception() -> None:
     """Any exceptional exit from the poll loop -- not just cancellation --
     must retire the ticket: a transient Store error (or anything else
     get_ticket can raise) would otherwise leave an actionable ticket
-    nobody is waiting on anymore. Found by Codex review before this ever
-    shipped."""
+    nobody is waiting on anymore. The retiring reject_ticket call itself
+    runs on a detached task (see queue.py's `_retire` inside ask()'s
+    `except BaseException` handler), so it can outlive a repeated
+    cancellation of ask() -- which also means it isn't guaranteed done the
+    instant ask() itself raises; poll for it instead. Found by Codex
+    review before this ever shipped."""
     queue = ApprovalQueue(Store())
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
@@ -552,6 +636,7 @@ async def test_ask_retires_the_ticket_on_a_non_cancellation_exception() -> None:
     finally:
         queue.get_ticket = real_get_ticket  # type: ignore[method-assign]
 
+    await _wait_until(lambda: queue.list_pending_tickets() == [])
     assert queue.list_pending_tickets() == []
 
 
@@ -560,7 +645,10 @@ async def test_ask_retires_the_ticket_when_cancelled() -> None:
     teardown) leaves nothing to consume the eventual decision -- the
     ticket must not stay "pending" (still listed, still actionable by an
     operator who has no idea the coroutine that asked is gone) until its
-    full TTL expiry hours later. Found by Codex review before this ever
+    full TTL expiry hours later. The retiring reject_ticket call runs on a
+    detached task so it can survive a repeated cancellation of ask()
+    itself, which also means `await task` no longer waits for it to
+    finish; poll for it instead. Found by Codex review before this ever
     shipped."""
     queue = ApprovalQueue(Store())
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
@@ -571,11 +659,140 @@ async def test_ask_retires_the_ticket_when_cancelled() -> None:
 
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        await task
+        _ = await task  # discarded on purpose -- awaiting only to let cancellation propagate/settle
 
+    await _wait_until(lambda: queue.get_ticket(ticket.approval_id).status == "rejected")
     resolved = queue.get_ticket(ticket.approval_id)
     assert resolved.status == "rejected"
     assert queue.list_pending_tickets() == []
+
+
+async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
+    """A cancellation landing WHILE create_ticket's offloaded call is
+    still in flight must not orphan the ticket that lands moments
+    later -- the underlying thread-pool work can't actually be stopped
+    once started, so this only works because ask() shields that specific
+    call and hands its real outcome to an independent watcher task that
+    retires it, regardless of what happens to ask() itself afterwards.
+    Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    real_create_ticket = queue.create_ticket
+    created: list[ApprovalTicket] = []
+
+    def _slow_create_ticket(*args, **kwargs):
+        time.sleep(0.1)
+        ticket = real_create_ticket(*args, **kwargs)
+        created.append(ticket)
+        return ticket
+
+    queue.create_ticket = _slow_create_ticket  # type: ignore[method-assign]
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    task = asyncio.create_task(channel.ask("please approve"))
+    await asyncio.sleep(0.02)  # cancel WHILE create_ticket's own 0.1s sleep is still running
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await task  # ask() unwinds immediately -- the retiring watcher runs on its own, separate task
+
+    await _wait_until(lambda: len(created) == 1)
+    await _wait_until(lambda: queue.get_ticket(created[0].approval_id).status == "rejected")
+    resolved = queue.get_ticket(created[0].approval_id)
+    assert resolved.status == "rejected"
+
+
+async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> None:
+    """A SECOND cancellation (and, in principle, any further one after
+    that) landing while ask() is still unwinding from the first must not
+    abandon the pending ticket -- asyncio.TaskGroup cancelling every
+    remaining sibling when one fails is a real way this can happen, not
+    just theoretical. Retiring it can't depend on ask()'s own coroutine
+    surviving long enough to do the cleanup itself: the ticket is retired
+    by an independent watcher task that nothing here ever cancels, so it
+    finishes regardless of how many more times `task` itself is cancelled.
+    Found by Codex review before this ever shipped; the first fix attempt
+    (nesting a second `asyncio.shield()` inside ask()'s own cancellation
+    handler) was proven insufficient by a standalone repro -- shield()
+    protects the awaited future from cancellation, not the coroutine
+    doing the awaiting from being cancelled again."""
+    queue = ApprovalQueue(Store())
+    real_create_ticket = queue.create_ticket
+    created: list[ApprovalTicket] = []
+
+    def _slow_create_ticket(*args, **kwargs):
+        time.sleep(0.15)
+        ticket = real_create_ticket(*args, **kwargs)
+        created.append(ticket)
+        return ticket
+
+    queue.create_ticket = _slow_create_ticket  # type: ignore[method-assign]
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    task = asyncio.create_task(channel.ask("please approve"))
+    await asyncio.sleep(0.02)
+    task.cancel()  # first cancellation -- create_ticket's 0.15s sleep is still running
+    await asyncio.sleep(0.02)
+    task.cancel()  # second cancellation -- ask() is still unwinding from the first
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await task
+
+    await _wait_until(lambda: len(created) == 1)
+    await _wait_until(lambda: queue.get_ticket(created[0].approval_id).status == "rejected")
+    resolved = queue.get_ticket(created[0].approval_id)
+    assert resolved.status == "rejected"
+
+
+async def test_ask_retires_the_ticket_when_cancelled_twice_after_creation() -> None:
+    """The same double-cancellation hazard exists on the OTHER retirement
+    path: a second cancellation landing while ask()'s post-creation
+    cleanup is (slowly) rejecting an already-created ticket must not
+    abandon that rejection either -- `contextlib.suppress(Exception)`
+    alone does not catch a second `asyncio.CancelledError` (a
+    `BaseException`) raised into that await. Detaching the reject_ticket
+    call onto its own task, exactly like the creation-path fix, is what
+    makes ask() itself unwind on the first cancellation without leaving
+    anything further for a second one to interrupt. Found by Codex review
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    real_reject_ticket = queue.reject_ticket
+
+    def _slow_reject_ticket(*args, **kwargs):
+        time.sleep(0.1)
+        return real_reject_ticket(*args, **kwargs)
+
+    queue.reject_ticket = _slow_reject_ticket  # type: ignore[method-assign]
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    task = asyncio.create_task(channel.ask("please approve"))
+    await asyncio.sleep(0.03)  # let it create the ticket and start polling
+    [ticket] = queue.list_pending_tickets()
+
+    task.cancel()  # first cancellation -- triggers the (slow) retiring reject_ticket call
+    await asyncio.sleep(0.02)
+    task.cancel()  # second cancellation -- lands after ask() has already unwound
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await task
+
+    await _wait_until(lambda: queue.get_ticket(ticket.approval_id).status == "rejected")
+    resolved = queue.get_ticket(ticket.approval_id)
+    assert resolved.status == "rejected"
+
+
+async def test_ask_works_with_sqlite_memory_special_filename() -> None:
+    """StoreApprovalChannel must not unconditionally offload to a worker
+    thread: Store(db=":memory:") relies on reusing the SAME thread's own
+    connection, and asyncio.to_thread hands each call to a (possibly
+    different) thread-pool worker, each opening ITS OWN unrelated empty
+    in-memory database. Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store(db=":memory:"))
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    async def approve_soon() -> None:
+        await asyncio.sleep(0.03)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    result, _ = await asyncio.gather(channel.ask("please approve"), approve_soon())
+    assert result is True
 
 
 async def test_message_includes_the_ticket_id_in_the_reply_commands() -> None:
