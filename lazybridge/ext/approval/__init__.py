@@ -30,6 +30,13 @@ primitive every agent needs. Nothing here is provider-specific — one
 
 from __future__ import annotations
 
+from lazybridge.ext.approval.queue import (
+    ApprovalQueue,
+    ApprovalTicket,
+    StoreApprovalChannel,
+    TicketKind,
+    ticket_gist,
+)
 from lazybridge.ext.approval.tiered import (
     AuditRecord,
     Channel,
@@ -41,11 +48,16 @@ from lazybridge.ext.approval.tiered import (
 )
 
 __all__ = [
+    "ApprovalQueue",
+    "ApprovalTicket",
     "AuditRecord",
     "Channel",
     "Rule",
+    "StoreApprovalChannel",
     "TerminalChannel",
+    "TicketKind",
     "Tier",
     "TieredGate",
     "run_gate_sync",
+    "ticket_gist",
 ]
