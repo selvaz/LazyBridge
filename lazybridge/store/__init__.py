@@ -102,6 +102,53 @@ class Store:
         except sqlite3.Error:
             pass
 
+    def _recover_after_failed_write(
+        self, conn: sqlite3.Connection, *, rollback_sql: str | None = None, caller: str = "Store"
+    ) -> None:
+        """Roll back ``conn`` after a failed write so it doesn't stay
+        pinned inside an open transaction for the rest of the process's
+        life (see :meth:`write`'s docstring for the full failure mode).
+
+        ``rollback_sql``: pass ``"ROLLBACK"`` for a caller (currently only
+        :meth:`compare_and_swap`) that manually opened the transaction
+        with ``BEGIN IMMEDIATE`` — the raw statement is required there
+        because the transaction was started explicitly. Every other
+        write path relies on sqlite3's own implicit transaction, so the
+        plain ``Connection.rollback()`` API (the default, ``None``) is
+        correct there.
+
+        If the rollback ITSELF fails, the connection is discarded (not
+        just left rolled-back-or-not) so the next call on this thread
+        opens a fresh one instead of inheriting undefined transaction
+        state.
+        """
+        try:
+            if rollback_sql is not None:
+                conn.execute(rollback_sql)
+            else:
+                conn.rollback()
+        except sqlite3.Error as rollback_exc:
+            # Discard BEFORE warning: a warnings-as-errors configuration
+            # (warnings.filterwarnings("error")) makes warn() itself raise,
+            # which would otherwise skip _discard_thread_conn() entirely
+            # and leave the closed/corrupted connection cached for the
+            # next call on this thread to inherit. Found by Codex review
+            # before this ever shipped -- pre-existing in
+            # compare_and_swap's own original recovery code too, not
+            # introduced by this refactor, but worth fixing now that it's
+            # shared by every write path.
+            self._discard_thread_conn()
+            import warnings as _warnings
+
+            _warnings.warn(
+                f"Store.{caller}: ROLLBACK after error failed "
+                f"({type(rollback_exc).__name__}: {rollback_exc}).  "
+                f"Discarded the thread-local connection so the next "
+                f"call gets a fresh one.",
+                UserWarning,
+                stacklevel=4,
+            )
+
     def close(self) -> None:
         """Close every thread-local SQLite connection opened by this Store.
 
@@ -186,14 +233,36 @@ class Store:
         (e.g. ``"x=42 name='hello'"``), which is NOT round-trippable.
         In-memory storage keeps the instance as-is since Python dicts
         don't need JSON round-tripping.
+
+        **Failure recovery (SQLite path)**: if the INSERT or the COMMIT
+        raises (a plain "database is locked" under write contention is a
+        realistic, confirmed-live cause — a Store shared by many
+        processes filing tickets/heartbeats produces exactly this), the
+        thread-local connection is rolled back before the exception
+        propagates. Without this, sqlite3's implicit transaction from the
+        failed statement stays open on this thread's cached connection
+        forever (nothing else ever calls commit()/rollback() on it again),
+        and in WAL mode every later read on this SAME connection is then
+        pinned to the snapshot as of that moment, never seeing any commit
+        made by another connection again — for the remaining life of the
+        process. Same recovery :meth:`compare_and_swap` already had;
+        ``write``/``delete``/``clear``/``write_memory``/``delete_memory``
+        did not, until callers worked around it themselves (see
+        ``lazyceo.approvals._fresh_read_store``'s docstring for the full,
+        independently-confirmed mechanism and incident history).
         """
         if self._db:
             serialised = _to_jsonable(value)
-            self._conn().execute(
-                "INSERT OR REPLACE INTO store (key, value, written_at, agent_id) VALUES (?,?,?,?)",
-                (key, json.dumps(serialised, default=str), time.time(), agent_id),
-            )
-            self._conn().commit()
+            conn = self._conn()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO store (key, value, written_at, agent_id) VALUES (?,?,?,?)",
+                    (key, json.dumps(serialised, default=str), time.time(), agent_id),
+                )
+                conn.commit()
+            except sqlite3.Error:
+                self._recover_after_failed_write(conn, caller="write")
+                raise
         else:
             with self._lock:
                 self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(value), agent_id=agent_id)
@@ -242,17 +311,31 @@ class Store:
             return {k: _deep_copy_safe(v.value) for k, v in self._mem.items()}
 
     def delete(self, key: str) -> None:
+        """Remove ``key``. See :meth:`write` for the SQLite failure-recovery
+        this and every other write path share."""
         if self._db:
-            self._conn().execute("DELETE FROM store WHERE key=?", (key,))
-            self._conn().commit()
+            conn = self._conn()
+            try:
+                conn.execute("DELETE FROM store WHERE key=?", (key,))
+                conn.commit()
+            except sqlite3.Error:
+                self._recover_after_failed_write(conn, caller="delete")
+                raise
         else:
             with self._lock:
                 self._mem.pop(key, None)
 
     def clear(self) -> None:
+        """Remove every key. See :meth:`write` for the SQLite
+        failure-recovery this and every other write path share."""
         if self._db:
-            self._conn().execute("DELETE FROM store")
-            self._conn().commit()
+            conn = self._conn()
+            try:
+                conn.execute("DELETE FROM store")
+                conn.commit()
+            except sqlite3.Error:
+                self._recover_after_failed_write(conn, caller="clear")
+                raise
         else:
             with self._lock:
                 self._mem.clear()
@@ -379,20 +462,7 @@ class Store:
                 # json.loads to raise inside the BEGIN IMMEDIATE block,
                 # leaving the transaction open on the thread-local
                 # connection and poisoning every subsequent call on that thread.
-                try:
-                    conn.execute("ROLLBACK")
-                except sqlite3.Error as rollback_exc:
-                    import warnings as _warnings
-
-                    _warnings.warn(
-                        f"Store.compare_and_swap: ROLLBACK after error failed "
-                        f"({type(rollback_exc).__name__}: {rollback_exc}).  "
-                        f"Discarding the thread-local connection so the next "
-                        f"call gets a fresh one.",
-                        UserWarning,
-                        stacklevel=3,
-                    )
-                    self._discard_thread_conn()
+                self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
                 raise
 
     def to_text(self, keys: list[str] | None = None) -> str:
@@ -424,18 +494,23 @@ class Store:
         already holds its state in full in-process.
         """
         if self._db:
-            self._conn().execute(
-                """
-                INSERT INTO agent_memory (agent_id, session_key, turns, summary, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (agent_id, session_key) DO UPDATE SET
-                    turns = excluded.turns,
-                    summary = excluded.summary,
-                    updated_at = excluded.updated_at
-                """,
-                (agent_id, session_key, json.dumps(turns, default=str), summary, time.time()),
-            )
-            self._conn().commit()
+            conn = self._conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO agent_memory (agent_id, session_key, turns, summary, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (agent_id, session_key) DO UPDATE SET
+                        turns = excluded.turns,
+                        summary = excluded.summary,
+                        updated_at = excluded.updated_at
+                    """,
+                    (agent_id, session_key, json.dumps(turns, default=str), summary, time.time()),
+                )
+                conn.commit()
+            except sqlite3.Error:
+                self._recover_after_failed_write(conn, caller="write_memory")
+                raise
         else:
             with self._lock:
                 self._agent_memory[(agent_id, session_key)] = {
@@ -474,11 +549,16 @@ class Store:
 
     def delete_memory(self, agent_id: str, *, session_key: str = "default") -> None:
         if self._db:
-            self._conn().execute(
-                "DELETE FROM agent_memory WHERE agent_id=? AND session_key=?",
-                (agent_id, session_key),
-            )
-            self._conn().commit()
+            conn = self._conn()
+            try:
+                conn.execute(
+                    "DELETE FROM agent_memory WHERE agent_id=? AND session_key=?",
+                    (agent_id, session_key),
+                )
+                conn.commit()
+            except sqlite3.Error:
+                self._recover_after_failed_write(conn, caller="delete_memory")
+                raise
         else:
             with self._lock:
                 self._agent_memory.pop((agent_id, session_key), None)
