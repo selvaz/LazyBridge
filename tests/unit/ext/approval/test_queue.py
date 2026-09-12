@@ -601,9 +601,9 @@ async def test_ask_does_not_block_the_event_loop() -> None:
 
     ticker_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        await ticker_task
+        _ = await ticker_task
     with contextlib.suppress(Exception):
-        await ask_task
+        _ = await ask_task
 
 
 async def test_ask_retires_the_ticket_on_a_non_cancellation_exception() -> None:
