@@ -300,6 +300,154 @@ async def test_notify_wait_does_not_overshoot_a_short_ttl() -> None:
     assert result is False
 
 
+async def test_send_does_not_wait_for_a_notify_that_ignores_cancellation() -> None:
+    """Plain `asyncio.wait_for(self._notify(...), timeout=...)` cancels the
+    notify call on timeout and then WAITS for it to actually finish
+    cancelling before raising -- a notifier that catches CancelledError to
+    run its own cleanup (or simply ignores it for a while) can make that
+    wait, and therefore notify_timeout itself, take far longer than
+    configured. Shielding the wait from the notify task, and never
+    awaiting the notify task's own cancellation, is what keeps this
+    bounded regardless of how the notifier behaves. Found by Codex review
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    notify_finished = asyncio.Event()
+
+    async def stubborn_notify(ticket, message):
+        try:
+            await asyncio.sleep(999)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.3)  # ignores the cancellation for a while
+            raise
+        finally:
+            notify_finished.set()
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=stubborn_notify, notify_timeout=0.02)
+
+    async def approve_soon() -> None:
+        await asyncio.sleep(0.05)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    loop = asyncio.get_event_loop()
+    started = loop.time()
+    result, _ = await asyncio.wait_for(asyncio.gather(channel.ask("please approve"), approve_soon()), timeout=1.0)
+    elapsed = loop.time() - started
+
+    assert result is True
+    # Well under the notifier's 0.3s cancellation-ignoring delay: the old,
+    # unshielded wait_for would have had to sit through that delay before
+    # ask() could even reach its polling loop.
+    assert elapsed < 0.25
+
+    # stubborn_notify's own detached cleanup (see _send()'s `_detach`)
+    # keeps running in the background after ask() has already returned --
+    # wait for it to actually finish before this test (and its event loop)
+    # tears down, or pytest-asyncio can destroy it mid-flight ("Task was
+    # destroyed but it is pending!"). Found by Codex review before this
+    # ever shipped.
+    await asyncio.wait_for(notify_finished.wait(), timeout=1.0)
+
+
+async def test_send_does_not_pile_up_notify_tasks_for_a_permanently_stuck_notifier() -> None:
+    """A notifier that never respects cancellation at all (not just a slow
+    one -- one that ignores it forever) must not accumulate one detached
+    background task per renotification: every renotify interval firing a
+    NEW _send() on top of an already-stuck previous one would leak an
+    unbounded number of permanently-running tasks (and whatever resources
+    the notifier itself holds -- a socket, a thread) over a long-lived
+    ticket. Refusing to start a second notify FOR THIS TICKET while the
+    first is still in flight caps the damage at the ONE lingering task the
+    very first stuck call leaves behind, not one per reminder. Found by
+    Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    call_count = 0
+    release = asyncio.Event()
+
+    async def stuck_notify(ticket, message):
+        nonlocal call_count
+        call_count += 1
+        while not release.is_set():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.sleep(0.01)
+
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        notify=stuck_notify,
+        notify_timeout=0.02,
+        renotify_interval=timedelta(seconds=0.05),
+    )
+
+    async def approve_after(delay: float) -> None:
+        await asyncio.sleep(delay)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    # 0.3s / a 0.05s renotify_interval is roughly six reminder ticks --
+    # without the single-flight guard, each would spawn its own
+    # permanently-stuck notify task.
+    result = await asyncio.wait_for(asyncio.gather(channel.ask("please approve"), approve_after(0.3)), timeout=2.0)
+
+    assert result[0] is True
+    assert call_count == 1
+
+    # Let the one lingering stuck_notify task (still looping until
+    # released) actually exit before this test's event loop tears down.
+    release.set()
+    await asyncio.sleep(0.05)
+
+
+async def test_stuck_notify_for_one_ticket_does_not_suppress_another() -> None:
+    """One channel instance can file MORE than one ticket over its life --
+    the class docstring's "every ticket this channel files" is deliberately
+    plural, and TieredGate can call ask() repeatedly, or concurrently, on
+    the same channel. The single-flight stuck-notify guard must key on
+    each ticket's own approval_id, not the channel as a whole -- otherwise
+    one ticket's stuck notifier would silently swallow the notification
+    (and every reminder) for a completely unrelated second ticket this
+    same channel is also handling. Found by Codex review before this ever
+    shipped."""
+    queue = ApprovalQueue(Store())
+    notified: list[str] = []
+    release = asyncio.Event()
+
+    async def notify(ticket: ApprovalTicket, message: str) -> None:
+        if ticket.prompt == "stuck one":
+            while not release.is_set():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.sleep(0.01)
+            return
+        notified.append(ticket.prompt)
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=notify, notify_timeout=0.02)
+
+    # A separate, explicitly-managed task rather than something gathered
+    # to completion: this ticket's own notify never releases on its own
+    # (DEFAULT_TTL is hours), so ask() for it would never return.
+    stuck_task = asyncio.create_task(channel.ask("stuck one"))
+    await asyncio.sleep(0.05)  # let its ticket get created, notified, time out, and get detached
+
+    async def approve_the_normal_one() -> None:
+        await asyncio.sleep(0.05)
+        [normal_ticket] = [t for t in queue.list_pending_tickets() if t.prompt == "normal one"]
+        queue.approve_ticket(normal_ticket.approval_id, actor="marco", channel="telegram")
+
+    normal_result, _ = await asyncio.wait_for(
+        asyncio.gather(channel.ask("normal one"), approve_the_normal_one()), timeout=2.0
+    )
+
+    assert normal_result is True
+    assert notified == ["normal one"]
+
+    release.set()
+    stuck_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await stuck_task
+    await asyncio.sleep(0.05)  # let the released stuck_notify loop actually exit
+
+
 def test_approve_ticket_is_cas_second_call_fails() -> None:
     queue = ApprovalQueue(Store())
     ticket = queue.create_ticket(task_id="t1", prompt="p")
