@@ -464,6 +464,19 @@ class StoreApprovalChannel:
         #: an agent's own channel, "approval" for a default TieredGate "ask"
         #: gate. See TicketKind's docstring.
         self._kind = kind
+        #: The most recent detached notify task `_send()` created for each
+        #: approval_id, if any is still running -- lets `_send()` refuse
+        #: to start a SECOND one for the SAME ticket while a permanently
+        #: uncooperative notifier is still stuck in the first. Keyed by
+        #: ticket, not shared across the whole channel: one channel
+        #: instance can file more than one ticket over its lifetime (the
+        #: class docstring's "every ticket this channel files" is
+        #: deliberately plural -- TieredGate can call ask() repeatedly, or
+        #: concurrently, on the same channel), and a stuck notify for ONE
+        #: of them must not silently swallow every notification for an
+        #: unrelated other. See `_send()`'s own comment for why the guard
+        #: itself matters. Found by Codex review before this ever shipped.
+        self._notify_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def _call(self, func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """Run one of ``self._queue``'s plain synchronous methods without
@@ -481,6 +494,28 @@ class StoreApprovalChannel:
     async def _send(self, ticket: ApprovalTicket, message: str) -> None:
         if self._notify is None:
             return
+        existing = self._notify_tasks.get(ticket.approval_id)
+        if existing is not None and not existing.done():
+            # A previous notify call FOR THIS TICKET (the original one at
+            # creation, or an earlier reminder) is STILL running -- a
+            # permanently uncooperative notifier that never responds to
+            # cancellation, not just a slow one (a slow-but-eventually-
+            # cancellable one is already `.done()` -- cancelled -- by the
+            # time any later call gets here). Starting ANOTHER detached
+            # notify task on top of it would mean every renotify interval
+            # piles up its own forever-running task (and whatever
+            # resources the notifier itself holds -- a socket, a thread,
+            # anything) without bound over a long-lived ticket. Scoped per
+            # ticket (approval_id), not to the whole channel: one channel
+            # instance can file more than one ticket over its life (see
+            # this class' own docstring), and a stuck notify for one
+            # ticket must not silently swallow notifications for an
+            # unrelated other one this same channel is also handling.
+            # Found by Codex review before this ever shipped.
+            logging.getLogger(__name__).warning(
+                "skipping notify for ticket %s -- a previous notify call is still stuck", ticket.approval_id
+            )
+            return
         # Bounded by whichever is SHORTER: notify_timeout, or the ticket's
         # own remaining lifetime. notify_timeout alone (10s default) can
         # still make ask() overshoot a short ttl by nearly that whole
@@ -490,16 +525,104 @@ class StoreApprovalChannel:
         # Codex review before this ever shipped.
         remaining = (ticket.expires_at - datetime.now(UTC)).total_seconds()
         timeout = min(self._notify_timeout, max(remaining, 0.0))
+
+        # A bounded wait, not just a try/except: a notify callback that
+        # hangs (a stalled network transport, e.g.) would otherwise block
+        # `ask()` from EVER reaching its own status-polling loop below --
+        # so even a ticket approved through another surface a second later
+        # would sit unnoticed for as long as the notify call never
+        # returns. A timeout turns that into an ordinary swallowed notify
+        # failure instead. Found by Codex review before this ever shipped.
+        #
+        # Shielded, with the cancel requested but never awaited: plain
+        # `asyncio.wait_for(self._notify(...), timeout=timeout)` cancels
+        # the notify coroutine on timeout and then WAITS for it to finish
+        # cancelling before raising -- a notifier that catches
+        # `CancelledError` to run its own cleanup or retry logic can make
+        # that wait, and therefore this supposedly-bounded timeout, take
+        # arbitrarily long. Shielding decouples the two: `wait_for` only
+        # ever waits on the (plain, instantly-cancellable) shield wrapper,
+        # so IT returns right on schedule regardless of how the real
+        # notify task behaves; requesting its cancellation separately,
+        # without awaiting it, is what keeps a slow-to-cancel notifier
+        # from blocking `_send()` itself. Found by Codex review before
+        # this ever shipped.
+        def _detach(notify_task: asyncio.Task[None]) -> None:
+            # Requests cancellation and walks away -- never awaited, so a
+            # notifier that ignores/absorbs it can't block whoever called
+            # this. Tracked in `_background_tasks` (module-level, shared
+            # with `ask()`'s own detached cleanup tasks) purely so nothing
+            # garbage-collects it mid-flight; retiring it is `_log_if_failed`
+            # below's job, not this function's.
+            notify_task.cancel()
+            _background_tasks.add(notify_task)
+
+            def _log_if_failed(t: asyncio.Task[None]) -> None:
+                _background_tasks.discard(t)
+                if t.cancelled():
+                    return
+                exc = t.exception()
+                if exc is not None:
+                    # A notifier that ignores this cancellation and later
+                    # raises something else entirely (not the
+                    # CancelledError it was asked for) would otherwise
+                    # surface as asyncio's own "Task exception was never
+                    # retrieved" -- noisy, and NOT the deliberate,
+                    # swallowed-and-logged treatment every other notify
+                    # failure in this method gets. Retrieving it here
+                    # (`t.exception()`) and logging it the same way closes
+                    # that gap. Found by Codex review before this ever
+                    # shipped.
+                    logging.getLogger(__name__).error(
+                        "notify failed for ticket %s -- it still exists and is still answerable",
+                        ticket.approval_id,
+                        exc_info=exc,
+                    )
+
+            notify_task.add_done_callback(_log_if_failed)
+
         try:
-            # A bounded wait, not just a try/except: a notify callback that
-            # hangs (a stalled network transport, e.g.) would otherwise
-            # block `ask()` from EVER reaching its own status-polling loop
-            # below -- so even a ticket approved through another surface
-            # a second later would sit unnoticed for as long as the
-            # notify call never returns. A timeout turns that into an
-            # ordinary swallowed notify failure instead. Found by Codex
-            # review before this ever shipped.
-            await asyncio.wait_for(self._notify(ticket, message), timeout=timeout)
+            # Constructing the awaitable is inside this try too, not just
+            # awaiting it: a `notify` that raises SYNCHRONOUSLY when called
+            # (before ever returning a coroutine) must be swallowed and
+            # logged the same as any other notify failure, not left to
+            # propagate out of `_send()` (and, from there, out of ask()
+            # itself, rejecting a ticket over a notify problem rather than
+            # a real approval one). Found by Codex review before this ever
+            # shipped.
+            notify_task = asyncio.ensure_future(self._notify(ticket, message))
+            self._notify_tasks[ticket.approval_id] = notify_task
+
+            def _forget_if_still_current(_: asyncio.Task[None], approval_id: str = ticket.approval_id) -> None:
+                # Only when THIS task is still the one on record for this
+                # approval_id -- otherwise a later call for the same
+                # ticket may already have replaced it, and this stale
+                # completion must not evict that newer entry.
+                if self._notify_tasks.get(approval_id) is notify_task:
+                    self._notify_tasks.pop(approval_id, None)
+
+            notify_task.add_done_callback(_forget_if_still_current)
+            try:
+                await asyncio.wait_for(asyncio.shield(notify_task), timeout=timeout)
+            except asyncio.CancelledError:
+                # `_send()` itself was cancelled (ask() is being torn
+                # down), not just the notify_timeout deadline -- shield()
+                # kept `notify_task` running through that regardless, so
+                # without this it would run forever with nothing left to
+                # ever cancel or retire it (the timeout machinery this
+                # whole method exists for disappears along with `_send()`
+                # unwinding). Detach it the same way a timeout does, then
+                # re-raise unchanged. Found by Codex review before this
+                # ever shipped.
+                _detach(notify_task)
+                raise
+            except TimeoutError:
+                _detach(notify_task)
+                logging.getLogger(__name__).warning(
+                    "notify timed out after %.1fs for ticket %s -- it still exists and is still answerable",
+                    timeout,
+                    ticket.approval_id,
+                )
         except Exception:
             logging.getLogger(__name__).exception(
                 "notify failed for ticket %s -- it still exists and is still answerable", ticket.approval_id
