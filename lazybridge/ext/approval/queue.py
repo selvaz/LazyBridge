@@ -22,6 +22,23 @@ Known accepted gap: the expiry check and the CAS that follows it are not one
 atomic step, so a request that crosses ``expires_at`` in the microseconds
 between them can still succeed. Given ``DEFAULT_TTL`` is hours, not seconds,
 this is a real but currently accepted race, not a practical one.
+
+Known accepted gap: ``ask()`` retires an orphaned ticket -- one whose
+``create_ticket`` call was still in flight when ``ask()`` itself was
+cancelled -- via a detached asyncio task, precisely so no number of
+FURTHER cancellations of ``ask()`` can interrupt that retirement (see
+``StoreApprovalChannel.ask()``'s own comments for the two prior attempts
+that didn't hold up). That task is still an ordinary asyncio task, though,
+not immune to the event loop itself being torn down -- ``asyncio.run()``
+exiting cancels every remaining task, this retiring one included, before
+the underlying offloaded ``create_ticket`` thread is guaranteed to have
+finished and been consumed. In that specific compound case (loop shutdown
+racing a cancelled-during-creation ``ask()``) the ticket can land, get
+written, and never be retired, sitting pending until its own TTL expiry
+hours later -- the same category of consequence as the CAS/expiry race
+above, not a correctness or security issue, and not worth a dedicated
+thread-native (non-asyncio) callback to close given how narrow and
+low-stakes it is.
 """
 
 from __future__ import annotations
@@ -192,6 +209,10 @@ def _anchor_db_path(store: Store) -> str | None:
                 if row[1] == "main" and row[2]:
                     return row[2]
         except Exception:
+            # PRAGMA database_list failed for any reason (a closed
+            # connection, a driver quirk) -- fall through to the
+            # best-effort raw-path resolution below rather than raising,
+            # since this is a best-effort anchor, not a required success.
             pass
     from pathlib import Path
 
@@ -220,11 +241,8 @@ def _anchored_store(store: Store, *, resolved_db_path: str | None) -> Any:
         return
     from lazybridge import Store as _Store
 
-    fresh = _Store(db=resolved_db_path)
-    try:
+    with _Store(db=resolved_db_path) as fresh:
         yield fresh
-    finally:
-        fresh.close()
 
 
 def _actionable(raw: dict, now: datetime) -> ApprovalTicket | None:
@@ -282,6 +300,22 @@ class ApprovalQueue:
 
     def _anchored(self) -> Any:
         return _anchored_store(self._store, resolved_db_path=self._resolved_db_path)
+
+    @property
+    def safe_to_call_from_any_thread(self) -> bool:
+        """``False`` only for ``Store(db=":memory:")`` -- the one
+        in-memory mode that is NOT safe to call from a different thread
+        than whichever one already has a connection open, because it
+        relies on reusing that thread's own thread-local SQLite
+        connection (see :func:`_anchor_db_path`'s docstring). ``Store
+        (db=None)`` is safe (guarded by ``Store._lock``, not a
+        connection); any real file path is safe too (every operation
+        opens a FRESH connection from the resolved absolute path, not a
+        cached thread-local one). ``StoreApprovalChannel`` reads this to
+        decide whether it's safe to offload this queue's calls to a
+        worker thread. Found by Codex review before this ever shipped.
+        """
+        return getattr(self._store, "_db", None) != ":memory:"
 
     def create_ticket(
         self, *, task_id: str, prompt: str, kind: TicketKind = "approval", ttl: timedelta = DEFAULT_TTL
@@ -351,6 +385,14 @@ class ApprovalQueue:
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
 
+#: Kept alive here so nothing else has to hold a reference: asyncio only
+#: keeps a WEAK reference to a Task once nothing else does, so an
+#: un-awaited watcher task (see `StoreApprovalChannel.ask()` below) could
+#: otherwise be garbage-collected mid-flight. Each task discards itself via
+#: its own done-callback.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
 class StoreApprovalChannel:
     """A ``lazybridge.ext.approval`` ``Channel`` backed by an :class:`ApprovalQueue`.
 
@@ -402,6 +444,15 @@ class StoreApprovalChannel:
             # (up to hours) finally expires. Found by Codex review before
             # this ever shipped.
             raise ValueError(f"poll_seconds must be positive, got {poll_seconds}")
+        if renotify_interval is not None and renotify_interval <= timedelta(0):
+            # `None` is already the documented way to disable reminders --
+            # zero/negative is not a smaller version of that, it's
+            # "always overdue": now - last_notified >= renotify_interval
+            # is true on EVERY poll, so a reminder (a full _send call,
+            # notify included) fires at the full polling rate --
+            # ~100/s at poll_seconds=0.01 -- for up to the ticket's whole
+            # TTL. Found by Codex review before this ever shipped.
+            raise ValueError(f"renotify_interval must be positive or None, got {renotify_interval}")
         self._queue = queue
         self._task_id = task_id
         self._poll_seconds = poll_seconds
@@ -413,6 +464,19 @@ class StoreApprovalChannel:
         #: an agent's own channel, "approval" for a default TieredGate "ask"
         #: gate. See TicketKind's docstring.
         self._kind = kind
+
+    async def _call(self, func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Run one of ``self._queue``'s plain synchronous methods without
+        blocking THIS event loop -- offloaded to a worker thread, unless
+        the queue itself says that's unsafe (``Store(db=":memory:")``,
+        which relies on reusing one specific thread's own thread-local
+        SQLite connection; ``asyncio.to_thread`` would instead hand each
+        call to a different pool thread, each opening its OWN unrelated
+        empty in-memory database). Found by Codex review before this ever
+        shipped."""
+        if self._queue.safe_to_call_from_any_thread:
+            return await asyncio.to_thread(func, *args, **kwargs)
+        return func(*args, **kwargs)
 
     async def _send(self, ticket: ApprovalTicket, message: str) -> None:
         if self._notify is None:
@@ -442,7 +506,88 @@ class StoreApprovalChannel:
             )
 
     async def ask(self, prompt: str) -> bool:
-        ticket = self._queue.create_ticket(task_id=self._task_id, prompt=prompt, kind=self._kind, ttl=self._ttl)
+        # ApprovalQueue's own methods are plain synchronous Store I/O (by
+        # design -- usable from a sync caller too, e.g. a CLI or a plain
+        # webhook handler), including, for a file-backed queue, opening a
+        # fresh SQLite connection per call. Called directly from this
+        # ASYNC method, a slow write (Store's busy_timeout is 5s under
+        # write contention -- a shared Store with many agents filing
+        # tickets/heartbeats is exactly what produces that) would block
+        # THIS WHOLE asyncio event loop, freezing every other coroutine
+        # sharing it (unrelated agents, other approval channels, anything
+        # else) for as long as the call takes -- not just this one
+        # ticket's own progress. Offloaded via self._call() throughout
+        # this method instead. Found by Codex review before this ever
+        # shipped.
+        #
+        # Shielded: the offloaded call's underlying thread-pool work can't
+        # actually be stopped once started (Python threads aren't forcibly
+        # killable) -- if ask() is cancelled while THIS specific call is
+        # pending, an unshielded await would unwind immediately with no
+        # ticket reference to clean up, while the write still lands moments
+        # later in the Store, orphaned, with nothing ever retiring it.
+        # Shielding keeps the creation itself running regardless of the
+        # outer cancellation. Found by Codex review before this ever
+        # shipped.
+        create = asyncio.ensure_future(
+            self._call(self._queue.create_ticket, task_id=self._task_id, prompt=prompt, kind=self._kind, ttl=self._ttl)
+        )
+
+        async def _retire_orphaned_ticket() -> None:
+            # Scheduled from the `except` block below as an entirely
+            # separate task, never awaited by ask() itself -- so no number
+            # of FURTHER cancellations delivered to ask() (which has
+            # already unwound and re-raised by the time this is scheduled)
+            # can interrupt it. Only ever created on the cancellation path:
+            # ask()'s own normal, non-cancelled flow never spawns this, so
+            # it can never race a legitimate resolution for a ticket that
+            # was never orphaned in the first place.
+            #
+            # An earlier version instead re-awaited `create` INLINE, in
+            # ask()'s own `except asyncio.CancelledError:` handler, nesting
+            # a second `asyncio.shield()` around that wait. That does not
+            # work: shield() only protects the awaited FUTURE from being
+            # cancelled, never the coroutine doing the awaiting from being
+            # cancelled AGAIN. A second `.cancel()` landing while that
+            # inline cleanup was itself suspended on the second shield blew
+            # straight through it, exactly like the first cancellation
+            # would have without any shield at all -- confirmed with a
+            # standalone repro before rewriting this. A cleanup that must
+            # survive an arbitrary number of repeated cancellations can't
+            # live on the cancellable coroutine's own call stack; it has to
+            # run on a task nothing above ever cancels.
+            #
+            # Still not immune to the event loop itself shutting down
+            # (which cancels this task too, before `create`'s underlying
+            # thread is guaranteed done) -- see this module's docstring for
+            # why that narrower, compound case is an accepted gap rather
+            # than something this task can be made to survive.
+            try:
+                ticket = await asyncio.shield(create)
+            except Exception:
+                return
+            with contextlib.suppress(Exception):
+                await self._call(
+                    self._queue.reject_ticket,
+                    ticket.approval_id,
+                    actor="system",
+                    channel=self.name,
+                    reason="ask() was cancelled during ticket creation",
+                )
+
+        try:
+            ticket = await asyncio.shield(create)
+        except asyncio.CancelledError:
+            # No await between here and `raise`: this handler cannot
+            # itself be interrupted by a further cancellation, so
+            # scheduling the retiring cleanup as an independent task --
+            # rather than awaiting it inline, which is what the previous,
+            # insufficient fix did -- is what makes this immune to however
+            # many more times ask() gets cancelled from here on.
+            watcher = asyncio.ensure_future(_retire_orphaned_ticket())
+            _background_tasks.add(watcher)
+            watcher.add_done_callback(_background_tasks.discard)
+            raise
         # The id is part of the COMMAND, not just shown alongside it: this
         # library has no bare-"/approve"-resolves-the-one-pending-ticket
         # convenience of its own (a caller like LazyCEO may layer that on
@@ -457,7 +602,7 @@ class StoreApprovalChannel:
             await self._send(ticket, message)
             last_notified = datetime.now(UTC)
             while True:
-                current = self._queue.get_ticket(ticket.approval_id)
+                current = await self._call(self._queue.get_ticket, ticket.approval_id)
                 if current is None or current.status == "rejected":
                     return False
                 if current.status == "approved":
@@ -506,6 +651,29 @@ class StoreApprovalChannel:
             # cleanup, not error handling. Found by Codex review before
             # this ever shipped.
             reason = "ask() was cancelled" if isinstance(exc, asyncio.CancelledError) else f"ask() raised: {exc!r}"
-            with contextlib.suppress(Exception):
-                self._queue.reject_ticket(ticket.approval_id, actor="system", channel=self.name, reason=reason)
+
+            async def _retire() -> None:
+                # Detached for the same reason `_retire_orphaned_ticket`
+                # above is: awaited INLINE here (as an earlier version
+                # did), a second `.cancel()` landing while THIS await is
+                # in flight would interrupt it too -- `contextlib.suppress`
+                # over `Exception` doesn't catch `asyncio.CancelledError`
+                # (a `BaseException`), so that second cancellation would
+                # blow straight past this cleanup and out through the
+                # `raise` below, leaving the ticket pending. ask() is
+                # already unconditionally terminating by the time this
+                # runs (every path through this except block re-raises),
+                # so there is nothing left for a detached cleanup task to
+                # race against -- unlike the creation-path watcher, this
+                # one doesn't need to be conditioned on ask() actually
+                # having been cancelled. Found by Codex review before this
+                # ever shipped.
+                with contextlib.suppress(Exception):
+                    await self._call(
+                        self._queue.reject_ticket, ticket.approval_id, actor="system", channel=self.name, reason=reason
+                    )
+
+            watcher = asyncio.ensure_future(_retire())
+            _background_tasks.add(watcher)
+            watcher.add_done_callback(_background_tasks.discard)
             raise
