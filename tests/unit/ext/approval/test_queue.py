@@ -248,9 +248,7 @@ async def test_store_approval_channel_bounds_a_stalled_notify_callback() -> None
     async def stalled_notify(ticket, message):
         await asyncio.sleep(999)  # never completes within this test
 
-    channel = StoreApprovalChannel(
-        queue, task_id="t1", poll_seconds=0.01, notify=stalled_notify, notify_timeout=0.02
-    )
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=stalled_notify, notify_timeout=0.02)
 
     async def approve_soon() -> None:
         await asyncio.sleep(0.05)
