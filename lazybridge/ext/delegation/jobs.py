@@ -32,8 +32,19 @@ def session_id_key(workspace_root: Path, *, prefix: str = DEFAULT_SESSION_KEY_PR
     a Claude Code SDK session created under one cwd cannot be resumed from a
     different one. The short hash keeps paths out of the Store namespace
     while remaining stable across restarts in the same workspace.
+
+    Resolved to an absolute, normalized path before hashing -- an
+    unresolved relative root would scope the key to its literal spelling
+    rather than the actual workspace: ``Path("project")`` launched from
+    two different parent directories would otherwise hash to the SAME
+    key for two different working directories, and a relative vs.
+    absolute spelling of the same directory would hash to two DIFFERENT
+    keys for the same one. Either mistake resumes an incompatible session
+    or fails to find the existing one. Found by Codex review before this
+    ever shipped.
     """
-    return prefix + hashlib.sha256(str(workspace_root).encode()).hexdigest()[:16]
+    resolved = Path(workspace_root).resolve()
+    return prefix + hashlib.sha256(str(resolved).encode()).hexdigest()[:16]
 
 
 class JobRegistry:
@@ -86,14 +97,31 @@ class JobRegistry:
     def reclaim_interrupted(self) -> list[str]:
         """Mark process-orphaned in-progress jobs ``interrupted``.
 
-        A background asyncio Task does not survive across processes, so an
-        old ``running`` or ``awaiting_approval`` record has no coroutine (or
-        live approval wait) left to resume. ``interrupted`` is more accurate
-        than ``failed`` and avoids silently presenting the job as active.
+        Meant to be called ONCE, at process startup. A background asyncio
+        Task does not survive across processes, so an old ``running`` or
+        ``awaiting_approval`` record has no coroutine (or live approval
+        wait) left to resume. ``interrupted`` is more accurate than
+        ``failed`` and avoids silently presenting the job as active.
 
         Compare-and-swap is essential: a genuine old-process completion may
         land between this scan and the update. A lost CAS skips that job so
         its real ``done``/``failed`` result is never clobbered.
+
+        Known accepted constraint: a job record carries no process/run
+        identity or lease, only a status. If more than one process shares
+        the same ``Store`` and is concurrently ALIVE at once (not the
+        "old process died, new process starts up" case this method is
+        for), this can't tell a genuinely still-running job in another
+        live process from an orphaned one, and would wrongly interrupt
+        it. The CAS only protects against a job finishing between this
+        scan and the write; it provides no cross-process liveness check.
+        This mirrors the promoted source's own single-owning-process
+        assumption (its own docstring reasons purely about "a background
+        Task does not survive across processes," never about concurrent
+        processes). Real multi-process safety would need a lease/heartbeat
+        per job, a bigger addition than this extraction takes on; revisit
+        only if a real concurrent-process deployment needs it. Found by
+        Codex review before this ever shipped.
         """
         reclaimed: list[str] = []
         for key, raw in self._store.items(prefix=self._prefix):
