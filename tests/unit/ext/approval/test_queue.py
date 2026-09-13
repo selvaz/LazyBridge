@@ -444,8 +444,190 @@ async def test_stuck_notify_for_one_ticket_does_not_suppress_another() -> None:
     release.set()
     stuck_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        await stuck_task
+        _ = await stuck_task
     await asyncio.sleep(0.05)  # let the released stuck_notify loop actually exit
+
+
+async def test_send_swallows_a_notifier_that_cancels_itself() -> None:
+    """A notify callback whose OWN internal implementation ends up
+    cancelled -- it manages a sub-task and cancels IT, unrelated to
+    anything cancelling ask()/_send() from outside -- must be treated like
+    any other notify failure: logged and swallowed, not mistaken for
+    _send() itself having been cancelled. shield() is what makes the two
+    distinguishable: cancelling the code AWAITING a shielded future never
+    touches the shielded task, so notify_task can only be `.cancelled()`
+    here if it finished that way on its own. Found by Codex review before
+    this ever shipped."""
+    queue = ApprovalQueue(Store())
+
+    async def self_cancelling_notify(ticket, message):
+        inner = asyncio.ensure_future(asyncio.sleep(999))
+        inner.cancel()
+        await inner  # raises CancelledError -- self-inflicted, not from outside
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=self_cancelling_notify)
+
+    async def approve_soon() -> None:
+        await asyncio.sleep(0.05)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    # If the bug were still present, ask() would abort right after the
+    # notify call instead of reaching its polling loop, and this gather
+    # would raise CancelledError instead of returning normally.
+    result, _ = await asyncio.wait_for(asyncio.gather(channel.ask("please approve"), approve_soon()), timeout=1.0)
+
+    assert result is True
+
+
+async def test_send_preserves_an_external_cancellation_racing_notifier_self_cancellation() -> None:
+    """Checking only `notify_task.cancelled()` isn't enough to tell "the
+    notifier cancelled itself" apart from "ask() ALSO has a pending
+    external cancellation at the very same moment" -- the latter must
+    still terminate ask() and retire its ticket, not be swallowed just
+    because notify_task also happened to end up cancelled in the same
+    event-loop turn. `Task.cancelling()` (3.11+, this project's floor) is
+    what distinguishes the two regardless of timing. Found by Codex review
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    real_create_ticket = queue.create_ticket
+    created: list[ApprovalTicket] = []
+
+    def _tracking_create_ticket(*args, **kwargs):
+        ticket = real_create_ticket(*args, **kwargs)
+        created.append(ticket)
+        return ticket
+
+    queue.create_ticket = _tracking_create_ticket  # type: ignore[method-assign]
+
+    ask_task_holder: list[asyncio.Task] = []
+
+    async def racing_notify(ticket, message):
+        # Both cancellations are requested synchronously, back to back,
+        # so the event loop delivers them in the same round: ask_task's
+        # own pending cancellation, and notify_task's self-inflicted one,
+        # racing exactly as described above.
+        ask_task_holder[0].cancel()
+        current = asyncio.current_task()
+        assert current is not None
+        current.cancel()
+        await asyncio.sleep(999)  # unreachable -- cancelled at this suspension point
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=racing_notify)
+
+    ask_task = asyncio.create_task(channel.ask("please approve"))
+    ask_task_holder.append(ask_task)
+
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await ask_task
+
+    # The external cancellation must win: ask() itself terminates instead
+    # of continuing to poll (which the bug this test guards against would
+    # cause, by swallowing the CancelledError here as if it were purely
+    # notify_task's own doing).
+    assert ask_task.cancelled()
+
+    await _wait_until(lambda: len(created) == 1)
+    await _wait_until(lambda: queue.get_ticket(created[0].approval_id).status == "rejected")
+    resolved = queue.get_ticket(created[0].approval_id)
+    assert resolved.status == "rejected"
+
+
+async def test_send_swallows_notifier_self_cancellation_despite_a_stale_cancelling_count() -> None:
+    """Task.cancelling() is cumulative and never auto-resets on its own --
+    a task that absorbed some EARLIER, unrelated cancellation (caught it
+    and kept going, without ever calling uncancel(), exactly like a
+    caller's own cleanup path might) keeps a nonzero count for the rest of
+    its life. Checking that raw count instead of comparing it across just
+    THIS specific await would treat every LATER notifier self-cancellation
+    on that same task as if it were a brand new external cancellation of
+    ask(), rejecting a perfectly fine ticket. Found by Codex review before
+    this ever shipped."""
+    queue = ApprovalQueue(Store())
+
+    async def self_cancelling_notify(ticket, message):
+        inner = asyncio.ensure_future(asyncio.sleep(999))
+        inner.cancel()
+        await inner  # raises CancelledError -- self-inflicted, not from outside
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=self_cancelling_notify)
+
+    async def run() -> bool:
+        current = asyncio.current_task()
+        assert current is not None
+        # Absorb an unrelated, already-resolved cancellation first,
+        # WITHOUT calling uncancel() -- current.cancelling() stays
+        # elevated for the rest of this task's life from here on.
+        current.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.sleep(0)
+        assert current.cancelling() > 0
+
+        async def approve_soon() -> None:
+            await asyncio.sleep(0.05)
+            [ticket] = queue.list_pending_tickets()
+            queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+        # approve_soon() runs as its OWN task, but ask() itself is awaited
+        # DIRECTLY (not gather()'d into a task of its own) so it runs on
+        # THIS coroutine's own task -- gather() would silently give it a
+        # fresh task with a clean cancelling() count, defeating the whole
+        # point of this test.
+        approve_task = asyncio.create_task(approve_soon())
+        result = await channel.ask("please approve")
+        await approve_task
+        return result
+
+    # A bare `current.cancelling() == 0` check (rather than comparing the
+    # count across this specific await) would see the stale nonzero count
+    # above and wrongly treat the notifier's self-cancellation as ask()
+    # being cancelled, raising CancelledError out of run() instead of
+    # returning True.
+    result = await asyncio.wait_for(asyncio.create_task(run()), timeout=1.0)
+    assert result is True
+
+
+async def test_send_snapshots_cancelling_count_before_invoking_notify() -> None:
+    """A notify callable that cancels the ask()-task as a synchronous side
+    effect of merely being CALLED -- before it even returns its own
+    awaitable -- must still terminate ask() and retire its ticket.
+    Snapshotting cancelling() any later than the very start of _send()
+    (in particular, after `self._notify` has already run) would already
+    include that fresh increment in the "before" snapshot, so the
+    subsequent before/after delta would show no NEW increase and wrongly
+    swallow this real external cancellation, leaving ask() to poll
+    forever instead. Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    ask_task_holder: list[asyncio.Task] = []
+
+    def cancel_on_call(ticket, message):
+        # Cancels ask() -- and hands back an ALREADY-CANCELLED future --
+        # entirely as a side effect of being CALLED, before this factory
+        # has even returned an awaitable of its own.
+        ask_task_holder[0].cancel()
+        fut = asyncio.get_event_loop().create_future()
+        fut.cancel()
+        return fut
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=cancel_on_call)
+
+    ask_task = asyncio.create_task(channel.ask("please approve"))
+    ask_task_holder.append(ask_task)
+
+    # Deliberately NOT wait_for()/cancel()'d by this test itself -- either
+    # would force a cancellation of its own and mask the very thing being
+    # tested. If the bug is present, ask() swallows the cancellation above
+    # and keeps polling (the ticket's own TTL is hours), so this is just a
+    # bounded window to let the FIXED behavior settle.
+    await asyncio.sleep(0.2)
+
+    try:
+        assert ask_task.cancelled()
+    finally:
+        if not ask_task.done():
+            ask_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                _ = await ask_task
 
 
 def test_approve_ticket_is_cas_second_call_fails() -> None:
