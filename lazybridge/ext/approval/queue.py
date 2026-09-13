@@ -470,12 +470,17 @@ class StoreApprovalChannel:
         renotify_interval: timedelta | None = DEFAULT_RENOTIFY_INTERVAL,
         kind: TicketKind = "approval",
     ):
-        if poll_seconds <= 0:
-            # A poll interval that isn't strictly positive means
+        if not poll_seconds > 0:
+            # Written as `not x > 0`, not `x <= 0`: NaN compares False
+            # against BOTH, so `poll_seconds <= 0` lets float("nan")
+            # straight through, unlike this phrasing (`not (nan > 0)` is
+            # `not False` -- True, correctly rejected). A poll interval
+            # that isn't verifiably positive means
             # min(poll_seconds, remaining_ttl) resolves to
-            # asyncio.sleep(0-or-negative) on every iteration -- a hot
-            # loop of Store reads (and, for a file-backed queue, a fresh
-            # SQLite connection opened and closed on every single
+            # asyncio.sleep(0-or-negative-or-NaN) every iteration -- a
+            # NaN sleep may never wake at all, and a nonpositive one is a
+            # hot loop of Store reads (and, for a file-backed queue, a
+            # fresh SQLite connection opened and closed every single
             # iteration) hammering the database until the ticket's TTL
             # (up to hours) finally expires. Found by Codex review before
             # this ever shipped.
@@ -489,8 +494,10 @@ class StoreApprovalChannel:
             # ~100/s at poll_seconds=0.01 -- for up to the ticket's whole
             # TTL. Found by Codex review before this ever shipped.
             raise ValueError(f"renotify_interval must be positive or None, got {renotify_interval}")
-        if notify_timeout <= 0:
-            # A nonpositive timeout hands `_send()` an immediate deadline:
+        if not notify_timeout > 0:
+            # `not x > 0`, not `x <= 0` -- see poll_seconds' own check
+            # above for why (NaN slips past `<= 0` but not this). A
+            # nonpositive timeout hands `_send()` an immediate deadline:
             # the notifier gets cancelled at its very first suspension
             # point (typically a network call), before it can ever
             # deliver the one message that tells a human this ticket
