@@ -1220,7 +1220,16 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     later -- the underlying thread-pool work can't actually be stopped
     once started, so this only works because ask() shields that specific
     call and hands its real outcome to an independent watcher task that
-    retires it, regardless of what happens to ask() itself afterwards.
+    retires it.
+
+    `await task` now waits for that watcher (shielded, so a repeated
+    cancellation of `task` can't interrupt the wait) rather than
+    returning the instant the first cancellation lands -- an earlier
+    version detached AND returned immediately, which let another surface
+    approve the ticket the moment create_ticket's write landed, before
+    the watcher got a chance to reject it (confirmed as a real gap by
+    Codex review). No `_wait_until` polling needed here anymore:
+    retirement is guaranteed complete by the time `await task` returns.
     Found by Codex review before this ever shipped."""
     queue = ApprovalQueue(Store())
     real_create_ticket = queue.create_ticket
@@ -1239,28 +1248,36 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     await asyncio.sleep(0.02)  # cancel WHILE create_ticket's own 0.1s sleep is still running
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        _ = await task  # ask() unwinds immediately -- the retiring watcher runs on its own, separate task
+        _ = await task
 
-    await _wait_until(lambda: len(created) == 1)
-    await _wait_until(lambda: queue.get_ticket(created[0].approval_id).status == "rejected")
+    assert len(created) == 1
     resolved = queue.get_ticket(created[0].approval_id)
     assert resolved.status == "rejected"
 
 
 async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> None:
     """A SECOND cancellation (and, in principle, any further one after
-    that) landing while ask() is still unwinding from the first must not
-    abandon the pending ticket -- asyncio.TaskGroup cancelling every
-    remaining sibling when one fails is a real way this can happen, not
-    just theoretical. Retiring it can't depend on ask()'s own coroutine
-    surviving long enough to do the cleanup itself: the ticket is retired
-    by an independent watcher task that nothing here ever cancels, so it
-    finishes regardless of how many more times `task` itself is cancelled.
-    Found by Codex review before this ever shipped; the first fix attempt
-    (nesting a second `asyncio.shield()` inside ask()'s own cancellation
-    handler) was proven insufficient by a standalone repro -- shield()
-    protects the awaited future from cancellation, not the coroutine
-    doing the awaiting from being cancelled again."""
+    that) landing while ask() is still WAITING ON its own retiring
+    watcher -- not just while the watcher itself is running -- must not
+    let that wait give up early: asyncio.TaskGroup cancelling every
+    remaining sibling when one fails is a real way a repeated
+    cancellation happens, not just theoretical.
+
+    Two earlier fix attempts got this wrong in opposite directions: the
+    first nested a second `asyncio.shield()` inside ask()'s own
+    cancellation handler and awaited it ONCE, proven insufficient by a
+    standalone repro (shield() protects the awaited future from
+    cancellation, not the coroutine doing the awaiting from being
+    cancelled again). The second detached the watcher correctly but then
+    re-raised immediately, before the watcher was necessarily done,
+    opening a window for another surface to approve the ticket before
+    retirement won the CAS (confirmed as a real gap by Codex review).
+    ask()'s own `except` block now loops, re-shielding its wait on the
+    watcher after each further cancellation instead of giving up after
+    one -- no `_wait_until` polling needed here anymore either:
+    retirement is guaranteed complete by the time `await task` returns,
+    however many cancellations landed along the way. Found by Codex
+    review before this ever shipped."""
     queue = ApprovalQueue(Store())
     real_create_ticket = queue.create_ticket
     created: list[ApprovalTicket] = []
@@ -1278,12 +1295,11 @@ async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> 
     await asyncio.sleep(0.02)
     task.cancel()  # first cancellation -- create_ticket's 0.15s sleep is still running
     await asyncio.sleep(0.02)
-    task.cancel()  # second cancellation -- ask() is still unwinding from the first
+    task.cancel()  # second cancellation -- ask() is now waiting on its own retiring watcher
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task
 
-    await _wait_until(lambda: len(created) == 1)
-    await _wait_until(lambda: queue.get_ticket(created[0].approval_id).status == "rejected")
+    assert len(created) == 1
     resolved = queue.get_ticket(created[0].approval_id)
     assert resolved.status == "rejected"
 

@@ -25,20 +25,32 @@ this is a real but currently accepted race, not a practical one.
 
 Known accepted gap: ``ask()`` retires an orphaned ticket -- one whose
 ``create_ticket`` call was still in flight when ``ask()`` itself was
-cancelled -- via a detached asyncio task, precisely so no number of
-FURTHER cancellations of ``ask()`` can interrupt that retirement (see
-``StoreApprovalChannel.ask()``'s own comments for the two prior attempts
-that didn't hold up). That task is still an ordinary asyncio task, though,
-not immune to the event loop itself being torn down -- ``asyncio.run()``
-exiting cancels every remaining task, this retiring one included, before
-the underlying offloaded ``create_ticket`` thread is guaranteed to have
-finished and been consumed. In that specific compound case (loop shutdown
-racing a cancelled-during-creation ``ask()``) the ticket can land, get
-written, and never be retired, sitting pending until its own TTL expiry
-hours later -- the same category of consequence as the CAS/expiry race
-above, not a correctness or security issue, and not worth a dedicated
-thread-native (non-asyncio) callback to close given how narrow and
-low-stakes it is.
+cancelled -- via a detached asyncio task that ``ask()`` then waits for
+(shielded, in a retry loop immune to however many further times ``ask()``
+itself gets cancelled) before letting its own cancellation become
+observable to its caller (see ``StoreApprovalChannel.ask()``'s own
+comments for the earlier attempts that didn't hold up). That task is
+still an ordinary asyncio task, though, not immune to the event loop
+itself being torn down -- ``asyncio.run()`` exiting cancels every
+remaining task, this retiring one included, before the underlying
+offloaded ``create_ticket`` thread is guaranteed to have finished and been
+consumed. In that specific compound case (loop shutdown racing a
+cancelled-during-creation ``ask()``) the ticket can land, get written, and
+never be retired, sitting pending until its own TTL expiry hours later --
+the same category of consequence as the CAS/expiry race above, not a
+correctness or security issue, and not worth a dedicated thread-native
+(non-asyncio) callback to close given how narrow and low-stakes it is.
+
+Known accepted gap: waiting for that retirement task guarantees it has
+been ATTEMPTED and fully resolved before ``ask()``'s cancellation becomes
+observable -- not that it necessarily WON. Its own ``reject_ticket`` call
+is an ordinary CAS that can lose to a genuinely concurrent external
+approve reaching the Store first, the instant the ticket becomes visible
+(some OTHER surface already polling this same queue, independent of
+``ask()`` entirely). No code inside ``ask()`` can prevent that outright --
+only shrink the window for it, which retiring as the very next thing once
+creation completes, with nothing else interposed, already does about as
+tightly as this queue's own design allows.
 """
 
 from __future__ import annotations
@@ -610,6 +622,20 @@ class StoreApprovalChannel:
         #: of them must not silently swallow every notification for an
         #: unrelated other. See `_send()`'s own comment for why the guard
         #: itself matters. Found by Codex review before this ever shipped.
+        #:
+        #: Known accepted gap: this bounds a stuck notifier to ONE task
+        #: per ticket, not per channel -- a notifier that never
+        #: cooperates with cancellation, applied to every ticket this
+        #: channel EVER files over an unboundedly long lifetime, still
+        #: accumulates one permanently-stuck task per ticket, without an
+        #: upper bound on how many tickets that can be. A circuit breaker
+        #: (stop calling a notifier that's proven itself permanently
+        #: uncooperative after some threshold, rather than retrying it
+        #: fresh for every new ticket) would close this properly but is a
+        #: real feature, not a narrow fix -- left as a caller
+        #: responsibility (fix or replace a notifier discovered to behave
+        #: this way) rather than built here. Found by Codex review before
+        #: this ever shipped.
         self._notify_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def _call(self, func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
@@ -896,27 +922,38 @@ class StoreApprovalChannel:
 
         async def _retire_orphaned_ticket() -> None:
             # Scheduled from the `except` block below as an entirely
-            # separate task, never awaited by ask() itself -- so no number
-            # of FURTHER cancellations delivered to ask() (which has
-            # already unwound and re-raised by the time this is scheduled)
-            # can interrupt it. Only ever created on the cancellation path:
+            # separate task -- ask() DOES end up waiting for this one
+            # (unlike the post-creation cleanup, which no longer needs to
+            # wait for anything), but shielded and in a retry loop rather
+            # than a single inline `await`, so no number of FURTHER
+            # cancellations delivered to ask() while it waits can
+            # interrupt this task's OWN execution -- only each individual
+            # wait for it. Only ever created on the cancellation path:
             # ask()'s own normal, non-cancelled flow never spawns this, so
             # it can never race a legitimate resolution for a ticket that
             # was never orphaned in the first place.
             #
-            # An earlier version instead re-awaited `create` INLINE, in
-            # ask()'s own `except asyncio.CancelledError:` handler, nesting
-            # a second `asyncio.shield()` around that wait. That does not
-            # work: shield() only protects the awaited FUTURE from being
-            # cancelled, never the coroutine doing the awaiting from being
-            # cancelled AGAIN. A second `.cancel()` landing while that
-            # inline cleanup was itself suspended on the second shield blew
-            # straight through it, exactly like the first cancellation
-            # would have without any shield at all -- confirmed with a
-            # standalone repro before rewriting this. A cleanup that must
-            # survive an arbitrary number of repeated cancellations can't
-            # live on the cancellable coroutine's own call stack; it has to
-            # run on a task nothing above ever cancels.
+            # Two earlier versions got this wrong in opposite directions.
+            # The first re-awaited `create` INLINE, in ask()'s own
+            # `except asyncio.CancelledError:` handler, nesting a second
+            # `asyncio.shield()` around that wait -- shield() only
+            # protects the awaited FUTURE from being cancelled, never the
+            # coroutine doing the awaiting from being cancelled AGAIN, so
+            # a second `.cancel()` landing while that inline cleanup was
+            # itself suspended on the second shield blew straight through
+            # it (confirmed with a standalone repro). The second detached
+            # this task correctly, for that reason, but then re-raised
+            # ask()'s own cancellation IMMEDIATELY, before this task was
+            # necessarily done -- letting another surface approve the
+            # ticket the instant `create`'s write landed, winning the CAS
+            # before this task got to reject it, for a decision nobody was
+            # listening for anymore (confirmed as a real gap by Codex
+            # review). ask()'s own `except` block now loops, shielded,
+            # re-waiting on this task after each further cancellation
+            # instead of giving up after one -- getting immunity to
+            # repeated cancellation AND a guarantee that retirement
+            # finishes before ask()'s cancellation becomes observable, at
+            # once.
             #
             # Still not immune to the event loop itself shutting down
             # (which cancels this task too, before `create`'s underlying
@@ -939,15 +976,50 @@ class StoreApprovalChannel:
         try:
             ticket = await asyncio.shield(create)
         except asyncio.CancelledError:
-            # No await between here and `raise`: this handler cannot
-            # itself be interrupted by a further cancellation, so
-            # scheduling the retiring cleanup as an independent task --
-            # rather than awaiting it inline, which is what the previous,
-            # insufficient fix did -- is what makes this immune to however
-            # many more times ask() gets cancelled from here on.
+            # Retirement runs on an independent task -- not awaited
+            # inline, which is what an earlier, insufficient fix did --
+            # so it's immune to however many more times ask() gets
+            # cancelled from here on: cancelling ask()'s OWN task never
+            # touches a separate task's execution, only whatever ask() is
+            # currently suspended on.
             watcher = asyncio.ensure_future(_retire_orphaned_ticket())
             _background_tasks.add(watcher)
             watcher.add_done_callback(_background_tasks.discard)
+            # But immunity to repeated cancellation isn't the only
+            # requirement: re-raising immediately here (an earlier version
+            # did exactly that) makes THIS cancellation observable to
+            # ask()'s own caller before `watcher` has necessarily finished
+            # retiring the ticket -- once `create`'s write actually lands,
+            # another surface can approve the newly-visible ticket in that
+            # gap, winning the CAS before `watcher` gets to reject it, for
+            # a decision nobody is listening for anymore (confirmed as a
+            # real gap by Codex review; the post-creation cleanup below
+            # had the identical bug before it was made synchronous).
+            # Waiting for `watcher` here -- shielded, in a loop that keeps
+            # re-waiting after each further cancellation rather than
+            # giving up after one -- gets BOTH properties at once: no
+            # number of repeated cancellations can make this loop exit
+            # before `watcher` is actually done (shield() only lets a
+            # cancellation of ASK's own task interrupt each individual
+            # wait, never `watcher` itself, which nothing here ever
+            # cancels), and this cancellation only becomes observable to
+            # ask()'s caller once retirement has been ATTEMPTED and fully
+            # resolved -- not once it has necessarily WON. `watcher`'s own
+            # reject_ticket call is still an ordinary CAS that can lose to
+            # a genuinely concurrent external approve reaching the Store
+            # first (the module docstring's own "Known accepted gap"
+            # documents this residual, irreducible race: it takes an
+            # external actor already polling and racing to approve this
+            # SAME ticket the instant it becomes visible, which no amount
+            # of code inside ask() itself can prevent -- only shrink the
+            # window for, which this already does about as tightly as
+            # possible by attempting retirement as the very next thing
+            # once creation completes, with nothing else interposed).
+            # Structurally the same technique asyncio.wait_for() itself
+            # uses to survive a cancellation racing its own timeout.
+            while not watcher.done():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(watcher)
             raise
         # The id is part of the COMMAND, not just shown alongside it: this
         # library has no bare-"/approve"-resolves-the-one-pending-ticket
