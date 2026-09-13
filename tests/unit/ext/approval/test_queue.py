@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from datetime import timedelta
 
@@ -984,46 +985,134 @@ async def test_ask_does_not_block_the_event_loop() -> None:
     heartbeats is exactly what produces that), freezing every other
     coroutine sharing it, not just this ticket's own progress.
 
-    Asserts progress WHILE the slow call is still in flight, not just
-    the final tick count after both coroutines have finished -- a
-    gather()-then-check-the-total assertion passes either way (blocking
-    only delays when the ticks happen, not whether all of them
-    eventually do), so it wouldn't actually catch a regression back to
-    calling ApprovalQueue directly. Found by Codex review before this
-    ever shipped (twice: the production fix, and this test's own first
-    version not actually distinguishing blocking from non-blocking)."""
+    Checks whether a tick lands strictly BETWEEN create_ticket's own
+    recorded start/end timestamps, not just whether ticks eventually
+    happen at all, and not a fixed elapsed-time threshold either -- both
+    of those looked right but were found NOT to actually distinguish
+    blocking from non-blocking when checked empirically (repeatedly
+    reverting the fix under test and confirming each style still passed):
+    a gather()-then-check-the-total assertion passes either way (blocking
+    only delays when the ticks happen, not whether all of them eventually
+    do); a fixed `await asyncio.sleep(0.1)` then `assert ticks > 0` ALSO
+    passes either way, because every timer that would have fired during a
+    genuinely-blocked window (the ticker's own included) simply becomes
+    overdue and fires in one catch-up batch the instant the block ends.
+    Anchoring the window to create_ticket's OWN measured start/end is
+    what actually ties a tick to being concurrent with it specifically.
+    Found by Codex review before this ever shipped (three rounds: the
+    production fix, this test's own first version not actually
+    distinguishing blocking from non-blocking, and this second version
+    -- an elapsed-time-threshold check -- turning out to be flaky the
+    same way for a different reason, confirmed by running it repeatedly
+    against the reverted fix)."""
     queue = ApprovalQueue(Store())
     real_create_ticket = queue.create_ticket
+    loop = asyncio.get_event_loop()
+    create_start: list[float] = []
+    create_end: list[float] = []
 
     def _slow_create_ticket(*args, **kwargs):
+        create_start.append(loop.time())
         time.sleep(0.2)
+        create_end.append(loop.time())
         return real_create_ticket(*args, **kwargs)
 
     queue.create_ticket = _slow_create_ticket  # type: ignore[method-assign]
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
-    ticks = 0
+    tick_times: list[float] = []
 
     async def _ticker() -> None:
-        nonlocal ticks
         while True:
             await asyncio.sleep(0.02)
-            ticks += 1
+            tick_times.append(loop.time())
 
     ask_task = asyncio.create_task(channel.ask("please approve"))
     ticker_task = asyncio.create_task(_ticker())
 
-    # Checked at the halfway point of the 0.2s slow call, while it is
-    # still running: if create_ticket ran directly on this event loop,
-    # NOTHING else could execute until it returned, and ticks would
-    # still be exactly 0 here.
-    await asyncio.sleep(0.1)
-    assert ticks > 0
-
+    with contextlib.suppress(Exception):
+        _ = await ask_task
     ticker_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         _ = await ticker_task
-    with contextlib.suppress(Exception):
-        _ = await ask_task
+
+    assert create_start and create_end
+    window_start, window_end = create_start[0], create_end[0]
+    # If create_ticket ran directly on this event loop, NOTHING else
+    # could execute for the whole [window_start, window_end) it was
+    # running -- no tick could possibly land inside it.
+    assert any(window_start < t < window_end for t in tick_times), (
+        f"no tick landed inside create_ticket's own [{window_start}, {window_end}) window; "
+        f"tick timestamps: {tick_times}"
+    )
+
+
+def test_non_async_def_notify_warns_at_construction() -> None:
+    """`notify` must be an `async def` -- calling one only constructs a
+    coroutine object, running none of its body yet, which is what keeps
+    calling it directly in _send() always cheap regardless of what the
+    coroutine goes on to do. A plain synchronous factory that performs
+    real, blocking work before ever returning one runs that work
+    directly on the event loop's own thread, freezing every other
+    coroutine sharing it -- with neither notify_timeout nor cancellation
+    able to help.
+
+    Offloading such a call to a worker thread (to defend against exactly
+    that) was tried and reverted: it broke an equally valid pattern, a
+    synchronous factory that legitimately needs the RUNNING loop to
+    build its result (`asyncio.get_event_loop().create_future()`, e.g.),
+    with `RuntimeError: no running event loop` -- confirmed with a
+    standalone repro. There is no way to tell the two apart via
+    introspection, so a loud, one-time warning at construction (where a
+    human will actually see it) is the whole defense; this test checks
+    that the warning fires for a non-coroutine-function notify, does NOT
+    fire for a proper async def OR a callable OBJECT whose own __call__
+    is async def (inspect.iscoroutinefunction(obj) alone reports False
+    for the latter even though calling it has exactly the safe,
+    non-blocking-construction property this check exists to confirm --
+    found by Codex review as a false positive in this warning's first
+    version). Found by Codex review before this ever shipped (three
+    times: once for the missing protection, again for the first fix
+    attempt's own regression, and again for this warning's own false
+    positive on async-__call__ objects)."""
+    queue = ApprovalQueue(Store())
+
+    def synchronous_notify(ticket, message):
+        async def _noop() -> None:
+            return None
+
+        return _noop()
+
+    caught: list[logging.LogRecord] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            caught.append(record)
+
+    logger = logging.getLogger("lazybridge.ext.approval.queue")
+    handler = _Handler()
+    logger.addHandler(handler)
+    try:
+        StoreApprovalChannel(queue, task_id="t1", notify=synchronous_notify)
+        assert any("not an `async def`" in r.getMessage() for r in caught)
+
+        caught.clear()
+
+        async def proper_async_notify(ticket, message) -> None:
+            return None
+
+        StoreApprovalChannel(queue, task_id="t1", notify=proper_async_notify)
+        assert not any("not an `async def`" in r.getMessage() for r in caught)
+
+        caught.clear()
+
+        class AsyncCallableNotifier:
+            async def __call__(self, ticket, message) -> None:
+                return None
+
+        StoreApprovalChannel(queue, task_id="t1", notify=AsyncCallableNotifier())
+        assert not any("not an `async def`" in r.getMessage() for r in caught)
+    finally:
+        logger.removeHandler(handler)
 
 
 async def test_ask_retires_the_ticket_on_a_non_cancellation_exception() -> None:

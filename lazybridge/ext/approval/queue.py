@@ -46,6 +46,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -163,6 +164,18 @@ def _unwrap_store(store: Any) -> Any:
     operation staying on the original wrapped ``store`` instead) is the
     safe, intentional fallback for anything that isn't a real ``Store``.
     Found by Codex review before this ever shipped.
+
+    Known accepted gap this leaves: a wrapped store backed by a FILE
+    (``EncryptedStoreAdapter(Store(db="relative.sqlite"), ...)``) never
+    gets the cwd-drift protection :func:`_anchor_db_path` exists for --
+    each thread's own first connection to it (offloading IS correct here;
+    see above) resolves the relative path against WHATEVER cwd is active
+    on that thread at that moment, exactly the hazard this whole anchoring
+    mechanism was built to close for an unwrapped ``Store``. Given no
+    generic re-wrap, the only real fix is avoiding the combination:
+    prefer an absolute path (or a cwd that never changes for the life of
+    the process) when handing a file-backed ``Store`` to a wrapper this
+    queue will also use. Found by Codex review before this ever shipped.
     """
     seen: set[int] = set()
     while not hasattr(store, "_db") and hasattr(store, "inner") and id(store) not in seen:
@@ -429,6 +442,21 @@ class ApprovalQueue:
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+def _is_async_callable(func: Callable[..., Any]) -> bool:
+    """True for a plain ``async def`` function, AND for a callable
+    OBJECT whose own ``__call__`` is ``async def`` -- ``inspect.
+    iscoroutinefunction(obj)`` alone only recognizes the former:
+    ``obj()`` for such an object still returns a coroutine without
+    running any of its body (exactly the property this whole check
+    exists to confirm), but ``iscoroutinefunction`` inspects the object
+    itself, never its ``__call__``, and reports ``False`` for it
+    regardless. Found by Codex review before this ever shipped."""
+    if inspect.iscoroutinefunction(func):
+        return True
+    call = getattr(func, "__call__", None)  # noqa: B004 -- need the __call__ object itself, not a bool
+    return call is not None and inspect.iscoroutinefunction(call)
+
+
 class StoreApprovalChannel:
     """A ``lazybridge.ext.approval`` ``Channel`` backed by an :class:`ApprovalQueue`.
 
@@ -447,6 +475,17 @@ class StoreApprovalChannel:
     logged and swallowed, never allowed to fail the approval itself -- the
     ticket still exists and is still answerable through any surface that
     reads the queue directly, even if the push notification didn't make it.
+
+    ``notify`` MUST be an ``async def`` -- calling one only constructs a
+    coroutine object, running none of its body yet, which is what makes
+    calling it directly here always cheap regardless of what the
+    coroutine goes on to do. A plain synchronous factory that performs
+    real, blocking work before ever returning its awaitable runs that
+    work directly on the event loop's own thread the first time this
+    channel notifies, freezing every other coroutine sharing it, with
+    neither ``notify_timeout`` nor cancellation able to help. A
+    non-coroutine-function ``notify`` triggers a one-time warning at
+    construction for exactly this reason.
 
     Past the FIRST notification, ``renotify_interval`` re-sends the same
     kind of message on a fixed schedule for as long as the ticket stays
@@ -505,6 +544,36 @@ class StoreApprovalChannel:
             # the ticket's full TTL -- hours by default. Found by Codex
             # review before this ever shipped.
             raise ValueError(f"notify_timeout must be positive, got {notify_timeout}")
+        if notify is not None and not _is_async_callable(notify):
+            # A loud, one-time warning at construction -- where a human
+            # actually reads logs -- rather than silently guessing at
+            # call time (`_send()` calls `notify` directly, trusting this
+            # contract). `notify` must be an `async def`: calling one
+            # only constructs a coroutine object, running none of its
+            # body yet, which is what keeps evaluating it here always
+            # cheap regardless of what the coroutine goes on to do. A
+            # plain synchronous factory that performs real, blocking work
+            # before returning an awaitable would run that work directly
+            # on the event loop's own thread the first time `ask()`
+            # notifies, freezing every other coroutine sharing it for as
+            # long as it takes -- with neither notify_timeout nor
+            # cancellation able to help, since nothing has reached an
+            # await yet. (Offloading such a call to a worker thread was
+            # tried and reverted: it broke an equally valid pattern --a
+            # synchronous factory that legitimately needs the RUNNING
+            # loop to build its result, e.g.
+            # `asyncio.get_event_loop().create_future()` -- with
+            # `RuntimeError: no running event loop`, confirmed by a
+            # standalone repro. There is no way to tell the two apart via
+            # introspection, so this stays a documented caller
+            # responsibility instead of an auto-fix.) Found by Codex
+            # review before this ever shipped.
+            logging.getLogger(__name__).warning(
+                "StoreApprovalChannel's notify=%r is not an `async def` -- if it performs blocking work "
+                "before returning its awaitable, that work will run directly on the event loop and freeze "
+                "every other coroutine sharing it. Prefer an async def notify(ticket, message): ...",
+                notify,
+            )
         self._queue = queue
         self._task_id = task_id
         self._poll_seconds = poll_seconds
@@ -688,7 +757,35 @@ class StoreApprovalChannel:
                 # from there, out of ask() itself, rejecting a ticket over
                 # a notify problem rather than a real approval one). Found
                 # by Codex review before this ever shipped.
-                notify_task = asyncio.ensure_future(self._notify(ticket, message))
+                #
+                # `notify` is documented (see the class docstring) as
+                # required to be an `async def` for exactly this reason:
+                # calling one only constructs a coroutine object, running
+                # none of its body yet, so evaluating it here is always
+                # cheap and safe regardless of what the coroutine goes on
+                # to do. A plain (non-async-def) factory that performs
+                # real, blocking work before ever returning an awaitable
+                # would run that work on THIS event loop's own thread,
+                # freezing every other coroutine sharing it -- but
+                # offloading the call to a worker thread to guard against
+                # that (an earlier version of this fix did exactly that)
+                # is NOT safe in general either: a factory that
+                # legitimately needs the running loop to construct its
+                # result (`asyncio.get_event_loop().create_future()`, or
+                # `asyncio.create_task(...)`, e.g.) would then fail with
+                # `RuntimeError: no running event loop` in the worker
+                # thread, confirmed with a standalone repro -- silently
+                # turning a WORKING synchronous factory into a broken one.
+                # There is no way to distinguish "safe, loop-bound, fast"
+                # from "unsafe, blocking" via introspection alone, so
+                # `__init__` warns instead (once, at construction, where a
+                # human will actually see it) rather than guessing wrong
+                # here on every call. Found by Codex review before this
+                # ever shipped (twice: once for the original missing
+                # protection, and again for this first fix attempt's own
+                # regression).
+                notify_awaitable = self._notify(ticket, message)
+                notify_task = asyncio.ensure_future(notify_awaitable)
             except asyncio.CancelledError:
                 # No `notify_task` exists yet here -- calling `self._notify`
                 # is plain, synchronous Python with no `await` in it, so
