@@ -1069,7 +1069,17 @@ class StoreApprovalChannel:
                     waited_minutes = int((now - ticket.created_at).total_seconds() // 60)
                     reminder = f"⏰ Still waiting on this one ({waited_minutes} min) -- {message}"
                     await self._send(current, reminder)
-                    last_notified = now
+                    # A FRESH timestamp, not the pre-send `now` above: a
+                    # reminder notify can itself take real time (bounded
+                    # by notify_timeout, which can be a meaningful
+                    # fraction of a short renotify_interval), and stamping
+                    # the pre-send time here would let that delivery time
+                    # eat into the NEXT interval too -- a 50ms interval
+                    # with a 40ms notifier would collapse to ~10ms between
+                    # completed reminders instead of the configured
+                    # spacing. Found by Codex review before this ever
+                    # shipped.
+                    last_notified = datetime.now(UTC)
                 # Capped at the ticket's remaining lifetime: an
                 # unconditional sleep(poll_seconds) would overshoot
                 # expires_at by up to a full poll interval whenever
