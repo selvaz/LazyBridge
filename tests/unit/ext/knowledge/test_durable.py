@@ -216,6 +216,23 @@ def test_save_lesson_is_create_only_a_second_save_is_refused() -> None:
     assert stored["revision"] == 1
 
 
+def test_save_lesson_duplicate_rejection_survives_an_oversized_stored_revision() -> None:
+    """A bare f-string interpolation of the stored revision would crash
+    for a migrated record whose revision is an oversized int (CPython
+    caps int-to-str conversion at ~4300 digits by default) -- the same
+    failure mode already fixed in render_lesson_line, but this
+    duplicate-save rejection formats the same stored value through its
+    own, separately unguarded interpolation. Found by Codex review
+    before this ever shipped."""
+    store = Store()
+    kb = DurableKnowledgeBase(store)
+    store.write(f"{DEFAULT_PREFIX}dup", {"slug": "dup", "topic": "dup", "what_worked": "x", "revision": 10**5000})
+
+    result = kb.save_lesson(topic="dup", what_worked="new attempt")  # must not raise
+
+    assert result.startswith("REJECTED")
+
+
 def test_save_lesson_rejects_a_topic_whose_slug_exceeds_the_length_limit() -> None:
     """render_lesson_line truncates a slug over MAX_SLUG_LENGTH for display
     (with a trailing "..." it doesn't strip), so a slug read back from
