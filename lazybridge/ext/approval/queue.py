@@ -142,6 +142,35 @@ def ticket_gist(prompt: str, *, max_len: int = 220) -> str:
     return gist[: max_len - 3] + "..."
 
 
+def _unwrap_store(store: Any) -> Any:
+    """Follow a wrapper's own public ``inner`` attribute (e.g.
+    :class:`~lazybridge.store.encryption.EncryptedStoreAdapter`, which
+    documents itself as usable anywhere a plain ``Store`` is) down to
+    whatever object actually looks like a real ``Store`` -- i.e. exposes
+    its own ``_db`` -- recursively, in case of nested wrappers. A wrapper
+    exposes none of ``Store``'s private ``_db``/``_local`` attributes
+    itself (those belong to the ``Store`` it delegates to), so inspecting
+    a wrapper directly for either silently misreports it: an encrypted
+    ``Store(db=":memory:")`` would look "thread-safe" to
+    :attr:`ApprovalQueue.safe_to_call_from_any_thread` (it is not -- see
+    that property's own docstring), producing exactly the
+    cross-thread-``:memory:`` breakage this module exists to avoid, just
+    one layer removed. Only used for THAT determination, not for
+    :func:`_anchor_db_path`'s own resolution -- a wrapper's anchored
+    fresh-connection Store would have to be re-wrapped in the SAME
+    encryption (or whatever else) to stay correct, which this module has
+    no principled way to do generically; returning ``None`` there (every
+    operation staying on the original wrapped ``store`` instead) is the
+    safe, intentional fallback for anything that isn't a real ``Store``.
+    Found by Codex review before this ever shipped.
+    """
+    seen: set[int] = set()
+    while not hasattr(store, "_db") and hasattr(store, "inner") and id(store) not in seen:
+        seen.add(id(store))
+        store = store.inner
+    return store
+
+
 def _anchor_db_path(store: Store) -> str | None:
     """The one absolute file path this queue will use for EVERY operation
     (reads and writes) for its whole lifetime, computed exactly once, at
@@ -313,9 +342,16 @@ class ApprovalQueue:
         opens a FRESH connection from the resolved absolute path, not a
         cached thread-local one). ``StoreApprovalChannel`` reads this to
         decide whether it's safe to offload this queue's calls to a
-        worker thread. Found by Codex review before this ever shipped.
+        worker thread.
+
+        Unwraps a transparent wrapper (e.g. ``EncryptedStoreAdapter``)
+        down to the real ``Store`` first -- encryption is a pure value
+        transform with no threading semantics of its own, so this
+        question is really about whatever ``Store`` is actually doing the
+        I/O underneath, not the wrapper sitting in front of it. Found by
+        Codex review before this ever shipped.
         """
-        return getattr(self._store, "_db", None) != ":memory:"
+        return getattr(_unwrap_store(self._store), "_db", None) != ":memory:"
 
     def create_ticket(
         self, *, task_id: str, prompt: str, kind: TicketKind = "approval", ttl: timedelta = DEFAULT_TTL
