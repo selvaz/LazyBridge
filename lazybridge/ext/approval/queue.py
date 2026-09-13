@@ -489,6 +489,15 @@ class StoreApprovalChannel:
             # ~100/s at poll_seconds=0.01 -- for up to the ticket's whole
             # TTL. Found by Codex review before this ever shipped.
             raise ValueError(f"renotify_interval must be positive or None, got {renotify_interval}")
+        if notify_timeout <= 0:
+            # A nonpositive timeout hands `_send()` an immediate deadline:
+            # the notifier gets cancelled at its very first suspension
+            # point (typically a network call), before it can ever
+            # deliver the one message that tells a human this ticket
+            # exists. ask() then just keeps polling, unnoticed, for up to
+            # the ticket's full TTL -- hours by default. Found by Codex
+            # review before this ever shipped.
+            raise ValueError(f"notify_timeout must be positive, got {notify_timeout}")
         self._queue = queue
         self._task_id = task_id
         self._poll_seconds = poll_seconds

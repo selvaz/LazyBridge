@@ -230,10 +230,12 @@ def test_safe_to_call_from_any_thread_unwraps_an_encrypted_store() -> None:
     thread-safe: exactly the cross-thread breakage this property exists
     to prevent, just one layer removed. Found by Codex review before this
     ever shipped."""
-    try:
-        from cryptography.fernet import Fernet
-    except ImportError:
-        pytest.skip("cryptography not installed; skipping EncryptedStoreAdapter coverage")
+    # pytest.importorskip (not a plain try/except ImportError + pytest.skip)
+    # so `Fernet` is unconditionally bound afterward -- static analysis
+    # can't know pytest.skip() never returns, and flags the try/except
+    # shape as leaving `Fernet` possibly-uninitialized on the line below.
+    # Found by CodeQL before this ever shipped.
+    Fernet = pytest.importorskip("cryptography.fernet").Fernet
     from lazybridge.store.encryption import EncryptedStoreAdapter
 
     key = Fernet.generate_key()
@@ -940,6 +942,20 @@ def test_renotify_interval_must_be_positive_or_none() -> None:
     StoreApprovalChannel(queue, task_id="t1", renotify_interval=None)
 
 
+def test_notify_timeout_must_be_positive() -> None:
+    """A nonpositive notify_timeout hands _send() an immediate deadline --
+    the notifier gets cancelled at its very first suspension point
+    (typically a network call), before it can ever deliver the one
+    message that tells a human this ticket exists, while ask() keeps
+    polling unnoticed for up to the ticket's full TTL. Found by Codex
+    review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="notify_timeout"):
+        StoreApprovalChannel(queue, task_id="t1", notify_timeout=0)
+    with pytest.raises(ValueError, match="notify_timeout"):
+        StoreApprovalChannel(queue, task_id="t1", notify_timeout=-1)
+
+
 async def test_ask_does_not_block_the_event_loop() -> None:
     """ApprovalQueue's methods are synchronous Store I/O -- calling them
     directly from this async method would block the WHOLE event loop for
@@ -1187,10 +1203,12 @@ async def test_ask_works_with_an_encrypted_sqlite_memory_store() -> None:
     different thread's own unrelated in-memory database and raising
     sqlite3.OperationalError: no such table: store. Found by Codex review
     before this ever shipped."""
-    try:
-        from cryptography.fernet import Fernet
-    except ImportError:
-        pytest.skip("cryptography not installed; skipping EncryptedStoreAdapter coverage")
+    # pytest.importorskip (not a plain try/except ImportError + pytest.skip)
+    # so `Fernet` is unconditionally bound afterward -- static analysis
+    # can't know pytest.skip() never returns, and flags the try/except
+    # shape as leaving `Fernet` possibly-uninitialized on the line below.
+    # Found by CodeQL before this ever shipped.
+    Fernet = pytest.importorskip("cryptography.fernet").Fernet
     from lazybridge.store.encryption import EncryptedStoreAdapter
 
     queue = ApprovalQueue(EncryptedStoreAdapter(Store(db=":memory:"), key=Fernet.generate_key()))
