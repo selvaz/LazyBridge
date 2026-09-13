@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import logging
 import time
 from datetime import timedelta
@@ -1481,6 +1482,63 @@ async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
     # Fixed: close to the true 0.2s ttl. 0.26s leaves comfortable margin
     # on both sides without making the test flaky.
     assert elapsed < 0.26
+
+
+async def test_reminder_spacing_accounts_for_notify_delivery_time() -> None:
+    """last_notified must be stamped from a FRESH timestamp taken after
+    the reminder's own notify call completes, not from the timestamp
+    captured before it -- otherwise a notifier that takes real time to
+    deliver (bounded by notify_timeout, which can be a meaningful
+    fraction of a short renotify_interval) has its own delivery time
+    eaten into the NEXT interval too, collapsing consecutive reminders
+    closer together than configured.
+
+    Checks the gap from one delivery's FINISH to the next one's START,
+    not from START to START -- the bug doesn't actually change start-to-
+    start spacing at all (each reminder still fires `renotify_interval`
+    after the PREVIOUS one's own pre-send timestamp, so consecutive
+    starts stay `renotify_interval` apart regardless of the bug); what it
+    collapses is the gap a human actually experiences between one
+    message finishing and the next one beginning, exactly as Codex's own
+    example put it: "subsequent notifications begin only ~10ms after the
+    preceding delivery completes" for a 50ms interval and a 40ms
+    notifier. A start-to-start check was tried first and found not to
+    distinguish the two at all, confirmed empirically by reverting the
+    fix and observing it still pass. Found by Codex review before this
+    ever shipped."""
+    queue = ApprovalQueue(Store())
+    loop = asyncio.get_event_loop()
+    notify_windows: list[tuple[float, float]] = []
+
+    async def slow_notify(ticket, message):
+        start = loop.time()
+        await asyncio.sleep(0.04)
+        notify_windows.append((start, loop.time()))
+
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        ttl=timedelta(seconds=1),
+        notify=slow_notify,
+        renotify_interval=timedelta(seconds=0.05),
+    )
+
+    async def approve_after_a_few_reminders() -> None:
+        await _wait_until(lambda: len(notify_windows) >= 4, timeout=2.0)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    result, _ = await asyncio.wait_for(
+        asyncio.gather(channel.ask("please approve"), approve_after_a_few_reminders()), timeout=3.0
+    )
+    assert result is True
+
+    # Each delivery's own finish time to the NEXT delivery's start time
+    # must be close to the configured renotify_interval -- not collapsed
+    # by the previous delivery's own 0.04s eating into the next interval.
+    gaps = [next_start - this_finish for (_, this_finish), (next_start, _) in itertools.pairwise(notify_windows)]
+    assert all(gap >= 0.045 for gap in gaps), gaps
 
 
 async def test_store_approval_channel_times_out_to_false() -> None:
