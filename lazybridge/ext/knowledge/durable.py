@@ -194,8 +194,21 @@ def _normalize(text: str) -> str:
     point) and let a differently-normalized or differently-cased query
     silently miss a match it should have found. Found by Codex review
     before this ever shipped.
+
+    Normalized a SECOND time after casefolding, not just once before it --
+    ``str.casefold()`` is not guaranteed to preserve normalization form
+    (e.g. Greek "ΐ" (U+0390) casefolds to a sequence that, compared
+    against ``"ΐ".upper()`` run through this same function, wouldn't
+    converge without re-normalizing afterward too), which is exactly the
+    standard "canonical caseless matching" pitfall Unicode's own
+    case-folding guidance warns about (normalize, casefold, normalize
+    again). Skipping the second pass let a lowercase lesson and an
+    uppercase query for the same word fail to match, and let
+    ``save_lesson`` accept both spellings as distinct slugs despite the
+    documented case-insensitive create-only identity. Found by Codex
+    review before this ever shipped.
     """
-    return unicodedata.normalize("NFKC", text).casefold()
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", text).casefold())
 
 
 def slugify(topic: str) -> str:
@@ -295,8 +308,12 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
     # it's the same "malformed record" failure mode, just a different
     # shape of malformed. Found by Codex review before this ever shipped.
     try:
+        # float(10**1000) raises OverflowError, not ValueError -- a
+        # migrated record's timestamp being a legitimately-parsed but
+        # astronomically large int is malformed the same way a
+        # non-numeric one is, so it must fall into the same fallback.
         verified_at = float(lesson.get("verified_at", lesson.get("updated_at", time.time())))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         verified_at = time.time()
     if not math.isfinite(verified_at):
         verified_at = time.time()

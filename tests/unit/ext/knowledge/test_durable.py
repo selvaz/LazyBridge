@@ -269,6 +269,29 @@ def test_find_lessons_matches_across_unicode_normalization_forms() -> None:
     assert kb.find_lessons(decomposed)
 
 
+def test_save_lesson_treats_casefold_normalization_drift_as_the_same_slug() -> None:
+    """str.casefold() is not guaranteed to preserve normalization form --
+    Greek "ΐ" (U+0390) casefolds to a sequence that, compared against
+    "ΐ".upper() run through the same casefold, wouldn't converge without
+    re-normalizing AFTER casefolding too (the standard Unicode canonical
+    caseless matching pitfall: normalize, casefold, normalize again).
+    Without the second pass, a lowercase lesson and an uppercase query
+    for the same word would fail to match, and save_lesson would accept
+    both spellings as distinct slugs despite the documented
+    case-insensitive create-only identity. Found by Codex review before
+    this ever shipped."""
+    lower = "ΐ"
+    upper = lower.upper()
+    assert slugify(lower) == slugify(upper)
+
+    kb = DurableKnowledgeBase(Store())
+    first = kb.save_lesson(topic=lower, what_worked="first meaning")
+    second = kb.save_lesson(topic=upper, what_worked="second, should collide")
+
+    assert "saved" in first
+    assert second.startswith("REJECTED")
+
+
 # ---------------------------------------------------------------------------
 # revise_lesson
 # ---------------------------------------------------------------------------
@@ -594,6 +617,26 @@ def test_render_lesson_line_falls_back_for_a_non_finite_verified_at() -> None:
     line = render_lesson_line(lesson)  # must not raise
 
     assert "STALE" not in line  # falls back to "just verified", not stale
+
+
+def test_render_lesson_line_falls_back_for_a_verified_at_too_large_for_a_float() -> None:
+    """A migrated record's verified_at could be a legitimately-parsed but
+    astronomically large int (e.g. 10**1000) -- float(...) on that raises
+    OverflowError, not TypeError/ValueError, so it slips past the earlier
+    except clause and aborts search_lessons for every other, perfectly
+    fine match in the same result set. Found by Codex review before this
+    ever shipped."""
+    lesson = {
+        "slug": "s",
+        "revision": 1,
+        "topic": "t",
+        "what_worked": "w",
+        "verified_at": 10**1000,
+    }
+
+    line = render_lesson_line(lesson)  # must not raise
+
+    assert "STALE" not in line
 
 
 def test_render_lesson_line_sanitizes_a_non_finite_revision() -> None:
