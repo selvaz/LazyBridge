@@ -926,6 +926,17 @@ def test_poll_seconds_must_be_positive() -> None:
         StoreApprovalChannel(queue, task_id="t1", poll_seconds=-1)
 
 
+def test_poll_seconds_rejects_nan() -> None:
+    """float("nan") compares False against BOTH `<= 0` and `> 0` -- a
+    plain `poll_seconds <= 0` guard lets it straight through, and
+    asyncio.sleep(nan) may never wake at all, silently missing both the
+    ticket's own resolution and its TTL expiry. Found by Codex review
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="poll_seconds"):
+        StoreApprovalChannel(queue, task_id="t1", poll_seconds=float("nan"))
+
+
 def test_renotify_interval_must_be_positive_or_none() -> None:
     """None is already the documented way to disable reminders -- zero or
     negative is not a smaller version of that, it's "always overdue":
@@ -954,6 +965,15 @@ def test_notify_timeout_must_be_positive() -> None:
         StoreApprovalChannel(queue, task_id="t1", notify_timeout=0)
     with pytest.raises(ValueError, match="notify_timeout"):
         StoreApprovalChannel(queue, task_id="t1", notify_timeout=-1)
+
+
+def test_notify_timeout_rejects_nan() -> None:
+    """float("nan") compares False against BOTH `<= 0` and `> 0` -- a
+    plain `notify_timeout <= 0` guard lets it straight through. Found by
+    Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="notify_timeout"):
+        StoreApprovalChannel(queue, task_id="t1", notify_timeout=float("nan"))
 
 
 async def test_ask_does_not_block_the_event_loop() -> None:
