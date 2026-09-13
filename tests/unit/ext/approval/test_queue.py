@@ -222,6 +222,28 @@ def test_queue_works_with_sqlite_memory_special_filename() -> None:
     assert queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram") is True
 
 
+def test_safe_to_call_from_any_thread_unwraps_an_encrypted_store() -> None:
+    """EncryptedStoreAdapter documents itself as usable wherever a plain
+    Store is -- but exposes none of Store's own _db/_local attributes
+    itself (those belong to the Store it delegates to), so inspecting the
+    adapter directly would misreport an encrypted Store(db=":memory:") as
+    thread-safe: exactly the cross-thread breakage this property exists
+    to prevent, just one layer removed. Found by Codex review before this
+    ever shipped."""
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        pytest.skip("cryptography not installed; skipping EncryptedStoreAdapter coverage")
+    from lazybridge.store.encryption import EncryptedStoreAdapter
+
+    key = Fernet.generate_key()
+    unsafe = ApprovalQueue(EncryptedStoreAdapter(Store(db=":memory:"), key=key))
+    assert unsafe.safe_to_call_from_any_thread is False
+
+    safe = ApprovalQueue(EncryptedStoreAdapter(Store(db=None), key=key))
+    assert safe.safe_to_call_from_any_thread is True
+
+
 def test_two_queues_with_different_prefixes_do_not_collide_on_one_store() -> None:
     """The whole point of a configurable prefix: two independent queues can
     share one Store."""
@@ -1146,6 +1168,32 @@ async def test_ask_works_with_sqlite_memory_special_filename() -> None:
     different) thread-pool worker, each opening ITS OWN unrelated empty
     in-memory database. Found by Codex review before this ever shipped."""
     queue = ApprovalQueue(Store(db=":memory:"))
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    async def approve_soon() -> None:
+        await asyncio.sleep(0.03)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    result, _ = await asyncio.gather(channel.ask("please approve"), approve_soon())
+    assert result is True
+
+
+async def test_ask_works_with_an_encrypted_sqlite_memory_store() -> None:
+    """The exact scenario Codex flagged: StoreApprovalChannel offloading
+    ticket creation to a worker thread because an EncryptedStoreAdapter
+    wrapping Store(db=":memory:") looked "thread-safe" from the outside
+    (it exposes none of Store's own _db attribute itself), landing on a
+    different thread's own unrelated in-memory database and raising
+    sqlite3.OperationalError: no such table: store. Found by Codex review
+    before this ever shipped."""
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        pytest.skip("cryptography not installed; skipping EncryptedStoreAdapter coverage")
+    from lazybridge.store.encryption import EncryptedStoreAdapter
+
+    queue = ApprovalQueue(EncryptedStoreAdapter(Store(db=":memory:"), key=Fernet.generate_key()))
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     async def approve_soon() -> None:
