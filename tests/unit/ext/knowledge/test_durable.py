@@ -614,6 +614,26 @@ def test_render_lesson_line_sanitizes_a_non_finite_revision() -> None:
     assert len(line) < 200
 
 
+def test_render_lesson_line_bounds_a_huge_integer_revision_too() -> None:
+    """A migrated record's revision could be a legitimately-parsed but
+    enormous int (Python ints are arbitrary precision, so int(10**1000)
+    succeeds) -- that sails past the except clause meant to catch
+    malformed values, but interpolating it unchecked would still blow the
+    "one bounded line" contract just as badly as an unbounded string
+    would. Found by Codex review before this ever shipped."""
+    lesson = {
+        "slug": "s",
+        "revision": 10**1000,
+        "topic": "t",
+        "what_worked": "w",
+        "verified_at": time.time(),
+    }
+
+    line = render_lesson_line(lesson)
+
+    assert len(line) < 200
+
+
 def test_render_lesson_line_flags_retracted_lessons() -> None:
     store = Store()
     kb = DurableKnowledgeBase(store)

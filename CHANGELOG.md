@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`lazybridge.ext.knowledge`**, a new extension promoting LazyCEO's
+  `lazyceo.lessons` module: `DurableKnowledgeBase` is a Store-backed
+  collection of durable, cross-session "lessons" an agent records after
+  genuinely non-obvious success, retrievable by keyword search across
+  future sessions. Mirrors `ApprovalQueue`/`DurableBlackboard`'s
+  configurable Store key prefix (default `"knowledge:"`).
 - **OpenAI GPT-6 Astra** (`gpt-6-astra`) is now supported throughout the
   OpenAI provider. The `top` tier resolves to Astra; GPT-5.6 Sol/Terra/Luna
   now occupy `expensive`/`medium`/`cheap`, and `_FALLBACKS["gpt-6-astra"]`

@@ -316,11 +316,18 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
         # int(float("inf")) raises OverflowError, not ValueError -- a
         # non-finite revision is malformed the same way a non-numeric one
         # is, so it must fall into the same string-sanitizing branch.
-        revision: int | str = int(raw_revision)
+        revision = str(int(raw_revision))
     except (TypeError, ValueError, OverflowError):
         revision = " ".join(str(raw_revision).split())
-        if len(revision) > 20:
-            revision = revision[:17] + "..."
+    # A successfully-parsed int still isn't guaranteed to be SHORT -- a
+    # migrated record with revision=10**1000 sails through `int(...)`
+    # (Python ints are arbitrary precision) and would otherwise bypass
+    # every other length guard in this function, blowing the "one bounded
+    # line" contract just as badly as an unbounded string would. Applying
+    # the same cap to both branches uniformly closes that gap. Found by
+    # Codex review before this ever shipped.
+    if len(revision) > 20:
+        revision = revision[:17] + "..."
     return f"- [{slug} rev{revision}]{flags} {topic}: {gist}"
 
 
