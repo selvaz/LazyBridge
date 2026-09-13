@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`lazybridge.ext.delegation`**, a new extension promoting LazyCEO's
+  generic background-delegation infrastructure: durable Store-backed job
+  records, persistent consultant handles, fire-and-forget writer delegates,
+  capped parallel delegation, and durable-plan-linked delegation. Like the
+  prior `ApprovalQueue`/`DurableKnowledgeBase` extractions, Store key prefixes
+  are configurable and default to neutral `"delegation:"` namespaces.
 - **`lazybridge.ext.knowledge`**, a new extension promoting LazyCEO's
   `lazyceo.lessons` module: `DurableKnowledgeBase` is a Store-backed
   collection of durable, cross-session "lessons" an agent records after
