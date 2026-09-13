@@ -677,6 +677,47 @@ def test_render_lesson_line_bounds_a_huge_integer_revision_too() -> None:
     assert len(line) < 200
 
 
+def test_render_lesson_line_bounds_an_extreme_but_finite_stale_age() -> None:
+    """verified_at can be an extreme but still FINITE float (e.g.
+    -1e308) -- it passes both the float() conversion and the isfinite()
+    check, so age_days ends up enormous but not inf/nan, and
+    int(age_days) succeeds too, just producing a 300+ digit number that
+    would blow this line's bound just as badly as an unbounded string.
+    Found by Codex review before this ever shipped."""
+    lesson = {
+        "slug": "s",
+        "revision": 1,
+        "topic": "t",
+        "what_worked": "w",
+        "verified_at": -1e308,
+    }
+
+    line = render_lesson_line(lesson)
+
+    assert len(line) < 200
+
+
+def test_render_lesson_line_avoids_restringifying_an_oversized_int_revision() -> None:
+    """CPython caps int-to-str conversion at ~4300 digits by default
+    (raising ValueError above that), so a revision like 10**5000 makes
+    str(int(raw_revision)) raise -- caught by the except clause -- but an
+    earlier version's fallback then called str(raw_revision) again on
+    the SAME oversized int, hitting the identical, this-time-uncaught
+    ValueError and aborting search_lessons anyway. Found by Codex review
+    before this ever shipped."""
+    lesson = {
+        "slug": "s",
+        "revision": 10**5000,
+        "topic": "t",
+        "what_worked": "w",
+        "verified_at": time.time(),
+    }
+
+    line = render_lesson_line(lesson)  # must not raise
+
+    assert len(line) < 200
+
+
 def test_render_lesson_line_flags_retracted_lessons() -> None:
     store = Store()
     kb = DurableKnowledgeBase(store)

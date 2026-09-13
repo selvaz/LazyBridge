@@ -322,7 +322,18 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
     if lesson.get("status") == "retracted":
         flags += " RETRACTED"
     elif age_days > STALE_AFTER_DAYS:
-        flags += f" STALE(verified {int(age_days)}d ago)"
+        # `verified_at` can be an extreme but still FINITE float (e.g.
+        # -1e308) -- it passes both the float() conversion and the
+        # isfinite() check above, so age_days ends up enormous but not
+        # inf/nan, and int(age_days) succeeds too, just producing a
+        # 300+ digit number that blows this line's bound just as badly
+        # as an unbounded string would. Capped the same way as the other
+        # sanitized fields. Found by Codex review before this ever
+        # shipped.
+        age_str = str(int(age_days))
+        if len(age_str) > 20:
+            age_str = age_str[:17] + "..."
+        flags += f" STALE(verified {age_str}d ago)"
     # Sanitized the same way as topic/gist/slug: revision is conceptually
     # always an int, but an externally seeded or migrated record isn't
     # guaranteed to have kept it that way -- interpolating it unchecked
@@ -335,7 +346,19 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
         # is, so it must fall into the same string-sanitizing branch.
         revision = str(int(raw_revision))
     except (TypeError, ValueError, OverflowError):
-        revision = " ".join(str(raw_revision).split())
+        if isinstance(raw_revision, int):
+            # If raw_revision is already an int, the ONLY way the try
+            # block above could have failed is str()'s own digit-limit
+            # guard (CPython caps int-to-str conversion at ~4300 digits
+            # by default, raising this same ValueError) -- so falling
+            # back to `str(raw_revision)` here would immediately hit the
+            # identical, still-uncaught error and abort search_lessons
+            # anyway. `bit_length()` describes the value's size without
+            # ever formatting all of it. Found by Codex review before
+            # this ever shipped.
+            revision = f"<{raw_revision.bit_length()}-bit int>"
+        else:
+            revision = " ".join(str(raw_revision).split())
     # A successfully-parsed int still isn't guaranteed to be SHORT -- a
     # migrated record with revision=10**1000 sails through `int(...)`
     # (Python ints are arbitrary precision) and would otherwise bypass
