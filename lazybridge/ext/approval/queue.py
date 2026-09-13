@@ -381,6 +381,18 @@ class ApprovalQueue:
     def create_ticket(
         self, *, task_id: str, prompt: str, kind: TicketKind = "approval", ttl: timedelta = DEFAULT_TTL
     ) -> ApprovalTicket:
+        if ttl <= timedelta(0):
+            # A nonpositive ttl writes a ticket whose expires_at is
+            # already at or before created_at -- immediately invisible to
+            # list_pending_tickets() (which filters on `expires_at >
+            # now`) and unapprovable/unrejectable (both check the same
+            # way via `_actionable`), yet still durably stored with
+            # status "pending" forever: a configuration mistake would
+            # silently deny every request through this queue while
+            # accumulating misleading pending-looking records nothing can
+            # ever act on. Found by Codex review before this ever
+            # shipped.
+            raise ValueError(f"ttl must be positive, got {ttl}")
         now = datetime.now(UTC)
         ticket = ApprovalTicket(
             approval_id=str(uuid.uuid4()),
@@ -549,6 +561,16 @@ class StoreApprovalChannel:
             # (up to hours) finally expires. Found by Codex review before
             # this ever shipped.
             raise ValueError(f"poll_seconds must be positive, got {poll_seconds}")
+        if ttl <= timedelta(0):
+            # ApprovalQueue.create_ticket() rejects this too, but only
+            # once ask() actually calls it -- validating here as well
+            # gives construction-time feedback, matching every other
+            # timing parameter this class already checks up front. A
+            # nonpositive ttl writes a ticket that's immediately invisible
+            # to list_pending_tickets() and unapprovable/unrejectable, yet
+            # still durably stored as "pending" forever. Found by Codex
+            # review before this ever shipped.
+            raise ValueError(f"ttl must be positive, got {ttl}")
         if renotify_interval is not None and renotify_interval <= timedelta(0):
             # `None` is already the documented way to disable reminders --
             # zero/negative is not a smaller version of that, it's

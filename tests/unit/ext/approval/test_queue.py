@@ -708,8 +708,13 @@ def test_approve_unknown_ticket_returns_false() -> None:
 
 
 def test_approve_expired_ticket_fails() -> None:
+    # create_ticket() rejects a nonpositive ttl outright (it would write
+    # an already-expired ticket that's durably stuck as "pending"
+    # forever), so a tiny POSITIVE ttl that elapses for real is how this
+    # test gets a genuinely expired ticket instead.
     queue = ApprovalQueue(Store())
-    ticket = queue.create_ticket(task_id="t1", prompt="p", ttl=timedelta(seconds=-1))
+    ticket = queue.create_ticket(task_id="t1", prompt="p", ttl=timedelta(microseconds=1))
+    time.sleep(0.01)
     assert queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram") is False
 
 
@@ -718,7 +723,10 @@ def test_list_pending_tickets_excludes_resolved_and_expired() -> None:
     pending = queue.create_ticket(task_id="t1", prompt="p1")
     resolved = queue.create_ticket(task_id="t1", prompt="p2")
     queue.approve_ticket(resolved.approval_id, actor="marco", channel="telegram")
-    queue.create_ticket(task_id="t1", prompt="p3", ttl=timedelta(seconds=-1))
+    # A tiny POSITIVE ttl that elapses for real -- create_ticket() rejects
+    # a nonpositive one outright, see test_approve_expired_ticket_fails.
+    queue.create_ticket(task_id="t1", prompt="p3", ttl=timedelta(microseconds=1))
+    time.sleep(0.01)
 
     ids = [t.approval_id for t in queue.list_pending_tickets()]
     assert ids == [pending.approval_id]
@@ -975,6 +983,34 @@ def test_notify_timeout_rejects_nan() -> None:
     queue = ApprovalQueue(Store())
     with pytest.raises(ValueError, match="notify_timeout"):
         StoreApprovalChannel(queue, task_id="t1", notify_timeout=float("nan"))
+
+
+def test_create_ticket_rejects_a_nonpositive_ttl() -> None:
+    """A nonpositive ttl writes a ticket whose expires_at is already at or
+    before created_at -- immediately invisible to list_pending_tickets()
+    and unapprovable/unrejectable, yet still durably stored as "pending"
+    forever: a configuration mistake would silently deny every request
+    through this queue while accumulating misleading pending-looking
+    records nothing can ever act on. Found by Codex review before this
+    ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="ttl"):
+        queue.create_ticket(task_id="t1", prompt="p", ttl=timedelta(0))
+    with pytest.raises(ValueError, match="ttl"):
+        queue.create_ticket(task_id="t1", prompt="p", ttl=timedelta(seconds=-1))
+
+
+def test_store_approval_channel_rejects_a_nonpositive_ttl_at_construction() -> None:
+    """Same check as ApprovalQueue.create_ticket()'s own, but surfaced at
+    StoreApprovalChannel construction time -- consistent with every other
+    timing parameter this class already validates up front, rather than
+    waiting for ask() to eventually call create_ticket() and hit it
+    there. Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="ttl"):
+        StoreApprovalChannel(queue, task_id="t1", ttl=timedelta(0))
+    with pytest.raises(ValueError, match="ttl"):
+        StoreApprovalChannel(queue, task_id="t1", ttl=timedelta(seconds=-1))
 
 
 async def test_ask_does_not_block_the_event_loop() -> None:
