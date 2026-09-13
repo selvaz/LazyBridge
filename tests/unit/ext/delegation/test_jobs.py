@@ -20,6 +20,19 @@ def test_session_id_key_is_stable_scoped_and_configurable() -> None:
     assert session_id_key(first, prefix="legacy:").startswith("legacy:")
 
 
+def test_session_id_key_canonicalizes_relative_and_absolute_spellings() -> None:
+    """An unresolved relative root scopes the key to its literal spelling
+    rather than the actual workspace: Path("project") launched from two
+    different parent directories would otherwise hash to the SAME key for
+    two different working directories, and a relative vs. absolute
+    spelling of the same directory would hash to two DIFFERENT keys for
+    the same one. Found by Codex review before this ever shipped."""
+    workspace = Path.cwd() / "some-project"
+
+    assert session_id_key(workspace) == session_id_key(Path("some-project"))
+    assert session_id_key(workspace) == session_id_key(workspace.resolve())
+
+
 def test_write_uses_one_compatible_record_shape_and_omits_none() -> None:
     store = Store()
     registry = JobRegistry(store, prefix="custom:")

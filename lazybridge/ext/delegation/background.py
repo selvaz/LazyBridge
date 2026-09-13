@@ -32,6 +32,33 @@ def _track(background_tasks: set[asyncio.Task[Any]], coro: Any) -> asyncio.Task[
     strong reference in ``background_tasks``, a fire-and-forget coroutine can
     be garbage-collected mid-run and die before writing a terminal status.
     The callback bounds the set by removing completed tasks.
+
+    Known accepted constraint: every Tool built in this module (via
+    :func:`make_background_delegate`, :func:`make_persistent_consultant`,
+    :func:`make_parallel_delegate`, :func:`make_plan_delegate`) requires a
+    genuinely PERSISTENT host event loop -- the task this creates must
+    outlive the coroutine that scheduled it, which returns almost
+    immediately by design. Driving one of these tools through
+    :meth:`~lazybridge.Tool.run_sync` breaks this: LazyBridge's
+    sync/async bridge (``lazybridge._asyncbridge.run_coroutine_blocking``)
+    runs the coroutine on a fresh event loop that CANCELS every task
+    still pending in its own ``finally`` cleanup as soon as the outer
+    coroutine returns -- so the just-scheduled background job would be
+    cancelled before it does any real work, while its durable record
+    stays stuck at ``"running"``/``"awaiting_approval"``. The same
+    fresh-loop-per-call behavior also means an :class:`asyncio.Lock`
+    created once at Tool-build time (see
+    :func:`make_persistent_consultant`) can become bound to one call's
+    loop and then raise on a later call through a different one. This
+    mirrors the promoted source's own assumption of one persistent host
+    loop for the delegating agent's entire process lifetime -- these
+    tools are designed to be awaited via :meth:`~lazybridge.Tool.run`
+    from within that loop, never invoked through ``run_sync``. A real
+    fix would need fire-and-forget work to live on a dedicated,
+    always-on loop independent of whatever loop happens to invoke the
+    tool -- a bigger architectural change than this extraction takes on;
+    revisit if a caller genuinely needs to invoke these tools from
+    ``run_sync``. Found by Codex review before this ever shipped.
     """
     task = asyncio.create_task(coro)
     background_tasks.add(task)

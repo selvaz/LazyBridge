@@ -11,6 +11,14 @@ consultant conversations, fans independent objectives out in parallel, and
 can link delegated work to a :class:`~lazybridge.ext.planners.DurableBlackboard`
 task without making any of those policies part of LazyBridge core.
 
+Every Tool this package builds must be awaited via
+:meth:`~lazybridge.Tool.run` from within the delegating agent's own,
+genuinely persistent event loop -- never invoked through
+:meth:`~lazybridge.Tool.run_sync`, whose fresh-loop-per-call semantics
+would cancel the fire-and-forget background work before it can do
+anything. See :func:`~lazybridge.ext.delegation.background._track`'s own
+docstring for the full explanation.
+
     from lazybridge import Store
     from lazybridge.ext.delegation import JobRegistry, make_background_delegate
 
