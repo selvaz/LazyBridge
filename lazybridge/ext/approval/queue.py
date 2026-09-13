@@ -390,7 +390,20 @@ class ApprovalQueue:
         return ApprovalTicket.model_validate(raw) if isinstance(raw, dict) else None
 
     def list_pending_tickets(self, *, limit: int = 100) -> list[ApprovalTicket]:
-        """Unexpired tickets still awaiting a decision, oldest first (FIFO queue)."""
+        """Unexpired tickets still awaiting a decision, oldest first (FIFO queue).
+
+        Known accepted gap: this loads and deserializes EVERY record under
+        ``prefix`` -- resolved and expired tickets included -- before
+        filtering to pending ones and applying ``limit``, so cost is
+        proportional to the queue's entire history, not to how many are
+        actually pending; an encrypted store additionally decrypts every
+        historical value on every call. Fine for a queue with a bounded or
+        modest lifetime; for one meant to run indefinitely with many
+        tickets ever filed, pair this with an external pruning/archival
+        job (there's no built-in one) or scope ``prefix`` narrowly enough
+        to keep each queue's own history small. Found by Codex review
+        before this ever shipped.
+        """
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
         now = datetime.now(UTC)
@@ -999,29 +1012,30 @@ class StoreApprovalChannel:
             # cleanup, not error handling. Found by Codex review before
             # this ever shipped.
             reason = "ask() was cancelled" if isinstance(exc, asyncio.CancelledError) else f"ask() raised: {exc!r}"
-
-            async def _retire() -> None:
-                # Detached for the same reason `_retire_orphaned_ticket`
-                # above is: awaited INLINE here (as an earlier version
-                # did), a second `.cancel()` landing while THIS await is
-                # in flight would interrupt it too -- `contextlib.suppress`
-                # over `Exception` doesn't catch `asyncio.CancelledError`
-                # (a `BaseException`), so that second cancellation would
-                # blow straight past this cleanup and out through the
-                # `raise` below, leaving the ticket pending. ask() is
-                # already unconditionally terminating by the time this
-                # runs (every path through this except block re-raises),
-                # so there is nothing left for a detached cleanup task to
-                # race against -- unlike the creation-path watcher, this
-                # one doesn't need to be conditioned on ask() actually
-                # having been cancelled. Found by Codex review before this
-                # ever shipped.
-                with contextlib.suppress(Exception):
-                    await self._call(
-                        self._queue.reject_ticket, ticket.approval_id, actor="system", channel=self.name, reason=reason
-                    )
-
-            watcher = asyncio.ensure_future(_retire())
-            _background_tasks.add(watcher)
-            watcher.add_done_callback(_background_tasks.discard)
+            # Called directly here, NOT through self._call()'s offload,
+            # and NOT detached onto its own task the way the creation-path
+            # cleanup above has to be -- ticket already exists by this
+            # point, so unlike that one, there's nothing left to wait on
+            # asynchronously before this can run. A synchronous call has
+            # no `await` for a repeated `.cancel()` to land in, so it's
+            # immune to however many more times ask() gets cancelled from
+            # here on for the same reason an async detached task is --
+            # but WITHOUT that approach's own race: a detached task lets
+            # ask()'s own CancelledError reach its caller BEFORE the
+            # reject_ticket CAS actually runs, so another surface can
+            # approve the still-"pending" ticket in that window --
+            # succeeding, silently, for a decision nobody is listening for
+            # anymore (confirmed as a real gap by Codex review; the
+            # earlier detached version of this cleanup had it). Calling it
+            # synchronously guarantees the CAS has already resolved one
+            # way or the other by the time `raise` below makes this
+            # cancellation observable to anyone. The trade-off is a rare,
+            # bounded block of the event loop for the duration of one
+            # Store write (this is the exceptional ask()-is-terminating
+            # path, not the hot polling loop) -- see `_call`'s own
+            # docstring for why that offload exists at all, and why it
+            # isn't needed for a call this infrequent. Found by Codex
+            # review before this ever shipped.
+            with contextlib.suppress(Exception):
+                self._queue.reject_ticket(ticket.approval_id, actor="system", channel=self.name, reason=reason)
             raise
