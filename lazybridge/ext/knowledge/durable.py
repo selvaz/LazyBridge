@@ -272,6 +272,46 @@ def _safe_str(value: Any) -> str:
         return ""
 
 
+def _display_revision(raw_revision: Any) -> str:
+    """A bounded, always-safe string form of a ``revision`` value, for
+    interpolation into either a rendered lesson line or a rejection
+    message. Shared by :func:`render_lesson_line` and
+    :meth:`DurableKnowledgeBase.save_lesson`'s duplicate-slug rejection --
+    a migrated record's ``revision`` isn't guaranteed to have stayed a
+    small int, and a bare f-string interpolation of one that's too large
+    would raise instead of degrading gracefully (this was independently
+    found twice: once in the renderer, then again in the duplicate-save
+    rejection, which formats the same stored value but had its own
+    unguarded interpolation). Found by Codex review before this ever
+    shipped.
+    """
+    try:
+        # int(float("inf")) raises OverflowError, not ValueError -- a
+        # non-finite revision is malformed the same way a non-numeric one
+        # is, so it must fall into the same string-sanitizing branch.
+        revision = str(int(raw_revision))
+    except (TypeError, ValueError, OverflowError):
+        if isinstance(raw_revision, int):
+            # If raw_revision is already an int, the ONLY way the try
+            # block above could have failed is str()'s own digit-limit
+            # guard (CPython caps int-to-str conversion at ~4300 digits
+            # by default, raising this same ValueError) -- so falling
+            # back to `str(raw_revision)` here would immediately hit the
+            # identical, still-uncaught error.  `bit_length()` describes
+            # the value's size without ever formatting all of it.
+            revision = f"<{raw_revision.bit_length()}-bit int>"
+        else:
+            revision = " ".join(str(raw_revision).split())
+    # A successfully-parsed int still isn't guaranteed to be SHORT -- a
+    # migrated record with revision=10**1000 sails through `int(...)`
+    # (Python ints are arbitrary precision) and would otherwise bypass
+    # every other length guard, blowing a bounded-line/message contract
+    # just as badly as an unbounded string would.
+    if len(revision) > 20:
+        revision = revision[:17] + "..."
+    return revision
+
+
 def render_lesson_line(lesson: dict[str, Any]) -> str:
     """One line: slug/revision/staleness flag, topic, and a short gist --
     never the full text, so a caller injecting several of these (e.g. into
@@ -364,35 +404,7 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
     # guaranteed to have kept it that way -- interpolating it unchecked
     # would bypass every whitespace/length guard this function otherwise
     # enforces. Found by Codex review before this ever shipped.
-    raw_revision = lesson.get("revision", 1)
-    try:
-        # int(float("inf")) raises OverflowError, not ValueError -- a
-        # non-finite revision is malformed the same way a non-numeric one
-        # is, so it must fall into the same string-sanitizing branch.
-        revision = str(int(raw_revision))
-    except (TypeError, ValueError, OverflowError):
-        if isinstance(raw_revision, int):
-            # If raw_revision is already an int, the ONLY way the try
-            # block above could have failed is str()'s own digit-limit
-            # guard (CPython caps int-to-str conversion at ~4300 digits
-            # by default, raising this same ValueError) -- so falling
-            # back to `str(raw_revision)` here would immediately hit the
-            # identical, still-uncaught error and abort search_lessons
-            # anyway. `bit_length()` describes the value's size without
-            # ever formatting all of it. Found by Codex review before
-            # this ever shipped.
-            revision = f"<{raw_revision.bit_length()}-bit int>"
-        else:
-            revision = " ".join(str(raw_revision).split())
-    # A successfully-parsed int still isn't guaranteed to be SHORT -- a
-    # migrated record with revision=10**1000 sails through `int(...)`
-    # (Python ints are arbitrary precision) and would otherwise bypass
-    # every other length guard in this function, blowing the "one bounded
-    # line" contract just as badly as an unbounded string would. Applying
-    # the same cap to both branches uniformly closes that gap. Found by
-    # Codex review before this ever shipped.
-    if len(revision) > 20:
-        revision = revision[:17] + "..."
+    revision = _display_revision(lesson.get("revision", 1))
     return f"- [{slug} rev{revision}]{flags} {topic}: {gist}"
 
 
@@ -458,7 +470,14 @@ class DurableKnowledgeBase:
         key = self._key(slug)
         existing = self._store.read(key)
         if isinstance(existing, dict):
-            revision = existing.get("revision", 1)
+            # A bare f-string interpolation of the stored revision would
+            # crash for a migrated record whose revision is an oversized
+            # int (the same ~4300-digit CPython int-to-str conversion
+            # limit render_lesson_line already guards against) -- this
+            # duplicate-save rejection formats the same stored value and
+            # had the identical, separately unguarded interpolation.
+            # Found by Codex review before this ever shipped.
+            revision = _display_revision(existing.get("revision", 1))
             return (
                 f"REJECTED: lesson {slug!r} already exists at revision {revision} -- call "
                 f"revise_lesson(slug={slug!r}, expected_revision={revision}, ...) to update it, "
