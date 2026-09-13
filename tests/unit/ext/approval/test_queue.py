@@ -463,9 +463,41 @@ async def test_send_swallows_a_notifier_that_cancels_itself() -> None:
     async def self_cancelling_notify(ticket, message):
         inner = asyncio.ensure_future(asyncio.sleep(999))
         inner.cancel()
-        await inner  # raises CancelledError -- self-inflicted, not from outside
+        _ = await inner  # raises CancelledError -- self-inflicted, not from outside
 
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=self_cancelling_notify)
+
+    async def approve_soon() -> None:
+        await asyncio.sleep(0.05)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    # If the bug were still present, ask() would abort right after the
+    # notify call instead of reaching its polling loop, and this gather
+    # would raise CancelledError instead of returning normally.
+    result, _ = await asyncio.wait_for(asyncio.gather(channel.ask("please approve"), approve_soon()), timeout=1.0)
+
+    assert result is True
+
+
+async def test_send_swallows_a_notify_that_raises_cancelled_before_returning_an_awaitable() -> None:
+    """A `notify` callable can raise CancelledError SYNCHRONOUSLY, when
+    merely called, before it ever returns an awaitable for
+    asyncio.ensure_future to wrap -- no notify_task exists yet at that
+    point for the shield()-based distinction to inspect. This must still
+    be treated as an ordinary notify failure (logged and swallowed), not
+    mistaken for ask() itself having been cancelled, per this class' own
+    documented contract that notify failures never fail the approval
+    itself. Found by Codex review before this ever shipped: the earlier
+    fix only covered a self-cancelling notify TASK, missing that the
+    factory call constructing it can raise the exact same way before one
+    ever exists."""
+    queue = ApprovalQueue(Store())
+
+    def notify_that_raises_cancelled_on_call(ticket, message):
+        raise asyncio.CancelledError("self-inflicted, before returning anything")
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=notify_that_raises_cancelled_on_call)
 
     async def approve_soon() -> None:
         await asyncio.sleep(0.05)
@@ -548,7 +580,7 @@ async def test_send_swallows_notifier_self_cancellation_despite_a_stale_cancelli
     async def self_cancelling_notify(ticket, message):
         inner = asyncio.ensure_future(asyncio.sleep(999))
         inner.cancel()
-        await inner  # raises CancelledError -- self-inflicted, not from outside
+        _ = await inner  # raises CancelledError -- self-inflicted, not from outside
 
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=self_cancelling_notify)
 
@@ -575,7 +607,7 @@ async def test_send_swallows_notifier_self_cancellation_despite_a_stale_cancelli
         # point of this test.
         approve_task = asyncio.create_task(approve_soon())
         result = await channel.ask("please approve")
-        await approve_task
+        _ = await approve_task
         return result
 
     # A bare `current.cancelling() == 0` check (rather than comparing the

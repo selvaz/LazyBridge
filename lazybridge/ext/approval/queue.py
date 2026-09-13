@@ -610,16 +610,51 @@ class StoreApprovalChannel:
         # above; the third snapshotted too late, after `self._notify` had
         # already run).
         cancelling_before = current.cancelling() if current is not None else 0
+
+        def _is_a_fresh_cancellation_of_this_task() -> bool:
+            # True only if a NEW `.cancel()` landed on THIS task somewhere
+            # between the snapshot above and right now -- see that
+            # snapshot's own comment for why a delta, not a raw
+            # `cancelling() == 0` check, is what's needed here.
+            cancelling_after = current.cancelling() if current is not None else 0
+            return cancelling_after != cancelling_before
+
+        def _swallow_notifier_cancellation() -> None:
+            logging.getLogger(__name__).warning(
+                "notify was cancelled (from within the notifier itself) for ticket %s -- "
+                "it still exists and is still answerable",
+                ticket.approval_id,
+            )
+
         try:
-            # Constructing the awaitable is inside this try too, not just
-            # awaiting it: a `notify` that raises SYNCHRONOUSLY when called
-            # (before ever returning a coroutine) must be swallowed and
-            # logged the same as any other notify failure, not left to
-            # propagate out of `_send()` (and, from there, out of ask()
-            # itself, rejecting a ticket over a notify problem rather than
-            # a real approval one). Found by Codex review before this ever
-            # shipped.
-            notify_task = asyncio.ensure_future(self._notify(ticket, message))
+            try:
+                # Constructing the awaitable is inside its own try, not
+                # just awaiting it: a `notify` that raises SYNCHRONOUSLY
+                # when called (before ever returning a coroutine) must be
+                # swallowed and logged the same as any other notify
+                # failure, not left to propagate out of `_send()` (and,
+                # from there, out of ask() itself, rejecting a ticket over
+                # a notify problem rather than a real approval one). Found
+                # by Codex review before this ever shipped.
+                notify_task = asyncio.ensure_future(self._notify(ticket, message))
+            except asyncio.CancelledError:
+                # No `notify_task` exists yet here -- calling `self._notify`
+                # is plain, synchronous Python with no `await` in it, so
+                # asyncio's OWN cancellation-delivery machinery (which only
+                # ever injects a CancelledError at an actual suspension
+                # point) cannot be the source of one raised from evaluating
+                # it. The delta check still guards this rather than
+                # assuming that invariant always holds -- e.g. a `notify`
+                # factory that itself awaits something internally before
+                # this expression finishes evaluating. Found by Codex
+                # review before this ever shipped: the previous fix only
+                # covered a self-cancelling notify TASK, missing that the
+                # factory call constructing it can raise the exact same
+                # way before one ever exists to inspect.
+                if _is_a_fresh_cancellation_of_this_task():
+                    raise
+                _swallow_notifier_cancellation()
+                return
             self._notify_tasks[ticket.approval_id] = notify_task
 
             def _forget_if_still_current(_: asyncio.Task[None], approval_id: str = ticket.approval_id) -> None:
@@ -634,8 +669,7 @@ class StoreApprovalChannel:
             try:
                 await asyncio.wait_for(asyncio.shield(notify_task), timeout=timeout)
             except asyncio.CancelledError:
-                cancelling_after = current.cancelling() if current is not None else 0
-                if cancelling_after == cancelling_before and notify_task.cancelled():
+                if not _is_a_fresh_cancellation_of_this_task() and notify_task.cancelled():
                     # No NEW cancellation landed on THIS task during this
                     # specific await -- so this CancelledError can only be
                     # notify_task's own doing (something inside the
@@ -646,11 +680,7 @@ class StoreApprovalChannel:
                     # logged and swallowed, not propagated to abort ask()
                     # and retire an otherwise-fine ticket over a
                     # notifier-internal hiccup.
-                    logging.getLogger(__name__).warning(
-                        "notify was cancelled (from within the notifier itself) for ticket %s -- "
-                        "it still exists and is still answerable",
-                        ticket.approval_id,
-                    )
+                    _swallow_notifier_cancellation()
                     return
                 # A NEW cancellation landed on `_send()` itself during this
                 # await (ask() is being torn down) -- shield() keeps
