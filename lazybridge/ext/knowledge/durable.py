@@ -256,6 +256,22 @@ def _field_terms(text: str) -> Counter[str]:
     return Counter(_query_terms(text))
 
 
+def _safe_str(value: Any) -> str:
+    """``str(value)`` on a migrated record's field can raise -- most
+    notably CPython's ~4300-digit int-to-str conversion limit, if a
+    ``topic``/``what_worked``/``gotchas`` value is an oversized int --
+    but :meth:`DurableKnowledgeBase.find_lessons` calls this once per
+    field PER CANDIDATE RECORD while scanning every match, so one
+    malformed field would abort scoring entirely (and with it every
+    OTHER, perfectly fine match) instead of just contributing no terms
+    for that one field. Found by Codex review before this ever shipped.
+    """
+    try:
+        return str(value)
+    except ValueError:
+        return ""
+
+
 def render_lesson_line(lesson: dict[str, Any]) -> str:
     """One line: slug/revision/staleness flag, topic, and a short gist --
     never the full text, so a caller injecting several of these (e.g. into
@@ -274,10 +290,19 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
     function exists to enforce. Found by Codex review before this ever
     shipped (twice: once for topic/gist, again for the slug).
     """
-    topic = " ".join(str(lesson.get("topic", "")).split())
+    # `_safe_str`, not bare `str`: a Store record isn't guaranteed to
+    # have gone through save_lesson/slugify at all (externally seeded,
+    # migrated, or otherwise hand-written) -- a topic/gist/slug that's an
+    # oversized int would make plain `str(...)` raise the same ~4300-digit
+    # conversion-limit ValueError already fixed in find_lessons's own
+    # field-term extraction, aborting this ONE call and, since
+    # search_lessons renders every match through this same function,
+    # every OTHER perfectly fine match in the same result set too. Found
+    # by Codex review before this ever shipped.
+    topic = " ".join(_safe_str(lesson.get("topic", "")).split())
     if len(topic) > 80:
         topic = topic[:77] + "..."
-    gist = " ".join(str(lesson.get("what_worked", "")).split())
+    gist = " ".join(_safe_str(lesson.get("what_worked", "")).split())
     if len(gist) > 150:
         gist = gist[:147] + "..."
     # Collapsed the same way as topic/gist above, not just length-capped:
@@ -291,7 +316,7 @@ def render_lesson_line(lesson: dict[str, Any]) -> str:
     # entirely correctly by Codex review, since search_lessons renders
     # arbitrary matching Store records through this same function. Found
     # by Codex review before this ever shipped.
-    slug = " ".join(str(lesson.get("slug", "")).split())
+    slug = " ".join(_safe_str(lesson.get("slug", "")).split())
     if len(slug) > MAX_SLUG_LENGTH:
         slug = slug[: MAX_SLUG_LENGTH - 3] + "..."
     # Same defensive posture as the slug above: an externally seeded or
@@ -576,9 +601,9 @@ class DurableKnowledgeBase:
                 continue
             if not include_retracted and raw.get("status") == "retracted":
                 continue
-            topic_terms = _field_terms(str(raw.get("topic", "")))
-            worked_terms = _field_terms(str(raw.get("what_worked", "")))
-            gotcha_terms = _field_terms(str(raw.get("gotchas", "")))
+            topic_terms = _field_terms(_safe_str(raw.get("topic", "")))
+            worked_terms = _field_terms(_safe_str(raw.get("what_worked", "")))
+            gotcha_terms = _field_terms(_safe_str(raw.get("gotchas", "")))
             distinct = 0
             total = 0
             for term in terms:

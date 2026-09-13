@@ -81,6 +81,27 @@ def test_slugify_distinguishes_topics_that_differ_only_by_a_combining_mark() -> 
     assert "saved" in second
 
 
+def test_find_lessons_skips_a_record_with_an_unstringifiable_field_instead_of_aborting() -> None:
+    """CPython caps int-to-str conversion at ~4300 digits by default --
+    if a migrated record's topic/what_worked/gotchas is an oversized int,
+    str(...) on it raises ValueError. find_lessons calls this once per
+    field PER CANDIDATE RECORD while scanning every match, so one such
+    malformed record would abort scoring entirely (and with it every
+    OTHER, perfectly fine match) instead of just contributing no terms
+    for that one field. Found by Codex review before this ever shipped."""
+    store = Store()
+    kb = DurableKnowledgeBase(store)
+    kb.save_lesson(topic="normal windows paths", what_worked="quote the path")
+    store.write(
+        f"{DEFAULT_PREFIX}malformed",
+        {"slug": "malformed", "topic": 10**5000, "what_worked": "x", "revision": 1},
+    )
+
+    results = kb.find_lessons("windows paths")
+
+    assert len(results) == 1
+
+
 def test_find_lessons_matches_accented_query_and_content() -> None:
     """A lesson saved with accented-Latin what_worked text must remain
     searchable -- an earlier version's ASCII-only tokenizer ([a-z0-9])
@@ -514,6 +535,20 @@ def test_render_lesson_line_is_a_single_bounded_line_regardless_of_input() -> No
 
     assert "\n" not in line
     assert len(line) < 260
+
+
+def test_render_lesson_line_survives_an_oversized_int_in_topic_gist_or_slug() -> None:
+    """CPython caps int-to-str conversion at ~4300 digits by default --
+    if a migrated record's topic, what_worked, or slug is an oversized
+    int, plain str(...) on it would raise, aborting this ONE call and,
+    since search_lessons renders every match through this same function,
+    every OTHER perfectly fine match in the same result set too. Found
+    by Codex review before this ever shipped."""
+    base_lesson = {"slug": "s", "revision": 1, "topic": "t", "what_worked": "w", "verified_at": time.time()}
+    for field in ("topic", "what_worked", "slug"):
+        lesson = {**base_lesson, field: 10**5000}
+        line = render_lesson_line(lesson)  # must not raise
+        assert len(line) < 200
 
 
 def test_render_lesson_line_bounds_a_long_slug_too() -> None:
