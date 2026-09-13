@@ -581,6 +581,35 @@ class StoreApprovalChannel:
 
             notify_task.add_done_callback(_log_if_failed)
 
+        current = asyncio.current_task()
+        # Snapshotted before ANYTHING else in this method, `self._notify`
+        # not even called yet -- not checked as a bare
+        # `current.cancelling() == 0` after catching -- `cancelling()` is
+        # a cumulative, never-auto-reset count of every `.cancel()` this
+        # task has EVER received that hasn't been matched by an
+        # `.uncancel()`. A task that swallowed some earlier, unrelated
+        # cancellation elsewhere (its own cleanup path, e.g.) keeps a
+        # nonzero count for the rest of its life without ever having
+        # called `uncancel()` -- checking the raw count would then treat
+        # every later notifier self-cancellation on that SAME task as if
+        # it were a fresh external cancellation, rejecting a perfectly
+        # fine ticket. Comparing the count from right here to the count
+        # right after only flags a NEW request that landed somewhere in
+        # this whole method -- `.cancel()` increments the count
+        # synchronously, before the resulting CancelledError is ever
+        # delivered, so a genuine cancellation is guaranteed to show up as
+        # an increase regardless of WHERE in this method it landed.
+        # Snapshotting any later than this (after constructing the notify
+        # awaitable, say) would miss a `notify` callable unusual enough to
+        # cancel this very task as a side effect of merely being called,
+        # before ever returning its own coroutine. Found by Codex review
+        # before this ever shipped (three times over: the first fix
+        # checked `notify_task.cancelled()` alone, missing that OUR OWN
+        # task's cancellation can race notify_task's; the second checked
+        # the raw count instead of the delta, missing the stale-count case
+        # above; the third snapshotted too late, after `self._notify` had
+        # already run).
+        cancelling_before = current.cancelling() if current is not None else 0
         try:
             # Constructing the awaitable is inside this try too, not just
             # awaiting it: a `notify` that raises SYNCHRONOUSLY when called
@@ -605,15 +634,32 @@ class StoreApprovalChannel:
             try:
                 await asyncio.wait_for(asyncio.shield(notify_task), timeout=timeout)
             except asyncio.CancelledError:
-                # `_send()` itself was cancelled (ask() is being torn
-                # down), not just the notify_timeout deadline -- shield()
-                # kept `notify_task` running through that regardless, so
-                # without this it would run forever with nothing left to
-                # ever cancel or retire it (the timeout machinery this
+                cancelling_after = current.cancelling() if current is not None else 0
+                if cancelling_after == cancelling_before and notify_task.cancelled():
+                    # No NEW cancellation landed on THIS task during this
+                    # specific await -- so this CancelledError can only be
+                    # notify_task's own doing (something inside the
+                    # notifier's own implementation: an inner
+                    # asyncio.wait_for, a transport task it manages and
+                    # cancels itself, etc.), not `_send()`/ask() being
+                    # torn down. Treat it like any other notify failure:
+                    # logged and swallowed, not propagated to abort ask()
+                    # and retire an otherwise-fine ticket over a
+                    # notifier-internal hiccup.
+                    logging.getLogger(__name__).warning(
+                        "notify was cancelled (from within the notifier itself) for ticket %s -- "
+                        "it still exists and is still answerable",
+                        ticket.approval_id,
+                    )
+                    return
+                # A NEW cancellation landed on `_send()` itself during this
+                # await (ask() is being torn down) -- shield() keeps
+                # `notify_task` running through that regardless of
+                # whatever ELSE notify_task may be doing, so without
+                # detaching it here it would run forever with nothing left
+                # to ever cancel or retire it (the timeout machinery this
                 # whole method exists for disappears along with `_send()`
-                # unwinding). Detach it the same way a timeout does, then
-                # re-raise unchanged. Found by Codex review before this
-                # ever shipped.
+                # unwinding).
                 _detach(notify_task)
                 raise
             except TimeoutError:
