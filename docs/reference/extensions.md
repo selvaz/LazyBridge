@@ -99,6 +99,65 @@ in a structured `AuditRecord`.
 
 ::: lazybridge.ext.approval.TerminalChannel
 
+## Durable background delegation
+
+Fire-and-forget delegation for long-running agents
+(`lazybridge.ext.delegation`) — Store-backed job records kept separate from
+the process-local `asyncio` tasks that execute them, process-lifetime
+serialized consultant conversations, process-local capped parallel fan-out,
+and delegation linked to a [`DurableBlackboard`](#planners) task. Job
+records survive restarts only when backed by a persistent `Store`; executing
+jobs do not resume after restart, and callers should invoke
+`JobRegistry.reclaim_interrupted()` during startup.
+
+Promoted from LazyCEO's generic background-delegation infrastructure after
+live production use. Tools produced by the fire-and-forget delegation
+factories must be awaited via `Tool.run` from the delegating agent's
+persistent event loop. `Tool.run_sync` is unsupported because its normal
+short-lived-loop paths cancel pending background tasks when the outer call
+returns. The synchronous status/result tools built by `JobRegistry` are not
+subject to this restriction.
+
+::: lazybridge.ext.delegation.JobRegistry
+
+::: lazybridge.ext.delegation.make_background_delegate
+
+::: lazybridge.ext.delegation.make_claude_delegate_engine_factory
+
+::: lazybridge.ext.delegation.make_parallel_delegate
+
+::: lazybridge.ext.delegation.make_persistent_consultant
+
+::: lazybridge.ext.delegation.make_plan_delegate
+
+::: lazybridge.ext.delegation.make_claude_writer
+
+::: lazybridge.ext.delegation.make_codex_writer
+
+::: lazybridge.ext.delegation.session_id_key
+
+## Durable knowledge base
+
+Store-backed, cross-session "lessons" a long-running agent can record after
+non-obvious success (`lazybridge.ext.knowledge`). With a persistent `Store`,
+these reusable notes outlive the plan, task, conversation, and process in
+which they were learned. `save_lesson()` is create-only; updates and
+retractions are explicit optimistic-CAS operations through
+`revise_lesson()`.
+
+Promoted from LazyCEO's `lazyceo.lessons` module after live production use.
+Unlike `lazybridge.Memory`, which represents conversation-history context,
+the knowledge base holds independently searchable retrospective lessons;
+unlike `DurableBlackboard`, it does not represent task state.
+
+::: lazybridge.ext.knowledge.DurableKnowledgeBase
+
+::: lazybridge.ext.knowledge.LessonStatus
+
+::: lazybridge.ext.knowledge.render_lesson_line
+
+::: lazybridge.ext.knowledge.slugify
+
 ## OpenTelemetry exporter
 
 ::: lazybridge.ext.otel.OTelExporter

@@ -5,7 +5,7 @@ LazyBridge is split into three concentric layers:
 | Layer | Lives in | Holds |
 |---|---|---|
 | **Core** | `lazybridge/` (excluding the subtree below) | `Agent`, `LLMEngine`, `Plan`, `Step`, `Tool`, `Envelope`, `Memory`, `Store`, `Session`, sentinels, predicates, guards, providers |
-| **Framework extensions** | `lazybridge/ext/*` | OpenTelemetry, HumanEngine / SupervisorEngine, Evals, planners, visualizer |
+| **Framework extensions** | `lazybridge/ext/*` | OpenTelemetry, HumanEngine / SupervisorEngine, Evals, planners, visualizer, tiered approval (`TieredGate`), background delegation, durable knowledge base |
 | **Concrete tools** | sibling `lazytoolkit` package (`pip install lazytoolkit`) | connectors (Gmail, Telegram, MCP, the HTTP gateway), document readers (`read_docs`), skills (`doc_skills`) |
 
 > **Moved in 0.8.** The MCP and gateway connectors (`lazybridge.ext.{mcp,gateway}`)
