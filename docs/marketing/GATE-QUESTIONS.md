@@ -1,76 +1,95 @@
 # Domande di gate per l'operatore — presenza pubblica di LazyBridge
 
-> Stato: **APERTO — in attesa di risposta.** Nessuna azione pubblica o irreversibile
-> (post reale, creazione di account, uso di credenziali reali su una piattaforma
-> social) viene eseguita finche' entrambe le domande sotto non hanno una risposta
-> esplicita dell'operatore. Questo vale a prescindere da quanto materiale di
-> preparazione (ricerca, positioning, scaffolding tecnico dry-run) sia gia' pronto
-> nel repository: essere pronti a pubblicare non e' un'autorizzazione a farlo.
+> Stato: **APERTO — in attesa di risposta.** Nessuna azione pubblica o uso di
+> credenziali reali viene eseguito finché entrambe le domande sotto non ricevono
+> una risposta esplicita dell'operatore. Il materiale preparatorio già presente
+> nel repository non costituisce autorizzazione a pubblicare.
 
-Questo documento esiste per rendere le due domande di gate visibili e tracciabili
-nel tempo, non per essere letto una volta sola. Va aggiornato (sezione
-"Log risposte" in fondo) quando arriva una risposta, senza cancellare la
-domanda originale.
+Questo documento mantiene visibili e tracciabili le due decisioni che spettano
+all'operatore. Quando arrivano le risposte, vanno registrate nel "Log risposte"
+senza cancellare o riscrivere le domande originali.
 
-## Domanda 1 — Chi possiede le credenziali del canale scelto?
+## Domanda 1 — Chi possiede e controlla le credenziali del canale scelto?
 
-Prima di qualunque annuncio pubblico (Show HN, X/Twitter, LinkedIn, Reddit, o
-altro canale), serve sapere:
+Per ciascun canale che si intende usare (Show HN, X/Twitter, LinkedIn, Reddit o
+altro), l'operatore deve indicare:
 
-- Quale canale/i si usa per primo (la ricerca in
-  `docs/marketing/launch-patterns-research.md` e la proposta in
-  `docs/marketing/positioning.md` indicano Show HN come primo candidato, sulla
-  base dei precedenti osservati — ma resta una proposta, non una decisione).
-- Chi e' il titolare dell'account/delle credenziali su quel canale: un account
-  esistente dell'operatore, un account nuovo da creare a nome di chi, o un
-  account del progetto/organizzazione da creare.
-- Chi detiene materialmente le credenziali una volta create (password,
-  eventuali API key/app OAuth per un bot di pubblicazione) e come vengono
-  conservate — nessuna credenziale reale esiste oggi in questo ambiente e
-  nessuna verra' richiesta o generata da questo agente prima di questa
-  risposta.
+- il canale e l'account esatto: account personale esistente, account di
+  un'organizzazione/progetto esistente, oppure nuovo account da creare e a nome
+  di chi;
+- il titolare dell'account, chi ne è amministratore e chi è autorizzato a
+  pubblicare e a rispondere ai commenti; queste persone possono non coincidere;
+- chi custodisce password, secondo fattore, codici di recupero ed eventuali
+  API key o autorizzazioni OAuth, e con quale sistema approvato; nel log non
+  vanno mai inseriti segreti;
+- chi può concedere e revocare l'accesso e chi interviene se l'account viene
+  bloccato, compromesso o richiede una verifica dell'identità.
 
-**Perche' serve prima di procedere:** senza sapere chi possiede l'account non e'
-possibile nemmeno proporre una finestra di pubblicazione realistica (serve la
-disponibilita' di chi risponde ai commenti nelle prime ore, come nota la
-ricerca), ne' impostare in sicurezza un eventuale bot di pubblicazione.
+La scelta va fatta nel rispetto del modello del canale: Show HN e altri canali
+possono richiedere un account personale e attività umana; LinkedIn può separare
+proprietario della pagina e amministratori; API, automazione o account di
+progetto possono non essere disponibili o consentiti. Il possesso di un account
+non autorizza automaticamente l'automazione.
 
-## Domanda 2 — Supervisione: ogni contenuto va approvato prima di uscire, o fiducia piena dopo un collaudo?
+La ricerca in `docs/marketing/launch-patterns-research.md` e la proposta in
+`docs/marketing/positioning.md` indicano Show HN come primo candidato sulla base
+dei precedenti osservati, ma non decidono né il canale né l'account.
 
-Due modelli alternativi, da scegliere esplicitamente (anche una via di mezzo
-va bene, ma va dichiarata):
+**Perché è un gate:** senza titolare, accessi e responsabilità definiti non è
+possibile usare credenziali in sicurezza, stabilire chi pubblica o pianificare
+una finestra in cui una persona autorizzata possa seguire i commenti.
 
-- **Approvazione preventiva:** ogni contenuto (post, risposta, thread) viene
-  mostrato all'operatore e pubblicato solo dopo un "ok" esplicito, per un
-  periodo indefinito o fino a nuova decisione.
-- **Fiducia dopo collaudo:** un primo periodo/numero di pubblicazioni con
-  approvazione preventiva, dopo il quale — se l'esito e' soddisfacente — il
-  bot/agente pubblica autonomamente entro regole concordate (es. solo risposte
-  tecniche, mai contenuti promozionali non richiesti, mai sollecitare voti).
+## Domanda 2 — Quale livello di approvazione serve prima di pubblicare contenuti?
 
-**Perche' serve prima di procedere:** determina se il bot di annuncio (oggi
-scaffolding mock/dry-run in `tools/marketing/`, inattivo) puo' mai passare a
-una modalita' "live" automatica, o se dovra' sempre presentare una bozza e
-aspettare un click umano. Cambia anche il disegno tecnico (coda di
-approvazione vs pubblicazione diretta), quindi la risposta va data prima di
-costruire quella parte, non dopo.
+L'operatore deve scegliere uno dei seguenti modelli, oppure descriverne una
+combinazione con confini altrettanto espliciti:
 
-## Cosa resta bloccato finche' non arriva risposta
+- **Approvazione preventiva per tutto:** ogni post, risposta, modifica,
+  correzione o rimozione viene mostrato all'operatore e richiede un "ok"
+  esplicito prima dell'azione.
+- **Autonomia limitata per categoria:** alcune azioni definite in anticipo
+  richiedono sempre approvazione (per esempio annunci, claim, confronti con
+  concorrenti o risposte controverse), mentre altre possono essere eseguite
+  senza approvazione caso per caso entro regole concordate (per esempio
+  risposte tecniche fattuali). L'operatore deve elencare categorie, canali e
+  limiti autorizzati.
+- **Fiducia dopo un collaudo:** si applica l'approvazione preventiva per un
+  periodo o numero di pubblicazioni definito; al termine, l'autonomia scatta
+  solo se l'operatore conferma che i criteri di esito concordati sono
+  soddisfatti.
 
-- Qualsiasi pubblicazione reale su qualunque piattaforma.
-- Creazione di un account reale su qualunque piattaforma.
-- Uso di credenziali reali di qualunque tipo.
-- Passaggio del bot di annuncio (`tools/marketing/`) da modalita' mock/dry-run
-  a modalita' live, in qualunque forma.
+La risposta deve inoltre specificare chi approva, su quale canale arriva
+l'approvazione, la durata o il numero di pubblicazioni del collaudo, i criteri
+per superarlo, le azioni che restano sempre soggette ad approvazione e come
+sospendere o revocare rapidamente l'autonomia. L'assenza di risposta o il
+silenzio dopo una bozza non valgono come approvazione.
 
-## Cosa resta invece disponibile senza attendere risposta
+**Perché è un gate:** la scelta determina se l'eventuale tooling di annuncio
+(oggi solo scaffolding mock/dry-run in `tools/marketing/`, inattivo) debba
+fermarsi a una bozza, usare una coda di approvazione o possa compiere alcune
+azioni live entro limiti verificabili. Non si assume che ogni canale consenta
+pubblicazione automatica: le sue regole e capacità tecniche restano vincolanti.
 
-- Ricerca, positioning, audit del repository, scaffolding tecnico dry-run:
-  tutto cio' che non richiede credenziali reali o un'azione pubblica.
-- Manutenzione di questo stesso documento.
+## Cosa resta bloccato finché entrambe le domande non ricevono risposta
+
+- Qualsiasi pubblicazione, risposta, modifica o rimozione reale su una
+  piattaforma esterna per conto di LazyBridge.
+- Creazione o modifica di account reali e assegnazione di ruoli o accessi.
+- Richiesta, inserimento, memorizzazione o uso di password, token, API key,
+  autorizzazioni OAuth, secondo fattore o codici di recupero reali.
+- Passaggio del tooling in `tools/marketing/` da mock/dry-run a qualunque
+  modalità live, inclusi test su account reali.
+
+## Cosa rimane disponibile nel frattempo
+
+- Ricerca, positioning, audit e pianificazione interna che non producano azioni
+  pubbliche.
+- Bozze chiaramente marcate come non approvate, purché non vengano inviate né
+  caricate su piattaforme esterne.
+- Scaffolding e test locali in mock/dry-run con credenziali e account fittizi.
+- Manutenzione di questo documento e registrazione delle future risposte.
 
 ## Log risposte
 
 | Data | Domanda | Risposta | Da chi |
 |------|---------|----------|--------|
-| — | — | Nessuna risposta ricevuta finora | — |
