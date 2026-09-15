@@ -87,6 +87,15 @@ def _fresh_task(text: str) -> dict[str, Any]:
         "attempts": 0,
         "owner": None,
         "claimed_at": None,
+        #: ``time.time()`` (same convention as ``claimed_at``) the moment
+        #: this task reaches a TERMINAL state: ``done``, an exhausted
+        #: ``failed``, or ``cancelled``. None while the task is open --
+        #: including a ``mark_failed`` that sends it back to ``todo`` for a
+        #: retry, which is not a close. Without this, a consumer reading a
+        #: closed task's text has no way to place it in time at all; a real
+        #: incident (a report showing days-old closures under today's date)
+        #: is what this field exists to close off.
+        "completed_at": None,
     }
 
 
@@ -241,7 +250,7 @@ class DurableBlackboard:
                     f"REJECTED: task {task_index} is {task.get('status')}, not todo -- "
                     "only an unclaimed task can be cancelled."
                 )
-            task.update(status="cancelled", cancel_reason=reason.strip())
+            task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=time.time())
             new_doc = {**doc, "tasks": tasks}
             return new_doc, self._render(new_doc)
 
@@ -333,7 +342,7 @@ class DurableBlackboard:
             if task.get("attempts", 0) >= self.max_attempts:
                 # Out of retries: park it so the plan can finish instead of
                 # handing the same poison task out forever.
-                task.update(status="failed", owner=None, claimed_at=None)
+                task.update(status="failed", owner=None, claimed_at=None, completed_at=time.time())
                 task["error"] = task.get("error") or f"exhausted {self.max_attempts} attempts"
                 new_doc = {**doc, "tasks": tasks}
                 return new_doc, None
@@ -415,7 +424,7 @@ class DurableBlackboard:
             if task.get("attempts", 0) >= self.max_attempts:
                 # Same poison-task handling as claim_next: park it so the
                 # plan can finish instead of handing it out again.
-                task.update(status="failed", owner=None, claimed_at=None)
+                task.update(status="failed", owner=None, claimed_at=None, completed_at=time.time())
                 task["error"] = task.get("error") or f"exhausted {self.max_attempts} attempts"
                 new_doc = {**doc, "tasks": tasks}
                 return new_doc, (
@@ -462,10 +471,19 @@ class DurableBlackboard:
                     "its lease was reassigned while you were working."
                 )
             if status == "done":
-                task.update(status="done", result=text, error="", owner=None, claimed_at=None)
+                task.update(status="done", result=text, error="", owner=None, claimed_at=None, completed_at=time.time())
             else:
                 exhausted = task.get("attempts", 0) >= self.max_attempts
-                task.update(status="failed" if exhausted else "todo", error=text, owner=None, claimed_at=None)
+                # Only an EXHAUSTED failure actually closes the task --
+                # sent back to "todo" for a retry is still open, and must
+                # not look completed to a consumer reading completed_at.
+                task.update(
+                    status="failed" if exhausted else "todo",
+                    error=text,
+                    owner=None,
+                    claimed_at=None,
+                    completed_at=time.time() if exhausted else None,
+                )
             new_doc = {**doc, "tasks": tasks}
             return new_doc, self._render(new_doc)
 

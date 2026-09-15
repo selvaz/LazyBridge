@@ -263,6 +263,170 @@ def test_a_plan_of_only_cancelled_and_done_tasks_is_complete():
     assert "1 cancelled" in board.render()
 
 
+# --- completed_at: a closed task can finally be placed in time -----------
+#
+# Found by a real incident: LazyCEO's end-of-day report showed a specialist's
+# "recently closed" tasks under today's date, when the closures were from
+# days earlier -- there was no way to tell, because no completion timestamp
+# existed anywhere in a closed task's record (only claimed_at, which a
+# terminal write always clears to None). These tests prove the field a
+# consumer would actually need to answer "was this closed today" now exists
+# and behaves correctly, not just that it's present.
+
+
+def test_a_fresh_task_has_no_completed_at():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    assert board.snapshot().tasks[0]["completed_at"] is None
+
+
+def test_mark_done_stamps_completed_at():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="w")
+
+    import time
+
+    before = time.time()
+    board.mark_done(0, "finished")
+    after = time.time()
+
+    completed_at = board.snapshot().tasks[0]["completed_at"]
+    assert completed_at is not None
+    assert before <= completed_at <= after
+
+
+def test_mark_failed_sent_back_to_todo_for_a_retry_is_not_completed():
+    """A retry is not a close -- the task is still open, headed back to the
+    queue, and completed_at must not claim otherwise."""
+    store = Store()
+    board = _board(store, max_attempts=5)
+    board.set_plan("shared", TASKS)
+    board.claim_next(owner="w")
+
+    board.mark_failed(0, "transient error")
+
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "todo"
+    assert task["completed_at"] is None
+
+
+def test_mark_failed_exhausted_stamps_completed_at():
+    """The attempts-exhausted branch of mark_failed IS a real close -- the
+    task is permanently parked, not retried -- and must be stamped like any
+    other terminal state."""
+    store = Store()
+    board = _board(store, max_attempts=1)
+    board.set_plan("shared", ["always fails"])
+    board.claim_next(owner="w")
+
+    import time
+
+    before = time.time()
+    board.mark_failed(0, "boom")
+    after = time.time()
+
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "failed"
+    completed_at = task["completed_at"]
+    assert completed_at is not None
+    assert before <= completed_at <= after
+
+
+def test_cancel_task_stamps_completed_at():
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", TASKS)
+
+    import time
+
+    before = time.time()
+    board.cancel_task(1, TASKS[1], "no longer needed")
+    after = time.time()
+
+    completed_at = board.snapshot().tasks[1]["completed_at"]
+    assert completed_at is not None
+    assert before <= completed_at <= after
+
+
+def test_an_exhausted_lease_parked_by_claim_next_stamps_completed_at():
+    """The OTHER poison-task park -- reached via claim_next reclaiming an
+    expired lease straight into exhaustion, not via mark_failed -- must be
+    stamped the same way. A live crash-loop is exactly this path, not the
+    mark_failed one."""
+    store = Store()
+    board = _board(store, lease_seconds=0.05, max_attempts=1)
+    board.set_plan("crash test", ["the task that kills the worker"])
+    board.claim_next(owner="doomed")
+
+    import time
+
+    time.sleep(0.06)
+    before = time.time()
+    assert board.claim_next(owner="next-worker") is None  # parked, not handed out
+    after = time.time()
+
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "failed"
+    completed_at = task["completed_at"]
+    assert completed_at is not None
+    assert before <= completed_at <= after
+
+
+def test_a_reclaimed_but_not_exhausted_lease_is_not_completed():
+    """The lease expired and the task was handed to a new worker -- it is
+    still open (now claimed again), not closed, and must not be stamped."""
+    store = Store()
+    board = _board(store, lease_seconds=0.05, max_attempts=5)
+    board.set_plan("crash test", ["the task that kills the worker"])
+    board.claim_next(owner="doomed")
+
+    import time
+
+    time.sleep(0.06)
+    assert board.claim_next(owner="next-worker") == (0, "the task that kills the worker")
+
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "claimed"
+    assert task["completed_at"] is None
+
+
+def test_completed_at_actually_distinguishes_an_old_closure_from_a_fresh_one():
+    """The invariant a real consumer needs, not just "the field is set":
+    given one task closed BEFORE a cutoff and one closed AFTER it, filtering
+    on completed_at must keep only the second -- exactly the LazyCEO
+    end-of-day report's "what closed since last night" question. Written to
+    fail if completed_at stopped varying per task (e.g. a bug that stamped
+    every closure with the SAME timestamp, or none at all) -- a test that
+    only checked "completed_at is not None" would pass even then."""
+    store = Store()
+    board = _board(store, max_attempts=5)
+    board.set_plan("shared", ["closed yesterday", "closed today"])
+
+    board.claim_next(owner="w")
+    board.mark_done(0, "old work, done a while ago")
+
+    import time
+
+    # A real gap on BOTH sides of the cutoff, not just after it -- the
+    # first sleep guarantees the cutoff is strictly later than task 0's
+    # completed_at even on a coarse system clock, so the boundary itself
+    # is never a tie.
+    time.sleep(0.02)
+    cutoff = time.time()
+    time.sleep(0.02)
+
+    board.claim_next(owner="w")
+    board.mark_done(1, "fresh work, done just now")
+
+    tasks = board.snapshot().tasks
+    closed_since_cutoff = [t["text"] for t in tasks if t["completed_at"] is not None and t["completed_at"] > cutoff]
+
+    assert closed_since_cutoff == ["closed today"]  # NOT "closed yesterday" too
+
+
 def test_claim_next_does_not_starve_an_expired_claim_behind_new_todo_tasks():
     """A plan that keeps growing via add_tasks() must not indefinitely delay
     reclaiming an abandoned worker's task just because a fresher todo item
