@@ -402,3 +402,25 @@ async def test_tiered_gate_satisfies_approval_gate_protocol():
     result = gate(_request(name="anything"))
     decision = await result
     assert isinstance(decision, ApprovalDecision)
+
+
+def test_elide_never_exceeds_the_budget_it_was_given():
+    """Found by Codex review on PR #167.
+
+    The marker costs characters too, so the first version answered a
+    three-character budget with a thirty-odd-character string -- longer than
+    the limit it was asked to respect, which would push a message past the
+    exact transport cap the caller was defending against. Below the floor
+    where both ends fit, the END is what survives: the same argument the
+    rest of the module is built on.
+    """
+    from lazybridge._display import DISPLAY_BUDGET, elide
+
+    text = "cd /repo && " + ("x" * 500) + " && rm -rf /tmp/gone"
+    for budget in (1, 3, 10, 39, 43, 44, 100, 999, DISPLAY_BUDGET):
+        assert len(elide(text, budget)) <= budget, budget
+    # Nothing fits in nothing.
+    assert elide(text, 0) == ""
+    assert elide(text, -5) == ""
+    # Where only a sliver fits, it is the sliver that names the consequence.
+    assert elide(text, 20).endswith("rm -rf /tmp/gone")

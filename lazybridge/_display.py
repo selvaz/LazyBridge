@@ -45,15 +45,29 @@ _HEAD_SHARE = 2 / 3
 
 
 def elide(text: str, budget: int = DISPLAY_BUDGET) -> str:
-    """``text`` shortened to ``budget``, keeping BOTH ends.
+    """``text`` shortened to at most ``budget`` characters, keeping BOTH ends.
 
     Returns the text unchanged when it fits, so short values are
     byte-for-byte what they always were.
+
+    The result never exceeds ``budget``. That sounds obvious and the first
+    version got it wrong: the elision marker costs characters too, so on a
+    budget too small to hold it, a head-plus-marker-plus-tail result came out
+    LONGER than the limit it was asked to respect -- which would push a
+    message past the very transport cap the caller was defending against.
+    Below that floor there is no room to show both ends, so this keeps the
+    END alone. That is the same argument the module is built on: if only a
+    sliver fits, the sliver worth having is the one saying what the command
+    does last.
     """
-    if budget <= 0 or len(text) <= budget:
+    if budget <= 0:
+        return ""
+    if len(text) <= budget:
         return text
     marker_width = 40  # the elision line costs budget too; pay for it
-    usable = max(budget - marker_width, 2)
+    if budget < marker_width + 4:
+        return text[-budget:]
+    usable = budget - marker_width
     head = max(int(usable * _HEAD_SHARE), 1)
     tail = max(usable - head, 1)
     dropped = len(text) - head - tail
