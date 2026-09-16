@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from lazybridge import Tool
+from lazybridge._display import elide
 from lazybridge.ext.delegation.jobs import JobRegistry
 
 # Matches the consultant handles emitted in practice: hex/dashes plus the
@@ -132,7 +133,7 @@ async def _run_delegate_job(
             plan_task_text=plan_task_text,
             result=text,
         )
-        preview = text if len(text) <= 500 else text[:497] + "..."
+        preview = elide(text)
         _safe_notify(notify, f"{label} job {job_id[:8]} done: {objective[:100]}\n\n{preview}")
     else:
         message = result.error.message if result.error else "unknown error"
@@ -218,7 +219,7 @@ def make_background_delegate(
         initial_status = "awaiting_approval" if pre_confirm is not None else "running"
         registry.write(job_id, objective, tool_name=tool_name, status=initial_status)
         _track(background_tasks, _run_job(job_id, objective))
-        preview = objective if len(objective) <= 300 else objective[:297] + "..."
+        preview = elide(objective)
         if pre_confirm is not None:
             _safe_notify(
                 notify,
@@ -283,14 +284,14 @@ def make_persistent_consultant(
             if match:
                 state["handle"] = match.group(1)
         registry.write(job_id, question, tool_name=tool_name, status="done", result=result)
-        preview = result if len(result) <= 500 else result[:497] + "..."
+        preview = elide(result)
         _safe_notify(notify, f"{tool_name} job {job_id[:8]} done: {question[:100]}\n\n{preview}")
 
     async def ask(question: str) -> str:
         job_id = str(uuid.uuid4())
         registry.write(job_id, question, tool_name=tool_name, status="running")
         _track(background_tasks, _run_job(job_id, question))
-        preview = question if len(question) <= 200 else question[:197] + "..."
+        preview = elide(question)
         _safe_notify(notify, f"Consulting {tool_name} (job {job_id[:8]}): {preview}")
         return (
             f"Started job {job_id[:8]} -- {tool_name} is answering in the background, not blocking you. "

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from lazybridge import Tool
+from lazybridge._display import elide
 from lazybridge.ext.delegation.background import make_background_delegate
 from lazybridge.ext.delegation.jobs import JobRegistry
 
@@ -36,7 +37,7 @@ def make_codex_writer(
     config = CodingAgentConfig.writer(gate)
 
     async def _confirm(objective: str) -> bool:
-        preview = objective if len(objective) <= 300 else objective[:297] + "..."
+        preview = elide(objective)
         return await channel.ask(confirmation_prompt.format(preview=preview))
 
     def _engine_factory() -> Any:
