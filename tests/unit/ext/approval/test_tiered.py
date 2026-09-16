@@ -303,6 +303,101 @@ async def test_rendered_prompt_redacts_common_secret_shapes():
     assert "[redacted]" in channel.prompts[0]
 
 
+# --- what the approver is actually shown --------------------------------
+
+
+async def test_a_long_command_is_shown_whole():
+    """Two thousand characters used to be cut at four hundred.
+
+    Measured on a live store: 155 of 397 real requests (39%) reached the
+    operator truncated, and the operator approved 95% of everything. The
+    budget was between eight and twenty times tighter than Telegram, which
+    is the narrowest transport these prompts travel over.
+    """
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    command = "echo " + ("a" * 2000)
+    await gate(_request(name="Bash", arguments={"command": command}))
+    assert "elided" not in channel.prompts[0]
+    assert command in channel.prompts[0]
+
+
+async def test_an_elided_command_still_shows_its_ending():
+    """The reason this fix exists.
+
+    In `cd repo && ... && rm -rf /tmp/gone` the consequence is LAST. Keeping
+    the head and dropping the tail shows the approver the harmless opening
+    and hides the part that could hurt them -- which does not merely
+    inconvenience the human, it manufactures their consent.
+    """
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    command = "cd /repo && " + ("x" * 6000) + " && rm -rf /tmp/gone"
+    await gate(_request(name="Bash", arguments={"command": command}))
+    prompt = channel.prompts[0]
+    assert "cd /repo" in prompt, "the opening should still be there"
+    assert "rm -rf /tmp/gone" in prompt, "the approver must see what it ends with"
+
+
+async def test_the_marker_says_how_much_is_missing():
+    """`...` cannot tell one dropped line from ten thousand, and that is
+    exactly the judgement the reader needs to decide whether to go and look
+    at the whole value."""
+    import re
+
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    await gate(_request(name="Bash", arguments={"command": "y" * 9000}))
+    match = re.search(r"\[…(\d+) characters elided…\]", channel.prompts[0])
+    assert match, channel.prompts[0][:200]
+    assert int(match.group(1)) > 5000
+
+
+async def test_redaction_survives_into_the_tail_segment():
+    """Redacting after eliding would leave a secret in the kept tail: the
+    patterns would have run against a string that no longer held it."""
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    command = "export API_KEY=sk-headsecret111 && " + ("z" * 6000) + " && export API_KEY=sk-tailsecret222"
+    await gate(_request(name="Bash", arguments={"command": command}))
+    prompt = channel.prompts[0]
+    assert "sk-headsecret111" not in prompt
+    assert "sk-tailsecret222" not in prompt
+    assert "[redacted]" in prompt
+
+
+async def test_a_long_cwd_does_not_blow_the_rendered_message_past_budget():
+    """Found by Codex review: only ``arguments`` went through ``elide()``,
+    so a pathological (or just very deep) ``cwd`` could push the whole
+    rendered message past Telegram's transport cap on its own -- the exact
+    failure class this module exists to remove, reappearing through a field
+    that had no budget at all."""
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    long_cwd = "C:\\" + ("nested-directory\\" * 400)
+    await gate(_request(name="Bash", arguments={"command": "git status"}, cwd=long_cwd))
+    prompt = channel.prompts[0]
+    assert len(prompt) < 4096
+    assert long_cwd not in prompt  # the bare, unbounded cwd never reaches the human whole
+    cwd_section = prompt[prompt.index("cwd:") :]  # elide()'s marker spans its own line
+    assert "elided" in cwd_section
+
+
+async def test_a_short_cwd_is_shown_whole():
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    await gate(_request(name="Bash", arguments={"command": "git status"}, cwd="C:\\repo"))
+    assert "cwd: C:\\repo" in channel.prompts[0]
+
+
+async def test_a_short_prompt_is_untouched():
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    await gate(_request(name="Bash", arguments={"command": "git status"}))
+    assert "elided" not in channel.prompts[0]
+    assert '"command": "git status"' in channel.prompts[0]
+
+
 # --- TerminalChannel ---------------------------------------------------
 
 
@@ -327,3 +422,25 @@ async def test_tiered_gate_satisfies_approval_gate_protocol():
     result = gate(_request(name="anything"))
     decision = await result
     assert isinstance(decision, ApprovalDecision)
+
+
+def test_elide_never_exceeds_the_budget_it_was_given():
+    """Found by Codex review on PR #167.
+
+    The marker costs characters too, so the first version answered a
+    three-character budget with a thirty-odd-character string -- longer than
+    the limit it was asked to respect, which would push a message past the
+    exact transport cap the caller was defending against. Below the floor
+    where both ends fit, the END is what survives: the same argument the
+    rest of the module is built on.
+    """
+    from lazybridge._display import DISPLAY_BUDGET, elide
+
+    text = "cd /repo && " + ("x" * 500) + " && rm -rf /tmp/gone"
+    for budget in (1, 3, 10, 39, 43, 44, 100, 999, DISPLAY_BUDGET):
+        assert len(elide(text, budget)) <= budget, budget
+    # Nothing fits in nothing.
+    assert elide(text, 0) == ""
+    assert elide(text, -5) == ""
+    # Where only a sliver fits, it is the sliver that names the consequence.
+    assert elide(text, 20).endswith("rm -rf /tmp/gone")
