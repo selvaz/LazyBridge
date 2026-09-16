@@ -1,9 +1,16 @@
 # Domande di gate per l'operatore — presenza pubblica di LazyBridge
 
-> Stato: **APERTO — in attesa di risposta.** Nessuna azione pubblica o uso di
-> credenziali reali viene eseguito finché entrambe le domande sotto non ricevono
-> una risposta esplicita dell'operatore. Il materiale preparatorio già presente
-> nel repository non costituisce autorizzazione a pubblicare.
+> Stato: **RISPOSTO (15/09) — in attesa di esecuzione.** L'operatore ha
+> risposto a entrambe le domande (vedi "Log risposte" sotto): percorso
+> primario per le credenziali + esperimento parallelo "computer use", e
+> approvazione preventiva di ogni contenuto durante un periodo di collaudo.
+> Questo NON è ancora un via libera a pubblicare: nessuna credenziale reale
+> esiste ancora in questo ambiente e nessun account è stato creato. Nessuna
+> azione pubblica o uso di credenziali reali viene eseguito finché un account
+> reale non esiste e la persona autorizzata non conferma esplicitamente di
+> voler procedere con la prima pubblicazione. Il materiale preparatorio già
+> presente nel repository non costituisce di per sé autorizzazione a
+> pubblicare.
 
 Questo documento mantiene visibili e tracciabili le due decisioni che spettano
 all'operatore. Quando arrivano le risposte, vanno registrate nel "Log risposte"
@@ -93,3 +100,6 @@ pubblicazione automatica: le sue regole e capacità tecniche restano vincolanti.
 
 | Data | Domanda | Risposta | Da chi |
 |------|---------|----------|--------|
+| 2026-09-15 | 1 (credenziali) | Percorso primario: l'operatore crea di persona il primo account (es. X/Twitter). In parallelo, provare come esperimento se un agente con capacità "computer use" (verificare cosa esiste davvero in questo ambiente prima di assumerlo) riesce a creare l'account da solo -- se non funziona (probabile: CAPTCHA/verifica telefono), si procede senza drammi col percorso primario. | Operatore |
+| 2026-09-15 | 2 (supervisione) | Si parte con ogni contenuto approvato dall'operatore prima di uscire; dopo un periodo di collaudo (durata/criteri da decidere quando ci si arriva) si passa a piena autonomia. | Operatore |
+| 2026-09-15 | (nota, non un gate separato) | Ordine di lavoro confermato: prima costruire gli strumenti (bot/automazioni in mock/dry-run), poi lanciare, poi monitorare i risultati e migliorare strumenti/strategia di conseguenza -- ciclo continuo, non un piano one-shot. Posizionamento: LazyBridge è il framework, ma LazyCEO può essere il prodotto di punta/hero; il fatto che la campagna sia gestita da un agente autonomo è un elemento di marketing da valorizzare esplicitamente (meta-storytelling), non da nascondere. | Operatore |
