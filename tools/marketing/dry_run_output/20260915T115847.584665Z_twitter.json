@@ -1,0 +1,16 @@
+{
+  "mode": "INACTIVE / MOCK - DRY RUN ONLY",
+  "would_have_posted_to": "Twitter/X",
+  "platform_key": "twitter",
+  "would_have_posted_at_utc": "2026-09-15T11:58:47.584665+00:00",
+  "source_draft": "C:\\Users\\Administrator\\Documents\\GitHub\\LazyBridge\\tools\\marketing\\example_draft.md",
+  "character_count": 214,
+  "character_limit": 280,
+  "text": "DRAFT — LazyBridge keeps functions, agents, and typed pipelines behind one tool contract. Start with one Agent; change the engine as the workflow grows. This is fictional preview copy, not an approved announcement.",
+  "metadata": {
+    "status": "DRAFT",
+    "campaign": "lazybridge-future-social",
+    "audience": "Python agent builders",
+    "content_kind": "illustrative announcement"
+  }
+}
