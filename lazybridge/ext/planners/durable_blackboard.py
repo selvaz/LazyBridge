@@ -23,6 +23,7 @@ tools are the blackboard verbs.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ Tools:
 - ``set_plan(reasoning, tasks)``       — create the plan (only when there is none).
 - ``add_tasks(tasks)``                 — append newly-discovered tasks to the plan.
 - ``cancel_task(task_index, expected_text, reason)`` — drop a todo task that is no longer needed.
+- ``set_task_schedule(task_index, expected_text, planned_start_at, due_at, reason)`` — schedule an open task.
 - ``claim_next()``                     — take the next task; returns its index and text.
 - ``claim_task(task_index, expected_text)`` — take a SPECIFIC task instead of "next", when you already know which one you need (expected_text must match get_plan()'s current text for that index exactly).
 - ``mark_done(task_index, summary)``   — close a task with a 1-3 sentence result.
@@ -87,6 +89,8 @@ def _fresh_task(text: str) -> dict[str, Any]:
         "attempts": 0,
         "owner": None,
         "claimed_at": None,
+        "planned_start_at": None,
+        "due_at": None,
         #: ``time.time()`` (same convention as ``claimed_at``) the moment
         #: this task reaches a TERMINAL state: ``done``, an exhausted
         #: ``failed``, or ``cancelled``. None while the task is open --
@@ -193,6 +197,7 @@ class DurableBlackboard:
                 "reasoning": reasoning.strip(),
                 "created_at": time.time(),
                 "tasks": [_fresh_task(t) for t in tasks],
+                "schedule_events": [],
             }
             return fresh, self._render(fresh)
 
@@ -256,6 +261,68 @@ class DurableBlackboard:
 
         return str(self._mutate(apply))
 
+    def set_task_schedule(
+        self,
+        task_index: int,
+        expected_text: str,
+        *,
+        planned_start_at: float | None = None,
+        due_at: float | None = None,
+        reason: str,
+    ) -> str:
+        """Set or clear a non-terminal task's schedule and record the edit.
+
+        The task update and its append-only audit event are part of the same
+        whole-document compare-and-swap. A concurrent close therefore either
+        preserves this schedule or wins first and causes this edit to be
+        rejected after the CAS retry re-reads the terminal task.
+        """
+        for name, value in (("planned_start_at", planned_start_at), ("due_at", due_at)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                raise ValueError(f"{name} must be a finite number or None, got {value!r}")
+            if value is not None and not math.isfinite(value):
+                raise ValueError(f"{name} must be finite, got {value!r}")
+        if planned_start_at is not None and due_at is not None and planned_start_at > due_at:
+            raise ValueError("planned_start_at must be <= due_at")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("reason must be a non-empty string")
+
+        def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
+            if doc is None or not doc.get("tasks"):
+                return None, "REJECTED: no plan set; call set_plan first."
+            tasks = [dict(t) for t in doc["tasks"]]
+            if not 0 <= task_index < len(tasks):
+                return None, f"REJECTED: task_index out of range (valid: 0..{len(tasks) - 1})."
+            task = tasks[task_index]
+            if task["text"] != expected_text:
+                return None, (
+                    f"REJECTED: task {task_index}'s current text does not match expected_text -- "
+                    "call get_plan() to see the current state before scheduling."
+                )
+            if task.get("status") not in ("todo", "claimed"):
+                return None, (
+                    f"REJECTED: task {task_index} is {task.get('status')}, not open -- "
+                    "only a todo or claimed task can be scheduled."
+                )
+
+            event_at = time.time()
+            task.update(planned_start_at=planned_start_at, due_at=due_at)
+            event = {
+                "task_index": task_index,
+                "planned_start_at": planned_start_at,
+                "due_at": due_at,
+                "reason": reason.strip(),
+                "at": event_at,
+            }
+            new_doc = {
+                **doc,
+                "tasks": tasks,
+                "schedule_events": [*doc.get("schedule_events", []), event],
+            }
+            return new_doc, self._render(new_doc)
+
+        return str(self._mutate(apply))
+
     def snapshot(self) -> BlackboardSnapshot:
         doc = self._read()
         return self._snapshot_of(doc)
@@ -280,6 +347,14 @@ class DurableBlackboard:
         lines = [f"plan: {doc.get('plan_id')}", f"reasoning: {doc.get('reasoning', '')}"]
         for i, task in enumerate(doc["tasks"]):
             row = f"  {i}. {marks.get(task['status'], '[?]')} {task['text']}"
+            planned_start_at = task.get("planned_start_at")
+            due_at = task.get("due_at")
+            if planned_start_at is not None:
+                row += f"\n       planned start: {planned_start_at}"
+            if due_at is not None:
+                row += f"\n       due: {due_at}"
+                if task.get("status") in ("todo", "claimed") and due_at < time.time():
+                    row += " OVERDUE"
             if task.get("result"):
                 row += f"\n       → {task['result']}"
             if task.get("error"):
@@ -554,6 +629,22 @@ def durable_blackboard_agent(
         the task's current text exactly (call get_plan() first) -- a mismatch is refused."""
         return board.cancel_task(task_index, expected_text, reason)
 
+    def set_task_schedule(
+        task_index: int,
+        expected_text: str,
+        planned_start_at: float | None = None,
+        due_at: float | None = None,
+        reason: str = "",
+    ) -> str:
+        """Set or clear an open task's planned start/due timestamps and record why."""
+        return board.set_task_schedule(
+            task_index,
+            expected_text,
+            planned_start_at=planned_start_at,
+            due_at=due_at,
+            reason=reason,
+        )
+
     def claim_next() -> str:
         """Take the next task to work on. Do only that task this run."""
         claimed = board.claim_next(owner=holder)
@@ -594,6 +685,7 @@ def durable_blackboard_agent(
             Tool(get_plan),
             Tool(add_tasks),
             Tool(cancel_task),
+            Tool(set_task_schedule),
             Tool(claim_next),
             Tool(claim_task),
             Tool(mark_done),

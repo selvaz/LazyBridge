@@ -263,6 +263,183 @@ def test_a_plan_of_only_cancelled_and_done_tasks_is_complete():
     assert "1 cancelled" in board.render()
 
 
+# ---------------------------------------------------------------------------
+# per-task scheduling
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_tasks_without_schedule_fields_still_support_every_transition():
+    store = Store()
+    board = _board(store, max_attempts=1)
+    board.set_plan("legacy", ["complete", "fail", "cancel"])
+    doc = store.read(board.key)
+    for task in doc["tasks"]:
+        task.pop("planned_start_at")
+        task.pop("due_at")
+    doc.pop("schedule_events")
+    store.write(board.key, doc)
+
+    board.claim_task(0, "complete", owner="w")
+    board.mark_done(0, "done", owner="w")
+    board.claim_task(1, "fail", owner="w")
+    board.mark_failed(1, "failed", owner="w")
+    board.cancel_task(2, "cancel", "obsolete")
+
+    assert [task["status"] for task in board.snapshot().tasks] == ["done", "failed", "cancelled"]
+    assert "plan complete" in board.render()
+
+
+def test_schedule_and_history_survive_retry_and_completion():
+    store = Store()
+    board = _board(store, max_attempts=2)
+    board.set_plan("scheduled", ["retry me"])
+
+    result = board.set_task_schedule(0, "retry me", planned_start_at=100.0, due_at=200.0, reason="initial estimate")
+    assert not result.startswith("REJECTED")
+    board.claim_next(owner="w")
+    board.mark_failed(0, "transient", owner="w")
+    board.claim_next(owner="w")
+    board.mark_done(0, "finished", owner="w")
+
+    task = board.snapshot().tasks[0]
+    assert (task["planned_start_at"], task["due_at"], task["status"]) == (100.0, 200.0, "done")
+    events = store.read(board.key)["schedule_events"]
+    assert len(events) == 1
+    assert {key: value for key, value in events[0].items() if key != "at"} == {
+        "task_index": 0,
+        "planned_start_at": 100.0,
+        "due_at": 200.0,
+        "reason": "initial estimate",
+    }
+    assert isinstance(events[0]["at"], float)
+
+
+def test_schedule_survives_cancellation():
+    store = Store()
+    board = _board(store)
+    board.set_plan("scheduled", ["cancel me"])
+    board.set_task_schedule(0, "cancel me", due_at=200.0, reason="deadline")
+
+    board.cancel_task(0, "cancel me", "obsolete")
+
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "cancelled"
+    assert task["due_at"] == 200.0
+    assert len(store.read(board.key)["schedule_events"]) == 1
+
+
+def test_rescheduling_appends_history_instead_of_replacing_it():
+    store = Store()
+    board = _board(store)
+    board.set_plan("scheduled", ["task"])
+
+    board.set_task_schedule(0, "task", due_at=200.0, reason="first estimate")
+    board.set_task_schedule(0, "task", planned_start_at=250.0, due_at=300.0, reason="replanned")
+
+    doc = store.read(board.key)
+    assert doc["tasks"][0]["planned_start_at"] == 250.0
+    assert doc["tasks"][0]["due_at"] == 300.0
+    assert [event["reason"] for event in doc["schedule_events"]] == ["first estimate", "replanned"]
+    assert [event["due_at"] for event in doc["schedule_events"]] == [200.0, 300.0]
+
+
+def test_completion_winning_a_schedule_cas_race_rejects_the_reschedule(tmp_path, monkeypatch):
+    db = str(tmp_path / "schedule-race.sqlite")
+    with Store(db=db) as scheduling_store, Store(db=db) as completing_store:
+        scheduling = _board(scheduling_store)
+        completing = _board(completing_store)
+        scheduling.set_plan("race", ["task"])
+        scheduling.claim_next(owner="worker")
+        original_cas = scheduling_store.compare_and_swap
+        raced = False
+
+        def complete_before_first_schedule_cas(key, expected, new, *, agent_id=None):
+            nonlocal raced
+            if not raced:
+                raced = True
+                assert not completing.mark_done(0, "finished", owner="worker").startswith("REJECTED")
+            return original_cas(key, expected, new, agent_id=agent_id)
+
+        monkeypatch.setattr(scheduling_store, "compare_and_swap", complete_before_first_schedule_cas)
+        result = scheduling.set_task_schedule(0, "task", due_at=200.0, reason="new deadline")
+
+        assert result.startswith("REJECTED")
+        assert "done" in result
+        assert scheduling.snapshot().tasks[0]["status"] == "done"
+        assert scheduling.snapshot().tasks[0]["due_at"] is None
+        assert scheduling_store.read(scheduling.key)["schedule_events"] == []
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), "tomorrow", True])
+def test_invalid_schedule_timestamps_are_rejected_without_touching_any_blackboard(value):
+    store = Store()
+    board = _board(store)
+    other = DurableBlackboard(store, "other-project")
+    board.set_plan("scheduled", ["first", "second"])
+    other.set_plan("unrelated", ["other"])
+    before = store.read(board.key)
+    other_before = store.read(other.key)
+
+    with pytest.raises(ValueError, match="due_at"):
+        board.set_task_schedule(0, "first", due_at=value, reason="bad input")
+
+    assert store.read(board.key) == before
+    assert store.read(other.key) == other_before
+
+
+def test_schedule_rejects_reversed_interval_and_blank_reason_without_writing():
+    store = Store()
+    board = _board(store)
+    board.set_plan("scheduled", ["task"])
+    before = store.read(board.key)
+
+    with pytest.raises(ValueError, match="planned_start_at must be <= due_at"):
+        board.set_task_schedule(0, "task", planned_start_at=2.0, due_at=1.0, reason="reversed")
+    with pytest.raises(ValueError, match="reason"):
+        board.set_task_schedule(0, "task", reason="   ")
+
+    assert store.read(board.key) == before
+
+
+def test_set_task_schedule_rejects_a_stale_text_mismatch():
+    store = Store()
+    board = _board(store)
+    board.set_plan("scheduled", TASKS)
+
+    refusal = board.set_task_schedule(1, "a task that no longer matches", due_at=200.0, reason="deadline")
+
+    assert refusal.startswith("REJECTED")
+    assert board.snapshot().tasks[1]["due_at"] is None
+    assert store.read(board.key)["schedule_events"] == []
+
+
+@pytest.mark.parametrize("terminal_status", ["done", "failed", "cancelled"])
+def test_render_marks_only_open_past_due_tasks_overdue(terminal_status):
+    import time
+
+    store = Store()
+    board = _board(store, max_attempts=1)
+    terminal_text = f"{terminal_status} overdue"
+    board.set_plan("deadlines", ["todo overdue", "claimed overdue", terminal_text])
+    past = time.time() - 60
+    for index, text in enumerate(["todo overdue", "claimed overdue", terminal_text]):
+        board.set_task_schedule(index, text, planned_start_at=past - 60, due_at=past, reason="deadline")
+    board.claim_task(1, "claimed overdue", owner="w")
+    if terminal_status == "cancelled":
+        board.cancel_task(2, terminal_text, "obsolete")
+    else:
+        board.claim_task(2, terminal_text, owner="w")
+        if terminal_status == "done":
+            board.mark_done(2, "finished", owner="w")
+        else:
+            board.mark_failed(2, "boom", owner="w")
+
+    rendered = board.render()
+    assert "planned start:" in rendered
+    assert "due:" in rendered
+    assert rendered.count("OVERDUE") == 2
+
+
 # --- completed_at: a closed task can finally be placed in time -----------
 #
 # Found by a real incident: LazyCEO's end-of-day report showed a specialist's
@@ -593,6 +770,7 @@ def test_the_agent_exposes_the_blackboard_verbs_alongside_sub_agents():
         "get_plan",
         "add_tasks",
         "cancel_task",
+        "set_task_schedule",
         "claim_next",
         "claim_task",
         "mark_done",
