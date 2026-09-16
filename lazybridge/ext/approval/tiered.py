@@ -354,11 +354,7 @@ def _render(request: ApprovalRequest, tier: Tier) -> str:
     # module must be bounded, none left bare.
     cwd = elide(request.cwd, CWD_BUDGET) if request.cwd else "-"
     once = " (approving grants it for this cwd/policy for the rest of the session)" if tier == "session" else ""
-    return (
-        f"[TieredGate] agent asks to run {request.kind} '{request.name}'{once}\n"
-        f"  arguments: {args}\n"
-        f"  cwd: {cwd}"
-    )
+    return f"[TieredGate] agent asks to run {request.kind} '{request.name}'{once}\n  arguments: {args}\n  cwd: {cwd}"
 
 
 def run_gate_sync(gate: TieredGate, request: ApprovalRequest) -> ApprovalDecision:
