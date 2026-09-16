@@ -358,16 +358,36 @@ async def test_redaction_survives_into_the_tail_segment():
     patterns would have run against a string that no longer held it."""
     channel = FakeChannel(answers=[False])
     gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
-    command = (
-        "export API_KEY=sk-headsecret111 && "
-        + ("z" * 6000)
-        + " && export API_KEY=sk-tailsecret222"
-    )
+    command = "export API_KEY=sk-headsecret111 && " + ("z" * 6000) + " && export API_KEY=sk-tailsecret222"
     await gate(_request(name="Bash", arguments={"command": command}))
     prompt = channel.prompts[0]
     assert "sk-headsecret111" not in prompt
     assert "sk-tailsecret222" not in prompt
     assert "[redacted]" in prompt
+
+
+async def test_a_long_cwd_does_not_blow_the_rendered_message_past_budget():
+    """Found by Codex review: only ``arguments`` went through ``elide()``,
+    so a pathological (or just very deep) ``cwd`` could push the whole
+    rendered message past Telegram's transport cap on its own -- the exact
+    failure class this module exists to remove, reappearing through a field
+    that had no budget at all."""
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    long_cwd = "C:\\" + ("nested-directory\\" * 400)
+    await gate(_request(name="Bash", arguments={"command": "git status"}, cwd=long_cwd))
+    prompt = channel.prompts[0]
+    assert len(prompt) < 4096
+    assert long_cwd not in prompt  # the bare, unbounded cwd never reaches the human whole
+    cwd_section = prompt[prompt.index("cwd:") :]  # elide()'s marker spans its own line
+    assert "elided" in cwd_section
+
+
+async def test_a_short_cwd_is_shown_whole():
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("ask", "Bash"),))
+    await gate(_request(name="Bash", arguments={"command": "git status"}, cwd="C:\\repo"))
+    assert "cwd: C:\\repo" in channel.prompts[0]
 
 
 async def test_a_short_prompt_is_untouched():

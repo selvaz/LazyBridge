@@ -74,7 +74,7 @@ from dataclasses import dataclass, field, replace
 from fnmatch import fnmatch
 from typing import Any, ClassVar, Literal, Protocol
 
-from lazybridge._display import elide
+from lazybridge._display import CWD_BUDGET, elide
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest
 
 Tier = Literal["allow", "session", "ask", "deny"]
@@ -347,11 +347,17 @@ def _render(request: ApprovalRequest, tier: Tier) -> str:
     # tail segment unredacted, because the patterns would have been applied
     # to a string that no longer contained it.
     args = elide(_redact(json.dumps(dict(request.arguments), default=str)))
+    # cwd goes through elide() too, on its own smaller budget -- found by
+    # Codex review: a bare, unbounded cwd could push the whole rendered
+    # message past the transport's hard cap on its own, regardless of how
+    # tightly args is budgeted. Every field shown to a human through this
+    # module must be bounded, none left bare.
+    cwd = elide(request.cwd, CWD_BUDGET) if request.cwd else "-"
     once = " (approving grants it for this cwd/policy for the rest of the session)" if tier == "session" else ""
     return (
         f"[TieredGate] agent asks to run {request.kind} '{request.name}'{once}\n"
         f"  arguments: {args}\n"
-        f"  cwd: {request.cwd or '-'}"
+        f"  cwd: {cwd}"
     )
 
 

@@ -34,9 +34,26 @@ from __future__ import annotations
 #: Derived, not picked: Telegram's 4096-character per-message limit is the
 #: tightest transport these strings travel over, and the lines around them
 #: (header, cwd, reply instructions, ticket id) run to a few hundred
-#: characters. Three thousand leaves real headroom for those and still shows
-#: several times what any of the previous per-call-site numbers did.
+#: characters -- PROVIDED that everything else in the message is bounded
+#: too. Found by Codex review on this exact module: the first version left
+#: ``request.cwd`` outside any budget at all, so a long working directory
+#: could push the whole rendered message past this transport cap on its
+#: own, silently -- exactly the failure class this module exists to
+#: remove. See ``CWD_BUDGET`` below; every field placed in front of a human
+#: through this module must go through ``elide()``, none left bare.
+#: Three thousand leaves real headroom for the other bounded fields and
+#: still shows several times what any of the previous per-call-site
+#: numbers did.
 DISPLAY_BUDGET = 3000
+
+#: Budget for a working-directory path shown alongside the arguments above.
+#: Kept separate from ``DISPLAY_BUDGET`` because a cwd is a different kind
+#: of value -- rarely more than a couple hundred characters in practice,
+#: and reading it in full is rarely the judgement call the elided-arguments
+#: budget exists for. Five hundred shows any realistic path whole while
+#: still bounding the pathological case (e.g. a misconfigured or malicious
+#: caller handing this a multi-thousand-character string).
+CWD_BUDGET = 500
 
 #: How the budget is split when both ends have to be kept. Weighted towards
 #: the head because that is where a command says what it is, while the tail
@@ -76,4 +93,4 @@ def elide(text: str, budget: int = DISPLAY_BUDGET) -> str:
     return f"{text[:head]}\n  […{dropped} characters elided…]\n{text[-tail:]}"
 
 
-__all__ = ["DISPLAY_BUDGET", "elide"]
+__all__ = ["CWD_BUDGET", "DISPLAY_BUDGET", "elide"]
