@@ -435,7 +435,9 @@ class DurableBlackboard:
                 return None
         return None
 
-    def claim_task(self, task_index: int, expected_text: str, *, owner: str | None = None) -> tuple[int, str] | str:
+    def claim_task(
+        self, task_index: int, expected_text: str, *, owner: str | None = None, renew: bool = False
+    ) -> tuple[int, str] | str:
         """Take a SPECIFIC task instead of whichever is earliest-eligible --
         for a caller that already knows which task it wants and does not
         want to claim (and immediately close) every earlier todo task just
@@ -505,6 +507,18 @@ class DurableBlackboard:
                 # be able to walk into each other's leases.
                 and owner is not None
                 and task.get("owner") == holder
+                # Opt-in, so the default stays "refuse". An owner here is
+                # PROCESS-level, not per-worker: delegate_plan_tasks claims
+                # every item of a batch under one owner string, so owner
+                # equality alone cannot tell "the holder re-entering to
+                # attach a job" from "a second, genuinely new delegation
+                # for a task that already has one running". Inferring
+                # renewal from owner equality would let the same batch
+                # start two writing jobs on one task and break the
+                # single-worker guarantee this claim exists to give. Only a
+                # caller that KNOWS it is re-entering passes renew=True.
+                # Found by Codex review on PR #169.
+                and renew
                 # Only while the lease is still alive. A holder whose lease
                 # ran out did NOT finish in time, and that is exactly what
                 # an attempt counts. Without this, a stable owner identity

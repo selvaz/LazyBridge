@@ -893,7 +893,7 @@ def test_a_worker_can_re_enter_the_task_it_already_holds():
     first = board.claim_task(0, TASKS[0], owner="worker-a")
     assert not isinstance(first, str), first
 
-    again = board.claim_task(0, TASKS[0], owner="worker-a")
+    again = board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
 
     assert not isinstance(again, str), f"the holder was refused its own task: {again}"
     assert again == (0, TASKS[0])
@@ -910,7 +910,7 @@ def test_re_entering_a_held_task_does_not_spend_an_attempt():
     board.claim_task(0, TASKS[0], owner="worker-a")
 
     for _ in range(5):
-        assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a"), str)
+        assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a", renew=True), str)
 
     task = board.snapshot().tasks[0]
     assert task["attempts"] == 1
@@ -956,7 +956,7 @@ def test_renewing_actually_extends_the_lease():
     first_claimed_at = store.read(board.key)["tasks"][0]["claimed_at"]
 
     time.sleep(0.01)
-    board.claim_task(0, TASKS[0], owner="worker-a")
+    board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
 
     assert store.read(board.key)["tasks"][0]["claimed_at"] > first_claimed_at
 
@@ -974,7 +974,7 @@ def test_a_holder_whose_lease_ran_out_spends_an_attempt_to_come_back():
     assert store.read(board.key)["tasks"][0]["attempts"] == 1
 
     time.sleep(0.05)  # the lease lapses while worker-a is stalled
-    again = board.claim_task(0, TASKS[0], owner="worker-a")
+    again = board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
 
     assert not isinstance(again, str), again
     assert store.read(board.key)["tasks"][0]["attempts"] == 2
@@ -990,7 +990,30 @@ def test_a_stale_holder_cannot_renew_a_task_someone_else_took_over():
     time.sleep(0.05)
     assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b"), str)
 
-    refused = board.claim_task(0, TASKS[0], owner="worker-a")
+    refused = board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
 
     assert isinstance(refused, str)
     assert "already claimed" in refused
+
+
+def test_a_second_delegation_for_a_held_task_is_refused_without_opting_in():
+    """The single-worker guarantee, against the caller that actually
+    threatens it.
+
+    delegate_plan_tasks claims every item of a batch under ONE
+    process-level owner string. If the same task_index appears twice in a
+    batch -- or the batch is retried while its first job is still running
+    -- owner equality is true, so inferring renewal from it would start a
+    second job with real write access on a task that already has one.
+    Renewal is opt-in for exactly this reason: a caller that does not say
+    it is re-entering gets the old refusal. Found by Codex review on PR
+    #169.
+    """
+    board = _board(Store())
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="shared-process-owner")
+
+    second = board.claim_task(0, TASKS[0], owner="shared-process-owner")
+
+    assert isinstance(second, str)
+    assert "already claimed" in second
