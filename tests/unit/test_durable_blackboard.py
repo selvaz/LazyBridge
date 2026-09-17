@@ -1056,3 +1056,27 @@ def test_a_lapsed_lease_restores_the_right_to_renew():
     assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b"), str)
 
     assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b", renew=True), str)
+
+
+def test_reclaiming_via_claim_next_also_restores_the_right_to_renew():
+    """The other fresh-claim path. claim_task's own fresh-claim branch resets
+    renewed=False, but claim_next() is a SEPARATE apply function with its own
+    fresh-claim update -- and claim_project_task actually calls claim_next()
+    as its default route, on the very same project board delegate_project_task
+    later renews with claim_task(renew=True). If claim_next() left a stale
+    renewed=True on a task a prior holder renewed and then abandoned, the new
+    holder's own first, legitimate renewal would be refused as if it had
+    already spent it. Found by independent review while verifying an
+    unrelated task on this same board.
+    """
+    board = _board(Store(), lease_seconds=0.01)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
+
+    time.sleep(0.05)  # the holder dies without ever closing the task
+    reclaimed = board.claim_next(owner="worker-b")
+    assert reclaimed is not None
+    assert reclaimed[0] == 0
+
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b", renew=True), str)
