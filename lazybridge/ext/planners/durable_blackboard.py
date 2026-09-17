@@ -529,6 +529,20 @@ class DurableBlackboard:
                 # that is the normal path, not an edge case. Found by Codex
                 # review.
                 and not expired
+                # And only ONCE. A renewal exists to attach a worker to
+                # a task; a second one attaches a second worker to the
+                # same checkout. Checking that OUTSIDE this function
+                # cannot work -- scan, claim and record are then three
+                # separate steps, and two concurrent callers both read
+                # "nothing running" before either writes. The claim is
+                # the mutual exclusion primitive, so the exclusion has
+                # to live inside its compare-and-swap, not beside it.
+                # Cleared by the fresh-claim path below -- which is what
+                # a lapsed lease turns into -- so a worker that dies
+                # holding a renewal releases it the same way it releases
+                # the claim, with no separate reaper to get stuck.
+                # Found by Codex review on PR #45.
+                and not task.get("renewed")
             )
             if task.get("status") == "claimed" and not renewing:
                 if not expired:
@@ -546,7 +560,7 @@ class DurableBlackboard:
                 # never left has not tried it again. Counting it would walk
                 # a healthy task to 'failed' in three ordinary steps of the
                 # intended flow, which is what happened.
-                task.update(claimed_at=now)
+                task.update(claimed_at=now, renewed=True)
                 new_doc = {**doc, "tasks": tasks}
                 return new_doc, (task_index, str(task["text"]))
             if task.get("attempts", 0) >= self.max_attempts:
@@ -558,7 +572,14 @@ class DurableBlackboard:
                 return new_doc, (
                     f"REJECTED: task {task_index} just exhausted its attempt budget and was parked as failed instead."
                 )
-            task.update(status="claimed", owner=holder, claimed_at=now, attempts=task.get("attempts", 0) + 1)
+            task.update(
+                status="claimed",
+                owner=holder,
+                claimed_at=now,
+                attempts=task.get("attempts", 0) + 1,
+                # A fresh claim is a fresh right to renew once.
+                renewed=False,
+            )
             new_doc = {**doc, "tasks": tasks}
             return new_doc, (task_index, str(task["text"]))
 

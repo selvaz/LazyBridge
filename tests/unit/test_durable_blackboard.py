@@ -909,8 +909,10 @@ def test_re_entering_a_held_task_does_not_spend_an_attempt():
     board.set_plan("reason", TASKS)
     board.claim_task(0, TASKS[0], owner="worker-a")
 
-    for _ in range(5):
-        assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a", renew=True), str)
+    # One renewal: the claim-to-delegate transition. A second is refused
+    # on purpose (see test_a_task_can_only_be_renewed_once) -- what this
+    # test pins is that the one allowed re-entry costs nothing.
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a", renew=True), str)
 
     task = board.snapshot().tasks[0]
     assert task["attempts"] == 1
@@ -1017,3 +1019,40 @@ def test_a_second_delegation_for_a_held_task_is_refused_without_opting_in():
 
     assert isinstance(second, str)
     assert "already claimed" in second
+
+
+def test_a_task_can_only_be_renewed_once():
+    """Renewal attaches a worker to a task. A second one attaches a second
+    worker to the same checkout -- concurrent edits, doubled spend.
+
+    Guarding this OUTSIDE the claim cannot work: scan, claim and record
+    are then three separate steps, and two concurrent callers both read
+    "nothing running" before either writes. The claim is the mutual
+    exclusion primitive, so the exclusion has to live inside its
+    compare-and-swap. Found by Codex review on PR #45.
+    """
+    board = _board(Store())
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a", renew=True), str)
+
+    second = board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
+
+    assert isinstance(second, str)
+    assert "already claimed" in second
+
+
+def test_a_lapsed_lease_restores_the_right_to_renew():
+    """The release path, and the reason no separate reaper is needed. A
+    worker that dies holding a renewal must not freeze the task forever:
+    its lease lapses, the next claim is an ordinary fresh one, and that
+    resets the right to renew along with everything else."""
+    board = _board(Store(), lease_seconds=0.01)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    board.claim_task(0, TASKS[0], owner="worker-a", renew=True)
+
+    time.sleep(0.05)  # the holder dies without ever closing the task
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b"), str)
+
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b", renew=True), str)
