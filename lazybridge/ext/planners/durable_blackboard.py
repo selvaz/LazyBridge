@@ -421,7 +421,25 @@ class DurableBlackboard:
                 task["error"] = task.get("error") or f"exhausted {self.max_attempts} attempts"
                 new_doc = {**doc, "tasks": tasks}
                 return new_doc, None
-            task.update(status="claimed", owner=holder, claimed_at=now, attempts=task.get("attempts", 0) + 1)
+            task.update(
+                status="claimed",
+                owner=holder,
+                claimed_at=now,
+                attempts=task.get("attempts", 0) + 1,
+                # A fresh claim is a fresh right to renew once. Without this,
+                # a task renewed by a prior holder that later became
+                # reclaimable (lease lapsed, or reset to todo) would keep
+                # renewed=True across the new holder's own claim -- so THAT
+                # holder's first legitimate claim_task(renew=True) would be
+                # refused as if it had already used its one renewal, which
+                # it never did. claim_project_task actually reaches this
+                # path (not just claim_task's own fresh-claim branch): it
+                # calls claim_next() as its default/fallback route, on the
+                # same project board delegate_project_task later renews.
+                # Found by independent review while verifying an unrelated
+                # task on this same board.
+                renewed=False,
+            )
             return {**doc, "tasks": tasks}, (index, str(task["text"]))
 
         # Parking a poison task is itself a mutation that hands back nothing,
