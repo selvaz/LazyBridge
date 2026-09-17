@@ -1,19 +1,37 @@
-# Positioning LazyBridge
+# Positioning LazyCEO / LazyBridge
 
 > **DRAFT — da approvare, NON pubblicato, nessuna azione esterna eseguita.**
 > Questo documento propone un posizionamento e un messaggio chiave. Non è
 > copy pronto per la pubblicazione, non modifica README/mkdocs/metadati del
 > repo, e non implica alcuna azione su piattaforme esterne. Si basa
 > esclusivamente su `docs/marketing/audit-2026-09-15.md`,
-> `docs/marketing/launch-patterns-research.md` e sul README attuale del
-> repository. Nessun dato, fonte o case study aggiuntivo è stato inventato.
+> `docs/marketing/launch-patterns-research.md`, sul README attuale del
+> repository e sul README di LazyCEO per le sole affermazioni che lo
+> riguardano. Nessun dato, fonte o case study aggiuntivo è stato inventato.
 
 ## 1. Tagline / promessa in una riga
 
 Ispirandosi al pattern osservato in LiteLLM (promessa ridotta a un beneficio
 verificabile: "usare provider diversi con lo stesso formato") e in PydanticAI
-(tagline di una riga seguita da differenze verificabili), una proposta per
-LazyBridge, derivata da come il README lo descrive già oggi:
+(tagline di una riga seguita da differenze verificabili), la storia deve avere
+un hero concreto: **LazyCEO è il prodotto di punta; LazyBridge è il framework
+open source sottostante**. Non si apre quindi con un framework in astratto, ma
+con ciò che quel framework contribuisce a rendere possibile in un sistema reale:
+
+> **LazyCEO è l'agente always-on che porta avanti progetti reali coordinando
+> una flotta di specialisti. LazyBridge è il framework open source sotto il
+> cofano. E questa stessa campagna è gestita — pianificata e scritta — da uno
+> specialista autonomo della flotta, sotto supervisione umana.**
+
+Il gancio non è una demo ipotetica. Il README di LazyCEO documenta il sistema
+oggi in uso: un piano durevole che sopravvive ai riavvii, deleghe singole o in
+parallelo collegate a task tracciati, specialisti indipendenti con una propria
+schedule, stato della flotta e notifiche in caso di processi interrotti. Il
+racconto resta però rigoroso sui confini: LazyCEO opera nel workspace di un
+singolo operatore fidato, alcune azioni richiedono approvazione e non va
+presentato come un dispatcher multi-tenant o come autonomia senza supervisione.
+
+La promessa tecnica di LazyBridge rimane la prova sotto la storia del prodotto:
 
 > **Un `Agent`, un contratto tool, motori intercambiabili — dallo script
 > one-shot alla pipeline di produzione, senza riscrivere nulla.**
@@ -24,6 +42,22 @@ boilerplate, multi-provider Python framework for LLM agents"):
 - "Zero boilerplate multi-provider — un `Agent`, ogni motore."
 - "Lo stesso `Agent(engine=..., tools=...)` regge un helper e una pipeline
   di produzione: cambia solo `engine=`."
+
+### Meta-narrativa verificabile
+
+La campagna non deve nascondere il proprio processo: è gestita da uno
+specialista autonomo della flotta, che pianifica e scrive questo documento e i
+materiali che lo circondano con supervisione dell'operatore. È una dimostrazione
+coerente con la tesi di LazyCEO — un agente che organizza lavoro reale e
+coordina specialisti — non un espediente narrativo. Il claim va sempre
+accompagnato dai suoi limiti
+verificabili: **agent-authored, human-supervised**, con approvazione preventiva
+dei contenuti e nessuna pubblicazione o altra azione esterna già eseguita.
+
+Questa meta-storia riguarda la pianificazione e la produzione dei materiali di
+campagna. Non modifica il vincolo specifico della futura bozza Show HN indicato
+in sezione 4: quel testo finale va scritto a mano in coerenza con la nota del
+moderatore citata nella ricerca.
 
 Nota: a differenza di LiteLLM (promessa ristretta a `completion()` /
 `embedding()`) o di PydanticAI ("Pydantic for agents", che eredita
@@ -100,11 +134,18 @@ comparabili ha dovuto affrontare un lancio da questo punto di partenza
 distributivo — il caso più vicino (LiteLLM) partiva comunque da zero
 community ma non aveva incoerenze di metadati pubblici da correggere prima.
 
+Per questo il posizionamento non deve fingere che LazyBridge abbia già una
+distribuzione: deve usare LazyCEO come hero e prova operativa, mantenendo
+LazyBridge come tecnologia abilitante. Anche la meta-narrativa della campagna
+agent-authored sotto supervisione è una prova di processo, non una scorciatoia
+per trasformare zero audience in trazione inesistente.
+
 ## 3. Proposta di primo canale di lancio
 
-**Proposta: Show HN, con corpo del post centrato su una capability
-dimostrabile del tier Mid/Full (es. `Plan` + resume via CAS, oppure
-Tool-is-Tool con MCP), non su un annuncio generico del framework.**
+**Proposta: Show HN, con LazyCEO come hero e una capability dimostrabile come
+prova (es. piano durevole + deleghe tracciate, oppure gestione e monitoraggio
+degli specialisti), collegata esplicitamente a LazyBridge come framework open
+source sottostante — non un annuncio generico del framework.**
 
 Motivazione, derivata direttamente dalla tabella "Implicazioni concrete per
 LazyBridge" di `launch-patterns-research.md`:
@@ -135,32 +176,44 @@ Da scrivere a mano, non generato/rifinito da un LLM, in coerenza con la nota
 del moderatore HN citata nella ricerca (marzo 2026).
 
 ```
-Titolo: Show HN: LazyBridge – [CAPABILITY CONCRETA DA SCEGLIERE, non "framework universale"]
+Titolo: Show HN: LazyCEO + LazyBridge – [CAPABILITY CONCRETA DA SCEGLIERE, non "framework universale"]
   (pattern osservato: titolo con beneficio/capability esplicita, non nome nudo)
 
 1. Backstory
    [PLACEHOLDER: perché è nato il progetto, problema reale incontrato da selvaz]
 
-2. Differenziazione
+2. Hero + architettura narrativa
+   [PLACEHOLDER: mostrare prima LazyCEO all'opera come agente always-on che
+    coordina specialisti su progetti reali; spiegare subito dopo che LazyBridge
+    è il framework open source sottostante, senza attribuirgli capability non
+    dimostrate dai rispettivi README]
+
+3. Differenziazione
    [PLACEHOLDER: 2-3 righe di confronto onesto con LangChain/LiteLLM/PydanticAI,
     riprendendo la sezione 2 di questo documento — nessun superlativo,
     nessun confronto non dimostrato]
 
-3. Descrizione chiara + esempio minimo eseguibile
+4. Descrizione chiara + esempio minimo eseguibile
    [PLACEHOLDER: uno degli esempi "Worked examples" del README, verificato
     localmente prima della pubblicazione, copiabile così com'è]
 
-4. 3-5 capability concrete
+5. 3-5 capability concrete
    [PLACEHOLDER: selezionare da "What makes LazyBridge different" nel README
     — es. Tool-is-Tool, compile-time plan validation, CAS resume, cost
     roll-up, OTel — solo quelle dimostrabili con un esempio, non un elenco
     di feature promesse]
 
-5. Link
+6. Meta-narrativa e disclosure
+   [PLACEHOLDER: dichiarare in modo sobrio e verificabile che la campagna è
+    stata pianificata e preparata da un agente autonomo sotto supervisione;
+    distinguere questo fatto dalla stesura manuale richiesta per il post HN e
+    non suggerire che siano già avvenute pubblicazioni autonome]
+
+7. Link
    [PLACEHOLDER: GitHub, PyPI, documentazione — verificare che ogni link
     porti a qualcosa di realmente provabile senza waitlist/gate]
 
-6. Domanda tecnica precisa alla community
+8. Domanda tecnica precisa alla community
    [PLACEHOLDER: una domanda specifica, non "cosa ne pensate", per invitare
     un confronto da builder a engineer]
 
