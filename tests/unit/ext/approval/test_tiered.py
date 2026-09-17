@@ -444,3 +444,57 @@ def test_elide_never_exceeds_the_budget_it_was_given():
     assert elide(text, -5) == ""
     # Where only a sliver fits, it is the sliver that names the consequence.
     assert elide(text, 20).endswith("rm -rf /tmp/gone")
+
+
+# --- rules that name a kind ---------------------------------------------
+
+
+async def test_a_rule_written_before_kinds_existed_still_matches_everything():
+    """Every rule in every table predates this field. Defaulting to "*"
+    is what keeps them meaning exactly what they meant."""
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("allow", "Bash"),))
+    decision = await gate(_request(name="Bash", kind="tool"))
+    assert decision.action == "allow"
+
+
+async def test_a_command_can_be_spoken_about_at_all():
+    """Before this, a table could say nothing about commands: a tool
+    arrives as a bare identifier, a command as the whole command line, so
+    tool patterns matched no command and every escalation fell into the
+    default deny. Seventeen refusals in six hours in production, all of
+    them Codex asking to run its own tests."""
+    channel = FakeChannel(answers=[True])
+    gate = TieredGate(
+        channel=channel,
+        rules=(Rule("ask", "*", kind_pattern="command"),),
+    )
+    decision = await gate(_request(name='"powershell.exe" -Command Remove-Item .test-tmp', kind="command"))
+    assert decision.action == "allow"
+    assert channel.prompts, "the operator has to be the one who decides"
+
+
+async def test_a_command_rule_does_not_quietly_govern_tools():
+    """The whole point of naming a kind is that it narrows. A catch-all
+    name pattern meant for commands must not become a catch-all for tool
+    calls, which would erase the default-deny the table relies on."""
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("allow", "*", kind_pattern="command"),))
+    decision = await gate(_request(name="launch_specialist", kind="tool"))
+    assert decision.action == "deny", "an unmatched tool still falls to the default"
+
+
+async def test_a_tool_rule_does_not_quietly_govern_commands():
+    channel = FakeChannel(answers=[False])
+    gate = TieredGate(channel=channel, rules=(Rule("allow", "*", kind_pattern="tool"),))
+    decision = await gate(_request(name="rm -rf /", kind="command"))
+    assert decision.action == "deny"
+
+
+def test_the_kind_is_part_of_a_rules_fingerprint():
+    """Session grants are scoped by fingerprint. Two rules differing only
+    in which kind they speak about must not share one, or a grant a human
+    gave for a tool would silently satisfy a command of the same name."""
+    tool_rule = Rule("session", "git push*", kind_pattern="tool")
+    command_rule = Rule("session", "git push*", kind_pattern="command")
+    assert tool_rule.fingerprint() != command_rule.fingerprint()

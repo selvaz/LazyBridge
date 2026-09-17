@@ -117,8 +117,23 @@ class Rule:
     tier: Tier
     name_pattern: str
     arg_pattern: str | None = None
+    #: Which KIND of request this rule speaks about — ``"tool"`` for a named
+    #: tool call, ``"command"`` for a coding agent escalating a shell command
+    #: it cannot run inside its sandbox. ``"*"`` means any, which is what
+    #: every rule written before this field meant and still means.
+    #:
+    #: Needed because a table can otherwise say nothing about commands at
+    #: all. A tool arrives as a bare identifier (``Bash``); a command arrives
+    #: as the whole command line, so patterns written for tool names match
+    #: none of them and every escalation falls into the default deny. Seen
+    #: in production: seventeen refusals in six hours, all tier=unmatched,
+    #: all of them Codex asking to run its own tests and delete its own
+    #: scratch directories -- and 2.4 GB of undeleted scratch as the result.
+    kind_pattern: str = "*"
 
     def matches(self, request: ApprovalRequest) -> bool:
+        if not fnmatch(str(request.kind), self.kind_pattern):
+            return False
         if not fnmatch(request.name, self.name_pattern):
             return False
         if self.arg_pattern is None:
@@ -134,7 +149,12 @@ class Rule:
         are different ``Rule`` instances (e.g. rebuilt on every process
         start) — the fingerprint is over content, not identity.
         """
-        payload = f"{self.tier}|{self.name_pattern}|{self.arg_pattern or ''}"
+        # kind_pattern is part of the shape, and leaving it out would be a
+        # security hole rather than an omission: two rules differing only in
+        # which kind they speak about would fingerprint identically, so a
+        # session grant a human gave for a TOOL would silently satisfy a
+        # COMMAND asking under the same name.
+        payload = f"{self.tier}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
