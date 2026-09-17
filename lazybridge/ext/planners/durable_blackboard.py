@@ -435,7 +435,9 @@ class DurableBlackboard:
                 return None
         return None
 
-    def claim_task(self, task_index: int, expected_text: str, *, owner: str | None = None) -> tuple[int, str] | str:
+    def claim_task(
+        self, task_index: int, expected_text: str, *, owner: str | None = None, renew: bool = False
+    ) -> tuple[int, str] | str:
         """Take a SPECIFIC task instead of whichever is earliest-eligible --
         for a caller that already knows which task it wants and does not
         want to claim (and immediately close) every earlier todo task just
@@ -486,16 +488,67 @@ class DurableBlackboard:
                     "call get_plan() to see the current state before claiming."
                 )
             now = time.time()
-            if task.get("status") == "claimed":
-                claimed_at = task.get("claimed_at")
-                expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+            # A worker re-entering a task it already holds is not a second
+            # worker. The check below used to compare only the lease clock,
+            # never the owner, so the holder was refused its own task and
+            # told another worker had it -- with no other worker in the
+            # system. LazyCEO's contracted-task flow does exactly this
+            # re-entry (claim_project_task, then delegate_project_task
+            # claims the same index to attach the job), so the flow could
+            # not complete: seen live on project lazyceostudio, where a
+            # healthy task was driven to 'failed' at attempts=3 on purpose,
+            # to escape a competitor that did not exist.
+            claimed_at = task.get("claimed_at")
+            expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+            renewing = (
+                task.get("status") == "claimed"
+                # owner=None means "I am not identifying myself" -- two
+                # anonymous callers are not the same caller, and must not
+                # be able to walk into each other's leases.
+                and owner is not None
+                and task.get("owner") == holder
+                # Opt-in, so the default stays "refuse". An owner here is
+                # PROCESS-level, not per-worker: delegate_plan_tasks claims
+                # every item of a batch under one owner string, so owner
+                # equality alone cannot tell "the holder re-entering to
+                # attach a job" from "a second, genuinely new delegation
+                # for a task that already has one running". Inferring
+                # renewal from owner equality would let the same batch
+                # start two writing jobs on one task and break the
+                # single-worker guarantee this claim exists to give. Only a
+                # caller that KNOWS it is re-entering passes renew=True.
+                # Found by Codex review on PR #169.
+                and renew
+                # Only while the lease is still alive. A holder whose lease
+                # ran out did NOT finish in time, and that is exactly what
+                # an attempt counts. Without this, a stable owner identity
+                # -- which every LazyCEO agent has, the same string across
+                # restarts -- renews forever after each stall-kill, attempts
+                # never grows, and a genuinely poisoned task is never
+                # parked. The watchdog restarts this agent routinely, so
+                # that is the normal path, not an edge case. Found by Codex
+                # review.
+                and not expired
+            )
+            if task.get("status") == "claimed" and not renewing:
                 if not expired:
                     return None, (
                         f"REJECTED: task {task_index} is already claimed by another worker "
                         "and its lease has not expired yet -- wait, or work on something else."
                     )
-            elif task.get("status") != "todo":
+            elif task.get("status") not in ("todo", "claimed"):
                 return None, f"REJECTED: task {task_index} is {task.get('status')}, not claimable."
+            if renewing:
+                # Extend the lease and hand back the same task. Deliberately
+                # NOT counted as an attempt: attempts is the poison-task
+                # budget -- how many times this work has been tried and not
+                # finished -- and a holder stepping back into a task it
+                # never left has not tried it again. Counting it would walk
+                # a healthy task to 'failed' in three ordinary steps of the
+                # intended flow, which is what happened.
+                task.update(claimed_at=now)
+                new_doc = {**doc, "tasks": tasks}
+                return new_doc, (task_index, str(task["text"]))
             if task.get("attempts", 0) >= self.max_attempts:
                 # Same poison-task handling as claim_next: park it so the
                 # plan can finish instead of handing it out again.
