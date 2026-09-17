@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from lazybridge import Agent, LLMEngine, Store, Tool
@@ -110,6 +110,7 @@ class BlackboardSnapshot:
     plan_id: str
     reasoning: str
     tasks: list[dict[str, Any]]
+    schedule_events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def complete(self) -> bool:
@@ -334,6 +335,7 @@ class DurableBlackboard:
             plan_id=str(doc.get("plan_id", self.plan_id)),
             reasoning=str(doc.get("reasoning", "")),
             tasks=list(doc.get("tasks", [])),
+            schedule_events=list(doc.get("schedule_events", [])),
         )
 
     def render(self) -> str:
