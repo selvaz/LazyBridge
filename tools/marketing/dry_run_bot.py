@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,9 +50,7 @@ def _parse_markdown(path: Path) -> Draft:
         raise ValueError("Markdown drafts must start with a '---' metadata block")
 
     try:
-        closing_index = next(
-            index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"
-        )
+        closing_index = next(index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---")
     except StopIteration as exc:
         raise ValueError("Markdown metadata block is missing its closing '---'") from exc
 
@@ -62,9 +60,7 @@ def _parse_markdown(path: Path) -> Draft:
             continue
         key, separator, value = line.partition(":")
         if not separator or not key.strip() or not value.strip():
-            raise ValueError(
-                f"Invalid metadata on line {line_number}; use 'key: value'"
-            )
+            raise ValueError(f"Invalid metadata on line {line_number}; use 'key: value'")
         metadata[key.strip()] = value.strip()
 
     text = "\n".join(lines[closing_index + 1 :]).strip()
@@ -120,18 +116,13 @@ def validate_draft(draft: Draft, rule: PlatformRule) -> None:
 
     character_count = len(draft.text)
     if character_count > rule.character_limit:
-        raise ValueError(
-            f"Post is {character_count} characters; {rule.label} allows "
-            f"at most {rule.character_limit}"
-        )
+        raise ValueError(f"Post is {character_count} characters; {rule.label} allows at most {rule.character_limit}")
 
 
-def write_dry_run_record(
-    draft: Draft, source_path: Path, platform: str, rule: PlatformRule
-) -> Path:
+def write_dry_run_record(draft: Draft, source_path: Path, platform: str, rule: PlatformRule) -> Path:
     """INACTIVE / MOCK: record locally what would be posted; never send it."""
 
-    simulated_at = datetime.now(timezone.utc)
+    simulated_at = datetime.now(UTC)
     timestamp = simulated_at.strftime("%Y%m%dT%H%M%S.%fZ")
     output_directory = Path(__file__).resolve().parent / "dry_run_output"
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -148,9 +139,7 @@ def write_dry_run_record(
         "text": draft.text,
         "metadata": draft.metadata,
     }
-    output_path.write_text(
-        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    output_path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return output_path
 
 
