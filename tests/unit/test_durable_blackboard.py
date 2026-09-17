@@ -8,6 +8,7 @@ exercising one long-lived instance.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -870,3 +871,126 @@ def test_each_planner_instance_claims_under_its_own_identity():
     assert str(asyncio.run(second._tool_map["mark_done"].run(task_index=0, result_summary="not mine"))).startswith(
         "REJECTED"
     )
+
+
+def test_a_worker_can_re_enter_the_task_it_already_holds():
+    """The deadlock in LazyCEO's own intended flow.
+
+    claim_project_task -> open_task_contract -> delegate_project_task is
+    how a contracted task is meant to move, and the third step claims the
+    same task again to attach the job to it. The lease check never
+    compared owners, so the holder was refused entry to its own task and
+    told "another worker" held it -- with no other worker in the system.
+
+    Observed live on project lazyceostudio: task 3 sat claimed by
+    agent:lazyceo-smoke-simple at attempts=3, and task 4 was driven to
+    'failed' at attempts=3 deliberately, to exhaust the budget and free
+    the queue. Nothing was wrong with the work; tasks were recorded as
+    failures to escape a competitor that did not exist.
+    """
+    board = _board(Store())
+    board.set_plan("reason", TASKS)
+    first = board.claim_task(0, TASKS[0], owner="worker-a")
+    assert not isinstance(first, str), first
+
+    again = board.claim_task(0, TASKS[0], owner="worker-a")
+
+    assert not isinstance(again, str), f"the holder was refused its own task: {again}"
+    assert again == (0, TASKS[0])
+
+
+def test_re_entering_a_held_task_does_not_spend_an_attempt():
+    """attempts is the poison-task budget: how many times this work has
+    been tried and not finished. A holder stepping back into a task it
+    never left has not tried it a second time, and counting it that way
+    walks a healthy task to 'failed' in three ordinary steps of the
+    intended flow."""
+    board = _board(Store(), max_attempts=3)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+
+    for _ in range(5):
+        assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-a"), str)
+
+    task = board.snapshot().tasks[0]
+    assert task["attempts"] == 1
+    assert task["status"] == "claimed"
+
+
+def test_a_genuinely_different_worker_is_still_refused():
+    """The protection this check exists for has to survive the fix: two
+    workers must not hold one task at once."""
+    board = _board(Store())
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+
+    refused = board.claim_task(0, TASKS[0], owner="worker-b")
+
+    assert isinstance(refused, str)
+    assert "already claimed" in refused
+
+
+def test_an_anonymous_claim_never_counts_as_the_same_worker():
+    """owner=None means "I am not identifying myself". Two anonymous
+    callers are not the same caller, so they must not be able to walk into
+    each other's leases."""
+    board = _board(Store())
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0])
+
+    refused = board.claim_task(0, TASKS[0])
+
+    assert isinstance(refused, str)
+    assert "already claimed" in refused
+
+
+def test_renewing_actually_extends_the_lease():
+    """Returning success without moving claimed_at would pass every other
+    test here and still lose the task: the original timestamp keeps
+    ageing, and another worker takes it the moment it expires. Found by
+    Codex review."""
+    store = Store()
+    board = _board(store, lease_seconds=900.0)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    first_claimed_at = store.read(board.key)["tasks"][0]["claimed_at"]
+
+    time.sleep(0.01)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+
+    assert store.read(board.key)["tasks"][0]["claimed_at"] > first_claimed_at
+
+
+def test_a_holder_whose_lease_ran_out_spends_an_attempt_to_come_back():
+    """The other half of the renewal rule. A stable owner identity -- which
+    every agent here has -- would otherwise renew forever across
+    stall-kills, never growing attempts, so a task that can never be
+    finished would never be parked. Taking the task back after the lease
+    lapsed is a fresh attempt, because the previous one did not finish."""
+    store = Store()
+    board = _board(store, lease_seconds=0.01)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    assert store.read(board.key)["tasks"][0]["attempts"] == 1
+
+    time.sleep(0.05)  # the lease lapses while worker-a is stalled
+    again = board.claim_task(0, TASKS[0], owner="worker-a")
+
+    assert not isinstance(again, str), again
+    assert store.read(board.key)["tasks"][0]["attempts"] == 2
+
+
+def test_a_stale_holder_cannot_renew_a_task_someone_else_took_over():
+    """Interleaving: A's lease lapses, B takes the task, then A comes back
+    still believing it holds it. A is no longer the owner, so it must be
+    refused rather than stealing the task back out from under B."""
+    board = _board(Store(), lease_seconds=0.01)
+    board.set_plan("reason", TASKS)
+    board.claim_task(0, TASKS[0], owner="worker-a")
+    time.sleep(0.05)
+    assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b"), str)
+
+    refused = board.claim_task(0, TASKS[0], owner="worker-a")
+
+    assert isinstance(refused, str)
+    assert "already claimed" in refused

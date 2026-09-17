@@ -486,16 +486,55 @@ class DurableBlackboard:
                     "call get_plan() to see the current state before claiming."
                 )
             now = time.time()
-            if task.get("status") == "claimed":
-                claimed_at = task.get("claimed_at")
-                expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+            # A worker re-entering a task it already holds is not a second
+            # worker. The check below used to compare only the lease clock,
+            # never the owner, so the holder was refused its own task and
+            # told another worker had it -- with no other worker in the
+            # system. LazyCEO's contracted-task flow does exactly this
+            # re-entry (claim_project_task, then delegate_project_task
+            # claims the same index to attach the job), so the flow could
+            # not complete: seen live on project lazyceostudio, where a
+            # healthy task was driven to 'failed' at attempts=3 on purpose,
+            # to escape a competitor that did not exist.
+            claimed_at = task.get("claimed_at")
+            expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+            renewing = (
+                task.get("status") == "claimed"
+                # owner=None means "I am not identifying myself" -- two
+                # anonymous callers are not the same caller, and must not
+                # be able to walk into each other's leases.
+                and owner is not None
+                and task.get("owner") == holder
+                # Only while the lease is still alive. A holder whose lease
+                # ran out did NOT finish in time, and that is exactly what
+                # an attempt counts. Without this, a stable owner identity
+                # -- which every LazyCEO agent has, the same string across
+                # restarts -- renews forever after each stall-kill, attempts
+                # never grows, and a genuinely poisoned task is never
+                # parked. The watchdog restarts this agent routinely, so
+                # that is the normal path, not an edge case. Found by Codex
+                # review.
+                and not expired
+            )
+            if task.get("status") == "claimed" and not renewing:
                 if not expired:
                     return None, (
                         f"REJECTED: task {task_index} is already claimed by another worker "
                         "and its lease has not expired yet -- wait, or work on something else."
                     )
-            elif task.get("status") != "todo":
+            elif task.get("status") not in ("todo", "claimed"):
                 return None, f"REJECTED: task {task_index} is {task.get('status')}, not claimable."
+            if renewing:
+                # Extend the lease and hand back the same task. Deliberately
+                # NOT counted as an attempt: attempts is the poison-task
+                # budget -- how many times this work has been tried and not
+                # finished -- and a holder stepping back into a task it
+                # never left has not tried it again. Counting it would walk
+                # a healthy task to 'failed' in three ordinary steps of the
+                # intended flow, which is what happened.
+                task.update(claimed_at=now)
+                new_doc = {**doc, "tasks": tasks}
+                return new_doc, (task_index, str(task["text"]))
             if task.get("attempts", 0) >= self.max_attempts:
                 # Same poison-task handling as claim_next: park it so the
                 # plan can finish instead of handing it out again.
