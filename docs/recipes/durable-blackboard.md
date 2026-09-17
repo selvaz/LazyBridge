@@ -23,6 +23,7 @@ invocation, which is exactly what this one must not do.
 | `get_plan()` | The whole board: what is done, claimed, failed, and what is next. |
 | `add_tasks(tasks)` | Appends newly-discovered tasks without touching any existing task's index or status. |
 | `cancel_task(index, expected_text, reason)` | Drops a not-yet-claimed task that turned out to be unnecessary. `expected_text` must match the task's current text. |
+| `set_task_schedule(index, expected_text, planned_start_at, due_at, reason)` | Sets (or clears, by passing `None`) a `todo`/`claimed` task's planned start and due timestamps. Same `expected_text` stale-index guard; each call also appends an entry to an audit trail. |
 | `claim_next()` | Takes exactly one task — whichever is earliest eligible — atomically. |
 | `claim_task(index, expected_text)` | Takes a SPECIFIC task instead of "next", for a caller that already knows which one it needs and doesn't want to claim-and-close every earlier task just to reach it. Same `expected_text` stale-index guard as `cancel_task`. |
 | `mark_done(index, summary)` | Closes a task with its result. |
@@ -36,6 +37,34 @@ result of the run that replaced it.
 `claim_next` is the difference from the ephemeral version. A plan you can only
 read is not resumable: two workers would take the same task, and a worker that
 dies mid-task would leave it "in progress" forever.
+
+## Scheduling, `completed_at`, and OVERDUE
+
+Every task carries `planned_start_at` and `due_at` (both `None` until set) and
+a `completed_at` timestamp, stored on the task record but **not** shown by
+`render()` — a consumer that reads the plan document directly (not just
+`get_plan()`'s text) uses it to place a closed task in time. Only
+`set_task_schedule` writes the first two — `set_plan`/`add_tasks` always
+create a task with both `None` — and only a task actually reaching a
+**terminal** state (`done`, an exhausted `failed`, or `cancelled`) gets
+`completed_at` set; a `mark_failed` that sends a task back to `todo` for a
+retry is not a close and leaves it `None`.
+
+`set_task_schedule` requires `reason`, rejects a non-finite or `bool` value
+for either timestamp, and rejects `planned_start_at > due_at` when both are
+given. It only accepts `todo`/`claimed` tasks — a terminal task can't be
+(re)scheduled. Every call, including one that only clears a timestamp with
+`None`, appends one entry to the plan's own append-only `schedule_events`
+list — `{task_index, planned_start_at, due_at, reason, at}` — written in the
+**same** compare-and-swap as the task update itself, so a concurrent close of
+that task either wins the race first (and this edit is rejected on retry
+against the now-terminal task) or the schedule and its audit entry land
+together.
+
+`render()` (what `get_plan()`/the CLI show) prints a task's planned interval
+under its line when set, and appends `OVERDUE` next to `due_at` when it's in
+the past **and** the task is still `todo` or `claimed` — never for a task
+that already closed, on time or not.
 
 ## What makes it survive a restart
 
