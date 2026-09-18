@@ -70,9 +70,34 @@ def concurrent_queue(store_path: str, *, workers: int, items: int, timeout: floa
     for p in procs:
         p.start()
 
-    results = [queue.get() for _ in procs]
+    # Timed reads, and watch the processes: a worker that dies BEFORE
+    # entering _drain's try block -- failing to open the candidate
+    # database, say -- never puts a result, and an unconditional get()
+    # would hang the qualification probe forever instead of failing it.
+    # A gate that can hang is not a gate. Found by Codex review on PR #173.
+    results: list[dict[str, Any]] = []
+    missing = 0
+    while len(results) + missing < len(procs):
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            missing = len(procs) - len(results)
+            print(f"TIMEOUT: {missing} worker(s) never reported")
+            break
+        try:
+            results.append(queue.get(timeout=min(remaining, 5.0)))
+        except Exception:  # queue.Empty, by any name the platform gives it
+            dead = [p for p in procs if p.exitcode is not None]
+            if len(dead) == len(procs):
+                missing = len(procs) - len(results)
+                if missing:
+                    codes = sorted({p.exitcode for p in procs if p.exitcode is not None})
+                    print(f"FAIL: {missing} worker(s) exited without reporting (exit codes {codes})")
+                break
     for p in procs:
         p.join(timeout=30)
+    if missing:
+        print("FAIL")
+        return 1
 
     all_claims = [c for r in results for c in r["claimed"]]
     locked = sum(r["locked"] for r in results)
@@ -101,6 +126,13 @@ def _stall_then_report(store_path: str, out: Any) -> None:
     """Claim, then die without reporting -- the worker that goes away."""
     store = ControlStore(store_path, lease_seconds=0.5)
     item = store.claim(owner="the-one-that-stalls")
+    if item is None:
+        # The scenario seeds exactly one item, so an empty queue here means
+        # the setup did not happen -- reporting that is far better than the
+        # parent waiting on a message that will never arrive.
+        out.put({"error": "nothing to claim: the scenario did not seed its item"})
+        store.close()
+        os._exit(1)
     out.put({"item_id": item.item_id, "fence": item.fence})
     store.close()
     os._exit(0)  # no atexit, no cleanup: as abrupt as a kill

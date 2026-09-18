@@ -197,3 +197,60 @@ def test_problems_name_the_item_rather_than_saying_something_is_wrong(store) -> 
     for problem in problems:
         assert problem.item_id == item.item_id
         assert problem.detail
+
+
+# --- what the first review found ----------------------------------------
+
+
+def test_work_cannot_be_completed_before_it_has_been_taken(store) -> None:
+    """A fence of 0 matches a never-claimed row, so finish(item, fence=0)
+    straight after enqueue used to succeed: unprocessed work left the
+    queue, a terminal event was recorded with no claim before it, and the
+    ledger called the result clean. Found by Codex review on PR #173."""
+    item_id = store.enqueue("alpha", {"work": "never started"})
+
+    with pytest.raises(FenceRejected):
+        store.finish(item_id, fence=0, status="done")
+
+    assert store.item(item_id)["status"] == "ready"
+
+
+def test_work_cannot_be_queued_for_a_project_that_does_not_exist(store) -> None:
+    """A typo would otherwise create work nobody can see: absent from
+    visible_projects, outside the scope model entirely, and still
+    claimable."""
+    with pytest.raises(ScopeDenied):
+        store.enqueue("typo-project", {"work": "orphaned"})
+
+
+def test_an_item_id_is_not_a_password(store) -> None:
+    """A UUID is not a secret. A caller that finds one in a log or a
+    shared report would otherwise read another project's payload through
+    a method that looks harmless."""
+    store.assign("alpha", "specialist-a")
+    other = store.enqueue("beta", {"work": "not yours"})
+
+    with pytest.raises(ScopeDenied):
+        store.item(other, actor_id="specialist-a")
+    # And the history too, by raising rather than answering empty: a
+    # silent empty list is indistinguishable from "no history yet", so
+    # the caller cannot tell it was refused.
+    with pytest.raises(ScopeDenied):
+        store.events(other, actor_id="specialist-a")
+    assert store.item(other) is not None  # the control plane still sees it
+
+
+def test_two_terminal_states_that_disagree_are_a_contradiction(store) -> None:
+    """Both terminal is not the same as agreeing. A failed item
+    overwritten to done leaves row and events both terminal, so a check
+    that only asks "are both terminal" hands back a clean ledger for the
+    wrong outcome."""
+    store.enqueue("alpha", {"work": "misreported"})
+    item = store.claim(owner="worker")
+    store.finish(item.item_id, fence=item.fence, status="failed")
+    store._conn.execute("UPDATE queue_items SET status='done' WHERE item_id=?", (item.item_id,))
+
+    problems = verify_ledger(store)
+
+    assert [p.kind for p in problems] == ["terminal_events_disagree"]
+    assert "failed" in str(problems[0]) and "done" in str(problems[0])

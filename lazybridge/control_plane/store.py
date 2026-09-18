@@ -200,6 +200,13 @@ class ControlStore:
         now = time.time()
         with self._write() as conn:
             self._assert_scope(conn, project_id, actor_id)
+            # A queue item for a project that does not exist is work nobody
+            # can see: it never appears in visible_projects, so it is
+            # outside the scope model entirely while still being claimable.
+            # A typo in a project id should not be able to create that.
+            # Found by Codex review on PR #173.
+            if conn.execute("SELECT 1 FROM projects WHERE project_id=?", (project_id,)).fetchone() is None:
+                raise ScopeDenied(f"no project {project_id!r} -- create it before queueing work for it")
             conn.execute(
                 "INSERT INTO queue_items (item_id, project_id, payload, status, created_at, updated_at)"
                 " VALUES (?, ?, ?, 'ready', ?, ?)",
@@ -282,6 +289,17 @@ class ControlStore:
                 )
             if row["status"] in ("done", "failed"):
                 raise FenceRejected(f"item {item_id!r} already reached {row['status']!r}")
+            if row["status"] != "claimed":
+                # Without this, finish(item, fence=0) right after enqueue
+                # succeeds: a fence of 0 matches a never-claimed row, so
+                # unprocessed work is removed from the queue, a terminal
+                # event is recorded with no claim before it, and the
+                # ledger accepts the result as clean. Found by Codex
+                # review on PR #173.
+                raise FenceRejected(
+                    f"item {item_id!r} is {row['status']!r}, not claimed -- "
+                    "work cannot be completed before it has been taken"
+                )
             conn.execute(
                 "UPDATE queue_items SET status=?, lease_expires_at=NULL, updated_at=? WHERE item_id=?",
                 (status, now, item_id),
@@ -299,11 +317,29 @@ class ControlStore:
 
     # --- reads ----------------------------------------------------------
 
-    def item(self, item_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute("SELECT * FROM queue_items WHERE item_id=?", (item_id,)).fetchone()
-        return dict(row) if row else None
+    def item(self, item_id: str, *, actor_id: str | None = None) -> dict[str, Any] | None:
+        """One item, scoped.
 
-    def events(self, item_id: str) -> list[dict[str, Any]]:
+        The scope check belongs here and not only on the write paths: an
+        item id is a UUID, but a UUID is not a secret, and a caller that
+        obtains one from a log or a shared report would otherwise read
+        another project's payload through a method that looks harmless.
+        Found by Codex review on PR #173.
+        """
+        row = self._conn.execute("SELECT * FROM queue_items WHERE item_id=?", (item_id,)).fetchone()
+        if row is None:
+            return None
+        if actor_id is not None:
+            self._assert_scope(self._conn, row["project_id"], actor_id)
+        return dict(row)
+
+    def events(self, item_id: str, *, actor_id: str | None = None) -> list[dict[str, Any]]:
+        if actor_id is not None:
+            # Raises rather than returning an empty list: a silent empty
+            # answer is indistinguishable from "this item has no history",
+            # and a caller cannot tell it was refused. The denial is the
+            # information.
+            self.item(item_id, actor_id=actor_id)
         rows = self._conn.execute(
             "SELECT * FROM run_events WHERE item_id=? ORDER BY occurred_at, rowid", (item_id,)
         ).fetchall()
@@ -313,8 +349,12 @@ class ControlStore:
         rows = self._conn.execute("SELECT status, COUNT(*) n FROM queue_items GROUP BY status").fetchall()
         return {row["status"]: int(row["n"]) for row in rows}
 
-    def all_items(self) -> Sequence[dict[str, Any]]:
+    # Bulk reads, for the ledger check and the operator CLI -- which ARE
+    # the control plane. Underscored rather than given an actor argument:
+    # nothing else has a reason to enumerate, and a scoped variant nobody
+    # calls is surface to keep correct for free.
+    def _every_item(self) -> Sequence[dict[str, Any]]:
         return [dict(r) for r in self._conn.execute("SELECT * FROM queue_items").fetchall()]
 
-    def all_events(self) -> Sequence[dict[str, Any]]:
+    def _every_event(self) -> Sequence[dict[str, Any]]:
         return [dict(r) for r in self._conn.execute("SELECT * FROM run_events").fetchall()]

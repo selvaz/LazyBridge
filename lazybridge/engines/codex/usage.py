@@ -31,6 +31,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from .app_server import codex_executable
 
@@ -105,7 +106,7 @@ class CodexUsageSnapshot:
 
     windows: tuple[CodexUsageWindow, ...]
     plan_type: str | None
-    raw: dict
+    raw: dict[str, Any]
 
     def weekly(self, *, limit_id: str = "codex") -> CodexUsageWindow | None:
         """The seven-day bucket for one limit, identified by its DURATION.
@@ -131,9 +132,7 @@ def _window(limit_id: str, kind: str, payload: object) -> CodexUsageWindow | Non
         # number this module exists to avoid.
         return None
     resets_raw = payload.get("resetsAt")
-    resets_at = (
-        datetime.fromtimestamp(resets_raw, UTC) if isinstance(resets_raw, (int, float)) else None
-    )
+    resets_at = datetime.fromtimestamp(resets_raw, UTC) if isinstance(resets_raw, (int, float)) else None
     return CodexUsageWindow(
         limit_id=limit_id,
         kind=kind,
@@ -144,9 +143,9 @@ def _window(limit_id: str, kind: str, payload: object) -> CodexUsageWindow | Non
     )
 
 
-def parse_rate_limits(result: dict) -> CodexUsageSnapshot:
+def parse_rate_limits(result: dict[str, Any]) -> CodexUsageSnapshot:
     """Parse an ``account/rateLimits/read`` result into buckets."""
-    buckets: dict[str, dict] = {}
+    buckets: dict[str, dict[str, Any]] = {}
     by_id = result.get("rateLimitsByLimitId")
     if isinstance(by_id, dict) and by_id:
         # Preferred: the multi-bucket view. Falling back to the single
@@ -188,19 +187,19 @@ async def fetch_codex_usage(
         stderr=asyncio.subprocess.DEVNULL,
     )
 
-    async def send(message: dict) -> None:
+    async def send(message: dict[str, Any]) -> None:
         assert process.stdin is not None
         process.stdin.write((json.dumps(message) + "\n").encode())
         await process.stdin.drain()
 
-    async def await_id(wanted: int) -> dict:
+    async def await_id(wanted: int) -> dict[str, Any]:
         assert process.stdout is not None
         while True:
             line = await process.stdout.readline()
             if not line:
                 raise RuntimeError("codex app-server closed the stream before answering")
             try:
-                message = json.loads(line)
+                message: dict[str, Any] = json.loads(line)
             except json.JSONDecodeError:
                 continue  # a non-JSON line is noise, not an answer
             if message.get("id") == wanted:
@@ -230,6 +229,9 @@ async def fetch_codex_usage(
         try:
             process.kill()
         except ProcessLookupError:
+            # Already gone -- it answered and exited on its own. Nothing to
+            # clean up, and raising here would replace a successful read
+            # with a failure about the teardown.
             pass
         await process.wait()
 

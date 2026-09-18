@@ -37,10 +37,10 @@ def verify_ledger(store: ControlStore) -> list[LedgerProblem]:
     """Every way the rows and the events can contradict each other."""
     problems: list[LedgerProblem] = []
     by_item: dict[str, list[dict]] = defaultdict(list)
-    for event in store.all_events():
+    for event in store._every_event():
         by_item[event["item_id"]].append(event)
 
-    items = {item["item_id"]: item for item in store.all_items()}
+    items = {item["item_id"]: item for item in store._every_item()}
 
     for item_id, item in items.items():
         events = by_item.get(item_id, [])
@@ -66,6 +66,19 @@ def verify_ledger(store: ControlStore) -> list[LedgerProblem]:
                     "terminal_without_event",
                     item_id,
                     f"the row says {item['status']!r} but no event says how it got there",
+                )
+            )
+        if terminals and item["status"] in _TERMINAL and terminals[-1] != item["status"]:
+            # Both terminal is not the same as agreeing. A failed item
+            # overwritten to done leaves the row terminal and the events
+            # terminal, so a check that only asks "are both terminal"
+            # hands the operator a clean ledger for the wrong outcome.
+            # Found by Codex review on PR #173.
+            problems.append(
+                LedgerProblem(
+                    "terminal_events_disagree",
+                    item_id,
+                    f"the row says {item['status']!r} but the event says {terminals[-1]!r}",
                 )
             )
         if terminals and item["status"] not in _TERMINAL:
