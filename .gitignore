@@ -57,3 +57,8 @@ site/
 # Local experiments (never published)
 sandbox/
 pytest-tmp-*/
+
+# Scratch written by tests and probes. Committed once by accident;
+# ignored here rather than globally, because "tmp" is a plausible real
+# directory name in some other repository.
+tmp/

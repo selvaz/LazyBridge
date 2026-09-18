@@ -269,6 +269,51 @@ def test_a_plan_of_only_cancelled_and_done_tasks_is_complete():
 # ---------------------------------------------------------------------------
 
 
+def test_fresh_plan_snapshot_has_no_schedule_events():
+    board = _board(Store())
+    board.set_plan("unscheduled", ["task"])
+
+    assert board.snapshot().schedule_events == []
+
+
+def test_snapshot_exposes_schedule_events_in_append_order():
+    board = _board(Store())
+    board.set_plan("scheduled", ["task"])
+    board.set_task_schedule(0, "task", due_at=200.0, reason="first estimate")
+    board.set_task_schedule(0, "task", planned_start_at=250.0, due_at=300.0, reason="replanned")
+
+    events = board.snapshot().schedule_events
+
+    assert events == [
+        {
+            "task_index": 0,
+            "planned_start_at": None,
+            "due_at": 200.0,
+            "reason": "first estimate",
+            "at": events[0]["at"],
+        },
+        {
+            "task_index": 0,
+            "planned_start_at": 250.0,
+            "due_at": 300.0,
+            "reason": "replanned",
+            "at": events[1]["at"],
+        },
+    ]
+    assert all(isinstance(event["at"], float) for event in events)
+
+
+def test_snapshot_schedule_events_is_a_defensive_list_copy():
+    board = _board(Store())
+    board.set_plan("scheduled", ["task"])
+    board.set_task_schedule(0, "task", due_at=200.0, reason="deadline")
+
+    returned_events = board.snapshot().schedule_events
+    returned_events.clear()
+
+    assert len(board.snapshot().schedule_events) == 1
+
+
 def test_legacy_tasks_without_schedule_fields_still_support_every_transition():
     store = Store()
     board = _board(store, max_attempts=1)
