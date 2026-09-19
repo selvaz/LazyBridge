@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -396,10 +396,11 @@ class ControlStore:
         try:
             yield
         except BaseException:
-            try:
+            # Best effort, and deliberately silent: the failure that got us
+            # here is the one the caller needs to see, so a ROLLBACK that also
+            # fails must not replace it.
+            with suppress(sqlite3.Error):
                 self._conn.execute("ROLLBACK")
-            except sqlite3.Error:
-                pass
             raise
         else:
             self._conn.execute("ROLLBACK")
