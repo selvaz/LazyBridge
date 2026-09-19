@@ -837,6 +837,26 @@ def test_claim_task_tool_passes_through_a_successful_claim_and_a_rejection():
     assert str(rejected).startswith("REJECTED")
 
 
+def test_the_claim_task_tool_can_renew_a_claim_its_own_agent_holds_once():
+    """The recipe documents claim_task(index, expected_text, renew=False) as
+    the agent's tool. The wrapper took only two arguments, so a model that
+    followed the recipe got a validation error instead of the re-entry."""
+    store = Store()
+    DurableBlackboard(store, "p1").set_plan("shared", TASKS)
+    agent = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
+    claim = agent._tool_map["claim_task"]
+
+    first = asyncio.run(claim.run(task_index=0, expected_text=TASKS[0]))
+    assert "claimed task 0" in str(first)
+    assert str(asyncio.run(claim.run(task_index=0, expected_text=TASKS[0]))).startswith("REJECTED")  # default: refused
+
+    renewed = asyncio.run(claim.run(task_index=0, expected_text=TASKS[0], renew=True))
+    assert "claimed task 0" in str(renewed)
+    assert str(asyncio.run(claim.run(task_index=0, expected_text=TASKS[0], renew=True))).startswith(
+        "REJECTED"
+    )  # once only
+
+
 def test_duplicate_sub_agent_names_are_rejected():
     store = Store()
     with pytest.raises(ValueError, match="unique names"):
