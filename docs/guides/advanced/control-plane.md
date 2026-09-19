@@ -29,7 +29,7 @@ its own history is *visible* rather than being the only copy left.
 ## A minimal round trip
 
 ```python
-from lazybridge.control_plane import ControlStore, FenceRejected, verify_ledger
+from lazybridge.control_plane import ControlStore, FenceRejected, ScopeDenied, verify_ledger
 
 store = ControlStore("control.db", lease_seconds=900)
 store.create_project("alpha", "Project Alpha", status="open")
@@ -62,12 +62,17 @@ Pass `actor_id=` and the **repository** enforces what that actor may see; a
 filter in the UI is a display choice, this is the boundary:
 
 ```python
+store.create_project("beta", "Project Beta", status="open")
 store.assign("alpha", "specialist-a")
-store.enqueue("beta", {"task": "not yours"})            # the control plane itself may enqueue anywhere
+store.enqueue("beta", {"task": "not yours"})            # the control plane itself may enqueue into any existing project
 
-store.visible_projects("specialist-a")                  # ['alpha']
-store.claim(owner="specialist-a", actor_id="specialist-a")   # None: beta's work is not theirs
-store.enqueue("beta", {}, actor_id="specialist-a")      # raises ScopeDenied
+assert store.visible_projects("specialist-a") == ["alpha"]
+assert store.claim(owner="specialist-a", actor_id="specialist-a") is None
+
+try:
+    store.enqueue("beta", {}, actor_id="specialist-a")
+except ScopeDenied:
+    ...  # refused by the store itself, whatever the caller's UI shows
 ```
 
 A denial does not distinguish "that project does not exist" from "that project

@@ -444,3 +444,25 @@ def test_the_guide_lists_every_problem_the_ledger_can_report() -> None:
 
     assert len(emitted) >= 9, emitted  # the extraction itself must not silently find nothing
     assert emitted <= documented, f"undocumented: {sorted(emitted - documented)}"
+
+
+def test_the_guides_examples_run_as_written(tmp_path, monkeypatch) -> None:
+    """The scoped example enqueued into a project the guide never created, so a
+    reader following it stopped at ScopeDenied before reaching the point of
+    the example. Every python block in the guide is executed in order, sharing
+    one namespace the way a reader's session would."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "docs/guides/advanced/control-plane.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)```", text, re.S)
+
+    assert len(blocks) >= 2, blocks  # the extraction itself must not silently find nothing
+    monkeypatch.chdir(tmp_path)  # the examples create control.db in the working directory
+    namespace: dict = {}
+    for index, block in enumerate(blocks):
+        try:
+            exec(compile(block, f"control-plane.md block {index}", "exec"), namespace)
+        except Exception as exc:
+            raise AssertionError(f"guide block {index} does not run: {type(exc).__name__}: {exc}") from exc
