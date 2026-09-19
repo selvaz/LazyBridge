@@ -37,10 +37,14 @@ def verify_ledger(store: ControlStore) -> list[LedgerProblem]:
     """Every way the rows and the events can contradict each other."""
     problems: list[LedgerProblem] = []
     by_item: dict[str, list[dict]] = defaultdict(list)
-    for event in store._every_event():
+    # One snapshot for both reads. As two autocommit statements they can
+    # straddle a worker finishing an item, and a healthy item then reads as
+    # terminal-without-event.
+    with store._consistent_read():
+        all_events = store._every_event()
+        items = {item["item_id"]: item for item in store._every_item()}
+    for event in all_events:
         by_item[event["item_id"]].append(event)
-
-    items = {item["item_id"]: item for item in store._every_item()}
 
     for item_id, item in items.items():
         events = by_item.get(item_id, [])
@@ -91,6 +95,19 @@ def verify_ledger(store: ControlStore) -> list[LedgerProblem]:
             )
 
         claims = [e for e in events if e["event_type"] == "claimed"]
+        if item["status"] == "ready" and (claims or int(item["fence"]) > 0):
+            # Nothing ever sets a claimed item back to "ready" -- a lapsed
+            # lease is reclaimed straight to "claimed" under a higher
+            # fence. A row that says ready while its own history shows it
+            # was taken was reset behind the ledger's back, and the fence
+            # check alone cannot see it because the fence still matches.
+            problems.append(
+                LedgerProblem(
+                    "ready_after_claim",
+                    item_id,
+                    f"the row says 'ready' but the history shows {len(claims)} claim(s) at fence {item['fence']}",
+                )
+            )
         if claims:
             fences = [int(e["fence"]) for e in claims if e["fence"] is not None]
             if fences != sorted(fences) or len(set(fences)) != len(fences):

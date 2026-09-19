@@ -7,11 +7,12 @@ transaction, and leaves one event behind.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 import uuid
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,17 @@ class ControlStore:
     """One database, opened per process, safe for concurrent processes."""
 
     def __init__(self, path: str | Path, *, lease_seconds: float = 900.0) -> None:
+        # A lease of 0 lets a second claimant take an item the moment the
+        # first has it; a negative one is the same; NaN compares false
+        # against every clock reading, so the claimed item could never be
+        # reclaimed. None of those is a configuration, they are mistakes
+        # that would surface as duplicate work or a stuck queue.
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, (int, float))
+            or not (math.isfinite(lease_seconds) and lease_seconds > 0)
+        ):
+            raise ValueError(f"lease_seconds must be a positive, finite number of seconds, got {lease_seconds!r}")
         self.path = str(path)
         self.lease_seconds = lease_seconds
         self._conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
@@ -328,9 +340,19 @@ class ControlStore:
         """
         row = self._conn.execute("SELECT * FROM queue_items WHERE item_id=?", (item_id,)).fetchone()
         if row is None:
+            if actor_id is not None:
+                # Same answer as "not yours". Returning None to a scoped
+                # actor for an absent id, and raising for a present one,
+                # is an oracle for which ids exist -- and, worse for
+                # events(), it skipped the check entirely when the item row
+                # was gone but its events remained.
+                raise ScopeDenied(f"actor {actor_id!r} may not read item {item_id!r}")
             return None
         if actor_id is not None:
-            self._assert_scope(self._conn, row["project_id"], actor_id)
+            try:
+                self._assert_scope(self._conn, row["project_id"], actor_id)
+            except ScopeDenied:
+                raise ScopeDenied(f"actor {actor_id!r} may not read item {item_id!r}") from None
         return dict(row)
 
     def events(self, item_id: str, *, actor_id: str | None = None) -> list[dict[str, Any]]:
@@ -345,6 +367,44 @@ class ControlStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    @contextmanager
+    def _consistent_read(self) -> Iterator[None]:
+        """One read transaction: every SELECT inside sees the same committed state.
+
+        The ledger reads events and items in two statements. In autocommit
+        those are two snapshots, so a worker finishing an item between them
+        makes verification see the events from before and the row from
+        after -- and report a healthy item as ``terminal_without_event``.
+
+        Two edges, both found by Codex review of the first version:
+
+        - **Already inside a transaction.** An unconditional ``BEGIN`` raises
+          "cannot start a transaction within a transaction" and leaves the
+          caller's transaction open. The ambient one already gives a
+          consistent view, so this joins it and neither begins nor ends
+          anything.
+        - **Ending it.** A read has nothing to commit, so it is ended with
+          ``ROLLBACK``. A ``COMMIT`` in a ``finally`` could raise its own
+          error and replace the real one -- the failed read that the caller
+          actually needs to see. On the error path the rollback is
+          best-effort and the original exception propagates untouched.
+        """
+        if self._conn.in_transaction:
+            yield
+            return
+        self._conn.execute("BEGIN")
+        try:
+            yield
+        except BaseException:
+            # Best effort, and deliberately silent: the failure that got us
+            # here is the one the caller needs to see, so a ROLLBACK that also
+            # fails must not replace it.
+            with suppress(sqlite3.Error):
+                self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("ROLLBACK")
+
     def counts(self) -> dict[str, int]:
         rows = self._conn.execute("SELECT status, COUNT(*) n FROM queue_items GROUP BY status").fetchall()
         return {row["status"]: int(row["n"]) for row in rows}
@@ -357,4 +417,4 @@ class ControlStore:
         return [dict(r) for r in self._conn.execute("SELECT * FROM queue_items").fetchall()]
 
     def _every_event(self) -> Sequence[dict[str, Any]]:
-        return [dict(r) for r in self._conn.execute("SELECT * FROM run_events").fetchall()]
+        return [dict(r) for r in self._conn.execute("SELECT * FROM run_events ORDER BY occurred_at, rowid").fetchall()]

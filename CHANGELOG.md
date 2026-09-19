@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.5.0] — 2026-09-18
+
 ### Added
 - **`lazybridge.ext.delegation`**, a new extension promoting LazyCEO's
   generic background-delegation infrastructure: durable Store-backed job
@@ -33,6 +37,76 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   tokens. As with GPT-5.6, the >272K-input long-context multiplier is not
   modelled because LazyBridge's usage envelope does not expose the request's
   billable long-context tier.
+- **`lazybridge.control_plane`**, a SQLite-backed store for a fleet's work:
+  an atomic claim (an item goes to exactly one worker, decided in a single
+  write transaction), **fencing** (every claim carries a rising token, so a
+  worker that stalls and comes back to report success is refused with
+  `FenceRejected`), and an append-only ledger with `verify_ledger()`
+  returning named `LedgerProblem`s rather than a boolean. Visibility is scoped
+  by the store itself (`actor_id=`, `ScopeDenied`), not by the caller. Ships
+  with `python -m lazybridge.control_plane.probe`, which qualifies the storage
+  engine with separate **processes** (`concurrent-queue`, `kill-and-reclaim`).
+  Single-machine by design. See the new *Control plane* guide.
+- **`lazybridge.engines.codex.usage.fetch_codex_usage()`** reads the Codex
+  subscription quota from the App Server (`account/rateLimits/read`) without
+  starting a thread or spending a turn. Each `CodexUsageWindow` carries a
+  percentage **and** its reset time; `CodexUsageSnapshot.weekly()` picks the
+  seven-day bucket by duration rather than position. It raises `RuntimeError`
+  when the server cannot be reached or refuses the method, which a caller must
+  treat as *unknown*, never as *unlimited*.
+- **`lazybridge.ext.approval.ApprovalQueue`**, a durable approval/escalation
+  ticket queue promoted from LazyCEO's `lazyceo.approvals`, with a
+  configurable Store key prefix so independent queues can share one Store.
+- **`DurableBlackboard.claim_task(index, expected_text)`** claims a specific
+  task instead of whichever is earliest-eligible, guarded by the same
+  `expected_text` stale-index check as `cancel_task`.
+- **Per-task scheduling on `DurableBlackboard`**: optional `planned_start_at` /
+  `due_at` on every task and a CAS-backed `set_task_schedule(...)`. Each edit
+  appends to an append-only `schedule_events` history stored in the same
+  document and written in the same compare-and-swap as the task update, and
+  `snapshot().schedule_events` exposes it. `render()` marks a task `OVERDUE`
+  when `due_at` is past and it is still `todo` or `claimed`. A closing task now
+  records **`completed_at`**, so a consumer can place closed work in time.
+- **A portable `approval_gate` on every engine**, not only the two coding
+  ones. `LLMEngine` had no equivalent, so swapping a coding engine for a plain
+  one in an application built around `TieredGate` silently dropped the whole
+  safety layer.
+
+### Changed
+- **`DurableBlackboard.claim_task` no longer refuses a holder its own task
+  when the caller opts in.** The default is unchanged (a claimed task is
+  refused), but `claim_task(..., renew=True)` lets the *same identified owner*
+  re-enter a claim it already holds. Renewal is deliberately narrow: `owner=`
+  must be given and equal the holder, the lease must still be alive, and it
+  succeeds **once** per claim -- checked inside the compare-and-swap, so two
+  concurrent callers cannot both win. A fresh claim, by either `claim_task` or
+  `claim_next`, always starts un-renewed. Previously the check compared only
+  the lease clock, never the owner, so the holder was told another worker had
+  its task when none existed.
+- **Approval prompts keep both ends of a long value.** A prompt now goes
+  through one shared `elide` (in `lazybridge/_display.py`) with a budget
+  derived from the transport rather than a magic number, keeps the head *and*
+  the tail, and says how many characters were dropped. The old head-only cut
+  at 400 characters showed an approver the harmless opening of
+  `cd repo && build && rm -rf artifacts` and hid what followed. Redaction runs
+  **before** elision, so a secret cannot survive in the kept tail.
+- **`TieredGate` rules can say which kind of request they speak about.**
+  `Rule` gains `kind_pattern` (default `"*"`, which is what every existing rule
+  already meant). A tool arrives as a bare identifier and a command as the
+  whole command line, so a pattern written for tool names matched no command
+  and every escalation fell into the default deny. The kind is part of a rule's
+  fingerprint, so a session grant given for a tool cannot satisfy a command of
+  the same name; **existing durable grants stop matching once a table starts
+  naming kinds** -- a grant must not outlive the wording the human was shown.
+
+### Fixed
+- `Store.write`, `delete`, `clear`, `write_memory` and `delete_memory` now roll
+  back on failure. Only `compare_and_swap` did, so a failed write (for example
+  "database is locked" under contention) left sqlite3's implicit transaction
+  open on that connection forever, and in WAL mode every later read through it
+  stayed pinned to the snapshot as of the failed write.
+- The Claude CLI subprocess's real stderr is captured instead of being lost, so
+  a crash reports more than the SDK's generic "exit code N".
 
 ---
 

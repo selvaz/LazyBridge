@@ -837,6 +837,26 @@ def test_claim_task_tool_passes_through_a_successful_claim_and_a_rejection():
     assert str(rejected).startswith("REJECTED")
 
 
+def test_the_claim_task_tool_can_renew_a_claim_its_own_agent_holds_once():
+    """The recipe documents claim_task(index, expected_text, renew=False) as
+    the agent's tool. The wrapper took only two arguments, so a model that
+    followed the recipe got a validation error instead of the re-entry."""
+    store = Store()
+    DurableBlackboard(store, "p1").set_plan("shared", TASKS)
+    agent = durable_blackboard_agent([_worker()], store=store, plan_id="p1", engine=_ToolCallingEngine([]))
+    claim = agent._tool_map["claim_task"]
+
+    first = asyncio.run(claim.run(task_index=0, expected_text=TASKS[0]))
+    assert "claimed task 0" in str(first)
+    assert str(asyncio.run(claim.run(task_index=0, expected_text=TASKS[0]))).startswith("REJECTED")  # default: refused
+
+    renewed = asyncio.run(claim.run(task_index=0, expected_text=TASKS[0], renew=True))
+    assert "claimed task 0" in str(renewed)
+    assert str(asyncio.run(claim.run(task_index=0, expected_text=TASKS[0], renew=True))).startswith(
+        "REJECTED"
+    )  # once only
+
+
 def test_duplicate_sub_agent_names_are_rejected():
     store = Store()
     with pytest.raises(ValueError, match="unique names"):
@@ -1125,3 +1145,28 @@ def test_reclaiming_via_claim_next_also_restores_the_right_to_renew():
     assert reclaimed[0] == 0
 
     assert not isinstance(board.claim_task(0, TASKS[0], owner="worker-b", renew=True), str)
+
+
+def test_a_task_written_by_1_4_0_reads_with_the_new_fields_as_none() -> None:
+    """Tasks persisted before per-task scheduling and completed_at existed
+    lack those keys, so a consumer reading task["completed_at"] raised
+    KeyError on every such task that had not been through another transition
+    since the upgrade. The fields are normalised on read; nothing is
+    rewritten in storage."""
+    from lazybridge import Store
+    from lazybridge.ext.planners import DurableBlackboard
+
+    store = Store()
+    board = DurableBlackboard(store, "legacy")
+    board.set_plan("reason", ["an old task"])
+    key = next(k for k, _ in store.items() if "legacy" in k)
+    doc = store.read(key)
+    for task in doc["tasks"]:  # what 1.4.0 wrote: no scheduling fields, no completed_at
+        for field in ("planned_start_at", "due_at", "completed_at"):
+            task.pop(field, None)
+    store.write(key, doc)
+
+    task = board.snapshot().tasks[0]
+
+    assert task["completed_at"] is None and task["due_at"] is None and task["planned_start_at"] is None
+    assert "completed_at" not in store.read(key)["tasks"][0]  # storage untouched

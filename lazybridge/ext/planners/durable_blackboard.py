@@ -331,10 +331,19 @@ class DurableBlackboard:
     def _snapshot_of(self, doc: dict[str, Any] | None) -> BlackboardSnapshot:
         if doc is None:
             return BlackboardSnapshot(plan_id=self.plan_id, reasoning="", tasks=[])
+        # Tasks persisted by 1.4.0 predate the optional scheduling fields and
+        # completed_at, so a consumer reading task["completed_at"] raised
+        # KeyError on every task that had not been through another
+        # transition since the upgrade. The fields are normalised to None
+        # on read; nothing is rewritten in storage.
+        tasks = [
+            {"planned_start_at": None, "due_at": None, "completed_at": None, **task} if isinstance(task, dict) else task
+            for task in doc.get("tasks", [])
+        ]
         return BlackboardSnapshot(
             plan_id=str(doc.get("plan_id", self.plan_id)),
             reasoning=str(doc.get("reasoning", "")),
-            tasks=list(doc.get("tasks", [])),
+            tasks=tasks,
             schedule_events=list(doc.get("schedule_events", [])),
         )
 
@@ -752,12 +761,14 @@ def durable_blackboard_agent(
         index, text = claimed
         return f"claimed task {index}: {text}"
 
-    def claim_task(task_index: int, expected_text: str) -> str:
+    def claim_task(task_index: int, expected_text: str, renew: bool = False) -> str:
         """Take a SPECIFIC task instead of whichever is next, when you
         already know which one you need. expected_text must match the
         task's CURRENT text exactly (call get_plan() first) -- a mismatch
-        is refused, same guard as cancel_task."""
-        result = board.claim_task(task_index, expected_text, owner=holder)
+        is refused, same guard as cancel_task. Pass renew=True only to
+        re-enter a claim YOU already hold (for example to attach the job
+        that will do the work); it is allowed once per claim."""
+        result = board.claim_task(task_index, expected_text, owner=holder, renew=renew)
         if isinstance(result, str):
             return result
         index, text = result
