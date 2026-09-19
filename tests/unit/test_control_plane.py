@@ -254,3 +254,168 @@ def test_two_terminal_states_that_disagree_are_a_contradiction(store) -> None:
 
     assert [p.kind for p in problems] == ["terminal_events_disagree"]
     assert "failed" in str(problems[0]) and "done" in str(problems[0])
+
+
+# --- what the release-readiness review found ------------------------------
+
+
+@pytest.mark.parametrize("bad", [0, -1, -0.5, float("nan"), float("inf"), "900", True, None])
+def test_a_lease_that_cannot_work_is_refused_at_construction(tmp_path, bad) -> None:
+    """A lease of 0 lets a second claimant take an item the instant the
+    first has it; a negative one is the same; NaN compares false against
+    every clock reading, so a claimed item could never be reclaimed. None of
+    those is a configuration -- each would surface later as duplicate work
+    or a stuck queue."""
+    with pytest.raises(ValueError, match="lease_seconds"):
+        ControlStore(tmp_path / "c.db", lease_seconds=bad)
+
+
+def test_a_scoped_actor_learns_nothing_from_an_id_that_does_not_exist(store) -> None:
+    """Returning None to a scoped actor for an absent id while raising for a
+    present one is an oracle for which ids exist."""
+    store.assign("alpha", "specialist-a")
+
+    with pytest.raises(ScopeDenied):
+        store.item("no-such-item", actor_id="specialist-a")
+    with pytest.raises(ScopeDenied):
+        store.events("no-such-item", actor_id="specialist-a")
+    assert store.item("no-such-item") is None  # the control plane itself is unaffected
+
+
+def test_events_that_outlive_their_item_row_stay_scoped(store) -> None:
+    """If the item row is gone but its append-only events remain, an actor
+    who was never assigned and merely knows the id must still be refused --
+    the scope check used to be skipped when the row was absent."""
+    item_id = store.enqueue("beta", {"work": "confidential"})
+    store._conn.execute("DELETE FROM queue_items WHERE item_id=?", (item_id,))
+    store.assign("alpha", "specialist-a")
+
+    with pytest.raises(ScopeDenied):
+        store.events(item_id, actor_id="specialist-a")
+    assert store.events(item_id)  # the control plane can still read the history
+
+
+def test_a_denial_does_not_name_the_project_it_protects(store) -> None:
+    """The refusal used to say "not assigned to project 'beta'", which tells
+    an actor that beta exists and what it is called."""
+    store.assign("alpha", "specialist-a")
+    other = store.enqueue("beta", {"work": "not yours"})
+
+    with pytest.raises(ScopeDenied) as denied:
+        store.item(other, actor_id="specialist-a")
+
+    assert "beta" not in str(denied.value)
+
+
+def test_a_row_reset_to_ready_behind_the_ledger_is_caught(store) -> None:
+    """Nothing ever moves a claimed item back to "ready" -- a lapsed lease is
+    reclaimed straight to "claimed" under a higher fence. The fence check
+    alone cannot see this, because the fence still matches."""
+    store.enqueue("alpha", {"work": "tampered"})
+    item = store.claim(owner="worker")
+    store._conn.execute("UPDATE queue_items SET status='ready' WHERE item_id=?", (item.item_id,))
+
+    assert [p.kind for p in verify_ledger(store)] == ["ready_after_claim"]
+
+
+def test_verification_reads_one_snapshot_not_two(tmp_path) -> None:
+    """Events and items are read by two statements. In autocommit those are
+    two snapshots, so a worker finishing an item between them made a healthy
+    item read as terminal_without_event. Here another connection finishes it
+    exactly between the two reads."""
+    path = tmp_path / "c.db"
+
+    class _Racy(ControlStore):
+        hook = None
+
+        def _every_item(self):
+            hook, self.hook = self.hook, None
+            if hook is not None:
+                hook()
+            return super()._every_item()
+
+    store = _Racy(path)
+    other = ControlStore(path)
+    try:
+        store.create_project("alpha", "Project Alpha", status="open")
+        store.enqueue("alpha", {"work": "in flight"})
+        claim = store.claim(owner="worker")
+        store.hook = lambda: other.finish(claim.item_id, fence=claim.fence, status="done")
+
+        assert verify_ledger(store) == []
+    finally:
+        other.close()
+        store.close()
+
+
+def test_the_bulk_event_read_is_ordered_like_events(store) -> None:
+    """The ledger treats list order as chronological when it checks fence
+    monotonicity and picks the last terminal event, so the bulk read cannot
+    leave the order to whatever scan plan SQLite chooses."""
+    item_id = store.enqueue("alpha", {"work": "ordered"})
+    # Physically inserted LAST, but it happened FIRST.
+    store._conn.execute(
+        "INSERT INTO run_events(event_id, item_id, project_id, event_type, occurred_at)"
+        " VALUES ('e-early', ?, 'alpha', 'note', 0.0)",
+        (item_id,),
+    )
+
+    bulk = [e["event_id"] for e in store._every_event() if e["item_id"] == item_id]
+
+    assert bulk == [e["event_id"] for e in store.events(item_id)]
+    assert bulk[0] == "e-early"
+
+
+def test_verifying_inside_an_open_transaction_neither_breaks_nor_ends_it(store) -> None:
+    """An unconditional BEGIN raised "cannot start a transaction within a
+    transaction" and left the caller's transaction open. The ambient one
+    already gives a consistent view, so verification joins it."""
+    store.enqueue("alpha", {"work": "x"})
+    store._conn.execute("BEGIN")
+    try:
+        assert verify_ledger(store) == []
+        assert store._conn.in_transaction  # still the caller's, untouched
+    finally:
+        store._conn.execute("ROLLBACK")
+
+
+def test_a_failing_read_surfaces_its_own_error_even_when_ending_the_transaction_fails(tmp_path) -> None:
+    """A COMMIT in a finally could raise its own error and replace the real
+    one -- the failed read the caller actually needs to see. That needs a
+    transaction that CANNOT be ended, so the connection is wrapped in a test
+    double whose COMMIT/ROLLBACK fail. The original exception must arrive
+    intact; a COMMIT that merely succeeds would never have shown the bug."""
+    import sqlite3
+
+    class _Boom(RuntimeError):
+        pass
+
+    class _EndFails:
+        """Delegates to the real connection, except ending a transaction fails."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def execute(self, sql, *args):
+            if sql.strip().upper() in ("COMMIT", "ROLLBACK"):
+                raise sqlite3.OperationalError("disk I/O error while ending the transaction")
+            return self._real.execute(sql, *args)
+
+    class _Failing(ControlStore):
+        def _every_item(self):
+            raise _Boom("the second read failed")
+
+    failing = _Failing(tmp_path / "c.db")
+    real = failing._conn
+    failing._conn = _EndFails(real)
+    try:
+        with pytest.raises(_Boom, match="the second read failed"):
+            verify_ledger(failing)
+    finally:
+        failing._conn = real
+        if real.in_transaction:
+            real.execute("ROLLBACK")
+        failing.close()

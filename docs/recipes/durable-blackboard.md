@@ -25,9 +25,38 @@ invocation, which is exactly what this one must not do.
 | `cancel_task(index, expected_text, reason)` | Drops a not-yet-claimed task that turned out to be unnecessary. `expected_text` must match the task's current text. |
 | `set_task_schedule(index, expected_text, planned_start_at, due_at, reason)` | Sets (or clears, by passing `None`) a `todo`/`claimed` task's planned start and due timestamps. Same `expected_text` stale-index guard; each call also appends an entry to an audit trail. |
 | `claim_next()` | Takes exactly one task — whichever is earliest eligible — atomically. |
-| `claim_task(index, expected_text)` | Takes a SPECIFIC task instead of "next", for a caller that already knows which one it needs and doesn't want to claim-and-close every earlier task just to reach it. Same `expected_text` stale-index guard as `cancel_task`. |
+| `claim_task(index, expected_text, renew=False)` | Takes a SPECIFIC task instead of "next", for a caller that already knows which one it needs and doesn't want to claim-and-close every earlier task just to reach it. Same `expected_text` stale-index guard as `cancel_task`. |
 | `mark_done(index, summary)` | Closes a task with its result. |
 | `mark_failed(index, error)` | Hands a task back after a genuine failure. |
+
+### Re-entering a claim you already hold (`renew=True`)
+
+By default `claim_task` **refuses** a task that is currently claimed, even by
+the caller that claimed it: two callers are only ever "the same" if one of
+them says so. Passing `renew=True` lets the *same identified owner* re-enter
+a claim it already holds -- the shape of a flow that claims a task, does some
+preparation, and claims the same index again to attach the job that will do
+the work.
+
+Renewal is deliberately narrow. It succeeds only when **all** of these hold,
+and is refused otherwise:
+
+- `owner=` was given and equals the current holder (`owner=None` never
+  renews: two anonymous callers are not the same caller);
+- `renew=True` was passed. An owner is usually *process*-level, so equality
+  alone cannot tell "the holder re-entering" from "a second, genuinely new
+  delegation for a task that already has one running" -- inferring renewal
+  would let one batch start two writers on one task;
+- the lease is still **alive**. A holder whose lease lapsed did not finish in
+  time, and that is exactly what an attempt counts; renewing it would let a
+  stable owner identity dodge the attempt limit forever;
+- the claim has not **already been renewed**. A renewal attaches a worker to
+  a task; a second one would attach a second worker to the same checkout.
+  The check happens inside the compare-and-swap, so two concurrent callers
+  cannot both win.
+
+A fresh claim always starts un-renewed, whichever way it was taken
+(`claim_next` included).
 
 Closing requires an **active claim**: a task that was never claimed, or one
 already closed, is refused. Each planner instance also claims under its own

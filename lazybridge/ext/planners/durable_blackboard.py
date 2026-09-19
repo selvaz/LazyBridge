@@ -331,10 +331,19 @@ class DurableBlackboard:
     def _snapshot_of(self, doc: dict[str, Any] | None) -> BlackboardSnapshot:
         if doc is None:
             return BlackboardSnapshot(plan_id=self.plan_id, reasoning="", tasks=[])
+        # Tasks persisted by 1.4.0 predate the optional scheduling fields and
+        # completed_at, so a consumer reading task["completed_at"] raised
+        # KeyError on every task that had not been through another
+        # transition since the upgrade. The fields are normalised to None
+        # on read; nothing is rewritten in storage.
+        tasks = [
+            {"planned_start_at": None, "due_at": None, "completed_at": None, **task} if isinstance(task, dict) else task
+            for task in doc.get("tasks", [])
+        ]
         return BlackboardSnapshot(
             plan_id=str(doc.get("plan_id", self.plan_id)),
             reasoning=str(doc.get("reasoning", "")),
-            tasks=list(doc.get("tasks", [])),
+            tasks=tasks,
             schedule_events=list(doc.get("schedule_events", [])),
         )
 

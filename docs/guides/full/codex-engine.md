@@ -206,6 +206,46 @@ script can tell LazyBridge-created threads apart from interactive ones by
 grepping rollout files for `"source": "lazybridge"`, e.g. as a starting point
 for a retention/cleanup pass.
 
+## Reading the subscription quota
+
+The subscription behind `CodexEngine` has a weekly quota, and it can be read
+without spending any of it. `fetch_codex_usage()` asks the App Server for
+`account/rateLimits/read` -- no thread and no turn are involved:
+
+```python
+from lazybridge.engines.codex.usage import fetch_codex_usage
+
+snapshot = await fetch_codex_usage()
+weekly = snapshot.weekly()          # the seven-day window, or None
+if weekly is not None:
+    print(weekly.used_percent, weekly.resets_at)
+```
+
+Each window carries **both** a percentage and a reset time (`resets_at` is
+timezone-aware UTC, or `None` if the server did not say), and they are meant to
+be read together: 85% is comfortable on the first day of a window and critical
+on the last.
+
+- `snapshot.windows` lists every bucket the account reported; an account can
+  report more than one. Each is a `CodexUsageWindow` with `limit_id`,
+  `used_percent`, `window_duration_minutes`, `resets_at` and `reached_type`.
+- `snapshot.weekly(limit_id="codex")` picks the seven-day bucket by its
+  **duration** (`WEEKLY_WINDOW_MINUTES`, 10080), not by position -- `primary`
+  is not always the weekly one -- and returns `None` when there is none.
+- `snapshot.plan_type` and `snapshot.raw` (the untouched response) are there
+  for anything the dataclass does not model yet.
+
+It needs a local Codex login, like the engine itself. It raises
+`RuntimeError` if the App Server cannot be reached, times out (30 s by
+default), closes the stream, or refuses the method -- an older `codex` binary
+answers "method not found". A caller that gates work on the number must treat
+all of those, and a `None` from `weekly()`, as **unknown**, never as
+*plenty left*.
+
+Claude Code's equivalent is different in kind: there is no typed field, so its
+figure is read out of the prose the CLI prints for `/usage` and can only be as
+reliable as that wording.
+
 ## Not implemented yet
 
 - **No model validation.** `model=` is passed straight to `thread/start`
