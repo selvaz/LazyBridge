@@ -90,6 +90,7 @@ item and the detail, not a boolean:
 | `event_without_terminal` | an event says it finished but the row still says otherwise |
 | `fence_not_monotonic` | claim fences repeated or fell instead of rising |
 | `fence_disagrees` | the row's fence differs from the last claim recorded |
+| `ready_after_claim` | the row says `ready` but the history shows it was claimed -- nothing moves a claimed item back to `ready`, so it was reset behind the ledger's back |
 | `orphan_events` | events reference an item that no longer exists |
 
 An empty list means the rows and their history agree. It cannot say the *right*

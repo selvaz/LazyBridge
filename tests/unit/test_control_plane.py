@@ -419,3 +419,28 @@ def test_a_failing_read_surfaces_its_own_error_even_when_ending_the_transaction_
         if real.in_transaction:
             real.execute("ROLLBACK")
         failing.close()
+
+
+def test_the_guide_lists_every_problem_the_ledger_can_report() -> None:
+    """The guide's table calls itself the full set. It was missing
+    ready_after_claim, added in the same commit that made verify_ledger emit
+    it -- so an operator investigating corruption could receive a diagnostic
+    the documentation never mentioned. Compared against what the code
+    actually emits, so it cannot drift again."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    emitted = set(
+        re.findall(
+            r'LedgerProblem\(\s*"([a-z_]+)"', (root / "lazybridge/control_plane/ledger.py").read_text(encoding="utf-8")
+        )
+    )
+    documented = set(
+        re.findall(
+            r"^\| `([a-z_]+)` \|", (root / "docs/guides/advanced/control-plane.md").read_text(encoding="utf-8"), re.M
+        )
+    )
+
+    assert len(emitted) >= 9, emitted  # the extraction itself must not silently find nothing
+    assert emitted <= documented, f"undocumented: {sorted(emitted - documented)}"
