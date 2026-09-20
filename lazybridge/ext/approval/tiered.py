@@ -130,8 +130,20 @@ class Rule:
     #: all of them Codex asking to run its own tests and delete its own
     #: scratch directories -- and 2.4 GB of undeleted scratch as the result.
     kind_pattern: str = "*"
+    #: Which PROVIDER this rule speaks about -- ``"claude-code"`` for Claude
+    #: Code, ``"codex"`` for Codex, or ``"llm"`` for the direct LLM engine.
+    #: ``"*"`` means any, which is what every rule written before this field
+    #: meant and still means.
+    #:
+    #: Needed because providers can expose the same stable tool name with
+    #: different execution and sandbox semantics. For example, a policy may
+    #: allow Codex's ``codex-shell`` command after review without silently
+    #: granting the same-named request if another provider emits one later.
+    provider_pattern: str = "*"
 
     def matches(self, request: ApprovalRequest) -> bool:
+        if not fnmatch(str(request.provider), self.provider_pattern):
+            return False
         if not fnmatch(str(request.kind), self.kind_pattern):
             return False
         if not fnmatch(request.name, self.name_pattern):
@@ -149,12 +161,15 @@ class Rule:
         are different ``Rule`` instances (e.g. rebuilt on every process
         start) — the fingerprint is over content, not identity.
         """
-        # kind_pattern is part of the shape, and leaving it out would be a
-        # security hole rather than an omission: two rules differing only in
-        # which kind they speak about would fingerprint identically, so a
-        # session grant a human gave for a TOOL would silently satisfy a
-        # COMMAND asking under the same name.
-        payload = f"{self.tier}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
+        # kind_pattern and provider_pattern are part of the shape. Leaving
+        # either out would be a security hole rather than an omission: two
+        # rules differing only in which kind or provider they speak about
+        # would fingerprint identically, so a session grant a human gave for
+        # one request would silently satisfy the same-named request in the
+        # other scope.
+        payload = (
+            f"{self.tier}|{self.provider_pattern}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
+        )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 

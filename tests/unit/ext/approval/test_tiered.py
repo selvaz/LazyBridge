@@ -498,3 +498,30 @@ def test_the_kind_is_part_of_a_rules_fingerprint():
     tool_rule = Rule("session", "git push*", kind_pattern="tool")
     command_rule = Rule("session", "git push*", kind_pattern="command")
     assert tool_rule.fingerprint() != command_rule.fingerprint()
+
+
+# --- rules that name a provider -----------------------------------------
+
+
+def test_a_codex_rule_does_not_match_claude_code_and_vice_versa():
+    codex_rule = Rule("allow", "codex-shell", provider_pattern="codex")
+    claude_rule = Rule("allow", "codex-shell", provider_pattern="claude-code")
+
+    assert codex_rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+    assert not codex_rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+    assert claude_rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+    assert not claude_rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+
+
+def test_a_rule_written_before_providers_existed_still_matches_every_provider():
+    rule = Rule("allow", "codex-shell")
+
+    assert rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+    assert rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+
+
+def test_the_provider_is_part_of_a_rules_fingerprint():
+    codex_rule = Rule("session", "codex-shell", provider_pattern="codex")
+    claude_rule = Rule("session", "codex-shell", provider_pattern="claude-code")
+
+    assert codex_rule.fingerprint() != claude_rule.fingerprint()
