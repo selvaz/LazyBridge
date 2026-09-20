@@ -132,12 +132,16 @@ class Rule:
     #: undeleted scratch as the result.
     #:
     #: A command's ``name`` is now a stable, provider-defined identifier
-    #: (e.g. Codex's ``codex-shell``), not the raw command line -- match its
-    #: actual content with ``arg_pattern`` against ``arguments["command"]``,
-    #: not with ``name_pattern``. A rule written to match command TEXT via
-    #: ``name_pattern`` (the old accidental behavior for Codex) will now
-    #: match nothing and fall through, same as before this field existed;
-    #: use ``arg_pattern`` instead.
+    #: (e.g. Codex's ``codex-shell``), not the raw command line -- prefer
+    #: matching its actual content with ``arg_pattern`` against
+    #: ``arguments["command"]`` in anything written from here on. A rule
+    #: written to match command TEXT via ``name_pattern`` (the old,
+    #: accidental behavior for Codex, and still how other providers name a
+    #: command) is NOT silently broken by this: ``matches`` falls back to
+    #: the command's own text when the stable name does not match, so an
+    #: existing policy keeps working exactly as it did rather than
+    #: silently stop enforcing itself. Found by Codex review: an earlier
+    #: version of this field let that happen.
     kind_pattern: str = "*"
     #: Which PROVIDER this rule speaks about -- ``"claude-code"`` for Claude
     #: Code, ``"codex"`` for Codex, or ``"llm"`` for the direct LLM engine.
@@ -156,7 +160,12 @@ class Rule:
         if not fnmatch(str(request.kind), self.kind_pattern):
             return False
         if not fnmatch(request.name, self.name_pattern):
-            return False
+            # The stable name did not match -- try the command's own text as a fallback, for a rule written
+            # before that stable name existed (or naming a provider whose "name" always was the command line).
+            # Never for anything else: a tool call, or a command with no usable text, still falls through here.
+            command = request.arguments.get("command") if request.kind == "command" else None
+            if not (isinstance(command, str) and command and fnmatch(command, self.name_pattern)):
+                return False
         if self.arg_pattern is None:
             return True
         command = request.arguments.get("command")
