@@ -103,6 +103,38 @@ def test_allow_session_for_command_does_not_approve_different_command(provider, 
     assert asked == ["git status", "rm -rf important-dir"]
 
 
+def test_allow_session_for_command_without_command_text_is_not_cached():
+    asked: list[dict[str, object]] = []
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(dict(request.arguments))
+        return ApprovalDecision.allow_for_session()
+
+    approved: set[tuple[str, str]] = set()
+    scoped = remembering_gate(gate, approved)
+    first = ApprovalRequest(
+        provider="codex",
+        kind="command",
+        name="codex-shell",
+        arguments={"commandActions": [{"type": "read", "path": "safe.txt"}]},
+    )
+    second = ApprovalRequest(
+        provider="codex",
+        kind="command",
+        name="codex-shell",
+        arguments={"command": None, "commandActions": [{"type": "delete", "path": "important.txt"}]},
+    )
+
+    async def approve_both() -> None:
+        assert (await scoped(first)).action == "allow_session"
+        assert (await scoped(second)).action == "allow_session"
+
+    asyncio.run(approve_both())
+
+    assert asked == [dict(first.arguments), dict(second.arguments)]
+    assert approved == set()
+
+
 @pytest.mark.parametrize(
     ("provider", "name"),
     [("codex", "codex-shell"), ("claude-code", "Bash")],
