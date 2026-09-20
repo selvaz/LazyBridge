@@ -294,7 +294,7 @@ def main() -> None:
                     "threadId": "thread-1",
                     "turnId": "turn-1",
                     "itemId": "item-1",
-                    "command": "git status",
+                    "command": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
                     "cwd": "C:/work/project",
                     "reason": "Inspect the worktree",
                 },

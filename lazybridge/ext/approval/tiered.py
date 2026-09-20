@@ -123,19 +123,49 @@ class Rule:
     #: every rule written before this field meant and still means.
     #:
     #: Needed because a table can otherwise say nothing about commands at
-    #: all. A tool arrives as a bare identifier (``Bash``); a command arrives
-    #: as the whole command line, so patterns written for tool names match
-    #: none of them and every escalation falls into the default deny. Seen
-    #: in production: seventeen refusals in six hours, all tier=unmatched,
-    #: all of them Codex asking to run its own tests and delete its own
-    #: scratch directories -- and 2.4 GB of undeleted scratch as the result.
+    #: all. A tool arrives as a bare identifier (``Bash``); a command used to
+    #: arrive as the whole command line for Codex specifically, so patterns
+    #: written for tool names matched none of them and every escalation fell
+    #: into the default deny. Seen in production: seventeen refusals in six
+    #: hours, all tier=unmatched, all of them Codex asking to run its own
+    #: tests and delete its own scratch directories -- and 2.4 GB of
+    #: undeleted scratch as the result.
+    #:
+    #: A command's ``name`` is now a stable, provider-defined identifier
+    #: (e.g. Codex's ``codex-shell``), not the raw command line -- prefer
+    #: matching its actual content with ``arg_pattern`` against
+    #: ``arguments["command"]`` in anything written from here on. A rule
+    #: written to match command TEXT via ``name_pattern`` (the old,
+    #: accidental behavior for Codex, and still how other providers name a
+    #: command) is NOT silently broken by this: ``matches`` falls back to
+    #: the command's own text when the stable name does not match, so an
+    #: existing policy keeps working exactly as it did rather than
+    #: silently stop enforcing itself. Found by Codex review: an earlier
+    #: version of this field let that happen.
     kind_pattern: str = "*"
+    #: Which PROVIDER this rule speaks about -- ``"claude-code"`` for Claude
+    #: Code, ``"codex"`` for Codex, or ``"llm"`` for the direct LLM engine.
+    #: ``"*"`` means any, which is what every rule written before this field
+    #: meant and still means.
+    #:
+    #: Needed because providers can expose the same stable tool name with
+    #: different execution and sandbox semantics. For example, a policy may
+    #: allow Codex's ``codex-shell`` command after review without silently
+    #: granting the same-named request if another provider emits one later.
+    provider_pattern: str = "*"
 
     def matches(self, request: ApprovalRequest) -> bool:
+        if not fnmatch(str(request.provider), self.provider_pattern):
+            return False
         if not fnmatch(str(request.kind), self.kind_pattern):
             return False
         if not fnmatch(request.name, self.name_pattern):
-            return False
+            # The stable name did not match -- try the command's own text as a fallback, for a rule written
+            # before that stable name existed (or naming a provider whose "name" always was the command line).
+            # Never for anything else: a tool call, or a command with no usable text, still falls through here.
+            command = request.arguments.get("command") if request.kind == "command" else None
+            if not (isinstance(command, str) and command and fnmatch(command, self.name_pattern)):
+                return False
         if self.arg_pattern is None:
             return True
         command = request.arguments.get("command")
@@ -149,12 +179,15 @@ class Rule:
         are different ``Rule`` instances (e.g. rebuilt on every process
         start) — the fingerprint is over content, not identity.
         """
-        # kind_pattern is part of the shape, and leaving it out would be a
-        # security hole rather than an omission: two rules differing only in
-        # which kind they speak about would fingerprint identically, so a
-        # session grant a human gave for a TOOL would silently satisfy a
-        # COMMAND asking under the same name.
-        payload = f"{self.tier}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
+        # kind_pattern and provider_pattern are part of the shape. Leaving
+        # either out would be a security hole rather than an omission: two
+        # rules differing only in which kind or provider they speak about
+        # would fingerprint identically, so a session grant a human gave for
+        # one request would silently satisfy the same-named request in the
+        # other scope.
+        payload = (
+            f"{self.tier}|{self.provider_pattern}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
+        )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 

@@ -388,7 +388,7 @@ class CodexAppServerClient:
                     }:
                         params = message.get("params", {})
                         if method == "item/commandExecution/requestApproval":
-                            kind, name = "command", str(params.get("command") or "command execution")
+                            kind, name = "command", "codex-shell"
                         elif method == "item/fileChange/requestApproval":
                             kind, name = "file_change", str(params.get("grantRoot") or "file changes")
                         else:

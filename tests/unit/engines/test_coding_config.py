@@ -77,6 +77,87 @@ def test_allow_session_is_remembered_per_agent_and_session_not_per_run():
     assert asked == ["codex:get_quote"]  # asked once, not once per run
 
 
+@pytest.mark.parametrize(
+    ("provider", "name"),
+    [("codex", "codex-shell"), ("claude-code", "Bash")],
+)
+def test_allow_session_for_command_does_not_approve_different_command(provider, name):
+    asked: list[str] = []
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request.arguments["command"])
+        return ApprovalDecision.allow_for_session()
+
+    scoped = remembering_gate(gate, set())
+    first = ApprovalRequest(provider=provider, kind="command", name=name, arguments={"command": "git status"})
+    second = ApprovalRequest(
+        provider=provider, kind="command", name=name, arguments={"command": "rm -rf important-dir"}
+    )
+
+    async def approve_both() -> None:
+        assert (await scoped(first)).action == "allow_session"
+        assert (await scoped(second)).action == "allow_session"
+
+    asyncio.run(approve_both())
+
+    assert asked == ["git status", "rm -rf important-dir"]
+
+
+def test_allow_session_for_command_without_command_text_is_not_cached():
+    asked: list[dict[str, object]] = []
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(dict(request.arguments))
+        return ApprovalDecision.allow_for_session()
+
+    approved: set[tuple[str, str]] = set()
+    scoped = remembering_gate(gate, approved)
+    first = ApprovalRequest(
+        provider="codex",
+        kind="command",
+        name="codex-shell",
+        arguments={"commandActions": [{"type": "read", "path": "safe.txt"}]},
+    )
+    second = ApprovalRequest(
+        provider="codex",
+        kind="command",
+        name="codex-shell",
+        arguments={"command": None, "commandActions": [{"type": "delete", "path": "important.txt"}]},
+    )
+
+    async def approve_both() -> None:
+        assert (await scoped(first)).action == "allow_session"
+        assert (await scoped(second)).action == "allow_session"
+
+    asyncio.run(approve_both())
+
+    assert asked == [dict(first.arguments), dict(second.arguments)]
+    assert approved == set()
+
+
+@pytest.mark.parametrize(
+    ("provider", "name"),
+    [("codex", "codex-shell"), ("claude-code", "Bash")],
+)
+def test_allow_session_for_command_is_reused_for_identical_command(provider, name):
+    asked: list[str] = []
+
+    async def gate(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request.arguments["command"])
+        return ApprovalDecision.allow_for_session()
+
+    scoped = remembering_gate(gate, set())
+    request = ApprovalRequest(provider=provider, kind="command", name=name, arguments={"command": "git status"})
+
+    async def approve_twice() -> None:
+        assert (await scoped(request)).action == "allow_session"
+        assert (await scoped(request)).action == "allow_session"
+
+    asyncio.run(approve_twice())
+
+    assert asked == ["git status"]
+
+
 def test_each_agent_and_provider_keeps_its_own_approvals():
     """A shared engine instance must not leak one agent's grant to another."""
 

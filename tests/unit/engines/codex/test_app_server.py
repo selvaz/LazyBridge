@@ -364,7 +364,8 @@ def test_native_command_approval_is_forwarded_to_the_shared_gate():
 
     assert result.text == "approved"
     assert seen[0].kind == "command"
-    assert seen[0].name == "git status"
+    assert seen[0].name == "codex-shell"
+    assert seen[0].raw["command"] == "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 
 
 class TestNativeReview:

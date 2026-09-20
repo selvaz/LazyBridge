@@ -491,6 +491,36 @@ async def test_a_tool_rule_does_not_quietly_govern_commands():
     assert decision.action == "deny"
 
 
+def test_a_rule_written_for_command_text_still_matches_after_the_stable_name_change():
+    """Found by Codex review: Codex commands used to arrive named as their own command line, so a rule written
+    against that text (the old, accidental behavior) matched by name_pattern alone. The stable name "codex-shell"
+    introduced for the rule table's own sake must not silently stop enforcing that existing policy."""
+    rule = Rule("allow", "git push*", kind_pattern="command")
+
+    assert rule.matches(_request(name="codex-shell", kind="command", arguments={"command": "git push origin main"}))
+    assert not rule.matches(_request(name="codex-shell", kind="command", arguments={"command": "rm -rf /"}))
+
+
+def test_the_command_text_fallback_never_governs_a_tool_or_a_commandless_request():
+    # kind_pattern="*" on purpose: with kind_pattern="command" the kind check alone would already refuse a
+    # "tool" request, so it would not actually exercise the fallback's OWN kind guard.
+    rule = Rule("allow", "git push*")
+
+    # a tool call named the same as the pattern must not match through the command-text path
+    assert not rule.matches(_request(name="codex-shell", kind="tool", arguments={"command": "git push origin main"}))
+    # no usable command string: falls through exactly as an unmatched name always has
+    assert not rule.matches(_request(name="codex-shell", kind="command", arguments={}))
+    assert not rule.matches(_request(name="codex-shell", kind="command", arguments={"command": 42}))
+    assert not rule.matches(_request(name="codex-shell", kind="command", arguments={"command": ""}))
+
+
+def test_a_stable_name_match_still_wins_without_needing_the_fallback():
+    """The fallback is additive: a rule already written against the new stable name is unaffected."""
+    rule = Rule("allow", "codex-shell", kind_pattern="command")
+
+    assert rule.matches(_request(name="codex-shell", kind="command", arguments={"command": "anything at all"}))
+
+
 def test_the_kind_is_part_of_a_rules_fingerprint():
     """Session grants are scoped by fingerprint. Two rules differing only
     in which kind they speak about must not share one, or a grant a human
@@ -498,3 +528,30 @@ def test_the_kind_is_part_of_a_rules_fingerprint():
     tool_rule = Rule("session", "git push*", kind_pattern="tool")
     command_rule = Rule("session", "git push*", kind_pattern="command")
     assert tool_rule.fingerprint() != command_rule.fingerprint()
+
+
+# --- rules that name a provider -----------------------------------------
+
+
+def test_a_codex_rule_does_not_match_claude_code_and_vice_versa():
+    codex_rule = Rule("allow", "codex-shell", provider_pattern="codex")
+    claude_rule = Rule("allow", "codex-shell", provider_pattern="claude-code")
+
+    assert codex_rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+    assert not codex_rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+    assert claude_rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+    assert not claude_rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+
+
+def test_a_rule_written_before_providers_existed_still_matches_every_provider():
+    rule = Rule("allow", "codex-shell")
+
+    assert rule.matches(_request(name="codex-shell", kind="command", provider="codex"))
+    assert rule.matches(_request(name="codex-shell", kind="command", provider="claude-code"))
+
+
+def test_the_provider_is_part_of_a_rules_fingerprint():
+    codex_rule = Rule("session", "codex-shell", provider_pattern="codex")
+    claude_rule = Rule("session", "codex-shell", provider_pattern="claude-code")
+
+    assert codex_rule.fingerprint() != claude_rule.fingerprint()

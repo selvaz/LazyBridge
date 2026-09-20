@@ -9,6 +9,7 @@ Claude Code or Codex without provider-specific branching.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -136,18 +137,31 @@ def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) 
 
     Applies to every request kind — tool, command, file_change, permissions —
     so one wrapper covers both the LazyBridge-side dynamic tool gate and the
-    provider-side approval requests arriving over the wire.
+    provider-side approval requests arriving over the wire. Command grants
+    additionally include a fingerprint of a usable ``arguments["command"]``
+    string so stable provider display names cannot widen a grant to a
+    different command. Commands without such a string are never cached.
 
     A gate that manages a narrower session scope and its own audit trail may
     opt out with ``manages_session_grants = True``. Caching such a gate here
-    would widen its scope back to ``(kind, name)`` and hide cache hits from
-    its audit log.
+    would widen its scope to this generic cache and hide cache hits from its
+    audit log.
     """
     if gate is not None and getattr(gate, "manages_session_grants", False):
         return gate
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
         key = (request.kind, request.name)
+        if request.kind == "command":
+            command = request.arguments.get("command")
+            # Some Codex command approvals omit command text and carry their
+            # identity in other request-specific fields. Without a stable
+            # command string, fail closed instead of widening a session grant
+            # to every command-less request with the same display name.
+            if not isinstance(command, str) or not command:
+                return await ask_approval(gate, request)
+            fingerprint = hashlib.sha256(repr(command).encode()).hexdigest()
+            key = (request.kind, f"{request.name}:{fingerprint}")
         if key in approved:
             return ApprovalDecision.allow_for_session()
         decision = await ask_approval(gate, request)
