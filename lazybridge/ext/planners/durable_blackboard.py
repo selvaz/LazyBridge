@@ -47,7 +47,7 @@ Tools:
 - ``get_plan()``                       — read the plan and see what is left.
 - ``set_plan(reasoning, tasks)``       — create the plan (only when there is none).
 - ``add_tasks(tasks)``                 — append newly-discovered tasks to the plan.
-- ``cancel_task(task_index, expected_text, reason)`` — drop a todo task that is no longer needed.
+- ``cancel_task(task_index, expected_text, reason)`` — drop an unclaimed or exhausted task that is no longer needed.
 - ``set_task_schedule(task_index, expected_text, planned_start_at, due_at, reason)`` — schedule an open task.
 - ``claim_next()``                     — take the next task; returns its index and text.
 - ``claim_task(task_index, expected_text)`` — take a SPECIFIC task instead of "next", when you already know which one you need (expected_text must match get_plan()'s current text for that index exactly).
@@ -224,17 +224,19 @@ class DurableBlackboard:
         return str(self._mutate(apply))
 
     def cancel_task(self, task_index: int, expected_text: str, reason: str) -> str:
-        """Permanently drop a not-yet-claimed task, without needing to claim
-        it first (unlike ``mark_done``/``mark_failed``, which require an
-        active claim).
+        """Permanently drop a task nobody is actively working on, whether
+        it is still ``todo`` or has been parked as ``failed`` after exhausting
+        its attempts. No active claim is needed (unlike
+        ``mark_done``/``mark_failed``, which require one).
 
         ``expected_text`` must match the task's CURRENT text exactly. This
         is the guard against acting on a stale rendering: an LLM that still
         remembers an earlier ``get_plan()`` (before a concurrent
         ``add_tasks``/``claim_next`` changed what index N refers to) gets a
         clear rejection instead of silently cancelling the wrong task. Only
-        a ``todo`` task may be cancelled -- a claimed task belongs to its
-        worker until that worker closes it; cancel must never pre-empt it.
+        a ``todo`` or ``failed`` task may be cancelled -- a claimed task
+        belongs to its worker until that worker closes it; cancel must never
+        pre-empt it. A completed or already-cancelled task stays terminal.
         """
         if not reason.strip():
             return "REJECTED: a reason is required."
@@ -251,10 +253,10 @@ class DurableBlackboard:
                     f"REJECTED: task {task_index}'s current text does not match expected_text -- "
                     "call get_plan() to see the current state before cancelling."
                 )
-            if task.get("status") != "todo":
+            if task.get("status") not in ("todo", "failed"):
                 return None, (
-                    f"REJECTED: task {task_index} is {task.get('status')}, not todo -- "
-                    "only an unclaimed task can be cancelled."
+                    f"REJECTED: task {task_index} is {task.get('status')}, not todo or failed -- "
+                    "only a task nobody is actively working on can be cancelled."
                 )
             task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=time.time())
             new_doc = {**doc, "tasks": tasks}
@@ -728,8 +730,8 @@ def durable_blackboard_agent(
         return board.add_tasks(tasks)
 
     def cancel_task(task_index: int, expected_text: str, reason: str) -> str:
-        """Drop a not-yet-claimed task that turned out to be unnecessary. expected_text must match
-        the task's current text exactly (call get_plan() first) -- a mismatch is refused."""
+        """Drop a todo or exhausted-failed task that turned out to be unnecessary. expected_text
+        must match the task's current text exactly (call get_plan() first) -- a mismatch is refused."""
         return board.cancel_task(task_index, expected_text, reason)
 
     def set_task_schedule(

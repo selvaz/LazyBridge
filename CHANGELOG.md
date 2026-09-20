@@ -8,6 +8,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`DurableBlackboard.cancel_task` accepts exhausted tasks.** A task parked
+  as `failed` after exhausting its attempt budget can now be reclassified as
+  `cancelled`, with the reason recorded. Active `claimed` tasks and terminal
+  `done`/already-`cancelled` tasks remain protected from cancellation.
+
 ### Documentation
 
 - Realign the homepage, README, quickstart and engine guides with Claude Code /

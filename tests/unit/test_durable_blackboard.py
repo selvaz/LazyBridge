@@ -245,6 +245,41 @@ def test_cancel_task_refuses_a_claimed_task():
     assert board.snapshot().tasks[0]["status"] == "claimed"
 
 
+def test_cancel_task_accepts_a_task_parked_after_exhausting_its_attempts():
+    store = Store()
+    board = _board(store, max_attempts=1)
+    board.set_plan("shared", ["exhausted task"])
+    board.claim_next(owner="w")
+    board.mark_failed(0, "worker was interrupted", owner="w")
+    assert board.snapshot().tasks[0]["status"] == "failed"
+
+    result = board.cancel_task(0, "exhausted task", "replacement task completed the work")
+
+    assert not result.startswith("REJECTED")
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "cancelled"
+    assert task["cancel_reason"] == "replacement task completed the work"
+
+
+@pytest.mark.parametrize("terminal_status", ["done", "cancelled"])
+def test_cancel_task_refuses_done_or_already_cancelled_tasks(terminal_status):
+    store = Store()
+    board = _board(store)
+    board.set_plan("shared", ["terminal task"])
+    if terminal_status == "done":
+        board.claim_next(owner="w")
+        board.mark_done(0, "finished", owner="w")
+    else:
+        board.cancel_task(0, "terminal task", "first cancellation")
+
+    refusal = board.cancel_task(0, "terminal task", "second cancellation")
+
+    assert refusal.startswith("REJECTED")
+    task = board.snapshot().tasks[0]
+    assert task["status"] == terminal_status
+    assert task["cancel_reason"] == ("first cancellation" if terminal_status == "cancelled" else "")
+
+
 def test_cancel_task_requires_a_reason():
     store = Store()
     board = _board(store)
