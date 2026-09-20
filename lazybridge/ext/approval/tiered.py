@@ -123,12 +123,21 @@ class Rule:
     #: every rule written before this field meant and still means.
     #:
     #: Needed because a table can otherwise say nothing about commands at
-    #: all. A tool arrives as a bare identifier (``Bash``); a command arrives
-    #: as the whole command line, so patterns written for tool names match
-    #: none of them and every escalation falls into the default deny. Seen
-    #: in production: seventeen refusals in six hours, all tier=unmatched,
-    #: all of them Codex asking to run its own tests and delete its own
-    #: scratch directories -- and 2.4 GB of undeleted scratch as the result.
+    #: all. A tool arrives as a bare identifier (``Bash``); a command used to
+    #: arrive as the whole command line for Codex specifically, so patterns
+    #: written for tool names matched none of them and every escalation fell
+    #: into the default deny. Seen in production: seventeen refusals in six
+    #: hours, all tier=unmatched, all of them Codex asking to run its own
+    #: tests and delete its own scratch directories -- and 2.4 GB of
+    #: undeleted scratch as the result.
+    #:
+    #: A command's ``name`` is now a stable, provider-defined identifier
+    #: (e.g. Codex's ``codex-shell``), not the raw command line -- match its
+    #: actual content with ``arg_pattern`` against ``arguments["command"]``,
+    #: not with ``name_pattern``. A rule written to match command TEXT via
+    #: ``name_pattern`` (the old accidental behavior for Codex) will now
+    #: match nothing and fall through, same as before this field existed;
+    #: use ``arg_pattern`` instead.
     kind_pattern: str = "*"
     #: Which PROVIDER this rule speaks about -- ``"claude-code"`` for Claude
     #: Code, ``"codex"`` for Codex, or ``"llm"`` for the direct LLM engine.
