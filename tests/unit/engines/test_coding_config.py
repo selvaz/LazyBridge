@@ -90,7 +90,9 @@ def test_allow_session_for_command_does_not_approve_different_command(provider, 
 
     scoped = remembering_gate(gate, set())
     first = ApprovalRequest(provider=provider, kind="command", name=name, arguments={"command": "git status"})
-    second = ApprovalRequest(provider=provider, kind="command", name=name, arguments={"command": "rm -rf important-dir"})
+    second = ApprovalRequest(
+        provider=provider, kind="command", name=name, arguments={"command": "rm -rf important-dir"}
+    )
 
     async def approve_both() -> None:
         assert (await scoped(first)).action == "allow_session"
