@@ -227,20 +227,24 @@ be read together: 85% is comfortable on the first day of a window and critical
 on the last.
 
 - `snapshot.windows` lists every bucket the account reported; an account can
-  report more than one. Each is a `CodexUsageWindow` with `limit_id`,
-  `used_percent`, `window_duration_minutes`, `resets_at` and `reached_type`.
+  report more than one. Each is a `CodexUsageWindow` with `limit_id`, `kind`
+  (`"primary"` or `"secondary"`), `used_percent`, `window_duration_minutes`,
+  `resets_at` and `reached_type`.
 - `snapshot.weekly(limit_id="codex")` picks the seven-day bucket by its
   **duration** (`WEEKLY_WINDOW_MINUTES`, 10080), not by position -- `primary`
   is not always the weekly one -- and returns `None` when there is none.
 - `snapshot.plan_type` and `snapshot.raw` (the untouched response) are there
   for anything the dataclass does not model yet.
 
-It needs a local Codex login, like the engine itself. It raises
-`RuntimeError` if the App Server cannot be reached, times out (30 s by
-default), closes the stream, or refuses the method -- an older `codex` binary
-answers "method not found". A caller that gates work on the number must treat
-all of those, and a `None` from `weekly()`, as **unknown**, never as
-*plenty left*.
+It needs a local Codex login, like the engine itself. Once the App Server
+process is actually running, `fetch_codex_usage` raises `RuntimeError` if it
+times out (30 s by default), closes the stream, or refuses the method -- an
+older `codex` binary answers "method not found". Locating or starting the
+`codex` binary itself is a separate failure mode: a `codex` CLI missing from
+`PATH`/`CODEX_BIN`/the app's install directory raises `FileNotFoundError`
+before any of that, not `RuntimeError`. A caller that gates work on the
+number must treat all of those, and a `None` from `weekly()`, as
+**unknown**, never as *plenty left*.
 
 Claude Code's equivalent is different in kind: there is no typed field, so its
 figure is read out of the prose the CLI prints for `/usage` and can only be as
