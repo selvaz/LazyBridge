@@ -22,7 +22,7 @@ invocation, which is exactly what this one must not do.
 | `set_plan(reasoning, tasks)` | Creates the plan. **Refuses** to discard one still in progress. |
 | `get_plan()` | The whole board: what is done, claimed, failed, and what is next. |
 | `add_tasks(tasks)` | Appends newly-discovered tasks without touching any existing task's index or status. |
-| `cancel_task(index, expected_text, reason)` | Drops a not-yet-claimed task that turned out to be unnecessary. `expected_text` must match the task's current text. |
+| `cancel_task(index, expected_text, reason)` | Drops a task nobody is actively working on when it is no longer needed: either `todo` or parked as `failed` after exhausting its attempts. `expected_text` must match the task's current text. |
 | `set_task_schedule(index, expected_text, planned_start_at, due_at, reason)` | Sets (or clears, by passing `None`) a `todo`/`claimed` task's planned start and due timestamps. Same `expected_text` stale-index guard; each call also appends an entry to an audit trail. |
 | `claim_next()` | Takes exactly one task — whichever is earliest eligible — atomically. |
 | `claim_task(index, expected_text, renew=False)` | Takes a SPECIFIC task instead of "next", for a caller that already knows which one it needs and doesn't want to claim-and-close every earlier task just to reach it. Same `expected_text` stale-index guard as `cancel_task`. |
