@@ -124,17 +124,17 @@ from lazybridge.ext.viz import Visualizer
 # 1) Live mode — wrap a pipeline run.
 sess = Session(db="demo.db")
 researcher = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="research",
     session=sess,
 )
 writer = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="write",
     session=sess,
 )
 orchestrator = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     tools=[researcher, writer],
     session=sess,
 )

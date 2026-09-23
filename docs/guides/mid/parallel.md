@@ -105,17 +105,17 @@ def search_asia(query: str) -> str:
 
 
 us = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     tools=[search_us],
     name="us",
 )
 eu = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     tools=[search_eu],
     name="eu",
 )
 asia = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     tools=[search_asia],
     name="asia",
 )

@@ -8,6 +8,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Tier aliases and price tables updated for September 2026 models.**
+  - Anthropic: `top` → `claude-fable-5-1`, `expensive` → `claude-opus-5-5`
+    ($4 / $20), `super_cheap` → `claude-haiku-4-5` (`claude-3-haiku` is
+    retired). Added `claude-mythos-5-1` (price only). Sonnet 5 stays at
+    $2 / $10 (the planned increase was cancelled). Per-model cache-read
+    rates for Fable 5.1 / Mythos 5.1 ($0.25) and Opus 5.5 ($0.20).
+    Retired models removed from fallback chains.
+  - OpenAI: added `gpt-6-sol` ($2 / $0.20 / $10) and `gpt-6-luna`
+    ($0.10 / $0.01 / $0.50); `expensive` / `medium` → `gpt-6-sol`,
+    `cheap` / `super_cheap` → `gpt-6-luna`. Effort `max` is passed
+    through for the whole GPT-6 family.
+  - DeepSeek: `deepseek-flash` (V4.1-Flash, $0.30 / $0.006 / $1.20)
+    replaces the retired `deepseek-v4-flash` as default model and for
+    `medium` / `cheap` / `super_cheap`.
+
+### Fixed
+
+- Anthropic: forced `tool_choice` (`"required"` / `"any"` / a tool name)
+  is sent as `"auto"` with a `UserWarning` on Opus 5.5 / Fable 5.1 /
+  Mythos 5.1, which reject it with a 400.
+
 ---
 
 ## [1.5.0] — 2026-09-18

@@ -17,11 +17,11 @@ from lazybridge import Agent, LLMEngine
 
 # Direct model selection — provider inferred from the model string.
 Agent(engine=LLMEngine("claude-opus-5"))
-Agent(engine=LLMEngine("gpt-5.6-luna"))
+Agent(engine=LLMEngine("gpt-6-luna"))
 
 # Tier-based selection — model never appears in app code.
-Agent.from_provider("anthropic", tier="top")     # → claude-fable-5
-Agent.from_provider("openai",    tier="medium")  # → gpt-5.6-terra
+Agent.from_provider("anthropic", tier="top")     # → claude-fable-5-1
+Agent.from_provider("openai",    tier="medium")  # → gpt-6-sol
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
 
@@ -50,22 +50,27 @@ name (passthrough).
 
 | tier | model | ctx | max_out | $/M in | $/M out |
 |---|---|---|---|---|---|
-| `top` | `claude-fable-5` | 1 M | 128 K | $10.00 | $50.00 |
-| `expensive` | `claude-opus-5` | 1 M | 128 K | $5.00 | $25.00 |
-| `medium` | `claude-sonnet-5` | 1 M | 128 K | $2.00¹ | $10.00¹ |
-| `cheap` | `claude-haiku-4-5` | 200 K | 64 K | $1.00 | $5.00 |
-| `super_cheap` | `claude-3-haiku` | 200 K | 4 K | $0.25 | $1.25 |
+| `top` | `claude-fable-5-1` | 1 M | 128 K | $10.00 | $50.00 |
+| `expensive` | `claude-opus-5-5` | 1 M | 128 K | $4.00 | $20.00 |
+| `medium` | `claude-sonnet-5` | 1 M | 128 K | $2.00 | $10.00 |
+| `cheap` / `super_cheap` | `claude-haiku-4-5` | 200 K | 64 K | $1.00 | $5.00 |
 
-¹ Sonnet 5 introductory pricing through 2026-08-31; rises to
-$3.00 / $15.00 per million tokens after that date.
+Sonnet 5's launch price is now permanent (the increase to $3 / $15 was
+cancelled). `claude-3-haiku` was retired on 2026-04-20, so `super_cheap`
+now shares Haiku 4.5 with `cheap`. Cache reads bill at 10% of input,
+except Fable 5.1 / Mythos 5.1 ($0.25 / M) and Opus 5.5 ($0.20 / M).
 
-Not tier-aliased: `claude-mythos-5` ($10.00 / $50.00, same underlying
-model as Fable 5 with fewer safety guardrails) — restricted to vetted
-partners (Project Glasswing / US government cyber defenders), not
+Not tier-aliased: `claude-mythos-5-1` / `claude-mythos-5` ($10.00 /
+$50.00) — restricted to vetted partners (Project Glasswing), not
 reachable with an ordinary API key. Older pinned ids
-(`claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`,
-`claude-sonnet-4-6`, `claude-opus-4-1`, …) still resolve — see
-`_PRICE_TABLE` in `core/providers/anthropic.py` for the full list.
+(`claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-4-6`,
+…) still resolve — see `_PRICE_TABLE` in `core/providers/anthropic.py`
+for the full list. Retired models stay in the price table for costing
+old transcripts but are never used as fallbacks.
+
+- **Opus 5.5 / Fable 5.1 reject forced tool use.** `tool_choice`
+  `"required"` / `"any"` / a tool name is a 400 on these models;
+  LazyBridge sends `"auto"` instead and emits a `UserWarning`.
 
 - **Thinking.** `fable-5` / `mythos-5` / `opus-5` / `opus-4-8` /
   `opus-4-7` / `opus-4-6` / `sonnet-5` / `sonnet-4-6` use adaptive
@@ -89,17 +94,18 @@ reachable with an ordinary API key. Older pinned ids
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
 | `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
-| `expensive` | `gpt-5.6-sol` | 1.05 M | 128 K | $5.00 | $0.50 | $30.00 |
-| `medium` | `gpt-5.6-terra` | 1.05 M | 128 K | $2.00 | $0.20 | $12.00 |
-| `cheap` | `gpt-5.6-luna` | 1.05 M | 128 K | $0.20 | $0.02 | $1.20 |
-| `super_cheap` | `gpt-4o-mini` | 128 K | 16 K | $0.15 | — | $0.60 |
+| `expensive` / `medium` | `gpt-6-sol` | — | — | $2.00 | $0.20 | $10.00 |
+| `cheap` / `super_cheap` | `gpt-6-luna` | — | — | $0.10 | $0.01 | $0.50 |
 
-GPT-6 Astra (released 2026-09-03) is now the `top` tier; GPT-5.6's three
-tiers — Sol (best coding / hardest reasoning), Terra (balanced general
-flagship), Luna (fast/light) — each shift down one slot to
-`expensive`/`medium`/`cheap`. The bare alias `gpt-5.6` still routes to
-Sol. Astra accepts reasoning effort `max` natively (GPT-5.6 and earlier
-top out at `xhigh`). GPT-5.6 also introduces explicit prompt-cache
+GPT-6 Sol and Luna (released 2026-09-22) replace the GPT-5.6 tiers.
+There is no GPT-6 Terra: Sol costs less than `gpt-5.6-terra`, so it
+covers `medium` too, and Luna costs less than `gpt-4o-mini`, so it
+covers `super_cheap`. All three GPT-6 models accept effort `max`.
+
+Previous generation, pinnable by id: `gpt-5.6-sol` ($5 / $0.50 / $30),
+`gpt-5.6-terra` ($2 / $0.20 / $12), `gpt-5.6-luna` ($0.20 / $0.02 /
+$1.20). The bare alias `gpt-5.6` routes to Sol. GPT-5.6 and earlier top
+out at effort `xhigh`. GPT-5.6 also introduces explicit prompt-cache
 breakpoints and a 30-minute minimum cache life.
 
 Other supported models (passed verbatim, no tier alias):
@@ -159,7 +165,7 @@ exactly half.
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
 | `top` / `expensive` | `deepseek-v4-pro` | 1 M | 384 K | $1.32 | $0.044 | $3.96 |
-| `medium` / `cheap` / `super_cheap` | `deepseek-v4-flash` | 1 M | 384 K | $0.44 | $0.014 | $1.32 |
+| `medium` / `cheap` / `super_cheap` | `deepseek-flash` | 1 M | 384 K | $0.30 | $0.006 | $1.20 |
 
 - **Thinking.** Both V4 models accept `ThinkingConfig` →
   `reasoning_content` field on the response. In thinking mode the
@@ -169,8 +175,9 @@ exactly half.
 - **Cache.** Automatic on repeated prefixes ≥1024 tokens; no
   opt-in required.
 - **Native tools.** None (function calling is supported).
-- **Deprecation (retire 2026-07-24).** `deepseek-reasoner` and
-  `deepseek-chat` both alias to `deepseek-v4-flash`.
+- **Retired.** `deepseek-v4-flash` (2026-09-10, replaced by
+  `deepseek-flash`, which serves V4.1-Flash), `deepseek-reasoner` and
+  `deepseek-chat` (2026-07-24). They stay in the price table only.
 
 ### LMStudio
 
@@ -224,12 +231,10 @@ don't have to switch on Gemini-specific values:
 
 - **DeepSeek tier collapse.** Three of the five tier aliases
   (`medium` / `cheap` / `super_cheap`) all map to
-  `deepseek-v4-flash` — there's no smaller model in the lineup.
-- **`cheap` now resolves to `gpt-5.6-luna`, not `gpt-5.4-nano`.**
-  Since Luna's 2026-07-30 price cut ($0.20 / $1.20 in/out per 1M) it is
-  effectively the same per-token cost as `gpt-5.4-nano` ($0.20 / $1.25)
-  — so the tier swap is now a model upgrade at no real cost penalty,
-  unlike when Luna first shipped at its original $1.00 / $6.00 pricing.
+  `deepseek-flash` — there's no smaller model in the lineup.
+- **Tier collapse on Anthropic / OpenAI.** `cheap` and `super_cheap`
+  share one model on both (`claude-haiku-4-5`, `gpt-6-luna`), and on
+  OpenAI `expensive` and `medium` share `gpt-6-sol`.
 - **`gemini-2.0-flash` deprecation** lands June 1 2026; switch to
   `gemini-2.5-flash-lite` before then.
 - **Adaptive thinking ignores `budget_tokens`.** Anthropic

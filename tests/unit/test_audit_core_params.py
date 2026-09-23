@@ -52,6 +52,16 @@ def test_anthropic_tool_choice_maps_to_valid_api_types(choice, expected):
     assert params["tool_choice"] == expected
 
 
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-fable-5-1"])
+@pytest.mark.parametrize("choice", ["required", "any", "get_weather"])
+def test_anthropic_forced_tool_choice_degrades_to_auto_where_unsupported(model, choice):
+    p = _bare_anthropic()
+    req = CompletionRequest(messages=[Message.user("hi")], tools=[_TOOL], tool_choice=choice, model=model)
+    with pytest.warns(UserWarning, match="forced tool_choice"):
+        params = p._build_params(req)
+    assert params["tool_choice"] == {"type": "auto"}
+
+
 def test_anthropic_tool_choice_without_tools_is_not_emitted():
     """A dangling tool_choice with no tools param is a guaranteed 400."""
     p = _bare_anthropic()

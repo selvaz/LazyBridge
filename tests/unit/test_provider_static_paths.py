@@ -203,12 +203,12 @@ def test_fallback_targets_have_pricing(provider_cls):
     "provider_cls,tier,expected_substring",
     [
         (OpenAIProvider, "top", "gpt-6-astra"),
-        (OpenAIProvider, "cheap", "gpt-5.6-luna"),
-        (AnthropicProvider, "top", "claude-fable-5"),
+        (OpenAIProvider, "cheap", "gpt-6-luna"),
+        (AnthropicProvider, "top", "claude-fable-5-1"),
         (AnthropicProvider, "cheap", "claude-haiku"),
         (GoogleProvider, "top", "gemini-3.1-pro"),
         (DeepSeekProvider, "top", "deepseek-v4-pro"),
-        (DeepSeekProvider, "cheap", "deepseek-v4-flash"),
+        (DeepSeekProvider, "cheap", "deepseek-flash"),
     ],
 )
 def test_resolve_model_resolves_tier_aliases(provider_cls, tier, expected_substring):

@@ -93,11 +93,16 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     # (Project Glasswing / US government cyber defenders) — kept in the
     # price table for callers with access, but deliberately NOT wired
     # into _TIER_ALIASES since ordinary API keys can't reach it.
+    # The ".1" / ".5" point releases MUST precede their family key: the match
+    # is by substring and "claude-opus-5" is a substring of "claude-opus-5-5".
+    "claude-fable-5-1": (10.0, 50.0),  # GA 2026-09-01
+    "claude-mythos-5-1": (10.0, 50.0),  # restricted access — see comment above
     "claude-fable-5": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),  # restricted access — see comment above
+    "claude-opus-5-5": (4.0, 20.0),  # GA 2026-09-22 — cheaper than Opus 5
     "claude-opus-5": (5.0, 25.0),
-    # Sonnet 5 introductory pricing runs through 2026-08-31, then rises to
-    # $3.00 / $15.00 per million tokens — update this row after that date.
+    # Sonnet 5's launch price is now the standard price — the increase to
+    # $3 / $15 announced for 2026-09-01 was cancelled.
     "claude-sonnet-5": (2.0, 10.0),
     "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
@@ -114,9 +119,24 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-3-haiku": (0.25, 1.25),
 }
 
+# Cache-read rate as a fraction of the base input price, keyed by the matching
+# _PRICE_TABLE key, for models that don't bill the standard 10%.  This is why
+# Fable 5.1 / Mythos 5.1 keep their own rows despite sharing the family price.
+_CACHE_READ_MULTIPLIER: dict[str, float] = {
+    "claude-fable-5-1": 0.025,  # $0.25 / MTok
+    "claude-mythos-5-1": 0.025,
+    "claude-opus-5-5": 0.05,  # $0.20 / MTok
+}
+
+# Models that reject forced tool use (tool_choice "any" / "tool") with a 400.
+# Substring-matched, like the sets below.
+_NO_FORCED_TOOL_CHOICE_MODELS = frozenset({"claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5"})
+
 # Models where temperature/top_p/top_k are not supported (returns 400).
 # Fable 5 / Mythos 5 are adaptive-thinking-only by family design (same
-# underlying model); Opus 5 continues the Opus 4.7/4.8 pattern.
+# underlying model); Opus 5 continues the Opus 4.7/4.8 pattern.  The model
+# sets below are substring-matched, so "claude-fable-5" also covers Fable 5.1,
+# "claude-mythos-5" Mythos 5.1 and "claude-opus-5" Opus 5.5.
 _NO_SAMPLING_MODELS = frozenset(
     {"claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5"}
 )
@@ -200,26 +220,30 @@ class AnthropicProvider(BaseProvider):
     # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
     # resolves here.  Update this table when new models ship.
     #
-    # "top" is Fable 5, Anthropic's most capable generally-available model
-    # (released 2026-06-09) — NOT Mythos 5, which is restricted to vetted
-    # partners and unreachable with an ordinary API key.
+    # "top" is Fable 5.1, Anthropic's most capable generally-available model
+    # (GA 2026-09-01) — NOT Mythos 5.1, which is restricted to vetted
+    # partners and unreachable with an ordinary API key.  There is no model
+    # below Haiku 4.5 any more (claude-3-haiku retired 2026-04-20), so
+    # "cheap" and "super_cheap" share it.
     _TIER_ALIASES = {
-        "top": "claude-fable-5",
-        "expensive": "claude-opus-5",  # second tier: near-Fable quality, ~half the price
+        "top": "claude-fable-5-1",
+        "expensive": "claude-opus-5-5",  # second tier: near-Fable quality, ~40% of the price
         "medium": "claude-sonnet-5",
         "cheap": "claude-haiku-4-5",
-        "super_cheap": "claude-3-haiku",
+        "super_cheap": "claude-haiku-4-5",
     }
+    # Retired models (claude-3-*, claude-3-5-*, claude-opus-4-1) are kept in
+    # _PRICE_TABLE for costing old transcripts but never used as fallbacks.
     _FALLBACKS = {
-        "claude-fable-5": ["claude-opus-5", "claude-sonnet-5"],
+        "claude-fable-5-1": ["claude-fable-5", "claude-opus-5-5"],
+        "claude-fable-5": ["claude-opus-5-5", "claude-opus-5"],
+        "claude-opus-5-5": ["claude-opus-5", "claude-sonnet-5"],
         "claude-opus-5": ["claude-sonnet-5", "claude-opus-4-8"],
-        "claude-sonnet-5": ["claude-sonnet-4-6", "claude-3-5-sonnet"],
+        "claude-sonnet-5": ["claude-sonnet-4-6"],
         "claude-opus-4-8": ["claude-opus-4-7", "claude-sonnet-4-6"],
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
         "claude-opus-4-6": ["claude-opus-4-5", "claude-sonnet-4-6"],
-        "claude-opus-4-1": ["claude-opus-4-6", "claude-sonnet-4-6"],
-        "claude-sonnet-4-6": ["claude-sonnet-4-5", "claude-3-5-sonnet"],
-        "claude-haiku-4-5": ["claude-3-5-haiku"],
+        "claude-sonnet-4-6": ["claude-sonnet-4-5"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset(
         {
@@ -285,7 +309,8 @@ class AnthropicProvider(BaseProvider):
         # cache counters — ``cache_read_input_tokens`` and
         # ``cache_creation_input_tokens`` are ADDITIVE (total prompt = input +
         # creation + read), not subsets of ``input_tokens``.  Cache reads are
-        # billed at 10% of the base input rate; cache writes (creation) at 125%.
+        # billed at 10% of the base input rate (or the per-model rate in
+        # _CACHE_READ_MULTIPLIER); cache writes (creation) at 125%.
         #
         # ``cache_creation_tokens`` is keyword-only so the positional signature
         # stays compatible with the 4-parameter contract inherited from
@@ -297,7 +322,7 @@ class AnthropicProvider(BaseProvider):
                 creation = max(0, cache_creation_tokens)
                 return (
                     input_tokens * in_price
-                    + cached * 0.1 * in_price
+                    + cached * _CACHE_READ_MULTIPLIER.get(key, 0.1) * in_price
                     + creation * 1.25 * in_price
                     + output_tokens * out_price
                 ) / 1_000_000
@@ -777,6 +802,15 @@ class AnthropicProvider(BaseProvider):
             # without tools is a guaranteed 400.
             if request.tool_choice in ("auto", "none"):
                 params["tool_choice"] = {"type": request.tool_choice}
+            elif any(key in model for key in _NO_FORCED_TOOL_CHOICE_MODELS):
+                # Forced tool use is a 400 on these models — degrade to auto.
+                warnings.warn(
+                    f"{model} does not support forced tool_choice={request.tool_choice!r}; "
+                    "sending tool_choice='auto' instead.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                params["tool_choice"] = {"type": "auto"}
             elif request.tool_choice in ("required", "any"):
                 params["tool_choice"] = {"type": "any"}
             else:

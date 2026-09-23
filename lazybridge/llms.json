@@ -65,22 +65,29 @@
   "default_model_advice": "Use Agent.from_provider('anthropic', tier='top') in quickstarts so the example stays current as providers ship new SKUs.  Pin a specific model id (e.g. 'claude-opus-5') only when the example tests a model-specific behaviour.",
 
   "tier_aliases": ["super_cheap", "cheap", "medium", "expensive", "top"],
-  "tier_aliases_anthropic_2026_07": {
-    "top": "claude-fable-5",
-    "expensive": "claude-opus-5",
+  "tier_aliases_anthropic_2026_09": {
+    "top": "claude-fable-5-1",
+    "expensive": "claude-opus-5-5",
     "medium": "claude-sonnet-5",
     "cheap": "claude-haiku-4-5",
-    "super_cheap": "claude-3-haiku",
-    "note": "claude-mythos-5 exists (same model as Fable 5, fewer safety guardrails) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier."
+    "super_cheap": "claude-haiku-4-5",
+    "note": "claude-mythos-5-1 exists (same pricing as Fable 5.1) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier.  claude-3-haiku is retired."
   },
   "tier_aliases_openai_2026_09": {
     "top": "gpt-6-astra",
-    "expensive": "gpt-5.6-sol",
-    "medium": "gpt-5.6-terra",
-    "cheap": "gpt-5.6-luna",
-    "super_cheap": "gpt-4o-mini"
+    "expensive": "gpt-6-sol",
+    "medium": "gpt-6-sol",
+    "cheap": "gpt-6-luna",
+    "super_cheap": "gpt-6-luna"
   },
-  "effort_parameter": "ThinkingConfig.effort accepts 'low'|'medium'|'high'|'xhigh'|'max' and is read by both AnthropicProvider (sent as output_config.effort — Fable 5, Mythos 5, Opus 5, Opus 4.8/4.7/4.6, Sonnet 5/4.6, Opus 4.5) and OpenAIProvider (sent as reasoning.effort / reasoning_effort on every gpt-5.x and o-series model). LLMEngine(model, thinking='low') is shorthand for LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort='low')).",
+  "tier_aliases_deepseek_2026_09": {
+    "top": "deepseek-v4-pro",
+    "expensive": "deepseek-v4-pro",
+    "medium": "deepseek-flash",
+    "cheap": "deepseek-flash",
+    "super_cheap": "deepseek-flash"
+  },
+  "effort_parameter": "ThinkingConfig.effort accepts 'low'|'medium'|'high'|'xhigh'|'max' and is read by both AnthropicProvider (sent as output_config.effort — Fable 5/5.1, Mythos 5/5.1, Opus 5.5/5, Opus 4.8/4.7/4.6, Sonnet 5/4.6, Opus 4.5) and OpenAIProvider (sent as reasoning.effort / reasoning_effort on every gpt-5.x and o-series model). LLMEngine(model, thinking='low') is shorthand for LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort='low')).",
   "providers": ["anthropic", "openai", "google", "deepseek", "litellm", "lmstudio"],
 
   "skill_md": "https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill/SKILL.md",

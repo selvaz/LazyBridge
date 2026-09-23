@@ -126,11 +126,11 @@ def normalise(text: str) -> str:
 
 
 searcher = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="search",
 )
 ranker = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="rank",
 )
 writer = Agent(
@@ -160,16 +160,16 @@ class Brief(BaseModel):
 
 
 synth = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="synth",
     output=Brief,
 )
 policy_loader = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="policy",
 )
 competitor = Agent(
-    engine=LLMEngine("deepseek-v4-flash"),
+    engine=LLMEngine("deepseek-flash"),
     name="bench",
 )
 

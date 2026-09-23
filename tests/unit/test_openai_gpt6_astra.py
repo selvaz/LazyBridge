@@ -54,7 +54,7 @@ def test_astra_preserves_native_max_effort_on_both_api_paths() -> None:
 
 def test_astra_falls_back_to_available_gpt_5_models() -> None:
     assert OpenAIProvider._FALLBACKS["gpt-6-astra"] == [
+        "gpt-6-sol",
         "gpt-5.6-sol",
-        "gpt-5.6-terra",
         "gpt-5.5",
     ]
