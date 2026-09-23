@@ -23,11 +23,19 @@ def _provider() -> OpenAIProvider:
     return OpenAIProvider.__new__(OpenAIProvider)
 
 
-def test_tier_aliases_retain_gpt_5_6_below_top() -> None:
-    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-6-astra"
-    assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-5.6-sol"
-    assert OpenAIProvider._TIER_ALIASES["medium"] == "gpt-5.6-terra"
-    assert OpenAIProvider._TIER_ALIASES["cheap"] == "gpt-5.6-luna"
+def test_tier_aliases_route_to_gpt_6_family() -> None:
+    assert OpenAIProvider._TIER_ALIASES == {
+        "top": "gpt-6-astra",
+        "expensive": "gpt-6-sol",
+        "medium": "gpt-6-sol",
+        "cheap": "gpt-6-luna",
+        "super_cheap": "gpt-6-luna",
+    }
+
+
+def test_price_table_has_gpt_6_sol_and_luna() -> None:
+    assert _PRICE_TABLE["gpt-6-sol"] == (2.0, 0.20, 10.0)
+    assert _PRICE_TABLE["gpt-6-luna"] == (0.10, 0.01, 0.50)
 
 
 def test_price_table_has_gpt_5_6_entries() -> None:

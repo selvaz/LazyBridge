@@ -3,13 +3,13 @@
 DeepSeek's API is fully compatible with the OpenAI SDK — it uses the same
 client with a custom base_url and different model names.
 
-Models (April 2026):
+Models (September 2026):
   Flagship:    deepseek-v4-pro    (1.6T/49B active, 1M ctx, 384K out, optional thinking)
-  Fast/Cheap:  deepseek-v4-flash  (284B/13B active, 1M ctx, 384K out, optional thinking)
+  Fast/Cheap:  deepseek-flash     (serves DeepSeek-V4.1-Flash, optional thinking)
 
-Deprecated (retire 2026-07-24 — currently routed to deepseek-v4-flash by the API):
-  deepseek-reasoner  → deepseek-v4-flash (thinking mode)
-  deepseek-chat      → deepseek-v4-flash (non-thinking mode)
+Retired (kept in the price tables only, for costing old transcripts):
+  deepseek-v4-flash  (2026-09-10, replaced by deepseek-flash)
+  deepseek-reasoner / deepseek-chat  (2026-07-24)
 
 Thinking mode (V4 models):
   - Activated by passing ThinkingConfig to the request.
@@ -56,7 +56,7 @@ _DEEPSEEK_ENV_KEY = "DEEPSEEK_API_KEY"
 _REASONING_MODELS = frozenset({"deepseek-reasoner"})
 
 # V4 models that support optional thinking via ThinkingConfig.
-_THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
+_THINKING_CAPABLE_MODELS = frozenset({"deepseek-v4-pro", "deepseek-flash", "deepseek-v4-flash"})
 
 # Parameters silently ignored by the API when thinking mode is active.
 _THINKING_SUPPRESSED_PARAMS = frozenset({"temperature", "top_p", "presence_penalty", "frequency_penalty"})
@@ -77,8 +77,9 @@ _THINKING_EFFORT_MAP = {
 # off-peak); we always cost at the peak rate for a conservative estimate.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "deepseek-v4-pro": (1.32, 3.96),
+    "deepseek-flash": (0.30, 1.20),
+    # Retired 2026-09-10 (v4-flash) and 2026-07-24 (reasoner / chat).
     "deepseek-v4-flash": (0.44, 1.32),
-    # Deprecated 2026-07-24; currently API-routed to deepseek-v4-flash.
     "deepseek-reasoner": (0.44, 1.32),
     "deepseek-chat": (0.44, 1.32),
 }
@@ -88,6 +89,7 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 # Peak rate, matching _PRICE_TABLE above.
 _CACHE_HIT_PRICE_TABLE: dict[str, float] = {
     "deepseek-v4-pro": 0.044,
+    "deepseek-flash": 0.006,
     "deepseek-v4-flash": 0.014,
     "deepseek-reasoner": 0.014,
     "deepseek-chat": 0.014,
@@ -181,25 +183,23 @@ class DeepSeekProvider(OpenAIProvider):
     """DeepSeek provider — extends OpenAI provider with DeepSeek-specific handling.
 
     Supports:
-    - deepseek-v4-flash: fast/cheap general chat + optional thinking + function calling
+    - deepseek-flash: fast/cheap general chat + optional thinking + function calling
     - deepseek-v4-pro: flagship, higher quality + optional thinking + function calling
-    - deepseek-reasoner (deprecated): always-on reasoning via reasoning_content field
     - Streaming with reasoning extraction
     - JSON mode structured output (response_format: json_object)
     """
 
-    default_model = "deepseek-v4-flash"
+    default_model = "deepseek-flash"
 
     _TIER_ALIASES = {
         "top": "deepseek-v4-pro",
         "expensive": "deepseek-v4-pro",
-        "medium": "deepseek-v4-flash",
-        "cheap": "deepseek-v4-flash",
-        "super_cheap": "deepseek-v4-flash",
+        "medium": "deepseek-flash",
+        "cheap": "deepseek-flash",
+        "super_cheap": "deepseek-flash",
     }
     _FALLBACKS = {
-        "deepseek-v4-pro": ["deepseek-v4-flash"],
-        "deepseek-reasoner": ["deepseek-v4-flash"],
+        "deepseek-v4-pro": ["deepseek-flash"],
     }
     supported_native_tools: frozenset[NativeTool] = frozenset()  # No native server tools
 
@@ -228,7 +228,7 @@ class DeepSeekProvider(OpenAIProvider):
     def get_default_max_tokens(self, model: str | None = None) -> int:
         """Return the default max_tokens for the given model."""
         resolved = (model or self.model or self.default_model or "").lower()
-        if "v4" in resolved:
+        if "v4" in resolved or "flash" in resolved:
             return 64_000  # Conservative default; V4 models support up to 384K
         if "reasoner" in resolved:
             return 64_000
@@ -318,7 +318,7 @@ class DeepSeekProvider(OpenAIProvider):
             if model not in (_REASONING_MODELS | _THINKING_CAPABLE_MODELS):
                 raise ValueError(
                     f"DeepSeek: thinking was requested but model {model!r} does "
-                    "not support reasoning. Use 'deepseek-v4-pro' or 'deepseek-v4-flash' "
+                    "not support reasoning. Use 'deepseek-v4-pro' or 'deepseek-flash' "
                     "for thinking, or drop thinking= for this call."
                 )
         return request

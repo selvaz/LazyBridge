@@ -222,3 +222,17 @@ def test_strip_tool_choice_noop_when_absent():
     params = {"tools": [{"type": "function"}]}
     p._strip_unsupported_tool_choice(params)
     assert "tool_choice" not in params
+
+
+def test_deepseek_flash_replaces_retired_v4_flash():
+    """deepseek-v4-flash was retired 2026-09-10; deepseek-flash replaces it."""
+    assert DeepSeekProvider.default_model == "deepseek-flash"
+    for tier in ("medium", "cheap", "super_cheap"):
+        assert DeepSeekProvider._TIER_ALIASES[tier] == "deepseek-flash"
+    for chain in DeepSeekProvider._FALLBACKS.values():
+        assert not {"deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"} & set(chain)
+    p = DeepSeekProvider.__new__(DeepSeekProvider)
+    p.model = None
+    cost = p._compute_cost("deepseek-flash", 1_000_000, 1_000_000, cached_input_tokens=1_000_000)
+    assert cost == pytest.approx(0.006 + 1.20)
+    assert p.get_default_max_tokens("deepseek-flash") == 64_000

@@ -67,11 +67,11 @@ The five tier aliases, ordered cheapest → smartest:
 
 | Tier | Use when | Anthropic | OpenAI | Google | DeepSeek |
 |---|---|---|---|---|---|
-| `super_cheap` | High-volume classification, simple extraction (legacy SKUs) | `claude-3-haiku` | `gpt-4o-mini` | `gemini-2.5-flash-lite` | `deepseek-v4-flash` |
-| `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-5.6-luna` | `gemini-3.1-flash-lite-preview` | `deepseek-v4-flash` |
-| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` | `deepseek-v4-flash` |
-| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-4-7` | `gpt-5.5` | `gemini-2.5-pro` | `deepseek-v4-pro` |
-| `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-opus-4-8` | `gpt-5.5-pro` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
+| `super_cheap` | High-volume classification, simple extraction | `claude-haiku-4-5` | `gpt-6-luna` | `gemini-2.5-flash-lite` | `deepseek-flash` |
+| `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-6-luna` | `gemini-3.1-flash-lite-preview` | `deepseek-flash` |
+| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-5` | `gpt-6-sol` | `gemini-3-flash-preview` | `deepseek-flash` |
+| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-5-5` | `gpt-6-sol` | `gemini-2.5-pro` | `deepseek-v4-pro` |
+| `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-fable-5-1` | `gpt-6-astra` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
 
 !!! note "How to read the table"
     - **`top` vs `expensive`** are *both* the provider's flagship class —
@@ -81,12 +81,11 @@ The five tier aliases, ordered cheapest → smartest:
       want `top`'s extra reasoning capacity.
     - **`medium`** is the default for `from_provider(...)` and the
       sensible starting point for agent work.
-    - **`super_cheap`** points at *legacy* SKUs (Claude 3 Haiku,
-      GPT-4o-mini, Gemini 2.5 Flash-Lite) — kept around for backwards
-      compatibility and pricing-floor workloads. For new code, prefer
-      `cheap`.
+    - **`super_cheap`** is the pricing floor. On Anthropic and OpenAI
+      it now shares the `cheap` model — the old legacy SKUs were
+      retired or undercut.
     - **DeepSeek collapses tiers** to just two SKUs
-      (`deepseek-v4-flash` and `deepseek-v4-pro`); the API is the same
+      (`deepseek-flash` and `deepseek-v4-pro`); the API is the same
       so you can write provider-agnostic code without worrying about
       gaps in the lineup.
     - Mappings change as providers ship new models — this table is a

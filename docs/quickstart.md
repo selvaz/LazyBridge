@@ -39,8 +39,8 @@ provider-specific behaviour), use the explicit form:
 from lazybridge import Agent, LLMEngine
 
 # Pin a specific SKU when you need it.  Cheap-tier models across
-# providers (Jan 2026): claude-haiku-4-5, gpt-5.4-mini, gpt-4o-mini,
-# gemini-3-flash-preview, deepseek-v4-flash.
+# providers (Sep 2026): claude-haiku-4-5, gpt-6-luna,
+# gemini-3-flash-preview, deepseek-flash.
 agent = Agent(engine=LLMEngine("claude-haiku-4-5"))
 result = agent("Explain LazyBridge in one sentence.")
 print(result.text())
