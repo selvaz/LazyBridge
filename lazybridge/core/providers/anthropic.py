@@ -119,8 +119,9 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-3-haiku": (0.25, 1.25),
 }
 
-# Cache-read rate as a fraction of the base input price, for models that don't
-# bill the standard 10%.  Same substring / ordering rules as _PRICE_TABLE.
+# Cache-read rate as a fraction of the base input price, keyed by the matching
+# _PRICE_TABLE key, for models that don't bill the standard 10%.  This is why
+# Fable 5.1 / Mythos 5.1 keep their own rows despite sharing the family price.
 _CACHE_READ_MULTIPLIER: dict[str, float] = {
     "claude-fable-5-1": 0.025,  # $0.25 / MTok
     "claude-mythos-5-1": 0.025,
@@ -186,13 +187,6 @@ _XHIGH_CAPABLE_MODELS = frozenset(
 )
 
 _EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
-
-
-def _cache_read_multiplier(model_l: str) -> float:
-    for key, mult in _CACHE_READ_MULTIPLIER.items():
-        if key in model_l:
-            return mult
-    return 0.1
 
 
 class AnthropicProvider(BaseProvider):
@@ -328,7 +322,7 @@ class AnthropicProvider(BaseProvider):
                 creation = max(0, cache_creation_tokens)
                 return (
                     input_tokens * in_price
-                    + cached * _cache_read_multiplier(model_l) * in_price
+                    + cached * _CACHE_READ_MULTIPLIER.get(key, 0.1) * in_price
                     + creation * 1.25 * in_price
                     + output_tokens * out_price
                 ) / 1_000_000
