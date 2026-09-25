@@ -768,3 +768,25 @@ class TestWritableRoots:
         Agent(CodexEngine(client=fake), name="a")("hello")
 
         assert fake.writable_roots_seen == [None]
+
+    def test_an_explicit_empty_list_is_forwarded_not_dropped(self):
+        """[] means "no extra roots, and drop any inherited from config.toml" -- not "unset"."""
+        fake = FakeAppServer()
+        agent = Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write", writable_roots=[])),
+            ),
+            name="a",
+        )
+        agent("commit")
+
+        assert fake.writable_roots_seen == [[]]
+
+    def test_the_frozen_policy_does_not_change_when_the_caller_mutates_its_list(self):
+        roots = ["C:/repo/.git"]
+        policy = CodexPolicy(sandbox="workspace-write", writable_roots=roots)
+        roots.append("C:/elsewhere")
+
+        assert policy.writable_roots == ("C:/repo/.git",)
+        hash(policy)  # a frozen policy stays hashable

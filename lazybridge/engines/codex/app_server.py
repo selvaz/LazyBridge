@@ -523,7 +523,8 @@ class CodexAppServerClient:
                 "sandbox": sandbox,
                 "dynamicTools": dynamic_tools,
             }
-            if writable_roots:
+            if writable_roots is not None:
+                # An explicit [] is sent too: it REMOVES roots inherited from the user's config.toml.
                 # There is no dedicated ``ThreadStartParams``/``ThreadResume
                 # Params`` field for this (verified against the generated App
                 # Server schema — ``codex app-server generate-json-schema``):
