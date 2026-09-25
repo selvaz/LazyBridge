@@ -257,6 +257,17 @@ class CodexPolicy:
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     approval_policy: Literal["untrusted", "on-request", "never"] = "never"
     preapprove_dynamic_tools: bool = True
+    #: Extra absolute paths writable under ``workspace-write``, beyond
+    #: ``cwd`` itself. Sent as the App Server's per-thread
+    #: ``config.sandbox_workspace_write.writable_roots`` override — the
+    #: field is additive to ``cwd``, never a replacement for it. The prime
+    #: use case is a ``cwd`` that is a git *worktree*: its index and refs
+    #: live under the main repository's ``.git`` (``git rev-parse
+    #: --git-common-dir``), which sits outside the worktree directory and
+    #: is otherwise unwritable, so `git add`/`commit` there is rejected.
+    #: Ignored (left ``None``/unsent) when the sandbox is not
+    #: ``workspace-write``.
+    writable_roots: list[str] | None = None
     #: Native Codex web search mode for this agent's subprocess. ``None``
     #: leaves the user's Codex configuration unchanged. Forwarded as a
     #: per-process ``-c web_search=\"<mode>\"`` override.

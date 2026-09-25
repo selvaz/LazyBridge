@@ -368,6 +368,29 @@ def test_native_command_approval_is_forwarded_to_the_shared_gate():
     assert seen[0].raw["command"] == "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 
 
+def test_writable_roots_sent_as_sandbox_workspace_write_config_override():
+    """No dedicated ``ThreadStartParams`` field exists for this (verified
+    against the App Server's generated JSON Schema — see ``app_server.py``);
+    it has to go through the free-form ``config`` override using the
+    ``config.toml`` field name, snake_case, unlike the rest of this params
+    dict."""
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "writable_roots"))
+        return await client.run(
+            prompt="commit",
+            model=None,
+            cwd="C:/repo-worktree",
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            sandbox="workspace-write",
+            writable_roots=["C:/repo/.git/worktrees/feature"],
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+    assert result.text
+
+
 class TestNativeReview:
     """``review/start``: Codex' own review harness, driven by a typed target.
 
