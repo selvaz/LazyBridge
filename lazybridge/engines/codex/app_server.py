@@ -172,6 +172,7 @@ class CodexAppServerClient:
         effort: str | None = None,
         output_schema: dict[str, Any] | None = None,
         sandbox: str = "read-only",
+        writable_roots: list[str] | None = None,
         approval_policy: str = "never",
         approval_gate: ApprovalGate | None = None,
         thread_id: str | None = None,
@@ -522,6 +523,20 @@ class CodexAppServerClient:
                 "sandbox": sandbox,
                 "dynamicTools": dynamic_tools,
             }
+            if writable_roots is not None:
+                # An explicit [] is sent too: it REMOVES roots inherited from the user's config.toml.
+                # There is no dedicated ``ThreadStartParams``/``ThreadResume
+                # Params`` field for this (verified against the generated App
+                # Server schema — ``codex app-server generate-json-schema``):
+                # both only carry the coarse ``sandbox`` enum. The escape
+                # hatch is ``config``, a free-form per-thread override with
+                # the same shape as ``config.toml`` — so this is the
+                # snake_case ``sandbox_workspace_write.writable_roots`` key,
+                # not the camelCase RPC style used elsewhere in this params
+                # dict. Additive to ``cwd``, which Codex always allows.
+                thread_params["config"] = {
+                    "sandbox_workspace_write": {"writable_roots": list(writable_roots)}
+                }
             if developer_instructions is not None:
                 # Preserve Codex's own base instructions while giving the
                 # application prompt the same priority as Engine.system.

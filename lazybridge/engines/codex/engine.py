@@ -286,6 +286,9 @@ class CodexEngine:
             "effort": self.reasoning_effort,
             "developer_instructions": self.system,
             "sandbox": self.config.codex.sandbox,
+            "writable_roots": (
+                list(self.config.codex.writable_roots) if self.config.codex.writable_roots is not None else None
+            ),
             "approval_policy": self.config.codex.approval_policy,
             "config_overrides": _config_overrides(self.config.codex),
             "approval_gate": gate,

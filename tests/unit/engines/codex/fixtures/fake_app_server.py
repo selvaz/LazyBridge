@@ -263,13 +263,19 @@ def main() -> None:
     params = thread_start["params"]
     # Lock in the enum spelling the real CLI accepts — "readOnly" is
     # rejected live with "unknown variant `readOnly`".
-    expected_sandbox = "workspace-write" if scenario == "command_approval" else "read-only"
+    expected_sandbox = "workspace-write" if scenario in ("command_approval", "writable_roots") else "read-only"
     expected_approval = "on-request" if scenario == "command_approval" else "never"
     assert params["sandbox"] == expected_sandbox, params
     assert params["approvalPolicy"] == expected_approval, params
     assert params["ephemeral"] is True, params
     if scenario == "developer_instructions":
         assert params["developerInstructions"] == "Be concise.", params
+    if scenario == "writable_roots":
+        assert params["config"] == {
+            "sandbox_workspace_write": {"writable_roots": ["C:/repo/.git/worktrees/feature"]}
+        }, params
+    else:
+        assert "config" not in params, params
     dynamic_tools = params.get("dynamicTools", [])
     # threadSource is opt-in: present only when the caller passed one. When
     # present it must carry through unchanged (creation-time analytics tag).
@@ -313,7 +319,7 @@ def main() -> None:
                 },
             }
         )
-    elif scenario in ("happy", "id_collision", "developer_instructions"):
+    elif scenario in ("happy", "id_collision", "developer_instructions", "writable_roots"):
         if dynamic_tools:
             # Server-side request ids start at 0 and are independent of the
             # client's counter; under "id_collision" this id is deliberately

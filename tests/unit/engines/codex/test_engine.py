@@ -30,6 +30,7 @@ class FakeAppServer:
         self.review_targets_seen: list[dict | None] = []
         self.thread_sources_seen: list[str | None] = []
         self.config_overrides_seen: list[tuple[str, ...]] = []
+        self.writable_roots_seen: list[list[str] | None] = []
         self.result = result or CodexRunResult(
             text="AMZN is available", input_tokens=11, output_tokens=7, cost_usd=0.002
         )
@@ -51,6 +52,7 @@ class FakeAppServer:
         effort=None,
         output_schema=None,
         sandbox="read-only",
+        writable_roots=None,
         approval_policy="never",
         approval_gate=None,
         thread_id=None,
@@ -69,6 +71,7 @@ class FakeAppServer:
         self.review_targets_seen.append(review_target)
         self.thread_sources_seen.append(thread_source)
         self.config_overrides_seen.append(tuple(config_overrides))
+        self.writable_roots_seen.append(writable_roots)
         self.prompts.append(prompt)
         self.thread_ids_seen.append(thread_id)
         self.ephemeral_seen.append(ephemeral)
@@ -731,3 +734,59 @@ class TestPerAgentCompaction:
         """
         assert not hasattr(CodexPolicy(), "context_window")
         assert not hasattr(CodexPolicy(), "model_context_window")
+
+
+class TestWritableRoots:
+    """Extra writable paths for a worktree ``cwd`` reach the App Server call.
+
+    The prime case: ``cwd`` is a git worktree, whose index/refs live under
+    the main repo's ``.git/worktrees/<name>`` — outside the worktree
+    directory itself, and so unwritable under a plain workspace-write
+    sandbox. See ``CodexPolicy.writable_roots`` and ``app_server.py``.
+    """
+
+    def test_writable_roots_is_forwarded_to_the_client(self):
+        fake = FakeAppServer()
+        agent = Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(
+                    codex=CodexPolicy(
+                        sandbox="workspace-write",
+                        writable_roots=["C:/repo/.git/worktrees/feature"],
+                    )
+                ),
+            ),
+            name="a",
+        )
+        agent("commit")
+
+        assert fake.writable_roots_seen == [["C:/repo/.git/worktrees/feature"]]
+
+    def test_unset_writable_roots_sends_none(self):
+        fake = FakeAppServer()
+        Agent(CodexEngine(client=fake), name="a")("hello")
+
+        assert fake.writable_roots_seen == [None]
+
+    def test_an_explicit_empty_list_is_forwarded_not_dropped(self):
+        """[] means "no extra roots, and drop any inherited from config.toml" -- not "unset"."""
+        fake = FakeAppServer()
+        agent = Agent(
+            CodexEngine(
+                client=fake,
+                config=CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write", writable_roots=[])),
+            ),
+            name="a",
+        )
+        agent("commit")
+
+        assert fake.writable_roots_seen == [[]]
+
+    def test_the_frozen_policy_does_not_change_when_the_caller_mutates_its_list(self):
+        roots = ["C:/repo/.git"]
+        policy = CodexPolicy(sandbox="workspace-write", writable_roots=roots)
+        roots.append("C:/elsewhere")
+
+        assert policy.writable_roots == ("C:/repo/.git",)
+        hash(policy)  # a frozen policy stays hashable
