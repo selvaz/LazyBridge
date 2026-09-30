@@ -199,6 +199,7 @@ nav:
           - Codex Engine: guides/full/codex-engine.md
           - Coding agents in practice: guides/full/coding-agents.md
           - Coding-agent permissions: guides/full/coding-agent-config.md
+          - Session aliases: guides/full/session-registry.md
       - Advanced:
           - Core vs Ext boundary: guides/core-vs-ext.md
           - Engine protocol: guides/advanced/engine-protocol.md

@@ -14,6 +14,7 @@ from typing import Any, ClassVar, TypeVar, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import ApprovalGate, CodingAgentConfig, remembering_gate, session_approvals
+from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -124,12 +125,27 @@ class ClaudeCodeEngine:
     ``Memory`` to the prompt (Claude has the history; sending it again states
     the same turns twice) and serialises runs per session id within the
     process — one session is one transcript.
+
+    **Session aliases.** ``session_alias="review"`` names the durable session:
+    the engine resumes whatever session that alias is bound to (for this
+    ``cwd``) in the :class:`~lazybridge.engines.sessions.SessionRegistry`,
+    opens a fresh durable session if the alias is new, and (re)binds the alias
+    to the session id as soon as the SDK reports it, so a turn that then fails
+    or times out is still resumable by name. An explicit ``session_id`` wins
+    over the registry and the alias is re-pointed at it. An alias implies
+    ``persist_session``. It is unrelated to ``session_name``, which only labels
+    the runtime-mode slot. Without ``session_alias`` nothing changes.
     """
 
     #: One lock per durable session id, shared by every engine in the process:
     #: two engines resuming the same session are the same hazard as one engine
     #: doing it twice.
     _session_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+
+    #: One lock per session alias (kind, cwd, name), held for a whole aliased
+    #: run so a run that is still *creating* the session blocks every other
+    #: engine on the same alias until its id is published.
+    _alias_locks: ClassVar[dict[tuple[str, str, str], asyncio.Lock]] = {}
 
     def __init__(
         self,
@@ -156,6 +172,8 @@ class ClaudeCodeEngine:
         approval_gate: ApprovalGate | None = None,
         client: ClaudeSdkClient | None = None,
         tag: str | None = "lazybridge",
+        session_alias: str | None = None,
+        session_registry: SessionRegistry | None = None,
     ) -> None:
         self.model = model
         self.cwd = cwd
@@ -210,6 +228,16 @@ class ClaudeCodeEngine:
             raise ValueError("session_mode must be 'memory' or 'runtime'")
         self.session_mode = session_mode
         self.session_name = session_name
+        #: Caller-chosen durable name for this engine's session; see the class
+        #: docstring. ``None`` (the default) leaves session handling untouched.
+        self.session_alias = session_alias
+        self._alias: AliasBinding | None = None
+        if session_alias is not None:
+            self._alias = AliasBinding("claude", session_alias, cwd, session_registry)
+            # An explicit id wins; otherwise adopt whatever the alias is bound to.
+            if session_id is None:
+                session_id = self._alias.known_id()
+            persist_session = True
         #: Claude Code session to resume, and after each run the session the
         #: run used. Unlike ``session_mode="runtime"`` — which parks the id on
         #: a LazyBridge ``Session`` object and so only spans one process — this
@@ -265,9 +293,30 @@ class ClaudeCodeEngine:
         """
         if not self.persist_session:
             return contextlib.nullcontext()
+        if self._alias is not None:
+            return self._alias_session_lock()
         if not self.session_id:
             return self._own_lock
         return type(self)._session_locks.setdefault(self.session_id, asyncio.Lock())
+
+    @contextlib.asynccontextmanager
+    async def _alias_session_lock(self) -> Any:
+        """Alias lock first, then the id's lock once the alias has an id.
+
+        The alias lock covers the creating turn (no id exists to key on yet);
+        the id lock still serialises a non-aliased engine that resumes the
+        same session by its raw id.
+        """
+        alias = self._alias
+        assert alias is not None
+        key = (alias.kind, alias.scope, alias.alias)
+        async with type(self)._alias_locks.setdefault(key, asyncio.Lock()):
+            self._refresh_alias()
+            if not self.session_id:
+                yield
+                return
+            async with type(self)._session_locks.setdefault(self.session_id, asyncio.Lock()):
+                yield
 
     def _resume_id(self, session: Any | None, agent_name: str) -> str | None:
         # An explicit handle wins over the Session-parked one: the caller
@@ -297,6 +346,34 @@ class ClaudeCodeEngine:
             tag_session(session_id, self.tag, directory=self.cwd)
         except Exception as exc:  # defensive: tagging must never break a run
             warnings.warn(f"ClaudeCodeEngine: could not tag session {session_id!r}: {exc}", stacklevel=2)
+
+    def _learn_session(self, session_id: str | None) -> None:
+        """Alias engines only: keep and bind a session id the moment it is known.
+
+        Runs from the SDK's early ``on_session_id`` report and from the failure
+        handlers, so an interrupted or failed turn still leaves the alias
+        pointing at its session. The success path keeps its own bookkeeping
+        and only adds the bind.
+        """
+        if self._alias is None or not session_id:
+            return
+        if not self._resuming:
+            self._tag_new_session(session_id)
+        self.session_id = session_id
+        self._resuming = True
+        self._alias.bind(session_id, model=self.model, effort=self.reasoning_effort)
+
+    def _refresh_alias(self) -> None:
+        """Adopt an id another engine bound to our alias since construction.
+
+        Only while this engine has no session yet; called inside the session
+        lock so a queued first run sees the id the run ahead of it created.
+        """
+        if self._alias is not None and not self.session_id:
+            known = self._alias.known_id()
+            if known:
+                self.session_id = known
+                self._resuming = True
 
     def _remember_session(self, session: Any | None, agent_name: str, runtime_id: str | None) -> None:
         if self.session_mode != "runtime" or session is None or not runtime_id:
@@ -493,6 +570,7 @@ class ClaudeCodeEngine:
             tool_observer=observe,
             include_partial_messages=partial,
             output_format=_output_format(output_type),
+            on_session_id=self._learn_session if self._alias is not None else None,
         )
 
     async def run(
@@ -509,6 +587,8 @@ class ClaudeCodeEngine:
         run_id = str(uuid.uuid4())
         started = time.monotonic()
         agent_name = resolve_agent_name(self, "agent")
+        if self._alias is not None:
+            self._alias.begin_run()
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         try:
@@ -526,6 +606,7 @@ class ClaudeCodeEngine:
 
             attachments = self._attachments(env)
             async with self._session_lock():
+                self._refresh_alias()
                 # Prompt and options are built INSIDE the lock: both read
                 # ``session_id``, and reading it before waiting would let two
                 # concurrent first runs each see "no session yet" and open one.
@@ -550,6 +631,8 @@ class ClaudeCodeEngine:
                         self._tag_new_session(result.session_id)
                     self.session_id = result.session_id
                     self._resuming = True
+                    if self._alias is not None:
+                        self._alias.bind(result.session_id, model=self.model, effort=self.reasoning_effort)
             self._remember_session(session, agent_name, result.session_id)
             if session:
                 # Mirrors LLMEngine's MODEL_RESPONSE payload shape so
@@ -588,8 +671,10 @@ class ClaudeCodeEngine:
             # asyncio.wait_for cancels the in-flight SDK call; a timeout is
             # a transient condition, unlike e.g. a schema/tool error, so
             # mark it retryable for callers that inspect ErrorInfo.
+            self._learn_session(getattr(exc, "session_id", None))
             out = Envelope.error_envelope(exc, retryable=True)
         except Exception as exc:
+            self._learn_session(getattr(exc, "session_id", None))
             out = Envelope.error_envelope(exc)
         if session:
             payload = {
@@ -617,7 +702,10 @@ class ClaudeCodeEngine:
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         chunks: list[str] = []
+        if self._alias is not None:
+            self._alias.begin_run()
         try:
+            self._refresh_alias()
 
             def observe(kind: str, payload: dict[str, Any]) -> None:
                 if session:
@@ -660,6 +748,8 @@ class ClaudeCodeEngine:
                             self._tag_new_session(event.session_id)
                         self.session_id = event.session_id
                         self._resuming = True
+                        if self._alias is not None:
+                            self._alias.bind(event.session_id, model=self.model, effort=self.reasoning_effort)
                     self._remember_session(session, agent_name, event.session_id)
                     input_tokens, output_tokens = event.input_tokens, event.output_tokens
                     cost_usd = event.cost_usd
@@ -686,6 +776,7 @@ class ClaudeCodeEngine:
                     run_id=run_id,
                 )
         except Exception as exc:
+            self._learn_session(getattr(exc, "session_id", None))
             if session:
                 session.emit(EventType.AGENT_FINISH, {"agent_name": agent_name, "error": str(exc)}, run_id=run_id)
             raise

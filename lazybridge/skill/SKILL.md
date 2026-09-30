@@ -555,6 +555,12 @@ Implement a custom `ApprovalGate` callback for production or use
 `TerminalApprovalGate` during local development.
 See [Coding-agent permissions](../../docs/guides/full/coding-agent-config.md).
 
+Durable conversations can be addressed by name: `CodexEngine(session_alias="reviewer")`
+(or `ClaudeCodeEngine(session_alias=...)`) resumes the thread/session bound to
+that name in a `SessionRegistry` (per kind and `cwd`) and binds it on first use;
+an explicit `thread_id=`/`session_id=` wins and rebinds. See
+[Session aliases](../../docs/guides/full/session-registry.md).
+
 ### Human-in-the-loop
 
 ```python

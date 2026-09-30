@@ -157,6 +157,7 @@ from lazybridge.engines.plan import (
     Step,
 )
 from lazybridge.engines.replan import PlanRound, ReplanEngine, ReplanTask
+from lazybridge.engines.sessions import SessionRegistry
 from lazybridge.envelope import Envelope
 
 # Exporters (core).  ``OTelExporter`` lives in ``lazybridge.ext.otel``.
@@ -233,6 +234,7 @@ __all__ = [
     "LLMEngine",
     "ClaudeCodeEngine",
     "CodexEngine",
+    "SessionRegistry",
     "ApprovalDecision",
     "ApprovalGate",
     "ApprovalRequest",

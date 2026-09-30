@@ -23,6 +23,7 @@ from lazybridge.engines.coding import (
     remembering_gate,
     session_approvals,
 )
+from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
@@ -174,6 +175,16 @@ class CodexEngine:
       queued in-process. Nothing can stop a *different* process resuming the
       same thread concurrently; don't share a thread id across processes.
 
+    **Session aliases.** ``session_alias="review"`` names the durable thread:
+    the engine resumes whatever thread that alias is bound to (for this
+    ``cwd``) in the :class:`~lazybridge.engines.sessions.SessionRegistry`,
+    opens a fresh durable thread if the alias is new, and (re)binds the alias
+    to the thread id after every turn — failed and timed-out turns included,
+    since an interrupted thread is exactly what one wants to resume. An
+    explicit ``thread_id`` wins over the registry and the alias is re-pointed
+    at it. An alias implies ``persist_thread``. Without ``session_alias``
+    nothing about the thread handling changes.
+
     **Native review.** ``review_target={"type": "baseBranch", "branch": "main"}``
     (or ``{"type": "uncommittedChanges"}`` / ``{"type": "commit", "sha": ...}``)
     runs Codex' own review harness instead of a prompted turn: it returns
@@ -205,8 +216,20 @@ class CodexEngine:
         persist_thread: bool = False,
         review_target: dict[str, Any] | None = None,
         thread_source: str | None = "lazybridge",
+        session_alias: str | None = None,
+        session_registry: SessionRegistry | None = None,
     ) -> None:
         self.model, self.cwd, self.system = model, cwd, system
+        #: Caller-chosen durable name for this engine's thread — see the class
+        #: docstring. ``None`` (the default) leaves thread handling untouched.
+        self.session_alias = session_alias
+        self._alias: AliasBinding | None = None
+        if session_alias is not None:
+            self._alias = AliasBinding("codex", session_alias, cwd, session_registry)
+            # An explicit id wins; otherwise adopt whatever the alias is bound to.
+            if thread_id is None:
+                thread_id = self._alias.known_id()
+            persist_thread = True
         #: Thread to resume, and after each run the thread the run used —
         #: durable only when ``persist_thread`` (resuming implies it).
         self.thread_id = thread_id
@@ -317,6 +340,21 @@ class CodexEngine:
         if self.persist_thread and thread_id:
             self.thread_id = thread_id
             if has_history:
+                self._resuming = True
+            if self._alias is not None:
+                self._alias.bind(thread_id, model=self.model, effort=self.reasoning_effort)
+
+    def _refresh_alias(self) -> None:
+        """Adopt an id another engine bound to our alias since construction.
+
+        Only while this engine has no thread yet: an engine that already holds
+        one (adopted, explicit or created) keeps it. Called inside the thread
+        lock so a queued first run sees the id the run ahead of it created.
+        """
+        if self._alias is not None and not self.thread_id:
+            known = self._alias.known_id()
+            if known:
+                self.thread_id = known
                 self._resuming = True
 
     def _durable_timeout(self, progress: dict[str, Any], exc: BaseException) -> BaseException:
@@ -545,6 +583,8 @@ class CodexEngine:
     ) -> Envelope[Any]:
         run_id, started = str(uuid.uuid4()), time.monotonic()
         agent_name = resolve_agent_name(self, "agent")
+        if self._alias is not None:
+            self._alias.begin_run()
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         out: Envelope[Any]
@@ -554,6 +594,7 @@ class CodexEngine:
             gate = self._scoped_gate(session, agent_name)
             attachments = self._attachments(env)
             async with self._thread_lock():
+                self._refresh_alias()
                 call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
                     **self._client_kwargs(env, tools, output_type, memory, observe, gate, attachments, progress)
                 )
@@ -627,6 +668,8 @@ class CodexEngine:
         """
         run_id, started = str(uuid.uuid4()), time.monotonic()
         agent_name = resolve_agent_name(self, "agent")
+        if self._alias is not None:
+            self._alias.begin_run()
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
 
@@ -648,6 +691,7 @@ class CodexEngine:
                 # same transcript, so it cannot be exempt from the per-thread
                 # lock without letting two turns interleave.
                 async with self._thread_lock():
+                    self._refresh_alias()
                     result = await self._client.run(
                         **self._client_kwargs(
                             env,
