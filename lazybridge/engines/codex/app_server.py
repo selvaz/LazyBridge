@@ -534,9 +534,7 @@ class CodexAppServerClient:
                 # snake_case ``sandbox_workspace_write.writable_roots`` key,
                 # not the camelCase RPC style used elsewhere in this params
                 # dict. Additive to ``cwd``, which Codex always allows.
-                thread_params["config"] = {
-                    "sandbox_workspace_write": {"writable_roots": list(writable_roots)}
-                }
+                thread_params["config"] = {"sandbox_workspace_write": {"writable_roots": list(writable_roots)}}
             if developer_instructions is not None:
                 # Preserve Codex's own base instructions while giving the
                 # application prompt the same priority as Engine.system.
