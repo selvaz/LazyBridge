@@ -52,7 +52,7 @@ name (passthrough).
 |---|---|---|---|---|---|
 | `top` | `claude-fable-5-1` | 1 M | 128 K | $10.00 | $50.00 |
 | `expensive` | `claude-opus-5-5` | 1 M | 128 K | $4.00 | $20.00 |
-| `medium` | `claude-sonnet-5` | 1 M | 128 K | $2.00 | $10.00 |
+| `medium` | `claude-sonnet-5-5` | 1 M | 128 K | $2.00 | $10.00 |
 | `cheap` / `super_cheap` | `claude-haiku-4-5` | 200 K | 64 K | $1.00 | $5.00 |
 
 Sonnet 5's launch price is now permanent (the increase to $3 / $15 was
