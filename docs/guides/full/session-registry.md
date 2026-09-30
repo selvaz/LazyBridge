@@ -74,9 +74,12 @@ unwritable registry logs a warning and the run continues.
 
 Known limits:
 
-- Two engine instances that share one *not yet bound* alias and run their first
-  turn at the same time each create a session; the last writer wins. Bind once
-  (run one turn) before fanning out.
+- Within one process, engines sharing an alias queue on a per-alias lock, so a
+  second engine waits for the turn that creates the session and then resumes
+  it. Across *processes* two first turns on a not-yet-bound alias each create a
+  session and the last writer wins; bind once (run one turn) before fanning out.
+- `ClaudeCodeEngine.stream()` does not take the per-session lock (as before);
+  do not overlap a stream with another turn on the same alias.
 - The registry maps names to ids; it does not check that the CLI still has the
   session. A rebind to an id the CLI has forgotten fails at resume time, with
   the CLI's own error.

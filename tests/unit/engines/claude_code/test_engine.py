@@ -678,6 +678,28 @@ class TestSessionAlias:
 
         assert sdk2.resumes == ["sess-N"]
 
+    def test_a_second_engine_waits_for_the_turn_that_creates_the_alias(self, registry, tmp_path):
+        class Slow(_AliasSdk):
+            async def run(self, prompt, *, options, attachments=()):
+                self.options.append(options)
+                if options.on_session_id is not None:
+                    options.on_session_id(self.session_id)
+                await asyncio.sleep(0.05)
+                return ClaudeSdkResult(text="ok", session_id=self.session_id)
+
+        sdk = Slow("sess-C")
+
+        async def both():
+            first, second = self._engine(sdk, registry, tmp_path), self._engine(sdk, registry, tmp_path)
+            await asyncio.gather(
+                Agent(first, name="a").run("one"),
+                Agent(second, name="b").run("two"),
+            )
+
+        asyncio.run(both())
+
+        assert sorted(r or "" for r in sdk.resumes) == ["", "sess-C"]
+
     def test_the_alias_follows_the_session_id_when_the_sdk_returns_a_new_one(self, registry, tmp_path):
         sdk = _AliasSdk("sess-1", early=False)
         agent = Agent(self._engine(sdk, registry, tmp_path), name="a")

@@ -142,6 +142,11 @@ class ClaudeCodeEngine:
     #: doing it twice.
     _session_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
+    #: One lock per session alias (kind, cwd, name), held for a whole aliased
+    #: run so a run that is still *creating* the session blocks every other
+    #: engine on the same alias until its id is published.
+    _alias_locks: ClassVar[dict[tuple[str, str, str], asyncio.Lock]] = {}
+
     def __init__(
         self,
         model: str = "sonnet",
@@ -288,9 +293,30 @@ class ClaudeCodeEngine:
         """
         if not self.persist_session:
             return contextlib.nullcontext()
+        if self._alias is not None:
+            return self._alias_session_lock()
         if not self.session_id:
             return self._own_lock
         return type(self)._session_locks.setdefault(self.session_id, asyncio.Lock())
+
+    @contextlib.asynccontextmanager
+    async def _alias_session_lock(self) -> Any:
+        """Alias lock first, then the id's lock once the alias has an id.
+
+        The alias lock covers the creating turn (no id exists to key on yet);
+        the id lock still serialises a non-aliased engine that resumes the
+        same session by its raw id.
+        """
+        alias = self._alias
+        assert alias is not None
+        key = (alias.kind, alias.scope, alias.alias)
+        async with type(self)._alias_locks.setdefault(key, asyncio.Lock()):
+            self._refresh_alias()
+            if not self.session_id:
+                yield
+                return
+            async with type(self)._session_locks.setdefault(self.session_id, asyncio.Lock()):
+                yield
 
     def _resume_id(self, session: Any | None, agent_name: str) -> str | None:
         # An explicit handle wins over the Session-parked one: the caller

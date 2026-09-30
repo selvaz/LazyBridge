@@ -211,7 +211,7 @@ class TestCorruptFile:
 class TestConcurrency:
     def test_threads_binding_different_aliases_lose_nothing(self, tmp_path, scope):
         path = tmp_path / "sessions.json"
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def worker(i: int) -> None:
             try:
@@ -220,7 +220,7 @@ class TestConcurrency:
                 reg = SessionRegistry(path)
                 for j in range(5):
                     reg.bind("codex", scope, f"a{i}-{j}", f"id-{i}-{j}")
-            except BaseException as exc:  # pragma: no cover - reported below
+            except Exception as exc:  # pragma: no cover - reported below
                 errors.append(exc)
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
