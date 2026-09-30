@@ -50,7 +50,7 @@ def _request(thinking: ThinkingConfig | None = None, structured_output=None, mod
 def test_tier_aliases_route_to_claude_5_family() -> None:
     assert AnthropicProvider._TIER_ALIASES["top"] == "claude-fable-5-1"
     assert AnthropicProvider._TIER_ALIASES["expensive"] == "claude-opus-5-5"
-    assert AnthropicProvider._TIER_ALIASES["medium"] == "claude-sonnet-5"
+    assert AnthropicProvider._TIER_ALIASES["medium"] == "claude-sonnet-5-5"
     # claude-3-haiku is retired — nothing sits below Haiku 4.5 any more.
     assert AnthropicProvider._TIER_ALIASES["super_cheap"] == "claude-haiku-4-5"
 
@@ -61,6 +61,11 @@ def test_point_releases_price_before_their_family_key() -> None:
     p = _provider()
     assert p._compute_cost("claude-opus-5-5", 1_000_000, 1_000_000) == pytest.approx(24.0)
     assert p._compute_cost("claude-fable-5-1", 1_000_000, 0) == pytest.approx(10.0)
+    # Same rule applies to Sonnet: "claude-sonnet-5" is inside
+    # "claude-sonnet-5-5", and both happen to be priced the same here, but
+    # the explicit row must still win so a future price change doesn't
+    # silently mis-cost 5.5 at the 5 rate.
+    assert p._compute_cost("claude-sonnet-5-5", 1_000_000, 1_000_000) == pytest.approx(12.0)
     assert _PRICE_TABLE["claude-mythos-5-1"] == (10.0, 50.0)
     assert "claude-mythos-5-1" not in AnthropicProvider._TIER_ALIASES.values()
 
@@ -77,6 +82,7 @@ def test_price_table_has_claude_5_entries() -> None:
     assert _PRICE_TABLE["claude-fable-5"] == (10.0, 50.0)
     assert _PRICE_TABLE["claude-opus-5"] == (5.0, 25.0)
     assert _PRICE_TABLE["claude-sonnet-5"] == (2.0, 10.0)
+    assert _PRICE_TABLE["claude-sonnet-5-5"] == (2.0, 10.0)
 
 
 def test_mythos_5_is_priced_but_not_tier_aliased() -> None:
@@ -106,8 +112,9 @@ def test_get_default_max_tokens_claude_5_family() -> None:
 
 def test_fallback_chains_for_claude_5_family() -> None:
     assert AnthropicProvider._FALLBACKS["claude-fable-5-1"] == ["claude-fable-5", "claude-opus-5-5"]
-    assert AnthropicProvider._FALLBACKS["claude-opus-5-5"] == ["claude-opus-5", "claude-sonnet-5"]
-    assert AnthropicProvider._FALLBACKS["claude-opus-5"] == ["claude-sonnet-5", "claude-opus-4-8"]
+    assert AnthropicProvider._FALLBACKS["claude-opus-5-5"] == ["claude-opus-5", "claude-sonnet-5-5"]
+    assert AnthropicProvider._FALLBACKS["claude-opus-5"] == ["claude-sonnet-5-5", "claude-opus-4-8"]
+    assert AnthropicProvider._FALLBACKS["claude-sonnet-5-5"] == ["claude-sonnet-5"]
 
 
 def test_fallbacks_never_route_to_retired_models() -> None:
@@ -120,7 +127,14 @@ def test_fallbacks_never_route_to_retired_models() -> None:
 def test_no_sampling_and_adaptive_only_include_claude_5() -> None:
     from lazybridge.core.providers.anthropic import _ADAPTIVE_ONLY_MODELS, _NO_SAMPLING_MODELS
 
-    for model in ("claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-opus-5-5"):
+    for model in (
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+    ):
         assert any(key in model for key in _NO_SAMPLING_MODELS)
         assert any(key in model for key in _ADAPTIVE_ONLY_MODELS)
 

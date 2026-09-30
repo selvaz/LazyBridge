@@ -68,10 +68,10 @@
   "tier_aliases_anthropic_2026_09": {
     "top": "claude-fable-5-1",
     "expensive": "claude-opus-5-5",
-    "medium": "claude-sonnet-5",
+    "medium": "claude-sonnet-5-5",
     "cheap": "claude-haiku-4-5",
     "super_cheap": "claude-haiku-4-5",
-    "note": "claude-mythos-5-1 exists (same pricing as Fable 5.1) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier.  claude-3-haiku is retired."
+    "note": "claude-sonnet-5-5 (GA 2026-09-28) replaced claude-sonnet-5 as the 'medium' tier alias, same $2/$10 pricing. claude-mythos-5-1 exists (same pricing as Fable 5.1) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier.  claude-3-haiku is retired."
   },
   "tier_aliases_openai_2026_09": {
     "top": "gpt-6-astra",
@@ -87,7 +87,7 @@
     "cheap": "deepseek-flash",
     "super_cheap": "deepseek-flash"
   },
-  "effort_parameter": "ThinkingConfig.effort accepts 'low'|'medium'|'high'|'xhigh'|'max' and is read by both AnthropicProvider (sent as output_config.effort — Fable 5/5.1, Mythos 5/5.1, Opus 5.5/5, Opus 4.8/4.7/4.6, Sonnet 5/4.6, Opus 4.5) and OpenAIProvider (sent as reasoning.effort / reasoning_effort on every gpt-5.x and o-series model). LLMEngine(model, thinking='low') is shorthand for LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort='low')).",
+  "effort_parameter": "ThinkingConfig.effort accepts 'low'|'medium'|'high'|'xhigh'|'max' and is read by both AnthropicProvider (sent as output_config.effort — Fable 5/5.1, Mythos 5/5.1, Opus 5.5/5, Opus 4.8/4.7/4.6, Sonnet 5.5/5/4.6, Opus 4.5) and OpenAIProvider (sent as reasoning.effort / reasoning_effort on every gpt-5.x and o-series model). LLMEngine(model, thinking='low') is shorthand for LLMEngine(model, thinking=ThinkingConfig(enabled=True, effort='low')).",
   "providers": ["anthropic", "openai", "google", "deepseek", "litellm", "lmstudio"],
 
   "skill_md": "https://github.com/selvaz/LazyBridge/blob/main/lazybridge/skill/SKILL.md",

@@ -10,6 +10,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Anthropic: `medium` tier now resolves to `claude-sonnet-5-5`** (GA
+  2026-09-28), replacing `claude-sonnet-5`. Same $2 / $10 pricing (added
+  as its own `_PRICE_TABLE` row, ordered before the `claude-sonnet-5` key
+  per the substring-match rule). Fallback chains updated so
+  `claude-opus-5-5` / `claude-opus-5` fall back to `claude-sonnet-5-5`
+  first, which itself falls back to `claude-sonnet-5`. No changes were
+  needed to the sampling/adaptive-thinking/effort/vision/audio capability
+  sets — they already substring-match `claude-sonnet-5` and cover the
+  point release automatically.
 - **Tier aliases and price tables updated for September 2026 models.**
   - Anthropic: `top` → `claude-fable-5-1`, `expensive` → `claude-opus-5-5`
     ($4 / $20), `super_cheap` → `claude-haiku-4-5` (`claude-3-haiku` is

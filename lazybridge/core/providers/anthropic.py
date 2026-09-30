@@ -103,6 +103,7 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-5": (5.0, 25.0),
     # Sonnet 5's launch price is now the standard price — the increase to
     # $3 / $15 announced for 2026-09-01 was cancelled.
+    "claude-sonnet-5-5": (2.0, 10.0),  # GA 2026-09-28 — same price as Sonnet 5
     "claude-sonnet-5": (2.0, 10.0),
     "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
@@ -228,7 +229,7 @@ class AnthropicProvider(BaseProvider):
     _TIER_ALIASES = {
         "top": "claude-fable-5-1",
         "expensive": "claude-opus-5-5",  # second tier: near-Fable quality, ~40% of the price
-        "medium": "claude-sonnet-5",
+        "medium": "claude-sonnet-5-5",
         "cheap": "claude-haiku-4-5",
         "super_cheap": "claude-haiku-4-5",
     }
@@ -237,8 +238,9 @@ class AnthropicProvider(BaseProvider):
     _FALLBACKS = {
         "claude-fable-5-1": ["claude-fable-5", "claude-opus-5-5"],
         "claude-fable-5": ["claude-opus-5-5", "claude-opus-5"],
-        "claude-opus-5-5": ["claude-opus-5", "claude-sonnet-5"],
-        "claude-opus-5": ["claude-sonnet-5", "claude-opus-4-8"],
+        "claude-opus-5-5": ["claude-opus-5", "claude-sonnet-5-5"],
+        "claude-opus-5": ["claude-sonnet-5-5", "claude-opus-4-8"],
+        "claude-sonnet-5-5": ["claude-sonnet-5"],
         "claude-sonnet-5": ["claude-sonnet-4-6"],
         "claude-opus-4-8": ["claude-opus-4-7", "claude-sonnet-4-6"],
         "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
