@@ -188,6 +188,53 @@ Existing observability consumers do not need Claude Code-specific logic.
 the end, the complete text is added to the same `Memory`, just as it is for
 `agent(...)`.
 
+### Session aliases
+
+A durable session (`persist_session=True` / `session_id=`) can be addressed by a
+name instead of a stored UUID:
+
+```python
+engine = ClaudeCodeEngine(model="haiku", reasoning_effort="low", cwd=repo, session_alias="reviewer")
+```
+
+The first run opens a durable session and records `reviewer -> session id`
+(with model and effort) in the [`SessionRegistry`](session-registry.md); a later
+engine with the same alias and `cwd` resumes it. An explicit `session_id=` wins
+and (re)binds the alias. The id is reported to the registry as soon as the SDK
+announces it, so a turn that fails or times out still leaves a usable binding;
+the alias is re-pointed if the SDK returns a new id for a resumed session.
+`session_name` is a different thing (the title tagged onto the session on disk)
+and is not affected. `engine.session_alias` exposes the name.
+
+### Using the engine as a writer
+
+The default profile offers only read tools. To let Claude create and edit files
+in `cwd`:
+
+```python
+from lazybridge import ClaudeCodeEngine, ClaudeCodePolicy, CodingAgentConfig
+
+engine = ClaudeCodeEngine(
+    cwd=repo,                                   # a resolved long path, not a Windows 8.3 short name
+    model="haiku",
+    config=CodingAgentConfig(
+        claude=ClaudeCodePolicy(permission_mode="acceptEdits", extra_tools=("Write", "Edit"))
+    ),
+    request_timeout=None,                       # see below
+)
+```
+
+Verified live: this creates a file in a fresh git repository. `extra_tools`
+is required -- `permission_mode="acceptEdits"` alone does not give the model
+`Write`/`Edit`, because the engine only offers the built-ins it derives plus
+`extra_tools`. `file_roots` defaults to `[cwd]` and confines the file tools.
+Granting `Bash` additionally requires an `approval_gate` (the engine refuses
+at construction otherwise).
+
+`request_timeout` defaults to 120 s and bounds the **whole run** (every retry
+included), so a long coding task is cut at two minutes. A writer should pass a
+larger value or `None`. `stream_idle_timeout` (90 s) only applies to `stream()`.
+
 ## 6. Web and filesystem: default profile
 
 The engine's default profile is intentionally useful but read-only:

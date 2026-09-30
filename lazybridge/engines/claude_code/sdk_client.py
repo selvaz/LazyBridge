@@ -66,9 +66,12 @@ class ClaudeSdkRequestError(RuntimeError):
     from the error string.
     """
 
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(self, message: str, *, status: int | None = None, session_id: str | None = None) -> None:
         super().__init__(message)
         self.status = status
+        #: The session the failed turn ran in, when the CLI reported one; a
+        #: failed turn is still a resumable session.
+        self.session_id = session_id
 
 
 class AgentSdkClient(ClaudeSdkClient):
@@ -99,6 +102,27 @@ class AgentSdkClient(ClaudeSdkClient):
             "type": "user",
             "message": {"role": "user", "content": content},
         }
+
+    @staticmethod
+    def _report_session_id(options: ClaudeSdkOptions, message: Any) -> None:
+        """Tell ``options.on_session_id`` which session a message belongs to.
+
+        Result/assistant/stream messages carry ``session_id``; the ``init``
+        ``SystemMessage`` (first message of a turn) carries it in ``data``. A
+        misbehaving callback never affects the turn.
+        """
+        callback = options.on_session_id
+        if callback is None:
+            return
+        sid = getattr(message, "session_id", None)
+        if not sid:
+            data = getattr(message, "data", None)
+            sid = data.get("session_id") if isinstance(data, dict) else None
+        if isinstance(sid, str) and sid:
+            try:
+                callback(sid)
+            except Exception:
+                logger.warning("on_session_id callback raised", exc_info=True)
 
     @staticmethod
     def _sdk_options(options: ClaudeSdkOptions) -> Any:
@@ -402,13 +426,16 @@ class AgentSdkClient(ClaudeSdkClient):
             self._prompt_stream(prompt, attachments) if self._needs_streaming_input(options, attachments) else prompt
         )
         async for message in query(prompt=sdk_prompt, options=sdk_options):
+            self._report_session_id(options, message)
             if isinstance(message, ResultMessage):
                 final = message
         if final is None:
             raise RuntimeError("Claude Agent SDK ended without a ResultMessage")
         if final.is_error:
             detail = "; ".join(final.errors or []) or final.result or final.subtype
-            raise ClaudeSdkRequestError(f"Claude Agent SDK failed: {detail}", status=final.api_error_status)
+            raise ClaudeSdkRequestError(
+                f"Claude Agent SDK failed: {detail}", status=final.api_error_status, session_id=final.session_id
+            )
 
         usage = final.usage or {}
         return ClaudeSdkResult(
@@ -465,6 +492,7 @@ class AgentSdkClient(ClaudeSdkClient):
             prompt=sdk_prompt,
             options=self._sdk_options(stream_options),
         ):
+            self._report_session_id(stream_options, message)
             if isinstance(message, StreamEvent):
                 event = message.event
                 if event.get("type") == "content_block_delta":
@@ -476,7 +504,11 @@ class AgentSdkClient(ClaudeSdkClient):
                 saw_result = True
                 if message.is_error:
                     detail = "; ".join(message.errors or []) or message.result or message.subtype
-                    raise ClaudeSdkRequestError(f"Claude Agent SDK failed: {detail}", status=message.api_error_status)
+                    raise ClaudeSdkRequestError(
+                        f"Claude Agent SDK failed: {detail}",
+                        status=message.api_error_status,
+                        session_id=message.session_id,
+                    )
                 # Some SDK/CLI versions do not emit partial text for a short
                 # response. Yield the final response exactly once in that case.
                 if not saw_text:

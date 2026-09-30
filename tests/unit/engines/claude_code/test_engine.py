@@ -588,3 +588,199 @@ def test_unconfinable_extra_tools_require_an_approval_gate(tmp_path):
         file_roots=[str(tmp_path)],
         config=CodingAgentConfig(claude=ClaudeCodePolicy(extra_tools=("Write", "Edit"))),
     )
+
+
+class _AliasSdk:
+    """Scriptable fake that reports its session id EARLY, like the real SDK.
+
+    ``early`` mimics the init-message report (``options.on_session_id``);
+    ``fail`` raises after it, ``fail_with_id`` attaches the id to the error
+    the way ``AgentSdkClient`` does for an error ``ResultMessage``.
+    """
+
+    def __init__(self, session_id="sess-A", *, early=True, fail=None, fail_with_id=False, hang=False):
+        self.session_id = session_id
+        self.early = early
+        self.fail = fail
+        self.fail_with_id = fail_with_id
+        self.hang = hang
+        self.options: list[ClaudeSdkOptions] = []
+
+    async def run(self, prompt, *, options, attachments=()):
+        self.options.append(options)
+        if self.early and options.on_session_id is not None:
+            options.on_session_id(self.session_id)
+        if self.hang:
+            await asyncio.sleep(3600)
+        if self.fail is not None:
+            if self.fail_with_id:
+                from lazybridge.engines.claude_code.sdk_client import ClaudeSdkRequestError
+
+                raise ClaudeSdkRequestError(str(self.fail), session_id=self.session_id)
+            raise self.fail
+        return ClaudeSdkResult(text="ok", session_id=self.session_id)
+
+    async def stream(self, prompt, *, options, attachments=()):
+        self.options.append(options)
+        yield ClaudeSdkStreamEvent(text="hi")
+        yield ClaudeSdkStreamEvent(session_id=self.session_id, final=True)
+
+    @property
+    def resumes(self):
+        return [o.resume for o in self.options]
+
+
+class TestSessionAlias:
+    """``session_alias``: a durable, caller-chosen name for the session."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_tagging(self, fake_tag_session):
+        return fake_tag_session
+
+    @pytest.fixture
+    def registry(self, tmp_path):
+        from lazybridge.engines.sessions import SessionRegistry
+
+        return SessionRegistry(tmp_path / "sessions.json")
+
+    @staticmethod
+    def _engine(sdk, registry, cwd, **kw):
+        return ClaudeCodeEngine(client=sdk, cwd=str(cwd), session_alias="probe", session_registry=registry, **kw)
+
+    def test_an_unknown_alias_opens_a_durable_session_and_binds_after_the_turn(self, registry, tmp_path):
+        sdk = _AliasSdk(early=False)
+        engine = self._engine(sdk, registry, tmp_path, model="haiku", reasoning_effort="low")
+
+        assert engine.session_alias == "probe"
+        assert registry.resolve("claude", tmp_path, "probe") is None
+        Agent(engine, name="a")("remember PINEAPPLE")
+
+        assert sdk.resumes == [None]
+        assert engine.session_id == "sess-A"
+        (row,) = registry.entries()
+        assert (row["kind"], row["native_id"], row["model"], row["effort"]) == ("claude", "sess-A", "haiku", "low")
+
+    def test_a_known_alias_is_resumed_by_a_brand_new_engine(self, registry, tmp_path):
+        registry.bind("claude", tmp_path, "probe", "sess-A")
+        sdk = _AliasSdk()
+        engine = self._engine(sdk, registry, tmp_path)
+
+        assert engine.session_id == "sess-A"
+        Agent(engine, name="a", memory=Memory())("what was the word?")
+
+        assert sdk.resumes == ["sess-A"]
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-A"
+
+    def test_two_engines_share_the_session_through_the_alias(self, registry, tmp_path):
+        Agent(self._engine(_AliasSdk("sess-N", early=False), registry, tmp_path), name="a")("one")
+        sdk2 = _AliasSdk("sess-N")
+        Agent(self._engine(sdk2, registry, tmp_path), name="a")("two")
+
+        assert sdk2.resumes == ["sess-N"]
+
+    def test_the_alias_follows_the_session_id_when_the_sdk_returns_a_new_one(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-1", early=False)
+        agent = Agent(self._engine(sdk, registry, tmp_path), name="a")
+        agent("one")
+        sdk.session_id = "sess-2"
+        agent("two")
+
+        assert sdk.resumes == [None, "sess-1"]
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-2"
+
+    def test_a_failed_turn_binds_the_session_the_sdk_reported_early(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-F", fail=RuntimeError("boom"))
+        engine = self._engine(sdk, registry, tmp_path, max_retries=0)
+
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-F"
+        assert engine.session_id == "sess-F"
+
+    def test_a_failed_turn_binds_the_id_carried_on_the_error(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-E", early=False, fail=RuntimeError("boom"), fail_with_id=True)
+        engine = self._engine(sdk, registry, tmp_path, max_retries=0)
+
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-E"
+
+    def test_a_timed_out_turn_binds_the_session_reported_before_the_hang(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-T", hang=True)
+        engine = self._engine(sdk, registry, tmp_path, request_timeout=0.05, max_retries=0)
+
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-T"
+
+    def test_an_explicit_session_id_wins_and_the_alias_is_repointed(self, registry, tmp_path):
+        registry.bind("claude", tmp_path, "probe", "sess-OLD")
+        sdk = _AliasSdk("sess-EXPLICIT", early=False)
+        engine = self._engine(sdk, registry, tmp_path, session_id="sess-EXPLICIT")
+
+        Agent(engine, name="a")("go")
+
+        assert sdk.resumes == ["sess-EXPLICIT"]
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-EXPLICIT"
+
+    def test_no_alias_is_unchanged_and_touches_no_registry(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-9")
+        engine = ClaudeCodeEngine(client=sdk, cwd=str(tmp_path))
+
+        Agent(engine, name="a")("go")
+        Agent(engine, name="a")("again")
+
+        assert engine.session_alias is None
+        assert sdk.resumes == [None, None]
+        assert all(o.on_session_id is None for o in sdk.options)
+        assert engine.session_id is None
+        assert not registry.path.exists()
+
+    def test_cwd_isolates_identical_aliases(self, registry, tmp_path):
+        registry.bind("claude", tmp_path / "one", "probe", "sess-ONE")
+        sdk = _AliasSdk("sess-TWO", early=False)
+        engine = self._engine(sdk, registry, tmp_path / "two")
+
+        assert engine.session_id is None
+        Agent(engine, name="a")("go")
+
+        assert sdk.resumes == [None]
+        assert registry.resolve("claude", tmp_path / "one", "probe") == "sess-ONE"
+        assert registry.resolve("claude", tmp_path / "two", "probe") == "sess-TWO"
+
+    def test_a_first_run_adopts_the_id_another_engine_bound_meanwhile(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-X", early=False)
+        engine = self._engine(sdk, registry, tmp_path)
+        registry.bind("claude", tmp_path, "probe", "sess-X")
+
+        Agent(engine, name="a")("go")
+
+        assert sdk.resumes == ["sess-X"]
+
+    def test_a_new_session_is_tagged_once_even_with_early_and_final_reports(self, registry, tmp_path, fake_tag_session):
+        sdk = _AliasSdk("sess-A")
+        Agent(self._engine(sdk, registry, tmp_path), name="a")("go")
+
+        assert fake_tag_session == [("sess-A", "lazybridge", str(tmp_path))]
+
+    def test_streaming_binds_too(self, registry, tmp_path):
+        sdk = _AliasSdk("sess-S")
+        agent = Agent(self._engine(sdk, registry, tmp_path), name="a")
+
+        async def collect() -> str:
+            return "".join([chunk async for chunk in agent.stream("go")])
+
+        assert asyncio.run(collect()) == "hi"
+        assert registry.resolve("claude", tmp_path, "probe") == "sess-S"
+
+    def test_an_invalid_alias_fails_at_construction(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="invalid session alias"):
+            ClaudeCodeEngine(client=_AliasSdk(), session_alias="9bad", session_registry=registry)
+
+    def test_session_name_is_not_repurposed(self, registry, tmp_path):
+        engine = self._engine(_AliasSdk(), registry, tmp_path, session_name="slot")
+        assert engine.session_name == "slot"
+        assert engine.session_alias == "probe"

@@ -61,6 +61,13 @@ class ClaudeSdkOptions:
     #: kind ``"call"`` / ``"result"``. In-process MCP tools are skipped.
     tool_observer: Callable[[str, dict[str, Any]], None] | None = None
 
+    #: Called (synchronously, from the event loop) with the native session id
+    #: as soon as the SDK reports one -- on the init message, long before the
+    #: turn ends -- and again on later messages carrying it. It exists so a
+    #: session alias can be bound even when the turn then fails or times out;
+    #: clients that cannot report early (fakes) may ignore it.
+    on_session_id: Callable[[str], None] | None = None
+
 
 @dataclass(frozen=True)
 class ClaudeSdkResult:

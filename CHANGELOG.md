@@ -8,6 +8,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`SessionRegistry` and `session_alias=` on `CodexEngine` and
+  `ClaudeCodeEngine`.** A JSON file store (`lazybridge/engines/sessions.py`,
+  exported from `lazybridge` and `lazybridge.engines`) maps a caller-chosen
+  name, per kind (`codex`/`claude`) and working directory, to the native
+  thread/session id plus the model and effort it ran with, so a launcher can
+  say "use session `reviewer`" and an operator can rename or rebind it by
+  hand. API: `resolve`, `bind`, `rename`, `forget`, `entries`; location from
+  the constructor, `LAZYBRIDGE_SESSIONS_FILE`, or `~/.lazybridge/sessions.json`;
+  atomic writes, cross-thread and cross-process locking, a corrupt file is
+  quarantined to `.corrupt` rather than overwritten. Engines take
+  `session_alias=` / `session_registry=` and expose `session_alias`: a known
+  alias resumes its id, an unknown one opens a durable session bound after the
+  first turn (failed turns included once an id exists), an explicit
+  `thread_id=`/`session_id=` wins and rebinds. Without an alias behaviour is
+  unchanged. `ClaudeSdkOptions` gains a trailing `on_session_id` callback and
+  `ClaudeSdkRequestError` a `session_id` attribute to support early binding.
+  Guides: `session-registry.md`, plus writer-configuration and timeout notes in
+  the Codex and Claude Code engine guides.
+
 ### Changed
 
 - **Anthropic: `medium` tier now resolves to `claude-sonnet-5-5`** (GA

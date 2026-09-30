@@ -48,6 +48,46 @@ transcript carries it. That moves the conversation's home, so the engine also:
 Durable threads are stored by the Codex CLI itself (they show up in its session
 history), and both processes must share the same Codex home and account.
 
+### Session aliases
+
+Instead of storing the thread id yourself, give the engine a name:
+
+```python
+engine = CodexEngine(model="gpt-6-luna", reasoning_effort="low", cwd=repo, session_alias="reviewer")
+```
+
+The first run opens a durable thread and records `reviewer -> thread id` (with
+the model and effort) in the [`SessionRegistry`](session-registry.md); any later
+engine with the same alias and `cwd` resumes that thread. An explicit
+`thread_id=` still wins and (re)binds the alias. The binding is written as soon
+as the thread id is known, including when the turn then fails. `engine.session_alias`
+exposes the name. See [Session aliases](session-registry.md) for the file format,
+renaming and the precedence rules.
+
+### Using the engine as a writer
+
+The default thread is read-only. To let Codex create and edit files in `cwd`:
+
+```python
+from lazybridge import CodexEngine, CodexPolicy, CodingAgentConfig
+
+engine = CodexEngine(
+    cwd=repo,                                   # a resolved long path, not a Windows 8.3 short name
+    model="gpt-6-luna",
+    config=CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write", approval_policy="never")),
+    request_timeout=None,                       # see below
+)
+```
+
+Verified live: this creates a file in a fresh git repository. `approval_policy="never"`
+is the unattended setting; `CodingAgentConfig.writer(gate)` uses `"on-request"`
+and routes approvals to your gate instead. A worktree needs `writable_roots=`
+for its shared `.git` directory (see `CodexPolicy`).
+
+`request_timeout` defaults to 120 s and bounds the **whole run** (every retry
+included), so a long coding task is cut at two minutes. A writer should pass a
+larger value or `None`. `stream_idle_timeout` (90 s) only applies to `stream()`.
+
 ## Setup
 
 ```bash

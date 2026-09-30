@@ -27,6 +27,7 @@ from lazybridge.engines.coding import (
 from lazybridge.engines.llm import LLMEngine
 from lazybridge.engines.plan import Plan, Step
 from lazybridge.engines.replan import PlanRound, ReplanEngine, Task
+from lazybridge.engines.sessions import SessionRegistry, default_session_registry, set_default_session_registry
 
 __all__ = [
     "ClaudeCodeEngine",
@@ -45,4 +46,7 @@ __all__ = [
     "PlanRound",
     "Step",
     "Task",
+    "SessionRegistry",
+    "default_session_registry",
+    "set_default_session_registry",
 ]

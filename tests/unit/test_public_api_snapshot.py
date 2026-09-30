@@ -64,6 +64,7 @@ _EXPECTED: frozenset[str] = frozenset(
         "LLMEngine",
         "ClaudeCodeEngine",
         "CodexEngine",
+        "SessionRegistry",
         "ApprovalDecision",
         "ApprovalGate",
         "ApprovalRequest",

@@ -790,3 +790,178 @@ class TestWritableRoots:
 
         assert policy.writable_roots == ("C:/repo/.git",)
         hash(policy)  # a frozen policy stays hashable
+
+
+class TestSessionAlias:
+    """``session_alias``: a durable, caller-chosen name for the thread."""
+
+    @pytest.fixture
+    def registry(self, tmp_path):
+        from lazybridge.engines.sessions import SessionRegistry
+
+        return SessionRegistry(tmp_path / "sessions.json")
+
+    @staticmethod
+    def _engine(fake, registry, **kw):
+        return CodexEngine(client=fake, session_alias="probe", session_registry=registry, **kw)
+
+    def test_an_unknown_alias_opens_a_durable_thread_and_binds_after_the_turn(self, registry, tmp_path):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-A"))
+        engine = self._engine(fake, registry, model="gpt-6-luna", reasoning_effort="low", cwd=str(tmp_path))
+
+        assert engine.session_alias == "probe"
+        assert registry.resolve("codex", tmp_path, "probe") is None
+        Agent(engine, name="a")("remember PINEAPPLE")
+
+        assert fake.ephemeral_seen == [False]  # the alias implies persistence
+        assert fake.thread_ids_seen == [None]
+        assert engine.thread_id == "thread-A"
+        (row,) = registry.entries()
+        assert row["native_id"] == "thread-A"
+        assert row["model"] == "gpt-6-luna"
+        assert row["effort"] == "low"
+
+    def test_a_known_alias_is_resumed_by_a_brand_new_engine(self, registry, tmp_path):
+        registry.bind("codex", tmp_path, "probe", "thread-A")
+        fake = FakeAppServer(result=CodexRunResult(text="PINEAPPLE", thread_id="thread-A"))
+        engine = self._engine(fake, registry, cwd=str(tmp_path))
+
+        assert engine.thread_id == "thread-A"
+        result = Agent(engine, name="a", memory=Memory())("what was the word?")
+
+        assert result.text() == "PINEAPPLE"
+        assert fake.thread_ids_seen == ["thread-A"]
+        assert fake.ephemeral_seen == [False]
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-A"
+
+    def test_the_same_alias_survives_two_engine_instances_end_to_end(self, registry, tmp_path):
+        first = FakeAppServer(result=CodexRunResult(text="OK", thread_id="thread-NEW"))
+        Agent(self._engine(first, registry, cwd=str(tmp_path)), name="a")("remember PINEAPPLE")
+
+        second = FakeAppServer(result=CodexRunResult(text="PINEAPPLE", thread_id="thread-NEW"))
+        Agent(self._engine(second, registry, cwd=str(tmp_path)), name="a")("the word?")
+
+        assert second.thread_ids_seen == ["thread-NEW"]
+
+    def test_a_failed_turn_that_produced_an_id_still_binds(self, registry, tmp_path):
+        fake = FakeAppServer(
+            result=CodexRunResult(text="x", thread_id="thread-F"),
+            fail_times=1,
+            exc_factory=lambda: RuntimeError("boom"),
+        )
+        engine = self._engine(fake, registry, cwd=str(tmp_path), max_retries=0)
+
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-F"
+
+    def test_an_uncertain_turn_still_binds(self, registry, tmp_path):
+        from lazybridge.engines.codex.app_server import CodexTurnUncertain
+
+        class Uncertain(FakeAppServer):
+            async def run(self, **kwargs):
+                raise CodexTurnUncertain("lost", thread_id="thread-U", turn_id="t1")
+
+        engine = self._engine(Uncertain(), registry, cwd=str(tmp_path))
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-U"
+
+    def test_a_timed_out_turn_binds_the_thread_it_had_opened(self, registry, tmp_path):
+        import asyncio as aio
+
+        class HangingMidTurn(FakeAppServer):
+            async def run(self, *, progress=None, **kwargs):
+                progress.update({"thread_id": "thread-T", "turn_sent": True})
+                await aio.sleep(3600)
+
+        engine = self._engine(HangingMidTurn(), registry, cwd=str(tmp_path), request_timeout=0.05)
+        result = Agent(engine, name="a")("go")
+
+        assert not result.ok
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-T"
+
+    def test_an_explicit_thread_id_wins_and_the_alias_is_repointed(self, registry, tmp_path):
+        registry.bind("codex", tmp_path, "probe", "thread-OLD")
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-EXPLICIT"))
+        engine = self._engine(fake, registry, cwd=str(tmp_path), thread_id="thread-EXPLICIT")
+
+        assert engine.thread_id == "thread-EXPLICIT"
+        Agent(engine, name="a")("go")
+
+        assert fake.thread_ids_seen == ["thread-EXPLICIT"]
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-EXPLICIT"
+
+    def test_no_alias_touches_no_registry(self, registry, tmp_path):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+        engine = CodexEngine(client=fake, cwd=str(tmp_path))
+
+        Agent(engine, name="a")("go")
+
+        assert engine.session_alias is None
+        assert fake.ephemeral_seen == [True]
+        assert fake.thread_ids_seen == [None]
+        assert engine.thread_id is None
+        assert registry.entries() == []
+        assert not registry.path.exists()
+
+    def test_cwd_isolates_identical_aliases(self, registry, tmp_path):
+        registry.bind("codex", tmp_path / "one", "probe", "thread-ONE")
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-TWO"))
+        engine = self._engine(fake, registry, cwd=str(tmp_path / "two"))
+
+        assert engine.thread_id is None  # the other project's alias is not ours
+        Agent(engine, name="a")("go")
+
+        assert fake.thread_ids_seen == [None]
+        assert registry.resolve("codex", tmp_path / "one", "probe") == "thread-ONE"
+        assert registry.resolve("codex", tmp_path / "two", "probe") == "thread-TWO"
+
+    def test_the_alias_follows_the_thread_id_between_turns(self, registry, tmp_path):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-1"))
+        engine = self._engine(fake, registry, cwd=str(tmp_path))
+        agent = Agent(engine, name="a")
+        agent("one")
+        fake.result = CodexRunResult(text="ok", thread_id="thread-2")
+        agent("two")
+
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-2"
+
+    def test_a_first_run_adopts_the_id_another_engine_bound_meanwhile(self, registry, tmp_path):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-X"))
+        engine = self._engine(fake, registry, cwd=str(tmp_path))
+        # Another engine binds the alias after this one was constructed.
+        registry.bind("codex", tmp_path, "probe", "thread-X")
+
+        Agent(engine, name="a")("go")
+
+        assert fake.thread_ids_seen == ["thread-X"]
+
+    def test_an_invalid_alias_fails_at_construction(self, registry):
+        with pytest.raises(ValueError, match="invalid session alias"):
+            CodexEngine(client=FakeAppServer(), session_alias="has space", session_registry=registry)
+
+    def test_an_unwritable_registry_never_fails_the_turn(self, tmp_path):
+        from lazybridge.engines.sessions import SessionRegistry
+
+        blocker = tmp_path / "blocker"
+        blocker.write_text("a file, not a directory", encoding="utf-8")
+        reg = SessionRegistry(blocker / "sub" / "sessions.json")
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-9"))
+
+        with pytest.warns(UserWarning, match="could not"):
+            result = Agent(self._engine(fake, reg, cwd=str(tmp_path)), name="a")("go")
+
+        assert result.ok
+
+    def test_streaming_binds_too(self, registry, tmp_path):
+        fake = FakeAppServer(result=CodexRunResult(text="ok", thread_id="thread-S"))
+        agent = Agent(self._engine(fake, registry, cwd=str(tmp_path)), name="a")
+
+        async def collect() -> str:
+            return "".join([chunk async for chunk in agent.stream("go")])
+
+        assert asyncio.run(collect()) == "streamed answer"
+        assert registry.resolve("codex", tmp_path, "probe") == "thread-S"

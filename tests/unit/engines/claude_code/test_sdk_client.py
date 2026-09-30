@@ -397,4 +397,58 @@ def test_a_new_policy_field_never_displaces_an_existing_positional_argument():
 
     from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 
-    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-2:] == ["auto_compact_window", "tool_observer"]
+    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-3:] == [
+        "auto_compact_window",
+        "tool_observer",
+        "on_session_id",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Early session-id reporting (alias binding)
+# ---------------------------------------------------------------------------
+
+
+def test_report_session_id_reads_the_attribute_then_the_init_payload():
+    from types import SimpleNamespace
+
+    from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
+    from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
+
+    seen: list[str] = []
+    opts = ClaudeSdkOptions(on_session_id=seen.append)
+
+    AgentSdkClient._report_session_id(opts, SimpleNamespace(session_id="from-attr"))
+    AgentSdkClient._report_session_id(opts, SimpleNamespace(data={"session_id": "from-data"}))
+    AgentSdkClient._report_session_id(opts, SimpleNamespace(data={}))
+    AgentSdkClient._report_session_id(opts, SimpleNamespace())
+
+    assert seen == ["from-attr", "from-data"]
+
+
+def test_report_session_id_without_a_callback_is_a_no_op():
+    from types import SimpleNamespace
+
+    from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
+    from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
+
+    AgentSdkClient._report_session_id(ClaudeSdkOptions(), SimpleNamespace(session_id="x"))
+
+
+def test_report_session_id_swallows_a_failing_callback():
+    from types import SimpleNamespace
+
+    from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
+    from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
+
+    def boom(_sid: str) -> None:
+        raise RuntimeError("callback exploded")
+
+    AgentSdkClient._report_session_id(ClaudeSdkOptions(on_session_id=boom), SimpleNamespace(session_id="x"))
+
+
+def test_request_error_carries_the_session_id_when_given():
+    from lazybridge.engines.claude_code.sdk_client import ClaudeSdkRequestError
+
+    assert ClaudeSdkRequestError("x").session_id is None
+    assert ClaudeSdkRequestError("x", status=500, session_id="sess-1").session_id == "sess-1"
