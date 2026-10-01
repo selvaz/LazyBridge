@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-10-01
+
 ### Added
 
 - **`SessionRegistry` and `session_alias=` on `CodexEngine` and
