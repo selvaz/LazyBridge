@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-10-01
+
 ### Added
 
 - **OpenAI `gpt-6.1-sol`.** The latest workhorse model, successor of
