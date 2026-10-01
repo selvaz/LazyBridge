@@ -69,8 +69,8 @@ The five tier aliases, ordered cheapest → smartest:
 |---|---|---|---|---|---|
 | `super_cheap` | High-volume classification, simple extraction | `claude-haiku-4-5` | `gpt-6-luna` | `gemini-2.5-flash-lite` | `deepseek-flash` |
 | `cheap` | Tools dispatch, summaries, short drafts | `claude-haiku-4-5` | `gpt-6-luna` | `gemini-3.1-flash-lite-preview` | `deepseek-flash` |
-| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-5-5` | `gpt-6-sol` | `gemini-3-flash-preview` | `deepseek-flash` |
-| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-5-5` | `gpt-6-sol` | `gemini-2.5-pro` | `deepseek-v4-pro` |
+| `medium` *(default)* | Most agent work — sensible all-rounder | `claude-sonnet-5-5` | `gpt-6.1-sol` | `gemini-3-flash-preview` | `deepseek-flash` |
+| `expensive` | Stable flagship — complex reasoning, hard tasks | `claude-opus-5-5` | `gpt-6.1-sol` | `gemini-2.5-pro` | `deepseek-v4-pro` |
 | `top` | Bleeding-edge flagship — extended reasoning, hardest problems | `claude-fable-5-1` | `gpt-6-astra` | `gemini-3.1-pro-preview` | `deepseek-v4-pro` |
 
 !!! note "How to read the table"

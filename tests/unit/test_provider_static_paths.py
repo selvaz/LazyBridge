@@ -131,6 +131,7 @@ def test_openai_compute_cost_clamps_cached_to_input():
     "provider_cls,model,expected_min",
     [
         (OpenAIProvider, "gpt-6-astra", 128_000),
+        (OpenAIProvider, "gpt-6.1-sol", 128_000),
         (OpenAIProvider, "gpt-5.5", 100_000),
         (OpenAIProvider, "gpt-4.1", 16_000),
         (OpenAIProvider, "gpt-4o", 8_000),
@@ -203,6 +204,8 @@ def test_fallback_targets_have_pricing(provider_cls):
     "provider_cls,tier,expected_substring",
     [
         (OpenAIProvider, "top", "gpt-6-astra"),
+        (OpenAIProvider, "medium", "gpt-6.1-sol"),
+        (OpenAIProvider, "expensive", "gpt-6.1-sol"),
         (OpenAIProvider, "cheap", "gpt-6-luna"),
         (AnthropicProvider, "top", "claude-fable-5-1"),
         (AnthropicProvider, "cheap", "claude-haiku"),
@@ -508,6 +511,7 @@ def test_anthropic_messages_tool_role_demotes_to_user():
         ("gpt-5.5", True),
         ("gpt-5.5-pro", True),
         ("gpt-6-astra", True),
+        ("gpt-6.1-sol", True),
         # Non-reasoning families.
         ("gpt-4o", False),
         ("gpt-4.1", False),
