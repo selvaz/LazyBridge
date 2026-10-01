@@ -21,7 +21,7 @@ Agent(engine=LLMEngine("gpt-6-luna"))
 
 # Tier-based selection — model never appears in app code.
 Agent.from_provider("anthropic", tier="top")     # → claude-fable-5-1
-Agent.from_provider("openai",    tier="medium")  # → gpt-6-sol
+Agent.from_provider("openai",    tier="medium")  # → gpt-6.1-sol
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
 
@@ -94,13 +94,20 @@ old transcripts but are never used as fallbacks.
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
 | `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
-| `expensive` / `medium` | `gpt-6-sol` | — | — | $2.00 | $0.20 | $10.00 |
+| `expensive` / `medium` | `gpt-6.1-sol` | — | — | $2.00 | $0.20 | $10.00 |
 | `cheap` / `super_cheap` | `gpt-6-luna` | — | — | $0.10 | $0.01 | $0.50 |
 
-GPT-6 Sol and Luna (released 2026-09-22) replace the GPT-5.6 tiers.
+GPT-6 Sol and Luna (released 2026-09-22) replace the GPT-5.6 tiers,
+and GPT-6.1 Sol is the latest workhorse: it succeeds `gpt-6-sol` at the
+same list price ($2.00 in / $10.00 out) with a $0.10 cache-hit rate.
 There is no GPT-6 Terra: Sol costs less than `gpt-5.6-terra`, so it
 covers `medium` too, and Luna costs less than `gpt-4o-mini`, so it
-covers `super_cheap`. All three GPT-6 models accept effort `max`.
+covers `super_cheap`. All GPT-6-family models accept effort `max`.
+Context window and max output for `gpt-6.1-sol` are not verified and
+are not shown in the table above.
+
+Previous generation workhorse, pinnable by id: `gpt-6-sol` ($2 / $0.20
+/ $10).
 
 Previous generation, pinnable by id: `gpt-5.6-sol` ($5 / $0.50 / $30),
 `gpt-5.6-terra` ($2 / $0.20 / $12), `gpt-5.6-luna` ($0.20 / $0.02 /
@@ -234,7 +241,7 @@ don't have to switch on Gemini-specific values:
   `deepseek-flash` — there's no smaller model in the lineup.
 - **Tier collapse on Anthropic / OpenAI.** `cheap` and `super_cheap`
   share one model on both (`claude-haiku-4-5`, `gpt-6-luna`), and on
-  OpenAI `expensive` and `medium` share `gpt-6-sol`.
+  OpenAI `expensive` and `medium` share `gpt-6.1-sol`.
 - **`gemini-2.0-flash` deprecation** lands June 1 2026; switch to
   `gemini-2.5-flash-lite` before then.
 - **Adaptive thinking ignores `budget_tokens`.** Anthropic

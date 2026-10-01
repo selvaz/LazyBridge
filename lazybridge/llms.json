@@ -75,8 +75,8 @@
   },
   "tier_aliases_openai_2026_09": {
     "top": "gpt-6-astra",
-    "expensive": "gpt-6-sol",
-    "medium": "gpt-6-sol",
+    "expensive": "gpt-6.1-sol",
+    "medium": "gpt-6.1-sol",
     "cheap": "gpt-6-luna",
     "super_cheap": "gpt-6-luna"
   },

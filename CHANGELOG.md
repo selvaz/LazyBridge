@@ -8,6 +8,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAI `gpt-6.1-sol`.** The latest workhorse model, successor of
+  `gpt-6-sol`, priced at $2 / $0.10 / $10 per 1M tokens (input / cached
+  input / output). Capabilities mirror `gpt-6-sol` (128K default max
+  tokens, reasoning model, vision, no audio, native effort `max`), and it
+  falls back to `gpt-6-sol`, `gpt-5.6-sol`, `gpt-5.6-terra`. As for the rest
+  of the GPT-6 family, the >272K-input long-context surcharge is not
+  modeled in cost. `gpt-6-sol` remains selectable by id.
+
+### Changed
+
+- **OpenAI `medium` / `expensive` tier alias is now `gpt-6.1-sol`** (was
+  `gpt-6-sol`); same list price. `gpt-6-astra` falls back to
+  `gpt-6.1-sol` first.
+
 ## [1.6.0] — 2026-10-01
 
 ### Added

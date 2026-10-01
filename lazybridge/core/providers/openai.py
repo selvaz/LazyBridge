@@ -96,7 +96,7 @@ _EFFORT_MAP = {
 def _reasoning_effort_for_model(model: str, effort: str) -> str:
     """Map the unified effort vocabulary to the selected OpenAI model.
 
-    The GPT-6 family (Astra / Sol / Luna) accepts ``max`` natively. Older OpenAI reasoning models top
+    The GPT-6 family (Astra / Sol / 6.1 Sol / Luna) accepts ``max`` natively. Older OpenAI reasoning models top
     out at ``xhigh``, which remains the compatibility mapping for them.
     Unknown values pass through so the API reports an invalid value instead
     of LazyBridge silently changing it.
@@ -110,7 +110,7 @@ def _reasoning_effort_for_model(model: str, effort: str) -> str:
 # the model has no published cache-hit rate (or doesn't support input caching),
 # in which case cached tokens are billed at the full input rate.
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
-# Long-context tier (>272K input on GPT-5.6 / GPT-6 Astra) is NOT modeled here — those prompts
+# Long-context tier (>272K input on GPT-5.6 / GPT-6 Astra / GPT-6.1 Sol) is NOT modeled here — those prompts
 # are billed at 2x input / 1.5x output for the session; cost values returned by
 # this table will under-count in that regime.
 _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
@@ -121,6 +121,9 @@ _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
     # GPT-6 Sol / Luna (released 2026-09-22).  Prices include the launch-week
     # cut (Sol $4/$20 -> $2/$10, Luna $0.20/$1.20 -> $0.10/$0.50).
     "gpt-6-sol": (2.0, 0.20, 10.0),
+    # GPT-6.1 Sol: latest workhorse, successor of gpt-6-sol at the same list
+    # price ($2 / $10) but a lower cache-hit rate ($0.10).
+    "gpt-6.1-sol": (2.0, 0.10, 10.0),
     "gpt-6-luna": (0.10, 0.01, 0.50),
     # GPT-5.6 (released 2026-07-09): three tiers instead of a single
     # flagship + "-pro".  "gpt-5.6" is a bare alias that routes to Sol —
@@ -329,18 +332,20 @@ class OpenAIProvider(BaseProvider):
     default_model: str | None = None
 
     # Tier aliases.  GPT-6 ships Astra (most capable), Sol and Luna; there is
-    # no GPT-6 Terra.  gpt-6-sol undercuts gpt-5.6-terra on price, so it
-    # covers both "expensive" and "medium"; gpt-6-luna is cheaper than
+    # no GPT-6 Terra.  gpt-6.1-sol (successor of gpt-6-sol, still pinnable)
+    # undercuts gpt-5.6-terra on price, so it covers both "expensive" and
+    # "medium"; gpt-6-luna is cheaper than
     # gpt-4o-mini, so it covers both "cheap" and "super_cheap".
     _TIER_ALIASES = {
         "top": "gpt-6-astra",  # most capable model for hardest end-to-end work
-        "expensive": "gpt-6-sol",
-        "medium": "gpt-6-sol",
+        "expensive": "gpt-6.1-sol",
+        "medium": "gpt-6.1-sol",
         "cheap": "gpt-6-luna",
         "super_cheap": "gpt-6-luna",
     }
     _FALLBACKS = {
-        "gpt-6-astra": ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.5"],
+        "gpt-6-astra": ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5"],
+        "gpt-6.1-sol": ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"],
         "gpt-6-sol": ["gpt-5.6-sol", "gpt-5.6-terra"],
         "gpt-6-luna": ["gpt-5.6-luna", "gpt-4o-mini"],
         "gpt-5.6-sol": ["gpt-5.6-terra", "gpt-5.5-pro", "gpt-5.5"],
