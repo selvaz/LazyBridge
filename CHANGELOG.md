@@ -31,6 +31,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   Guides: `session-registry.md`, plus writer-configuration and timeout notes in
   the Codex and Claude Code engine guides.
 
+- **`CodexPolicy.writable_roots`** (#178). Extra directories the Codex sandbox
+  may write besides `cwd`, sent to the App Server as
+  `sandbox_workspace_write.writable_roots` (an explicit empty tuple also
+  reaches it, clearing roots inherited from `config.toml`). Needed when `cwd`
+  is a git worktree: `git add`/`commit` write the index under the main
+  repository's `.git/worktrees/<name>`, which was otherwise rejected.
+- **`Rule.provider_pattern` and stable Codex command names** (#175).
+  `TieredGate` rules can scope on the request's provider (default `"*"`,
+  so existing rules are unchanged). A Codex command approval's `name` is now
+  the stable identifier `codex-shell` instead of the raw command line; match
+  command content with `arg_pattern` against `arguments["command"]`. A rule
+  written against the old behaviour still matches via a fallback on the
+  command's own text, and session-wide approvals are scoped to the command's
+  content (commandless ones fail closed).
+
 ### Changed
 
 - **Anthropic: `medium` tier now resolves to `claude-sonnet-5-5`** (GA
