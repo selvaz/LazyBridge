@@ -383,25 +383,43 @@ class CodexEngine:
         interleave, and the App Server may reject the second outright. Fresh
         ephemeral threads share nothing, so they stay fully parallel.
 
-        A persistent engine takes **both** locks, always in this order: its own
+        A persistent engine takes its locks in ONE fixed order: its own first
         (so its runs queue even before a thread id exists — two concurrent
-        first runs would otherwise open two threads and race to store the id)
-        and then the id's (so a *different* engine resuming the same thread
-        queues too). Taking only the second would leave a hole: a run that
-        starts after the id is stored keys straight onto an uncontended shared
-        lock while the run that created it is still going.
+        first runs would otherwise open two threads and race to store the id),
+        then, for an aliased engine, the alias lock (so two *different*
+        engines on a still-unknown alias queue behind whichever creates the
+        thread instead of opening one each), then the id's lock (so a
+        *different* engine resuming the same thread queues too). Taking only
+        the last would leave a hole: a run that starts after the id is stored
+        keys straight onto an uncontended shared lock while the run that
+        created it is still going.
 
-        Both are scoped to the running event loop — see ``loop_scoped_lock``.
+        All are scoped to the running event loop — see ``loop_scoped_lock``.
         """
         if not self.persist_thread:
             yield
             return
         async with loop_scoped_lock(f"codex-engine:{id(self)}"):
-            if self.thread_id:
-                async with loop_scoped_lock(f"codex-thread:{self.thread_id}"):
+            if self._alias is None:
+                async with self._id_lock():
                     yield
-            else:
-                yield
+                return
+            alias = self._alias
+            async with loop_scoped_lock(f"codex-alias:{alias.kind}:{alias.scope}:{alias.alias}"):
+                # Inside the alias lock a queued first run sees the id the run
+                # ahead of it created, and keys the id lock on it.
+                self._refresh_alias()
+                async with self._id_lock():
+                    yield
+
+    @contextlib.asynccontextmanager
+    async def _id_lock(self) -> Any:
+        """The shared lock of this engine's thread id, once it has one."""
+        if not self.thread_id:
+            yield
+            return
+        async with loop_scoped_lock(f"codex-thread:{self.thread_id}"):
+            yield
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -692,20 +710,28 @@ class CodexEngine:
                 # lock without letting two turns interleave.
                 async with self._thread_lock():
                     self._refresh_alias()
-                    result = await self._client.run(
-                        **self._client_kwargs(
-                            env,
-                            tools,
-                            output_type,
-                            memory,
-                            observe,
-                            gate,
-                            self._attachments(env),
-                            progress,
-                            on_text=on_text,
+                    try:
+                        result = await self._client.run(
+                            **self._client_kwargs(
+                                env,
+                                tools,
+                                output_type,
+                                memory,
+                                observe,
+                                gate,
+                                self._attachments(env),
+                                progress,
+                                on_text=on_text,
+                            )
                         )
-                    )
-                    self._absorb(result.thread_id)
+                        self._absorb(result.thread_id)
+                    finally:
+                        # Still INSIDE the lock: this task is cancelled when the
+                        # consumer walks away, and the stream's own bookkeeping
+                        # below only runs after a further await — by then a
+                        # queued turn on the same thread/alias may already have
+                        # taken the lock, found no id and opened a second thread.
+                        self._absorb(progress.get("thread_id"), has_history=_ran(progress))
                 if not streamed and result.text:
                     # A native review streams no deltas at all (measured), so a
                     # streaming caller would otherwise get an empty result while

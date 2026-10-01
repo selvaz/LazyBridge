@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
-from lazybridge.engines.coding import ApprovalRequest, ask_approval
+from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_iter
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 
@@ -488,45 +488,48 @@ class AgentSdkClient(ClaudeSdkClient):
             if self._needs_streaming_input(stream_options, attachments)
             else prompt
         )
-        async for message in query(
-            prompt=sdk_prompt,
-            options=self._sdk_options(stream_options),
-        ):
-            self._report_session_id(stream_options, message)
-            if isinstance(message, StreamEvent):
-                event = message.event
-                if event.get("type") == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
-                        saw_text = True
-                        yield ClaudeSdkStreamEvent(text=delta["text"])
-            elif isinstance(message, ResultMessage):
-                saw_result = True
-                if message.is_error:
-                    detail = "; ".join(message.errors or []) or message.result or message.subtype
-                    raise ClaudeSdkRequestError(
-                        f"Claude Agent SDK failed: {detail}",
-                        status=message.api_error_status,
+        async with closing_iter(
+            query(
+                prompt=sdk_prompt,
+                options=self._sdk_options(stream_options),
+            )
+        ) as messages:
+            async for message in messages:
+                self._report_session_id(stream_options, message)
+                if isinstance(message, StreamEvent):
+                    event = message.event
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+                            saw_text = True
+                            yield ClaudeSdkStreamEvent(text=delta["text"])
+                elif isinstance(message, ResultMessage):
+                    saw_result = True
+                    if message.is_error:
+                        detail = "; ".join(message.errors or []) or message.result or message.subtype
+                        raise ClaudeSdkRequestError(
+                            f"Claude Agent SDK failed: {detail}",
+                            status=message.api_error_status,
+                            session_id=message.session_id,
+                        )
+                    # Some SDK/CLI versions do not emit partial text for a short
+                    # response. Yield the final response exactly once in that case.
+                    if not saw_text:
+                        final_text = (
+                            json.dumps(message.structured_output)
+                            if message.structured_output is not None
+                            else (message.result or "")
+                        )
+                        if final_text:
+                            yield ClaudeSdkStreamEvent(text=final_text)
+                    usage = message.usage or {}
+                    yield ClaudeSdkStreamEvent(
                         session_id=message.session_id,
+                        input_tokens=int(usage.get("input_tokens", 0) or 0),
+                        output_tokens=int(usage.get("output_tokens", 0) or 0),
+                        cost_usd=float(message.total_cost_usd or 0.0),
+                        final=True,
                     )
-                # Some SDK/CLI versions do not emit partial text for a short
-                # response. Yield the final response exactly once in that case.
-                if not saw_text:
-                    final_text = (
-                        json.dumps(message.structured_output)
-                        if message.structured_output is not None
-                        else (message.result or "")
-                    )
-                    if final_text:
-                        yield ClaudeSdkStreamEvent(text=final_text)
-                usage = message.usage or {}
-                yield ClaudeSdkStreamEvent(
-                    session_id=message.session_id,
-                    input_tokens=int(usage.get("input_tokens", 0) or 0),
-                    output_tokens=int(usage.get("output_tokens", 0) or 0),
-                    cost_usd=float(message.total_cost_usd or 0.0),
-                    final=True,
-                )
         if not saw_result:
             # Mirrors AgentSdkClient.run(): the SDK iterator ended without a
             # ResultMessage. Silently returning here would let the engine

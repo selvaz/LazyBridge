@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, ClassVar, TypeVar, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
-from lazybridge.engines.coding import ApprovalGate, CodingAgentConfig, remembering_gate, session_approvals
+from lazybridge.engines.coding import (
+    ApprovalGate,
+    CodingAgentConfig,
+    closing_iter,
+    remembering_gate,
+    session_approvals,
+)
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
@@ -283,40 +289,52 @@ class ClaudeCodeEngine:
         return f"claude-code:{self.session_name or agent_name}"
 
     def _session_lock(self) -> Any:
-        """Serialise runs that continue the same Claude Code session.
+        """Serialise turns that continue the same Claude Code session.
 
         One session is one transcript: two turns appended at once interleave.
-        Before the first durable run there is no id to key on, and that is not
-        a free pass — two concurrent first runs would open two sessions and
-        race to store their ids — so persistent engines fall back to a lock of
-        their own until the id exists.
+        Before the first durable turn there is no id to key on, and that is not
+        a free pass — two concurrent first turns would open two sessions and
+        race to store their ids — so a persistent engine always queues on a
+        lock of its own first.
+
+        The own lock is taken FIRST and held for the whole turn, then the
+        alias lock (aliased engines), then the session id's lock; that order is
+        used everywhere, so no two turns can ever wait on each other's locks.
+        Taking the own lock unconditionally closes a hand-off hole: once the
+        first turn published an id, a later call used to key straight onto the
+        id lock and bypass the own lock a still-queued first call was holding.
         """
         if not self.persist_session:
             return contextlib.nullcontext()
-        if self._alias is not None:
-            return self._alias_session_lock()
-        if not self.session_id:
-            return self._own_lock
-        return type(self)._session_locks.setdefault(self.session_id, asyncio.Lock())
+        return self._persistent_session_lock()
 
     @contextlib.asynccontextmanager
-    async def _alias_session_lock(self) -> Any:
-        """Alias lock first, then the id's lock once the alias has an id.
+    async def _persistent_session_lock(self) -> Any:
+        async with self._own_lock:
+            if self._alias is not None:
+                alias = self._alias
+                key = (alias.kind, alias.scope, alias.alias)
+                async with type(self)._alias_locks.setdefault(key, asyncio.Lock()):
+                    self._refresh_alias()
+                    async with self._id_lock():
+                        yield
+            else:
+                async with self._id_lock():
+                    yield
 
-        The alias lock covers the creating turn (no id exists to key on yet);
-        the id lock still serialises a non-aliased engine that resumes the
-        same session by its raw id.
+    @contextlib.asynccontextmanager
+    async def _id_lock(self) -> Any:
+        """The shared lock of this engine's session id, when it has one.
+
+        Serialises a *different* engine resuming the same session by its raw
+        id (or through another alias); a no-op while no id exists yet, since
+        then the own/alias lock already covers the creating turn.
         """
-        alias = self._alias
-        assert alias is not None
-        key = (alias.kind, alias.scope, alias.alias)
-        async with type(self)._alias_locks.setdefault(key, asyncio.Lock()):
-            self._refresh_alias()
-            if not self.session_id:
-                yield
-                return
-            async with type(self)._session_locks.setdefault(self.session_id, asyncio.Lock()):
-                yield
+        if not self.session_id:
+            yield
+            return
+        async with type(self)._session_locks.setdefault(self.session_id, asyncio.Lock()):
+            yield
 
     def _resume_id(self, session: Any | None, agent_name: str) -> str | None:
         # An explicit handle wins over the Session-parked one: the caller
@@ -454,23 +472,24 @@ class ClaudeCodeEngine:
         pinning the consumer forever.  A transparent passthrough when
         ``stream_idle_timeout`` is ``None``.
         """
-        if self.stream_idle_timeout is None:
-            async for item in agen:
-                yield item
-            return
-        aiter = agen.__aiter__()
-        while True:
-            try:
-                item = await asyncio.wait_for(aiter.__anext__(), timeout=self.stream_idle_timeout)
-            except StopAsyncIteration:
+        async with closing_iter(agen) as inner:
+            if self.stream_idle_timeout is None:
+                async for item in inner:
+                    yield item
                 return
-            except TimeoutError as exc:
-                raise TimeoutError(
-                    f"Claude Code stream went idle for {self.stream_idle_timeout}s without "
-                    "delivering a chunk (set ClaudeCodeEngine(stream_idle_timeout=...) to a "
-                    "higher value if streams legitimately pause that long)."
-                ) from exc
-            yield item
+            aiter = inner.__aiter__()
+            while True:
+                try:
+                    item = await asyncio.wait_for(aiter.__anext__(), timeout=self.stream_idle_timeout)
+                except StopAsyncIteration:
+                    return
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"Claude Code stream went idle for {self.stream_idle_timeout}s without "
+                        "delivering a chunk (set ClaudeCodeEngine(stream_idle_timeout=...) to a "
+                        "higher value if streams legitimately pause that long)."
+                    ) from exc
+                yield item
 
     async def _call_with_retries(self, make_call: Callable[[], Awaitable[_T]]) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
@@ -696,6 +715,35 @@ class ClaudeCodeEngine:
         memory: Any | None,
         session: Any | None,
     ) -> AsyncIterator[str]:
+        """Stream a turn, serialised against every other turn on its session.
+
+        Holds the same lock as ``run()`` for the whole stream — including its
+        teardown: closing or cancelling the consumer closes the turn (and with
+        it the SDK query) BEFORE the lock is released, so a queued successor
+        never overlaps a half-closed predecessor.
+        """
+        # One ``async with``: the turn is built only after the lock is held,
+        # and is closed (``aclose``) before the lock is released.
+        async with (
+            self._session_lock(),
+            contextlib.aclosing(
+                self._stream_unlocked(env, tools=tools, output_type=output_type, memory=memory, session=session)
+            ) as turn,
+        ):
+            async for chunk in turn:
+                yield chunk
+
+    async def _stream_unlocked(
+        self,
+        env: Envelope[Any],
+        *,
+        tools: list[Any],
+        output_type: type,
+        memory: Any | None,
+        session: Any | None,
+    ) -> AsyncGenerator[str, None]:
+        # Caller (``stream``) holds the session lock. asyncio.Lock is not
+        # reentrant: never take it again in here.
         run_id = str(uuid.uuid4())
         started = time.monotonic()
         agent_name = resolve_agent_name(self, "agent")

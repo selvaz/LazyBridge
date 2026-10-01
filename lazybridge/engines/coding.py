@@ -9,9 +9,10 @@ Claude Code or Codex without provider-specific branching.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import inspect
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from weakref import WeakKeyDictionary
@@ -100,6 +101,26 @@ def loop_scoped_lock(key: str) -> asyncio.Lock:
     """
     loop = asyncio.get_running_loop()
     return _LOOP_LOCKS.setdefault(loop, {}).setdefault(key, asyncio.Lock())
+
+
+@contextlib.asynccontextmanager
+async def closing_iter(iterator: AsyncIterator[Any]) -> AsyncIterator[AsyncIterator[Any]]:
+    """Yield ``iterator`` and ``aclose()`` it on exit, when it can be closed.
+
+    ``async for`` over an async generator does NOT close it when the loop is
+    left early (``break``, an exception, the consumer being closed or
+    cancelled): the generator is only finalised later, by the garbage
+    collector. For a turn that holds a per-session lock that is too late — the
+    lock would be released while the provider query is still being torn down.
+    Closing explicitly makes teardown complete inside the locked region.
+    Plain iterators without ``aclose`` are left alone.
+    """
+    try:
+        yield iterator
+    finally:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 #: Attribute used to park approval caches on a LazyBridge ``Session``.
