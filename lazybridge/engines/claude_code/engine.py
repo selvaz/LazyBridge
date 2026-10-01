@@ -770,37 +770,40 @@ class ClaudeCodeEngine:
 
             input_tokens = output_tokens = 0
             cost_usd = 0.0
-            async for event in self._idle_guarded_stream(
-                self._client.stream(
-                    self._prompt(
-                        env,
-                        None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
-                    ),
-                    options=self._options(
-                        tools,
-                        observe if session else None,
-                        output_type=output_type,
-                        partial=True,
-                        resume=self._resume_id(session, agent_name),
-                        gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
-                    ),
-                    attachments=self._attachments(env),
+            async with closing_iter(
+                self._idle_guarded_stream(
+                    self._client.stream(
+                        self._prompt(
+                            env,
+                            None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
+                        ),
+                        options=self._options(
+                            tools,
+                            observe if session else None,
+                            output_type=output_type,
+                            partial=True,
+                            resume=self._resume_id(session, agent_name),
+                            gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                        ),
+                        attachments=self._attachments(env),
+                    )
                 )
-            ):
-                if event.text:
-                    chunks.append(event.text)
-                    yield event.text
-                if event.final:
-                    if self.persist_session and event.session_id:
-                        if not self._resuming:
-                            self._tag_new_session(event.session_id)
-                        self.session_id = event.session_id
-                        self._resuming = True
-                        if self._alias is not None:
-                            self._alias.bind(event.session_id, model=self.model, effort=self.reasoning_effort)
-                    self._remember_session(session, agent_name, event.session_id)
-                    input_tokens, output_tokens = event.input_tokens, event.output_tokens
-                    cost_usd = event.cost_usd
+            ) as events:
+                async for event in events:
+                    if event.text:
+                        chunks.append(event.text)
+                        yield event.text
+                    if event.final:
+                        if self.persist_session and event.session_id:
+                            if not self._resuming:
+                                self._tag_new_session(event.session_id)
+                            self.session_id = event.session_id
+                            self._resuming = True
+                            if self._alias is not None:
+                                self._alias.bind(event.session_id, model=self.model, effort=self.reasoning_effort)
+                        self._remember_session(session, agent_name, event.session_id)
+                        input_tokens, output_tokens = event.input_tokens, event.output_tokens
+                        cost_usd = event.cost_usd
             text = "".join(chunks)
             if session:
                 session.emit(
