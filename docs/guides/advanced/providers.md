@@ -94,7 +94,7 @@ old transcripts but are never used as fallbacks.
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
 | `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
-| `expensive` / `medium` | `gpt-6.1-sol` | — | — | $2.00 | $0.20 | $10.00 |
+| `expensive` / `medium` | `gpt-6.1-sol` | — | — | $2.00 | $0.10 | $10.00 |
 | `cheap` / `super_cheap` | `gpt-6-luna` | — | — | $0.10 | $0.01 | $0.50 |
 
 GPT-6 Sol and Luna (released 2026-09-22) replace the GPT-5.6 tiers,

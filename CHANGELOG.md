@@ -14,9 +14,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `gpt-6-sol`, priced at $2 / $0.10 / $10 per 1M tokens (input / cached
   input / output). Capabilities mirror `gpt-6-sol` (128K default max
   tokens, reasoning model, vision, no audio, native effort `max`), and it
-  falls back to `gpt-6-sol`, `gpt-5.6-sol`, `gpt-5.6-terra`. As for the rest
-  of the GPT-6 family, the >272K-input long-context surcharge is not
-  modeled in cost. `gpt-6-sol` remains selectable by id.
+  has a `_FALLBACKS` entry (`gpt-6-sol`, `gpt-5.6-sol`, `gpt-5.6-terra`;
+  declarative data, automatic fallback is not implemented, see
+  `BaseProvider._FALLBACKS`). As for the rest of the GPT-6 family, the
+  >272K-input long-context surcharge is not modeled in cost. `gpt-6-sol` remains selectable by id.
 
 ### Changed
 
