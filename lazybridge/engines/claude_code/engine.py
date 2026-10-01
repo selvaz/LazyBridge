@@ -17,6 +17,7 @@ from lazybridge.engines.coding import (
     ApprovalGate,
     CodingAgentConfig,
     closing_iter,
+    loop_scoped_lock,
     remembering_gate,
     session_approvals,
 )
@@ -272,8 +273,18 @@ class ClaudeCodeEngine:
         self.tag = tag
         #: Guards the run that *creates* the session, before there is an id to
         #: key the shared per-session lock on.
-        self._own_lock = asyncio.Lock()
+        self._own_lock_key = f"claude-own:{uuid.uuid4().hex}"
         self._client = client or AgentSdkClient()
+
+    @property
+    def _own_lock(self) -> asyncio.Lock:
+        """This engine's own lock, scoped to the RUNNING event loop.
+
+        An engine is reused across ``asyncio.run()`` calls (every synchronous
+        ``Agent.__call__`` is a fresh loop); a plain ``asyncio.Lock`` would bind
+        to the first loop that contended on it and raise on the next.
+        """
+        return loop_scoped_lock(self._own_lock_key)
 
     @staticmethod
     def _thinking_config(value: str | int | None) -> dict[str, Any] | None:

@@ -165,6 +165,40 @@ class TestFirstTurns:
 
         asyncio.run(scenario())
 
+    def test_a_persistent_engine_reused_across_event_loops_still_serialises(self):
+        # Contention in the first asyncio.run() must not bind the engine's own
+        # lock to that loop: the id is known afterwards, yet the own lock is
+        # still taken on every turn.
+        sdk = GatedSdk()
+        engine = ClaudeCodeEngine(client=sdk, persist_session=True)
+
+        async def first_loop() -> None:
+            first = asyncio.create_task(_call(engine, "run"))
+            await sdk.entered(0).wait()
+            second = asyncio.create_task(_call(engine, "run"))
+            await settle()
+            assert len(sdk.options) == 1
+            sdk.gate(0).set()
+            await sdk.entered(1).wait()
+            sdk.gate(1).set()
+            await asyncio.gather(first, second)
+
+        async def second_loop() -> None:
+            first = asyncio.create_task(_call(engine, "stream"))
+            await sdk.entered(2).wait()
+            second = asyncio.create_task(_call(engine, "run"))
+            await settle()
+            assert len(sdk.options) == 3
+            sdk.gate(2).set()
+            await sdk.entered(3).wait()
+            sdk.gate(3).set()
+            await asyncio.gather(first, second)
+
+        asyncio.run(asyncio.wait_for(first_loop(), 10))
+        ClaudeCodeEngine._session_locks.clear()  # the class-wide id locks are a known, separate limitation
+        asyncio.run(asyncio.wait_for(second_loop(), 10))
+        assert sdk.resumes == [None, "sess-1", "sess-1", "sess-1"]
+
     @pytest.mark.parametrize("modes", [("run", "run"), ("run", "stream"), ("stream", "run"), ("stream", "stream")])
     def test_own_lock_to_id_lock_handoff_with_three_calls(self, modes):
         # a creates the session, b queued behind it on the engine's own lock,
