@@ -13,13 +13,16 @@ independent of the client's.
 Usage: ``python fake_app_server.py <scenario>`` where scenario is one of
 "happy", "turn_failed", "error_notification", "id_collision",
 "developer_instructions", "huge_message" or "exit_immediately" (see
-``test_app_server.py``).
+``test_app_server.py``), plus the transport-failure scenarios "flaky_startup",
+"always_fail_startup", "die_after_thread_start", "die_after_turn", "stderr_flood_ok" and "stderr_flood_die"
+(which take a shared file path as ``argv[2]``).
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 
 def read_message() -> dict:
@@ -251,6 +254,28 @@ def main() -> None:
     if scenario == "exit_immediately":
         return
 
+    # Transport-failure scenarios. ``argv[2]`` is a file shared by every spawn
+    # of one test run, so a test can count how many children reached a stage.
+    if scenario == "flaky_startup":
+        marker = Path(sys.argv[2])
+        if not marker.exists():
+            marker.write_text("spawned")
+            sys.stderr.write("startup-boom\n")
+            sys.stderr.flush()
+            sys.exit(3)
+        scenario = "happy"
+    if scenario == "always_fail_startup":
+        with open(sys.argv[2], "a") as spawns:
+            spawns.write("spawn\n")
+        sys.stderr.write("startup-boom\n")
+        sys.stderr.flush()
+        sys.exit(7)
+    if scenario == "stderr_flood_ok":
+        # Far more than a pipe buffer: blocks here unless the parent drains.
+        sys.stderr.write("x" * (600 * 1024) + "\n")
+        sys.stderr.flush()
+        scenario = "happy"
+
     init = read_message()
     assert init["method"] == "initialize", init
     write_message({"id": init["id"], "result": {"userAgent": "fake", "platformOs": "test"}})
@@ -260,6 +285,11 @@ def main() -> None:
 
     thread_start = read_message()
     assert thread_start["method"] == "thread/start", thread_start
+    if scenario == "die_after_thread_start":
+        # The thread may already be persisted: a retry would orphan it.
+        with open(sys.argv[2], "a") as spawns:
+            spawns.write("spawn\n")
+        sys.exit(4)
     params = thread_start["params"]
     # Lock in the enum spelling the real CLI accepts — "readOnly" is
     # rejected live with "unknown variant `readOnly`".
@@ -285,6 +315,17 @@ def main() -> None:
 
     turn_start = read_message()
     assert turn_start["method"] == "turn/start", turn_start
+    if scenario == "die_after_turn":
+        # The turn reached the child and did its side effect, then it died.
+        with open(sys.argv[2], "a") as side_effects:
+            side_effects.write("side-effect\n")
+        sys.stderr.write("post-submit-boom\n")
+        sys.stderr.flush()
+        sys.exit(9)
+    if scenario == "stderr_flood_die":
+        sys.stderr.write("HEAD-MARK" + "x" * (600 * 1024) + "TAIL-MARK\n")
+        sys.stderr.flush()
+        sys.exit(5)
     turn_started_result = {"id": turn_start["id"], "result": {"turn": {"id": "turn-1", "status": "inProgress"}}}
     if scenario != "id_collision":
         # Real ordering: turn/start is acknowledged immediately, long before

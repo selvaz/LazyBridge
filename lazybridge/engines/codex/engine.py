@@ -27,7 +27,7 @@ from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.session import EventType
 
-from .app_server import CodexAppServerClient, CodexTurnUncertain
+from .app_server import _PRE_THREAD_PHASES, CodexAppServerClient, CodexTransportError, CodexTurnUncertain
 from .dynamic_tools import definitions, dispatcher
 
 _T = TypeVar("_T")
@@ -62,6 +62,8 @@ def _ran(progress: dict[str, Any]) -> bool:
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, _NON_TRANSIENT_OS_TYPES):
         return False
+    if isinstance(exc, CodexTransportError) and (exc.turn_sent or exc.phase not in _PRE_THREAD_PHASES):
+        return False  # a thread may exist / the turn may have run: replaying could repeat its writes
     return isinstance(exc, _TRANSIENT_ERROR_TYPES)
 
 
