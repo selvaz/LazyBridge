@@ -38,6 +38,10 @@ _STDERR_TAIL_BYTES = 16 * 1024
 _STDERR_MESSAGE_CHARS = 2000
 #: Bound on each wait during teardown and on the return-code lookup after EOF.
 _EXIT_GRACE = 2.0
+#: Short wait for a clean exit after stdin closes (the real child needs ~1s, so
+#: this usually falls through to terminate, as before) — kept small so teardown
+#: stays fast.
+_STDIN_EOF_GRACE = 0.25
 #: Jittered pause (seconds) before the single startup retry.
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
@@ -807,14 +811,14 @@ async def _reap(process: asyncio.subprocess.Process) -> None:
             process.stdin.close()
         except Exception:  # already closed or broken: nothing left to flush
             pass
-    for stop in (None, process.terminate, process.kill):
+    for stop, grace in ((None, _STDIN_EOF_GRACE), (process.terminate, _EXIT_GRACE), (process.kill, _EXIT_GRACE)):
         if stop is not None and process.returncode is None:
             try:
                 stop()
             except ProcessLookupError:
                 pass
         try:
-            await asyncio.wait_for(process.wait(), _EXIT_GRACE)
+            await asyncio.wait_for(process.wait(), grace)
             return
         except TimeoutError:
             continue
