@@ -788,6 +788,34 @@ class TestBoundedCleanup:
         assert process.returncode == -9
         assert leftovers == []
 
+    def test_a_second_cancellation_during_teardown_does_not_skip_the_kill(self, monkeypatch):
+        async def scenario():
+            monkeypatch.setattr(app_server, "_EXIT_GRACE", 0.05)
+            monkeypatch.setattr(app_server, "_STDIN_EOF_GRACE", 0.05)
+            process = _FakeProcess(honors_terminate=False)
+
+            async def fake_spawn(*argv, **kwargs):
+                return process
+
+            monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+            client = CodexAppServerClient(command=("codex", "app-server"))
+            task = asyncio.create_task(
+                client.run(prompt="hi", model=None, cwd=None, dynamic_tools=[], on_tool_call=_call_tool)
+            )
+            await process.stdin.blocked.wait()
+            task.cancel()
+            while not process.stdin.closed:  # teardown has started
+                await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            return process
+
+        process = asyncio.run(asyncio.wait_for(scenario(), timeout=_TIMEOUT))
+
+        assert process.calls == ["terminate", "kill"]
+        assert process.returncode == -9
+
 
 class TestSpawnFailures:
     @staticmethod

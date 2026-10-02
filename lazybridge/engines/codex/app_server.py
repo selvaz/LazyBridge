@@ -798,9 +798,30 @@ class CodexAppServerClient:
                 # through fail_waiters(), so there is nothing to re-raise here
                 # — and re-raising would mask the original error.
                 pass
-            await _reap(process)
-            stderr_task.cancel()
-            await asyncio.gather(stderr_task, return_exceptions=True)
+
+            async def collect_child() -> None:
+                await _reap(process)
+                stderr_task.cancel()
+                await asyncio.gather(stderr_task, return_exceptions=True)
+
+            await _finish_despite_cancel(asyncio.ensure_future(collect_child()))
+
+
+async def _finish_despite_cancel(task: asyncio.Future[None]) -> None:
+    """Await ``task`` to completion even if the caller is cancelled meanwhile.
+
+    Cancellation is re-raised only after the task has finished, so the child
+    is always killed and reaped.
+    """
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    await asyncio.gather(task, return_exceptions=True)
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 async def _reap(process: asyncio.subprocess.Process) -> None:
