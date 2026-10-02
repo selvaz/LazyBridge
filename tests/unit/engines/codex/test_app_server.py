@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from lazybridge.engines.codex import app_server
 from lazybridge.engines.codex.app_server import (
     CodexAppServerClient,
     CodexRequestRejected,
+    CodexTransportError,
     CodexTurnUncertain,
 )
+from lazybridge.engines.codex.engine import _is_transient
 from lazybridge.engines.coding import ApprovalDecision
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "fake_app_server.py")
@@ -18,6 +21,11 @@ FIXTURE = str(Path(__file__).parent / "fixtures" / "fake_app_server.py")
 # Bound every subprocess test so a broken fixture or protocol regression
 # fails fast instead of hanging CI.
 _TIMEOUT = 10.0
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_delay(monkeypatch):
+    monkeypatch.setattr(app_server, "_STARTUP_RETRY_DELAY", (0.0, 0.0))
 
 
 async def _call_tool(tool: str, arguments: dict) -> dict:
@@ -612,3 +620,201 @@ def test_a_turn_still_completes_with_overrides_on_the_command_line():
 
     result = asyncio.run(asyncio.wait_for(run(), _TIMEOUT))
     assert result.text
+
+
+# --------------------------------------------------------------------------- #
+# Transport failures: diagnostics, the single startup retry, bounded cleanup
+# --------------------------------------------------------------------------- #
+async def _run_scenario(*argv: str):
+    client = CodexAppServerClient(command=(sys.executable, FIXTURE, *argv))
+    return await client.run(prompt="hi", model=None, cwd=None, dynamic_tools=[], on_tool_call=_call_tool)
+
+
+def _lines(path: Path) -> list[str]:
+    return path.read_text().splitlines() if path.exists() else []
+
+
+class TestTransportFailures:
+    def test_a_startup_failure_is_retried_once_and_the_retry_can_succeed(self, tmp_path):
+        marker = tmp_path / "spawned"
+
+        result = asyncio.run(asyncio.wait_for(_run_scenario("flaky_startup", str(marker)), timeout=_TIMEOUT))
+
+        assert result.text == "AMZN is 123.45"
+        assert marker.exists()
+
+    def test_a_startup_failure_twice_surfaces_diagnostics_after_exactly_two_spawns(self, tmp_path):
+        spawns = tmp_path / "spawns"
+
+        with pytest.raises(CodexTransportError) as excinfo:
+            asyncio.run(asyncio.wait_for(_run_scenario("always_fail_startup", str(spawns)), timeout=_TIMEOUT))
+
+        exc = excinfo.value
+        assert _lines(spawns) == ["spawn", "spawn"]
+        assert isinstance(exc, ConnectionError)
+        assert exc.returncode == 7
+        assert isinstance(exc.pid, int)
+        assert exc.phase == "initialize"
+        assert exc.turn_sent is False
+        assert "startup-boom" in exc.stderr_tail
+        for fragment in (f"pid={exc.pid}", "returncode=7", "phase=initialize", "startup-boom"):
+            assert fragment in str(exc)
+
+    def test_a_failure_after_the_turn_was_written_is_never_retried(self, tmp_path):
+        side_effects = tmp_path / "side_effects"
+
+        with pytest.raises(CodexTransportError) as excinfo:
+            asyncio.run(asyncio.wait_for(_run_scenario("die_after_turn", str(side_effects)), timeout=_TIMEOUT))
+
+        exc = excinfo.value
+        # A replay would have repeated the side effect.
+        assert _lines(side_effects) == ["side-effect"]
+        assert exc.turn_sent is True
+        assert exc.returncode == 9
+        assert exc.phase == "turn/start"
+        assert "post-submit-boom" in exc.stderr_tail
+        for fragment in (f"pid={exc.pid}", "returncode=9", "phase=turn/start", "post-submit-boom"):
+            assert fragment in str(exc)
+        # The engine's own retry loop must not replay it either.
+        assert _is_transient(exc) is False
+
+    def test_a_startup_transport_error_stays_transient_for_the_engine(self):
+        assert _is_transient(CodexTransportError("x", turn_sent=False)) is True
+
+    def test_only_the_stderr_tail_is_kept_when_the_child_floods_it(self):
+        with pytest.raises(CodexTransportError) as excinfo:
+            asyncio.run(asyncio.wait_for(_run_scenario("stderr_flood_die"), timeout=_TIMEOUT))
+
+        exc = excinfo.value
+        assert len(exc.stderr_tail.encode()) <= app_server._STDERR_TAIL_BYTES
+        assert exc.stderr_tail.endswith("TAIL-MARK")
+        assert "HEAD-MARK" not in exc.stderr_tail
+        assert len(str(exc)) < app_server._STDERR_MESSAGE_CHARS + 500
+
+    def test_a_chatty_child_does_not_deadlock_a_healthy_run(self):
+        result = asyncio.run(asyncio.wait_for(_run_scenario("stderr_flood_ok"), timeout=_TIMEOUT))
+
+        assert result.text == "AMZN is 123.45"
+
+
+class _FakeStdin:
+    def __init__(self) -> None:
+        self.closed = False
+        self.blocked = asyncio.Event()
+
+    def write(self, data: bytes) -> None:
+        pass
+
+    async def drain(self) -> None:
+        self.blocked.set()
+        await asyncio.Event().wait()  # a full pipe: never completes
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProcess:
+    pid = 4242
+
+    def __init__(self, *, honors_terminate: bool) -> None:
+        self.stdin = _FakeStdin()
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.returncode: int | None = None
+        self.calls: list[str] = []
+        self._honors_terminate = honors_terminate
+        self._exited = asyncio.Event()
+
+    def _exit(self, code: int) -> None:
+        self.returncode = code
+        self._exited.set()
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+        if self._honors_terminate:
+            self._exit(-15)
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+        self._exit(-9)
+
+    async def wait(self) -> int | None:
+        await self._exited.wait()
+        return self.returncode
+
+
+class TestBoundedCleanup:
+    @staticmethod
+    async def _cancel_during_drain(monkeypatch, *, honors_terminate: bool):
+        before = asyncio.all_tasks()
+        monkeypatch.setattr(app_server, "_EXIT_GRACE", 0.05)
+        process = _FakeProcess(honors_terminate=honors_terminate)
+        spawns: list[tuple] = []
+
+        async def fake_spawn(*argv, **kwargs):
+            spawns.append(argv)
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+        client = CodexAppServerClient(command=("codex", "app-server"))
+        task = asyncio.create_task(
+            client.run(prompt="hi", model=None, cwd=None, dynamic_tools=[], on_tool_call=_call_tool)
+        )
+        await process.stdin.blocked.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        leftovers = [t for t in asyncio.all_tasks() if t not in before and not t.done()]
+        return process, spawns, leftovers
+
+    def test_cancelling_a_blocked_write_propagates_cleans_up_and_never_retries(self, monkeypatch):
+        process, spawns, leftovers = asyncio.run(
+            asyncio.wait_for(self._cancel_during_drain(monkeypatch, honors_terminate=True), timeout=_TIMEOUT)
+        )
+
+        assert len(spawns) == 1
+        assert process.stdin.closed
+        assert process.calls == ["terminate"]
+        assert process.returncode is not None
+        assert leftovers == []  # the stderr drain was cancelled and collected too
+
+    def test_a_child_that_ignores_terminate_is_killed_and_reaped(self, monkeypatch):
+        process, spawns, leftovers = asyncio.run(
+            asyncio.wait_for(self._cancel_during_drain(monkeypatch, honors_terminate=False), timeout=_TIMEOUT)
+        )
+
+        assert len(spawns) == 1
+        assert process.calls == ["terminate", "kill"]
+        assert process.returncode == -9
+        assert leftovers == []
+
+
+class TestSpawnFailures:
+    @staticmethod
+    def _spawn_raising(monkeypatch, exc: BaseException) -> list[tuple]:
+        spawns: list[tuple] = []
+
+        async def fake_spawn(*argv, **kwargs):
+            spawns.append(argv)
+            raise exc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+        return spawns
+
+    def test_a_transient_spawn_error_is_retried_once_then_reported_with_its_phase(self, monkeypatch):
+        spawns = self._spawn_raising(monkeypatch, OSError("resource temporarily unavailable"))
+
+        with pytest.raises(CodexTransportError, match="failed to spawn") as excinfo:
+            asyncio.run(asyncio.wait_for(_run_scenario("happy"), timeout=_TIMEOUT))
+
+        assert len(spawns) == 2
+        assert excinfo.value.phase == "spawn"
+        assert excinfo.value.turn_sent is False
+
+    def test_a_missing_executable_is_a_configuration_error_and_is_not_retried(self, monkeypatch):
+        spawns = self._spawn_raising(monkeypatch, FileNotFoundError("no codex"))
+
+        with pytest.raises(FileNotFoundError):
+            asyncio.run(asyncio.wait_for(_run_scenario("happy"), timeout=_TIMEOUT))
+
+        assert len(spawns) == 1

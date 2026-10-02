@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import shutil
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,16 @@ ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 #: is the ceiling on one *message*, not on the turn, and is only ever
 #: allocated for a line that actually arrives.
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+
+#: Newest stderr bytes kept for diagnostics. The pipe is always drained, so a
+#: chatty child can neither block nor grow this buffer past the cap.
+_STDERR_TAIL_BYTES = 16 * 1024
+#: How much of that tail is quoted in the exception message.
+_STDERR_MESSAGE_CHARS = 2000
+#: Bound on each wait during teardown and on the return-code lookup after EOF.
+_EXIT_GRACE = 2.0
+#: Jittered pause (seconds) before the single startup retry.
+_STARTUP_RETRY_DELAY = (0.2, 0.6)
 
 
 def codex_executable() -> str:
@@ -69,6 +80,42 @@ class CodexRequestRejected(RuntimeError):
     thread id — so it must not be dressed up as :class:`CodexTurnUncertain`:
     nothing was accepted, and the caller needs the server's actual message.
     """
+
+
+class CodexTransportError(ConnectionError):
+    """The App Server child died or its pipes broke.
+
+    Still a ``ConnectionError`` so callers that treat transport failures as
+    transient keep working. ``turn_sent`` records whether the turn request had
+    been handed to the child (set before the write): once it is true the turn
+    may have run, so neither this client nor the engine may replay it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        pid: int | None = None,
+        returncode: int | None = None,
+        phase: str = "",
+        stderr_tail: str = "",
+        turn_sent: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.pid = pid
+        self.returncode = returncode
+        self.phase = phase
+        self.stderr_tail = stderr_tail
+        self.turn_sent = turn_sent
+
+
+@dataclass
+class _Attempt:
+    """What the retry wrapper needs to know about one spawn, even on failure."""
+
+    turn_sent: bool = False
+    phase: str = "spawn"
+    stderr: bytearray = field(default_factory=bytearray)
 
 
 class CodexTurnUncertain(RuntimeError):
@@ -136,11 +183,10 @@ class CodexAppServerClient:
 
         ``--strict-config`` is added, but ONLY when there is at least one
         override to protect. Verified live: without it, ``-c`` with an
-        invented key exits cleanly and stderr is discarded (``DEVNULL``
-        below), so a key a running Codex build does not recognise is a
+        invented key exits cleanly and nothing is reported, so a key a running Codex build does not recognise is a
         silent no-op — the agent keeps Codex's default despite an explicit
         policy, and nothing says so. With it, the same invented key is a
-        startup error instead.
+        startup error instead (reported with the stderr tail).
 
         The flag is not applied unconditionally because it validates the
         *entire* resolved configuration, file included, not just this call's
@@ -183,6 +229,12 @@ class CodexAppServerClient:
         thread_source: str | None = None,
     ) -> CodexRunResult:
         """Run one turn, in a fresh thread or in ``thread_id``.
+
+        A transport failure during startup, before the turn request was
+        written, is retried once after a short jittered pause. After that
+        point nothing is retried: the child may already have executed the turn
+        and its side effects. Failures raise :class:`CodexTransportError`
+        carrying the child's pid, return code, RPC phase and stderr tail.
 
         ``thread_id`` resumes an existing durable thread (``thread/resume``)
         instead of starting one, so Codex' own transcript carries the history
@@ -242,19 +294,119 @@ class CodexAppServerClient:
         already carries the value its creating call set, and Codex has no
         endpoint to change it after the fact.
         """
+        for attempt in range(2):
+            state = _Attempt()
+            try:
+                return await self._run_once(
+                    state,
+                    prompt=prompt,
+                    model=model,
+                    cwd=cwd,
+                    dynamic_tools=dynamic_tools,
+                    on_tool_call=on_tool_call,
+                    developer_instructions=developer_instructions,
+                    on_text=on_text,
+                    attachments=attachments,
+                    effort=effort,
+                    output_schema=output_schema,
+                    sandbox=sandbox,
+                    writable_roots=writable_roots,
+                    approval_policy=approval_policy,
+                    approval_gate=approval_gate,
+                    thread_id=thread_id,
+                    ephemeral=ephemeral,
+                    review_target=review_target,
+                    progress=progress,
+                    config_overrides=config_overrides,
+                    thread_source=thread_source,
+                )
+            except CodexTransportError as exc:
+                if exc.turn_sent or attempt:
+                    raise
+                await asyncio.sleep(random.uniform(*_STARTUP_RETRY_DELAY))
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _run_once(
+        self,
+        state: _Attempt,
+        *,
+        prompt: str,
+        model: str | None,
+        cwd: str | None,
+        dynamic_tools: list[dict[str, Any]],
+        on_tool_call: ToolCallback,
+        developer_instructions: str | None,
+        on_text: Callable[[str], Awaitable[None]] | None,
+        attachments: list[dict[str, Any]] | None,
+        effort: str | None,
+        output_schema: dict[str, Any] | None,
+        sandbox: str,
+        writable_roots: list[str] | None,
+        approval_policy: str,
+        approval_gate: ApprovalGate | None,
+        thread_id: str | None,
+        ephemeral: bool,
+        review_target: dict[str, Any] | None,
+        progress: dict[str, Any] | None,
+        config_overrides: tuple[str, ...],
+        thread_source: str | None,
+    ) -> CodexRunResult:
         if thread_id:
             ephemeral = False
         command = self._spawn_command(config_overrides)
-        # stderr is DEVNULL, not PIPE: nothing ever reads it here, and an
-        # unread PIPE deadlocks the App Server once its stderr buffer fills.
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            limit=_STDOUT_LINE_LIMIT,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        assert process.stdin and process.stdout
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                limit=_STDOUT_LINE_LIMIT,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except (FileNotFoundError, PermissionError, NotADirectoryError, IsADirectoryError):
+            raise  # configuration problems, not transport blips
+        except OSError as exc:
+            raise CodexTransportError(
+                f"Codex App Server failed to spawn: {type(exc).__name__}: {exc}", phase="spawn"
+            ) from exc
+        assert process.stdin and process.stdout and process.stderr
+        stderr_stream = process.stderr
+
+        async def drain_stderr() -> None:
+            # Always drained: an unread PIPE blocks the child once it fills.
+            try:
+                while chunk := await stderr_stream.read(4096):
+                    state.stderr += chunk
+                    if len(state.stderr) > _STDERR_TAIL_BYTES:
+                        del state.stderr[: len(state.stderr) - _STDERR_TAIL_BYTES]
+            except Exception:  # diagnostics must never break the run
+                pass
+
+        stderr_task = asyncio.create_task(drain_stderr())
+
+        async def transport_failure(reason: str) -> CodexTransportError:
+            returncode = process.returncode
+            if returncode is None:
+                try:
+                    returncode = await asyncio.wait_for(process.wait(), _EXIT_GRACE)
+                except TimeoutError:
+                    pass
+            await asyncio.wait({stderr_task}, timeout=_EXIT_GRACE / 4)
+            tail = bytes(state.stderr).decode("utf-8", errors="replace").strip()
+            message = (
+                f"{reason} (pid={process.pid}, returncode={returncode}, phase={state.phase}, "
+                f"turn_sent={state.turn_sent})"
+            )
+            if tail:
+                message += f"; stderr tail: {tail[-_STDERR_MESSAGE_CHARS:]}"
+            return CodexTransportError(
+                message,
+                pid=process.pid,
+                returncode=returncode,
+                phase=state.phase,
+                stderr_tail=tail,
+                turn_sent=state.turn_sent,
+            )
+
         pending: dict[int, asyncio.Future[Any]] = {}
         completed: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         #: Last cumulative ``total`` seen per turn id. Keyed rather than
@@ -284,11 +436,15 @@ class CodexAppServerClient:
         async def send(message: dict[str, Any]) -> None:
             assert process.stdin
             process.stdin.write((json.dumps(message) + "\n").encode())
-            await process.stdin.drain()
+            try:
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                raise await transport_failure(f"Codex App Server pipe broke: {type(exc).__name__}") from exc
 
         async def request(method: str, params: dict[str, Any], *, is_turn: bool = False) -> Any:
             nonlocal counter, turn_request_id
             counter += 1
+            state.phase = method
             if is_turn:
                 # Recorded before the round-trip so the reader can pick our
                 # turn id out of the response itself: assigning it here, after
@@ -303,7 +459,10 @@ class CodexAppServerClient:
                 # ``review_target`` raises here, and a request that never left
                 # the process must not count as a turn that may have run.
                 progress["turn_sent"] = True
-            return await future
+            result = await future
+            if is_turn:
+                state.phase = "turn running"
+            return result
 
         def fail_waiters(exc: BaseException) -> None:
             """Wake the active RPC waiter, or the turn waiter, after reader failure."""
@@ -492,12 +651,15 @@ class CodexAppServerClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                failure = ConnectionError(f"Codex App Server reader failed: {type(exc).__name__}: {exc}")
-                failure.__cause__ = exc
-                fail_waiters(failure)
+                if isinstance(exc, CodexTransportError):
+                    fail_waiters(exc)
+                else:
+                    failure = await transport_failure(f"Codex App Server reader failed: {type(exc).__name__}: {exc}")
+                    failure.__cause__ = exc
+                    fail_waiters(failure)
             else:
                 if pending or not completed.done():
-                    fail_waiters(ConnectionError("Codex App Server exited before completing the request"))
+                    fail_waiters(await transport_failure("Codex App Server exited before completing the request"))
 
         reader = asyncio.create_task(read_loop())
         try:
@@ -508,6 +670,7 @@ class CodexAppServerClient:
                     "capabilities": {"experimentalApi": True},
                 },
             )
+            state.phase = "initialized"
             await send({"method": "initialized", "params": {}})
             # ``sandbox`` is the CLI's kebab-case ``SandboxMode`` enum
             # (read-only / workspace-write / danger-full-access); "readOnly"
@@ -575,7 +738,7 @@ class CodexAppServerClient:
                 # and then drop the connection before answering, and a retry
                 # would replay a turn already committed to a durable thread —
                 # tool side effects included.
-                turn_sent = True
+                turn_sent = state.turn_sent = True
                 if review_target is not None:
                     await request(
                         "review/start",
@@ -632,6 +795,27 @@ class CodexAppServerClient:
                 # through fail_waiters(), so there is nothing to re-raise here
                 # — and re-raising would mask the original error.
                 pass
-            if process.returncode is None:
-                process.terminate()
-            await process.wait()
+            await _reap(process)
+            stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
+
+
+async def _reap(process: asyncio.subprocess.Process) -> None:
+    """Close stdin, give the child a moment to exit, then terminate and kill it."""
+    if process.stdin is not None:
+        try:
+            process.stdin.close()
+        except Exception:  # already closed or broken: nothing left to flush
+            pass
+    for stop in (None, process.terminate, process.kill):
+        if stop is not None and process.returncode is None:
+            try:
+                stop()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), _EXIT_GRACE)
+            return
+        except TimeoutError:
+            continue
+    await process.wait()  # killed: only the reap is left

@@ -10,6 +10,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Codex App Server transport failures are diagnosable and safely retried.**
+  The child's stderr was sent to `DEVNULL`, so a dying App Server surfaced only
+  as "exited before completing the request". It is now piped and drained into
+  a bounded 16 KiB tail, and the new `CodexTransportError` (a
+  `ConnectionError`) reports the child's PID, return code, the RPC phase it
+  died in and the stderr tail. A transport failure during startup, before the
+  turn request was written, is retried at most once after a short jittered
+  pause; a failure after the turn was written is never retried (neither by
+  the client nor by `CodexEngine`'s retry loop), because the turn may already
+  have run and replaying it could repeat workspace writes. Cleanup is bounded:
+  stdin is closed, the child gets a short grace period, then the same child is
+  terminated, killed if needed, and reaped.
 - **`ClaudeCodeEngine.stream()` now takes the session lock.** `run()` already
   held it for the whole turn, `stream()` did not, so two streams (or a
   `run()` and a `stream()`) on one persistent session (one engine, or two
