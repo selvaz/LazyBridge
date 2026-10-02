@@ -227,8 +227,6 @@ def test_engines_reject_conflicting_direct_and_configured_gates(engine_type):
 
 
 def test_loop_scoped_lock_prunes_closed_loops() -> None:
-    import asyncio
-
     from lazybridge.engines import coding
 
     async def grab() -> asyncio.AbstractEventLoop:
