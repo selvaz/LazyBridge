@@ -14,7 +14,7 @@ Usage: ``python fake_app_server.py <scenario>`` where scenario is one of
 "happy", "turn_failed", "error_notification", "id_collision",
 "developer_instructions", "huge_message" or "exit_immediately" (see
 ``test_app_server.py``), plus the transport-failure scenarios "flaky_startup",
-"always_fail_startup", "die_after_turn", "stderr_flood_ok" and "stderr_flood_die"
+"always_fail_startup", "die_after_thread_start", "die_after_turn", "stderr_flood_ok" and "stderr_flood_die"
 (which take a shared file path as ``argv[2]``).
 """
 
@@ -285,6 +285,11 @@ def main() -> None:
 
     thread_start = read_message()
     assert thread_start["method"] == "thread/start", thread_start
+    if scenario == "die_after_thread_start":
+        # The thread may already be persisted: a retry would orphan it.
+        with open(sys.argv[2], "a") as spawns:
+            spawns.write("spawn\n")
+        sys.exit(4)
     params = thread_start["params"]
     # Lock in the enum spelling the real CLI accepts — "readOnly" is
     # rejected live with "unknown variant `readOnly`".

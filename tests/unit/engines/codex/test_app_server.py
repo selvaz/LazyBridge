@@ -816,6 +816,34 @@ class TestBoundedCleanup:
         assert process.calls == ["terminate", "kill"]
         assert process.returncode == -9
 
+    def test_a_child_that_survives_kill_does_not_hang_teardown(self, monkeypatch):
+        monkeypatch.setattr(app_server, "_EXIT_GRACE", 0.05)
+        monkeypatch.setattr(app_server, "_STDIN_EOF_GRACE", 0.05)
+
+        class Wedged(_FakeProcess):
+            def kill(self) -> None:
+                self.calls.append("kill")  # never exits
+
+        async def scenario():
+            process = Wedged(honors_terminate=False)
+            await app_server._reap(process)
+            return process
+
+        process = asyncio.run(asyncio.wait_for(scenario(), timeout=_TIMEOUT))
+
+        assert process.calls == ["terminate", "kill"]
+        assert process.returncode is None
+
+    def test_a_failure_after_thread_start_was_written_is_not_retried(self, tmp_path):
+        spawns = tmp_path / "spawns"
+
+        with pytest.raises(CodexTransportError) as excinfo:
+            asyncio.run(asyncio.wait_for(_run_scenario("die_after_thread_start", str(spawns)), timeout=_TIMEOUT))
+
+        assert _lines(spawns) == ["spawn"]
+        assert excinfo.value.phase == "thread/start"
+        assert excinfo.value.turn_sent is False
+
 
 class TestSpawnFailures:
     @staticmethod

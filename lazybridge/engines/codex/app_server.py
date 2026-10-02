@@ -43,6 +43,10 @@ _EXIT_GRACE = 2.0
 #: this usually falls through to terminate, as before) — kept small so teardown
 #: stays fast.
 _STDIN_EOF_GRACE = 0.25
+#: Phases before any stateful request (thread/start, thread/resume) was written:
+#: only a failure here is safe to retry, since a durable thread may already exist
+#: after that point.
+_PRE_THREAD_PHASES = frozenset({"spawn", "initialize", "initialized"})
 #: Jittered pause (seconds) before the single startup retry.
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
@@ -326,7 +330,7 @@ class CodexAppServerClient:
                     thread_source=thread_source,
                 )
             except CodexTransportError as exc:
-                if exc.turn_sent or attempt:
+                if exc.turn_sent or attempt or exc.phase not in _PRE_THREAD_PHASES:
                     raise
                 await asyncio.sleep(random.uniform(*_STARTUP_RETRY_DELAY))
         raise AssertionError("unreachable")  # pragma: no cover
@@ -840,4 +844,5 @@ async def _reap(process: asyncio.subprocess.Process) -> None:
             return
         except TimeoutError:
             continue
-    await process.wait()  # killed: only the reap is left
+    # Still alive after kill(): wedged beyond our reach. Stop waiting rather
+    # than hold the caller (and its timeout) hostage forever.
