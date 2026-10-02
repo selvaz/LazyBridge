@@ -452,3 +452,44 @@ def test_request_error_carries_the_session_id_when_given():
 
     assert ClaudeSdkRequestError("x").session_id is None
     assert ClaudeSdkRequestError("x", status=500, session_id="sess-1").session_id == "sess-1"
+
+
+def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeypatch):
+    # ``async for`` does not close the iterator it leaves early; the engine
+    # holds a per-session lock around this stream, so the SDK query must be
+    # torn down *inside* aclose(), not whenever the garbage collector gets to it.
+    import sys
+    import types
+
+    class StreamEvent:
+        def __init__(self, event):
+            self.event = event
+
+    class ResultMessage:  # never produced here; only needed for the import
+        pass
+
+    closed = asyncio.Event()
+
+    async def query(*, prompt, options):
+        try:
+            yield StreamEvent({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}})
+            await asyncio.Event().wait()  # parked, as a live query would be
+        finally:
+            closed.set()
+
+    module = types.ModuleType("claude_agent_sdk")
+    module.ResultMessage = ResultMessage
+    module.StreamEvent = StreamEvent
+    module.query = query
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
+
+    async def scenario() -> None:
+        turn = AgentSdkClient().stream("go", options=ClaudeSdkOptions())
+        event = await turn.__anext__()
+        assert event.text == "hi"
+        assert not closed.is_set()
+        await turn.aclose()
+        assert closed.is_set()
+
+    asyncio.run(scenario())

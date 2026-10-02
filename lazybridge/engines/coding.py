@@ -9,12 +9,12 @@ Claude Code or Codex without provider-specific branching.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import inspect
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
-from weakref import WeakKeyDictionary
 
 ApprovalAction = Literal["allow", "allow_session", "deny", "cancel"]
 
@@ -83,12 +83,13 @@ async def ask_approval(gate: ApprovalGate | None, request: ApprovalRequest) -> A
     return result
 
 
-#: Per-event-loop lock registries, keyed weakly so a finished loop's locks are
-#: collected with it. An ``asyncio.Lock`` binds to the loop that first waits on
-#: it and raises ``RuntimeError: bound to a different event loop`` anywhere
-#: else — and every synchronous ``Agent.__call__`` runs on a *fresh* loop, so a
-#: process-wide lock cache would break on the second such call.
-_LOOP_LOCKS: MutableMapping[Any, dict[str, asyncio.Lock]] = WeakKeyDictionary()
+#: Per-event-loop lock registries. An ``asyncio.Lock`` binds to the loop that
+#: first waits on it and raises ``RuntimeError: bound to a different event
+#: loop`` anywhere else — and every synchronous ``Agent.__call__`` runs on a
+#: *fresh* loop, so a process-wide lock cache would break on the second such
+#: call. A weak key cannot be used: the lock references its loop, so the key
+#: would never die. Closed loops are pruned on each lookup instead.
+_LOOP_LOCKS: dict[Any, dict[str, asyncio.Lock]] = {}
 
 
 def loop_scoped_lock(key: str) -> asyncio.Lock:
@@ -99,7 +100,29 @@ def loop_scoped_lock(key: str) -> asyncio.Lock:
     coordinate outside the process.
     """
     loop = asyncio.get_running_loop()
+    for stale in [lp for lp in _LOOP_LOCKS if lp is not loop and lp.is_closed()]:
+        del _LOOP_LOCKS[stale]
     return _LOOP_LOCKS.setdefault(loop, {}).setdefault(key, asyncio.Lock())
+
+
+@contextlib.asynccontextmanager
+async def closing_iter(iterator: AsyncIterator[Any]) -> AsyncIterator[AsyncIterator[Any]]:
+    """Yield ``iterator`` and ``aclose()`` it on exit, when it can be closed.
+
+    ``async for`` over an async generator does NOT close it when the loop is
+    left early (``break``, an exception, the consumer being closed or
+    cancelled): the generator is only finalised later, by the garbage
+    collector. For a turn that holds a per-session lock that is too late — the
+    lock would be released while the provider query is still being torn down.
+    Closing explicitly makes teardown complete inside the locked region.
+    Plain iterators without ``aclose`` are left alone.
+    """
+    try:
+        yield iterator
+    finally:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 #: Attribute used to park approval caches on a LazyBridge ``Session``.

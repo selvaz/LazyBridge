@@ -8,6 +8,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ClaudeCodeEngine.stream()` now takes the session lock.** `run()` already
+  held it for the whole turn, `stream()` did not, so two streams (or a
+  `run()` and a `stream()`) on one persistent session (one engine, or two
+  engines sharing a raw id or alias) overlapped: both read the session state
+  before either stored the id, and aliased streams published their id early
+  while another turn was mid-flight. The old body is now `_stream_unlocked()`
+  and the public `stream()` holds the lock around it, closing it before the
+  lock is released. An ephemeral engine still takes no lock.
+- **SDK teardown completes inside the locked turn.** The Claude engine's idle
+  guard and `AgentSdkClient.stream()` iterated their inner async generators
+  with a plain `async for`, which does not close them on an early exit; on an
+  early `aclose()` or a cancellation the lock could be released while the SDK
+  query was still being torn down. Both now close the inner iterator
+  explicitly (`lazybridge.engines.coding.closing_iter`).
+- **Own-lock to id-lock hand-off hole in `ClaudeCodeEngine`.** A persistent
+  engine with no id yet queued on its own lock; once an id was published,
+  later calls keyed straight onto the id lock and bypassed it, so a queued
+  first call and a newer one could run together. A persistent engine now
+  always takes its own lock first, then the alias lock, then the id lock.
+- **`CodexEngine`: two engines on one still-unknown `session_alias` could open
+  two threads.** The thread lock covered the engine and the thread id but not
+  the alias, and the alias was refreshed after the lock was chosen. It now
+  mirrors the Claude engine (own lock, alias lock, id lock). A streamed turn
+  that is abandoned also records its thread id before releasing the lock, so
+  the queued turn resumes that thread instead of opening another.
+
+Known and not changed here: `ClaudeCodeEngine`'s class-wide `asyncio.Lock`
+registries (`_session_locks`, `_alias_locks`) can bind to an earlier event loop
+when contention happens across successive loops (`CodexEngine` already scopes
+its locks per loop).
+
 ## [1.6.1] — 2026-10-01
 
 ### Added

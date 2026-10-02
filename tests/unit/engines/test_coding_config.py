@@ -224,3 +224,23 @@ def test_engines_reject_conflicting_direct_and_configured_gates(engine_type):
             approval_gate=direct_gate,
             config=CodingAgentConfig(approval_gate=configured_gate),
         )
+
+
+def test_loop_scoped_lock_prunes_closed_loops() -> None:
+    from lazybridge.engines import coding
+
+    async def grab() -> asyncio.AbstractEventLoop:
+        lock = coding.loop_scoped_lock("prune-test")
+        assert coding.loop_scoped_lock("prune-test") is lock
+        return asyncio.get_running_loop()
+
+    loops = []
+    for _ in range(3):
+        loop = asyncio.new_event_loop()
+        loops.append(loop)
+        loop.run_until_complete(grab())
+        loop.close()
+    assert loops[-1] in coding._LOOP_LOCKS
+
+    asyncio.run(grab())
+    assert not any(lp in coding._LOOP_LOCKS for lp in loops)
