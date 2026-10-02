@@ -679,7 +679,10 @@ class TestTransportFailures:
         assert _is_transient(exc) is False
 
     def test_a_startup_transport_error_stays_transient_for_the_engine(self):
-        assert _is_transient(CodexTransportError("x", turn_sent=False)) is True
+        assert _is_transient(CodexTransportError("x", phase="initialize", turn_sent=False)) is True
+
+    def test_a_post_thread_start_transport_error_is_not_transient_for_the_engine(self):
+        assert _is_transient(CodexTransportError("x", phase="thread/start", turn_sent=False)) is False
 
     def test_only_the_stderr_tail_is_kept_when_the_child_floods_it(self):
         with pytest.raises(CodexTransportError) as excinfo:
