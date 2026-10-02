@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.2] — 2026-10-02
+
 ### Fixed
 
 - **Codex App Server transport failures are diagnosable and safely retried.**
