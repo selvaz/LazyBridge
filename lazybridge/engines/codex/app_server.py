@@ -8,6 +8,7 @@ The wire format here was verified against a live ``codex app-server``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import random
@@ -390,10 +391,8 @@ class CodexAppServerClient:
         async def transport_failure(reason: str) -> CodexTransportError:
             returncode = process.returncode
             if returncode is None:
-                try:
+                with contextlib.suppress(TimeoutError):
                     returncode = await asyncio.wait_for(process.wait(), _EXIT_GRACE)
-                except TimeoutError:
-                    pass
             await asyncio.wait({stderr_task}, timeout=_EXIT_GRACE / 4)
             tail = bytes(state.stderr).decode("utf-8", errors="replace").strip()
             message = (
@@ -813,10 +812,8 @@ async def _reap(process: asyncio.subprocess.Process) -> None:
             pass
     for stop, grace in ((None, _STDIN_EOF_GRACE), (process.terminate, _EXIT_GRACE), (process.kill, _EXIT_GRACE)):
         if stop is not None and process.returncode is None:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 stop()
-            except ProcessLookupError:
-                pass
         try:
             await asyncio.wait_for(process.wait(), grace)
             return
