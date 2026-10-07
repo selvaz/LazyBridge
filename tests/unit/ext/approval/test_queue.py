@@ -2140,3 +2140,90 @@ def test_job_owner_is_alive_rejects_a_recycled_pid_with_a_different_boot_id() ->
     from lazybridge.ext.delegation.jobs import _job_owner_is_alive
 
     assert _job_owner_is_alive({"owner_pid": os.getpid(), "owner_boot_id": "a-different-boot-id"}) is False
+
+
+async def test_ask_only_one_of_two_concurrent_identical_calls_wins_one_approval() -> None:
+    """claim_earlier_approval is checked ONCE, at the very top of ask() --
+    so the real race isn't two ask() calls started together (the second
+    one's own claim check runs before the first ticket is even approved);
+    it's call A's own ticket getting approved, with a window between A's
+    OWN polling loop observing "approved" and A finishing the consumption
+    CAS, during which a brand-new call B (identical task_id/prompt)
+    starts, hits its OWN claim_earlier_approval check, and claims that
+    SAME still-unconsumed ticket first. If A then ignored losing that
+    race and returned True anyway, both A and B would report success for
+    one single human decision. Found by Codex review before this ever
+    shipped (round 2)."""
+    import threading
+
+    queue = ApprovalQueue(Store())
+    channel_a = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=5))
+    channel_b = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=5))
+
+    real_mark = queue.mark_approval_consumed
+    b_may_claim = threading.Event()
+    a_may_proceed = threading.Event()
+
+    def _paused_mark(approval_id: str, **kwargs: Any) -> bool:
+        # Runs on a worker thread (offloaded via self._call) -- safe to
+        # block it directly rather than the event loop.
+        b_may_claim.set()
+        a_may_proceed.wait(timeout=2.0)
+        return real_mark(approval_id, **kwargs)
+
+    queue.mark_approval_consumed = _paused_mark  # type: ignore[method-assign]
+
+    async def approve_a_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    task_a = asyncio.create_task(channel_a.ask("please approve"))
+    await approve_a_soon()
+    # A's own loop has observed "approved" and is now paused inside its
+    # OWN mark_approval_consumed call -- the exact window this test
+    # exercises.
+    while not b_may_claim.is_set():
+        await asyncio.sleep(0.005)
+
+    result_b = await channel_b.ask("please approve")
+    a_may_proceed.set()
+    result_a = await asyncio.wait_for(task_a, timeout=2.0)
+
+    assert result_b is True
+    assert result_a is False
+
+
+async def test_stop_waiting_notice_does_not_exceed_notify_timeout_despite_a_long_ttl() -> None:
+    """The "stopped waiting" notice must not fall back to the ordinary
+    ticket.expires_at-based cap: with a long ttl and a short wait_budget,
+    that default would let a stalled notifier cost this already-giving-up
+    call up to a full extra notify_timeout on top of a wait_budget that
+    may be milliseconds -- exactly the inflation wait_budget exists to
+    cap. Found by Codex review before this ever shipped (round 2)."""
+    queue = ApprovalQueue(Store())
+
+    async def stalled_notify(ticket, message):
+        await asyncio.sleep(999)
+
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        ttl=timedelta(seconds=30),
+        wait_budget=timedelta(seconds=0.03),
+        notify=stalled_notify,
+        notify_timeout=0.3,
+    )
+
+    import time as _time
+
+    start = _time.monotonic()
+    result = await asyncio.wait_for(channel.ask("please approve"), timeout=2.0)
+    elapsed = _time.monotonic() - start
+
+    assert result is False
+    # Bounded by notify_timeout (0.3s) for the stop-waiting notice itself,
+    # not by the 30s ttl -- comfortable margin without being flaky.
+    assert elapsed < 1.0

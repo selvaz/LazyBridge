@@ -1033,31 +1033,36 @@ class StoreApprovalChannel:
         return func(*args, **kwargs)
 
     async def _send(self, ticket: ApprovalTicket, message: str, *, deadline: datetime | None = None) -> None:
-        """``deadline``, when given, is an ADDITIONAL cap on how long this
-        send may take -- used for the FIRST notification and for a
-        renotify reminder, both sent while a wait is still genuinely in
-        progress, to also respect ``StoreApprovalChannel``'s own
-        ``wait_budget`` (not just ``ticket.expires_at``/``ttl``): without
-        it, a short ``wait_budget`` paired with a much longer ``ttl`` and a
-        stalled notifier let the very first send alone block for up to
-        ``notify_timeout`` (10s by default) before ``ask()`` ever reached
-        its own polling loop, overshooting a ``wait_budget`` that could be
-        milliseconds. Found by Codex review before this ever shipped.
-
-        Left ``None`` for the "stopped waiting" notice: that one fires
-        while ``current.expires_at > now`` still holds (the branch that
-        sends it checks exactly that), so the ordinary
-        ``ticket.expires_at``-based fallback below is still correct --
-        there IS real remaining ticket lifetime to bound by.
-
-        The "expired" notice is DIFFERENT: it fires only once
-        ``ticket.expires_at`` has already passed, so letting it fall back
-        to that same default would compute a NEGATIVE remaining time,
-        floor straight to a ``0.0`` timeout, and cancel the notifier
-        before it could ever deliver the one message explaining the
-        expiry -- that call passes its own explicit, FUTURE ``deadline``
-        instead (``now + notify_timeout``) for exactly this reason. Found
+        """``deadline``, when given, REPLACES ``ticket.expires_at`` as what
+        this send's timeout is measured against (``self._notify_timeout``
+        itself still always applies on top, via the ``min()`` below) --
+        used for the FIRST notification and for a renotify reminder, both
+        sent while a wait is still genuinely in progress, to also respect
+        ``StoreApprovalChannel``'s own ``wait_budget`` (not just
+        ``ticket.expires_at``/``ttl``): without it, a short ``wait_budget``
+        paired with a much longer ``ttl`` and a stalled notifier let the
+        very first send alone block for up to ``notify_timeout`` (10s by
+        default) before ``ask()`` ever reached its own polling loop,
+        overshooting a ``wait_budget`` that could be milliseconds. Found
         by Codex review before this ever shipped.
+
+        Both terminal notices -- "stopped waiting" (``wait_budget``
+        elapsed, ticket still live) and "expired" (``ttl`` elapsed) --
+        pass their own explicit ``deadline`` (``now + notify_timeout``)
+        rather than relying on the default ``ticket.expires_at``-based
+        fallback below. Two different failure modes motivate this for the
+        two calls: for "expired", ``ticket.expires_at`` has ALREADY
+        passed, so the default would compute a NEGATIVE remaining time,
+        floor straight to a ``0.0`` timeout, and cancel the notifier
+        before it could ever deliver the message explaining the expiry.
+        For "stopped waiting", ``ticket.expires_at`` is usually still far
+        in the FUTURE (``ttl`` is typically much longer than
+        ``wait_budget``), so the default would instead let a stalled
+        notifier cost this already-giving-up call up to a full extra
+        ``notify_timeout`` on top of a ``wait_budget`` that may be
+        milliseconds -- exactly the inflation ``wait_budget`` exists to
+        cap. Found by Codex review before this ever shipped (two rounds:
+        the first fix only caught the "expired" case).
         """
         if self._notify is None:
             return
@@ -1580,15 +1585,25 @@ class StoreApprovalChannel:
                     # to find still "approved" and unconsumed -- otherwise a
                     # later retry with the IDENTICAL prompt (same task_id)
                     # could silently re-claim and re-run THIS SAME approval
-                    # a second time, off one human decision. Best-effort:
-                    # losing this CAS (a concurrent claim_earlier_approval
-                    # beat it here) does not change what this call already
-                    # observed -- a human said yes to the request this call
-                    # itself is waiting on, so it still returns True
-                    # regardless of who "won" marking it spent. Found by
-                    # Codex review before this ever shipped.
-                    await self._call(self._queue.mark_approval_consumed, current.approval_id)
-                    return True
+                    # a second time, off one human decision.
+                    #
+                    # The return value matters, not just the side effect:
+                    # TWO CONCURRENT ask() calls for the identical
+                    # (task_id, prompt) each create their OWN ticket (tickets
+                    # are never deduplicated by content), and either one's
+                    # ticket getting approved makes claim_earlier_approval
+                    # claimable by the OTHER call too. If this call's own
+                    # mark_approval_consumed loses that race (the other call's
+                    # claim_earlier_approval won it first), returning True
+                    # here regardless would let BOTH calls report success for
+                    # the SAME single human decision -- two executions from
+                    # one "yes". Only the caller that actually wins the
+                    # consumption may report True; losing it is treated the
+                    # same as never having been approved at all, for THIS
+                    # call. Found by Codex review before this ever shipped
+                    # (two rounds: the first fix recorded consumption but
+                    # ignored whether it actually won).
+                    return await self._call(self._queue.mark_approval_consumed, current.approval_id)
                 now = datetime.now(UTC)
                 if current.expires_at > now >= stop_waiting_at:
                     # THIS CALLER stops waiting; the REQUEST does not die.
@@ -1605,6 +1620,17 @@ class StoreApprovalChannel:
                         f"⏸️ Stopped waiting after {waited} min, so this did NOT run. The request is still "
                         f"open and still answerable -- an answer given now still counts and can be picked up "
                         f"on a later attempt.\n\n{ticket_gist(ticket.prompt)}",
+                        # An explicit, bounded deadline -- NOT the default
+                        # fallback to ticket.expires_at, which can still be
+                        # arbitrarily far in the future (ttl is usually much
+                        # longer than wait_budget). Falling back to it here
+                        # would let a stalled notifier cost this already-
+                        # giving-up call up to a full extra notify_timeout on
+                        # top of a wait_budget that may be milliseconds --
+                        # exactly the inflation wait_budget exists to put a
+                        # ceiling on. Found by Codex review before this ever
+                        # shipped.
+                        deadline=now + timedelta(seconds=self._notify_timeout),
                     )
                     return False
                 if current.expires_at <= now:

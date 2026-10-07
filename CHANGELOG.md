@@ -57,16 +57,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
     automatically by `StoreApprovalChannel.ask()`'s own ordinary polling
     path once it observes `"approved"`, so a LATER call with the identical
     `(task_id, prompt)` can never find that same approval still unconsumed
-    and re-claim (and re-run) it a second time via `claim_earlier_approval`.
+    and re-claim (and re-run) it a second time via `claim_earlier_approval`
+    -- and `ask()` only reports `True` to whichever of two concurrent
+    identical calls actually WINS that consumption, never both.
   - `ask()` now treats an externally `expire_ticket()`-ed ticket (one
     expired by some OTHER caller, before this call's own `ttl` would have
     elapsed on its own) as terminal immediately, instead of falling
     through to its own ttl check and polling (and re-notifying) a
     ticket that is already done.
-  - The `claim_earlier_approval` check at the top of `ask()`, and the
-    "expired" terminal notice, are now correctly bounded against
-    cancellation and against an already-elapsed ticket lifetime,
-    respectively (see `StoreApprovalChannel._send`'s own docstring).
+  - The `claim_earlier_approval` check at the top of `ask()` is correctly
+    bounded against cancellation. The "expired" and "stopped waiting"
+    terminal notices are both bounded by `notify_timeout` alone, decoupled
+    from the ticket's own (already-elapsed, for "expired") lifetime --
+    without this, a stalled notifier could cost a `wait_budget` that may
+    be milliseconds up to a full extra `notify_timeout` just to report
+    giving up (see `StoreApprovalChannel._send`'s own docstring).
 - **`lazybridge.ext.delegation` gains admission/validation hooks and richer
   job records.**
   - `make_background_delegate` (and `make_codex_writer`/`make_claude_writer`)
