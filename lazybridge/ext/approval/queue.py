@@ -1369,7 +1369,7 @@ class StoreApprovalChannel:
                     timeout,
                     ticket.approval_id,
                 )
-                self._queue.record_notify_failure(
+                self._audit_notify_failure(
                     source=f"StoreApprovalChannel:{ticket.kind}",
                     text=message,
                     error=f"timed out after {timeout:.1f}s",
@@ -1378,9 +1378,25 @@ class StoreApprovalChannel:
             logging.getLogger(__name__).exception(
                 "notify failed for ticket %s -- it still exists and is still answerable", ticket.approval_id
             )
-            self._queue.record_notify_failure(
-                source=f"StoreApprovalChannel:{ticket.kind}", text=message, error=repr(exc)
-            )
+            self._audit_notify_failure(source=f"StoreApprovalChannel:{ticket.kind}", text=message, error=repr(exc))
+
+    def _audit_notify_failure(self, *, source: str, text: str, error: str) -> None:
+        """Record a failed notification without holding up the wait.
+
+        The audit write is a plain Store write; on a contended file-backed
+        Store it can block for SQLite's whole busy timeout, after ``_send()``
+        has already spent ``notify_timeout``. Run inline it would push
+        ``ask()`` past its ``wait_budget`` and freeze every other coroutine
+        on the loop, so it runs as a retained detached task instead (off the
+        loop when the queue allows it). Best-effort, like the record itself.
+        Found by Codex review."""
+        record = self._queue.record_notify_failure
+        if self._queue.safe_to_call_from_any_thread:
+            task = asyncio.ensure_future(asyncio.to_thread(record, source=source, text=text, error=error))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+        else:
+            record(source=source, text=text, error=error)
 
     def _record_refusal(self, ticket: ApprovalTicket, *, reason: str, responder: str) -> None:
         """A refusal THIS CHANNEL knows the true reason for -- rejected by

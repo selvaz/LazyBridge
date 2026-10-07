@@ -82,9 +82,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
     giving up (see `StoreApprovalChannel._send`'s own docstring).
 - **`lazybridge.ext.delegation` gains admission/validation hooks and richer
   job records.**
-  - `make_background_delegate` (and `make_codex_writer`/`make_claude_writer`)
+  - `make_background_delegate`, `make_codex_writer` and `make_claude_writer`
     accept `validate_model` (a sync `model -> rejection string | None` hook
-    run BEFORE anything is recorded or spawned) and `admission_gate` (an
+    run BEFORE anything is recorded or spawned); `make_background_delegate`
+    and `make_codex_writer` also accept `admission_gate` (an
     async zero-argument hook, consulted only on the `pre_confirm` path,
     right after a human approves and right before the engine actually
     starts; a refusal is recorded as `status="failed"` with
