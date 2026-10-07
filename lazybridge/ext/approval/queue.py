@@ -60,9 +60,11 @@ import contextlib
 import hashlib
 import inspect
 import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
@@ -77,7 +79,15 @@ if TYPE_CHECKING:
 #: different state machine -- kept in the same ticket shape and queue on
 #: purpose: not enough distinct behavior to justify a second mechanism.
 TicketKind = Literal["approval", "escalation"]
-TicketStatus = Literal["pending", "approved", "rejected"]
+#: "expired" is distinct from "rejected": nobody said no, nobody said
+#: anything -- :meth:`ApprovalQueue.expire_ticket` is how a caller that
+#: gave up waiting (see :class:`StoreApprovalChannel`'s ``wait_budget``)
+#: records that distinction durably instead of leaving the ticket at
+#: "pending" forever (still listed by ``list_pending_tickets``, still
+#: actionable, with no sign anything ever stopped waiting on it) or
+#: silently treating it the same as a human refusal (which it provably was
+#: not, and deserves a different repair).
+TicketStatus = Literal["pending", "approved", "rejected", "expired"]
 
 #: Default key prefix when a caller doesn't need multiple independent
 #: queues sharing one Store. Pass ``prefix=`` to :class:`ApprovalQueue`
@@ -85,9 +95,39 @@ TicketStatus = Literal["pending", "approved", "rejected"]
 #: ``"ceo:approval:"`` to preserve its own on-disk key format).
 DEFAULT_PREFIX = "approval:"
 
+#: Default prefix for the durable denial audit trail -- see
+#: :meth:`ApprovalQueue.record_denial`. Configurable per :class:`ApprovalQueue`
+#: the same way ``prefix`` is, for a caller preserving an existing on-disk
+#: layout.
+DEFAULT_DENIAL_PREFIX = "approval-denial:"
+
+#: Default prefix for the durable notify-failure audit trail -- see
+#: :meth:`ApprovalQueue.record_notify_failure`.
+DEFAULT_NOTIFY_FAILURE_PREFIX = "approval-notify-failure:"
+
 #: How long a ticket stays actionable before a stuck/forgotten approval
 #: request stops being answerable and the caller must treat it as denied.
+#: This is NOT how long a waiter blocks for -- see ``wait_budget`` on
+#: :class:`StoreApprovalChannel` for that separate, usually much shorter,
+#: number. A ticket can stay actionable for hours while the agent that
+#: filed it has long since stopped waiting and moved on.
 DEFAULT_TTL = timedelta(hours=2)
+
+#: How long :meth:`StoreApprovalChannel.ask` waits before giving up on a
+#: ticket that is still pending and still well within its ``ttl``.
+#:
+#: ``ask()`` blocks whatever called it -- usually a tool call inside a
+#: bounded turn -- so a wait long enough to survive a human being away for
+#: hours would make that turn itself hang for hours. Splitting "how long is
+#: this request answerable" (``ttl``) from "how long will THIS caller wait
+#: for it" (``wait_budget``) is what lets a ticket stay open far longer than
+#: any one wait: giving up here does not expire the ticket -- it stays
+#: pending and answerable until ``ttl``, so a human who answers after the
+#: caller stopped waiting still lands on a live ticket, not a corpse. Equal
+#: to ``DEFAULT_TTL`` by default, which reproduces this module's own
+#: pre-split behaviour exactly: a caller that never sets ``wait_budget``
+#: waits the full ``ttl``, same as before this existed.
+DEFAULT_WAIT_BUDGET = DEFAULT_TTL
 
 #: Found live: a ticket notified once at creation and never mentioned again
 #: left a whole turn blocked for the better part of an hour on a routine
@@ -108,15 +148,90 @@ class ApprovalTicket(BaseModel):
     prompt_hash: str
     status: TicketStatus
     kind: TicketKind = "approval"
+    #: A caller-defined flag meaning whatever the caller needs it to mean
+    #: by way of a policy layered on top of this queue -- e.g. "this ticket
+    #: must be resolved by a specific human channel, never auto-settled by
+    #: anything else with queue access." This module does not enforce
+    #: anything about it; it is pure metadata, carried through
+    #: :meth:`ApprovalQueue.create_ticket` and
+    #: :class:`StoreApprovalChannel`'s constructor so a caller's own
+    #: resolution logic can read it back off the ticket.
+    operator_only: bool = False
     actor: str | None = None
     channel: str | None = None
     reason: str | None = None
     created_at: datetime
     expires_at: datetime
+    #: When an approval given AFTER a waiter stopped waiting for it (see
+    #: ``wait_budget``) was actually spent by a later attempt -- see
+    #: :meth:`ApprovalQueue.claim_earlier_approval`. An approval sitting
+    #: unconsumed is worth nothing: without this field nothing anywhere
+    #: records whether a "yes" that arrived late was ever actually acted
+    #: on, so the audit trail could show an approval for work that never
+    #: ran. Set by compare-and-swap, so two attempts racing to claim the
+    #: same approval cannot both win.
+    consumed_at: datetime | None = None
 
 
 def _hash_prompt(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()
+
+
+#: The tool/command name inside a TieredGate-rendered prompt's first line
+#: (``lazybridge.ext.approval.tiered._render``'s own
+#: ``"[TieredGate] agent asks to run {kind} '{name}'"`` wording).
+_TOOL_IN_PROMPT = re.compile(r"asks to run \S+ '([^']+)'")
+
+
+def _tool_name_from_prompt(prompt: str) -> str | None:
+    """Best-effort tool/command name dug out of a TieredGate-rendered
+    prompt, for an audit record that needs it (see
+    :meth:`ApprovalQueue.record_denial`) but was only ever handed the
+    rendered text -- :class:`~lazybridge.ext.approval.tiered.Channel` never
+    sees the structured ``ApprovalRequest`` TieredGate matched, only this
+    string."""
+    match = _TOOL_IN_PROMPT.search(prompt or "")
+    return match.group(1) if match else None
+
+
+def _tiered_gate_gist(prompt: str) -> str | None:
+    """Extract the real command/arguments from a TieredGate-rendered prompt
+    (``lazybridge.ext.approval.tiered._render``), or ``None`` if ``prompt``
+    isn't shaped like one -- the caller falls back to the generic logic in
+    that case.
+
+    A TieredGate-created ticket's first line is the generic
+    ``"[TieredGate] agent asks to run tool 'Bash'"`` sentence for every
+    single Bash ticket, with the actual command buried in an
+    ``"arguments: {...}"`` line below -- there is no ``"Objective:"``
+    marker to find, so falling back to the first line (the plain,
+    non-TieredGate behaviour) would show that identical sentence for every
+    pending Bash ticket, indistinguishable from one another. Checked
+    first, and never falling through to the ``Objective:``/first-line
+    logic below for a prompt shaped this way: if the command text itself
+    happens to contain the literal substring ``"Objective:"`` (a commit
+    message can), searching for that marker across the WHOLE prompt would
+    match inside the arguments JSON and hide the tool/kind context that
+    came before it.
+
+    Best-effort past that: an elided/truncated ``arguments:`` line can't
+    parse as JSON, so this returns the raw (still truncated, still useful)
+    text rather than raising."""
+    import json
+
+    if not prompt.startswith("[TieredGate] "):
+        return None
+    args_line = next((line for line in prompt.splitlines() if line.strip().startswith("arguments:")), None)
+    if args_line is None:
+        return None
+    raw = args_line.split("arguments:", 1)[1].strip()
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return raw
+    if isinstance(parsed, dict) and isinstance(parsed.get("command"), str):
+        return parsed["command"]
+    return raw
 
 
 def ticket_gist(prompt: str, *, max_len: int = 220) -> str:
@@ -125,19 +240,27 @@ def ticket_gist(prompt: str, *, max_len: int = 220) -> str:
     confirmation template can put identical boilerplate on line 1 of every
     ticket it files (e.g. "Delegate to Codex with REAL write access..."),
     with the real objective further down after an "Objective:" marker.
-    Falls back to the first line when there's no such marker (a plain
+
+    A prompt rendered by :class:`~lazybridge.ext.approval.tiered.TieredGate`
+    has the same problem in a different shape -- see
+    :func:`_tiered_gate_gist`, checked first here -- so that case is
+    handled before the ``Objective:``/first-line fallback below ever runs.
+
+    Falls back to the first line when neither marker applies (a plain
     yes/no ticket's prompt IS just the request itself, already the whole
     distinguishing content, nothing to skip past)."""
-    marker = "Objective:"
-    idx = prompt.find(marker)
-    if idx != -1:
-        gist = prompt[idx + len(marker) :].strip()
-    else:
-        # An empty/whitespace-only prompt (create_ticket doesn't reject
-        # one) has no lines at all -- splitlines()[0] would raise
-        # IndexError. Found by Codex review before this ever shipped.
-        lines = prompt.splitlines()
-        gist = lines[0] if lines else ""
+    gist = _tiered_gate_gist(prompt)
+    if gist is None:
+        marker = "Objective:"
+        idx = prompt.find(marker)
+        if idx != -1:
+            gist = prompt[idx + len(marker) :].strip()
+        else:
+            # An empty/whitespace-only prompt (create_ticket doesn't reject
+            # one) has no lines at all -- splitlines()[0] would raise
+            # IndexError. Found by Codex review before this ever shipped.
+            lines = prompt.splitlines()
+            gist = lines[0] if lines else ""
     gist = " ".join(gist.split())  # collapse embedded newlines/whitespace to one line
     if max_len <= 0:
         # A zero/negative limit has no valid non-empty result; falling
@@ -341,9 +464,18 @@ class ApprovalQueue:
     interchangeable.
     """
 
-    def __init__(self, store: Store, *, prefix: str = DEFAULT_PREFIX) -> None:
+    def __init__(
+        self,
+        store: Store,
+        *,
+        prefix: str = DEFAULT_PREFIX,
+        denial_prefix: str = DEFAULT_DENIAL_PREFIX,
+        notify_failure_prefix: str = DEFAULT_NOTIFY_FAILURE_PREFIX,
+    ) -> None:
         self._store = store
         self._prefix = prefix
+        self._denial_prefix = denial_prefix
+        self._notify_failure_prefix = notify_failure_prefix
         # Resolved ONCE, here -- see _anchor_db_path's own docstring for
         # why re-resolving per-call/per-thread is unsafe. Every operation
         # below (reads AND writes) routes through this same anchor.
@@ -379,7 +511,13 @@ class ApprovalQueue:
         return getattr(_unwrap_store(self._store), "_db", None) != ":memory:"
 
     def create_ticket(
-        self, *, task_id: str, prompt: str, kind: TicketKind = "approval", ttl: timedelta = DEFAULT_TTL
+        self,
+        *,
+        task_id: str,
+        prompt: str,
+        kind: TicketKind = "approval",
+        ttl: timedelta = DEFAULT_TTL,
+        operator_only: bool = False,
     ) -> ApprovalTicket:
         if ttl <= timedelta(0):
             # A nonpositive ttl writes a ticket whose expires_at is
@@ -401,6 +539,7 @@ class ApprovalQueue:
             prompt_hash=_hash_prompt(prompt),
             status="pending",
             kind=kind,
+            operator_only=operator_only,
             created_at=now,
             expires_at=now + ttl,
         )
@@ -469,6 +608,260 @@ class ApprovalQueue:
                 update={"status": "rejected", "actor": actor, "channel": channel, "reason": reason}
             )
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def expire_ticket(self, approval_id: str) -> bool:
+        """Record that nobody answered in time.
+
+        Meant to be called by a waiter that is giving up (see
+        :class:`StoreApprovalChannel`'s ``wait_budget``), not by a
+        background sweep -- the read-time expiry filter in ``_actionable``/
+        ``list_pending_tickets`` still has to stand on its own, because a
+        waiter can die with its process and leave a record nobody will
+        ever come back to transition. This only closes the ones a caller
+        actually watched expire.
+
+        Without it a ticket sits at ``"pending"`` forever even once it is
+        truly dead, so any count of "waiting on a human" mixes live
+        questions with corpses, and nothing distinguishes "the ticket was
+        answered no" from "nobody ever saw it" -- two different situations
+        that deserve two different responses, not one shared status.
+
+        CAS: only transitions a ticket that is still ``"pending"`` at the
+        moment this runs -- a concurrent approve/reject that lands first
+        wins, and this call simply reports ``False``, the same "lost the
+        race" contract every other mutator in this class already has.
+        """
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict) or raw.get("status") != "pending":
+                return False
+            ticket = ApprovalTicket.model_validate(raw)
+            updated = ticket.model_copy(update={"status": "expired"})
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def claim_earlier_approval(
+        self, *, task_id: str, prompt: str, operator_only: bool = False, now: datetime | None = None
+    ) -> bool:
+        """Spend an approval a human gave after a previous waiter had
+        already stopped waiting for it.
+
+        Without this, splitting "how long a ticket stays answerable"
+        (``ttl``) from "how long one waiter blocks for it" (``wait_budget``)
+        is a false promise: the ticket stays live, a human answers it, and
+        nothing anywhere ever consumes that answer -- the queue ends up
+        recording a "yes" for work that never ran, which is worse than
+        having asked nothing at all. A caller that retries the identical
+        request (same ``task_id``, same exact rendered ``prompt``) after an
+        earlier wait gave up should check this FIRST, before filing a new
+        ticket for the same question.
+
+        Deliberately narrow:
+
+        - the prompt must match EXACTLY, by hash -- not the tool, not the
+          directory, the WHOLE rendered text a human was shown, arguments
+          included. A different command is a different question.
+        - same ``task_id``.
+        - same ``operator_only`` scope. A ticket approved while
+          ``operator_only=False`` (any resolver could have answered it,
+          including a non-human one layered on top of this queue) must
+          never satisfy a LATER request made with ``operator_only=True``
+          -- that flag exists so a caller's own resolver can refuse to
+          answer certain tickets itself and insist a specific human
+          channel does; silently reusing a looser-scoped approval would
+          let the stricter request through without ever being seen by
+          that channel. The reverse (reusing an ``operator_only=True``
+          approval for an ``operator_only=False`` request) is refused
+          too, for simplicity and because "matching scope" is the whole
+          point -- an exact match, not a one-way escalation rule. Found
+          by Codex review before this ever shipped.
+        - the candidate was created under THIS consumption protocol in
+          the first place -- see the ``consumed_at`` key-presence check
+          below.
+        - still inside the ticket's own ``expires_at`` window.
+        - once -- ``consumed_at`` is set by compare-and-swap, so two
+          attempts racing for the same approval cannot both win.
+
+        For comparison, ``lazybridge.ext.approval.tiered.TieredGate``'s own
+        ``session`` tier already grants reuse for a whole process on a far
+        coarser key (provider + kind + tool + cwd + rule fingerprint), with
+        no expiry at all. An exact-text, single-use, task-scoped,
+        scope-matched reuse is strictly narrower than that.
+
+        Known accepted gap, inherited from ``prompt_hash``'s own documented
+        nature (module docstring): this matches on the HASH of whatever
+        rendered text ``ask()`` was given, which may itself be a lossy
+        rendering of the real request -- ``TieredGate``'s own renderer
+        elides long arguments past a fixed budget and redacts
+        secret-shaped substrings, and a caller's own confirmation template
+        (e.g. ``make_codex_writer``'s) elides its objective preview too.
+        Two DIFFERENT real requests that happen to render down to
+        IDENTICAL visible text (both truncated to the same elided tail, or
+        both containing a secret masked the same way) hash identically,
+        so an approval intended for one could, in principle, be claimed by
+        a later, different request that collides with it under elision.
+        This is the same non-binding nature ``prompt_hash`` already has as
+        a pure AUDIT field, now also load-bearing for reuse -- closing it
+        would need either a wider/lossless render budget (a separate,
+        broader change than this queue owns) or binding on something
+        beyond rendered text, which the ``Channel`` protocol does not hand
+        this queue. Narrow in practice (needs a late approval, a
+        ``wait_budget`` shorter than ``ttl``, AND a real elision
+        collision), not closed here. Found by Codex review.
+        """
+        moment = now or datetime.now(UTC)
+        wanted = _hash_prompt(prompt)
+        with self._anchored() as anchored:
+            items = anchored.items(prefix=self._prefix)
+            for key, raw in items:
+                if not isinstance(raw, dict) or raw.get("status") != "approved":
+                    continue
+                # A record written before `consumed_at` existed (any
+                # ticket created by a pre-1.7.0 ApprovalQueue) has no
+                # "consumed_at" KEY at all -- `raw.get("consumed_at")`
+                # alone cannot tell that apart from a ticket deliberately
+                # left unconsumed under THIS protocol (which always
+                # serializes the key, as `null`, at creation). Without
+                # this presence check, an old, already-acted-on approval
+                # from before this queue ever tracked consumption would
+                # be silently claimable and re-executed a second time, on
+                # no new human decision at all. A legacy ticket is simply
+                # never eligible for reuse -- it was never meant to be.
+                # Found by Codex review before this ever shipped.
+                if "consumed_at" not in raw:
+                    continue
+                # Scope must match EXACTLY, not just the ticket matching
+                # or being looser: a ticket approved with
+                # operator_only=False (any resolver could have answered
+                # it) must never satisfy a request now asking with
+                # operator_only=True, which exists precisely so a
+                # caller's own resolver can refuse to answer certain
+                # tickets itself and insist a specific human channel
+                # does -- reusing a looser approval would let the
+                # stricter request through unseen by that channel. The
+                # reverse is refused too, for the same "matching scope,
+                # not escalation" reason. ``.get(..., False)`` mirrors
+                # ApprovalTicket.operator_only's own default, for a
+                # record that predates this field but somehow already
+                # passed the consumed_at check above (never, in
+                # practice, since both fields were added together, but
+                # this stays correct even if that ever changes). Found
+                # by Codex review before this ever shipped.
+                if raw.get("operator_only", False) != operator_only:
+                    continue
+                if raw.get("consumed_at") or raw.get("prompt_hash") != wanted or raw.get("task_id") != task_id:
+                    continue
+                ticket = ApprovalTicket.model_validate(raw)
+                if ticket.expires_at <= moment:
+                    continue
+                updated = ticket.model_copy(update={"consumed_at": moment})
+                if anchored.compare_and_swap(key, raw, updated.model_dump(mode="json")):
+                    return True
+        return False
+
+    def mark_approval_consumed(self, approval_id: str, *, now: datetime | None = None) -> bool:
+        """Spend an approved ticket's OWN approval, so a later
+        :meth:`claim_earlier_approval` for an identical ``(task_id, prompt)``
+        can never find it still "approved" and unconsumed.
+
+        Without this, a ticket resolved through the ORDINARY polling path
+        in :meth:`StoreApprovalChannel.ask` (a human answers while that
+        same call is still waiting, not via a later retry) stayed
+        "approved" with ``consumed_at`` left ``None`` forever -- the exact
+        shape :meth:`claim_earlier_approval` looks for, so a LATER call
+        with the identical prompt could silently re-claim and re-run that
+        same approval a second time, off one human decision. Found by
+        Codex review before this ever shipped.
+
+        Best-effort: returns ``False`` (not an error) for a ticket that
+        isn't ``"approved"``, or is already consumed -- a caller that
+        already observed "approved" through its own read proceeds either
+        way; this call only prevents a FUTURE reuse, it doesn't change
+        what already happened.
+        """
+        moment = now or datetime.now(UTC)
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict) or raw.get("status") != "approved" or raw.get("consumed_at"):
+                return False
+            ticket = ApprovalTicket.model_validate(raw)
+            updated = ticket.model_copy(update={"consumed_at": moment})
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def record_denial(self, record: Any) -> None:
+        """Persist one refusal, with the reason the caller actually had.
+
+        Generic enough to wire directly as
+        :class:`~lazybridge.ext.approval.tiered.TieredGate`'s own
+        ``on_record`` callback (``on_record=queue.record_denial``): that
+        callback fires for every decision the gate makes, allow-tier reads
+        included, so only ``action in {"deny", "denied"}`` records
+        anything here -- putting a Store write in front of every "allowed,
+        as always" call would cost more than the trail is worth. Reads
+        ``record`` via ``getattr`` rather than requiring a specific type,
+        so both a :class:`~lazybridge.ext.approval.tiered.AuditRecord` and
+        a plain ``SimpleNamespace`` built by a caller's own refusal path
+        (see :class:`StoreApprovalChannel`'s ``ask()``) work identically.
+
+        Best-effort and never raising: a failure to record WHY something
+        was refused must not become a second fault stacked on top of the
+        refusal itself.
+        """
+        action = str(getattr(record, "action", "") or "")
+        if action not in ("deny", "denied"):
+            return
+        try:
+            with self._anchored() as anchored:
+                anchored.write(
+                    f"{self._denial_prefix}{uuid.uuid4()}",
+                    {
+                        "denied_at": datetime.now(UTC).isoformat(),
+                        "tool_name": str(getattr(record, "tool_name", "") or ""),
+                        "kind": str(getattr(record, "kind", "") or ""),
+                        "tier": str(getattr(record, "tier", "") or ""),
+                        # The distinguishing field. "no rule matched" (the
+                        # default deny), "a human said no", and "nobody
+                        # answered in time" are three different repairs --
+                        # this is what tells them apart later.
+                        "message": str(getattr(record, "message", "") or ""),
+                        "responder": str(getattr(record, "responder", "") or ""),
+                        "cwd": str(getattr(record, "cwd", "") or ""),
+                        "arguments_preview": str(getattr(record, "arguments_preview", "") or ""),
+                    },
+                )
+        except Exception:
+            logging.getLogger(__name__).exception("failed to record a denial")
+
+    def record_notify_failure(self, *, source: str, text: str, error: str) -> None:
+        """Durable, queryable audit record of a swallowed ``notify()``
+        failure.
+
+        Deliberately additive-only: never read back by anything that
+        changes behaviour, never retried from here, never allowed to raise
+        (a failure recording a failure must not itself become a second
+        failure -- caught and logged, not propagated, same posture as the
+        notify call it is describing). ``source`` identifies the call site
+        in human terms (e.g. ``"StoreApprovalChannel:approval"``) so a
+        reader doesn't have to guess which of several notify paths dropped
+        a message. Without this, the only record of a failed notification
+        was a single ``logging.exception`` call, visible only by tailing
+        that one process's raw log file -- nobody could later ask "did a
+        notification ever silently fail?" without doing exactly that.
+        """
+        try:
+            with self._anchored() as anchored:
+                anchored.write(
+                    f"{self._notify_failure_prefix}{uuid.uuid4()}",
+                    {
+                        "source": source,
+                        "text": text,
+                        "error": error,
+                        "failed_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+        except Exception:
+            logging.getLogger(__name__).exception("failed to record a notify failure for source %r", source)
 
 
 #: Kept alive here so nothing else has to hold a reference: asyncio only
@@ -541,10 +934,12 @@ class StoreApprovalChannel:
         task_id: str,
         poll_seconds: float = 2.0,
         ttl: timedelta = DEFAULT_TTL,
+        wait_budget: timedelta | None = None,
         notify: Callable[[ApprovalTicket, str], Awaitable[None]] | None = None,
         notify_timeout: float = 10.0,
         renotify_interval: timedelta | None = DEFAULT_RENOTIFY_INTERVAL,
         kind: TicketKind = "approval",
+        operator_only: bool = False,
     ):
         if not poll_seconds > 0:
             # Written as `not x > 0`, not `x <= 0`: NaN compares False
@@ -571,6 +966,12 @@ class StoreApprovalChannel:
             # still durably stored as "pending" forever. Found by Codex
             # review before this ever shipped.
             raise ValueError(f"ttl must be positive, got {ttl}")
+        if wait_budget is not None and wait_budget <= timedelta(0):
+            # Same reasoning as ttl's own check above: a nonpositive
+            # wait_budget would make ask() give up on its very first poll,
+            # every time, for a channel that otherwise looks correctly
+            # configured.
+            raise ValueError(f"wait_budget must be positive, got {wait_budget}")
         if renotify_interval is not None and renotify_interval <= timedelta(0):
             # `None` is already the documented way to disable reminders --
             # zero/negative is not a smaller version of that, it's
@@ -625,6 +1026,10 @@ class StoreApprovalChannel:
         self._task_id = task_id
         self._poll_seconds = poll_seconds
         self._ttl = ttl
+        # Never longer than the ticket is alive -- waiting past expiry would
+        # just be waiting for a corpse. `None` (the default) reproduces this
+        # module's own pre-split behaviour exactly: wait the full ttl.
+        self._wait_budget = ttl if wait_budget is None else min(wait_budget, ttl)
         self._notify = notify
         self._notify_timeout = notify_timeout
         self._renotify_interval = renotify_interval
@@ -632,6 +1037,11 @@ class StoreApprovalChannel:
         #: an agent's own channel, "approval" for a default TieredGate "ask"
         #: gate. See TicketKind's docstring.
         self._kind = kind
+        #: Stamped on every ticket this instance creates -- see
+        #: ApprovalTicket.operator_only's own docstring. Pure metadata as
+        #: far as this class is concerned; it enforces nothing about it
+        #: itself.
+        self._operator_only = operator_only
         #: The most recent detached notify task `_send()` created for each
         #: approval_id, if any is still running -- lets `_send()` refuse
         #: to start a SECOND one for the SAME ticket while a permanently
@@ -673,7 +1083,38 @@ class StoreApprovalChannel:
             return await asyncio.to_thread(func, *args, **kwargs)
         return func(*args, **kwargs)
 
-    async def _send(self, ticket: ApprovalTicket, message: str) -> None:
+    async def _send(self, ticket: ApprovalTicket, message: str, *, deadline: datetime | None = None) -> None:
+        """``deadline``, when given, REPLACES ``ticket.expires_at`` as what
+        this send's timeout is measured against (``self._notify_timeout``
+        itself still always applies on top, via the ``min()`` below) --
+        used for the FIRST notification and for a renotify reminder, both
+        sent while a wait is still genuinely in progress, to also respect
+        ``StoreApprovalChannel``'s own ``wait_budget`` (not just
+        ``ticket.expires_at``/``ttl``): without it, a short ``wait_budget``
+        paired with a much longer ``ttl`` and a stalled notifier let the
+        very first send alone block for up to ``notify_timeout`` (10s by
+        default) before ``ask()`` ever reached its own polling loop,
+        overshooting a ``wait_budget`` that could be milliseconds. Found
+        by Codex review before this ever shipped.
+
+        Both terminal notices -- "stopped waiting" (``wait_budget``
+        elapsed, ticket still live) and "expired" (``ttl`` elapsed) --
+        pass their own explicit ``deadline`` (``now + notify_timeout``)
+        rather than relying on the default ``ticket.expires_at``-based
+        fallback below. Two different failure modes motivate this for the
+        two calls: for "expired", ``ticket.expires_at`` has ALREADY
+        passed, so the default would compute a NEGATIVE remaining time,
+        floor straight to a ``0.0`` timeout, and cancel the notifier
+        before it could ever deliver the message explaining the expiry.
+        For "stopped waiting", ``ticket.expires_at`` is usually still far
+        in the FUTURE (``ttl`` is typically much longer than
+        ``wait_budget``), so the default would instead let a stalled
+        notifier cost this already-giving-up call up to a full extra
+        ``notify_timeout`` on top of a ``wait_budget`` that may be
+        milliseconds -- exactly the inflation ``wait_budget`` exists to
+        cap. Found by Codex review before this ever shipped (two rounds:
+        the first fix only caught the "expired" case).
+        """
         if self._notify is None:
             return
         existing = self._notify_tasks.get(ticket.approval_id)
@@ -705,7 +1146,21 @@ class StoreApprovalChannel:
         # hanging notifier would return ~10s late instead of ~50ms late,
         # contradicting the timeout this channel documents. Found by
         # Codex review before this ever shipped.
-        remaining = (ticket.expires_at - datetime.now(UTC)).total_seconds()
+        now = datetime.now(UTC)
+        # `deadline`, when given, REPLACES the ticket.expires_at-based cap
+        # entirely rather than being combined with it via min(): the one
+        # caller that needs this (an already-past-expiry terminal notice)
+        # needs that past expires_at taken OUT of the computation, not
+        # min'd against (min() with an already-past timestamp would still
+        # floor straight to 0.0 regardless of how far in the future
+        # `deadline` itself is). `StoreApprovalChannel.ask()`'s own
+        # `wait_budget` is always <= `ttl` by construction (see __init__),
+        # so a `deadline=stop_waiting_at` passed for a send that's still
+        # genuinely in progress is already the tighter of the two without
+        # needing to also compare it against ticket.expires_at here. Found
+        # by Codex review before this ever shipped.
+        cap_at = deadline if deadline is not None else ticket.expires_at
+        remaining = (cap_at - now).total_seconds()
         timeout = min(self._notify_timeout, max(remaining, 0.0))
 
         # A bounded wait, not just a try/except: a notify callback that
@@ -759,6 +1214,11 @@ class StoreApprovalChannel:
                         "notify failed for ticket %s -- it still exists and is still answerable",
                         ticket.approval_id,
                         exc_info=exc,
+                    )
+                    self._queue.record_notify_failure(
+                        source=f"StoreApprovalChannel:{ticket.kind}:detached",
+                        text=message,
+                        error=repr(exc),
                     )
 
             notify_task.add_done_callback(_log_if_failed)
@@ -909,12 +1369,102 @@ class StoreApprovalChannel:
                     timeout,
                     ticket.approval_id,
                 )
-        except Exception:
+                self._audit_notify_failure(
+                    source=f"StoreApprovalChannel:{ticket.kind}",
+                    text=message,
+                    error=f"timed out after {timeout:.1f}s",
+                )
+        except Exception as exc:
             logging.getLogger(__name__).exception(
                 "notify failed for ticket %s -- it still exists and is still answerable", ticket.approval_id
             )
+            self._audit_notify_failure(source=f"StoreApprovalChannel:{ticket.kind}", text=message, error=repr(exc))
+
+    def _audit_notify_failure(self, *, source: str, text: str, error: str) -> None:
+        """Record a failed notification without holding up the wait.
+
+        The audit write is a plain Store write; on a contended file-backed
+        Store it can block for SQLite's whole busy timeout, after ``_send()``
+        has already spent ``notify_timeout``. Run inline it would push
+        ``ask()`` past its ``wait_budget`` and freeze every other coroutine
+        on the loop, so it runs as a retained detached task instead (off the
+        loop when the queue allows it). Best-effort, like the record itself.
+        Found by Codex review."""
+        record = self._queue.record_notify_failure
+        if self._queue.safe_to_call_from_any_thread:
+            task = asyncio.ensure_future(asyncio.to_thread(record, source=source, text=text, error=error))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+        else:
+            record(source=source, text=text, error=error)
+
+    def _record_refusal(self, ticket: ApprovalTicket, *, reason: str, responder: str) -> None:
+        """A refusal THIS CHANNEL knows the true reason for -- rejected by
+        an actual human, or expired with nobody ever answering.
+
+        The gate-level recorder (``queue.record_denial`` wired as
+        :class:`~lazybridge.ext.approval.tiered.TieredGate`'s own
+        ``on_record``) only ever sees TieredGate's generic ``"'...' denied
+        by the human approver"`` sentence -- the same text whether a human
+        actually declined or a deadline simply passed with nobody looking.
+        This records the version where that distinction is still known,
+        through the SAME :meth:`ApprovalQueue.record_denial` sink so both
+        audit paths land in one place. Synchronous and direct (not through
+        ``self._call``'s offload): this runs once, on ``ask()``'s own
+        terminal path, not in the hot polling loop, the same trade-off the
+        final cleanup at the bottom of ``ask()`` already makes.
+        """
+        self._queue.record_denial(
+            SimpleNamespace(
+                action="deny",
+                tool_name=_tool_name_from_prompt(ticket.prompt) or ticket.kind,
+                kind="approval-channel",
+                tier="ask",
+                message=reason,
+                responder=responder,
+                cwd="",
+                arguments_preview=ticket_gist(ticket.prompt),
+            )
+        )
 
     async def ask(self, prompt: str) -> bool:
+        # An answer a human already gave after an EARLIER waiter had
+        # already given up on it (see wait_budget below, and
+        # ApprovalQueue.claim_earlier_approval's own docstring) -- checked
+        # BEFORE filing a new ticket, or the same question gets asked again
+        # while the answer to it already sits unread in the queue.
+        #
+        # Shielded, like the ticket-creation call below: claim_earlier_approval
+        # does a CAS that SPENDS an existing approval (sets consumed_at) --
+        # the underlying thread-pool work can't actually be stopped once
+        # started, so an unshielded await that unwinds on cancellation would
+        # let that CAS land moments later with nobody ever told whether it
+        # won, silently spending a human's "yes" for a call that never
+        # itself returned True to anyone. Waiting out the cancellation here
+        # (rather than detaching, the way a fresh ticket's own orphaned
+        # creation is retired) is deliberate: a claim either wins or
+        # doesn't, there is no record to roll back the way an orphaned
+        # ticket is rejected -- the outcome is simply resolved before this
+        # cancellation becomes observable, not undone. Found by Codex
+        # review before this ever shipped.
+        claim = asyncio.ensure_future(
+            self._call(
+                self._queue.claim_earlier_approval,
+                task_id=self._task_id,
+                prompt=prompt,
+                operator_only=self._operator_only,
+            )
+        )
+        try:
+            claimed = await asyncio.shield(claim)
+        except asyncio.CancelledError:
+            while not claim.done():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(claim)
+            raise
+        if claimed:
+            return True
+
         # ApprovalQueue's own methods are plain synchronous Store I/O (by
         # design -- usable from a sync caller too, e.g. a CLI or a plain
         # webhook handler), including, for a file-backed queue, opening a
@@ -939,7 +1489,14 @@ class StoreApprovalChannel:
         # outer cancellation. Found by Codex review before this ever
         # shipped.
         create = asyncio.ensure_future(
-            self._call(self._queue.create_ticket, task_id=self._task_id, prompt=prompt, kind=self._kind, ttl=self._ttl)
+            self._call(
+                self._queue.create_ticket,
+                task_id=self._task_id,
+                prompt=prompt,
+                kind=self._kind,
+                ttl=self._ttl,
+                operator_only=self._operator_only,
+            )
         )
 
         async def _retire_orphaned_ticket() -> None:
@@ -1053,22 +1610,156 @@ class StoreApprovalChannel:
         # to a specific approval_id at all. Found by Codex review before
         # this ever shipped.
         message = f"{prompt}\n\nReply /approve {ticket.approval_id} or /reject {ticket.approval_id} <reason>."
+        # How long THIS call waits before giving up -- never past the
+        # ticket's own expires_at (self._wait_budget is already clamped to
+        # self._ttl at construction, but a ticket's actual expires_at is
+        # ticket.created_at + self._ttl computed independently by
+        # create_ticket, so this is derived from the ticket itself rather
+        # than re-deriving it from self._ttl a second time).
+        stop_waiting_at = ticket.created_at + self._wait_budget
         try:
-            await self._send(ticket, message)
+            await self._send(ticket, message, deadline=stop_waiting_at)
             last_notified = datetime.now(UTC)
             while True:
                 current = await self._call(self._queue.get_ticket, ticket.approval_id)
-                if current is None or current.status == "rejected":
+                if current is None or current.status in ("rejected", "expired"):
+                    # "expired" reaches here when some OTHER caller (an
+                    # operator tool, a second concurrent poller) calls
+                    # expire_ticket() directly -- expire_ticket itself does
+                    # not check elapsed time, only CAS's pending -> expired,
+                    # so this can happen before THIS loop's own
+                    # current.expires_at <= now check below would ever fire
+                    # on its own. Without this branch, an externally-expired
+                    # ticket fell through to that later check, which stayed
+                    # false (not actually time-expired yet), and this loop
+                    # kept polling -- and even re-notifying -- an already
+                    # terminal ticket indefinitely. Found by Codex review
+                    # before this ever shipped.
+                    #
+                    # Recorded HERE, where the difference is still known --
+                    # by the time a plain "denied by the human approver" (if
+                    # this channel sits behind TieredGate) reaches the
+                    # gate-level recorder it is the same sentence for a
+                    # rejection and for a timeout.
+                    if current is not None and current.status == "expired":
+                        reason = "expired" + (f": {current.reason}" if current.reason else "")
+                        responder = "nobody"
+                    else:
+                        actor = (current.actor if current is not None else None) or "unknown"
+                        reason = f"rejected by {actor}" + (
+                            f": {current.reason}" if current is not None and current.reason else ""
+                        )
+                        responder = actor
+                    self._record_refusal(current or ticket, reason=reason, responder=responder)
                     return False
                 if current.status == "approved":
-                    return True
+                    # Spent now, not left for a later claim_earlier_approval
+                    # to find still "approved" and unconsumed -- otherwise a
+                    # later retry with the IDENTICAL prompt (same task_id)
+                    # could silently re-claim and re-run THIS SAME approval
+                    # a second time, off one human decision.
+                    #
+                    # The return value matters, not just the side effect:
+                    # TWO CONCURRENT ask() calls for the identical
+                    # (task_id, prompt) each create their OWN ticket (tickets
+                    # are never deduplicated by content), and either one's
+                    # ticket getting approved makes claim_earlier_approval
+                    # claimable by the OTHER call too. If this call's own
+                    # mark_approval_consumed loses that race (the other call's
+                    # claim_earlier_approval won it first), returning True
+                    # here regardless would let BOTH calls report success for
+                    # the SAME single human decision -- two executions from
+                    # one "yes". Only the caller that actually wins the
+                    # consumption may report True; losing it is treated the
+                    # same as never having been approved at all, for THIS
+                    # call. Found by Codex review before this ever shipped
+                    # (two rounds: the first fix recorded consumption but
+                    # ignored whether it actually won).
+                    return await self._call(self._queue.mark_approval_consumed, current.approval_id)
                 now = datetime.now(UTC)
+                if current.expires_at > now >= stop_waiting_at:
+                    # THIS CALLER stops waiting; the REQUEST does not die.
+                    # Nothing is expired and nothing is recorded as refused
+                    # here, because nobody refused anything -- the ticket
+                    # stays pending, listed, and answerable, and a LATER
+                    # call to ask() with the identical prompt picks up an
+                    # answer given after this point via
+                    # claim_earlier_approval, instead of asking the same
+                    # question again into a void.
+                    waited = int((now - ticket.created_at).total_seconds() // 60)
+                    await self._send(
+                        current,
+                        f"⏸️ Stopped waiting after {waited} min, so this did NOT run. The request is still "
+                        f"open and still answerable -- an answer given now still counts and can be picked up "
+                        f"on a later attempt.\n\n{ticket_gist(ticket.prompt)}",
+                        # An explicit, bounded deadline -- NOT the default
+                        # fallback to ticket.expires_at, which can still be
+                        # arbitrarily far in the future (ttl is usually much
+                        # longer than wait_budget). Falling back to it here
+                        # would let a stalled notifier cost this already-
+                        # giving-up call up to a full extra notify_timeout on
+                        # top of a wait_budget that may be milliseconds --
+                        # exactly the inflation wait_budget exists to put a
+                        # ceiling on. Found by Codex review before this ever
+                        # shipped.
+                        deadline=now + timedelta(seconds=self._notify_timeout),
+                    )
+                    return False
                 if current.expires_at <= now:
+                    # Giving up silently would make a timeout
+                    # indistinguishable, from the human's side, from a
+                    # message they simply never opened, and indistinguishable,
+                    # from this channel's side, from a human saying no.
+                    if not await self._call(self._queue.expire_ticket, current.approval_id):
+                        # Lost a race on the deadline: someone answered
+                        # between the read above and this write. Their
+                        # answer is the real one -- ignoring the CAS result
+                        # here would tell a human who just approved that
+                        # their action "did NOT run", and leave the audit
+                        # trail saying approved while nothing happened.
+                        #
+                        # Spent here too, exactly like the ordinary approved
+                        # path above -- returning True directly, without
+                        # consuming, left this ticket "approved" and
+                        # unconsumed, the precise shape claim_earlier_approval
+                        # looks for, so a LATER identical ask() could
+                        # silently re-claim and re-run this SAME approval a
+                        # second time. The return value is the CAS outcome,
+                        # not a bare "was it approved": a lost consumption
+                        # race here (a concurrent caller's own
+                        # claim_earlier_approval winning it first) means
+                        # someone else already claimed it, so THIS call must
+                        # not also report success -- same reasoning as the
+                        # ordinary approved path. Found by Codex review
+                        # before this ever shipped.
+                        settled = await self._call(self._queue.get_ticket, current.approval_id)
+                        if settled is not None and settled.status == "approved":
+                            return await self._call(self._queue.mark_approval_consumed, settled.approval_id)
+                        return False
+                    waited = int((now - ticket.created_at).total_seconds() // 60)
+                    self._record_refusal(
+                        current, reason=f"expired: nobody answered in {waited} min", responder="nobody"
+                    )
+                    await self._send(
+                        current,
+                        f"⌛ No answer in {waited} min, so this did NOT run. Nothing is waiting on you now; "
+                        f"ask again if it should still happen.\n\n{ticket_gist(ticket.prompt)}",
+                        # An explicit FUTURE deadline, not the default
+                        # fallback to ticket.expires_at: this send runs
+                        # AFTER the ticket's own expires_at has already
+                        # passed (that's why we're here), so the default
+                        # cap would compute a NEGATIVE remaining time,
+                        # floor to a 0.0 timeout, and cancel the notifier
+                        # before it could ever deliver the one message
+                        # explaining the expiry. Found by Codex review
+                        # before this ever shipped.
+                        deadline=now + timedelta(seconds=self._notify_timeout),
+                    )
                     return False
                 if self._renotify_interval is not None and now - last_notified >= self._renotify_interval:
                     waited_minutes = int((now - ticket.created_at).total_seconds() // 60)
                     reminder = f"⏰ Still waiting on this one ({waited_minutes} min) -- {message}"
-                    await self._send(current, reminder)
+                    await self._send(current, reminder, deadline=stop_waiting_at)
                     # A FRESH timestamp, not the pre-send `now` above: a
                     # reminder notify can itself take real time (bounded
                     # by notify_timeout, which can be a meaningful
@@ -1098,8 +1789,13 @@ class StoreApprovalChannel:
                 # actually took. Found by Codex review before this ever
                 # shipped.
                 now = datetime.now(UTC)
-                seconds_until_expiry = (current.expires_at - now).total_seconds()
-                await asyncio.sleep(min(self._poll_seconds, max(seconds_until_expiry, 0.0)))
+                # Also capped at stop_waiting_at, not just expires_at: without
+                # this a long poll_seconds (or a short wait_budget well inside
+                # a much longer ttl) could sleep straight past the point this
+                # call is meant to give up, overshooting it by up to a whole
+                # poll interval before the check above ever runs again.
+                seconds_until_deadline = (min(current.expires_at, stop_waiting_at) - now).total_seconds()
+                await asyncio.sleep(min(self._poll_seconds, max(seconds_until_deadline, 0.0)))
         except BaseException as exc:
             # Best-effort: if this coroutine exits WITHOUT returning --
             # cancellation (a caller's own timeout, task shutdown, process

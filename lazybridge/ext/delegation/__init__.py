@@ -46,6 +46,7 @@ from lazybridge.ext.delegation.jobs import (
     DEFAULT_JOB_PREFIX,
     DEFAULT_SESSION_KEY_PREFIX,
     JobRegistry,
+    current_owner_fields,
     session_id_key,
 )
 from lazybridge.ext.delegation.writers import make_claude_writer, make_codex_writer
@@ -54,6 +55,7 @@ __all__ = [
     "DEFAULT_JOB_PREFIX",
     "DEFAULT_SESSION_KEY_PREFIX",
     "JobRegistry",
+    "current_owner_fields",
     "make_background_delegate",
     "make_claude_delegate_engine_factory",
     "make_claude_writer",

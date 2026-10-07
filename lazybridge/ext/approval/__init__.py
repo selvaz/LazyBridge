@@ -31,10 +31,17 @@ primitive every agent needs. Nothing here is provider-specific — one
 from __future__ import annotations
 
 from lazybridge.ext.approval.queue import (
+    DEFAULT_DENIAL_PREFIX,
+    DEFAULT_NOTIFY_FAILURE_PREFIX,
+    DEFAULT_PREFIX,
+    DEFAULT_RENOTIFY_INTERVAL,
+    DEFAULT_TTL,
+    DEFAULT_WAIT_BUDGET,
     ApprovalQueue,
     ApprovalTicket,
     StoreApprovalChannel,
     TicketKind,
+    TicketStatus,
     ticket_gist,
 )
 from lazybridge.ext.approval.tiered import (
@@ -48,6 +55,12 @@ from lazybridge.ext.approval.tiered import (
 )
 
 __all__ = [
+    "DEFAULT_DENIAL_PREFIX",
+    "DEFAULT_NOTIFY_FAILURE_PREFIX",
+    "DEFAULT_PREFIX",
+    "DEFAULT_RENOTIFY_INTERVAL",
+    "DEFAULT_TTL",
+    "DEFAULT_WAIT_BUDGET",
     "ApprovalQueue",
     "ApprovalTicket",
     "AuditRecord",
@@ -56,6 +69,7 @@ __all__ = [
     "StoreApprovalChannel",
     "TerminalChannel",
     "TicketKind",
+    "TicketStatus",
     "Tier",
     "TieredGate",
     "run_gate_sync",

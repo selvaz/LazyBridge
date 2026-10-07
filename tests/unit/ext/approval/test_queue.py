@@ -14,13 +14,25 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import os
 import time
 from datetime import timedelta
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from lazybridge import Store
-from lazybridge.ext.approval import ApprovalQueue, ApprovalTicket, Rule, StoreApprovalChannel, TieredGate, ticket_gist
+from lazybridge.ext.approval import (
+    ApprovalQueue,
+    ApprovalTicket,
+    Rule,
+    StoreApprovalChannel,
+    TerminalChannel,
+    TieredGate,
+    ticket_gist,
+)
+from lazybridge.ext.approval.queue import DEFAULT_DENIAL_PREFIX, DEFAULT_NOTIFY_FAILURE_PREFIX
 
 
 async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
@@ -266,7 +278,8 @@ async def test_store_approval_channel_stamps_its_configured_kind_on_tickets_it_c
     queue = ApprovalQueue(store)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -291,7 +304,8 @@ async def test_store_approval_channel_bounds_a_stalled_notify_callback() -> None
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=stalled_notify, notify_timeout=0.02)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.05)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -302,9 +316,20 @@ async def test_store_approval_channel_bounds_a_stalled_notify_callback() -> None
 async def test_notify_wait_does_not_overshoot_a_short_ttl() -> None:
     """notify_timeout alone (10s default) can still make ask() overshoot a
     short ttl by nearly that whole amount whenever a notify call stalls --
-    the wait must be capped by whichever is shorter: notify_timeout, or
-    the ticket's own remaining lifetime. Found by Codex review before this
-    ever shipped."""
+    the INITIAL send must be capped by whichever is shorter: notify_timeout,
+    or the ticket's own remaining lifetime. Found by Codex review before
+    this ever shipped.
+
+    notify_timeout IS set here, unlike this test's own original form --
+    still far longer than ttl (so the INITIAL send's own ttl-wins guarantee
+    stays exercised), but no longer the 10s default: the ticket now also
+    gets an EXPIRY notice once ttl elapses (a later addition), and that
+    terminal notice is deliberately bounded by notify_timeout alone (there
+    is no "remaining ttl" left to cap it by; see
+    StoreApprovalChannel._send's own docstring), so a stalled notifier
+    paired with the 10s default would make ask() overshoot this test's own
+    outer wait_for budget for a reason unrelated to what this test checks.
+    """
     queue = ApprovalQueue(Store())
 
     async def stalled_notify(ticket, message):
@@ -316,9 +341,7 @@ async def test_notify_wait_does_not_overshoot_a_short_ttl() -> None:
         poll_seconds=0.01,
         ttl=timedelta(seconds=0.05),
         notify=stalled_notify,
-        # Default notify_timeout (10s) is deliberately left unset here --
-        # the fix is that ttl (50ms) wins regardless, not that this test
-        # passes a short notify_timeout to dodge the bug.
+        notify_timeout=0.5,
     )
 
     result = await asyncio.wait_for(channel.ask("please approve"), timeout=2.0)
@@ -351,7 +374,8 @@ async def test_send_does_not_wait_for_a_notify_that_ignores_cancellation() -> No
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=stubborn_notify, notify_timeout=0.02)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.05)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -456,8 +480,12 @@ async def test_stuck_notify_for_one_ticket_does_not_suppress_another() -> None:
     await asyncio.sleep(0.05)  # let its ticket get created, notified, time out, and get detached
 
     async def approve_the_normal_one() -> None:
-        await asyncio.sleep(0.05)
-        [normal_ticket] = [t for t in queue.list_pending_tickets() if t.prompt == "normal one"]
+        def _find() -> list[ApprovalTicket]:
+            return [t for t in queue.list_pending_tickets() if t.prompt == "normal one"]
+
+        while not _find():
+            await asyncio.sleep(0.005)
+        [normal_ticket] = _find()
         queue.approve_ticket(normal_ticket.approval_id, actor="marco", channel="telegram")
 
     normal_result, _ = await asyncio.wait_for(
@@ -494,7 +522,8 @@ async def test_send_swallows_a_notifier_that_cancels_itself() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=self_cancelling_notify)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.05)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -526,7 +555,8 @@ async def test_send_swallows_a_notify_that_raises_cancelled_before_returning_an_
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=notify_that_raises_cancelled_on_call)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.05)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -622,7 +652,8 @@ async def test_send_swallows_notifier_self_cancellation_despite_a_stale_cancelli
         assert current.cancelling() > 0
 
         async def approve_soon() -> None:
-            await asyncio.sleep(0.05)
+            while not queue.list_pending_tickets():
+                await asyncio.sleep(0.005)
             [ticket] = queue.list_pending_tickets()
             queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -794,7 +825,8 @@ async def test_store_approval_channel_calls_notify_with_ticket_and_message() -> 
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=notify)
 
     async def approve_soon():
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -819,7 +851,8 @@ async def test_store_approval_channel_survives_a_failing_notify() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=broken_notify)
 
     async def approve_soon():
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -867,7 +900,13 @@ async def test_store_approval_channel_stops_renotifying_once_resolved() -> None:
     )
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.015)
+        # Polls for the ticket to exist rather than a fixed sleep: ask() now
+        # checks claim_earlier_approval (one more offloaded Store round
+        # trip) before create_ticket even runs, and that extra hop can cost
+        # an occasional double-digit-ms jump on Windows' own scheduler
+        # granularity -- a fixed short sleep raced that and flaked.
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -887,7 +926,8 @@ async def test_store_approval_channel_renotify_none_matches_old_single_notify_be
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=notify, renotify_interval=None)
 
     async def approve_after_a_while() -> None:
-        await asyncio.sleep(0.05)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -901,7 +941,8 @@ async def test_store_approval_channel_returns_true_when_approved() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -914,7 +955,8 @@ async def test_store_approval_channel_returns_false_when_rejected() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     async def reject_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.reject_ticket(ticket.approval_id, actor="marco", channel="telegram", reason="no")
 
@@ -1273,7 +1315,7 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     created: list[ApprovalTicket] = []
 
     def _slow_create_ticket(*args, **kwargs):
-        time.sleep(0.1)
+        time.sleep(0.15)
         ticket = real_create_ticket(*args, **kwargs)
         created.append(ticket)
         return ticket
@@ -1282,7 +1324,14 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     task = asyncio.create_task(channel.ask("please approve"))
-    await asyncio.sleep(0.02)  # cancel WHILE create_ticket's own 0.1s sleep is still running
+    # 0.06s, not 0.02s: ask() now runs claim_earlier_approval's own
+    # offloaded Store round trip BEFORE ever starting create_ticket, and
+    # that extra hop can occasionally cost a double-digit-ms jump on
+    # Windows' own scheduler granularity -- too tight a margin here let
+    # this cancellation land on THAT call instead of (as this test
+    # intends) on create_ticket's own 0.15s sleep, which never ran
+    # create_ticket at all.
+    await asyncio.sleep(0.06)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task
@@ -1320,7 +1369,7 @@ async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> 
     created: list[ApprovalTicket] = []
 
     def _slow_create_ticket(*args, **kwargs):
-        time.sleep(0.15)
+        time.sleep(0.2)
         ticket = real_create_ticket(*args, **kwargs)
         created.append(ticket)
         return ticket
@@ -1329,9 +1378,14 @@ async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> 
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     task = asyncio.create_task(channel.ask("please approve"))
-    await asyncio.sleep(0.02)
-    task.cancel()  # first cancellation -- create_ticket's 0.15s sleep is still running
-    await asyncio.sleep(0.02)
+    # 0.06s, not 0.02s -- see the sibling single-cancellation test's own
+    # identical comment: ask() now runs claim_earlier_approval's own
+    # offloaded Store round trip before create_ticket even starts, and an
+    # occasional scheduler jump could otherwise land this FIRST
+    # cancellation there instead of on create_ticket's own sleep.
+    await asyncio.sleep(0.06)
+    task.cancel()  # first cancellation -- create_ticket's 0.2s sleep is still running
+    await asyncio.sleep(0.06)
     task.cancel()  # second cancellation -- ask() is now waiting on its own retiring watcher
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task
@@ -1393,7 +1447,8 @@ async def test_ask_works_with_sqlite_memory_special_filename() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -1421,7 +1476,8 @@ async def test_ask_works_with_an_encrypted_sqlite_memory_store() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -1441,7 +1497,13 @@ async def test_message_includes_the_ticket_id_in_the_reply_commands() -> None:
         notified.append((ticket, message))
 
     async def approve_soon() -> None:
-        await asyncio.sleep(0.03)
+        # Polls rather than a fixed sleep -- ask() now checks
+        # claim_earlier_approval (one more offloaded Store round trip)
+        # before create_ticket even runs, see
+        # test_store_approval_channel_stops_renotifying_once_resolved's
+        # own identical comment.
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         [ticket] = queue.list_pending_tickets()
         queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
 
@@ -1479,9 +1541,12 @@ async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
 
     assert result is False
     # Unfixed: ~0.2s ttl + ~0.08s stale-reminder overshoot =~ 0.28s+.
-    # Fixed: close to the true 0.2s ttl. 0.26s leaves comfortable margin
-    # on both sides without making the test flaky.
-    assert elapsed < 0.26
+    # Fixed: close to the true 0.2s ttl, PLUS one more ~0.08s round trip
+    # through the same slow_notify for the ticket's own EXPIRY notice (a
+    # later addition -- the ticket now gets told, once, that it expired).
+    # 0.4s leaves comfortable margin on both sides without making the test
+    # flaky.
+    assert elapsed < 0.4
 
 
 async def test_reminder_spacing_accounts_for_notify_delivery_time() -> None:
@@ -1570,7 +1635,8 @@ async def test_tiered_gate_end_to_end_through_store_approval_channel() -> None:
     from lazybridge.engines.coding import ApprovalRequest
 
     async def resolve_soon() -> None:
-        await asyncio.sleep(0.03)
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
         pending = queue.list_pending_tickets()
         assert len(pending) == 1
         queue.approve_ticket(pending[0].approval_id, actor="marco", channel="telegram")
@@ -1580,3 +1646,751 @@ async def test_tiered_gate_end_to_end_through_store_approval_channel() -> None:
     )
     decision, _ = await asyncio.gather(gate(request), resolve_soon())
     assert decision.action == "allow"
+
+
+# --- claim_earlier_approval ---------------------------------------------
+
+
+def test_claim_earlier_approval_spends_a_matching_unconsumed_approval() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is True
+    assert queue.get_ticket(ticket.approval_id).consumed_at is not None
+
+
+def test_claim_earlier_approval_is_single_use() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is True
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
+
+
+def test_claim_earlier_approval_requires_exact_prompt_match() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it, please") is False
+
+
+def test_claim_earlier_approval_requires_matching_task_id() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    assert queue.claim_earlier_approval(task_id="other-task", prompt="run it") is False
+
+
+def test_claim_earlier_approval_ignores_pending_and_rejected_tickets() -> None:
+    queue = ApprovalQueue(Store())
+    pending = queue.create_ticket(task_id="t1", prompt="run it")
+    rejected = queue.create_ticket(task_id="t1", prompt="reject it")
+    queue.reject_ticket(rejected.approval_id, actor="marco", channel="telegram", reason="no")
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
+    assert queue.claim_earlier_approval(task_id="t1", prompt="reject it") is False
+    assert queue.get_ticket(pending.approval_id).status == "pending"
+
+
+def test_claim_earlier_approval_ignores_an_expired_approval() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it", ttl=timedelta(microseconds=1))
+    # approve_ticket itself refuses an expired ticket -- force the row
+    # into "approved" directly to isolate claim_earlier_approval's OWN
+    # expiry check from approve_ticket's.
+    raw = queue._store.read(queue._key(ticket.approval_id))
+    queue._store.write(queue._key(ticket.approval_id), {**raw, "status": "approved"})
+    # A tiny POSITIVE ttl that elapses for real -- see
+    # test_approve_expired_ticket_fails' own identical comment.
+    time.sleep(0.01)
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
+
+
+def test_claim_earlier_approval_rejects_a_legacy_record_with_no_consumed_at_key() -> None:
+    """A ticket written by a pre-1.7.0 ApprovalQueue (before `consumed_at`
+    existed) has no `consumed_at` KEY at all -- `raw.get("consumed_at")`
+    alone can't tell that apart from a ticket deliberately left unconsumed
+    under the new protocol (which always serializes the key, as `null`).
+    Without checking for the key's PRESENCE, an old, already-acted-on
+    approval from before this queue tracked consumption would be
+    silently claimable and re-executed a second time, on no new human
+    decision at all. Found by Codex review (PR #187) before this ever
+    shipped."""
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    # Simulate a legacy (pre-1.7.0) record: strip the consumed_at key
+    # entirely, not just set it to None (model_dump always includes it).
+    key = queue._key(ticket.approval_id)
+    raw = queue._store.read(key)
+    assert "consumed_at" in raw
+    del raw["consumed_at"]
+    queue._store.write(key, raw)
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
+
+
+def test_claim_earlier_approval_requires_matching_operator_only_scope() -> None:
+    """A ticket approved while operator_only=False (any resolver could
+    have answered it) must never satisfy a LATER request made with
+    operator_only=True -- that flag exists so a caller's own resolver can
+    insist a specific human channel answers certain tickets, and reusing
+    a looser-scoped approval would let the stricter request through
+    unseen by that channel. The reverse direction is refused too: scope
+    must match, not merely be compatible. Found by Codex review (PR #187)
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+
+    loose = queue.create_ticket(task_id="t1", prompt="run it", operator_only=False)
+    queue.approve_ticket(loose.approval_id, actor="marco", channel="telegram")
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it", operator_only=True) is False
+    # Never consumed by the mismatched attempt -- still claimable by a
+    # request with the SAME (loose) scope.
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it", operator_only=False) is True
+
+    strict = queue.create_ticket(task_id="t1", prompt="run it strictly", operator_only=True)
+    queue.approve_ticket(strict.approval_id, actor="marco", channel="telegram")
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it strictly", operator_only=False) is False
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it strictly", operator_only=True) is True
+
+
+async def test_store_approval_channel_only_reuses_approvals_with_matching_operator_only_scope() -> None:
+    """End-to-end: a channel configured operator_only=True must not reuse
+    an approval a DIFFERENT, looser channel (operator_only=False) already
+    claimed-free for the identical task/prompt."""
+    queue = ApprovalQueue(Store())
+    loose_channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, operator_only=False)
+    strict_channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, operator_only=True)
+
+    async def approve_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        assert ticket.operator_only is False
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    loose_result, _ = await asyncio.gather(loose_channel.ask("please approve"), approve_soon())
+    assert loose_result is True
+
+    # strict_channel's own claim_earlier_approval must NOT find the
+    # loose, already-approved ticket -- it must file (and wait on) its
+    # OWN new ticket instead.
+    strict_task = asyncio.create_task(strict_channel.ask("please approve"))
+    await asyncio.sleep(0.03)
+    assert strict_task.done() is False
+    strict_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await strict_task
+
+
+# --- expire_ticket -------------------------------------------------------
+
+
+def test_expire_ticket_transitions_a_pending_ticket() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="p")
+    assert queue.expire_ticket(ticket.approval_id) is True
+    assert queue.get_ticket(ticket.approval_id).status == "expired"
+
+
+def test_expire_ticket_is_cas_second_call_fails() -> None:
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="p")
+    assert queue.expire_ticket(ticket.approval_id) is True
+    assert queue.expire_ticket(ticket.approval_id) is False
+
+
+def test_expire_ticket_loses_to_a_concurrent_approval() -> None:
+    """A human answering between the read and the write wins -- expiring
+    an already-approved ticket would silently turn a real "yes" into a
+    "did not run"."""
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="p")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+    assert queue.expire_ticket(ticket.approval_id) is False
+    assert queue.get_ticket(ticket.approval_id).status == "approved"
+
+
+def test_expire_ticket_on_unknown_ticket_returns_false() -> None:
+    queue = ApprovalQueue(Store())
+    assert queue.expire_ticket("nope") is False
+
+
+def test_list_pending_tickets_excludes_an_expired_ticket() -> None:
+    queue = ApprovalQueue(Store())
+    pending = queue.create_ticket(task_id="t1", prompt="p1")
+    expiring = queue.create_ticket(task_id="t1", prompt="p2")
+    queue.expire_ticket(expiring.approval_id)
+
+    assert [t.approval_id for t in queue.list_pending_tickets()] == [pending.approval_id]
+
+
+# --- operator_only --------------------------------------------------------
+
+
+def test_create_ticket_operator_only_defaults_to_false_and_is_stored_when_set() -> None:
+    queue = ApprovalQueue(Store())
+    default_ticket = queue.create_ticket(task_id="t1", prompt="p")
+    flagged_ticket = queue.create_ticket(task_id="t1", prompt="p2", operator_only=True)
+
+    assert default_ticket.operator_only is False
+    assert flagged_ticket.operator_only is True
+    assert queue.get_ticket(flagged_ticket.approval_id).operator_only is True
+
+
+async def test_store_approval_channel_stamps_operator_only_on_tickets_it_creates() -> None:
+    queue = ApprovalQueue(Store())
+    captured: list[ApprovalTicket] = []
+
+    async def approve_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        captured.append(ticket)
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, operator_only=True)
+    await asyncio.gather(channel.ask("please approve"), approve_soon())
+
+    assert captured[0].operator_only is True
+
+
+# --- record_denial ---------------------------------------------------------
+
+
+def test_record_denial_ignores_non_deny_actions() -> None:
+    queue = ApprovalQueue(Store())
+    queue.record_denial(SimpleNamespace(action="allow", tool_name="Bash", message="fine"))
+    assert queue._store.items(prefix=DEFAULT_DENIAL_PREFIX) == []
+
+
+def test_record_denial_writes_a_denial_for_deny_and_denied_actions() -> None:
+    queue = ApprovalQueue(Store())
+    queue.record_denial(
+        SimpleNamespace(
+            action="deny",
+            tool_name="Bash",
+            kind="tool",
+            tier="ask",
+            message="'Bash' denied by the human approver",
+            responder="store-approval-queue",
+            cwd="C:/repo",
+            arguments_preview="git push",
+        )
+    )
+    queue.record_denial(SimpleNamespace(action="denied", tool_name="Write", message="no rule matched"))
+
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_DENIAL_PREFIX)]
+    assert len(records) == 2
+    by_tool = {r["tool_name"]: r for r in records}
+    assert by_tool["Bash"]["message"] == "'Bash' denied by the human approver"
+    assert by_tool["Bash"]["arguments_preview"] == "git push"
+    assert by_tool["Write"]["message"] == "no rule matched"
+
+
+def test_record_denial_prefix_is_configurable() -> None:
+    queue = ApprovalQueue(Store(), denial_prefix="custom-denial:")
+    queue.record_denial(SimpleNamespace(action="deny", tool_name="Bash", message="x"))
+    assert len(list(queue._store.items(prefix="custom-denial:"))) == 1
+    assert queue._store.items(prefix=DEFAULT_DENIAL_PREFIX) == []
+
+
+def test_record_denial_never_raises() -> None:
+    """Best-effort: a failure to record WHY something was refused must not
+    become a second fault on top of the refusal itself."""
+
+    class _BrokenStore:
+        def write(self, *_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("store is down")
+
+        def read(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def items(self, *_args: Any, **_kwargs: Any) -> list:
+            return []
+
+    queue = ApprovalQueue(_BrokenStore())  # type: ignore[arg-type]
+    queue.record_denial(SimpleNamespace(action="deny", tool_name="Bash", message="x"))  # must not raise
+
+
+def test_tiered_gate_on_record_wires_directly_into_record_denial() -> None:
+    """record_denial is generic enough to be TieredGate's own ``on_record``
+    callback directly -- no adapter needed."""
+    queue = ApprovalQueue(Store())
+    gate = TieredGate(channel=TerminalChannel(), rules=(), on_record=queue.record_denial)
+
+    from lazybridge.engines.coding import ApprovalRequest
+
+    request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={}, cwd="C:/repo")
+    decision = asyncio.run(gate(request))
+
+    assert decision.action == "deny"
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_DENIAL_PREFIX)]
+    assert len(records) == 1
+    assert records[0]["tool_name"] == "Bash"
+    assert "no rule" in records[0]["message"]
+
+
+# --- record_notify_failure -------------------------------------------------
+
+
+def test_record_notify_failure_writes_a_durable_record() -> None:
+    queue = ApprovalQueue(Store())
+    queue.record_notify_failure(source="StoreApprovalChannel:approval", text="hello", error="boom")
+
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_NOTIFY_FAILURE_PREFIX)]
+    assert len(records) == 1
+    assert records[0]["source"] == "StoreApprovalChannel:approval"
+    assert records[0]["text"] == "hello"
+    assert records[0]["error"] == "boom"
+    assert records[0]["failed_at"]
+
+
+def test_record_notify_failure_prefix_is_configurable() -> None:
+    queue = ApprovalQueue(Store(), notify_failure_prefix="custom-nf:")
+    queue.record_notify_failure(source="x", text="y", error="z")
+    assert len(list(queue._store.items(prefix="custom-nf:"))) == 1
+
+
+async def test_store_approval_channel_records_a_durable_notify_failure() -> None:
+    queue = ApprovalQueue(Store())
+
+    async def broken_notify(ticket, message):
+        raise RuntimeError("notification channel unreachable")
+
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, notify=broken_notify)
+
+    async def approve_soon():
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    await asyncio.gather(channel.ask("please approve"), approve_soon())
+
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_NOTIFY_FAILURE_PREFIX)]
+    assert len(records) == 1
+    assert "notification channel unreachable" in records[0]["error"]
+
+
+# --- rejection/expiry are recorded as denials through ask() ---------------
+
+
+async def test_ask_records_a_rejection_with_the_real_actor() -> None:
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    async def reject_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.reject_ticket(ticket.approval_id, actor="marco", channel="telegram", reason="too risky")
+
+    result, _ = await asyncio.gather(channel.ask("please approve"), reject_soon())
+    assert result is False
+
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_DENIAL_PREFIX)]
+    assert len(records) == 1
+    assert records[0]["responder"] == "marco"
+    assert "rejected by marco" in records[0]["message"]
+    assert "too risky" in records[0]["message"]
+
+
+async def test_ask_expires_and_records_a_ticket_nobody_answered() -> None:
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.03))
+
+    result = await channel.ask("please approve")
+    assert result is False
+
+    [(_key, raw)] = queue._store.items(prefix="approval:")
+    assert raw["status"] == "expired"
+
+    records = [raw for _key, raw in queue._store.items(prefix=DEFAULT_DENIAL_PREFIX)]
+    assert len(records) == 1
+    assert records[0]["responder"] == "nobody"
+    assert "expired" in records[0]["message"]
+
+
+# --- wait_budget / ttl split -----------------------------------------------
+
+
+async def test_wait_budget_gives_up_without_expiring_the_ticket() -> None:
+    """A caller that stops WAITING does not kill the REQUEST -- the ticket
+    stays pending, listed, and answerable well past wait_budget, as long
+    as it's still within ttl."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        ttl=timedelta(seconds=2),
+        wait_budget=timedelta(seconds=0.03),
+    )
+
+    result = await asyncio.wait_for(channel.ask("please approve"), timeout=1.0)
+
+    assert result is False
+    [ticket] = queue.list_pending_tickets()
+    assert ticket.status == "pending"
+
+
+async def test_wait_budget_default_matches_the_old_full_ttl_wait() -> None:
+    """Leaving wait_budget unset reproduces this module's own pre-split
+    behaviour exactly: a caller waits the full ttl, and a ticket nobody
+    ever answers ends up "expired", not merely abandoned mid-wait."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.03))
+
+    result = await channel.ask("please approve")
+
+    assert result is False
+    [(_key, raw)] = queue._store.items(prefix="approval:")
+    assert raw["status"] == "expired"
+
+
+async def test_a_later_ask_claims_an_approval_given_after_an_earlier_waiter_gave_up() -> None:
+    """The whole point of splitting wait_budget from ttl: an answer given
+    after one caller stopped waiting is not wasted -- a LATER call with
+    the identical prompt picks it up via claim_earlier_approval instead of
+    asking the same question into a void a second time."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        ttl=timedelta(seconds=2),
+        wait_budget=timedelta(seconds=0.03),
+    )
+
+    first_result = await asyncio.wait_for(channel.ask("please approve"), timeout=1.0)
+    assert first_result is False
+
+    [ticket] = queue.list_pending_tickets()
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    second_result = await channel.ask("please approve")
+    assert second_result is True
+
+
+def test_wait_budget_must_be_positive() -> None:
+    queue = ApprovalQueue(Store())
+    with pytest.raises(ValueError, match="wait_budget"):
+        StoreApprovalChannel(queue, task_id="t1", wait_budget=timedelta(0))
+    with pytest.raises(ValueError, match="wait_budget"):
+        StoreApprovalChannel(queue, task_id="t1", wait_budget=timedelta(seconds=-1))
+
+
+def test_wait_budget_is_clamped_to_ttl() -> None:
+    """A wait_budget longer than ttl would just be waiting for a corpse --
+    silently clamped to ttl rather than treated as an error, the same way
+    the promoted source's own wait_budget/ttl relationship works."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", ttl=timedelta(seconds=1), wait_budget=timedelta(seconds=999))
+    assert channel._wait_budget == timedelta(seconds=1)
+
+
+async def test_ask_consumes_the_approval_when_it_loses_the_expiry_cas_to_it() -> None:
+    """If the loop reads a pending ticket immediately before its deadline,
+    an approver can win just before expiry, so this call then crosses the
+    deadline and loses expire_ticket() to that approval. Returning True
+    there directly, without consuming, left the ticket "approved" and
+    unconsumed -- the exact shape a LATER identical ask() could re-claim
+    and re-run. Found by Codex review (PR #187) before this ever
+    shipped."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
+    real_expire = queue.expire_ticket
+
+    def _expire_that_loses_to_a_late_approval(approval_id: str) -> bool:
+        # The real race: an approver's OWN approve_ticket() call succeeds
+        # at some moment BEFORE expires_at (while the ticket was still
+        # genuinely actionable from ITS perspective); by the time THIS
+        # call reaches expire_ticket -- already past expires_at, from
+        # ask()'s own perspective, or it wouldn't be here -- the row is
+        # already "approved". Writing the status directly (bypassing
+        # approve_ticket()'s OWN expiry gate, which would otherwise also
+        # see "now" as past expires_at and refuse) is what reproduces
+        # that ordering deterministically instead of racing real
+        # wall-clock timing.
+        key = queue._key(approval_id)
+        raw = queue._store.read(key)
+        approved = ApprovalTicket.model_validate(raw).model_copy(
+            update={"status": "approved", "actor": "marco", "channel": "telegram"}
+        )
+        queue._store.write(key, approved.model_dump(mode="json"))
+        return real_expire(approval_id)
+
+    queue.expire_ticket = _expire_that_loses_to_a_late_approval  # type: ignore[method-assign]
+
+    result = await channel.ask("please approve")
+
+    assert result is True
+    [ticket] = [ApprovalTicket.model_validate(raw) for _k, raw in queue._store.items(prefix="approval:")]
+    assert ticket.status == "approved"
+    assert ticket.consumed_at is not None
+
+    # Consumed -- a later identical retry must not be able to re-claim it.
+    assert queue.claim_earlier_approval(task_id="t1", prompt="please approve") is False
+
+
+async def test_ask_does_not_report_success_if_it_loses_both_expiry_and_consumption() -> None:
+    """The lost-expiry-CAS branch must report the CONSUMPTION CAS's own
+    outcome, not a bare "was it approved" -- if a concurrent caller's own
+    claim_earlier_approval already consumed this exact ticket first, this
+    call must not ALSO report success for the same single human
+    decision."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
+    real_expire = queue.expire_ticket
+
+    def _expire_that_loses_to_an_already_consumed_approval(approval_id: str) -> bool:
+        # Same deterministic setup as the sibling test above: write
+        # "approved" directly, bypassing approve_ticket()'s own expiry
+        # gate, which would otherwise also see this moment as past
+        # expires_at and refuse.
+        key = queue._key(approval_id)
+        raw = queue._store.read(key)
+        approved = ApprovalTicket.model_validate(raw).model_copy(
+            update={"status": "approved", "actor": "marco", "channel": "telegram"}
+        )
+        queue._store.write(key, approved.model_dump(mode="json"))
+        # Simulate a concurrent caller's claim_earlier_approval having
+        # already won the consumption CAS for this exact ticket.
+        assert queue.mark_approval_consumed(approval_id) is True
+        return real_expire(approval_id)
+
+    queue.expire_ticket = _expire_that_loses_to_an_already_consumed_approval  # type: ignore[method-assign]
+
+    result = await channel.ask("please approve")
+
+    assert result is False
+
+
+# --- TieredGate-aware ticket_gist -------------------------------------------
+
+
+def test_ticket_gist_extracts_the_real_bash_command_from_a_tiered_gate_prompt() -> None:
+    prompt = (
+        '[TieredGate] agent asks to run tool \'Bash\'\n  arguments: {"command": "git push origin main"}\n  cwd: C:/repo'
+    )
+    assert ticket_gist(prompt) == "git push origin main"
+
+
+def test_ticket_gist_tiered_gate_prompt_with_objective_in_the_command_itself() -> None:
+    """A commit message containing the literal substring "Objective:" must
+    not be mistaken for the Objective:-marker fallback -- the TieredGate
+    shape is detected and handled FIRST, before that generic logic ever
+    runs."""
+    prompt = (
+        "[TieredGate] agent asks to run tool 'Bash'\n"
+        '  arguments: {"command": "git commit -m \'Objective: ship it\'"}\n'
+        "  cwd: C:/repo"
+    )
+    assert "Objective: ship it" in ticket_gist(prompt)
+    assert not ticket_gist(prompt).startswith("ship it")
+
+
+def test_ticket_gist_tiered_gate_prompt_falls_back_to_raw_text_when_not_json() -> None:
+    """An elided/truncated arguments line can't parse as JSON -- returns
+    the raw (still truncated, still useful) text rather than raising."""
+    prompt = "[TieredGate] agent asks to run tool 'Bash'\n  arguments: not valid json…\n  cwd: C:/repo"
+    assert ticket_gist(prompt) == "not valid json…"
+
+
+def test_ticket_gist_non_tiered_gate_prompt_uses_the_generic_fallback() -> None:
+    """A plain prompt that doesn't start with the TieredGate marker is
+    untouched by the new extraction -- existing non-TieredGate behaviour
+    (the Objective:/first-line logic) is unchanged."""
+    assert ticket_gist("just a plain question") == "just a plain question"
+
+
+# --- Codex-review fixes -----------------------------------------------------
+
+
+async def test_ask_consumes_its_own_approval_so_a_later_retry_cannot_reclaim_it() -> None:
+    """A ticket resolved through ask()'s OWN polling loop (not a later
+    retry's claim_earlier_approval) must still end up consumed -- otherwise
+    a LATER call with the identical prompt could silently re-claim and
+    re-run this same approval a second time, off one human decision.
+    Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=2))
+
+    async def approve_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    result, _ = await asyncio.gather(channel.ask("please approve"), approve_soon())
+    assert result is True
+
+    [ticket] = [ApprovalTicket.model_validate(raw) for _k, raw in queue._store.items(prefix="approval:")]
+    assert ticket.consumed_at is not None
+
+    # A second ask() with the IDENTICAL prompt must file a brand-new
+    # ticket, not silently re-claim the already-spent approval.
+    second = asyncio.create_task(channel.ask("please approve"))
+    await asyncio.sleep(0.03)
+    assert second.done() is False
+    second.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await second
+
+
+async def test_claim_earlier_approval_survives_cancellation_without_losing_the_outcome() -> None:
+    """Cancelling ask() while the claim_earlier_approval call it makes at
+    the very top is still in flight must not let that CAS land, unobserved,
+    after the cancellation has already propagated -- the same hazard the
+    ticket-creation path already guards against. Found by Codex review
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="please approve")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    real_claim = queue.claim_earlier_approval
+    started = asyncio.Event()
+
+    def _slow_claim(*args: Any, **kwargs: Any) -> bool:
+        started.set()
+        time.sleep(0.05)
+        return real_claim(*args, **kwargs)
+
+    queue.claim_earlier_approval = _slow_claim  # type: ignore[method-assign]
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
+
+    task = asyncio.create_task(channel.ask("please approve"))
+    await started.wait()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await task
+
+    # Resolved one way or the other -- not left mid-flight with ask()
+    # having already moved on.
+    assert queue.get_ticket(ticket.approval_id).consumed_at is not None
+
+
+async def test_ask_treats_an_externally_expired_ticket_as_terminal() -> None:
+    """expire_ticket() doesn't check elapsed time -- another caller can
+    expire a ticket long before its own ttl would naturally elapse.
+    Without an explicit check for this, ask()'s own polling loop fell
+    through to its ttl-based expiry check (which stayed false) and kept
+    polling -- and even re-notifying -- an already-terminal ticket
+    indefinitely. Found by Codex review before this ever shipped."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=5))
+
+    async def expire_it_early() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.expire_ticket(ticket.approval_id)
+
+    result, _ = await asyncio.wait_for(asyncio.gather(channel.ask("please approve"), expire_it_early()), timeout=2.0)
+    assert result is False
+
+
+def test_job_owner_is_alive_rejects_a_recycled_pid_with_a_different_boot_id() -> None:
+    """A record whose owner_pid equals THIS process's own pid but whose
+    owner_boot_id does NOT match is a DEAD earlier owner that happened to
+    be handed this exact pid before -- not this process. Falling through
+    to a process-table check would trivially see THIS process (it has
+    that pid) and wrongly report the old, dead owner as alive. Found by
+    Codex review before this ever shipped."""
+    from lazybridge.ext.delegation.jobs import _job_owner_is_alive
+
+    assert _job_owner_is_alive({"owner_pid": os.getpid(), "owner_boot_id": "a-different-boot-id"}) is False
+
+
+async def test_ask_only_one_of_two_concurrent_identical_calls_wins_one_approval() -> None:
+    """claim_earlier_approval is checked ONCE, at the very top of ask() --
+    so the real race isn't two ask() calls started together (the second
+    one's own claim check runs before the first ticket is even approved);
+    it's call A's own ticket getting approved, with a window between A's
+    OWN polling loop observing "approved" and A finishing the consumption
+    CAS, during which a brand-new call B (identical task_id/prompt)
+    starts, hits its OWN claim_earlier_approval check, and claims that
+    SAME still-unconsumed ticket first. If A then ignored losing that
+    race and returned True anyway, both A and B would report success for
+    one single human decision. Found by Codex review before this ever
+    shipped (round 2)."""
+    import threading
+
+    queue = ApprovalQueue(Store())
+    channel_a = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=5))
+    channel_b = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=5))
+
+    real_mark = queue.mark_approval_consumed
+    b_may_claim = threading.Event()
+    a_may_proceed = threading.Event()
+
+    def _paused_mark(approval_id: str, **kwargs: Any) -> bool:
+        # Runs on a worker thread (offloaded via self._call) -- safe to
+        # block it directly rather than the event loop.
+        b_may_claim.set()
+        a_may_proceed.wait(timeout=2.0)
+        return real_mark(approval_id, **kwargs)
+
+    queue.mark_approval_consumed = _paused_mark  # type: ignore[method-assign]
+
+    async def approve_a_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    task_a = asyncio.create_task(channel_a.ask("please approve"))
+    await approve_a_soon()
+    # A's own loop has observed "approved" and is now paused inside its
+    # OWN mark_approval_consumed call -- the exact window this test
+    # exercises.
+    while not b_may_claim.is_set():
+        await asyncio.sleep(0.005)
+
+    result_b = await channel_b.ask("please approve")
+    a_may_proceed.set()
+    result_a = await asyncio.wait_for(task_a, timeout=2.0)
+
+    assert result_b is True
+    assert result_a is False
+
+
+async def test_stop_waiting_notice_does_not_exceed_notify_timeout_despite_a_long_ttl() -> None:
+    """The "stopped waiting" notice must not fall back to the ordinary
+    ticket.expires_at-based cap: with a long ttl and a short wait_budget,
+    that default would let a stalled notifier cost this already-giving-up
+    call up to a full extra notify_timeout on top of a wait_budget that
+    may be milliseconds -- exactly the inflation wait_budget exists to
+    cap. Found by Codex review before this ever shipped (round 2)."""
+    queue = ApprovalQueue(Store())
+
+    async def stalled_notify(ticket, message):
+        await asyncio.sleep(999)
+
+    channel = StoreApprovalChannel(
+        queue,
+        task_id="t1",
+        poll_seconds=0.01,
+        ttl=timedelta(seconds=30),
+        wait_budget=timedelta(seconds=0.03),
+        notify=stalled_notify,
+        notify_timeout=0.3,
+    )
+
+    import time as _time
+
+    start = _time.monotonic()
+    result = await asyncio.wait_for(channel.ask("please approve"), timeout=2.0)
+    elapsed = _time.monotonic() - start
+
+    assert result is False
+    # Bounded by notify_timeout (0.3s) for the stop-waiting notice itself,
+    # not by the 30s ttl -- comfortable margin without being flaky.
+    assert elapsed < 1.0

@@ -8,7 +8,7 @@ These provider adapters sit in the delegation extension under the policy in
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +29,17 @@ def make_codex_writer(
     notify: Callable[[str], None] | None = None,
     doc: str,
     confirmation_prompt: str = "About to delegate to Codex: {preview}\n\nProceed?",
+    validate_model: Callable[[str | None], str | None] | None = None,
+    admission_gate: Callable[[], Awaitable[Any]] | None = None,
 ) -> Tool:
-    """Build a one-shot-confirmed Codex workspace writer."""
+    """Build a one-shot-confirmed Codex workspace writer.
+
+    ``validate_model`` and ``admission_gate`` are passed straight through to
+    :func:`~lazybridge.ext.delegation.background.make_background_delegate` --
+    see that function's own docstring for what each hook does and when it
+    runs. This module carries no model-validation or admission POLICY of
+    its own; both are entirely the caller's.
+    """
     from lazybridge.engines.coding import CodingAgentConfig
 
     # `gate` does NOT protect this the way it protects the agent's own Bash calls or claude_write's sub-agent — Codex's sandbox is a hard permission boundary, not a per-call tier check, so `channel` is used directly (not through `gate`'s tier matching) to ask ONE question — "delegate this whole task to Codex at all?" — before the sub-agent starts; a live commit was observed landing with zero calls to `gate`.
@@ -57,6 +66,9 @@ def make_codex_writer(
         notify=notify,
         pre_confirm=_confirm,
         doc=doc,
+        model=model,
+        validate_model=validate_model,
+        admission_gate=admission_gate,
     )
 
 
@@ -69,8 +81,17 @@ def make_claude_writer(
     model: str = "sonnet",
     notify: Callable[[str], None] | None = None,
     doc: str,
+    validate_model: Callable[[str | None], str | None] | None = None,
 ) -> Tool:
-    """Build a per-action-gated Claude Code workspace writer."""
+    """Build a per-action-gated Claude Code workspace writer.
+
+    No ``admission_gate`` parameter here, unlike :func:`make_codex_writer`:
+    that hook only ever fires on the ``pre_confirm`` path (see
+    :func:`~lazybridge.ext.delegation.background.make_background_delegate`'s
+    docstring), and this writer has none -- its own actions are already
+    gated per-call through ``gate``, so there is no human wait after which
+    admission would need re-checking.
+    """
     from lazybridge.engines.coding import ClaudeCodePolicy, CodingAgentConfig
 
     config = CodingAgentConfig(
@@ -103,4 +124,6 @@ def make_claude_writer(
         background_tasks=background_tasks,
         notify=notify,
         doc=doc,
+        model=model,
+        validate_model=validate_model,
     )
