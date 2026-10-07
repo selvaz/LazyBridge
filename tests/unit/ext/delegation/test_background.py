@@ -1044,6 +1044,49 @@ async def test_extra_params_are_forwarded_to_engine_factory_and_guard(monkeypatc
     definition = tool.definition()
     assert definition.parameters["required"] == ["objective", "repo"]
     assert definition.parameters["properties"]["repo"]["type"] == "string"
+    assert definition.parameters["additionalProperties"] is False
+
+
+@pytest.mark.asyncio
+async def test_disabled_model_override_is_rejected_not_silently_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With accept_session_override=True but accept_model_override=False,
+    the real Python callable is `(objective, **extra)` -- Tool's own
+    argument validation lets ANY keyword through, including a "model" the
+    caller was never offered. Without an explicit guard, that "model"
+    would reach engine_factory unvalidated (validate_model only ever runs
+    against the tool's own fixed default, since the override is off).
+    Found by Codex review before this ever shipped."""
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+
+    def engine_factory(*, session: str | None = None) -> Any:
+        pytest.fail("engine must not be built once the undeclared model= is rejected")
+
+    def validate_model(model: str | None) -> str | None:
+        if model == "gpt-5":
+            return "REJECTED: gpt-5 is not an Anthropic model"
+        return None
+
+    tool = make_background_delegate(
+        tool_name="claude_write",
+        label="a Claude Code sub-agent",
+        engine_factory=engine_factory,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        model="sonnet",
+        validate_model=validate_model,
+        accept_model_override=False,
+        extra_params={"session": ExtraParam(description="resume")},
+    )
+
+    result = await tool.func(objective="do it", session="resume-me", model="gpt-5")
+
+    assert result.startswith("REJECTED: unexpected argument(s)")
+    assert "model" in result
+    assert _jobs(registry, store) == []
 
 
 @pytest.mark.asyncio
@@ -1432,6 +1475,118 @@ async def test_parallel_delegate_refunds_all_grants_on_the_capacity_race(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_refund_and_clear_makes_a_repeated_refund_pass_a_noop() -> None:
+    """The real scenario this guards: a cancellation lands between two
+    awaits inside a batch-wide refund loop, and the outer ``except
+    BaseException`` handler re-runs the SAME loop over the SAME list to
+    make sure everything is given back. Without clearing each slot as it
+    is refunded, that second pass would refund an admission a second
+    time -- crediting a quota or restoring a one-use approval twice for a
+    single reservation. Found by Codex review before this ever shipped."""
+    from lazybridge.ext.delegation.background import _refund_and_clear
+
+    first, second = _FakeAdmission(allowed=True), _FakeAdmission(allowed=True)
+    admissions: list[Any] = [first, second]
+
+    # First pass gets partway through (only index 0) before being
+    # interrupted -- exactly what a cancellation between the two awaits
+    # would leave behind.
+    await _refund_and_clear(admissions, 0)
+    assert admissions[0] is None
+    assert first.refunded == 1
+
+    # The outer handler re-runs the WHOLE loop regardless of how far the
+    # first pass got.
+    for i in range(len(admissions)):
+        await _refund_and_clear(admissions, i)
+
+    assert first.refunded == 1  # not refunded twice
+    assert second.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_refunds_earlier_grants_when_admission_gate_raises_mid_pass() -> None:
+    """A raised admission_gate (service unreachable, ...) mid-pass must not
+    leak the admissions already granted for earlier objectives in the same
+    batch -- same refund discipline as an ordinary refusal, just reached via
+    an exception instead of an ``allowed=False`` return. Found by Codex
+    review before this ever shipped."""
+    store = Store()
+    registry = JobRegistry(store)
+    granted = [_FakeAdmission(allowed=True), _FakeAdmission(allowed=True)]
+    decisions = iter([*granted, RuntimeError("admission service unreachable")])
+
+    async def admission_gate() -> Any:
+        decision = next(decisions)
+        if isinstance(decision, Exception):
+            raise decision
+        return decision
+
+    tool = make_parallel_delegate(
+        engine_factory=lambda: pytest.fail("no engine must be built once admission_gate raises"),
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+
+    with pytest.raises(RuntimeError, match="admission service unreachable"):
+        await tool.func(["one", "two", "three"])
+
+    assert all(g.refunded == 1 and g.released == 0 for g in granted)
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_refunds_admission_when_scheduling_one_objective_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-objective scheduling failure (registry.write/_track raising)
+    must refund THAT objective's admission rather than hold it for an
+    attempt that never ran, and must not abort objectives already
+    scheduled earlier in the same batch. Found by Codex review before this
+    ever shipped."""
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    admissions = [_FakeAdmission(allowed=True), _FakeAdmission(allowed=True)]
+    decisions = iter(admissions)
+    real_track = _track
+    calls = 0
+
+    def flaky_track(tasks: set[Any], coro: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            coro.close()
+            raise RuntimeError("scheduler unavailable")
+        return real_track(tasks, coro)
+
+    async def admission_gate() -> Any:
+        return next(decisions)
+
+    monkeypatch.setattr("lazybridge.ext.delegation.background._track", flaky_track)
+    tool = make_parallel_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one", "two"])
+    await _drain()
+
+    assert "Started 1 job(s)" in result
+    assert "scheduler unavailable" in result
+    jobs = sorted(_jobs(registry, store), key=lambda j: j["objective"])
+    assert [j["status"] for j in jobs] == ["done", "failed"]
+    # The first objective's job ran and released its admission; the
+    # second's scheduling failed before it ever started, so it is refunded.
+    assert admissions[0].released == 1 and admissions[0].refunded == 0
+    assert admissions[1].refunded == 1 and admissions[1].released == 0
+
+
+@pytest.mark.asyncio
 async def test_parallel_delegate_releases_admission_after_each_job_completes(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_agent(monkeypatch)
     store = Store()
@@ -1507,6 +1662,81 @@ async def test_plan_delegate_refunds_admission_when_the_claim_loses_the_race(mon
     result = await tool.func([{"task_index": 0, "expected_text": "stale text", "objective": "implement it"}])
 
     assert "does not match expected_text" in result
+    assert admission.refunded == 1
+    assert admission.released == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_rechecks_capacity_after_admission_and_refunds_on_the_race() -> None:
+    """admission_gate's own await can suspend for real time, during which a
+    CONCURRENT delegate_plan_tasks call sharing background_tasks can also
+    schedule work -- the top-of-call capacity check alone cannot see that.
+    Found by Codex review before this ever shipped."""
+    store = Store()
+    registry = JobRegistry(store)
+    board = DurableBlackboard(store, "plan-a")
+    board.set_plan("work", ["task one"])
+    admission = _FakeAdmission(allowed=True)
+    background_tasks: set[asyncio.Task[Any]] = set()
+
+    async def admission_gate() -> Any:
+        # Simulate another caller filling up capacity WHILE this call is
+        # suspended awaiting admission.
+        background_tasks.add(asyncio.ensure_future(asyncio.sleep(10)))
+        return admission
+
+    tool = make_plan_delegate(
+        engine_factory=lambda: pytest.fail("must not be built once capacity is exceeded"),
+        registry=registry,
+        background_tasks=background_tasks,
+        board=board,
+        owner="agent:test",
+        max_in_flight_delegate_tasks=1,
+        admission_gate=admission_gate,
+    )
+    result = await tool.func([{"task_index": 0, "expected_text": "task one", "objective": "implement it"}])
+
+    assert "capacity was taken by another call" in result
+    assert board.snapshot().tasks[0]["status"] == "todo"  # never claimed
+    assert admission.refunded == 1
+    assert admission.released == 0
+
+    for task in list(background_tasks):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            _ = await task
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_refunds_admission_when_claim_task_raises() -> None:
+    """``board.claim_task`` raising outright (rather than returning its
+    usual "REJECTED: ..." string -- a real DurableBlackboard exhausting its
+    CAS retries, for instance) must still refund an already-granted
+    admission. Found by Codex review before this ever shipped."""
+    store = Store()
+    registry = JobRegistry(store)
+    admission = _FakeAdmission(allowed=True)
+
+    class BrokenBoard:
+        plan_id = "plan-a"
+
+        def claim_task(self, *_args: Any, **_kwargs: Any) -> str:
+            raise RuntimeError("CAS retries exhausted")
+
+    async def admission_gate() -> Any:
+        return admission
+
+    tool = make_plan_delegate(
+        engine_factory=lambda: pytest.fail("must not be built"),
+        registry=registry,
+        background_tasks=set(),
+        board=BrokenBoard(),
+        owner="agent:test",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func([{"task_index": 0, "expected_text": "task one", "objective": "implement it"}])
+
+    assert "claim_task failed" in result and "CAS retries exhausted" in result
     assert admission.refunded == 1
     assert admission.released == 0
 

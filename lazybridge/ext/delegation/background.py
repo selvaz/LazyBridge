@@ -8,6 +8,7 @@ Tool, and Store primitives, not a primitive every agent must carry.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import re
@@ -89,12 +90,38 @@ async def _run_with_admission_release(coro: Any, admission: Any) -> None:
     back once the job is actually done, not held until some external TTL.
     A ``try/finally`` around the await covers cancellation too (the task
     this wraps is tracked in ``background_tasks`` and can be cancelled from
-    outside).
+    outside): asyncio delivers a cancellation by throwing into this
+    coroutine, which still enters the ``try`` and therefore still reaches
+    the ``finally`` below, even on a task cancelled before its first real
+    step. A task whose underlying event loop stops ticking entirely before
+    ever scheduling this coroutine at all (interpreter shutdown, a loop
+    closed out from under ``background_tasks``) is the one case nothing at
+    this layer can observe or clean up after -- noted, not solved, by
+    Codex review.
     """
     try:
         await coro
     finally:
         await release_admission(admission)
+
+
+async def _refund_and_clear(admissions: list[Any], index: int) -> None:
+    """Refund ``admissions[index]`` and set the slot to ``None``.
+
+    Makes a batch-wide "refund everything still outstanding" pass safe to
+    run MORE THAN ONCE over the same list -- an earlier partial pass
+    (refunding objectives 0..i before being cancelled, say) already
+    cleared the slots it finished, so a later pass over the whole list
+    only ever re-attempts the ones that are still actually outstanding
+    (``refund_admission(None)`` is a no-op). Without this, a cancellation
+    landing between two awaits in one refund loop, followed by this
+    function's own ``except BaseException`` catch-all re-running the SAME
+    loop, could refund one admission twice -- crediting a quota or
+    restoring a one-use approval twice for work that was only ever
+    reserved once. Found by Codex review before this ever shipped.
+    """
+    await refund_admission(admissions[index])
+    admissions[index] = None
 
 
 def _schedule_with_admission_release(
@@ -151,7 +178,11 @@ def _build_delegate_schema(
         properties[name] = {"type": spec.json_type, "description": spec.description}
         if spec.required:
             required.append(name)
-    return {"type": "object", "properties": properties, "required": required}
+    # Advertises the real constraint to the LLM too (the runtime guard in
+    # ``delegate_with_overrides`` is what actually enforces it, since a
+    # schema is advisory): a disabled override or an undeclared name is
+    # not a valid call.
+    return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
 
 def _track(background_tasks: set[asyncio.Task[Any]], coro: Any) -> asyncio.Task[Any]:
@@ -670,7 +701,26 @@ def make_background_delegate(
         delegate.__doc__ = doc
         return Tool.wrap(delegate, name=tool_name)
 
+    allowed_extra_names = set(extra_params or {})
+    if accept_model_override:
+        allowed_extra_names.add("model")
+    if accept_effort_override:
+        allowed_extra_names.add("effort")
+
     async def delegate_with_overrides(objective: str, **extra: Any) -> str:
+        # The real Python signature is `**extra` (see this function's own
+        # module docstring on why), so Tool's own argument validation lets
+        # ANY keyword through, including "model"/"effort" when their
+        # override is NOT enabled -- that gap would let a disabled
+        # ``model`` override reach ``engine_factory`` unvalidated below
+        # (``validate_model`` only ever runs against the RESOLVED model,
+        # which stays this function's own default when the override is
+        # off). Reject anything outside the declared shape first, for
+        # free, before any of that runs. Found by Codex review before
+        # this ever shipped.
+        unexpected = sorted(set(extra) - allowed_extra_names)
+        if unexpected:
+            return f"REJECTED: unexpected argument(s) {unexpected} -- this tool does not accept them"
         call_model = extra.pop("model", None) if accept_model_override else None
         call_effort = extra.pop("effort", None) if accept_effort_override else None
         resolved_model = call_model if call_model is not None else model
@@ -934,72 +984,133 @@ def make_parallel_delegate(
 
         admissions: list[Any] = [None] * len(objectives)
         if admission_gate is not None:
-            for index in range(len(objectives)):
-                admission = await admission_gate()
-                if admission is not None and not getattr(admission, "allowed", True):
-                    # Nothing partially admitted may stay reserved once the
-                    # whole batch is held back -- every admission granted
-                    # for an EARLIER objective in this same loop is given
-                    # back before returning.
-                    for granted in admissions[:index]:
-                        await refund_admission(granted)
-                    rejection = _admission_rejection_text(admission)
+            try:
+                for index in range(len(objectives)):
+                    admission = await admission_gate()
+                    if admission is not None and not getattr(admission, "allowed", True):
+                        # Nothing partially admitted may stay reserved once the
+                        # whole batch is held back -- every admission granted
+                        # for an EARLIER objective in this same loop is given
+                        # back before returning.
+                        for earlier in range(index):
+                            await _refund_and_clear(admissions, earlier)
+                        rejection = _admission_rejection_text(admission)
+                        return (
+                            f"REJECTED: {rejection} (refused at objective {index + 1} of {len(objectives)}; "
+                            "the whole batch was held back rather than started in part)"
+                        )
+                    admissions[index] = admission
+                # Re-checked immediately before scheduling, not just once at
+                # the top of this call: admission_gate's own await can suspend
+                # for real time, during which a CONCURRENT run_parallel call on
+                # this same background_tasks set can pass the exact same
+                # capacity check and also proceed, jointly exceeding
+                # max_in_flight_delegate_tasks even though neither call's own
+                # check ever saw a violation. This narrows that window
+                # (there is still a gap between this read and the scheduling
+                # loop below) rather than closing it outright -- the module's
+                # own docstring already documents this cap as "process-local
+                # and cooperative, not a fleet-wide guarantee"; a fully atomic
+                # reservation would need a lock around the whole
+                # check-then-schedule sequence, a bigger change than this
+                # extraction takes on. Found by Codex review before this ever
+                # shipped.
+                if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
+                    for i in range(len(admissions)):
+                        await _refund_and_clear(admissions, i)
                     return (
-                        f"REJECTED: {rejection} (refused at objective {index + 1} of {len(objectives)}; "
-                        "the whole batch was held back rather than started in part)"
+                        f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new "
+                        f"objective(s) exceeds the process-local cap of {max_in_flight_delegate_tasks} -- capacity "
+                        "was taken by another call while admission was being checked"
                     )
-                admissions[index] = admission
-            # Re-checked immediately before scheduling, not just once at
-            # the top of this call: admission_gate's own await can suspend
-            # for real time, during which a CONCURRENT run_parallel call on
-            # this same background_tasks set can pass the exact same
-            # capacity check and also proceed, jointly exceeding
-            # max_in_flight_delegate_tasks even though neither call's own
-            # check ever saw a violation. This narrows that window
-            # (there is still a gap between this read and the scheduling
-            # loop below) rather than closing it outright -- the module's
-            # own docstring already documents this cap as "process-local
-            # and cooperative, not a fleet-wide guarantee"; a fully atomic
-            # reservation would need a lock around the whole
-            # check-then-schedule sequence, a bigger change than this
-            # extraction takes on. Found by Codex review before this ever
-            # shipped.
-            if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
-                for granted in admissions:
-                    await refund_admission(granted)
-                return (
-                    f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new "
-                    f"objective(s) exceeds the process-local cap of {max_in_flight_delegate_tasks} -- capacity "
-                    "was taken by another call while admission was being checked"
-                )
+            except BaseException:
+                # admission_gate itself raised (or this coroutine was
+                # cancelled) mid-pass -- every admission already granted in
+                # THIS call is still refunded before the exception
+                # propagates; a half-run admission pass must not leak any
+                # more than a cleanly-refused one does. Reusing
+                # ``_refund_and_clear`` (not a bare ``refund_admission``)
+                # matters here specifically: this same ``except`` also
+                # catches a cancellation raised partway through one of the
+                # refund loops ABOVE, and re-running this loop over slots
+                # those already cleared is what keeps that a no-op instead
+                # of a second refund for the same grant. Found by Codex
+                # review before this ever shipped.
+                for i in range(len(admissions)):
+                    await _refund_and_clear(admissions, i)
+                raise
 
         job_ids: list[str] = []
+        failures: list[str] = []
         for objective, admission in zip(objectives, admissions, strict=True):
             job_id = str(uuid.uuid4())
             created_at = datetime.now(UTC).isoformat()
-            registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
-            _schedule_with_admission_release(
-                background_tasks,
-                _run_delegate_job(
-                    job_id,
-                    objective,
-                    tool_name="run_parallel",
-                    label="a parallel Claude Code sub-agent",
-                    engine_factory=resolved_factory,
-                    registry=registry,
-                    notify=notify,
-                    created_at=created_at,
-                ),
-                admission,
-            )
+            try:
+                registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
+                _schedule_with_admission_release(
+                    background_tasks,
+                    _run_delegate_job(
+                        job_id,
+                        objective,
+                        tool_name="run_parallel",
+                        label="a parallel Claude Code sub-agent",
+                        engine_factory=resolved_factory,
+                        registry=registry,
+                        notify=notify,
+                        created_at=created_at,
+                    ),
+                    admission,
+                )
+            except Exception as exc:
+                # Scheduling THIS objective failed before its job ever
+                # started -- its admission (if any) is given back rather
+                # than held for an attempt that never ran, and this
+                # objective's own failure is reported without aborting the
+                # rest of the batch (objectives already scheduled above
+                # keep running). Found by Codex review before this ever
+                # shipped.
+                #
+                # NOT re-checking capacity again after this refund before
+                # scheduling the REST of the batch is a known, accepted gap
+                # in the same direction as the capacity recheck above this
+                # loop: ``refund_admission`` can itself suspend, during
+                # which another caller can take the capacity this refund
+                # just freed, and this call still schedules its remaining
+                # objectives on top of that. Closing it fully would mean
+                # re-running the whole capacity-then-admission dance per
+                # remaining objective, not just once per call -- the same
+                # "process-local and cooperative, not a fleet-wide
+                # guarantee" ceiling this module's own docstring already
+                # names, now reached from one more direction. Flagged by
+                # Codex review; left as a documented limitation rather than
+                # chased further here.
+                await refund_admission(admission)
+                error = f"run_parallel scheduling failed: {exc}"
+                with contextlib.suppress(Exception):
+                    registry.write(
+                        job_id,
+                        objective,
+                        tool_name="run_parallel",
+                        status="failed",
+                        error=error,
+                        created_at=created_at,
+                    )
+                failures.append(f"{job_id[:8]}: {error}")
+                continue
             job_ids.append(job_id[:8])
 
         preview = ", ".join(job_ids)
-        _safe_notify(notify, f"Started {len(objectives)} parallel Claude Code sub-agent(s): {preview}")
-        return (
-            f"Started {len(objectives)} job(s) in parallel ({preview}) -- not blocking you, each is its own "
+        if job_ids:
+            _safe_notify(notify, f"Started {len(job_ids)} parallel Claude Code sub-agent(s): {preview}")
+        summary = (
+            f"Started {len(job_ids)} job(s) in parallel ({preview}) -- not blocking you, each is its own "
             "sub-agent with real write access. check_jobs() shows status/results as each one finishes."
+            if job_ids
+            else "No job was started."
         )
+        if failures:
+            summary += "\n" + "\n".join(f"- {line}" for line in failures)
+        return summary
 
     run_parallel.__doc__ = doc
     return Tool.wrap(run_parallel, name="run_parallel")
@@ -1092,9 +1203,37 @@ def make_plan_delegate(
                 if admission is not None and not getattr(admission, "allowed", True):
                     outcomes[item_number - 1] = f"- item {item_number}: {_admission_rejection_text(admission)}"
                     continue
+                # admission_gate's own await can suspend for real time,
+                # during which a CONCURRENT delegate_plan_tasks call
+                # sharing this same background_tasks set can pass ITS OWN
+                # capacity check and also proceed -- the top-of-call check
+                # above only ever saw this call's own batch. Re-checking
+                # per item (not once for the whole batch, since items are
+                # scheduled one at a time as this loop runs, growing
+                # background_tasks as it goes) narrows that window the
+                # same way run_parallel's own post-admission recheck does.
+                # Found by Codex review before this ever shipped.
+                if len(background_tasks) >= max_in_flight_delegate_tasks:
+                    outcomes[item_number - 1] = (
+                        f"- item {item_number}: REJECTED: {len(background_tasks)} job(s) already in flight "
+                        f"reached the process-local cap of {max_in_flight_delegate_tasks} -- capacity was taken "
+                        "by another call while admission was being checked"
+                    )
+                    await refund_admission(admission)
+                    continue
 
             job_id = str(uuid.uuid4())
-            claimed = board.claim_task(task_index, expected_text, owner=owner)
+            try:
+                claimed = board.claim_task(task_index, expected_text, owner=owner)
+            except Exception as exc:
+                # The claim call itself raised (e.g. a real DurableBlackboard
+                # exhausting its CAS retries) rather than returning its
+                # usual "REJECTED: ..." string -- this attempt never ran
+                # either way, same as the lost-the-claim-race branch below.
+                # Found by Codex review before this ever shipped.
+                outcomes[item_number - 1] = f"- item {item_number}: claim_task failed for task {task_index}: {exc}"
+                await refund_admission(admission)
+                continue
             if isinstance(claimed, str):
                 outcomes[item_number - 1] = f"- item {item_number}: {claimed}"
                 # Granted but the claim lost the race -- this attempt never
