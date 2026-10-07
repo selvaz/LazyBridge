@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gc
 import inspect
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -36,6 +38,33 @@ class _SuccessEnvelope:
 
     def text(self) -> str:
         return self._text
+
+
+class _Metadata:
+    def __init__(self, cost_usd: float = 0.0, nested_cost_usd: float = 0.0) -> None:
+        self.cost_usd = cost_usd
+        self.nested_cost_usd = nested_cost_usd
+
+
+class _CostedEnvelope:
+    ok = True
+
+    def __init__(self, text: str = "done", cost_usd: float = 0.0, nested_cost_usd: float = 0.0) -> None:
+        self._text = text
+        self.metadata = _Metadata(cost_usd, nested_cost_usd)
+
+    def text(self) -> str:
+        return self._text
+
+
+class _EngineStub:
+    """Stand-in for ClaudeCodeEngine/CodexEngine -- both real engines expose
+    plain ``model``/``reasoning_effort`` attributes that ``_engine_identity``
+    reads off whatever ``engine_factory()`` built."""
+
+    def __init__(self, model: str | None = "sonnet", effort: str | None = None) -> None:
+        self.model = model
+        self.reasoning_effort = effort
 
 
 def _install_fake_agent(monkeypatch: pytest.MonkeyPatch, *, engines: list[Any] | None = None) -> None:
@@ -432,3 +461,474 @@ async def test_plan_delegate_setup_failure_releases_claim_and_fails_job(
     [job] = _jobs(registry, store)
     assert job["status"] == "failed"
     assert "scheduler unavailable" in job["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_delegate_job_records_engine_model_cost_and_timestamps(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            self.engine = engine
+
+        async def run(self, objective: str) -> _CostedEnvelope:
+            return _CostedEnvelope(f"did: {objective}", cost_usd=0.12, nested_cost_usd=0.03)
+
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    registry = JobRegistry(store)
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=lambda: _EngineStub(model="sonnet", effort="high"),
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "done"
+    assert job["engine"] == "_EngineStub"
+    assert job["model"] == "sonnet"
+    assert job["effort"] == "high"
+    assert job["execution_started"] is True
+    assert job["cost_usd"] == pytest.approx(0.15)
+    assert job["cost_unknown"] is False
+    assert job["created_at"]
+    assert job["finished_at"]
+
+
+@pytest.mark.asyncio
+async def test_run_delegate_job_keeps_cost_unknown_on_a_worker_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    class RaisingAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> Any:
+            raise RuntimeError("worker crashed")
+
+    monkeypatch.setattr("lazybridge.Agent", RaisingAgent)
+    store = Store()
+    registry = JobRegistry(store)
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=_EngineStub,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert "worker crashed" in job["error"]
+    assert job["cost_unknown"] is True
+    assert "cost_usd" not in job
+    assert job["execution_started"] is True
+
+
+@pytest.mark.asyncio
+async def test_validate_model_runs_before_anything_is_recorded_or_spawned() -> None:
+    store = Store()
+    registry = JobRegistry(store)
+
+    def reject(_model: str | None) -> str | None:
+        return "REJECTED: this engine cannot run that model"
+
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=lambda: pytest.fail("engine must not be constructed"),
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        model="gpt-5",
+        validate_model=reject,
+    )
+    result = await tool.func("do it")
+
+    assert result == "REJECTED: this engine cannot run that model"
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_validate_model_allows_through_when_it_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    seen: list[str | None] = []
+
+    def allow(model: str | None) -> str | None:
+        seen.append(model)
+        return None
+
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        model="sonnet",
+        validate_model=allow,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    assert seen == ["sonnet"]
+    assert _jobs(registry, store)[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_refusal_after_approval_fails_the_job_without_starting_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine_built = False
+
+    def engine_factory() -> Any:
+        nonlocal engine_built
+        engine_built = True
+        return _EngineStub()
+
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def admission_gate() -> Any:
+        return SimpleNamespace(allowed=False, reason="quota exhausted")
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=engine_factory,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert "quota exhausted" in job["error"]
+    assert job["execution_started"] is False
+    assert engine_built is False  # refused before the engine was ever built
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_allows_the_job_to_proceed_after_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    calls = 0
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def admission_gate() -> Any:
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(allowed=True)
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    assert calls == 1
+    assert _jobs(registry, store)[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_none_is_treated_as_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def admission_gate() -> Any:
+        return None
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    assert _jobs(registry, store)[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_is_not_consulted_without_pre_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """admission_gate only ever re-checks admission AFTER a human approval
+    lands -- claude_write's own shape (no pre_confirm) has no such wait to
+    re-check anything across, so an admission_gate passed anyway must be a
+    silent no-op, never consulted."""
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    calls = 0
+
+    async def admission_gate() -> Any:
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(allowed=False, reason="should never be asked")
+
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    assert calls == 0
+    assert _jobs(registry, store)[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_failure_terminates_the_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def broken_admission_gate() -> Any:
+        raise RuntimeError("admission service unreachable")
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=broken_admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert "admission service unreachable" in job["error"]
+    assert job["execution_started"] is False
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_admission_gate_checks_every_objective_before_starting_any(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    checked: list[int] = []
+
+    async def admission_gate() -> Any:
+        checked.append(len(checked))
+        # Refuse the SECOND objective -- the whole batch must roll back,
+        # nothing started for either objective.
+        if len(checked) == 2:
+            return SimpleNamespace(allowed=False, reason="quota exhausted")
+        return SimpleNamespace(allowed=True)
+
+    tool = make_parallel_delegate(
+        engine_factory=lambda: pytest.fail("no engine must be built when the batch is refused"),
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one", "two", "three"])
+
+    assert result.startswith("REJECTED: quota exhausted")
+    assert "objective 2 of 3" in result
+    assert len(checked) == 2  # stopped at the first refusal, never checked the third
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_admission_gate_allows_every_objective(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    checked: list[str] = []
+
+    async def admission_gate() -> Any:
+        checked.append("ok")
+        return None  # None means allowed
+
+    tool = make_parallel_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one", "two"])
+    await _drain()
+
+    assert "Started 2 job(s)" in result
+    assert len(checked) == 2
+    jobs = _jobs(registry, store)
+    assert {job["status"] for job in jobs} == {"done"}
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_admission_gate_rechecks_capacity_before_scheduling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capacity check that only ran once, at the very top, left a window
+    open across admission_gate's own await for a concurrent caller to also
+    pass it and jointly exceed the cap. Re-checking right before scheduling
+    narrows that window. Found by Codex review before this ever shipped."""
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    background_tasks: set[asyncio.Task[Any]] = set()
+
+    async def admission_gate() -> Any:
+        # Simulate another caller filling up capacity WHILE this call is
+        # suspended awaiting admission.
+        background_tasks.add(asyncio.ensure_future(asyncio.sleep(10)))
+        return SimpleNamespace(allowed=True)
+
+    tool = make_parallel_delegate(
+        engine_factory=lambda: pytest.fail("no engine must be built once capacity is exceeded"),
+        registry=registry,
+        background_tasks=background_tasks,
+        doc="parallel",
+        max_in_flight_delegate_tasks=1,
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one"])
+
+    assert result.startswith("REJECTED")
+    assert "capacity was taken by another call" in result
+    assert _jobs(registry, store) == []
+
+    for task in list(background_tasks):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+class _FailedEnvelopeWithZeroCost:
+    """Stand-in for the shape Envelope.error_envelope() produces: ok is
+    False, metadata defaults to all-zero regardless of real spend."""
+
+    ok = False
+
+    def __init__(self, message: str = "boom") -> None:
+        self.error = SimpleNamespace(message=message)
+        self.metadata = _Metadata(0.0, 0.0)
+
+
+class _FailedEnvelopeWithRealCost:
+    """A failure path that preserves its own envelope's real metadata
+    (e.g. an output-validation failure built via model_copy)."""
+
+    ok = False
+
+    def __init__(self, message: str = "boom", cost_usd: float = 0.07) -> None:
+        self.error = SimpleNamespace(message=message)
+        self.metadata = _Metadata(cost_usd, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_failed_result_with_ambiguous_zero_cost_is_recorded_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _FailedEnvelopeWithZeroCost:
+            return _FailedEnvelopeWithZeroCost("engine-level failure")
+
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    registry = JobRegistry(store)
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert job["cost_unknown"] is True
+    assert "cost_usd" not in job
+
+
+@pytest.mark.asyncio
+async def test_failed_result_with_real_nonzero_cost_is_still_recorded_known(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _FailedEnvelopeWithRealCost:
+            return _FailedEnvelopeWithRealCost("output validation failed", cost_usd=0.07)
+
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    registry = JobRegistry(store)
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert job["cost_unknown"] is False
+    assert job["cost_usd"] == pytest.approx(0.07)

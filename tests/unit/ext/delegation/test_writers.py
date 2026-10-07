@@ -137,3 +137,67 @@ async def test_claude_writer_starts_running_without_preconfirm(monkeypatch: pyte
     assert captured["config"].claude.extra_tools == ("Write", "Edit", "Bash")
     assert captured["request_timeout"] is None
     assert captured["max_turns"] == 60
+
+
+@pytest.mark.asyncio
+async def test_claude_writer_validate_model_rejects_before_anything_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    def engine_that_must_not_be_built(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("ClaudeCodeEngine must not be constructed once validate_model refuses")
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.ClaudeCodeEngine", engine_that_must_not_be_built)
+    store = Store()
+    tool = make_claude_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Claude",
+        model="gpt-5",
+        validate_model=lambda model: f"REJECTED: {model} is not an Anthropic model",
+    )
+
+    result = await tool.func("implement it")
+
+    assert result == "REJECTED: gpt-5 is not an Anthropic model"
+    assert _jobs(store) == []
+
+
+@pytest.mark.asyncio
+async def test_codex_writer_admission_gate_refuses_after_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    engine_built = False
+
+    def engine_that_tracks_construction(*args: Any, **kwargs: Any) -> Any:
+        nonlocal engine_built
+        engine_built = True
+        return SimpleNamespace()
+
+    monkeypatch.setattr("lazybridge.engines.codex.CodexEngine", engine_that_tracks_construction)
+
+    class Channel:
+        async def ask(self, prompt: str) -> bool:
+            return True
+
+    async def admission_gate() -> Any:
+        return SimpleNamespace(allowed=False, reason="quota exhausted")
+
+    store = Store()
+    tool = make_codex_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        channel=Channel(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Codex",
+        admission_gate=admission_gate,
+    )
+
+    await tool.func("implement it")
+    await _drain()
+
+    [job] = _jobs(store)
+    assert job["status"] == "failed"
+    assert "quota exhausted" in job["error"]
+    assert job["execution_started"] is False
+    assert engine_built is False

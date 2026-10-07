@@ -13,6 +13,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,44 @@ def _safe_notify(notify: Callable[[str], None] | None, text: str) -> None:
         logging.getLogger(__name__).exception("notify failed for %r", text[:100])
 
 
+def _engine_identity(engine: Any) -> tuple[str, str | None, str | None]:
+    """Best-effort ``(engine class name, model, effort)`` for a job record,
+    read directly off whatever ``engine_factory()`` built -- never a
+    tool-call argument, since none of the tools in this module thread
+    model/effort through their own public signatures today.
+
+    Both :class:`~lazybridge.engines.claude_code.ClaudeCodeEngine` and
+    :class:`~lazybridge.engines.codex.CodexEngine` expose ``model`` and
+    ``reasoning_effort`` as plain attributes; a caller's own test double
+    (or a future engine) need not -- ``getattr`` with a ``None`` default
+    makes this purely cosmetic (a richer job record), never a hard
+    requirement an engine must satisfy.
+    """
+    model = getattr(engine, "model", None)
+    effort = getattr(engine, "reasoning_effort", None)
+    return (
+        type(engine).__name__,
+        model if isinstance(model, str) else None,
+        effort if isinstance(effort, str) else None,
+    )
+
+
+def _result_cost_usd(result: Any) -> float:
+    """Direct plus nested cost off a finished :class:`~lazybridge.Agent.run`
+    result -- matches LazyPulse's own envelope accounting. ``0.0`` for a
+    result shaped without a ``metadata.cost_usd``/``nested_cost_usd`` pair
+    (a caller's own test double, most commonly) rather than raising: a
+    job's durable record must still get written even when its cost can't
+    be read off the result it just produced."""
+    metadata = getattr(result, "metadata", None)
+    if metadata is None:
+        return 0.0
+    try:
+        return float(getattr(metadata, "cost_usd", 0.0)) + float(getattr(metadata, "nested_cost_usd", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 async def _run_delegate_job(
     job_id: str,
     objective: str,
@@ -94,6 +133,7 @@ async def _run_delegate_job(
     plan_id: str | None = None,
     task_index: int | None = None,
     plan_task_text: str | None = None,
+    created_at: str | None = None,
 ) -> None:
     """Run one objective with a fresh engine and persist its outcome.
 
@@ -101,11 +141,60 @@ async def _run_delegate_job(
     concurrency. ClaudeCodeEngine serializes calls through its session lock,
     so N jobs sharing one engine would still execute one at a time despite N
     surrounding asyncio Tasks; separate instances create real concurrency.
+
+    ``created_at`` is the caller's own record of when the JOB was created
+    (not when this coroutine happened to start running it, which can be
+    much later on the ``pre_confirm`` path) -- threaded through every write
+    this function makes rather than recomputed, so a job's full lifetime is
+    visible on its terminal record. Computed fresh (``now``) only if the
+    caller genuinely has no earlier timestamp to hand in.
     """
     from lazybridge import Agent
 
+    created_at = created_at or datetime.now(UTC).isoformat()
+
     try:
-        worker = Agent(engine=engine_factory(), name=f"delegate-{tool_name}-{job_id[:8]}")
+        engine = engine_factory()
+    except Exception as exc:
+        registry.write(
+            job_id,
+            objective,
+            tool_name=tool_name,
+            status="failed",
+            plan_id=plan_id,
+            task_index=task_index,
+            plan_task_text=plan_task_text,
+            error=f"engine_factory failed: {exc}",
+            execution_started=False,
+            created_at=created_at,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
+        _safe_notify(notify, f"{label} job {job_id[:8]} FAILED before it started: {objective[:100]}\n\n{exc}")
+        return
+
+    engine_name, model, effort = _engine_identity(engine)
+    # Crossing this write is the durable boundary between "queued/approved"
+    # and "a worker is actually running, may already be spending money" --
+    # execution_started=True from here on, cost_unknown=True until a result
+    # envelope exists to read a real cost from.
+    registry.write(
+        job_id,
+        objective,
+        tool_name=tool_name,
+        status="running",
+        plan_id=plan_id,
+        task_index=task_index,
+        plan_task_text=plan_task_text,
+        execution_started=True,
+        engine=engine_name,
+        model=model,
+        effort=effort,
+        created_at=created_at,
+        cost_unknown=True,
+    )
+
+    try:
+        worker = Agent(engine=engine, name=f"delegate-{tool_name}-{job_id[:8]}")
         result = await worker.run(objective)
     except Exception as exc:
         registry.write(
@@ -117,10 +206,21 @@ async def _run_delegate_job(
             task_index=task_index,
             plan_task_text=plan_task_text,
             error=str(exc),
+            execution_started=True,
+            engine=engine_name,
+            model=model,
+            effort=effort,
+            created_at=created_at,
+            finished_at=datetime.now(UTC).isoformat(),
+            # No result envelope exists to read a real cost from -- stays
+            # genuinely unknown rather than assumed zero.
+            cost_unknown=True,
         )
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{exc}")
         return
 
+    finished_at = datetime.now(UTC).isoformat()
+    cost_usd = _result_cost_usd(result)
     if result.ok:
         text = result.text()
         registry.write(
@@ -132,11 +232,32 @@ async def _run_delegate_job(
             task_index=task_index,
             plan_task_text=plan_task_text,
             result=text,
+            execution_started=True,
+            engine=engine_name,
+            model=model,
+            effort=effort,
+            created_at=created_at,
+            finished_at=finished_at,
+            cost_usd=cost_usd,
+            cost_unknown=False,
         )
         preview = elide(text)
         _safe_notify(notify, f"{label} job {job_id[:8]} done: {objective[:100]}\n\n{preview}")
     else:
         message = result.error.message if result.error else "unknown error"
+        # Most engine-level failures route through Envelope.error_envelope(),
+        # which never attaches real usage -- metadata stays at its all-zero
+        # default regardless of how much billable work ran before the
+        # failure. A computed cost of exactly 0.0 on a FAILED result is
+        # therefore ambiguous (a genuine free failure -- a guard blocking
+        # before any call, e.g. -- looks identical to "never measured") and
+        # is recorded as unknown rather than a confident zero. A NONZERO
+        # cost can only be genuine measured usage (surfaced by a failure
+        # path that preserves its own envelope's metadata, e.g. an
+        # output-validation failure built via `envelope.model_copy(update=
+        # {"error": ...})`), so that is still recorded as known. Found by
+        # Codex review before this ever shipped.
+        cost_known = cost_usd != 0.0
         registry.write(
             job_id,
             objective,
@@ -146,6 +267,14 @@ async def _run_delegate_job(
             task_index=task_index,
             plan_task_text=plan_task_text,
             error=message,
+            execution_started=True,
+            engine=engine_name,
+            model=model,
+            effort=effort,
+            created_at=created_at,
+            finished_at=finished_at,
+            cost_usd=cost_usd if cost_known else None,
+            cost_unknown=not cost_known,
         )
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{message}")
 
@@ -160,6 +289,9 @@ def make_background_delegate(
     notify: Callable[[str], None] | None,
     doc: str,
     pre_confirm: Callable[[str], Awaitable[bool]] | None = None,
+    validate_model: Callable[[str | None], str | None] | None = None,
+    model: str | None = None,
+    admission_gate: Callable[[], Awaitable[Any]] | None = None,
 ) -> Tool:
     """Build a fire-and-forget delegate with durable status reporting.
 
@@ -168,9 +300,34 @@ def make_background_delegate(
     makes) blocks every other message. ``pre_confirm`` exists because once a
     sub-agent's own actions are not individually gated, the reliable human
     decision point is before the whole delegated objective starts.
+
+    ``validate_model`` and ``model`` together let a caller reject a model
+    its OWN ``engine_factory`` was built to use (e.g. a non-Anthropic model
+    handed to a Claude Code engine) before anything is recorded or spawned
+    -- ``model`` is not a per-call argument on the ``delegate`` tool this
+    builds (the engine a caller wants is already fixed by whatever
+    ``engine_factory`` closes over); it exists purely so this validation can
+    run against the SAME value, once, up front. This package carries no
+    opinion about which models are valid for which engine -- that policy
+    belongs to the caller, passed in as ``validate_model``.
+
+    ``admission_gate``, when given, is awaited exactly once, on the
+    ``pre_confirm`` path only, right after a human approves and right
+    before the engine actually starts -- never before ``pre_confirm`` is
+    asked (a quota/rate check run there would be re-validated against a
+    picture of the world that can be hours stale by the time an unbounded
+    human wait finally resolves) and never on the no-``pre_confirm`` path
+    (there is no wait to re-check anything across there). A rejection is
+    recorded as ``status="failed"`` with ``execution_started=False`` --
+    approved by the human, refused before any real work started, no tokens
+    spent. This package carries no quota/admission POLICY of its own
+    (``admission_gate`` is any zero-argument async callable returning
+    either ``None`` -- treated as "allowed" -- or an object exposing
+    ``.allowed: bool`` and, when denying, a human-readable ``.reason``);
+    that policy is entirely the caller's.
     """
 
-    async def _run_job(job_id: str, objective: str) -> None:
+    async def _run_job(job_id: str, objective: str, created_at: str) -> None:
         if pre_confirm is not None:
             try:
                 approved = await pre_confirm(objective)
@@ -189,6 +346,9 @@ def make_background_delegate(
                     tool_name=tool_name,
                     status="failed",
                     error=f"pre_confirm failed: {exc}",
+                    execution_started=False,
+                    created_at=created_at,
+                    finished_at=datetime.now(UTC).isoformat(),
                 )
                 _safe_notify(notify, f"{label} job {job_id[:8]} FAILED before it started: {objective[:100]}\n\n{exc}")
                 return
@@ -199,10 +359,57 @@ def make_background_delegate(
                     tool_name=tool_name,
                     status="denied",
                     error="denied by approver",
+                    execution_started=False,
+                    created_at=created_at,
+                    finished_at=datetime.now(UTC).isoformat(),
                 )
                 _safe_notify(notify, f"{label} job {job_id[:8]} DENIED before it started: {objective[:100]}")
                 return
-            registry.write(job_id, objective, tool_name=tool_name, status="running")
+            if admission_gate is not None:
+                # THE admission, not a preflight -- a human-approved delegation
+                # can sit waiting, unbounded, for far longer than any reservation
+                # lives, so the only point at which checking admission means
+                # anything is right here: approved, not yet executing.
+                try:
+                    admission = await admission_gate()
+                except Exception as exc:
+                    registry.write(
+                        job_id,
+                        objective,
+                        tool_name=tool_name,
+                        status="failed",
+                        error=f"admission_gate failed: {exc}",
+                        execution_started=False,
+                        created_at=created_at,
+                        finished_at=datetime.now(UTC).isoformat(),
+                    )
+                    _safe_notify(
+                        notify,
+                        f"{label} job {job_id[:8]} was approved, but the admission check itself failed before "
+                        f"it started: {exc}",
+                    )
+                    return
+                if admission is not None and not getattr(admission, "allowed", True):
+                    reason = getattr(admission, "reason", None) or "rejected by admission_gate"
+                    registry.write(
+                        job_id,
+                        objective,
+                        tool_name=tool_name,
+                        status="failed",
+                        error=str(reason),
+                        execution_started=False,
+                        created_at=created_at,
+                        finished_at=datetime.now(UTC).isoformat(),
+                    )
+                    _safe_notify(
+                        notify,
+                        f"{label} job {job_id[:8]} was approved, but admission refused it by the time approval "
+                        f"arrived: {reason}. Nothing was started.",
+                    )
+                    return
+            registry.write(
+                job_id, objective, tool_name=tool_name, status="running", execution_started=False, created_at=created_at
+            )
 
         await _run_delegate_job(
             job_id,
@@ -212,13 +419,23 @@ def make_background_delegate(
             engine_factory=engine_factory,
             registry=registry,
             notify=notify,
+            created_at=created_at,
         )
 
     async def delegate(objective: str) -> str:
+        # Before anything else: no job record, no approval asked. A model
+        # this engine can never run is refused for free, same discipline
+        # applied to every other cheap-to-check precondition in this
+        # package.
+        if validate_model is not None:
+            rejection = validate_model(model)
+            if rejection is not None:
+                return rejection
         job_id = str(uuid.uuid4())
+        created_at = datetime.now(UTC).isoformat()
         initial_status = "awaiting_approval" if pre_confirm is not None else "running"
-        registry.write(job_id, objective, tool_name=tool_name, status=initial_status)
-        _track(background_tasks, _run_job(job_id, objective))
+        registry.write(job_id, objective, tool_name=tool_name, status=initial_status, created_at=created_at)
+        _track(background_tasks, _run_job(job_id, objective, created_at))
         preview = elide(objective)
         if pre_confirm is not None:
             _safe_notify(
@@ -337,6 +554,23 @@ def _resolve_engine_factory(
     return make_claude_delegate_engine_factory(workspace_root=workspace_root, gate=gate, model=model)
 
 
+async def _admission_rejection_message(
+    admission_gate: Callable[[], Awaitable[Any]], *, index: int, total: int
+) -> str | None:
+    """One admission check for one objective in a batch -- ``None`` means
+    allowed. See :func:`make_parallel_delegate`'s own docstring for why a
+    batch stops at the FIRST refusal rather than admitting some objectives
+    and refusing others."""
+    admission = await admission_gate()
+    if admission is None or getattr(admission, "allowed", True):
+        return None
+    reason = getattr(admission, "reason", None) or "rejected by admission_gate"
+    return (
+        f"REJECTED: {reason} (refused at objective {index} of {total}; "
+        "the whole batch was held back rather than started in part)"
+    )
+
+
 def make_parallel_delegate(
     *,
     engine_factory: Callable[[], Any] | None = None,
@@ -349,6 +583,7 @@ def make_parallel_delegate(
     workspace_root: Path | None = None,
     gate: Any = None,
     model: str = "sonnet",
+    admission_gate: Callable[[], Awaitable[Any]] | None = None,
 ) -> Tool:
     """Build a capped, fire-and-forget parallel delegation tool.
 
@@ -356,6 +591,22 @@ def make_parallel_delegate(
     make. The in-flight cap is deliberately process-local and cooperative,
     not a fleet-wide guarantee; it coordinates only callers sharing this
     ``background_tasks`` set.
+
+    ``admission_gate``, when given, is checked ONCE PER OBJECTIVE, not once
+    for the whole batch -- this tool is exactly the shape an admission
+    policy exists for: N engines started from one decision. Checking once
+    for the batch would let a single admission buy every objective's worth
+    of whatever that policy limits; skipping the per-objective check
+    entirely would let a fan-out start above a ceiling a single call would
+    have respected. The checks run BEFORE any objective is scheduled, and
+    the first refusal aborts the WHOLE batch -- nothing partially admitted
+    is started, so a batch too large for the current admission state needs
+    a smaller batch, not a partial one nobody asked for. This mirrors
+    LazyCEO's own ``run_parallel`` batch-rollback behaviour; unlike that
+    source, ``admission_gate`` here is a plain zero-argument callable with
+    no reservation to take out and refund on a later refusal in the SAME
+    batch -- this package has no quota/reservation model of its own, so
+    there is nothing to roll back beyond simply not starting anything yet.
 
     ``run_parallel`` itself must be a COROUTINE function, not a plain one:
     :class:`~lazybridge.Tool` dispatches a synchronous tool's function
@@ -378,10 +629,38 @@ def make_parallel_delegate(
                 f"exceeds the process-local cap of {max_in_flight_delegate_tasks}"
             )
 
+        if admission_gate is not None:
+            for index in range(1, len(objectives) + 1):
+                rejection = await _admission_rejection_message(admission_gate, index=index, total=len(objectives))
+                if rejection is not None:
+                    return rejection
+            # Re-checked immediately before scheduling, not just once at
+            # the top of this call: admission_gate's own await can suspend
+            # for real time, during which a CONCURRENT run_parallel call on
+            # this same background_tasks set can pass the exact same
+            # capacity check and also proceed, jointly exceeding
+            # max_in_flight_delegate_tasks even though neither call's own
+            # check ever saw a violation. This narrows that window
+            # (there is still a gap between this read and the scheduling
+            # loop below) rather than closing it outright -- the module's
+            # own docstring already documents this cap as "process-local
+            # and cooperative, not a fleet-wide guarantee"; a fully atomic
+            # reservation would need a lock around the whole
+            # check-then-schedule sequence, a bigger change than this
+            # extraction takes on. Found by Codex review before this ever
+            # shipped.
+            if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
+                return (
+                    f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new "
+                    f"objective(s) exceeds the process-local cap of {max_in_flight_delegate_tasks} -- capacity "
+                    "was taken by another call while admission was being checked"
+                )
+
         job_ids: list[str] = []
         for objective in objectives:
             job_id = str(uuid.uuid4())
-            registry.write(job_id, objective, tool_name="run_parallel", status="running")
+            created_at = datetime.now(UTC).isoformat()
+            registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
             _track(
                 background_tasks,
                 _run_delegate_job(
@@ -392,6 +671,7 @@ def make_parallel_delegate(
                     engine_factory=resolved_factory,
                     registry=registry,
                     notify=notify,
+                    created_at=created_at,
                 ),
             )
             job_ids.append(job_id[:8])
@@ -428,6 +708,14 @@ def make_plan_delegate(
     function's docstring for why a synchronous one would break
     ``asyncio.create_task`` inside ``_track`` when dispatched through
     :class:`~lazybridge.Tool`'s executor path for plain functions.
+
+    Does not accept ``run_parallel``'s own ``admission_gate`` -- a plan
+    task's claim (``board.claim_task``) and its job record are written
+    together per item, inside one loop, with no separate pre-pass that
+    checks every item before any of them starts; retrofitting the same
+    per-objective check-then-start-nothing-on-refusal shape here would mean
+    unwinding already-claimed board tasks on a later refusal, which this
+    extraction does not take on. Revisit together if a caller needs both.
     """
     resolved_factory = _resolve_engine_factory(engine_factory, workspace_root=workspace_root, gate=gate, model=model)
     plan_id = board.plan_id
@@ -476,6 +764,7 @@ def make_plan_delegate(
 
             coroutine = None
             try:
+                created_at = datetime.now(UTC).isoformat()
                 registry.write(
                     job_id,
                     objective,
@@ -484,6 +773,7 @@ def make_plan_delegate(
                     plan_id=plan_id,
                     task_index=task_index,
                     plan_task_text=expected_text,
+                    created_at=created_at,
                 )
                 coroutine = _run_delegate_job(
                     job_id,
@@ -496,6 +786,7 @@ def make_plan_delegate(
                     plan_id=plan_id,
                     task_index=task_index,
                     plan_task_text=expected_text,
+                    created_at=created_at,
                 )
                 _track(background_tasks, coroutine)
             except Exception as exc:

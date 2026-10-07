@@ -8,6 +8,106 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-10-07
+
+### Added
+
+- **`lazybridge.ext.approval.queue` gains the generic improvements LazyCEO's
+  own evolved copy made after promotion.**
+  - `ApprovalQueue.claim_earlier_approval(task_id, prompt)` lets a caller
+    spend an approval a human gave after an earlier `StoreApprovalChannel.ask()`
+    had already stopped waiting for it (see `wait_budget` below) -- checked
+    automatically at the START of every `ask()` call, before a new ticket is
+    even filed, so the same question is never asked twice while an earlier
+    answer sits unconsumed.
+  - `ApprovalQueue.expire_ticket(approval_id)` and a new `"expired"`
+    `TicketStatus` give a ticket nobody ever answered a durable state
+    distinct from `"rejected"` (a human said no) and from "still pending"
+    (still listed, still actionable). `StoreApprovalChannel.ask()` now calls
+    it when a ticket's own `ttl` genuinely elapses.
+  - `ApprovalQueue.record_denial(record)` and
+    `ApprovalQueue.record_notify_failure(source=..., text=..., error=...)`
+    add durable, best-effort audit trails for refusals and swallowed
+    `notify()` failures -- both configurable via `denial_prefix=`/
+    `notify_failure_prefix=` on `ApprovalQueue.__init__`.
+    `record_denial` is generic enough to wire directly as
+    `TieredGate(..., on_record=queue.record_denial)`; `StoreApprovalChannel`
+    now also calls it with the real reason when IT resolves a ticket
+    (rejected by a human, or expired with nobody answering) -- a case
+    `TieredGate`'s own audit log can't distinguish, since both reach it as
+    the same generic "denied by the human approver" sentence.
+  - `StoreApprovalChannel` gains a `wait_budget` parameter, split from `ttl`:
+    `ttl` is how long a ticket stays *answerable*, `wait_budget` is how long
+    *this one call* blocks for it before giving up (defaulting to the full
+    `ttl`, reproducing the previous behaviour exactly). Giving up on
+    `wait_budget` leaves the ticket pending and answerable -- it does not
+    expire it -- so a later `ask()` call with the identical prompt can pick
+    up an answer given after the first caller moved on, via
+    `claim_earlier_approval`.
+  - `ApprovalTicket.operator_only` is a caller-defined metadata flag carried
+    through `ApprovalQueue.create_ticket(..., operator_only=...)` and
+    `StoreApprovalChannel(..., operator_only=...)`; this package enforces
+    nothing about it, leaving the policy (e.g. "only a specific human
+    channel may resolve this one") entirely to the caller.
+  - `ticket_gist()` now recognizes a `TieredGate`-rendered prompt and
+    extracts the real tool/command text from its `arguments:` line instead
+    of showing the generic `"[TieredGate] agent asks to run tool 'Bash'"`
+    sentence for every pending Bash ticket.
+  - `ApprovalQueue.mark_approval_consumed(approval_id)` is called
+    automatically by `StoreApprovalChannel.ask()`'s own ordinary polling
+    path once it observes `"approved"`, so a LATER call with the identical
+    `(task_id, prompt)` can never find that same approval still unconsumed
+    and re-claim (and re-run) it a second time via `claim_earlier_approval`.
+  - `ask()` now treats an externally `expire_ticket()`-ed ticket (one
+    expired by some OTHER caller, before this call's own `ttl` would have
+    elapsed on its own) as terminal immediately, instead of falling
+    through to its own ttl check and polling (and re-notifying) a
+    ticket that is already done.
+  - The `claim_earlier_approval` check at the top of `ask()`, and the
+    "expired" terminal notice, are now correctly bounded against
+    cancellation and against an already-elapsed ticket lifetime,
+    respectively (see `StoreApprovalChannel._send`'s own docstring).
+- **`lazybridge.ext.delegation` gains admission/validation hooks and richer
+  job records.**
+  - `make_background_delegate` (and `make_codex_writer`/`make_claude_writer`)
+    accept `validate_model` (a sync `model -> rejection string | None` hook
+    run BEFORE anything is recorded or spawned) and `admission_gate` (an
+    async zero-argument hook, consulted only on the `pre_confirm` path,
+    right after a human approves and right before the engine actually
+    starts; a refusal is recorded as `status="failed"` with
+    `execution_started=False` and nothing is started). Neither hook carries
+    any model-validation or admission POLICY of its own -- both are
+    entirely the caller's.
+  - `make_parallel_delegate` accepts the same `admission_gate`, checked ONCE
+    PER OBJECTIVE before any of them starts; the first refusal aborts the
+    whole batch (nothing partially started), and the in-flight capacity cap
+    is rechecked again right before scheduling (narrowing, not closing, the
+    pre-existing cooperative-not-atomic race a concurrent call could win
+    during `admission_gate`'s own await).
+  - A failed delegation whose result envelope carries an ambiguous `0.0`
+    cost (the common shape for an engine-level failure, which never
+    attaches real usage) is recorded `cost_unknown=True` rather than a
+    confidently wrong `cost_usd=0.0`; a failure that preserves real,
+    nonzero measured cost is still recorded as known.
+  - Job records written through `JobRegistry.write` now carry
+    `engine`/`model`/`effort` (read off the actual engine instance),
+    `execution_started`, `cost_usd`/`cost_unknown` (direct + nested cost off
+    the finished result, matching LazyPulse's own accounting),
+    `created_at`/`finished_at`, and an open `extra=` passthrough dict for a
+    caller's own fields -- without forking this method's signature.
+  - `JobRegistry.reclaim_interrupted()` is now owner-aware:
+    `current_owner_fields()` stamps `owner_pid`/`owner_boot_id` on a job a
+    caller wants protected, and only a job whose owner process is
+    confirmed DEAD (checked via `tasklist` on Windows, `os.kill(pid, 0)`
+    elsewhere) is reclaimed -- more than one process can now share a
+    `Store` and be concurrently alive without one wrongly reclaiming the
+    other's in-flight job. A job with no owner stamp is reclaimed exactly
+    as before this existed. A record whose `owner_pid` matches THIS
+    process but whose `owner_boot_id` does not (pid reuse after a restart)
+    is correctly treated as dead rather than falling through to a
+    process-table check that would trivially see this process and report
+    the old, dead owner as alive.
+
 ## [1.6.2] — 2026-10-02
 
 ### Fixed
