@@ -1315,7 +1315,7 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     created: list[ApprovalTicket] = []
 
     def _slow_create_ticket(*args, **kwargs):
-        time.sleep(0.1)
+        time.sleep(0.15)
         ticket = real_create_ticket(*args, **kwargs)
         created.append(ticket)
         return ticket
@@ -1324,7 +1324,14 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     task = asyncio.create_task(channel.ask("please approve"))
-    await asyncio.sleep(0.02)  # cancel WHILE create_ticket's own 0.1s sleep is still running
+    # 0.06s, not 0.02s: ask() now runs claim_earlier_approval's own
+    # offloaded Store round trip BEFORE ever starting create_ticket, and
+    # that extra hop can occasionally cost a double-digit-ms jump on
+    # Windows' own scheduler granularity -- too tight a margin here let
+    # this cancellation land on THAT call instead of (as this test
+    # intends) on create_ticket's own 0.15s sleep, which never ran
+    # create_ticket at all.
+    await asyncio.sleep(0.06)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task
@@ -1362,7 +1369,7 @@ async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> 
     created: list[ApprovalTicket] = []
 
     def _slow_create_ticket(*args, **kwargs):
-        time.sleep(0.15)
+        time.sleep(0.2)
         ticket = real_create_ticket(*args, **kwargs)
         created.append(ticket)
         return ticket
@@ -1371,9 +1378,14 @@ async def test_ask_retires_the_ticket_when_cancelled_twice_during_creation() -> 
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     task = asyncio.create_task(channel.ask("please approve"))
-    await asyncio.sleep(0.02)
-    task.cancel()  # first cancellation -- create_ticket's 0.15s sleep is still running
-    await asyncio.sleep(0.02)
+    # 0.06s, not 0.02s -- see the sibling single-cancellation test's own
+    # identical comment: ask() now runs claim_earlier_approval's own
+    # offloaded Store round trip before create_ticket even starts, and an
+    # occasional scheduler jump could otherwise land this FIRST
+    # cancellation there instead of on create_ticket's own sleep.
+    await asyncio.sleep(0.06)
+    task.cancel()  # first cancellation -- create_ticket's 0.2s sleep is still running
+    await asyncio.sleep(0.06)
     task.cancel()  # second cancellation -- ask() is now waiting on its own retiring watcher
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task
@@ -1699,6 +1711,84 @@ def test_claim_earlier_approval_ignores_an_expired_approval() -> None:
     assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
 
 
+def test_claim_earlier_approval_rejects_a_legacy_record_with_no_consumed_at_key() -> None:
+    """A ticket written by a pre-1.7.0 ApprovalQueue (before `consumed_at`
+    existed) has no `consumed_at` KEY at all -- `raw.get("consumed_at")`
+    alone can't tell that apart from a ticket deliberately left unconsumed
+    under the new protocol (which always serializes the key, as `null`).
+    Without checking for the key's PRESENCE, an old, already-acted-on
+    approval from before this queue tracked consumption would be
+    silently claimable and re-executed a second time, on no new human
+    decision at all. Found by Codex review (PR #187) before this ever
+    shipped."""
+    queue = ApprovalQueue(Store())
+    ticket = queue.create_ticket(task_id="t1", prompt="run it")
+    queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    # Simulate a legacy (pre-1.7.0) record: strip the consumed_at key
+    # entirely, not just set it to None (model_dump always includes it).
+    key = queue._key(ticket.approval_id)
+    raw = queue._store.read(key)
+    assert "consumed_at" in raw
+    del raw["consumed_at"]
+    queue._store.write(key, raw)
+
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it") is False
+
+
+def test_claim_earlier_approval_requires_matching_operator_only_scope() -> None:
+    """A ticket approved while operator_only=False (any resolver could
+    have answered it) must never satisfy a LATER request made with
+    operator_only=True -- that flag exists so a caller's own resolver can
+    insist a specific human channel answers certain tickets, and reusing
+    a looser-scoped approval would let the stricter request through
+    unseen by that channel. The reverse direction is refused too: scope
+    must match, not merely be compatible. Found by Codex review (PR #187)
+    before this ever shipped."""
+    queue = ApprovalQueue(Store())
+
+    loose = queue.create_ticket(task_id="t1", prompt="run it", operator_only=False)
+    queue.approve_ticket(loose.approval_id, actor="marco", channel="telegram")
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it", operator_only=True) is False
+    # Never consumed by the mismatched attempt -- still claimable by a
+    # request with the SAME (loose) scope.
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it", operator_only=False) is True
+
+    strict = queue.create_ticket(task_id="t1", prompt="run it strictly", operator_only=True)
+    queue.approve_ticket(strict.approval_id, actor="marco", channel="telegram")
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it strictly", operator_only=False) is False
+    assert queue.claim_earlier_approval(task_id="t1", prompt="run it strictly", operator_only=True) is True
+
+
+async def test_store_approval_channel_only_reuses_approvals_with_matching_operator_only_scope() -> None:
+    """End-to-end: a channel configured operator_only=True must not reuse
+    an approval a DIFFERENT, looser channel (operator_only=False) already
+    claimed-free for the identical task/prompt."""
+    queue = ApprovalQueue(Store())
+    loose_channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, operator_only=False)
+    strict_channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, operator_only=True)
+
+    async def approve_soon() -> None:
+        while not queue.list_pending_tickets():
+            await asyncio.sleep(0.005)
+        [ticket] = queue.list_pending_tickets()
+        assert ticket.operator_only is False
+        queue.approve_ticket(ticket.approval_id, actor="marco", channel="telegram")
+
+    loose_result, _ = await asyncio.gather(loose_channel.ask("please approve"), approve_soon())
+    assert loose_result is True
+
+    # strict_channel's own claim_earlier_approval must NOT find the
+    # loose, already-approved ticket -- it must file (and wait on) its
+    # OWN new ticket instead.
+    strict_task = asyncio.create_task(strict_channel.ask("please approve"))
+    await asyncio.sleep(0.03)
+    assert strict_task.done() is False
+    strict_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        _ = await strict_task
+
+
 # --- expire_ticket -------------------------------------------------------
 
 
@@ -2006,6 +2096,83 @@ def test_wait_budget_is_clamped_to_ttl() -> None:
     assert channel._wait_budget == timedelta(seconds=1)
 
 
+async def test_ask_consumes_the_approval_when_it_loses_the_expiry_cas_to_it() -> None:
+    """If the loop reads a pending ticket immediately before its deadline,
+    an approver can win just before expiry, so this call then crosses the
+    deadline and loses expire_ticket() to that approval. Returning True
+    there directly, without consuming, left the ticket "approved" and
+    unconsumed -- the exact shape a LATER identical ask() could re-claim
+    and re-run. Found by Codex review (PR #187) before this ever
+    shipped."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
+    real_expire = queue.expire_ticket
+
+    def _expire_that_loses_to_a_late_approval(approval_id: str) -> bool:
+        # The real race: an approver's OWN approve_ticket() call succeeds
+        # at some moment BEFORE expires_at (while the ticket was still
+        # genuinely actionable from ITS perspective); by the time THIS
+        # call reaches expire_ticket -- already past expires_at, from
+        # ask()'s own perspective, or it wouldn't be here -- the row is
+        # already "approved". Writing the status directly (bypassing
+        # approve_ticket()'s OWN expiry gate, which would otherwise also
+        # see "now" as past expires_at and refuse) is what reproduces
+        # that ordering deterministically instead of racing real
+        # wall-clock timing.
+        key = queue._key(approval_id)
+        raw = queue._store.read(key)
+        approved = ApprovalTicket.model_validate(raw).model_copy(
+            update={"status": "approved", "actor": "marco", "channel": "telegram"}
+        )
+        queue._store.write(key, approved.model_dump(mode="json"))
+        return real_expire(approval_id)
+
+    queue.expire_ticket = _expire_that_loses_to_a_late_approval  # type: ignore[method-assign]
+
+    result = await channel.ask("please approve")
+
+    assert result is True
+    [ticket] = [ApprovalTicket.model_validate(raw) for _k, raw in queue._store.items(prefix="approval:")]
+    assert ticket.status == "approved"
+    assert ticket.consumed_at is not None
+
+    # Consumed -- a later identical retry must not be able to re-claim it.
+    assert queue.claim_earlier_approval(task_id="t1", prompt="please approve") is False
+
+
+async def test_ask_does_not_report_success_if_it_loses_both_expiry_and_consumption() -> None:
+    """The lost-expiry-CAS branch must report the CONSUMPTION CAS's own
+    outcome, not a bare "was it approved" -- if a concurrent caller's own
+    claim_earlier_approval already consumed this exact ticket first, this
+    call must not ALSO report success for the same single human
+    decision."""
+    queue = ApprovalQueue(Store())
+    channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01, ttl=timedelta(seconds=0.05))
+    real_expire = queue.expire_ticket
+
+    def _expire_that_loses_to_an_already_consumed_approval(approval_id: str) -> bool:
+        # Same deterministic setup as the sibling test above: write
+        # "approved" directly, bypassing approve_ticket()'s own expiry
+        # gate, which would otherwise also see this moment as past
+        # expires_at and refuse.
+        key = queue._key(approval_id)
+        raw = queue._store.read(key)
+        approved = ApprovalTicket.model_validate(raw).model_copy(
+            update={"status": "approved", "actor": "marco", "channel": "telegram"}
+        )
+        queue._store.write(key, approved.model_dump(mode="json"))
+        # Simulate a concurrent caller's claim_earlier_approval having
+        # already won the consumption CAS for this exact ticket.
+        assert queue.mark_approval_consumed(approval_id) is True
+        return real_expire(approval_id)
+
+    queue.expire_ticket = _expire_that_loses_to_an_already_consumed_approval  # type: ignore[method-assign]
+
+    result = await channel.ask("please approve")
+
+    assert result is False
+
+
 # --- TieredGate-aware ticket_gist -------------------------------------------
 
 
@@ -2075,7 +2242,7 @@ async def test_ask_consumes_its_own_approval_so_a_later_retry_cannot_reclaim_it(
     assert second.done() is False
     second.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        await second
+        _ = await second
 
 
 async def test_claim_earlier_approval_survives_cancellation_without_losing_the_outcome() -> None:
@@ -2103,7 +2270,7 @@ async def test_claim_earlier_approval_survives_cancellation_without_losing_the_o
     await started.wait()
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        await task
+        _ = await task
 
     # Resolved one way or the other -- not left mid-flight with ask()
     # having already moved on.

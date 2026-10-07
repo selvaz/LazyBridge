@@ -59,7 +59,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
     `(task_id, prompt)` can never find that same approval still unconsumed
     and re-claim (and re-run) it a second time via `claim_earlier_approval`
     -- and `ask()` only reports `True` to whichever of two concurrent
-    identical calls actually WINS that consumption, never both.
+    identical calls actually WINS that consumption, never both. The same
+    protection now also applies to the branch where `ask()` loses the
+    `expire_ticket()` CAS to a late approval.
+  - `claim_earlier_approval()` only reuses a ticket created under THIS
+    consumption protocol (one whose record has a `consumed_at` KEY at
+    all, even if `null` -- a pre-1.7.0 record has none) and whose
+    `operator_only` scope matches the request's own exactly; a ticket
+    approved with `operator_only=False` can never satisfy a later
+    request made with `operator_only=True`, or vice versa.
   - `ask()` now treats an externally `expire_ticket()`-ed ticket (one
     expired by some OTHER caller, before this call's own `ttl` would have
     elapsed on its own) as terminal immediately, instead of falling

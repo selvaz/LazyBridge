@@ -849,7 +849,7 @@ async def test_parallel_delegate_admission_gate_rechecks_capacity_before_schedul
     for task in list(background_tasks):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            _ = await task
 
 
 class _FailedEnvelopeWithZeroCost:

@@ -640,7 +640,9 @@ class ApprovalQueue:
             updated = ticket.model_copy(update={"status": "expired"})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
-    def claim_earlier_approval(self, *, task_id: str, prompt: str, now: datetime | None = None) -> bool:
+    def claim_earlier_approval(
+        self, *, task_id: str, prompt: str, operator_only: bool = False, now: datetime | None = None
+    ) -> bool:
         """Spend an approval a human gave after a previous waiter had
         already stopped waiting for it.
 
@@ -660,6 +662,22 @@ class ApprovalQueue:
           directory, the WHOLE rendered text a human was shown, arguments
           included. A different command is a different question.
         - same ``task_id``.
+        - same ``operator_only`` scope. A ticket approved while
+          ``operator_only=False`` (any resolver could have answered it,
+          including a non-human one layered on top of this queue) must
+          never satisfy a LATER request made with ``operator_only=True``
+          -- that flag exists so a caller's own resolver can refuse to
+          answer certain tickets itself and insist a specific human
+          channel does; silently reusing a looser-scoped approval would
+          let the stricter request through without ever being seen by
+          that channel. The reverse (reusing an ``operator_only=True``
+          approval for an ``operator_only=False`` request) is refused
+          too, for simplicity and because "matching scope" is the whole
+          point -- an exact match, not a one-way escalation rule. Found
+          by Codex review before this ever shipped.
+        - the candidate was created under THIS consumption protocol in
+          the first place -- see the ``consumed_at`` key-presence check
+          below.
         - still inside the ticket's own ``expires_at`` window.
         - once -- ``consumed_at`` is set by compare-and-swap, so two
           attempts racing for the same approval cannot both win.
@@ -667,8 +685,8 @@ class ApprovalQueue:
         For comparison, ``lazybridge.ext.approval.tiered.TieredGate``'s own
         ``session`` tier already grants reuse for a whole process on a far
         coarser key (provider + kind + tool + cwd + rule fingerprint), with
-        no expiry at all. An exact-text, single-use, task-scoped reuse is
-        strictly narrower than that.
+        no expiry at all. An exact-text, single-use, task-scoped,
+        scope-matched reuse is strictly narrower than that.
 
         Known accepted gap, inherited from ``prompt_hash``'s own documented
         nature (module docstring): this matches on the HASH of whatever
@@ -697,6 +715,39 @@ class ApprovalQueue:
             items = anchored.items(prefix=self._prefix)
             for key, raw in items:
                 if not isinstance(raw, dict) or raw.get("status") != "approved":
+                    continue
+                # A record written before `consumed_at` existed (any
+                # ticket created by a pre-1.7.0 ApprovalQueue) has no
+                # "consumed_at" KEY at all -- `raw.get("consumed_at")`
+                # alone cannot tell that apart from a ticket deliberately
+                # left unconsumed under THIS protocol (which always
+                # serializes the key, as `null`, at creation). Without
+                # this presence check, an old, already-acted-on approval
+                # from before this queue ever tracked consumption would
+                # be silently claimable and re-executed a second time, on
+                # no new human decision at all. A legacy ticket is simply
+                # never eligible for reuse -- it was never meant to be.
+                # Found by Codex review before this ever shipped.
+                if "consumed_at" not in raw:
+                    continue
+                # Scope must match EXACTLY, not just the ticket matching
+                # or being looser: a ticket approved with
+                # operator_only=False (any resolver could have answered
+                # it) must never satisfy a request now asking with
+                # operator_only=True, which exists precisely so a
+                # caller's own resolver can refuse to answer certain
+                # tickets itself and insist a specific human channel
+                # does -- reusing a looser approval would let the
+                # stricter request through unseen by that channel. The
+                # reverse is refused too, for the same "matching scope,
+                # not escalation" reason. ``.get(..., False)`` mirrors
+                # ApprovalTicket.operator_only's own default, for a
+                # record that predates this field but somehow already
+                # passed the consumed_at check above (never, in
+                # practice, since both fields were added together, but
+                # this stays correct even if that ever changes). Found
+                # by Codex review before this ever shipped.
+                if raw.get("operator_only", False) != operator_only:
                     continue
                 if raw.get("consumed_at") or raw.get("prompt_hash") != wanted or raw.get("task_id") != task_id:
                     continue
@@ -1381,7 +1432,12 @@ class StoreApprovalChannel:
         # cancellation becomes observable, not undone. Found by Codex
         # review before this ever shipped.
         claim = asyncio.ensure_future(
-            self._call(self._queue.claim_earlier_approval, task_id=self._task_id, prompt=prompt)
+            self._call(
+                self._queue.claim_earlier_approval,
+                task_id=self._task_id,
+                prompt=prompt,
+                operator_only=self._operator_only,
+            )
         )
         try:
             claimed = await asyncio.shield(claim)
@@ -1645,8 +1701,25 @@ class StoreApprovalChannel:
                         # here would tell a human who just approved that
                         # their action "did NOT run", and leave the audit
                         # trail saying approved while nothing happened.
+                        #
+                        # Spent here too, exactly like the ordinary approved
+                        # path above -- returning True directly, without
+                        # consuming, left this ticket "approved" and
+                        # unconsumed, the precise shape claim_earlier_approval
+                        # looks for, so a LATER identical ask() could
+                        # silently re-claim and re-run this SAME approval a
+                        # second time. The return value is the CAS outcome,
+                        # not a bare "was it approved": a lost consumption
+                        # race here (a concurrent caller's own
+                        # claim_earlier_approval winning it first) means
+                        # someone else already claimed it, so THIS call must
+                        # not also report success -- same reasoning as the
+                        # ordinary approved path. Found by Codex review
+                        # before this ever shipped.
                         settled = await self._call(self._queue.get_ticket, current.approval_id)
-                        return settled is not None and settled.status == "approved"
+                        if settled is not None and settled.status == "approved":
+                            return await self._call(self._queue.mark_approval_consumed, settled.approval_id)
+                        return False
                     waited = int((now - ticket.created_at).total_seconds() // 60)
                     self._record_refusal(
                         current, reason=f"expired: nobody answered in {waited} min", responder="nobody"
