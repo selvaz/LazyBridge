@@ -35,7 +35,14 @@ docstring for the full explanation.
     )
 """
 
+from lazybridge.ext.delegation.admission import (
+    AdmissionDecision,
+    refund_admission,
+    rejection_text,
+    release_admission,
+)
 from lazybridge.ext.delegation.background import (
+    ExtraParam,
     make_background_delegate,
     make_claude_delegate_engine_factory,
     make_parallel_delegate,
@@ -52,8 +59,10 @@ from lazybridge.ext.delegation.jobs import (
 from lazybridge.ext.delegation.writers import make_claude_writer, make_codex_writer
 
 __all__ = [
+    "AdmissionDecision",
     "DEFAULT_JOB_PREFIX",
     "DEFAULT_SESSION_KEY_PREFIX",
+    "ExtraParam",
     "JobRegistry",
     "current_owner_fields",
     "make_background_delegate",
@@ -63,5 +72,8 @@ __all__ = [
     "make_parallel_delegate",
     "make_persistent_consultant",
     "make_plan_delegate",
+    "refund_admission",
+    "rejection_text",
+    "release_admission",
     "session_id_key",
 ]

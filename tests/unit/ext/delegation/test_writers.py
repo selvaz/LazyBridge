@@ -201,3 +201,163 @@ async def test_codex_writer_admission_gate_refuses_after_approval(monkeypatch: p
     assert "quota exhausted" in job["error"]
     assert job["execution_started"] is False
     assert engine_built is False
+
+
+# ---------------------------------------------------------------------------
+# Gap 4 -- max_turns / writable_roots knobs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_writer_max_turns_defaults_to_60_and_is_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeClaudeEngine:
+        def __init__(self, *, model: str, cwd: str, config: Any, request_timeout: Any, max_turns: int) -> None:
+            captured["max_turns"] = max_turns
+
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _Envelope:
+            return _Envelope("claude finished")
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.ClaudeCodeEngine", FakeClaudeEngine)
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    tool = make_claude_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Claude",
+        max_turns=100,
+    )
+    await tool.func("implement it")
+    await _drain()
+    assert captured["max_turns"] == 100
+
+
+@pytest.mark.asyncio
+async def test_codex_writer_writable_roots_reach_codex_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeCodexEngine:
+        def __init__(self, *, model: Any, cwd: str, config: Any, request_timeout: Any) -> None:
+            captured["config"] = config
+
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _Envelope:
+            return _Envelope("codex finished")
+
+    monkeypatch.setattr("lazybridge.engines.codex.CodexEngine", FakeCodexEngine)
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+
+    class Channel:
+        async def ask(self, prompt: str) -> bool:
+            return True
+
+    store = Store()
+    tool = make_codex_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        channel=Channel(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Codex",
+        writable_roots=["C:/work/.git/worktrees/project"],
+    )
+    await tool.func("implement it")
+    await _drain()
+
+    assert captured["config"].codex.writable_roots == ("C:/work/.git/worktrees/project",)
+
+
+# ---------------------------------------------------------------------------
+# Gap 2 -- per-call model/effort/session overrides on the writers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_writer_accepts_per_call_model_effort_and_session_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeClaudeEngine:
+        def __init__(
+            self,
+            *,
+            model: str,
+            cwd: str,
+            config: Any,
+            request_timeout: Any,
+            max_turns: int,
+            reasoning_effort: str | None = None,
+            session_id: str | None = None,
+        ) -> None:
+            captured.update(model=model, reasoning_effort=reasoning_effort, session_id=session_id)
+
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _Envelope:
+            return _Envelope("claude finished")
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.ClaudeCodeEngine", FakeClaudeEngine)
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    tool = make_claude_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Claude",
+        accept_model_override=True,
+        accept_effort_override=True,
+        accept_session_override=True,
+    )
+    await tool.func(objective="implement it", model="opus", effort="high", session="resume-me")
+    await _drain()
+
+    assert captured == {"model": "opus", "reasoning_effort": "high", "session_id": "resume-me"}
+
+
+@pytest.mark.asyncio
+async def test_claude_writer_without_overrides_builds_engine_with_the_pre_1_8_kwargs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No accept_*_override means ClaudeCodeEngine is built with exactly the
+    same keyword arguments as before those existed -- proven here against
+    a stand-in engine with the OLD, narrower constructor signature."""
+    captured: dict[str, Any] = {}
+
+    class FakeClaudeEngine:
+        def __init__(self, *, model: str, cwd: str, config: Any, request_timeout: Any, max_turns: int) -> None:
+            captured.update(model=model, cwd=cwd, max_turns=max_turns)
+
+    class FakeAgent:
+        def __init__(self, *, engine: Any, name: str) -> None:
+            pass
+
+        async def run(self, objective: str) -> _Envelope:
+            return _Envelope("claude finished")
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.ClaudeCodeEngine", FakeClaudeEngine)
+    monkeypatch.setattr("lazybridge.Agent", FakeAgent)
+    store = Store()
+    tool = make_claude_writer(
+        workspace_root=Path("C:/work/project"),
+        gate=_Gate(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        doc="write with Claude",
+    )
+    await tool.func("implement it")
+    await _drain()
+    assert captured["model"] == "sonnet"

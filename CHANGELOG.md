@@ -8,6 +8,68 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.0]
+
+### Added
+
+- **`lazybridge.ext.delegation` gains the generic hooks LazyCEO's own
+  richer `codex_write`/`claude_write`/`run_parallel`/`delegate_plan_tasks`
+  copies needed before they could be dropped in favour of this package.**
+  Every addition is optional and defaults to today's exact behaviour --
+  the pre-1.8 generated tools' signatures, JSON Schemas, and engine
+  construction calls are all byte-identical when none of the new
+  parameters are passed.
+  - **Per-call engine construction** (`make_background_delegate`):
+    `extra_params: Mapping[str, ExtraParam] | None` declares further
+    per-call parameters (LazyCEO's motivating case: a `repo` argument)
+    beyond `objective`, forwarded verbatim to `engine_factory` as keyword
+    arguments; `guard: Callable[[str, dict[str, Any]], Any] | None` is a
+    caller-supplied per-call validation hook (sync or async) that runs
+    FIRST, before anything is recorded or a task spawned, and can reject
+    with a `"REJECTED: ..."` string. Setting either builds the tool via
+    `Tool.from_schema` with an explicit, hand-built JSON Schema instead of
+    signature introspection, since the real Python callable underneath now
+    accepts an arbitrary `**extra`.
+  - **Per-call model/effort/session overrides** (writers and the
+    persistent consultant): `make_background_delegate`/`make_codex_writer`/
+    `make_claude_writer` gain `accept_model_override`/`accept_effort_override`
+    (plus `accept_session_override` on the two writers, forwarded as
+    `CodexEngine(thread_id=...)`/`ClaudeCodeEngine(session_id=...)`); the
+    resolved per-call value (falling back to the tool's own default) is
+    what `validate_model` now runs against. `make_persistent_consultant`
+    gains `accept_fresh` (a per-call `fresh=True` starts a new thread
+    instead of continuing the remembered one -- the new thread's handle
+    still becomes the one subsequent calls continue), plus the matching
+    `accept_model_override`/`accept_effort_override`, each checked against
+    the wrapped consultant function's own signature at BUILD time
+    (`TypeError` immediately, not on the first call that tries to use it).
+  - **Admission reservation protocol**
+    (`lazybridge.ext.delegation.admission`): an `admission_gate` may now
+    return a decision exposing, beyond `allowed`/`rejection_text()`, an
+    optional `release()` (give back a reservation once the attempt it
+    covered actually ran, success or failure) and `refund()` (give back
+    the reservation AND anything else spent, e.g. a human's one-use
+    approval, for an attempt that never ran at all -- falls back to
+    `release()` when absent). Both may be sync or async. `release_admission`/
+    `refund_admission`/`rejection_text` are the generic helpers every
+    delegate in this package now calls exactly once on every path, never
+    more. `make_parallel_delegate` refunds every admission already granted
+    earlier in the same batch when a later objective is refused or the
+    post-check capacity race fires, and releases each job's admission once
+    it finishes. `make_plan_delegate` gains `admission_gate` (checked per
+    item, before that item's own `board.claim_task` -- a refusal costs
+    nothing to unwind); a claim that loses the race, or a job that fails to
+    even get scheduled after the claim succeeds, now refunds that item's
+    admission alongside the existing board-claim unwind (`board.mark_failed`).
+  - **Engine factory knobs on the writers**: `make_claude_writer` gains
+    `max_turns` (default `60`, unchanged -- a caller needing more headroom,
+    as LazyCEO did after `20` proved too low live, passes a larger value).
+    `make_codex_writer` gains `writable_roots`, wired straight through to
+    `CodexPolicy.writable_roots` -- the prime use case is a `workspace_root`
+    that is a git worktree, whose index lives outside it under the main
+    repository's `.git`. Resolving which path(s) a given worktree needs is
+    left to the caller; this package has no git-topology opinion of its own.
+
 ## [1.7.0] — 2026-10-07
 
 ### Added

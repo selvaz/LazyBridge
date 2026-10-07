@@ -9,8 +9,9 @@ from typing import Any
 
 import pytest
 
-from lazybridge import Store
+from lazybridge import Store, Tool
 from lazybridge.ext.delegation.background import (
+    ExtraParam,
     _safe_notify,
     _track,
     make_background_delegate,
@@ -932,3 +933,643 @@ async def test_failed_result_with_real_nonzero_cost_is_still_recorded_known(monk
     assert job["status"] == "failed"
     assert job["cost_unknown"] is False
     assert job["cost_usd"] == pytest.approx(0.07)
+
+
+# ---------------------------------------------------------------------------
+# Gap 1 -- per-call extra params + guard hook
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_guard_rejects_before_anything_is_recorded_or_spawned(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    seen: list[tuple[str, dict[str, Any]]] = []
+
+    def guard(objective: str, call_kwargs: dict[str, Any]) -> str | None:
+        seen.append((objective, call_kwargs))
+        return "REJECTED: not project work"
+
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=lambda: pytest.fail("engine must not be built once guard refuses"),
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        guard=guard,
+    )
+    result = await tool.func("do it")
+
+    assert result == "REJECTED: not project work"
+    assert seen == [("do it", {})]
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_async_guard_is_awaited(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+
+    async def guard(objective: str, _call_kwargs: dict[str, Any]) -> str | None:
+        await asyncio.sleep(0)
+        return None
+
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        guard=guard,
+    )
+    await tool.func("do it")
+    await _drain()
+    assert _jobs(registry, store)[0]["status"] == "done"
+
+
+def test_extra_params_reserved_names_are_rejected() -> None:
+    with pytest.raises(ValueError, match="reserved names"):
+        make_background_delegate(
+            tool_name="delegate",
+            label="worker",
+            engine_factory=object,
+            registry=JobRegistry(Store()),
+            background_tasks=set(),
+            notify=None,
+            doc="delegate",
+            extra_params={"model": ExtraParam()},
+        )
+
+
+@pytest.mark.asyncio
+async def test_extra_params_are_forwarded_to_engine_factory_and_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    built: list[dict[str, Any]] = []
+    guarded: list[dict[str, Any]] = []
+
+    def engine_factory(*, repo: str) -> Any:
+        built.append({"repo": repo})
+        return _EngineStub()
+
+    def guard(_objective: str, call_kwargs: dict[str, Any]) -> str | None:
+        guarded.append(dict(call_kwargs))
+        return None
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=engine_factory,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        guard=guard,
+        extra_params={"repo": ExtraParam(description="target repo", required=True)},
+    )
+    result = await tool.func(objective="do it", repo="market-data-hub")
+    assert "Started job" in result
+    await _drain()
+
+    assert built == [{"repo": "market-data-hub"}]
+    assert guarded == [{"repo": "market-data-hub"}]
+    assert _jobs(registry, store)[0]["status"] == "done"
+    definition = tool.definition()
+    assert definition.parameters["required"] == ["objective", "repo"]
+    assert definition.parameters["properties"]["repo"]["type"] == "string"
+
+
+@pytest.mark.asyncio
+async def test_default_delegate_tool_signature_is_unchanged_without_dynamic_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero behaviour change for the pre-1.8 shape: no accept_*_override and
+    no extra_params means the generated tool's real Python signature (and
+    therefore its JSON Schema) is exactly ``delegate(objective: str)``."""
+    _install_fake_agent(monkeypatch)
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=object,
+        registry=JobRegistry(Store()),
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+    )
+    assert list(inspect.signature(tool.func).parameters) == ["objective"]
+    assert isinstance(tool, Tool)
+
+
+# ---------------------------------------------------------------------------
+# Gap 2 -- per-call model/effort overrides
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_accept_model_and_effort_override_resolve_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    built: list[dict[str, Any]] = []
+    validated: list[str | None] = []
+
+    def engine_factory(*, model: str | None = None, effort: str | None = None) -> Any:
+        built.append({"model": model, "effort": effort})
+        return _EngineStub(model=model, effort=effort)
+
+    def validate_model(model: str | None) -> str | None:
+        validated.append(model)
+        return None
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=engine_factory,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        model="sonnet",
+        effort="low",
+        validate_model=validate_model,
+        accept_model_override=True,
+        accept_effort_override=True,
+    )
+
+    # Call 1: no override -- falls back to the tool's own defaults.
+    await tool.func(objective="first")
+    await _drain()
+    # Call 2: per-call override on both.
+    await tool.func(objective="second", model="opus", effort="high")
+    await _drain()
+
+    assert built == [{"model": "sonnet", "effort": "low"}, {"model": "opus", "effort": "high"}]
+    assert validated == ["sonnet", "opus"]
+    jobs = sorted(_jobs(registry, store), key=lambda j: j["objective"])
+    assert [j["status"] for j in jobs] == ["done", "done"]
+
+
+@pytest.mark.asyncio
+async def test_validate_model_runs_against_the_overridden_model_before_anything_is_recorded() -> None:
+    def engine_factory(*, model: str | None = None) -> Any:
+        pytest.fail("engine must not be built once validate_model refuses the override")
+
+    def validate_model(model: str | None) -> str | None:
+        if model == "gpt-5":
+            return f"REJECTED: {model} is not an Anthropic model"
+        return None
+
+    store = Store()
+    registry = JobRegistry(store)
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=engine_factory,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        model="sonnet",
+        validate_model=validate_model,
+        accept_model_override=True,
+    )
+
+    result = await tool.func(objective="do it", model="gpt-5")
+
+    assert result == "REJECTED: gpt-5 is not an Anthropic model"
+    assert _jobs(registry, store) == []
+
+
+# ---------------------------------------------------------------------------
+# Gap 2 -- persistent consultant: fresh / model / effort overrides
+# ---------------------------------------------------------------------------
+
+
+class _FakeOverridableConsultantTool:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+        async def ask(
+            question: str, thread_id: str | None = None, model: str | None = None, effort: str | None = None
+        ) -> str:
+            self.calls.append({"question": question, "thread_id": thread_id, "model": model, "effort": effort})
+            return f"[label] answer thread_id=handle-{len(self.calls)}"
+
+        self.func = ask
+
+
+@pytest.mark.asyncio
+async def test_persistent_consultant_fresh_ignores_stored_handle_but_still_updates_it() -> None:
+    fake = _FakeOverridableConsultantTool()
+    tool = make_persistent_consultant(
+        lambda: fake,
+        tool_name="ask_codex",
+        registry=JobRegistry(Store()),
+        background_tasks=set(),
+        accept_fresh=True,
+    )
+
+    await tool.func("first question")
+    await _drain()
+    assert fake.calls[0]["thread_id"] is None
+
+    # Without fresh, the second call continues the remembered handle.
+    await tool.func("second question")
+    await _drain()
+    assert fake.calls[1]["thread_id"] == "handle-1"
+
+    # fresh=True ignores the remembered handle for this call...
+    await tool.func("third question", fresh=True)
+    await _drain()
+    assert fake.calls[2]["thread_id"] is None
+
+    # ...but the new handle it gets back still becomes the one subsequent
+    # calls continue.
+    await tool.func("fourth question")
+    await _drain()
+    assert fake.calls[3]["thread_id"] == "handle-3"
+
+
+@pytest.mark.asyncio
+async def test_persistent_consultant_model_and_effort_override_are_forwarded() -> None:
+    fake = _FakeOverridableConsultantTool()
+    tool = make_persistent_consultant(
+        lambda: fake,
+        tool_name="ask_codex",
+        registry=JobRegistry(Store()),
+        background_tasks=set(),
+        accept_model_override=True,
+        accept_effort_override=True,
+    )
+
+    await tool.func("question", model="opus", effort="high")
+    await _drain()
+
+    assert fake.calls == [{"question": "question", "thread_id": None, "model": "opus", "effort": "high"}]
+
+
+@pytest.mark.asyncio
+async def test_persistent_consultant_rejects_unsupported_overrides() -> None:
+    fake = _FakeOverridableConsultantTool()
+    tool = make_persistent_consultant(
+        lambda: fake,
+        tool_name="ask_codex",
+        registry=JobRegistry(Store()),
+        background_tasks=set(),
+        accept_fresh=True,  # only fresh is accepted -- model/effort are not
+    )
+
+    assert "model override" in await tool.func("q", fresh=False, model="opus")
+    assert "effort override" in await tool.func("q", effort="high")
+    assert fake.calls == []
+
+
+def test_persistent_consultant_accept_model_override_requires_model_parameter() -> None:
+    class NoModelParam:
+        def __init__(self) -> None:
+            async def ask(question: str, thread_id: str | None = None) -> str:
+                return question
+
+            self.func = ask
+
+    with pytest.raises(TypeError, match="accept_model_override=True"):
+        make_persistent_consultant(
+            NoModelParam,
+            tool_name="ask_codex",
+            registry=JobRegistry(Store()),
+            background_tasks=set(),
+            accept_model_override=True,
+        )
+
+
+def test_persistent_consultant_default_signature_is_unchanged() -> None:
+    fake = _FakeConsultantTool("thread_id")
+    tool = make_persistent_consultant(
+        lambda: fake,
+        tool_name="ask_codex",
+        registry=JobRegistry(Store()),
+        background_tasks=set(),
+    )
+    assert list(inspect.signature(tool.func).parameters) == ["question"]
+
+
+# ---------------------------------------------------------------------------
+# Gap 3 -- admission reservation protocol: release()/refund()
+# ---------------------------------------------------------------------------
+
+
+class _FakeAdmission:
+    """A granted or denied admission that records release()/refund() calls.
+
+    ``release``/``refund`` default to sync no-return callables; a test can
+    swap in an async variant via the ``async_methods`` flag to prove both
+    shapes are supported."""
+
+    def __init__(self, *, allowed: bool = True, reason: str = "quota exhausted", async_methods: bool = False) -> None:
+        self.allowed = allowed
+        self.reason = reason
+        self.released = 0
+        self.refunded = 0
+        if async_methods:
+
+            async def release() -> None:
+                self.released += 1
+
+            async def refund() -> None:
+                self.refunded += 1
+        else:
+
+            def release() -> None:
+                self.released += 1
+
+            def refund() -> None:
+                self.refunded += 1
+
+        self.release = release
+        self.refund = refund
+
+    def rejection_text(self) -> str:
+        return self.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_methods", [False, True])
+async def test_background_delegate_releases_admission_exactly_once_after_the_job_runs(
+    monkeypatch: pytest.MonkeyPatch, async_methods: bool
+) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    admission = _FakeAdmission(allowed=True, async_methods=async_methods)
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def admission_gate() -> Any:
+        return admission
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=_EngineStub,
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    assert _jobs(registry, store)[0]["status"] == "done"
+    assert admission.released == 1
+    assert admission.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_background_delegate_refusal_after_approval_does_not_release_a_never_granted_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    refused = _FakeAdmission(allowed=False)
+
+    async def approve(_objective: str) -> bool:
+        return True
+
+    async def admission_gate() -> Any:
+        return refused
+
+    tool = make_background_delegate(
+        tool_name="codex_write",
+        label="Codex",
+        engine_factory=lambda: pytest.fail("must not be built"),
+        registry=registry,
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        pre_confirm=approve,
+        admission_gate=admission_gate,
+    )
+    await tool.func("do it")
+    await _drain()
+
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert "quota exhausted" in job["error"]
+    # Nothing was ever granted -- release()/refund() must not fire for a
+    # denied admission.
+    assert refused.released == 0
+    assert refused.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_refunds_earlier_grants_on_a_later_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    granted = [_FakeAdmission(allowed=True), _FakeAdmission(allowed=True)]
+    refusal = _FakeAdmission(allowed=False)
+    decisions = iter([*granted, refusal])
+
+    async def admission_gate() -> Any:
+        return next(decisions)
+
+    tool = make_parallel_delegate(
+        engine_factory=lambda: pytest.fail("no engine must be built when the batch is refused"),
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one", "two", "three"])
+
+    assert result.startswith("REJECTED: quota exhausted")
+    assert all(g.refunded == 1 and g.released == 0 for g in granted)
+    assert refusal.refunded == 0  # never granted in the first place
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_refunds_all_grants_on_the_capacity_race(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    background_tasks: set[asyncio.Task[Any]] = set()
+    admission = _FakeAdmission(allowed=True)
+
+    async def admission_gate() -> Any:
+        background_tasks.add(asyncio.ensure_future(asyncio.sleep(10)))
+        return admission
+
+    tool = make_parallel_delegate(
+        engine_factory=lambda: pytest.fail("no engine must be built once capacity is exceeded"),
+        registry=registry,
+        background_tasks=background_tasks,
+        doc="parallel",
+        max_in_flight_delegate_tasks=1,
+        admission_gate=admission_gate,
+    )
+    result = await tool.func(["one"])
+
+    assert result.startswith("REJECTED")
+    assert admission.refunded == 1
+    assert admission.released == 0
+
+    for task in list(background_tasks):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            _ = await task
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegate_releases_admission_after_each_job_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    admissions = [_FakeAdmission(allowed=True), _FakeAdmission(allowed=True)]
+    decisions = iter(admissions)
+
+    async def admission_gate() -> Any:
+        return next(decisions)
+
+    tool = make_parallel_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        doc="parallel",
+        admission_gate=admission_gate,
+    )
+    await tool.func(["one", "two"])
+    await _drain()
+
+    assert {job["status"] for job in _jobs(registry, store)} == {"done"}
+    assert all(a.released == 1 and a.refunded == 0 for a in admissions)
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_admission_refusal_claims_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = Store()
+    registry = JobRegistry(store)
+    board = DurableBlackboard(store, "plan-a")
+    board.set_plan("work", ["task one"])
+    refused = _FakeAdmission(allowed=False)
+
+    async def admission_gate() -> Any:
+        return refused
+
+    tool = make_plan_delegate(
+        engine_factory=lambda: pytest.fail("must not be built"),
+        registry=registry,
+        background_tasks=set(),
+        board=board,
+        owner="agent:test",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func([{"task_index": 0, "expected_text": "task one", "objective": "implement it"}])
+
+    assert "quota exhausted" in result
+    assert board.snapshot().tasks[0]["status"] == "todo"
+    assert refused.released == 0
+    assert refused.refunded == 0
+    assert _jobs(registry, store) == []
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_refunds_admission_when_the_claim_loses_the_race(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = Store()
+    registry = JobRegistry(store)
+    board = DurableBlackboard(store, "plan-a")
+    board.set_plan("work", ["task one"])
+    admission = _FakeAdmission(allowed=True)
+
+    async def admission_gate() -> Any:
+        return admission
+
+    tool = make_plan_delegate(
+        engine_factory=lambda: pytest.fail("must not be built"),
+        registry=registry,
+        background_tasks=set(),
+        board=board,
+        owner="agent:test",
+        admission_gate=admission_gate,
+    )
+    # expected_text does not match -- the claim itself is refused.
+    result = await tool.func([{"task_index": 0, "expected_text": "stale text", "objective": "implement it"}])
+
+    assert "does not match expected_text" in result
+    assert admission.refunded == 1
+    assert admission.released == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_setup_failure_refunds_admission_alongside_the_board_unwind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = Store()
+    registry = JobRegistry(store)
+    board = DurableBlackboard(store, "plan-a")
+    board.set_plan("work", ["task one"])
+    admission = _FakeAdmission(allowed=True)
+
+    async def admission_gate() -> Any:
+        return admission
+
+    def broken_track(_tasks: set[Any], _coroutine: Any) -> None:
+        raise RuntimeError("scheduler unavailable")
+
+    monkeypatch.setattr("lazybridge.ext.delegation.background._track", broken_track)
+    tool = make_plan_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        board=board,
+        owner="agent:test",
+        admission_gate=admission_gate,
+    )
+    result = await tool.func([{"task_index": 0, "expected_text": "task one", "objective": "do it"}])
+
+    assert "setup failed" in result and "scheduler unavailable" in result
+    task = board.snapshot().tasks[0]
+    assert task["status"] == "todo" and task["owner"] is None
+    [job] = _jobs(registry, store)
+    assert job["status"] == "failed"
+    assert admission.refunded == 1
+    assert admission.released == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_delegate_releases_admission_after_the_job_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    board = DurableBlackboard(store, "plan-a")
+    board.set_plan("work", ["task one"])
+    admission = _FakeAdmission(allowed=True)
+
+    async def admission_gate() -> Any:
+        return admission
+
+    tool = make_plan_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=set(),
+        board=board,
+        owner="agent:test",
+        admission_gate=admission_gate,
+    )
+    await tool.func([{"task_index": 0, "expected_text": "task one", "objective": "implement it"}])
+    await _drain()
+
+    assert _jobs(registry, store)[0]["status"] == "done"
+    assert admission.released == 1
+    assert admission.refunded == 0
