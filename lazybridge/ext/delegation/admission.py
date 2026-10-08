@@ -65,11 +65,14 @@ class AdmissionDecision(Protocol):
 
     allowed: bool
 
-    def rejection_text(self) -> str: ...
+    def rejection_text(self) -> str:
+        """Return the caller's refusal text."""
 
-    def release(self) -> Any: ...
+    def release(self) -> Any:
+        """Release a grant whose execution started; optionally return an awaitable."""
 
-    def refund(self) -> Any: ...
+    def refund(self) -> Any:
+        """Refund a grant that never started; optionally return an awaitable."""
 
 
 async def _maybe_await(value: Any) -> Any:

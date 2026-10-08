@@ -86,7 +86,7 @@ async def test_default_phases_prepare_agent_before_cas_and_preserve_metadata(tmp
             return SimpleNamespace(ok=True, text=lambda: "done")
 
     monkeypatch.setattr("lazybridge.Agent", Agent)
-    await JobRunner()(JobContext("job", "work", "delegate", "worker", lambda: object(), registry))
+    await JobRunner()(JobContext("job", "work", "delegate", "worker", object, registry))
     record = registry.find("job")
     assert (record["status"], record["result"], record["provenance"]) == ("done", "done", "caller")
 
@@ -113,7 +113,7 @@ async def test_cancelled_execute_rolls_back_and_releases_even_if_rollback_raises
     await entered.wait()
     task.cancel()
     with pytest.raises(ValueError, match="rollback failed"):
-        await task
+        assert await task is None
     assert calls == ["execute"]
     assert (grant.released, grant.refunded) == (1, 0)
     assert registry.find("job")["status"] == "failed"

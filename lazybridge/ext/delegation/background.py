@@ -1457,6 +1457,23 @@ def make_plan_delegate(
         if context.claimed and not context.started:
             board.mark_failed(context.task_index, "delegate_plan_tasks cancelled before execution", owner=owner)
 
+    async def cleanup_setup_failure(context: JobContext, error: BaseException) -> None:
+        if selected_runner is not None:
+            await selected_runner.abort(context, error, phase=context.phase)
+        elif context.claimed:
+            board.mark_failed(context.task_index, f"delegate_plan_tasks setup failed: {error}", owner=owner)
+            registry.write(
+                context.job_id,
+                context.objective,
+                tool_name="delegate_plan_tasks",
+                status="failed",
+                plan_id=plan_id,
+                task_index=context.task_index,
+                plan_task_text=context.plan_task_text,
+                error=f"delegate_plan_tasks setup failed: {error}",
+                execution_started=False,
+            )
+
     async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> Any:
         def reject(reason: str, code: str) -> Any:
             # A whole-batch refusal carries a stable ``code`` ("empty",
@@ -1612,25 +1629,13 @@ def make_plan_delegate(
                     )
                 handed_over = True
                 record(number, index, "started", job_id=context.job_id)
-            except BaseException as exc:
-                try:
-                    if selected_runner is not None:
-                        await selected_runner.abort(context, exc, phase=context.phase)
-                    elif context.claimed:
-                        board.mark_failed(index, f"delegate_plan_tasks setup failed: {exc}", owner=owner)
-                        registry.write(
-                            context.job_id,
-                            objective,
-                            tool_name="delegate_plan_tasks",
-                            status="failed",
-                            plan_id=plan_id,
-                            task_index=index,
-                            plan_task_text=text,
-                            error=f"delegate_plan_tasks setup failed: {exc}",
-                        )
-                finally:
-                    if not isinstance(exc, Exception):
-                        raise
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit) as exc:
+                # Cancellation and process exit must unwind the handoff and propagate;
+                # unlike ordinary setup failures, they are never item outcomes.
+                await cleanup_setup_failure(context, exc)
+                raise
+            except Exception as exc:
+                await cleanup_setup_failure(context, exc)
                 reason = (
                     f"claim_task failed for task {index}: {exc}"
                     if context.phase == "claim"

@@ -42,6 +42,7 @@ class JobContext:
     phase: str = "prepare"
     started: bool = False
     prepared: Any = None
+    engine: Any = None
     result: Any = None
     error: BaseException | None = None
     attempts_before: int | None = None
@@ -57,14 +58,28 @@ class JobContext:
         Custom register callbacks can call this before adding their own setup.
         A callback using its own CAS should set ``registered=True`` on success.
         """
-        self.registered = self.registry.begin_execution(self.job_id)
+        from lazybridge.ext.delegation.background import _engine_identity
+
+        engine = self.engine if self.engine is not None else getattr(self.prepared, "engine", None)
+        fields: dict[str, Any] = {"cost_unknown": True}
+        if engine is not None:
+            engine_name, model, effort = _engine_identity(engine)
+            fields.update(
+                {
+                    name: value
+                    for name, value in {"engine": engine_name, "model": model, "effort": effort}.items()
+                    if value is not None
+                }
+            )
+        self.registered = self.registry.begin_execution(self.job_id, extra=fields)
         return self.registered
 
 
 def _prepare(context: JobContext) -> Any:
     from lazybridge import Agent
 
-    return Agent(engine=context.engine_factory(), name=f"delegate-{context.tool_name}-{context.job_id[:8]}")
+    context.engine = context.engine_factory()
+    return Agent(engine=context.engine, name=f"delegate-{context.tool_name}-{context.job_id[:8]}")
 
 
 def _register(context: JobContext) -> bool:
@@ -113,10 +128,12 @@ class JobRunner:
     here. Errors propagate after cleanup. A lost CAS leaves the record intact.
     """
 
-    prepare: Callable[[JobContext], Any] = _prepare
-    register: Callable[[JobContext], Any] = _register
-    execute: Callable[[JobContext], Any] = _execute
-    finalize: Callable[[JobContext], Any] = _finalize
+    # Install plain callables on each instance; a class-level function default
+    # looks like a bound method to static analyzers and gains a spurious self.
+    prepare: Callable[[JobContext], Any] = field(default_factory=lambda: _prepare)
+    register: Callable[[JobContext], Any] = field(default_factory=lambda: _register)
+    execute: Callable[[JobContext], Any] = field(default_factory=lambda: _execute)
+    finalize: Callable[[JobContext], Any] = field(default_factory=lambda: _finalize)
     rollback: Callable[[JobContext], Any] | None = None
 
     async def __call__(self, context: JobContext) -> None:
@@ -159,7 +176,7 @@ class JobRunner:
                 finally:
                     if not refused:
                         try:
-                            context.registry.update(
+                            recorded = context.registry.update(
                                 context.job_id,
                                 {
                                     "status": "failed",
@@ -175,6 +192,16 @@ class JobRunner:
                             # here leaves the job looking "running". Found by review.
                             logging.getLogger(__name__).exception(
                                 "could not record the failure of job %s", context.job_id
+                            )
+                            recorded = True  # still surface the failure if its Store write failed
+                        if recorded:
+                            from lazybridge.ext.delegation.background import _safe_notify
+
+                            before_start = " before it started" if not context.started else ""
+                            _safe_notify(
+                                context.notify,
+                                f"{context.label} job {context.job_id[:8]} FAILED{before_start}: "
+                                f"{context.objective[:100]}\n\n{context.error}",
                             )
         finally:
             if not context._settled:

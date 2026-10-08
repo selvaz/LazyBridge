@@ -273,12 +273,14 @@ class JobRegistry:
             record.update(extra)
         self._store.write(self._key(job_id), record)
 
-    def begin_execution(self, job_id: str) -> bool:
+    def begin_execution(self, job_id: str, *, extra: dict[str, Any] | None = None) -> bool:
         """CAS a queued running record to started, preserving unknown fields.
 
         False means recovery or another worker won. Never starts a missing,
         terminal, or already-started record. Legacy missing markers are allowed.
         """
+        if extra and _RESERVED_FIELDS & extra.keys():
+            raise ValueError("execution metadata cannot replace job identity or status")
         key = self._key(job_id)
         while True:
             current = self._store.read(key)
@@ -286,7 +288,7 @@ class JobRegistry:
                 return False
             if current.get("execution_started") is True:
                 return False
-            if self._store.compare_and_swap(key, current, {**current, "execution_started": True}):
+            if self._store.compare_and_swap(key, current, {**current, **(extra or {}), "execution_started": True}):
                 return True
 
     def update(

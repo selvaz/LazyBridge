@@ -12,6 +12,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- JobRunner sends safe failure notifications for exceptions in setup and execution.
+  Its execution CAS atomically records unknown cost and prepared engine/model/effort
+  identity; failures preserve that provenance. Default callbacks are installed as
+  unbound instance callables, and plan cancellation cleanup explicitly re-raises.
+
 - Default parallel/plan workers refund admission when engine or Agent setup never
   reaches execution, and release it after actual execution. Cancellation before
   the first task step closes the inner coroutine, refunds the grant, and records
