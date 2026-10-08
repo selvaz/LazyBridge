@@ -28,7 +28,7 @@ class _DefaultAlias:
 _DEFAULT_ALIAS = _DefaultAlias()
 
 
-def _resolve_alias(session: str | None, alias: str | None | _DefaultAlias, configured: str | None) -> str | None:
+def _resolve_alias(session: str | None, alias: str | _DefaultAlias | None, configured: str | None) -> str | None:
     if isinstance(alias, _DefaultAlias):
         return configured if session is None else None
     if session is not None and alias is not None:
@@ -62,7 +62,7 @@ def make_codex_writer_engine_factory(
         model: str | None = model,
         effort: str | None = effort,
         session: str | None = None,
-        session_alias: str | None | _DefaultAlias = _DEFAULT_ALIAS,
+        session_alias: str | _DefaultAlias | None = _DEFAULT_ALIAS,
         writable_roots: Sequence[str] | None = writable_roots,
     ) -> Any:
         from lazybridge.engines.codex import CodexEngine
@@ -114,7 +114,7 @@ def make_claude_writer_engine_factory(
         model: str = model,
         effort: str | None = effort,
         session: str | None = None,
-        session_alias: str | None | _DefaultAlias = _DEFAULT_ALIAS,
+        session_alias: str | _DefaultAlias | None = _DEFAULT_ALIAS,
         max_turns: int = max_turns,
     ) -> Any:
         from lazybridge.engines.claude_code import ClaudeCodeEngine
