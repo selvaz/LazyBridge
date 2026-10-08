@@ -82,29 +82,20 @@ async def _maybe_await_value(value: Any) -> Any:
     return value
 
 
-async def _run_with_admission_release(coro: Any, admission: Any) -> None:
-    """Run ``coro`` to completion, then release its admission however it
-    ends -- success, failure, or cancellation.
+async def _run_with_admission_release(coro: Any, admission: Any, *, context: JobContext | None = None) -> Any:
+    """Settle a stepped worker using its actual execution boundary.
 
-    Shared by :func:`make_parallel_delegate` and :func:`make_plan_delegate`:
-    both schedule one ``_run_delegate_job`` coroutine per objective/task
-    under its own admission grant, and both need that reservation given
-    back once the job is actually done, not held until some external TTL.
-    A ``try/finally`` around the await covers cancellation too (the task
-    this wraps is tracked in ``background_tasks`` and can be cancelled from
-    outside): asyncio delivers a cancellation by throwing into this
-    coroutine, which still enters the ``try`` and therefore still reaches
-    the ``finally`` below, even on a task cancelled before its first real
-    step. A task whose underlying event loop stops ticking entirely before
-    ever scheduling this coroutine at all (interpreter shutdown, a loop
-    closed out from under ``background_tasks``) is the one case nothing at
-    this layer can observe or clean up after -- noted, not solved, by
-    Codex review.
+    Delegates pass an attempt context so setup failures refund the grant. Opaque
+    caller coroutines retain release-on-completion behavior. Pre-entry cancellation
+    belongs to the scheduler's done callback, since this body never runs then.
     """
     try:
-        await coro
+        return await coro
     finally:
-        await release_admission(admission)
+        if context is not None and not context.started:
+            await refund_admission(admission)
+        else:
+            await release_admission(admission)
 
 
 async def _refund_and_clear(admissions: list[Any], index: int) -> None:
@@ -132,6 +123,8 @@ def _schedule_with_admission_release(
     admission: Any,
     *,
     track: Callable[[set[asyncio.Task[Any]], Any], Any] | None = None,
+    context: JobContext | None = None,
+    on_cancel: Callable[[JobContext], Any] | None = None,
 ) -> None:
     """Schedule ``coro`` wrapped in :func:`_run_with_admission_release`,
     owning BOTH coroutines if the scheduling call itself raises.
@@ -144,13 +137,56 @@ def _schedule_with_admission_release(
     coroutine, silences both without running either body. Mirrors the
     promoted source's own ``_start_released``/``_releasing`` pattern.
     """
-    wrapper = _run_with_admission_release(coro, admission)
+    lease = _AdmissionLease(admission)
+    entered = False
+
+    async def cancel_cleanup() -> None:
+        try:
+            if context is not None:
+                try:
+                    if on_cancel is not None:
+                        await _maybe_await_value(on_cancel(context))
+                finally:
+                    context.registry.update(
+                        context.job_id,
+                        {
+                            "status": "failed",
+                            "error": "job cancelled",
+                            "execution_started": context.started,
+                            "finished_at": datetime.now(UTC).isoformat(),
+                        },
+                        expected_started=context.started,
+                    )
+        finally:
+            if context is not None and context.started:
+                await release_admission(lease)
+            else:
+                await refund_admission(lease)
+
+    async def run() -> Any:
+        nonlocal entered
+        entered = True
+        try:
+            return await _run_with_admission_release(coro, lease, context=context)
+        except asyncio.CancelledError:
+            await cancel_cleanup()
+            raise
+
+    wrapper = run()
     try:
-        (track or _track)(background_tasks, wrapper)
+        task = (track or _track)(background_tasks, wrapper)
     except BaseException:
         wrapper.close()
         coro.close()  # closing an already-closed coroutine is a no-op
         raise
+
+    def cancelled_before_step(task: asyncio.Task[Any]) -> None:
+        if task.cancelled() and not entered:
+            coro.close()
+            _track(background_tasks, cancel_cleanup())
+
+    if isinstance(task, asyncio.Task):
+        task.add_done_callback(cancelled_before_step)
 
 
 def _build_delegate_schema(
@@ -294,6 +330,7 @@ async def _run_delegate_job(
     task_index: int | None = None,
     plan_task_text: str | None = None,
     created_at: str | None = None,
+    context: JobContext | None = None,
 ) -> None:
     """Run one objective with a fresh engine and persist its outcome.
 
@@ -313,8 +350,11 @@ async def _run_delegate_job(
 
     created_at = created_at or datetime.now(UTC).isoformat()
 
+    setup_phase = "engine_factory"
     try:
         engine = engine_factory()
+        setup_phase = "Agent construction"
+        worker = Agent(engine=engine, name=f"delegate-{tool_name}-{job_id[:8]}")
     except Exception as exc:
         registry.write(
             job_id,
@@ -324,7 +364,7 @@ async def _run_delegate_job(
             plan_id=plan_id,
             task_index=task_index,
             plan_task_text=plan_task_text,
-            error=f"engine_factory failed: {exc}",
+            error=f"{setup_phase} failed: {exc}",
             execution_started=False,
             created_at=created_at,
             finished_at=datetime.now(UTC).isoformat(),
@@ -352,9 +392,10 @@ async def _run_delegate_job(
         created_at=created_at,
         cost_unknown=True,
     )
+    if context is not None:
+        context.started = True
 
     try:
-        worker = Agent(engine=engine, name=f"delegate-{tool_name}-{job_id[:8]}")
         result = await worker.run(objective)
     except Exception as exc:
         registry.write(
@@ -1228,6 +1269,15 @@ def make_parallel_delegate(
                     )
                     await _schedule_context(context, job_runner, background_tasks)
                 else:
+                    context = JobContext(
+                        job_id,
+                        objective,
+                        "run_parallel",
+                        "a parallel Claude Code sub-agent",
+                        resolved_factory,
+                        registry,
+                        created_at=created_at,
+                    )
                     _schedule_with_admission_release(
                         background_tasks,
                         _run_delegate_job(
@@ -1239,8 +1289,10 @@ def make_parallel_delegate(
                             registry=registry,
                             notify=notify,
                             created_at=created_at,
+                            context=context,
                         ),
                         admission,
+                        context=context,
                     )
             except Exception as exc:
                 # Scheduling THIS objective failed before its job ever
@@ -1401,6 +1453,10 @@ def make_plan_delegate(
             if index is not None and 0 <= index < len(snapshot):
                 context.attempts_before = snapshot[index].get("attempts", 0)
 
+    def cancel_default_plan(context: JobContext) -> None:
+        if context.claimed and not context.started:
+            board.mark_failed(context.task_index, "delegate_plan_tasks cancelled before execution", owner=owner)
+
     async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> Any:
         def reject(reason: str, code: str) -> Any:
             # A whole-batch refusal carries a stable ``code`` ("empty",
@@ -1549,8 +1605,11 @@ def make_plan_delegate(
                         task_index=index,
                         plan_task_text=text,
                         created_at=context.created_at,
+                        context=context,
                     )
-                    _schedule_with_admission_release(background_tasks, coroutine, context.admission)
+                    _schedule_with_admission_release(
+                        background_tasks, coroutine, context.admission, context=context, on_cancel=cancel_default_plan
+                    )
                 handed_over = True
                 record(number, index, "started", job_id=context.job_id)
             except BaseException as exc:

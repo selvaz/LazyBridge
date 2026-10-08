@@ -10,6 +10,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [1.8.0]
 
+### Fixed
+
+- Default parallel/plan workers refund admission when engine or Agent setup never
+  reaches execution, and release it after actual execution. Cancellation before
+  the first task step closes the inner coroutine, refunds the grant, and records
+  a terminal job status; default plan claims also unwind on that cancellation.
+
 ### Added
 
 - Whole-batch refusals from `make_plan_delegate(structured_outcomes=True)` carry
