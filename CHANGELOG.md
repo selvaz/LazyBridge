@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Background admission now runs before scheduling when no confirmation is configured;
+  jobs own grants and refund all not-started paths, including immediate cancellation.
+  `make_claude_writer` also accepts `admission_gate`.
+
 - Optional `JobRunner` / `JobContext` worker phases (prepare, CAS register, execute,
   finalize) on background, parallel, and plan delegates, with one rollback callback
   on refusal/failure/cancellation and release/refund ownership. `JobRegistry.begin_execution`

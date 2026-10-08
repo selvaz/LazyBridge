@@ -22,6 +22,7 @@ from typing import Any
 from lazybridge import Tool
 from lazybridge._display import elide
 from lazybridge.ext.delegation.admission import (
+    _AdmissionLease,
     refund_admission,
     release_admission,
 )
@@ -529,25 +530,13 @@ def make_background_delegate(
     caller's own policy (e.g. LazyCEO's project-work gate) runs through --
     this package has no opinion about what it checks.
 
-    ``admission_gate``, when given, is awaited exactly once, on the
-    ``pre_confirm`` path only, right after a human approves and right
-    before the engine actually starts -- never before ``pre_confirm`` is
-    asked (a quota/rate check run there would be re-validated against a
-    picture of the world that can be hours stale by the time an unbounded
-    human wait finally resolves) and never on the no-``pre_confirm`` path
-    (there is no wait to re-check anything across there). A rejection is
-    recorded as ``status="failed"`` with ``execution_started=False`` --
-    approved by the human, refused before any real work started, no tokens
-    spent. This package carries no quota/admission POLICY of its own
-    (``admission_gate`` is any zero-argument async callable returning
-    either ``None`` -- treated as "allowed" -- or an
-    :class:`~lazybridge.ext.delegation.admission.AdmissionDecision`-shaped
-    object); that policy is entirely the caller's. When granted, the
-    admission is released (via
-    :func:`~lazybridge.ext.delegation.admission.release_admission`) exactly
-    once, in a ``finally`` around the job's actual run, regardless of how
-    it ends -- a reservation is never held past the attempt it was taken
-    out for.
+    ``admission_gate`` runs once at scheduling time without ``pre_confirm``,
+    or once after approval when confirmation is enabled. A refused call without
+    confirmation returns the caller's rejection text before registration. Grants
+    belong to the attempt: release after execution, refund on every path that
+    never starts, including setup/scheduling failure and cancellation before
+    the task's first step. Supplying admission opts into the CAS JobRunner
+    boundary unless a custom runner is supplied. No admission policy lives here.
     """
     dynamic = accept_model_override or accept_effort_override or bool(extra_params)
     if extra_params and _RESERVED_EXTRA_PARAM_NAMES & extra_params.keys():
@@ -556,10 +545,17 @@ def make_background_delegate(
             "those are resolved by accept_model_override/accept_effort_override instead"
         )
 
+    selected_runner = job_runner or (JobRunner() if admission_gate is not None else None)
+
     async def _run_job(
-        job_id: str, objective: str, created_at: str, *, engine_factory: Callable[[], Any] = engine_factory
+        job_id: str,
+        objective: str,
+        created_at: str,
+        *,
+        engine_factory: Callable[[], Any] = engine_factory,
+        admission: Any = None,
     ) -> None:
-        admission: Any = None
+        handed_to_runner = False
         try:
             if pre_confirm is not None:
                 try:
@@ -607,6 +603,8 @@ def make_background_delegate(
                     # anything is right here: approved, not yet executing.
                     try:
                         admission = await admission_gate()
+                        if admission is not None and getattr(admission, "allowed", True):
+                            admission = _AdmissionLease(admission)
                     except Exception as exc:
                         registry.write(
                             job_id,
@@ -651,6 +649,7 @@ def make_background_delegate(
                     created_at=created_at,
                 )
 
+            handed_to_runner = selected_runner is not None
             await _run_selected_job(
                 job_id,
                 objective,
@@ -660,7 +659,7 @@ def make_background_delegate(
                 registry=registry,
                 notify=notify,
                 created_at=created_at,
-                job_runner=job_runner,
+                job_runner=selected_runner,
                 admission=admission,
             )
         finally:
@@ -668,15 +667,70 @@ def make_background_delegate(
             # (admission stays None on every other exit -- denied, pre_confirm
             # failure, admission_gate failure/refusal, or no admission_gate at
             # all -- and release_admission() itself no-ops for None).
-            if job_runner is None:
-                await release_admission(admission)
+            if not handed_to_runner:
+                if selected_runner is None:
+                    await release_admission(admission)
+                else:
+                    await refund_admission(admission)
 
     async def _start_and_describe(objective: str, *, engine_factory_for_job: Callable[[], Any]) -> str:
         job_id = str(uuid.uuid4())
         created_at = datetime.now(UTC).isoformat()
         initial_status = "awaiting_approval" if pre_confirm is not None else "running"
-        registry.write(job_id, objective, tool_name=tool_name, status=initial_status, created_at=created_at)
-        _track(background_tasks, _run_job(job_id, objective, created_at, engine_factory=engine_factory_for_job))
+        admission: Any = None
+        if pre_confirm is None and admission_gate is not None:
+            decision = await admission_gate()
+            if decision is not None and not getattr(decision, "allowed", True):
+                return _admission_rejection_text(decision)
+            admission = _AdmissionLease(decision)
+        entered = False
+        coroutine = None
+
+        async def cleanup_unstarted(error: BaseException) -> None:
+            try:
+                if selected_runner is not None and selected_runner.rollback is not None:
+                    context = JobContext(
+                        job_id,
+                        objective,
+                        tool_name,
+                        label,
+                        engine_factory_for_job,
+                        registry,
+                        notify=notify,
+                        created_at=created_at,
+                        admission=admission,
+                        phase="schedule",
+                        error=error,
+                    )
+                    await _maybe_await_value(selected_runner.rollback(context))
+            finally:
+                await refund_admission(admission)
+                registry.update(
+                    job_id, {"status": "failed", "execution_started": False, "error": f"scheduling failed: {error}"}
+                )
+
+        async def run() -> None:
+            nonlocal entered
+            entered = True
+            await _run_job(job_id, objective, created_at, engine_factory=engine_factory_for_job, admission=admission)
+
+        try:
+            registry.write(job_id, objective, tool_name=tool_name, status=initial_status, created_at=created_at)
+            coroutine = run()
+            task = _track(background_tasks, coroutine)
+        except BaseException as exc:
+            if coroutine is not None:
+                coroutine.close()
+            await cleanup_unstarted(exc)
+            raise
+
+        def cancelled_before_step(task: asyncio.Task[Any]) -> None:
+            if task.cancelled() and not entered:
+                coroutine.close()
+                # Retain cleanup so callers can await it on their persistent loop.
+                _track(background_tasks, cleanup_unstarted(asyncio.CancelledError()))
+
+        task.add_done_callback(cancelled_before_step)
         preview = elide(objective)
         if pre_confirm is not None:
             _safe_notify(

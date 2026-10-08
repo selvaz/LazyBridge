@@ -691,11 +691,8 @@ async def test_admission_gate_none_is_treated_as_allowed(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
-async def test_admission_gate_is_not_consulted_without_pre_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """admission_gate only ever re-checks admission AFTER a human approval
-    lands -- claude_write's own shape (no pre_confirm) has no such wait to
-    re-check anything across, so an admission_gate passed anyway must be a
-    silent no-op, never consulted."""
+async def test_admission_gate_is_consulted_without_pre_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A no-confirmation refusal happens before registration or scheduling."""
     _install_fake_agent(monkeypatch)
     store = Store()
     registry = JobRegistry(store)
@@ -716,11 +713,12 @@ async def test_admission_gate_is_not_consulted_without_pre_confirm(monkeypatch: 
         doc="delegate",
         admission_gate=admission_gate,
     )
-    await tool.func("do it")
+    result = await tool.func("do it")
     await _drain()
 
-    assert calls == 0
-    assert _jobs(registry, store)[0]["status"] == "done"
+    assert calls == 1
+    assert result == "should never be asked"
+    assert _jobs(registry, store) == []
 
 
 @pytest.mark.asyncio

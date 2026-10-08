@@ -131,6 +131,7 @@ def make_claude_writer(
     effort: str | None = None,
     notify: Callable[[str], None] | None = None,
     doc: str,
+    admission_gate: Callable[[], Awaitable[Any]] | None = None,
     validate_model: Callable[[str | None], str | None] | None = None,
     max_turns: int = 60,
     accept_model_override: bool = False,
@@ -139,12 +140,8 @@ def make_claude_writer(
 ) -> Tool:
     """Build a per-action-gated Claude Code workspace writer.
 
-    No ``admission_gate`` parameter here, unlike :func:`make_codex_writer`:
-    that hook only ever fires on the ``pre_confirm`` path (see
-    :func:`~lazybridge.ext.delegation.background.make_background_delegate`'s
-    docstring), and this writer has none -- its own actions are already
-    gated per-call through ``gate``, so there is no human wait after which
-    admission would need re-checking.
+    ``admission_gate`` is consulted at scheduling time before registration.
+    Its grant is refunded for work that never starts and released on completion.
 
     ``max_turns`` defaults to ``60`` (the SDK's own default is ``20`` --
     too low for a real multi-file objective; see the comment on the
@@ -209,6 +206,7 @@ def make_claude_writer(
         model=model,
         effort=effort,
         validate_model=validate_model,
+        admission_gate=admission_gate,
         accept_model_override=accept_model_override,
         accept_effort_override=accept_effort_override,
         extra_params=extra_params,

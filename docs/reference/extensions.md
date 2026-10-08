@@ -186,3 +186,17 @@ owned by the runner: refund before execution, release after execution starts.
 Callbacks should not also settle that reservation. Exceptions propagate after
 cleanup; a failing Store makes terminal recording best effort. No lifecycle can
 write a terminal record while its Store is unavailable.
+
+
+### Background admission without confirmation (1.8)
+
+`make_background_delegate(..., admission_gate=...)` checks once before registration
+when `pre_confirm` is absent. A refusal returns `rejection_text()` directly and
+creates no job. With confirmation, admission remains after approval. A grant is
+owned by one job: setup, scheduling, CAS refusal, and cancellation before execution
+refund it; execution completion/failure/cancellation release it. Admission enables
+the optional CAS runner by default, so engine and Agent setup happen before the
+execution marker. `make_claude_writer` forwards the same gate. Quotas, approval
+spending, rejection wording, and reservation storage remain caller policy.
+Cancellation before a task's first step schedules retained cleanup on the host's
+persistent event loop; await the retained tasks before closing that loop.

@@ -36,6 +36,25 @@ from typing import Any, Protocol, runtime_checkable
 _logger = logging.getLogger(__name__)
 
 
+class _AdmissionLease:
+    """Attempt-local, single settlement around an arbitrary caller decision."""
+
+    def __init__(self, decision: Any) -> None:
+        self.decision = decision
+        self.allowed = getattr(decision, "allowed", True)
+        self.settled = False
+
+    async def release(self) -> None:
+        if not self.settled:
+            self.settled = True
+            await release_admission(self.decision)
+
+    async def refund(self) -> None:
+        if not self.settled:
+            self.settled = True
+            await refund_admission(self.decision)
+
+
 @runtime_checkable
 class AdmissionDecision(Protocol):
     """The shape an ``admission_gate``'s non-``None`` return value is
