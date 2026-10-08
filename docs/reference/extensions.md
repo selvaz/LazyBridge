@@ -165,3 +165,24 @@ unlike `DurableBlackboard`, it does not represent task state.
 ## Visualizer
 
 ::: lazybridge.ext.viz.Visualizer
+
+
+### Replaceable delegation lifecycle (1.8)
+
+`make_background_delegate`, `make_parallel_delegate`, and `make_plan_delegate`
+accept `job_runner: JobRunner | None = None`. Omitting it preserves the existing
+worker. `JobRunner(prepare=..., register=..., execute=..., finalize=..., rollback=...)`
+exposes four sync or async phases, each receiving the same `JobContext`.
+The default prepare constructs both engine and Agent; register calls
+`JobRegistry.begin_execution(job_id)` to CAS a running, unstarted record to
+started; execute runs the prepared Agent; finalize stores the result using
+`JobRegistry.update(job_id, changes, only_active=True)` while preserving unknown fields.
+A custom register returns `False` when its CAS loses. No execution or terminal
+rewrite follows that refusal. The rollback callback runs once on refusal, phase
+failure, or cancellation, including partial setup. Its context exposes `phase`,
+`error`, `started`, `prepared`, `result`, and caller-owned `metadata`; callers can
+capture claim ownership and pre-claim attempts there. Reservation settlement is
+owned by the runner: refund before execution, release after execution starts.
+Callbacks should not also settle that reservation. Exceptions propagate after
+cleanup; a failing Store makes terminal recording best effort. No lifecycle can
+write a terminal record while its Store is unavailable.

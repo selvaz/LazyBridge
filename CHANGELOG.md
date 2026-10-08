@@ -12,6 +12,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Optional `JobRunner` / `JobContext` worker phases (prepare, CAS register, execute,
+  finalize) on background, parallel, and plan delegates, with one rollback callback
+  on refusal/failure/cancellation and release/refund ownership. `JobRegistry.begin_execution`
+  and `update` preserve unknown record fields through CAS transitions.
+
 - `lazybridge.ext.delegation.track_background_task` and
   `schedule_with_admission_release`: public names for the two scheduling
   primitives the delegate builders use, for callers that keep their own

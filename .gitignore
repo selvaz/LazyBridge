@@ -62,3 +62,4 @@ pytest-tmp-*/
 # ignored here rather than globally, because "tmp" is a plausible real
 # directory name in some other repository.
 tmp/
+.test-tmp/

@@ -29,6 +29,7 @@ from lazybridge.ext.delegation.admission import (
     rejection_text as _admission_rejection_text,
 )
 from lazybridge.ext.delegation.jobs import JobRegistry
+from lazybridge.ext.delegation.lifecycle import JobContext, JobRunner
 
 # Matches the consultant handles emitted in practice: hex/dashes plus the
 # ``repo#id`` shape used by Codex. Deliberately narrower than ``\S+`` so it
@@ -437,6 +438,15 @@ async def _run_delegate_job(
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{message}")
 
 
+async def _run_selected_job(
+    job_id: str, objective: str, *, job_runner: JobRunner | None = None, admission: Any = None, **kwargs: Any
+) -> None:
+    if job_runner is None:
+        await _run_delegate_job(job_id, objective, **kwargs)
+    else:
+        await job_runner(JobContext(job_id=job_id, objective=objective, admission=admission, **kwargs))
+
+
 def make_background_delegate(
     *,
     tool_name: str,
@@ -455,6 +465,7 @@ def make_background_delegate(
     accept_effort_override: bool = False,
     extra_params: Mapping[str, ExtraParam] | None = None,
     guard: Callable[[str, dict[str, Any]], Any] | None = None,
+    job_runner: JobRunner | None = None,
 ) -> Tool:
     """Build a fire-and-forget delegate with durable status reporting.
 
@@ -640,7 +651,7 @@ def make_background_delegate(
                     created_at=created_at,
                 )
 
-            await _run_delegate_job(
+            await _run_selected_job(
                 job_id,
                 objective,
                 tool_name=tool_name,
@@ -649,13 +660,16 @@ def make_background_delegate(
                 registry=registry,
                 notify=notify,
                 created_at=created_at,
+                job_runner=job_runner,
+                admission=admission,
             )
         finally:
             # A no-op unless admission_gate actually granted something above
             # (admission stays None on every other exit -- denied, pre_confirm
             # failure, admission_gate failure/refusal, or no admission_gate at
             # all -- and release_admission() itself no-ops for None).
-            await release_admission(admission)
+            if job_runner is None:
+                await release_admission(admission)
 
     async def _start_and_describe(objective: str, *, engine_factory_for_job: Callable[[], Any]) -> str:
         job_id = str(uuid.uuid4())
@@ -933,6 +947,7 @@ def make_parallel_delegate(
     gate: Any = None,
     model: str = "sonnet",
     admission_gate: Callable[[], Awaitable[Any]] | None = None,
+    job_runner: JobRunner | None = None,
 ) -> Tool:
     """Build a capped, fire-and-forget parallel delegation tool.
 
@@ -1049,7 +1064,7 @@ def make_parallel_delegate(
                 registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
                 _schedule_with_admission_release(
                     background_tasks,
-                    _run_delegate_job(
+                    _run_selected_job(
                         job_id,
                         objective,
                         tool_name="run_parallel",
@@ -1058,8 +1073,10 @@ def make_parallel_delegate(
                         registry=registry,
                         notify=notify,
                         created_at=created_at,
+                        job_runner=job_runner,
+                        admission=admission,
                     ),
-                    admission,
+                    admission if job_runner is None else None,
                 )
             except Exception as exc:
                 # Scheduling THIS objective failed before its job ever
@@ -1131,6 +1148,7 @@ def make_plan_delegate(
     gate: Any = None,
     model: str = "sonnet",
     admission_gate: Callable[[], Awaitable[Any]] | None = None,
+    job_runner: JobRunner | None = None,
 ) -> Tool:
     """Build a tool that claims durable-plan tasks before delegation.
 
@@ -1254,7 +1272,7 @@ def make_plan_delegate(
                     plan_task_text=expected_text,
                     created_at=created_at,
                 )
-                coroutine = _run_delegate_job(
+                coroutine = _run_selected_job(
                     job_id,
                     objective,
                     tool_name="delegate_plan_tasks",
@@ -1266,8 +1284,10 @@ def make_plan_delegate(
                     task_index=task_index,
                     plan_task_text=expected_text,
                     created_at=created_at,
+                    job_runner=job_runner,
+                    admission=admission,
                 )
-                _schedule_with_admission_release(background_tasks, coroutine, admission)
+                _schedule_with_admission_release(background_tasks, coroutine, admission if job_runner is None else None)
             except Exception as exc:
                 if coroutine is not None:
                     coroutine.close()
