@@ -1402,26 +1402,32 @@ def make_plan_delegate(
                 context.attempts_before = snapshot[index].get("attempts", 0)
 
     async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> Any:
-        def reject(reason: str) -> Any:
+        def reject(reason: str, code: str) -> Any:
+            # A whole-batch refusal carries a stable ``code`` ("empty",
+            # "batch_cap", "in_flight_cap") beside its wording, so a caller can
+            # tell it from per-item refusals without matching the text.
             if structured_outcomes:
                 return {
                     "items": [
                         _item_outcome(i, d.get("task_index") if isinstance(d, dict) else None, "refused", reason=reason)
                         for i, d in enumerate(delegations, start=1)
-                    ]
+                    ],
+                    "batch_refused": {"code": code, "reason": reason},
                 }
             return reason
 
         if not delegations:
-            return reject("REJECTED: delegations is empty -- nothing to run")
+            return reject("REJECTED: delegations is empty -- nothing to run", "empty")
         if len(delegations) > max_parallel_objectives:
             return reject(
-                f"REJECTED: {len(delegations)} delegations exceeds the cap of {max_parallel_objectives} per call"
+                f"REJECTED: {len(delegations)} delegations exceeds the cap of {max_parallel_objectives} per call",
+                "batch_cap",
             )
         if len(background_tasks) + len(delegations) > max_in_flight_delegate_tasks:
             return reject(
                 f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(delegations)} new delegation(s) "
-                f"exceeds the process-local cap of {max_in_flight_delegate_tasks}"
+                f"exceeds the process-local cap of {max_in_flight_delegate_tasks}",
+                "in_flight_cap",
             )
 
         outcomes: list[dict[str, Any] | None] = [None] * len(delegations)

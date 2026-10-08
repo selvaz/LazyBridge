@@ -12,6 +12,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Whole-batch refusals from `make_plan_delegate(structured_outcomes=True)` carry
+  `batch_refused = {"code": "empty" | "batch_cap" | "in_flight_cap", "reason": ...}`,
+  so callers can tell them from per-item refusals without matching the wording.
 - Plan delegates accept an optional `rollback_claim(JobContext)` carrying captured
   attempts, claim owner, and job id. It runs once for every valid item that never
   starts, including later worker setup failure and pre-step cancellation. Optional

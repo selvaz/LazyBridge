@@ -242,3 +242,35 @@ async def test_parallel_structured_partial_scheduling_failure(tmp_path, monkeypa
     assert [r["status"] for r in result["items"]] == ["started", "failed", "started"]
     assert result["items"][1]["reason"] == "run_parallel scheduling failed: write unavailable"
     await asyncio.gather(*tasks)
+
+
+@pytest.mark.parametrize(
+    "count,in_flight,code",
+    [(0, 0, "empty"), (3, 0, "batch_cap"), (1, 2, "in_flight_cap")],
+)
+async def test_whole_batch_refusal_carries_a_stable_code(tmp_path, count, in_flight, code):
+    """Callers tell a whole-batch refusal from per-item ones by its code, not by
+    matching the wording -- which is free to change."""
+    store = Store(db=str(tmp_path / "jobs.db"))
+    board = DurableBlackboard(store, "plan")
+    board.set_plan("work", ["a", "b", "c"])
+    tasks: set[asyncio.Task] = {asyncio.ensure_future(asyncio.sleep(10)) for _ in range(in_flight)}
+    tool = make_plan_delegate(
+        engine_factory=object,
+        registry=JobRegistry(store),
+        background_tasks=tasks,
+        board=board,
+        owner="caller",
+        structured_outcomes=True,
+        max_parallel_objectives=2,
+        max_in_flight_delegate_tasks=2,
+    )
+    try:
+        delegations = [dict(task_index=i, expected_text=t, objective=t) for i, t in enumerate(["a", "b", "c"][:count])]
+        result = await tool.func(delegations)
+    finally:
+        for task in tasks:
+            task.cancel()
+    assert result["batch_refused"]["code"] == code
+    assert result["batch_refused"]["reason"].startswith("REJECTED:")
+    assert all(item["status"] == "refused" for item in result["items"])
