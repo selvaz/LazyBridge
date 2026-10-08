@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Persistent consultant signatures and tool schemas expose only the enabled
+  fresh/model/effort overrides, and dispatch rejects disabled arguments before
+  recording or scheduling work. The question-only default signature is unchanged.
+
 - Per-call native writer session ids override a configured default alias for that
   call. Explicit per-call alias plus native id remains an error; omitting both
   still resumes the configured alias.

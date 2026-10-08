@@ -1075,6 +1075,19 @@ def make_persistent_consultant(
             )
 
         ask = _ask_with_overrides
+        enabled = {"question"}
+        if accept_fresh:
+            enabled.add("fresh")
+        if accept_model_override:
+            enabled.add("model")
+        if accept_effort_override:
+            enabled.add("effort")
+        signature = inspect.signature(ask)
+        # Tool.wrap and argument validation both honor __signature__. Keep the
+        # defensive direct-call checks above, but expose only supported knobs.
+        ask.__signature__ = signature.replace(  # type: ignore[attr-defined]
+            parameters=[parameter for name, parameter in signature.parameters.items() if name in enabled]
+        )
 
     ask.__doc__ = (inner.func.__doc__ or "") + " " + doc_suffix
     return Tool.wrap(ask, name=tool_name)
