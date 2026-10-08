@@ -178,3 +178,30 @@ async def test_setup_failure_cannot_overwrite_another_started_worker(tmp_path):
         await JobRunner(prepare=prepare)(JobContext("job", "work", "delegate", "worker", object, registry))
     assert registry.find("job")["status"] == "running"
     assert registry.find("job")["execution_started"] is True
+
+
+async def test_background_failure_is_recorded_and_the_task_ends_quietly(tmp_path):
+    """JobRunner re-raises for a caller awaiting it; a background delegate's own
+    retained task must not, or every failed job resurfaces later as asyncio's
+    'Task exception was never retrieved'. The failure stays in the record."""
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    tasks = set()
+
+    def fail(ctx):
+        raise RuntimeError("no worker was built")
+
+    tool = make_background_delegate(
+        tool_name="work",
+        label="worker",
+        engine_factory=lambda: None,
+        registry=registry,
+        background_tasks=tasks,
+        notify=None,
+        doc="work",
+        job_runner=JobRunner(prepare=fail),
+    )
+    await tool.run(objective="work")
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert results == [None]
+    [record] = [v for _, v in registry._store.items(prefix=registry._prefix)]
+    assert record["status"] == "failed" and "no worker was built" in record["error"]

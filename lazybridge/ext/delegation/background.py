@@ -439,13 +439,31 @@ async def _run_delegate_job(
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{message}")
 
 
+async def _run_in_background(runner: JobRunner, context: JobContext) -> None:
+    """Await ``runner`` as a fire-and-forget task.
+
+    ``JobRunner`` re-raises after recording the failure, settling admission and
+    rolling back -- right for a caller awaiting it, wrong for a retained
+    background task nobody awaits: the error would surface again only as
+    asyncio's "Task exception was never retrieved" at garbage collection. The
+    failure is already in the job record and the notification, so it is logged
+    here and the task ends normally. Cancellation still propagates.
+    """
+    try:
+        await runner(context)
+    except Exception:
+        logging.getLogger(__name__).debug("background job %s failed (already recorded)", context.job_id, exc_info=True)
+
+
 async def _run_selected_job(
     job_id: str, objective: str, *, job_runner: JobRunner | None = None, admission: Any = None, **kwargs: Any
 ) -> None:
     if job_runner is None:
         await _run_delegate_job(job_id, objective, **kwargs)
     else:
-        await job_runner(JobContext(job_id=job_id, objective=objective, admission=admission, **kwargs))
+        await _run_in_background(
+            job_runner, JobContext(job_id=job_id, objective=objective, admission=admission, **kwargs)
+        )
 
 
 def make_background_delegate(
@@ -1294,7 +1312,7 @@ async def _schedule_context(
     async def run() -> None:
         nonlocal entered
         entered = True
-        await runner(context)
+        await _run_in_background(runner, context)
 
     coroutine = run()
     try:
