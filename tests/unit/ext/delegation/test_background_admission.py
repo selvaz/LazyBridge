@@ -208,3 +208,30 @@ async def test_cancel_during_approval_finishes_record_and_calls_rollback(tmp_pat
     [job] = [v for _, v in registry._store.items(prefix=registry._prefix)]
     assert job["status"] == "failed" and job["execution_started"] is False
     assert calls == ["approval"]
+
+
+async def test_raising_admission_gate_without_pre_confirm_is_a_recorded_refusal(tmp_path):
+    """A gate that raises on the no-pre_confirm path must not escape the Tool:
+    it becomes a failed job record and a REJECTED string, like every other
+    admission call in the module."""
+
+    async def gate():
+        raise RuntimeError("quota backend down")
+
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    tasks = set()
+    tool = make_claude_writer(
+        workspace_root=tmp_path,
+        gate=object(),
+        registry=registry,
+        background_tasks=tasks,
+        doc="write",
+        admission_gate=gate,
+    )
+    answer = await tool.func("work")
+    assert answer.startswith("REJECTED:") and "quota backend down" in answer
+    assert tasks == set()
+    [record] = [v for _, v in registry._store.items(prefix=registry._prefix)]
+    assert record["status"] == "failed"
+    assert record["execution_started"] is False
+    assert "admission_gate failed" in record["error"]

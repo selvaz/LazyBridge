@@ -26,10 +26,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   guard, and lifecycle hooks. Exported Codex/Claude writer engine factories support
   per-call cwd/model/effort/alias and writable roots or max turns.
 
-- Background admission now runs before scheduling when no confirmation is configured;
-  jobs own grants and refund all not-started paths, including immediate cancellation.
-  `make_claude_writer` also accepts `admission_gate`.
-
 - Optional `JobRunner` / `JobContext` worker phases (prepare, CAS register, execute,
   finalize) on background, parallel, and plan delegates, with one rollback callback
   on refusal/failure/cancellation and release/refund ownership. `JobRegistry.begin_execution`
@@ -96,6 +92,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
     that is a git worktree, whose index lives outside it under the main
     repository's `.git`. Resolving which path(s) a given worktree needs is
     left to the caller; this package has no git-topology opinion of its own.
+
+### Changed
+
+- **`admission_gate` is now consulted when there is no `pre_confirm`.** Before, a
+  background delegate ignored its `admission_gate` unless it also had a `pre_confirm`;
+  now the gate runs before the job is scheduled and can refuse it (a gate that raises is
+  recorded as a failed job and returned as a `REJECTED:` refusal). Callers that passed
+  `admission_gate` without `pre_confirm` and relied on it being a no-op will see refusals.
+  Jobs own the grant: released when the job ran, refunded on every not-started path,
+  including immediate cancellation. `make_claude_writer` also accepts `admission_gate`.
 
 ## [1.7.0] — 2026-10-07
 

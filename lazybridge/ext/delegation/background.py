@@ -725,7 +725,27 @@ def make_background_delegate(
         initial_status = "awaiting_approval" if pre_confirm is not None else "running"
         admission: Any = None
         if pre_confirm is None and admission_gate is not None:
-            decision = await admission_gate()
+            try:
+                decision = await admission_gate()
+            except Exception as exc:
+                # Same contract as every other admission call in this module: a
+                # gate that raises (quota backend down, timeout) is a refusal the
+                # caller can read and a failed record it can find -- never a raw
+                # exception out of the Tool. Found by review.
+                # registry.write, not _write_queued: nothing has been recorded
+                # for this job yet, so there is no record for a runner's update
+                # to amend.
+                registry.write(
+                    job_id,
+                    objective,
+                    tool_name=tool_name,
+                    status="failed",
+                    error=f"admission_gate failed: {exc}",
+                    execution_started=False,
+                    created_at=created_at,
+                    finished_at=datetime.now(UTC).isoformat(),
+                )
+                return f"REJECTED: the admission check failed before {label} job {job_id[:8]} could start: {exc}"
             if decision is not None and not getattr(decision, "allowed", True):
                 return _admission_rejection_text(decision)
             admission = _AdmissionLease(decision)

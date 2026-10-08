@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import inspect
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -158,7 +158,7 @@ class JobRunner:
                         await _resolve(self.rollback(context))
                 finally:
                     if not refused:
-                        with contextlib.suppress(Exception):
+                        try:
                             context.registry.update(
                                 context.job_id,
                                 {
@@ -169,6 +169,12 @@ class JobRunner:
                                 },
                                 only_active=True,
                                 expected_started=context.started or context.registered,
+                            )
+                        except Exception:
+                            # Best-effort, as before, but never silent: a failed write
+                            # here leaves the job looking "running". Found by review.
+                            logging.getLogger(__name__).exception(
+                                "could not record the failure of job %s", context.job_id
                             )
         finally:
             if not context._settled:
