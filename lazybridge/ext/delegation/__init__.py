@@ -35,12 +35,21 @@ docstring for the full explanation.
     )
 """
 
+from lazybridge.ext.delegation.admission import (
+    AdmissionDecision,
+    refund_admission,
+    rejection_text,
+    release_admission,
+)
 from lazybridge.ext.delegation.background import (
+    ExtraParam,
     make_background_delegate,
     make_claude_delegate_engine_factory,
     make_parallel_delegate,
     make_persistent_consultant,
     make_plan_delegate,
+    schedule_with_admission_release,
+    track_background_task,
 )
 from lazybridge.ext.delegation.jobs import (
     DEFAULT_JOB_PREFIX,
@@ -49,19 +58,36 @@ from lazybridge.ext.delegation.jobs import (
     current_owner_fields,
     session_id_key,
 )
-from lazybridge.ext.delegation.writers import make_claude_writer, make_codex_writer
+from lazybridge.ext.delegation.lifecycle import JobContext, JobRunner
+from lazybridge.ext.delegation.writers import (
+    make_claude_writer,
+    make_claude_writer_engine_factory,
+    make_codex_writer,
+    make_codex_writer_engine_factory,
+)
 
 __all__ = [
+    "AdmissionDecision",
     "DEFAULT_JOB_PREFIX",
     "DEFAULT_SESSION_KEY_PREFIX",
+    "ExtraParam",
     "JobRegistry",
+    "JobContext",
+    "JobRunner",
     "current_owner_fields",
     "make_background_delegate",
     "make_claude_delegate_engine_factory",
     "make_claude_writer",
     "make_codex_writer",
+    "make_codex_writer_engine_factory",
+    "make_claude_writer_engine_factory",
     "make_parallel_delegate",
     "make_persistent_consultant",
     "make_plan_delegate",
+    "refund_admission",
+    "rejection_text",
+    "release_admission",
+    "schedule_with_admission_release",
     "session_id_key",
+    "track_background_task",
 ]

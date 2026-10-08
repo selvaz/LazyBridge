@@ -68,8 +68,8 @@ class Store:
             raise RuntimeError("Store is closed")
         if not hasattr(self._local, "conn"):
             conn = sqlite3.connect(self._db, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
+            _enable_wal(conn)
             conn.row_factory = sqlite3.Row
             self._local.conn = conn
             with self._lock:
@@ -562,6 +562,33 @@ class Store:
         else:
             with self._lock:
                 self._agent_memory.pop((agent_id, session_key), None)
+
+
+#: How long a new connection keeps retrying the switch to WAL.
+_WAL_RETRY_SECONDS = 5.0
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch ``conn`` to WAL, retrying while another connection holds the lock.
+
+    Changing the journal mode does not go through SQLite's busy handler, so
+    ``busy_timeout`` does not cover it: several processes or threads opening
+    the same (especially fresh) database at once got an immediate "database is
+    locked" on this pragma -- about two times in three when four connections
+    open together. Seen in CI as a bridge job failing at startup. Retried with
+    a short backoff for up to the same five seconds busy_timeout allows.
+    """
+    deadline = time.monotonic() + _WAL_RETRY_SECONDS
+    delay = 0.005
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
 
 
 def _json_eq(a: Any, b: Any) -> bool:

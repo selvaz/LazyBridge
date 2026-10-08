@@ -273,6 +273,46 @@ class JobRegistry:
             record.update(extra)
         self._store.write(self._key(job_id), record)
 
+    def begin_execution(self, job_id: str, *, extra: dict[str, Any] | None = None) -> bool:
+        """CAS a queued running record to started, preserving unknown fields.
+
+        False means recovery or another worker won. Never starts a missing,
+        terminal, or already-started record. Legacy missing markers are allowed.
+        """
+        if extra and _RESERVED_FIELDS & extra.keys():
+            raise ValueError("execution metadata cannot replace job identity or status")
+        key = self._key(job_id)
+        while True:
+            current = self._store.read(key)
+            if not isinstance(current, dict) or current.get("status") != "running":
+                return False
+            if current.get("execution_started") is True:
+                return False
+            if self._store.compare_and_swap(key, current, {**current, **(extra or {}), "execution_started": True}):
+                return True
+
+    def update(
+        self, job_id: str, changes: dict[str, Any], *, only_active: bool = True, expected_started: bool | None = None
+    ) -> bool:
+        """CAS a partial update, retaining fields the caller does not own.
+
+        ``expected_started`` optionally protects setup cleanup from overwriting
+        another worker that crossed the execution boundary in the meantime.
+        """
+        if {"job_id", "kind", "objective"} & changes.keys():
+            raise ValueError("update cannot replace job identity")
+        key = self._key(job_id)
+        while True:
+            current = self._store.read(key)
+            if not isinstance(current, dict):
+                return False
+            if only_active and current.get("status") not in ("running", "awaiting_approval"):
+                return False
+            if expected_started is not None and (current.get("execution_started") is True) != expected_started:
+                return False
+            if self._store.compare_and_swap(key, current, {**current, **changes}):
+                return True
+
     def reclaim_interrupted(self) -> list[str]:
         """Mark orphaned in-progress jobs ``interrupted`` -- but only the
         ones whose OWNER is actually dead.

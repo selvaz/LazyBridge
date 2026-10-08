@@ -8,6 +8,128 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.0]
+
+### Fixed
+
+- **`Store` no longer fails with "database is locked" when several connections open the
+  same database at once.** The switch to WAL bypasses SQLite's busy handler, so
+  `busy_timeout` never covered it; the pragma now retries with a short backoff for up to
+  five seconds (reproduced: two in three concurrent first opens failed before).
+- Persistent consultant signatures and tool schemas expose only the enabled
+  fresh/model/effort overrides, and dispatch rejects disabled arguments before
+  recording or scheduling work. The question-only default signature is unchanged.
+
+- Per-call native writer session ids override a configured default alias for that
+  call. Explicit per-call alias plus native id remains an error; omitting both
+  still resumes the configured alias.
+
+- JobRunner sends safe failure notifications for exceptions in setup and execution.
+  Its execution CAS atomically records unknown cost and prepared engine/model/effort
+  identity; failures preserve that provenance. Default callbacks are installed as
+  unbound instance callables, and plan cancellation cleanup explicitly re-raises.
+
+- Default parallel/plan workers refund admission when engine or Agent setup never
+  reaches execution, and release it after actual execution. Cancellation before
+  the first task step closes the inner coroutine, refunds the grant, and records
+  a terminal job status; default plan claims also unwind on that cancellation.
+
+### Added
+
+- Whole-batch refusals from `make_plan_delegate(structured_outcomes=True)` carry
+  `batch_refused = {"code": "empty" | "batch_cap" | "in_flight_cap", "reason": ...}`,
+  so callers can tell them from per-item refusals without matching the wording.
+- Plan delegates accept an optional `rollback_claim(JobContext)` carrying captured
+  attempts, claim owner, and job id. It runs once for every valid item that never
+  starts, including later worker setup failure and pre-step cancellation. Optional
+  `structured_outcomes` on plan/parallel delegates returns exact per-item started,
+  refused, or failed outcomes; `stop_on_refusal` preserves already scheduled jobs
+  while holding back later plan items. Defaults retain string output, continuing
+  the batch, and the existing board failure behavior. Lifecycle cleanup protects
+  records against a competing worker's execution CAS and preserves approval metadata.
+
+- Writers accept durable `session_alias` / `SessionRegistry`, separately from native
+  session ids, with optional alias overrides, custom factories, extra parameters,
+  guard, and lifecycle hooks. Exported Codex/Claude writer engine factories support
+  per-call cwd/model/effort/alias and writable roots or max turns.
+
+- Optional `JobRunner` / `JobContext` worker phases (prepare, CAS register, execute,
+  finalize) on background, parallel, and plan delegates, with one rollback callback
+  on refusal/failure/cancellation and release/refund ownership. `JobRegistry.begin_execution`
+  and `update` preserve unknown record fields through CAS transitions.
+
+- `lazybridge.ext.delegation.track_background_task` and
+  `schedule_with_admission_release`: public names for the two scheduling
+  primitives the delegate builders use, for callers that keep their own
+  orchestration on top of this package instead of importing private names.
+- **`lazybridge.ext.delegation` gains the generic hooks LazyCEO's own
+  richer `codex_write`/`claude_write`/`run_parallel`/`delegate_plan_tasks`
+  copies needed before they could be dropped in favour of this package.**
+  Every addition is optional and defaults to today's exact behaviour --
+  the pre-1.8 generated tools' signatures, JSON Schemas, and engine
+  construction calls are all byte-identical when none of the new
+  parameters are passed.
+  - **Per-call engine construction** (`make_background_delegate`):
+    `extra_params: Mapping[str, ExtraParam] | None` declares further
+    per-call parameters (LazyCEO's motivating case: a `repo` argument)
+    beyond `objective`, forwarded verbatim to `engine_factory` as keyword
+    arguments; `guard: Callable[[str, dict[str, Any]], Any] | None` is a
+    caller-supplied per-call validation hook (sync or async) that runs
+    FIRST, before anything is recorded or a task spawned, and can reject
+    with a `"REJECTED: ..."` string. Setting either builds the tool via
+    `Tool.from_schema` with an explicit, hand-built JSON Schema instead of
+    signature introspection, since the real Python callable underneath now
+    accepts an arbitrary `**extra`.
+  - **Per-call model/effort/session overrides** (writers and the
+    persistent consultant): `make_background_delegate`/`make_codex_writer`/
+    `make_claude_writer` gain `accept_model_override`/`accept_effort_override`
+    (plus `accept_session_override` on the two writers, forwarded as
+    `CodexEngine(thread_id=...)`/`ClaudeCodeEngine(session_id=...)`); the
+    resolved per-call value (falling back to the tool's own default) is
+    what `validate_model` now runs against. `make_persistent_consultant`
+    gains `accept_fresh` (a per-call `fresh=True` starts a new thread
+    instead of continuing the remembered one -- the new thread's handle
+    still becomes the one subsequent calls continue), plus the matching
+    `accept_model_override`/`accept_effort_override`, each checked against
+    the wrapped consultant function's own signature at BUILD time
+    (`TypeError` immediately, not on the first call that tries to use it).
+  - **Admission reservation protocol**
+    (`lazybridge.ext.delegation.admission`): an `admission_gate` may now
+    return a decision exposing, beyond `allowed`/`rejection_text()`, an
+    optional `release()` (give back a reservation once the attempt it
+    covered actually ran, success or failure) and `refund()` (give back
+    the reservation AND anything else spent, e.g. a human's one-use
+    approval, for an attempt that never ran at all -- falls back to
+    `release()` when absent). Both may be sync or async. `release_admission`/
+    `refund_admission`/`rejection_text` are the generic helpers every
+    delegate in this package now calls exactly once on every path, never
+    more. `make_parallel_delegate` refunds every admission already granted
+    earlier in the same batch when a later objective is refused or the
+    post-check capacity race fires, and releases each job's admission once
+    it finishes. `make_plan_delegate` gains `admission_gate` (checked per
+    item, before that item's own `board.claim_task` -- a refusal costs
+    nothing to unwind); a claim that loses the race, or a job that fails to
+    even get scheduled after the claim succeeds, now refunds that item's
+    admission alongside the existing board-claim unwind (`board.mark_failed`).
+  - **Engine factory knobs on the writers**: `make_claude_writer` gains
+    `max_turns` (default `60`, unchanged -- a caller needing more headroom,
+    as LazyCEO did after `20` proved too low live, passes a larger value).
+    `make_codex_writer` gains `writable_roots`, wired straight through to
+    `CodexPolicy.writable_roots` -- the prime use case is a `workspace_root`
+    that is a git worktree, whose index lives outside it under the main
+    repository's `.git`. Resolving which path(s) a given worktree needs is
+    left to the caller; this package has no git-topology opinion of its own.
+
+### Changed
+
+- **`admission_gate` is now consulted when there is no `pre_confirm`.** Before, a
+  background delegate ignored its `admission_gate` unless it also had a `pre_confirm`;
+  now the gate runs before the job is scheduled and can refuse it (a gate that raises is
+  recorded as a failed job and returned as a `REJECTED:` refusal). Callers that passed
+  `admission_gate` without `pre_confirm` and relied on it being a no-op will see refusals.
+  Jobs own the grant: released when the job ran, refunded on every not-started path,
+  including immediate cancellation. `make_claude_writer` also accepts `admission_gate`.
+
 ## [1.7.0] — 2026-10-07
 
 ### Added
