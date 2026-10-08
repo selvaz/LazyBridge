@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`Store` no longer fails with "database is locked" when several connections open the
+  same database at once.** The switch to WAL bypasses SQLite's busy handler, so
+  `busy_timeout` never covered it; the pragma now retries with a short backoff for up to
+  five seconds (reproduced: two in three concurrent first opens failed before).
 - Persistent consultant signatures and tool schemas expose only the enabled
   fresh/model/effort overrides, and dispatch rejects disabled arguments before
   recording or scheduling work. The question-only default signature is unchanged.
