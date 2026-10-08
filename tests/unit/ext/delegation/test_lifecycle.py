@@ -141,3 +141,40 @@ async def test_background_accepts_runner(tmp_path):
     await tool.run(objective="work")
     await asyncio.gather(*tasks)
     assert phases == ["prepare", "execute"]
+
+
+async def test_register_failure_after_cas_refunds_and_rolls_back(tmp_path):
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    registry.write("job", "work", tool_name="delegate", status="running", execution_started=False)
+    grant = Reservation()
+    calls = []
+
+    def register(context):
+        assert context.begin_execution()
+        raise RuntimeError("after CAS")
+
+    runner = JobRunner(
+        prepare=lambda ctx: None,
+        register=register,
+        rollback=lambda ctx: calls.append((ctx.phase, ctx.registered, ctx.started)),
+    )
+    with pytest.raises(RuntimeError, match="after CAS"):
+        await runner(JobContext("job", "work", "delegate", "worker", object, registry, admission=grant))
+    assert calls == [("register", True, False)]
+    assert (grant.released, grant.refunded) == (0, 1)
+    assert registry.find("job")["status"] == "failed"
+    assert registry.find("job")["execution_started"] is False
+
+
+async def test_setup_failure_cannot_overwrite_another_started_worker(tmp_path):
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    registry.write("job", "work", tool_name="delegate", status="running", execution_started=False)
+
+    def prepare(context):
+        assert registry.begin_execution("job")  # a competing worker wins during preparation
+        raise RuntimeError("local setup failed")
+
+    with pytest.raises(RuntimeError, match="local setup failed"):
+        await JobRunner(prepare=prepare)(JobContext("job", "work", "delegate", "worker", object, registry))
+    assert registry.find("job")["status"] == "running"
+    assert registry.find("job")["execution_started"] is True

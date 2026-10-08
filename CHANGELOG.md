@@ -12,6 +12,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Plan delegates accept an optional `rollback_claim(JobContext)` carrying captured
+  attempts, claim owner, and job id. It runs once for every valid item that never
+  starts, including later worker setup failure and pre-step cancellation. Optional
+  `structured_outcomes` on plan/parallel delegates returns exact per-item started,
+  refused, or failed outcomes; `stop_on_refusal` preserves already scheduled jobs
+  while holding back later plan items. Defaults retain string output, continuing
+  the batch, and the existing board failure behavior. Lifecycle cleanup protects
+  records against a competing worker's execution CAS and preserves approval metadata.
+
 - Writers accept durable `session_alias` / `SessionRegistry`, separately from native
   session ids, with optional alias overrides, custom factories, extra parameters,
   guard, and lifecycle hooks. Exported Codex/Claude writer engine factories support

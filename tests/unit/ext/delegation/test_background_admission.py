@@ -138,3 +138,73 @@ async def test_claude_writer_admission_refuses_before_registration(tmp_path):
     assert tasks == set()
     assert list(registry._store.items(prefix=registry._prefix)) == []
     assert (refused.released, refused.refunded) == (0, 0)
+
+
+async def test_approval_transition_preserves_unknown_metadata(tmp_path, monkeypatch):
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    tasks = set()
+    grant = Reservation()
+
+    async def approve(objective):
+        [job] = [v for _, v in registry._store.items(prefix=registry._prefix)]
+        registry.update(job["job_id"], {"caller_provenance": "kept"})
+        return True
+
+    async def gate():
+        return grant
+
+    class Agent:
+        def __init__(self, **kwargs):
+            pass
+
+        async def run(self, objective):
+            return SimpleNamespace(ok=True, text=lambda: "done")
+
+    monkeypatch.setattr("lazybridge.Agent", Agent)
+    tool = make_background_delegate(
+        tool_name="work",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=tasks,
+        notify=None,
+        doc="work",
+        pre_confirm=approve,
+        admission_gate=gate,
+    )
+    await tool.func("work")
+    await asyncio.gather(*tasks)
+    [job] = [v for _, v in registry._store.items(prefix=registry._prefix)]
+    assert job["status"] == "done" and job["caller_provenance"] == "kept"
+    assert (grant.released, grant.refunded) == (1, 0)
+
+
+async def test_cancel_during_approval_finishes_record_and_calls_rollback(tmp_path):
+    registry = JobRegistry(Store(db=str(tmp_path / "jobs.db")))
+    tasks = set()
+    entered = asyncio.Event()
+    calls = []
+
+    async def approve(objective):
+        entered.set()
+        await asyncio.Event().wait()
+
+    tool = make_background_delegate(
+        tool_name="work",
+        label="worker",
+        engine_factory=object,
+        registry=registry,
+        background_tasks=tasks,
+        notify=None,
+        doc="work",
+        pre_confirm=approve,
+        job_runner=JobRunner(rollback=lambda ctx: calls.append(ctx.phase)),
+    )
+    await tool.func("work")
+    await entered.wait()
+    [task] = tasks
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    [job] = [v for _, v in registry._store.items(prefix=registry._prefix)]
+    assert job["status"] == "failed" and job["execution_started"] is False
+    assert calls == ["approval"]

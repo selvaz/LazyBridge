@@ -44,6 +44,21 @@ class JobContext:
     prepared: Any = None
     result: Any = None
     error: BaseException | None = None
+    attempts_before: int | None = None
+    claim_owner: str | None = None
+    claimed: bool = False
+    registered: bool = False
+    _rolled_back: bool = field(default=False, init=False, repr=False)
+    _settled: bool = field(default=False, init=False, repr=False)
+
+    def begin_execution(self) -> bool:
+        """Acquire the registry CAS and remember ownership even if setup later raises.
+
+        Custom register callbacks can call this before adding their own setup.
+        A callback using its own CAS should set ``registered=True`` on success.
+        """
+        self.registered = self.registry.begin_execution(self.job_id)
+        return self.registered
 
 
 def _prepare(context: JobContext) -> Any:
@@ -53,7 +68,7 @@ def _prepare(context: JobContext) -> Any:
 
 
 def _register(context: JobContext) -> bool:
-    return context.registry.begin_execution(context.job_id)
+    return context.begin_execution()
 
 
 async def _execute(context: JobContext) -> Any:
@@ -61,6 +76,7 @@ async def _execute(context: JobContext) -> Any:
 
 
 def _finalize(context: JobContext) -> None:
+    from lazybridge._display import elide
     from lazybridge.ext.delegation.background import _result_cost_usd, _safe_notify
 
     result = context.result
@@ -76,8 +92,14 @@ def _finalize(context: JobContext) -> None:
         changes["error"] = result.error.message if result.error else "unknown error"
     if result.ok or cost:
         changes["cost_usd"] = cost
-    context.registry.update(context.job_id, changes)
-    _safe_notify(context.notify, f"{context.label} job {context.job_id[:8]} {changes['status']}")
+    context.registry.update(context.job_id, changes, expected_started=True)
+    if result.ok:
+        message = (
+            f"{context.label} job {context.job_id[:8]} done: {context.objective[:100]}\n\n{elide(changes['result'])}"
+        )
+    else:
+        message = f"{context.label} job {context.job_id[:8]} FAILED: {context.objective[:100]}\n\n{changes['error']}"
+    _safe_notify(context.notify, message)
 
 
 @dataclass
@@ -99,6 +121,7 @@ class JobRunner:
 
     async def __call__(self, context: JobContext) -> None:
         refused = False
+        context.phase = "prepare"
         try:
             context.prepared = await _resolve(self.prepare(context))
             context.phase = "register"
@@ -108,6 +131,7 @@ class JobRunner:
             if not registered:
                 refused = True
                 return
+            context.registered = True
             context.started = True
             context.phase = "execute"
             context.result = await _resolve(self.execute(context))
@@ -117,27 +141,38 @@ class JobRunner:
             context.error = exc
             raise
         finally:
-            try:
-                if refused or context.error is not None:
-                    try:
-                        if self.rollback is not None:
-                            await _resolve(self.rollback(context))
-                    finally:
-                        if not refused:
-                            # Best effort if the Store itself caused the failure.
-                            # Preserve metadata and any recovery/other worker's terminal record.
-                            with contextlib.suppress(Exception):
-                                context.registry.update(
-                                    context.job_id,
-                                    {
-                                        "status": "failed",
-                                        "error": f"{context.phase} failed: {context.error}",
-                                        "execution_started": context.started,
-                                        "finished_at": datetime.now(UTC).isoformat(),
-                                    },
-                                    only_active=True,
-                                )
-            finally:
+            await self._cleanup(context, refused=refused)
+
+    async def abort(self, context: JobContext, error: BaseException, *, phase: str = "schedule") -> None:
+        """Unwind a failed handoff before this runner has entered any phase."""
+        context.phase = phase
+        context.error = error
+        await self._cleanup(context)
+
+    async def _cleanup(self, context: JobContext, *, refused: bool = False) -> None:
+        try:
+            if (refused or context.error is not None) and not context._rolled_back:
+                context._rolled_back = True
+                try:
+                    if self.rollback is not None:
+                        await _resolve(self.rollback(context))
+                finally:
+                    if not refused:
+                        with contextlib.suppress(Exception):
+                            context.registry.update(
+                                context.job_id,
+                                {
+                                    "status": "failed",
+                                    "error": f"{context.phase} failed: {context.error}",
+                                    "execution_started": context.started,
+                                    "finished_at": datetime.now(UTC).isoformat(),
+                                },
+                                only_active=True,
+                                expected_started=context.started or context.registered,
+                            )
+        finally:
+            if not context._settled:
+                context._settled = True
                 if context.started:
                     await release_admission(context.admission)
                 else:

@@ -14,7 +14,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -547,6 +547,13 @@ def make_background_delegate(
 
     selected_runner = job_runner or (JobRunner() if admission_gate is not None else None)
 
+    def _write_queued(job_id: str, objective: str, **kwargs: Any) -> None:
+        if selected_runner is None:
+            registry.write(job_id, objective, **kwargs)
+        else:
+            kwargs.pop("tool_name", None)
+            registry.update(job_id, kwargs, expected_started=False)
+
     async def _run_job(
         job_id: str,
         objective: str,
@@ -569,7 +576,7 @@ def make_background_delegate(
                     # exception here would show it stuck "awaiting_approval"
                     # forever even though no approval is actually pending
                     # anymore. Found by Codex review before this ever shipped.
-                    registry.write(
+                    _write_queued(
                         job_id,
                         objective,
                         tool_name=tool_name,
@@ -584,7 +591,7 @@ def make_background_delegate(
                     )
                     return
                 if not approved:
-                    registry.write(
+                    _write_queued(
                         job_id,
                         objective,
                         tool_name=tool_name,
@@ -606,7 +613,7 @@ def make_background_delegate(
                         if admission is not None and getattr(admission, "allowed", True):
                             admission = _AdmissionLease(admission)
                     except Exception as exc:
-                        registry.write(
+                        _write_queued(
                             job_id,
                             objective,
                             tool_name=tool_name,
@@ -624,7 +631,7 @@ def make_background_delegate(
                         return
                     if admission is not None and not getattr(admission, "allowed", True):
                         reason = _admission_rejection_text(admission)
-                        registry.write(
+                        _write_queued(
                             job_id,
                             objective,
                             tool_name=tool_name,
@@ -640,7 +647,7 @@ def make_background_delegate(
                             f"arrived: {reason}. Nothing was started.",
                         )
                         return
-                registry.write(
+                _write_queued(
                     job_id,
                     objective,
                     tool_name=tool_name,
@@ -662,6 +669,45 @@ def make_background_delegate(
                 job_runner=selected_runner,
                 admission=admission,
             )
+        except BaseException as exc:
+            if not handed_to_runner:
+                if selected_runner is not None and selected_runner.rollback is not None:
+                    context = JobContext(
+                        job_id,
+                        objective,
+                        tool_name,
+                        label,
+                        engine_factory,
+                        registry,
+                        notify=notify,
+                        created_at=created_at,
+                        admission=admission,
+                        phase="approval",
+                        error=exc,
+                    )
+                    try:
+                        await _maybe_await_value(selected_runner.rollback(context))
+                    finally:
+                        _write_queued(
+                            job_id,
+                            objective,
+                            tool_name=tool_name,
+                            status="failed",
+                            error=f"approval/setup failed: {exc}",
+                            execution_started=False,
+                            finished_at=datetime.now(UTC).isoformat(),
+                        )
+                else:
+                    _write_queued(
+                        job_id,
+                        objective,
+                        tool_name=tool_name,
+                        status="failed",
+                        error=f"approval/setup failed: {exc}",
+                        execution_started=False,
+                        finished_at=datetime.now(UTC).isoformat(),
+                    )
+            raise
         finally:
             # A no-op unless admission_gate actually granted something above
             # (admission stays None on every other exit -- denied, pre_confirm
@@ -706,7 +752,9 @@ def make_background_delegate(
             finally:
                 await refund_admission(admission)
                 registry.update(
-                    job_id, {"status": "failed", "execution_started": False, "error": f"scheduling failed: {error}"}
+                    job_id,
+                    {"status": "failed", "execution_started": False, "error": f"scheduling failed: {error}"},
+                    expected_started=False,
                 )
 
         async def run() -> None:
@@ -1002,6 +1050,7 @@ def make_parallel_delegate(
     model: str = "sonnet",
     admission_gate: Callable[[], Awaitable[Any]] | None = None,
     job_runner: JobRunner | None = None,
+    structured_outcomes: bool = False,
 ) -> Tool:
     """Build a capped, fire-and-forget parallel delegation tool.
 
@@ -1040,13 +1089,22 @@ def make_parallel_delegate(
     """
     resolved_factory = _resolve_engine_factory(engine_factory, workspace_root=workspace_root, gate=gate, model=model)
 
-    async def run_parallel(objectives: list[str]) -> str:
+    async def run_parallel(objectives: list[str]) -> Any:
+        def reject(reason: str) -> Any:
+            if structured_outcomes:
+                return {
+                    "items": [_item_outcome(i, None, "refused", reason=reason) for i in range(1, len(objectives) + 1)]
+                }
+            return reason
+
         if not objectives:
-            return "REJECTED: objectives is empty -- nothing to run"
+            return reject("REJECTED: objectives is empty -- nothing to run")
         if len(objectives) > max_parallel_objectives:
-            return f"REJECTED: {len(objectives)} objectives exceeds the cap of {max_parallel_objectives} per call"
+            return reject(
+                f"REJECTED: {len(objectives)} objectives exceeds the cap of {max_parallel_objectives} per call"
+            )
         if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
-            return (
+            return reject(
                 f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new objective(s) "
                 f"exceeds the process-local cap of {max_in_flight_delegate_tasks}"
             )
@@ -1064,7 +1122,7 @@ def make_parallel_delegate(
                         for earlier in range(index):
                             await _refund_and_clear(admissions, earlier)
                         rejection = _admission_rejection_text(admission)
-                        return (
+                        return reject(
                             f"REJECTED: {rejection} (refused at objective {index + 1} of {len(objectives)}; "
                             "the whole batch was held back rather than started in part)"
                         )
@@ -1087,7 +1145,7 @@ def make_parallel_delegate(
                 if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
                     for i in range(len(admissions)):
                         await _refund_and_clear(admissions, i)
-                    return (
+                    return reject(
                         f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new "
                         f"objective(s) exceeds the process-local cap of {max_in_flight_delegate_tasks} -- capacity "
                         "was taken by another call while admission was being checked"
@@ -1111,27 +1169,41 @@ def make_parallel_delegate(
 
         job_ids: list[str] = []
         failures: list[str] = []
-        for objective, admission in zip(objectives, admissions, strict=True):
+        outcomes: list[dict[str, Any]] = []
+        for number, (objective, admission) in enumerate(zip(objectives, admissions, strict=True), start=1):
             job_id = str(uuid.uuid4())
             created_at = datetime.now(UTC).isoformat()
+            context = None
             try:
                 registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
-                _schedule_with_admission_release(
-                    background_tasks,
-                    _run_selected_job(
+                if job_runner is not None:
+                    context = JobContext(
                         job_id,
                         objective,
-                        tool_name="run_parallel",
-                        label="a parallel Claude Code sub-agent",
-                        engine_factory=resolved_factory,
-                        registry=registry,
+                        "run_parallel",
+                        "a parallel Claude Code sub-agent",
+                        resolved_factory,
+                        registry,
                         notify=notify,
                         created_at=created_at,
-                        job_runner=job_runner,
-                        admission=admission,
-                    ),
-                    admission if job_runner is None else None,
-                )
+                        admission=_AdmissionLease(admission),
+                    )
+                    await _schedule_context(context, job_runner, background_tasks)
+                else:
+                    _schedule_with_admission_release(
+                        background_tasks,
+                        _run_delegate_job(
+                            job_id,
+                            objective,
+                            tool_name="run_parallel",
+                            label="a parallel Claude Code sub-agent",
+                            engine_factory=resolved_factory,
+                            registry=registry,
+                            notify=notify,
+                            created_at=created_at,
+                        ),
+                        admission,
+                    )
             except Exception as exc:
                 # Scheduling THIS objective failed before its job ever
                 # started -- its admission (if any) is given back rather
@@ -1155,7 +1227,8 @@ def make_parallel_delegate(
                 # names, now reached from one more direction. Flagged by
                 # Codex review; left as a documented limitation rather than
                 # chased further here.
-                await refund_admission(admission)
+                if context is None or not context._settled:
+                    await refund_admission(admission)
                 error = f"run_parallel scheduling failed: {exc}"
                 with contextlib.suppress(Exception):
                     registry.write(
@@ -1167,8 +1240,10 @@ def make_parallel_delegate(
                         created_at=created_at,
                     )
                 failures.append(f"{job_id[:8]}: {error}")
+                outcomes.append(_item_outcome(number, None, "failed", job_id=job_id, reason=error))
                 continue
             job_ids.append(job_id[:8])
+            outcomes.append(_item_outcome(number, None, "started", job_id=job_id))
 
         preview = ", ".join(job_ids)
         if job_ids:
@@ -1181,10 +1256,46 @@ def make_parallel_delegate(
         )
         if failures:
             summary += "\n" + "\n".join(f"- {line}" for line in failures)
-        return summary
+        return {"items": outcomes} if structured_outcomes else summary
 
+    run_parallel.__annotations__["return"] = "dict[str, Any]" if structured_outcomes else "str"
     run_parallel.__doc__ = doc
     return Tool.wrap(run_parallel, name="run_parallel")
+
+
+async def _schedule_context(
+    context: JobContext,
+    runner: JobRunner,
+    background_tasks: set[asyncio.Task[Any]],
+) -> None:
+    """Transfer one context to a retained worker, including pre-step cancellation."""
+    entered = False
+
+    async def run() -> None:
+        nonlocal entered
+        entered = True
+        await runner(context)
+
+    coroutine = run()
+    try:
+        task = _track(background_tasks, coroutine)
+    except BaseException as exc:
+        coroutine.close()
+        await runner.abort(context, exc)
+        raise
+
+    def finished(task: asyncio.Task[Any]) -> None:
+        if task.cancelled() and not entered:
+            coroutine.close()
+            _track(background_tasks, runner.abort(context, asyncio.CancelledError()))
+
+    task.add_done_callback(finished)
+
+
+def _item_outcome(
+    item_number: int, task_index: int | None, status: str, *, job_id: str | None = None, reason: str | None = None
+) -> dict[str, Any]:
+    return {"item_number": item_number, "task_index": task_index, "status": status, "job_id": job_id, "reason": reason}
 
 
 def make_plan_delegate(
@@ -1203,6 +1314,9 @@ def make_plan_delegate(
     model: str = "sonnet",
     admission_gate: Callable[[], Awaitable[Any]] | None = None,
     job_runner: JobRunner | None = None,
+    rollback_claim: Callable[[JobContext], Any] | None = None,
+    structured_outcomes: bool = False,
+    stop_on_refusal: bool = False,
 ) -> Tool:
     """Build a tool that claims durable-plan tasks before delegation.
 
@@ -1230,147 +1344,205 @@ def make_plan_delegate(
     resolved_factory = _resolve_engine_factory(engine_factory, workspace_root=workspace_root, gate=gate, model=model)
     plan_id = board.plan_id
 
-    async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> str:
+    base_runner = job_runner or JobRunner()
+
+    async def rollback(context: JobContext) -> None:
+        try:
+            if rollback_claim is not None and not context.started:
+                await _maybe_await_value(rollback_claim(context))
+        finally:
+            if base_runner.rollback is not None:
+                await _maybe_await_value(base_runner.rollback(context))
+
+    selected_runner = replace(base_runner, rollback=rollback) if rollback_claim is not None else job_runner
+
+    def capture_attempts(context: JobContext) -> None:
+        if rollback_claim is not None:
+            snapshot = board.snapshot().tasks
+            index = context.task_index
+            if index is not None and 0 <= index < len(snapshot):
+                context.attempts_before = snapshot[index].get("attempts", 0)
+
+    async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> Any:
+        def reject(reason: str) -> Any:
+            if structured_outcomes:
+                return {
+                    "items": [
+                        _item_outcome(i, d.get("task_index") if isinstance(d, dict) else None, "refused", reason=reason)
+                        for i, d in enumerate(delegations, start=1)
+                    ]
+                }
+            return reason
+
         if not delegations:
-            return "REJECTED: delegations is empty -- nothing to run"
+            return reject("REJECTED: delegations is empty -- nothing to run")
         if len(delegations) > max_parallel_objectives:
-            return f"REJECTED: {len(delegations)} delegations exceeds the cap of {max_parallel_objectives} per call"
+            return reject(
+                f"REJECTED: {len(delegations)} delegations exceeds the cap of {max_parallel_objectives} per call"
+            )
         if len(background_tasks) + len(delegations) > max_in_flight_delegate_tasks:
-            return (
+            return reject(
                 f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(delegations)} new delegation(s) "
                 f"exceeds the process-local cap of {max_in_flight_delegate_tasks}"
             )
 
-        # Validate the entire batch before the first claim. Capacity/type
-        # rejection must never leave a partial durable-plan mutation behind.
-        outcomes: list[str | None] = [None] * len(delegations)
+        outcomes: list[dict[str, Any] | None] = [None] * len(delegations)
+        lines: list[str | None] = [None] * len(delegations)
         validated: list[tuple[int, str, str] | None] = [None] * len(delegations)
-        for item_number, delegation in enumerate(delegations, start=1):
-            task_index = delegation.get("task_index")
-            expected_text = delegation.get("expected_text")
-            objective = delegation.get("objective")
-            if not isinstance(task_index, int) or isinstance(task_index, bool):
-                outcomes[item_number - 1] = (
-                    f"- item {item_number}: REJECTED: task_index must be an int (bool is not accepted)"
-                )
-                continue
-            if not isinstance(expected_text, str) or not expected_text.strip():
-                outcomes[item_number - 1] = f"- item {item_number}: REJECTED: expected_text must be a non-empty string"
-                continue
-            if not isinstance(objective, str) or not objective.strip():
-                outcomes[item_number - 1] = f"- item {item_number}: REJECTED: objective must be a non-empty string"
-                continue
-            validated[item_number - 1] = (task_index, expected_text, objective)
 
-        for item_number, item in enumerate(validated, start=1):
+        def record(
+            number: int, index: int | None, status: str, reason: str | None = None, job_id: str | None = None
+        ) -> None:
+            outcomes[number - 1] = _item_outcome(number, index, status, job_id=job_id, reason=reason)
+            text = f"started job {job_id[:8]} for task {index}" if status == "started" and job_id else reason
+            lines[number - 1] = f"- item {number}: {text}"
+
+        # Validate the batch before any claims; preserve per-item refusals.
+        for number, delegation in enumerate(delegations, start=1):
+            index = delegation.get("task_index") if isinstance(delegation, dict) else None
+            text = delegation.get("expected_text") if isinstance(delegation, dict) else None
+            objective = delegation.get("objective") if isinstance(delegation, dict) else None
+            if not isinstance(index, int) or isinstance(index, bool):
+                record(number, None, "refused", "REJECTED: task_index must be an int (bool is not accepted)")
+            elif not isinstance(text, str) or not text.strip():
+                record(number, index, "refused", "REJECTED: expected_text must be a non-empty string")
+            elif not isinstance(objective, str) or not objective.strip():
+                record(number, index, "refused", "REJECTED: objective must be a non-empty string")
+            else:
+                validated[number - 1] = (index, text, objective)
+
+        stopped_reason: str | None = None
+        for number, item in enumerate(validated, start=1):
             if item is None:
+                if stop_on_refusal and stopped_reason is None:
+                    stopped_reason = f"not started after refusal at item {number}"
                 continue
-            task_index, expected_text, objective = item
-
-            admission: Any = None
-            if admission_gate is not None:
-                # Ask BEFORE claiming: a refusal must cost this item
-                # nothing -- no claim taken out, nothing to unwind.
-                admission = await admission_gate()
-                if admission is not None and not getattr(admission, "allowed", True):
-                    outcomes[item_number - 1] = f"- item {item_number}: {_admission_rejection_text(admission)}"
-                    continue
-                # admission_gate's own await can suspend for real time,
-                # during which a CONCURRENT delegate_plan_tasks call
-                # sharing this same background_tasks set can pass ITS OWN
-                # capacity check and also proceed -- the top-of-call check
-                # above only ever saw this call's own batch. Re-checking
-                # per item (not once for the whole batch, since items are
-                # scheduled one at a time as this loop runs, growing
-                # background_tasks as it goes) narrows that window the
-                # same way run_parallel's own post-admission recheck does.
-                # Found by Codex review before this ever shipped.
-                if len(background_tasks) >= max_in_flight_delegate_tasks:
-                    outcomes[item_number - 1] = (
-                        f"- item {item_number}: REJECTED: {len(background_tasks)} job(s) already in flight "
-                        f"reached the process-local cap of {max_in_flight_delegate_tasks} -- capacity was taken "
-                        "by another call while admission was being checked"
-                    )
-                    await refund_admission(admission)
-                    continue
-
-            job_id = str(uuid.uuid4())
+            index, text, objective = item
+            context = JobContext(
+                str(uuid.uuid4()),
+                objective,
+                "delegate_plan_tasks",
+                "a plan-linked Claude Code sub-agent",
+                resolved_factory,
+                registry,
+                notify=notify,
+                created_at=datetime.now(UTC).isoformat(),
+                plan_id=plan_id,
+                task_index=index,
+                plan_task_text=text,
+                claim_owner=owner,
+            )
+            handed_over = False
             try:
-                claimed = board.claim_task(task_index, expected_text, owner=owner)
-            except Exception as exc:
-                # The claim call itself raised (e.g. a real DurableBlackboard
-                # exhausting its CAS retries) rather than returning its
-                # usual "REJECTED: ..." string -- this attempt never ran
-                # either way, same as the lost-the-claim-race branch below.
-                # Found by Codex review before this ever shipped.
-                outcomes[item_number - 1] = f"- item {item_number}: claim_task failed for task {task_index}: {exc}"
-                await refund_admission(admission)
-                continue
-            if isinstance(claimed, str):
-                outcomes[item_number - 1] = f"- item {item_number}: {claimed}"
-                # Granted but the claim lost the race -- this attempt never
-                # ran at all.
-                await refund_admission(admission)
-                continue
-
-            coroutine = None
-            try:
-                created_at = datetime.now(UTC).isoformat()
+                context.phase = "admission"
+                if stopped_reason is not None:
+                    record(number, index, "refused", stopped_reason)
+                    if selected_runner is not None:
+                        capture_attempts(context)
+                        await selected_runner.abort(context, RuntimeError(stopped_reason), phase="admission")
+                    continue
+                if admission_gate is not None:
+                    decision = await admission_gate()
+                    if decision is not None and not getattr(decision, "allowed", True):
+                        reason = _admission_rejection_text(decision)
+                        record(number, index, "refused", reason)
+                        if stop_on_refusal:
+                            stopped_reason = f"not started after refusal at item {number}"
+                        if selected_runner is not None:
+                            capture_attempts(context)
+                            await selected_runner.abort(context, RuntimeError(reason), phase="admission")
+                        continue
+                    context.admission = _AdmissionLease(decision)
+                    if len(background_tasks) >= max_in_flight_delegate_tasks:
+                        reason = (
+                            f"REJECTED: {len(background_tasks)} job(s) already in flight "
+                            f"reached the process-local cap of {max_in_flight_delegate_tasks} -- capacity was taken "
+                            "by another call while admission was being checked"
+                        )
+                        record(number, index, "refused", reason)
+                        if stop_on_refusal:
+                            stopped_reason = f"not started after refusal at item {number}"
+                        if selected_runner is not None:
+                            capture_attempts(context)
+                            await selected_runner.abort(context, RuntimeError(reason), phase="admission")
+                        continue
+                context.phase = "claim"
+                capture_attempts(context)
+                claimed = board.claim_task(index, text, owner=owner)
+                if isinstance(claimed, str):
+                    record(number, index, "refused", claimed)
+                    if stop_on_refusal:
+                        stopped_reason = f"not started after refusal at item {number}"
+                    if selected_runner is not None:
+                        await selected_runner.abort(context, RuntimeError(claimed), phase="claim")
+                    continue
+                context.claimed = True
+                context.phase = "schedule"
+                extra = {"attempts_before": context.attempts_before, "claim_owner": owner} if rollback_claim else None
                 registry.write(
-                    job_id,
+                    context.job_id,
                     objective,
                     tool_name="delegate_plan_tasks",
                     status="running",
                     plan_id=plan_id,
-                    task_index=task_index,
-                    plan_task_text=expected_text,
-                    created_at=created_at,
+                    task_index=index,
+                    plan_task_text=text,
+                    created_at=context.created_at,
+                    extra=extra,
                 )
-                coroutine = _run_selected_job(
-                    job_id,
-                    objective,
-                    tool_name="delegate_plan_tasks",
-                    label="a plan-linked Claude Code sub-agent",
-                    engine_factory=resolved_factory,
-                    registry=registry,
-                    notify=notify,
-                    plan_id=plan_id,
-                    task_index=task_index,
-                    plan_task_text=expected_text,
-                    created_at=created_at,
-                    job_runner=job_runner,
-                    admission=admission,
+                if selected_runner is not None:
+                    await _schedule_context(context, selected_runner, background_tasks)
+                else:
+                    coroutine = _run_delegate_job(
+                        context.job_id,
+                        objective,
+                        tool_name="delegate_plan_tasks",
+                        label=context.label,
+                        engine_factory=resolved_factory,
+                        registry=registry,
+                        notify=notify,
+                        plan_id=plan_id,
+                        task_index=index,
+                        plan_task_text=text,
+                        created_at=context.created_at,
+                    )
+                    _schedule_with_admission_release(background_tasks, coroutine, context.admission)
+                handed_over = True
+                record(number, index, "started", job_id=context.job_id)
+            except BaseException as exc:
+                try:
+                    if selected_runner is not None:
+                        await selected_runner.abort(context, exc, phase=context.phase)
+                    elif context.claimed:
+                        board.mark_failed(index, f"delegate_plan_tasks setup failed: {exc}", owner=owner)
+                        registry.write(
+                            context.job_id,
+                            objective,
+                            tool_name="delegate_plan_tasks",
+                            status="failed",
+                            plan_id=plan_id,
+                            task_index=index,
+                            plan_task_text=text,
+                            error=f"delegate_plan_tasks setup failed: {exc}",
+                        )
+                finally:
+                    if not isinstance(exc, Exception):
+                        raise
+                reason = (
+                    f"claim_task failed for task {index}: {exc}"
+                    if context.phase == "claim"
+                    else f"setup failed for task {index}: {exc}"
                 )
-                _schedule_with_admission_release(background_tasks, coroutine, admission if job_runner is None else None)
-            except Exception as exc:
-                if coroutine is not None:
-                    coroutine.close()
-                error = f"delegate_plan_tasks setup failed: {exc}"
-                board.mark_failed(task_index, error, owner=owner)
-                # The job never ran -- give back its admission alongside the
-                # board claim, same "never attempted" reasoning as the
-                # lost-the-claim-race branch above.
-                await refund_admission(admission)
-                # Releasing the claim is only half the cleanup. The initial
-                # record already says "running", and no coroutine now exists
-                # to transition it; startup reclamation does not run here.
-                registry.write(
-                    job_id,
-                    objective,
-                    tool_name="delegate_plan_tasks",
-                    status="failed",
-                    plan_id=plan_id,
-                    task_index=task_index,
-                    plan_task_text=expected_text,
-                    error=error,
-                )
-                outcomes[item_number - 1] = f"- item {item_number}: setup failed for task {task_index}: {exc}"
-                continue
+                record(number, index, "failed", reason, context.job_id if context.claimed else None)
+            finally:
+                if not handed_over and (selected_runner is None or not context._settled):
+                    await refund_admission(context.admission)
 
-            outcomes[item_number - 1] = f"- item {item_number}: started job {job_id[:8]} for task {task_index}"
+        if structured_outcomes:
+            return {"items": [outcome for outcome in outcomes if outcome is not None]}
+        return "\n".join(line for line in lines if line is not None)
 
-        return "\n".join(outcome for outcome in outcomes if outcome is not None)
-
+    delegate_plan_tasks.__annotations__["return"] = "dict[str, Any]" if structured_outcomes else "str"
     delegate_plan_tasks.__doc__ = doc or (
         "Claim and delegate specific plan tasks. Each item requires task_index, "
         "expected_text matching the current plan, and a self-contained objective."

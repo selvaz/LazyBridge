@@ -289,8 +289,14 @@ class JobRegistry:
             if self._store.compare_and_swap(key, current, {**current, "execution_started": True}):
                 return True
 
-    def update(self, job_id: str, changes: dict[str, Any], *, only_active: bool = True) -> bool:
-        """CAS a partial update, retaining fields the caller does not own."""
+    def update(
+        self, job_id: str, changes: dict[str, Any], *, only_active: bool = True, expected_started: bool | None = None
+    ) -> bool:
+        """CAS a partial update, retaining fields the caller does not own.
+
+        ``expected_started`` optionally protects setup cleanup from overwriting
+        another worker that crossed the execution boundary in the meantime.
+        """
         if {"job_id", "kind", "objective"} & changes.keys():
             raise ValueError("update cannot replace job identity")
         key = self._key(job_id)
@@ -299,6 +305,8 @@ class JobRegistry:
             if not isinstance(current, dict):
                 return False
             if only_active and current.get("status") not in ("running", "awaiting_approval"):
+                return False
+            if expected_started is not None and (current.get("execution_started") is True) != expected_started:
                 return False
             if self._store.compare_and_swap(key, current, {**current, **changes}):
                 return True
