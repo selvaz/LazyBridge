@@ -21,6 +21,21 @@ from lazybridge.ext.delegation.jobs import JobRegistry
 from lazybridge.ext.delegation.lifecycle import JobRunner
 
 
+class _DefaultAlias:
+    """Distinguish an omitted per-call alias from an explicit alias or None."""
+
+
+_DEFAULT_ALIAS = _DefaultAlias()
+
+
+def _resolve_alias(session: str | None, alias: str | None | _DefaultAlias, configured: str | None) -> str | None:
+    if isinstance(alias, _DefaultAlias):
+        return configured if session is None else None
+    if session is not None and alias is not None:
+        raise ValueError("choose a native session id or a session_alias")
+    return alias
+
+
 def make_codex_writer_engine_factory(
     *,
     workspace_root: Path,
@@ -39,6 +54,7 @@ def make_codex_writer_engine_factory(
     from lazybridge.engines.coding import CodingAgentConfig
 
     config = CodingAgentConfig.writer(gate)
+    configured_alias = session_alias
 
     def factory(
         *,
@@ -46,13 +62,12 @@ def make_codex_writer_engine_factory(
         model: str | None = model,
         effort: str | None = effort,
         session: str | None = None,
-        session_alias: str | None = session_alias,
+        session_alias: str | None | _DefaultAlias = _DEFAULT_ALIAS,
         writable_roots: Sequence[str] | None = writable_roots,
     ) -> Any:
         from lazybridge.engines.codex import CodexEngine
 
-        if session is not None and session_alias is not None:
-            raise ValueError("choose a native session id or a session_alias")
+        resolved_alias = _resolve_alias(session, session_alias, configured_alias)
         selected_config = config
         if writable_roots:
             selected_config = dataclasses.replace(
@@ -63,8 +78,8 @@ def make_codex_writer_engine_factory(
             extra["reasoning_effort"] = effort
         if session is not None:
             extra["thread_id"] = session
-        if session_alias is not None:
-            extra["session_alias"] = session_alias
+        if resolved_alias is not None:
+            extra["session_alias"] = resolved_alias
         if session_registry is not None:
             extra["session_registry"] = session_registry
         return CodexEngine(model=model, cwd=str(cwd), config=selected_config, request_timeout=None, **extra)
@@ -91,6 +106,7 @@ def make_claude_writer_engine_factory(
         ),
         approval_gate=gate,
     )
+    configured_alias = session_alias
 
     def factory(
         *,
@@ -98,20 +114,19 @@ def make_claude_writer_engine_factory(
         model: str = model,
         effort: str | None = effort,
         session: str | None = None,
-        session_alias: str | None = session_alias,
+        session_alias: str | None | _DefaultAlias = _DEFAULT_ALIAS,
         max_turns: int = max_turns,
     ) -> Any:
         from lazybridge.engines.claude_code import ClaudeCodeEngine
 
-        if session is not None and session_alias is not None:
-            raise ValueError("choose a native session id or a session_alias")
+        resolved_alias = _resolve_alias(session, session_alias, configured_alias)
         extra: dict[str, Any] = {}
         if effort is not None:
             extra["reasoning_effort"] = effort
         if session is not None:
             extra["session_id"] = session
-        if session_alias is not None:
-            extra["session_alias"] = session_alias
+        if resolved_alias is not None:
+            extra["session_alias"] = resolved_alias
         if session_registry is not None:
             extra["session_registry"] = session_registry
         return ClaudeCodeEngine(

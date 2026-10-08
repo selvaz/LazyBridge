@@ -120,3 +120,71 @@ async def test_writer_forwards_factory_extra_params_and_guard(tmp_path):
     assert await tool.func("work", cwd="chosen") == "REJECTED: caller policy"
     assert calls == [("work", {"cwd": "chosen"})]
     assert list(registry._store.items(prefix=registry._prefix)) == []
+
+
+@pytest.mark.parametrize("kind", ["codex", "claude"])
+def test_native_session_suppresses_only_the_configured_default_alias(tmp_path, monkeypatch, kind):
+    captured = []
+
+    def fake_engine(**kwargs):
+        captured.append(kwargs)
+        return object()
+
+    target = "codex.CodexEngine" if kind == "codex" else "claude_code.ClaudeCodeEngine"
+    monkeypatch.setattr("lazybridge.engines." + target, fake_engine)
+    builder = make_codex_writer_engine_factory if kind == "codex" else make_claude_writer_engine_factory
+    factory = builder(workspace_root=tmp_path, gate=object(), session_alias="configured")
+    factory(session="native-id")
+    native_key = "thread_id" if kind == "codex" else "session_id"
+    assert captured[-1][native_key] == "native-id"
+    assert "session_alias" not in captured[-1]
+    factory()
+    assert captured[-1]["session_alias"] == "configured"  # one override does not change the default
+    factory(session_alias=None)
+    assert "session_alias" not in captured[-1]
+    factory(session_alias="explicit")
+    assert captured[-1]["session_alias"] == "explicit"
+    factory(session="native-id", session_alias=None)
+    assert captured[-1][native_key] == "native-id" and "session_alias" not in captured[-1]
+    for alias in ("explicit", "configured"):
+        with pytest.raises(ValueError, match="native session id or a session_alias"):
+            factory(session="native-id", session_alias=alias)
+
+
+@pytest.mark.parametrize("kind", ["codex", "claude"])
+async def test_writer_native_override_can_resume_with_a_configured_alias(tmp_path, monkeypatch, kind):
+    captured = []
+
+    def engine(**kwargs):
+        captured.append(kwargs)
+        return object()
+
+    class Agent:
+        def __init__(self, **kwargs):
+            pass
+
+        async def run(self, objective):
+            return SimpleNamespace(ok=True, text=lambda: "done")
+
+    class Channel:
+        async def ask(self, prompt):
+            return True
+
+    target = "codex.CodexEngine" if kind == "codex" else "claude_code.ClaudeCodeEngine"
+    monkeypatch.setattr("lazybridge.engines." + target, engine)
+    monkeypatch.setattr("lazybridge.Agent", Agent)
+    tasks = set()
+    kwargs = dict(
+        workspace_root=tmp_path,
+        gate=object(),
+        registry=JobRegistry(Store(db=str(tmp_path / "jobs.db"))),
+        background_tasks=tasks,
+        doc="write",
+        session_alias="configured",
+        accept_session_override=True,
+    )
+    tool = make_codex_writer(channel=Channel(), **kwargs) if kind == "codex" else make_claude_writer(**kwargs)
+    await tool.run(objective="resume", session="native-id")
+    await asyncio.gather(*tasks)
+    assert captured[0]["thread_id" if kind == "codex" else "session_id"] == "native-id"
+    assert "session_alias" not in captured[0]

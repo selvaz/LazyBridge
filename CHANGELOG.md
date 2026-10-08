@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Per-call native writer session ids override a configured default alias for that
+  call. Explicit per-call alias plus native id remains an error; omitting both
+  still resumes the configured alias.
+
 - JobRunner sends safe failure notifications for exceptions in setup and execution.
   Its execution CAS atomically records unknown cost and prepared engine/model/effort
   identity; failures preserve that provenance. Default callbacks are installed as
