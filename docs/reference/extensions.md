@@ -200,3 +200,30 @@ execution marker. `make_claude_writer` forwards the same gate. Quotas, approval
 spending, rejection wording, and reservation storage remain caller policy.
 Cancellation before a task's first step schedules retained cleanup on the host's
 persistent event loop; await the retained tasks before closing that loop.
+
+
+### Writer aliases and reusable provider factories (1.8)
+
+Both writers accept `session_alias: str | None`,
+`session_registry: SessionRegistry | None`, and
+`accept_session_alias_override: bool = False`. A generated `session_alias` tool
+parameter is a durable name scoped to the engine cwd. The existing optional
+`session` parameter continues to mean a native Codex thread or Claude session id.
+Combining a native id and an alias in the same factory call raises ValueError.
+The engines resolve and bind aliases through `lazybridge.engines.sessions`;
+reconstructing the writer and registry after restart resumes the saved native id.
+
+`make_codex_writer_engine_factory(*, workspace_root, gate, model=None, effort=None,
+session_alias=None, session_registry=None, writable_roots=None)` returns a callable
+accepting keyword `cwd`, `model`, `effort`, `session`, `session_alias`, and
+`writable_roots`. `make_claude_writer_engine_factory` takes the same common
+settings, with `model="sonnet"` and `max_turns=60` instead of writable roots;
+its callable also accepts a per-call `max_turns`. Every call builds a fresh engine
+and keeps the existing writer permission configuration and unbounded request timeout.
+
+Writers also forward optional `engine_factory`, `extra_params`, `guard`, and
+`job_runner` to background delegation. For example, declare
+`extra_params={"cwd": ExtraParam(required=True)}` and validate allowed repositories
+in your own guard; the provider factory receives the chosen cwd. Custom factories
+own their build-time settings; per-call arguments are forwarded unchanged. No
+repository resolution, model rules, or quota policy is supplied by these adapters.

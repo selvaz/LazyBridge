@@ -59,7 +59,12 @@ from lazybridge.ext.delegation.jobs import (
     session_id_key,
 )
 from lazybridge.ext.delegation.lifecycle import JobContext, JobRunner
-from lazybridge.ext.delegation.writers import make_claude_writer, make_codex_writer
+from lazybridge.ext.delegation.writers import (
+    make_claude_writer,
+    make_claude_writer_engine_factory,
+    make_codex_writer,
+    make_codex_writer_engine_factory,
+)
 
 __all__ = [
     "AdmissionDecision",
@@ -74,6 +79,8 @@ __all__ = [
     "make_claude_delegate_engine_factory",
     "make_claude_writer",
     "make_codex_writer",
+    "make_codex_writer_engine_factory",
+    "make_claude_writer_engine_factory",
     "make_parallel_delegate",
     "make_persistent_consultant",
     "make_plan_delegate",

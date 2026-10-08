@@ -12,6 +12,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Writers accept durable `session_alias` / `SessionRegistry`, separately from native
+  session ids, with optional alias overrides, custom factories, extra parameters,
+  guard, and lifecycle hooks. Exported Codex/Claude writer engine factories support
+  per-call cwd/model/effort/alias and writable roots or max turns.
+
 - Background admission now runs before scheduling when no confirmation is configured;
   jobs own grants and refund all not-started paths, including immediate cancellation.
   `make_claude_writer` also accepts `admission_gate`.
