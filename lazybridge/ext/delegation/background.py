@@ -1302,3 +1302,11 @@ def make_plan_delegate(
         "expected_text matching the current plan, and a self-contained objective."
     )
     return Tool.wrap(delegate_plan_tasks, name="delegate_plan_tasks")
+
+
+#: Public names for the two scheduling primitives the delegate builders use,
+#: for callers that run their own orchestration on top of this package
+#: (LazyCEO's background/parallel/plan delegates) instead of importing the
+#: underscore names, which carry no stability promise.
+track_background_task = _track
+schedule_with_admission_release = _schedule_with_admission_release

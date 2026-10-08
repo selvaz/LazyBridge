@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `lazybridge.ext.delegation.track_background_task` and
+  `schedule_with_admission_release`: public names for the two scheduling
+  primitives the delegate builders use, for callers that keep their own
+  orchestration on top of this package instead of importing private names.
 - **`lazybridge.ext.delegation` gains the generic hooks LazyCEO's own
   richer `codex_write`/`claude_write`/`run_parallel`/`delegate_plan_tasks`
   copies needed before they could be dropped in favour of this package.**

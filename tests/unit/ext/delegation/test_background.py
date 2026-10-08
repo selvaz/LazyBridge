@@ -1803,3 +1803,11 @@ async def test_plan_delegate_releases_admission_after_the_job_completes(monkeypa
     assert _jobs(registry, store)[0]["status"] == "done"
     assert admission.released == 1
     assert admission.refunded == 0
+
+
+def test_scheduling_primitives_are_public_and_are_the_ones_the_builders_use():
+    from lazybridge.ext import delegation
+    from lazybridge.ext.delegation import background
+
+    assert delegation.track_background_task is background._track
+    assert delegation.schedule_with_admission_release is background._schedule_with_admission_release

@@ -48,6 +48,8 @@ from lazybridge.ext.delegation.background import (
     make_parallel_delegate,
     make_persistent_consultant,
     make_plan_delegate,
+    schedule_with_admission_release,
+    track_background_task,
 )
 from lazybridge.ext.delegation.jobs import (
     DEFAULT_JOB_PREFIX,
@@ -75,5 +77,7 @@ __all__ = [
     "refund_admission",
     "rejection_text",
     "release_admission",
+    "schedule_with_admission_release",
     "session_id_key",
+    "track_background_task",
 ]
