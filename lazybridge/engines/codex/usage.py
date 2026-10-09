@@ -179,7 +179,7 @@ async def fetch_codex_usage(
     must treat that as *unknown*, never as *unlimited*.
     """
     # Off the loop: the first lookup may probe app installs with `--version`.
-    exe = executable or await asyncio.to_thread(codex_executable)
+    exe: str = executable if executable else await asyncio.to_thread(codex_executable)
     process = await asyncio.create_subprocess_exec(
         exe,
         "app-server",
