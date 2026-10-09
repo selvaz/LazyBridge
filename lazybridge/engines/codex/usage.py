@@ -178,7 +178,8 @@ async def fetch_codex_usage(
     method -- an older binary answers "method not found", and the caller
     must treat that as *unknown*, never as *unlimited*.
     """
-    exe = executable or codex_executable()
+    # Off the loop: the first lookup may probe app installs with `--version`.
+    exe: str = executable if executable else await asyncio.to_thread(codex_executable)
     process = await asyncio.create_subprocess_exec(
         exe,
         "app-server",

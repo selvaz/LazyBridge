@@ -12,9 +12,12 @@ import contextlib
 import json
 import os
 import random
+import re
 import shutil
+import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +54,68 @@ _PRE_THREAD_PHASES = frozenset({"spawn", "initialize", "initialized"})
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
 
+def _probe_codex_version(executable: str) -> str | None:
+    """Read a CLI version without letting a broken install block discovery."""
+    try:
+        return subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            check=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _parse_codex_version(
+    output: str | None,
+) -> tuple[bool, tuple[int, int, int], tuple[tuple[int, int | str], ...]] | None:
+    """Parse SemVer precedence, ignoring build metadata."""
+    if output is None:
+        return None
+    number = r"(0|[1-9][0-9]*)"
+    identifier = r"[0-9A-Za-z-]+"
+    match = re.fullmatch(
+        rf"codex-cli {number}\.{number}\.{number}"
+        rf"(?:-({identifier}(?:\.{identifier})*))?"
+        rf"(?:\+{identifier}(?:\.{identifier})*)?",
+        output.strip(),
+    )
+    if match is None:
+        return None
+    major, minor, patch, prerelease = match.groups()
+    identifiers: list[tuple[int, int | str]] = []
+    if prerelease:
+        for part in prerelease.split("."):
+            if part.isascii() and part.isdigit():
+                if len(part) > 1 and part.startswith("0"):
+                    return None
+                identifiers.append((0, int(part)))
+            else:
+                identifiers.append((1, part))
+    return prerelease is None, (int(major), int(minor), int(patch)), tuple(identifiers)
+
+
+@lru_cache(maxsize=1)
+def _select_app_codex(candidates: tuple[tuple[str, int], ...]) -> str:
+    """Cache discovery until the candidate paths or modification times change."""
+
+    def rank(
+        candidate: tuple[str, int],
+    ) -> tuple[bool, bool, tuple[int, int, int], tuple[tuple[int, int | str], ...], int]:
+        executable, mtime = candidate
+        version = _parse_codex_version(_probe_codex_version(executable))
+        if version is None:
+            return False, False, (0, 0, 0), (), mtime
+        stable, numeric, prerelease = version
+        return True, stable, numeric, prerelease, mtime
+
+    return max(candidates, key=rank)[0]
+
+
 def codex_executable() -> str:
     """Locate the ``codex`` CLI.
 
@@ -58,6 +123,13 @@ def codex_executable() -> str:
     desktop app's versioned install directory — the latter is *not* added to
     ``PATH``, so its ``bin/<hash>/codex.exe`` layout would otherwise be
     unreachable from ``create_subprocess_exec``.
+
+    App directories accept only exact ``codex.exe`` / ``codex`` filenames
+    directly under each hash directory. Parsed versions rank stable releases
+    before prereleases, then by numeric version and SemVer prerelease order,
+    with mtime breaking ties. Failed, timed-out or unparseable version probes
+    rank last, ordered by mtime. App selection is cached by paths and mtimes;
+    environment and PATH overrides are checked on every call without probing.
     """
     if override := os.environ.get("CODEX_BIN"):
         return override
@@ -68,14 +140,15 @@ def codex_executable() -> str:
         Path.home() / ".local" / "share" / "OpenAI" / "Codex" / "bin",
     ]
     candidates = [
-        exe
+        (str(exe), exe.stat().st_mtime_ns)
         for root in roots
         if root.is_dir()
-        for exe in root.glob("*/codex*")
-        if exe.is_file() and exe.suffix in ("", ".exe")
+        for name in ("codex.exe", "codex")
+        for exe in root.glob(f"*/{name}")
+        if exe.name == name and exe.is_file()
     ]
     if candidates:
-        return str(max(candidates, key=lambda p: p.stat().st_mtime))
+        return _select_app_codex(tuple(sorted(set(candidates))))
     raise FileNotFoundError(
         "codex CLI not found on PATH or in the Codex app install directory — "
         "install it (`npm install -g @openai/codex`) or set CODEX_BIN to its full path."
@@ -362,7 +435,8 @@ class CodexAppServerClient:
     ) -> CodexRunResult:
         if thread_id:
             ephemeral = False
-        command = self._spawn_command(config_overrides)
+        # Off the loop: the first lookup may probe app installs with `--version`.
+        command = await asyncio.to_thread(self._spawn_command, config_overrides)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
