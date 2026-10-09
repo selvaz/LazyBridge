@@ -435,7 +435,8 @@ class CodexAppServerClient:
     ) -> CodexRunResult:
         if thread_id:
             ephemeral = False
-        command = self._spawn_command(config_overrides)
+        # Off the loop: the first lookup may probe app installs with `--version`.
+        command = await asyncio.to_thread(self._spawn_command, config_overrides)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
