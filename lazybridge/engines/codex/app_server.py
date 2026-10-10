@@ -50,6 +50,12 @@ _STDIN_EOF_GRACE = 0.25
 #: only a failure here is safe to retry, since a durable thread may already exist
 #: after that point.
 _PRE_THREAD_PHASES = frozenset({"spawn", "initialize", "initialized"})
+#: Phases the client itself retries once when the child dies before the turn
+#: was written. thread/resume is idempotent; a thread/start that dies before
+#: answering never handed us the id, so its (empty) thread is orphaned whether
+#: or not we retry. Live 10/10/2026: the weekly died with 0xC0000409 in
+#: thread/start. The engine-level retry keeps the narrower _PRE_THREAD_PHASES.
+_RETRYABLE_BEFORE_TURN = _PRE_THREAD_PHASES | {"thread/start", "thread/resume"}
 #: Jittered pause (seconds) before the single startup retry.
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
@@ -403,7 +409,7 @@ class CodexAppServerClient:
                     thread_source=thread_source,
                 )
             except CodexTransportError as exc:
-                if exc.turn_sent or attempt or exc.phase not in _PRE_THREAD_PHASES:
+                if exc.turn_sent or attempt or exc.phase not in _RETRYABLE_BEFORE_TURN:
                     raise
                 await asyncio.sleep(random.uniform(*_STARTUP_RETRY_DELAY))
         raise AssertionError("unreachable")  # pragma: no cover
