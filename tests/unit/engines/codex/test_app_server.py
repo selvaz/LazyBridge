@@ -280,6 +280,37 @@ class TestDurableThreads:
 
         assert (result.input_tokens, result.output_tokens) == (55, 7)
 
+    def test_a_death_during_resume_before_the_turn_is_retried_once(self, tmp_path):
+        # Live 09–10/10/2026: bridge jobs died with 0xC0000409 in phase
+        # thread/resume, turn_sent=False. Resuming again is idempotent.
+        marker = tmp_path / "spawned"
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "flaky_resume", str(marker)))
+
+        result = asyncio.run(
+            asyncio.wait_for(
+                client.run(
+                    prompt="carry on",
+                    model=None,
+                    cwd="C:/work/project",
+                    dynamic_tools=[
+                        {
+                            "type": "function",
+                            "name": "get_quote",
+                            "description": "d",
+                            "inputSchema": _QuoteTool._Def.parameters,
+                        }
+                    ],
+                    on_tool_call=_call_tool,
+                    thread_id="thread-1",
+                ),
+                timeout=_TIMEOUT,
+            )
+        )
+
+        assert marker.exists()
+        assert result.text == "resumed answer"
+        assert result.thread_id == "thread-1"
+
     def test_a_completion_for_another_turn_is_ignored(self):
         result = asyncio.run(asyncio.wait_for(self._run("resume_stale_turn", thread_id="thread-1"), timeout=_TIMEOUT))
 
@@ -837,15 +868,26 @@ class TestBoundedCleanup:
         assert process.calls == ["terminate", "kill"]
         assert process.returncode is None
 
-    def test_a_failure_after_thread_start_was_written_is_not_retried(self, tmp_path):
+    def test_a_death_after_thread_start_but_before_the_turn_is_retried_once(self, tmp_path):
+        # Live 10/10/2026: the weekly died with 0xC0000409 in phase thread/start,
+        # turn_sent=False. No turn ran and the thread id never reached us, so a
+        # fresh process is a clean restart; it is still bounded to one retry.
         spawns = tmp_path / "spawns"
 
         with pytest.raises(CodexTransportError) as excinfo:
             asyncio.run(asyncio.wait_for(_run_scenario("die_after_thread_start", str(spawns)), timeout=_TIMEOUT))
 
-        assert _lines(spawns) == ["spawn"]
+        assert _lines(spawns) == ["spawn", "spawn"]
         assert excinfo.value.phase == "thread/start"
         assert excinfo.value.turn_sent is False
+
+    def test_a_flaky_thread_start_is_retried_and_the_retry_can_succeed(self, tmp_path):
+        marker = tmp_path / "spawned"
+
+        result = asyncio.run(asyncio.wait_for(_run_scenario("flaky_thread_start", str(marker)), timeout=_TIMEOUT))
+
+        assert result.text == "AMZN is 123.45"
+        assert marker.exists()
 
 
 class TestSpawnFailures:
