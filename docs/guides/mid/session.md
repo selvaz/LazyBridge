@@ -207,18 +207,18 @@ sess.add_exporter(OTelExporter(endpoint="http://otelcol:4318"))
   entirely with `unsafe_log_payloads=True` (or `redact=None`); pass
   your own `redact=` to replace it (LazyBridge does not stack the
   default in front of a user redactor).
-- **Nested agents inherit `session=`** unless they pass their own.
-  This is what gives you transitive cost rollup; pass an explicit
-  `session=None` on a sub-agent only when you genuinely want it
-  invisible.
+- **Nested tool agents inherit `session=`** when their session is None,
+  including an explicit `session=None`. A different explicit Session is
+  retained. Agents used directly as Plan Step targets need `session=` for
+  child-engine events; see [project patterns](../project-patterns.md#44-one-pipeline-one-session).
 
 ## See also
 
-- *Guides → Full → Exporters* (Phase 3) — the sinks that consume
+- [Exporters](../full/exporters.md) — the sinks that consume
   session events (`ConsoleExporter`, `JsonFileExporter`,
   `StructuredLogExporter`, `FilteredExporter`, `CallbackExporter`,
   `OTelExporter`).
-- *Guides → Full → GraphSchema* (Phase 3) — the topology view
+- [GraphSchema](../full/graph-schema.md) — the topology view
   exposed via `session.graph`.
 - [Memory](memory.md) — separate concept (conversation context, not
   observability).

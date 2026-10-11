@@ -64,7 +64,7 @@ research = Agent(
     engine=Plan(Step("search"), Step("summarise")),        # a sub-pipeline
     tools=[search, summarise], name="research",
 )
-article = Agent(
+article = Agent(name="pipeline",
     engine=Plan(Step("research"),                           # research is one tool
                 Step("write", context=from_step("research"))),
     tools=[research, writer], session=Session(),
@@ -84,7 +84,7 @@ tool named `"research"`. No glue, no special sub-pipeline type.
 Steps in a Plan execute in declaration order. The simplest nested case:
 
 ```python
-Agent(engine=Plan(Step("a"), Step("b")), tools=[a, b])
+Agent(name="pipeline", engine=Plan(Step("a"), Step("b")), tools=[a, b])
 ```
 
 `Agent.chain(a, b)` is sugar for the same thing when you don't need
@@ -98,12 +98,12 @@ Mark steps as `parallel=True` to run them in the same band:
 Plan(
     Step("fetch_news",    parallel=True),
     Step("fetch_papers",  parallel=True),
-    Step("synthesise",    context=from_parallel("fetch_news", "fetch_papers")),
+    Step("synthesise",    context=from_parallel_all("fetch_news")),
 )
 ```
 
-`Agent.parallel(a, b)` is sugar for a two-step parallel band followed
-by a collect step.
+`Agent.parallel(a, b)` returns a ParallelAgent with a labelled-text Envelope
+join. It is a separate implementation, not a Plan parallel-band alias.
 
 ### Nested — Plan inside Plan
 
@@ -111,7 +111,7 @@ Give a `Step` a target that is itself a Plan-backed agent:
 
 ```python
 inner = Agent(engine=Plan(Step("a"), Step("b")), tools=[a, b], name="inner")
-outer = Agent(engine=Plan(Step("inner"), Step("c")), tools=[inner, c])
+outer = Agent(name="pipeline", engine=Plan(Step("inner"), Step("c")), tools=[inner, c])
 ```
 
 The outer Plan sees `inner` as one tool. Nesting can go arbitrarily
@@ -126,7 +126,7 @@ deep — there is no nesting limit in the framework.
 | **Cost rollup** | `Envelope.metadata.nested_cost` aggregates token spend across all levels automatically. |
 | **Per-level pre-launch validation** | Each Plan runs `PlanCompiler.validate()` at construction. A broken inner plan fails immediately — before any LLM call in any level. |
 | **OTel `nesting_level`** | Every span emitted by an inner plan carries `nesting_level` so you can filter by depth in your observability backend. |
-| **`verify=` at any level** | A `verify=judge` on a Step inside an inner Plan works exactly like one on a top-level Step. |
+| **`verify=` at any level** | Wrap a Step's target Agent with `verify=judge`; Step has no `verify` parameter. Exhaustion can return a rejected draft. |
 | **Per-level checkpoint** | Each Plan can have its own `checkpoint_key=`; SQLite-backed `Store` namespaces them. A resume restarts from the deepest incomplete step. |
 
 ---

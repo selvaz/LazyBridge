@@ -1,222 +1,194 @@
 # Coding-agent permissions and approvals
 
-`CodingAgentConfig` configures Claude Code and Codex with one shared approval
-gate while preserving each runtime's native sandbox and permission system.
+CodingAgentConfig supplies one approval contract while retaining each runtime's
+native controls. It configures actions, rather than final workflow acceptance.
 
-## Safe profiles
+## Profiles and a working writer
 
 ```python
+from pathlib import Path
 from lazybridge import (
-    Agent,
-    ClaudeCodeEngine,
-    CodexEngine,
-    CodingAgentConfig,
+    Agent, ClaudeCodeEngine, ClaudeCodePolicy, CodexEngine, CodingAgentConfig,
     TerminalApprovalGate,
 )
 
+repo = str(Path.cwd().resolve())
 gate = TerminalApprovalGate()
-
-writer = Agent(
-    name="writer",
-    engine=ClaudeCodeEngine(
-        cwd="C:/work/project",
-        file_roots=["C:/work/project"],
-        config=CodingAgentConfig.writer(gate),
-    ),
-    tools=[...],
+# writer(gate) alone does not expose Claude Write/Edit/Bash.
+claude_config = CodingAgentConfig(
+    claude=ClaudeCodePolicy(permission_mode="default",
+                            preapprove_application_tools=False,
+                            extra_tools=("Write", "Edit", "Bash")),
+    approval_gate=gate,
 )
-
-reviewer = Agent(
-    name="reviewer",
-    engine=CodexEngine(
-        cwd="C:/work/project",
-        config=CodingAgentConfig.reviewer(),
-    ),
-)
+writer = Agent(name="writer", engine=ClaudeCodeEngine(
+    cwd=repo, file_roots=[repo], config=claude_config, request_timeout=600,
+))
+reviewer = Agent(name="reviewer", engine=CodexEngine(
+    cwd=repo, config=CodingAgentConfig.reviewer(),
+))
+codex_writer = Agent(name="codex-writer", engine=CodexEngine(
+    cwd=repo, config=CodingAgentConfig.writer(gate), request_timeout=600,
+))
 ```
 
-The writer profile uses Claude's `default` permission mode and Codex's
-`workspace-write` sandbox with `on-request` approvals. Application tools are
-not pre-approved and are sent to the gate. The reviewer profile is read-only
-and fails closed for application tools.
+| Profile | Claude | Codex | Application tools |
+| --- | --- | --- | --- |
+| Default config | Derived read/web built-ins, automatic permission mode | read-only, never | Preapproved |
+| reviewer() | Read/web; no write extras | read-only, never | Fail closed without a gate |
+| writer(gate) | default permission mode; no write extras added | workspace-write, on-request | Sent to the gate |
 
-Omitting `config=` preserves the engines' original trusted behavior for
-backward compatibility. Security-sensitive applications should select a
-profile explicitly.
+The default preapproval trusts your Python tools. Native read-only permissions
+do not remove side effects from a tool you supplied. Use a profile explicitly
+when that distinction matters.
 
-## Native web search per agent
-
-Codex's hosted web search can be selected for one engine subprocess without
-changing the user's global Codex configuration:
+## Custom policy
 
 ```python
-from lazybridge import CodexEngine, CodexPolicy, CodingAgentConfig
-
-research_config = CodingAgentConfig(
-    codex=CodexPolicy(
-        web_search="live",              # "live", "cached", "indexed", or "disabled"
-        preapprove_dynamic_tools=True,   # Store/blackboard tools may run
-    )
-)
-engine = CodexEngine(config=research_config)
-```
-
-`None` leaves the account default unchanged. LazyBridge forwards the selected
-mode as a per-process `codex app-server -c web_search=...` override; it does
-not edit `~/.codex/config.toml`. Use `preapprove_dynamic_tools=False` only when
-an approval gate is intentionally attached.
-
-## Custom policy and approval UI
-
-```python
-from lazybridge import (
-    ApprovalDecision,
-    ClaudeCodePolicy,
-    CodexPolicy,
-    CodingAgentConfig,
-)
+from lazybridge import ApprovalDecision, ClaudeCodePolicy, CodexPolicy, CodingAgentConfig
 
 async def approve(request):
-    if request.kind == "tool" and request.name in {"read_ticket", "get_quote"}:
+    if request.kind == "tool" and request.name in {"project_status", "read_ticket"}:
         return ApprovalDecision.allow()
-    if request.kind == "command" and request.name.startswith("git status"):
-        return ApprovalDecision.allow_for_session()
     return ApprovalDecision.deny(f"Blocked {request.kind}: {request.name}")
 
 config = CodingAgentConfig(
     claude=ClaudeCodePolicy(
-        permission_mode="default",
         preapprove_application_tools=False,
-        allowed_tools=("Read", "Glob", "Grep"),
-        disallowed_tools=("Bash(rm *)",),
+        extra_tools=("Write", "Edit"),
         setting_sources=(),
     ),
     codex=CodexPolicy(
-        sandbox="workspace-write",
-        approval_policy="on-request",
+        sandbox="workspace-write", approval_policy="on-request",
         preapprove_dynamic_tools=False,
     ),
     approval_gate=approve,
 )
 ```
 
-`ApprovalRequest` normalizes the provider, action kind, name, arguments,
-working directory, reason, and native request identifiers. A gate returns
-`ApprovalDecision.allow()`, `.allow_for_session()`, `.deny()`, or `.cancel()`.
+ApprovalRequest carries provider, kind, name, arguments, cwd, reason,
+thread_id, turn_id and raw runtime data. Kinds are tool, command, file_change,
+permissions and user_input. A sync or async gate returns ApprovalDecision:
+allow, allow_for_session, deny or cancel. A direct engine approval_gate conflicts
+with a different config gate. No gate means deny when approval is required.
 
-Use `TerminalApprovalGate` for local development. In production, pass an async
-callback backed by your web UI, Telegram bot, queue, or policy service. Keep
-workflow approvals such as “approve this complete diff before push” as a
-separate `HumanEngine` step; this gate controls individual runtime actions.
+TerminalApprovalGate provides a terminal UI. For durable approvals use the
+[core approval extension](../../reference/extensions.md#tiered-approval-gate)
+or [LazyTools code bridge](https://tools.lazybridge.com/code-bridge/).
+Final diff/release approval is a separate workflow step.
 
-### How far a grant reaches
+## Native policy fields
 
-`allow_for_session()` is remembered **per agent, per LazyBridge `Session`** —
-keyed by `(provider, agent_name)` and parked on the `Session` object, so:
+| ClaudeCodePolicy | Default | Meaning |
+| --- | --- | --- |
+| permission_mode | None | Auto-select dontAsk if nothing needs gating, default otherwise. Explicit modes: default, dontAsk, acceptEdits, bypassPermissions, plan, auto. |
+| preapprove_application_tools | True | Trust in-process MCP/Python tools without calling the gate. |
+| allowed_tools / disallowed_tools | () / () | Preapproval and denial rules; do not expose a missing built-in. |
+| extra_tools | () | Adds names to the derived built-in set. |
+| setting_sources | () | No ambient user/project/local settings by default. |
+| auto_compact_window | None | Per-agent context window used to bring compaction forward. |
 
-- a grant survives the next runs of that agent instead of re-prompting every
-  turn (the dispatcher itself is rebuilt per run, so a naive cache would);
-- a second agent sharing the same engine instance is still asked separately,
-  which matters because engines are shared freely — that is why
-  `resolve_agent_name` exists;
-- each provider keeps its own grants, so approving a tool for Codex does not
-  silently approve the same name for Claude Code.
+File roots belong to ClaudeCodeEngine and constrain file hooks, including
+Read/Glob/Grep/Write/Edit/NotebookEdit. Bash is outside that confinement, so
+granting Bash or another unconfined built-in requires an approval gate.
+Permissive permission modes do not bypass the engine's file-root hook.
 
-Without a `Session` there is nowhere to persist a grant, so it degrades to
-"for the rest of this run". `allow()` is always single-use.
+| CodexPolicy | Default | Meaning |
+| --- | --- | --- |
+| sandbox | read-only | read-only, workspace-write or danger-full-access. |
+| approval_policy | never | never, on-request or untrusted. |
+| preapprove_dynamic_tools | True | Trust Python tools independently of native sandbox. |
+| writable_roots | None | Extra absolute paths additive to cwd under workspace-write; ignored by other sandbox modes. |
+| web_search | None | Runtime default, or disabled/cached/indexed/live per subprocess. |
+| auto_compact_token_limit | None | Per-process token count that triggers compaction. |
+
+Git worktrees may need explicit access to their shared Git metadata outside
+cwd for add/commit. The caller resolves those paths; LazyBridge does not infer
+Git topology or authorize unrelated workspaces.
 
 ## Provider mapping
 
-| Shared configuration | Claude Code | Codex |
-|---|---|---|
-| Runtime sandbox | `file_roots`, built-in tool selection | `sandbox` |
-| Native approval mode | `permission_mode` | `approval_policy` |
-| Granting more built-ins | `extra_tools` | (n/a — the sandbox decides) |
-| Pre-approved app tools | `allowed_tools` / MCP allow rules | `preapprove_dynamic_tools` |
-| Hard denial | `disallowed_tools` | sandbox plus gate denial |
-| Human callback | `can_use_tool` | App Server approval requests and dynamic tools |
-| Ambient configuration | `setting_sources` | local Codex configuration plus thread overrides |
-| When the agent compacts | `auto_compact_window` | `auto_compact_token_limit` |
+| Shared concern | Claude Code | Codex |
+| --- | --- | --- |
+| Native filesystem boundary | Engine file_roots hooks and built-in selection | Runtime sandbox and optional writable_roots |
+| Approval mode | permission_mode | approval_policy |
+| Expose more native tools | extra_tools | Native tools governed by sandbox/runtime |
+| Trust application tools | preapprove_application_tools; native allowed_tools rules | preapprove_dynamic_tools |
+| Hard denial | disallowed_tools and gate | Sandbox restrictions and gate |
+| Human callback | SDK can_use_tool, normalized through ApprovalRequest | App Server native approval requests and dynamic callbacks |
+| Ambient configuration | Explicit setting_sources | Runtime config plus thread/per-process overrides |
+| Compaction | auto_compact_window | auto_compact_token_limit |
 
-`ClaudeCodePolicy.permission_mode` defaults to `None`, which lets the engine
-pick per run: `"dontAsk"` when nothing needs gating (application tools only,
-all pre-approved) and `"default"` when something does — built-in tools, an
-approval gate, or `preapprove_application_tools=False`. Pin a value only when
-you want to override that; a hardcoded `"default"` would put a fully
-pre-approved, tool-only agent into prompting mode with no callback able to
-answer.
+Claude permission_mode=None selects dontAsk when nothing needs gating and
+default when built-ins or an approval policy need callbacks. Pin a mode only
+when you intend to override that choice. Granting a built-in is distinct from
+preapproving it; an allowed_tools rule cannot expose a tool absent from the set.
 
-## Deciding when an agent compacts
+Production UIs can implement a sync or async ApprovalGate backed by a web form,
+bot, policy service or durable queue. Preserve native request identifiers and
+the normalized arguments in the decision record. A grant for a runtime action
+does not approve the complete diff, a merge or a publish operation.
 
-Both CLIs summarise their own history when it grows too long. Left alone they
-use a default tuned for the model, which is usually the right thing — but a
-long-running agent that keeps refilling its context can be told to compact
-earlier, per agent, without touching a machine-wide configuration file.
+## Native web search per agent
 
 ```python
-from lazybridge.engines.coding import ClaudeCodePolicy, CodexPolicy, CodingAgentConfig
+from lazybridge import CodexEngine, CodexPolicy, CodingAgentConfig
 
-claude = CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=140_000))
-codex = CodingAgentConfig(codex=CodexPolicy(auto_compact_token_limit=140_000))
+research_config = CodingAgentConfig(codex=CodexPolicy(
+    web_search="live", preapprove_dynamic_tools=True,
+))
+research_engine = CodexEngine(config=research_config)
 ```
 
-The two numbers do **not** mean quite the same thing, and the difference is
-worth knowing before you copy one into the other.
+None keeps the runtime default. disabled/cached/indexed/live are accepted
+policy values; actual support is runtime-dependent. The adapter forwards
+web_search as a per-process -c override instead of editing the user's global
+config. Preapproving Python tools is independent of native web access.
 
-`auto_compact_window` is a *window*: Claude Code compacts when usage
-approaches it, and the effective threshold is the minimum of your value and
-the model's real context window. So it can bring compaction forward, never
-push it beyond what the model allows. It travels to the agent as the
-`CLAUDE_CODE_AUTO_COMPACT_WINDOW` environment variable, which outranks every
-settings file — deliberately, because an agent reads none of them by default
-(`setting_sources` is empty), and the alternative would be inheriting a
-human's personal settings wholesale to deliver one number.
+## Grant scope and compaction
 
-`auto_compact_token_limit` is a *trigger*: the token count at which Codex
-starts summarising. It travels as a `-c model_auto_compact_token_limit=<n>`
-override on that agent's own App Server subprocess, so the shared
-`~/.codex/config.toml` is never touched and no other Codex on the machine
-changes behaviour.
-
-Codex's companion setting `model_context_window` is deliberately not exposed.
-It describes the budget rather than enlarging the model's real limit, and
-setting it is reported upstream to break auto-compaction outright
-([openai/codex#16068](https://github.com/openai/codex/issues/16068)).
-
-Both paths are verified end to end rather than by construction: a Claude Code
-agent given `auto_compact_window=137000` echoes that value back from
-`$CLAUDE_CODE_AUTO_COMPACT_WINDOW` inside its own subprocess, and
-`codex app-server --strict-config -c model_auto_compact_token_limit=140000`
-starts cleanly where an invented key is rejected outright.
-
-Neither knob exists for `LLMEngine`: an API-backed agent has no compaction to
-schedule, and its budgets are turns and tool calls rather than tokens.
-
-## Granting write tools to a gated agent
-
-`ClaudeCodePolicy.extra_tools` adds names to the built-in set the SDK is
-allowed to offer the model. Without it, no approval gate can ever be *asked*
-about a write — the model simply never has `Write`/`Edit`/`Bash`:
+Generic allow_for_session grants live on the LazyBridge Session, scoped by
+(provider, agent_name) and action kind/name. Command grants also fingerprint
+a usable arguments.command string; commands without one are not cached.
+Without a Session, grants last only for that run. allow is single-use.
+This cache does not persist through a process restart or native transcript.
+Gates that manage their own narrower scope can set manages_session_grants=True.
+TieredGate uses its own cwd/policy-fingerprint scope and audit trail.
 
 ```python
-config = CodingAgentConfig(
-    claude=ClaudeCodePolicy(
-        preapprove_application_tools=False,
-        extra_tools=("Write", "Edit", "Bash"),
-    ),
-    approval_gate=my_gate,
-)
+from lazybridge import ClaudeCodePolicy, CodexPolicy, CodingAgentConfig
+
+claude_config = CodingAgentConfig(claude=ClaudeCodePolicy(auto_compact_window=140_000))
+codex_config = CodingAgentConfig(codex=CodexPolicy(
+    web_search="live", auto_compact_token_limit=140_000,
+))
 ```
 
-Granting is **not** pre-approving: unless a name is also in `allowed_tools`,
-every call still routes through the gate. One asymmetry matters — `file_roots`
-confinement is enforced by a hook over the *file* tools (`Read`/`Glob`/`Grep`/
-`Edit`/`Write`/`NotebookEdit`), and `Bash` is not path-confinable that way: an
-approved command can touch anything its process can. Its only boundary is the
-gate's policy, so the engine **refuses at construction** to grant `Bash`
-without an `approval_gate` rather than advertising a confinement it cannot
-deliver.
+Claude's window becomes CLAUDE_CODE_AUTO_COMPACT_WINDOW. The effective threshold
+cannot exceed the model's actual context window. Codex's trigger becomes
+model_auto_compact_token_limit in per-process -c overrides, alongside web_search.
+These numbers have different semantics: Claude's value is a context window
+that can bring compaction forward; Codex's value is a token trigger for
+summarization. Copying a number from one field to the other does not establish
+equivalent behavior. Runtime defaults may be preferable for a short-lived run.
+Claude's per-process environment override avoids inheriting personal settings
+merely to supply a compaction window. Codex's -c override affects only its
+App Server subprocess. Neither changes the user's global configuration. Codex model_context_window
+is not exposed. LLMEngine uses its own turns/tools/deadlines, with no native
+history-compaction knob.
 
-A worked, end-to-end tiered policy (allow / ask-once / ask-every-time / deny,
-with a terminal or chat approval channel) lives in
-[Coding agents in practice](coding-agents.md#privileges-a-four-tier-policy).
+## Granting write tools without implying confinement
+
+The writer example above exposes Claude Write/Edit/Bash explicitly. A gate
+cannot approve a tool the model was never offered. File-tool hooks enforce
+file_roots even in permissive modes; they cannot confine arbitrary shell code.
+The constructor requires a gate for unconfined built-ins rather than claiming
+that a path allowlist makes Bash safe.
+
+Generic session grants separate providers and agent names even if they share
+an engine instance or Session. They are not persisted native permissions.
+For a file-specific or argument-specific approval, prefer a gate that owns
+narrower scope rather than a broad tool-name session grant.
+
+See [coding agents](coding-agents.md#privileges-a-four-tier-policy) and
+[Claude Code writes, Codex reviews](claude-writes-codex-reviews.md).

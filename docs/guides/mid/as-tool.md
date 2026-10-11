@@ -191,7 +191,7 @@ orchestrator = Agent(
   scripted fan-out into a single tool.
 - [Tool](../basic/tool.md) — the surface every `as_tool()` call
   produces.
-- *Guides → Full → verify=* (Phase 3) — verify around the parent
+- [verify=](verify.md) — verify around the parent
   agent's whole run versus per-tool gating.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
   the rules for when to call `as_tool` explicitly versus relying

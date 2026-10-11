@@ -1,22 +1,25 @@
 {
   "package": "lazybridge",
-  "version": "0.7.9",
-  "stability": "alpha",
+  "version": "1.8.0",
+  "stability": "stable",
+  "maturity_note": "Stable core API; coding engines and extensions retain their documented subsystem boundaries. See the docs maturity table.",
   "homepage": "https://github.com/selvaz/LazyBridge",
-  "docs": "https://lazybridge.com",
+  "docs": "https://core.lazybridge.com",
 
-  "canonical_import": "from lazybridge import Agent, LLMEngine, tool",
+  "canonical_import": "from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, LLMEngine, Plan, Step, Tool, Memory, Store, Session, SessionRegistry",
 
   "canonical_patterns": {
-    "single_agent": "agent = Agent(engine=LLMEngine('claude-opus-5'))",
-    "agent_with_tool": "agent = Agent(engine=LLMEngine('claude-opus-5'), tools=[tool(get_weather, name='get_weather')])",
+    "single_agent": "agent = Agent(name='assistant', engine=ClaudeCodeEngine())",
+    "agent_with_tool": "agent = Agent(name='assistant', engine=CodexEngine(), tools=[Tool.wrap(get_weather, name='get_weather')])",
     "sequential_plan": "agent = Agent(engine=Plan(Step('research'), Step('write')), tools=[research_agent, write_agent], name='pipeline')",
-    "parallel_fanout": "fan = Agent.parallel(researcher, analyst)\nenv = fan('topic')           # one Envelope\nenv.text()                      # labelled-text join across branches\nenv.payload                     # list[Envelope] for typed access",
+    "parallel_fanout": "fan = Agent.parallel(researcher, analyst)\nenv = fan('topic')           # one Envelope with labelled text\nenv.text()\n# For list[Envelope], use await fan.run_branches('topic') instead.",
     "chain": "pipe = Agent.chain(researcher, writer)   # linear Plan shortcut",
     "agent_as_tool": "tools=[other_agent]              # auto-wrapped; other_agent.name is the tool name",
     "agent_as_tool_with_judge": "tools=[other_agent.as_tool(verify=judge_agent)]",
-    "mcp_server": "tools=[MCP.stdio('fs', command='npx', args=[...], allow=['fs.read_*'])]   # allow= REQUIRED since 0.7.9",
-    "structured_output": "agent = Agent(engine=LLMEngine('...'), output=MyPydanticModel)",
+    "coding_review": "reviewer = Agent(name='reviewer', engine=CodexEngine(system='Return approved or rejected: <reason>.'))\nwriter = Agent(name='writer', engine=ClaudeCodeEngine(), verify=reviewer, max_verify=3)",
+    "named_claude": "engine = ClaudeCodeEngine(session_alias='writer', session_registry=registry, cwd=repo)",
+    "named_codex": "engine = CodexEngine(session_alias='reviewer', session_registry=registry, cwd=repo)",
+    "structured_output": "agent = Agent(name='structured', engine=LLMEngine('gpt-6.1-sol'), output=MyPydanticModel)",
     "sync_entry_point": "result = agent('do the thing'); result.text()",
     "async_entry_point": "result = await agent.run('do the thing'); result.text()"
   },
@@ -24,7 +27,7 @@
   "envelope_contract": {
     "text": "result.text() -> str — final assistant text",
     "payload": "result.payload -> T — typed payload when output= was set; otherwise str",
-    "error": "result.error -> Exception | None — propagated runtime failure",
+    "error": "result.error -> ErrorInfo | None — reported runtime failure; result.ok is execution success, not review acceptance",
     "metadata": "result.metadata.cost_usd / input_tokens / output_tokens / latency_ms / model / provider / run_id / nested_*"
   },
 
@@ -58,8 +61,26 @@
   },
 
   "tools_vs_native_tools": {
-    "tools=": "Tools the LazyBridge runtime executes locally — Python functions, sub-Agents, MCP servers, schema-backed Tool instances.",
+    "tools=": "Python functions, named sub-Agents, ToolProvider instances and schema-backed Tools. LazyTools owns MCP connectors. Claude exposes tools through in-process MCP; Codex uses App Server dynamic tools. Native read-only settings do not sandbox Python tools.",
     "native_tools=": "Provider-side tools the LLM invokes via the vendor's native API (web search, code execution, etc.).  Pass a NativeTool enum value, e.g. native_tools=[NativeTool.WEB_SEARCH].  Dangerous tools (CODE_EXECUTION, COMPUTER_USE) require allow_dangerous_native_tools=True."
+  },
+
+  "coding_continuity": {
+    "claude": "persist_session/session_id; session_alias/session_registry. session_name labels a runtime-mode slot on Session, not a native title.",
+    "codex": "persist_thread/thread_id; session_alias/session_registry. Ephemeral thread ids are not resumable.",
+    "state": "Reuse Python Memory/Store/Session references when changing engines. Native Claude transcripts and Codex threads do not migrate across engines.",
+    "locks": "Durable runs/streams serialize within an event loop. Registry file locks do not protect native transcripts across processes.",
+    "verify": "Construction-time judge; max_verify counts total attempts. Unknown verdicts reject; exhaustion returns the last output without an approval flag. Select the opposite engine explicitly and use deterministic release checks.",
+    "writes": "Claude needs extra_tools as well as policy; writer(gate) does not add Write/Edit/Bash. Bash is not confined by file_roots. Codex uses workspace-write and optional writable_roots."
+  },
+  "integrations": {
+    "lazytools": "https://tools.lazybridge.com/",
+    "mcp": "https://tools.lazybridge.com/mcp-server/",
+    "code_support": "https://tools.lazybridge.com/code-support/",
+    "code_bridge": "https://tools.lazybridge.com/code-bridge/",
+    "projects": "https://tools.lazybridge.com/projects/",
+    "namespace": "Distribution lazytoolkit; import lazytools. lazybridge.ext.mcp/gateway and external_tools shims were removed in 0.9.",
+    "quota_routing_benchmark": "in progress"
   },
 
   "default_model_advice": "Use Agent.from_provider('anthropic', tier='top') in quickstarts so the example stays current as providers ship new SKUs.  Pin a specific model id (e.g. 'claude-opus-5') only when the example tests a model-specific behaviour.",

@@ -1,514 +1,420 @@
 # Claude Code Engine
 
-`ClaudeCodeEngine` is a standard LazyBridge [`Engine`](../advanced/engine-protocol.md)
-that runs the model/tool loop through the locally installed **Claude Code**
-runtime (via the Claude Agent SDK) instead of a raw provider API call. The
-application remains a normal `lazybridge.Agent` — Claude Code is only the
-engine that drives it.
+`ClaudeCodeEngine` runs the model/tool loop through the locally authenticated
+Claude Code runtime via the Claude Agent SDK. It satisfies the same
+[Engine protocol](../advanced/engine-protocol.md) as Codex, provider APIs and
+Plan. Tools and application state remain LazyBridge objects.
 
-## Scope and design
+## Setup
 
-The integration is designed to use a Claude.ai account with a Claude Code
-compatible plan (for example, Pro or Max), without putting an API key in the
-project. It does not create a persistent service, open ports, or store Claude
-credentials or separate Claude conversations.
+Use Python 3.11 or later and install the extra:
 
-LazyBridge owns conversation memory. LazyBridge owns tools. For one agent run,
-the engine creates a temporary **in-process** MCP adapter: it only lets Claude
-invoke tools that LazyBridge has already normalised.
-
-## 1. First-time Claude Code setup and sign-in
-
-### Prerequisites
-
-- A Claude.ai account with a plan that includes Claude Code.
-- Node.js and npm (Anthropic's npm installation documentation requires Node.js
-  18 or later).
-- Python 3.11 or later.
-- An Internet connection for Claude Code sign-in and model processing.
-
-On Windows, Claude Code is supported in WSL or Git Bash. The Python process
-using `ClaudeCodeEngine` may run in the normal project environment as long as
-it can find the `claude` command.
-
-### Install Claude Code
-
-In a shell supported by Claude Code:
-
-```bash
-npm install -g @anthropic-ai/claude-code
+```sh
+python -m pip install "lazybridge[claude-code]==1.8.0"
 claude doctor
 ```
 
-If a global npm installation does not suit the environment, use one of the
-alternative methods in Anthropic's documentation. Do not use `sudo` with the
-global npm installation.
+Install Claude Code and sign in by following the current
+[official setup instructions](https://code.claude.com/docs/en/setup).
+Run `claude` interactively to authenticate. With a subscription login,
+the runtime uses plan quota; the SDK also supports other configured
+authentication. The adapter does not copy credentials. Check runtime
+authentication if you intend to use a subscription rather than API billing.
 
-### Sign in once
+The class and constructor work without the extra; the first SDK operation
+needs `claude-agent-sdk` and `mcp`. Installation and operating-system
+requirements belong to the upstream docs, rather than a frozen npm/Node guide.
 
-1. Change into any working directory.
-2. Start `claude`.
-3. At the sign-in screen, choose the **Claude App / Claude.ai** subscription
-   option.
-4. Complete browser sign-in with the account that owns the Claude plan.
-5. Return to the terminal. The interactive session can then be closed if it
-   is not otherwise needed.
-
-Claude Code stores its own credentials in local secure storage.
-`ClaudeCodeEngine` reuses that login through the Agent SDK: it does not read,
-copy, or write tokens into the repository, project environment variables, or
-LazyBridge memory.
-
-Quick verification:
-
-```bash
-claude -p "Reply exactly: Claude Code ready"
-claude doctor
-```
-
-If the first command prints the requested response, sign-in is ready. Do not
-set `ANTHROPIC_API_KEY` when the explicit goal is to use Claude.ai sign-in; an
-API key uses a separate billing path.
-
-Official Anthropic references: [Claude Code setup](https://docs.anthropic.com/en/docs/claude-code/getting-started)
-and [CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage).
-
-## 2. Install the extra
-
-`ClaudeCodeEngine` is always importable from `lazybridge`; actually
-constructing/running one needs the optional dependencies:
-
-```bash
-pip install "lazybridge[claude-code]"
-```
-
-This pulls `claude-agent-sdk` and `mcp`. Without the extra installed,
-constructing a `ClaudeCodeEngine` still works, but the first call that
-touches the SDK raises a clear `ImportError` pointing back to this install
-command — see [`sdk_client.AgentSdkClient`](#) in
-`lazybridge.engines.claude_code`.
-
-## 3. Basic usage: a standard LazyBridge engine
+## Basic usage and tools
 
 ```python
 from lazybridge import Agent, ClaudeCodeEngine
 
+def project_status() -> str:
+    """Return a deterministic project status."""
+    return "The draft is ready for review."
 
-def get_quote(symbol: str) -> dict[str, str]:
-    """Return a deterministic quote for the requested symbol."""
-    return {"symbol": symbol, "price": "123.45"}
-
-
-agent = Agent(
-    name="research",
-    engine=ClaudeCodeEngine(model="sonnet", system="Be concise."),
-    tools=[get_quote],
-)
-
-result = agent("Find AMZN's quote using the available tool.")
+agent = Agent(name="assistant", engine=ClaudeCodeEngine(system="Be concise."),
+              tools=[project_status])
+result = agent("Read project_status and report the next step.")
 print(result.text())
 ```
 
-Nothing changes for a caller compared with a standard LazyBridge engine:
+LazyBridge normalizes functions, `Tool`, `ToolProvider.as_tools()` and named
+child agents. The engine exposes them through a temporary in-process MCP
+adapter, without a resident server or manual MCP registration. Tool handlers
+call `Tool.run()`, preserving schema validation and tool-error reporting.
+Names must be unique. Native built-ins are configured separately.
 
-- `Agent`, `Memory`, `Session`, and `stream()` remain LazyBridge concepts.
-- `result` is a normal LazyBridge `Envelope` with `provider="claude-code"`.
-- Functions, `Tool` objects, `ToolProvider` instances, and other `Agent`
-  instances are passed through `tools=[...]`.
-- There is no application MCP registration to perform manually.
-
-## 4. Tool lifecycle
+### Tool-call lifecycle
 
 ```text
-tools=[function | ToolProvider | Agent]
-                |
-                v
-LazyBridge normalises/expands them into Tool objects
-                |
-                v
-ClaudeCodeEngine creates an in-process MCP adapter for this run only
-                |
-                v
-Claude Code selects a tool and sends validated arguments
-                |
-                v
-LazyBridge Tool.run(**args) runs the function or child agent
-                |
-                v
-Result or error returns to Claude, then to the LazyBridge Envelope
+typed callable / ToolProvider / named child Agent
+  → normalized Tool catalogue
+  → temporary SDK MCP definitions
+  → model selects a tool with structured arguments
+  → Tool.run validates and executes
+  → result/error goes back to the runtime and optional Session events
 ```
 
-JSON schemas come from LazyBridge `Tool.definition()`. Argument validation
-therefore stays in normal `Tool.run()` execution. A tool failure is returned
-to Claude as a tool error, allowing the model to correct its arguments or
-choose another strategy rather than terminating the entire run immediately.
-
-### Tool providers and child agents
+The runtime can reason about a tool error and try another action. That is not
+automatic success: inspect the returned Envelope and your acceptance checks.
+Providers must expose as_tools(); reusable child agents need unique names.
+You can mix a callable with a specialist without a custom MCP configuration:
 
 ```python
-agent = Agent(
-    name="coordinator",
-    engine=ClaudeCodeEngine(),
-    tools=[my_provider, specialist_agent],
-)
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine
+
+def get_quote(symbol: str) -> dict[str, str]:
+    """Return a deterministic demonstration quote, not live market data."""
+    return {"symbol": symbol, "price": "123.45"}
+
+specialist = Agent(name="quote-review", engine=CodexEngine(
+    system="Explain quote inputs and limitations; do not trade.",
+))
+desk = Agent(name="desk", engine=ClaudeCodeEngine(), tools=[get_quote, specialist])
+print(desk("Explain the demonstration quote for EXAMPLE.").text())
 ```
 
-LazyBridge expands `my_provider.as_tools()` before engine execution.
-`specialist_agent` becomes a normal tool with a `task` argument; when Claude
-calls it, LazyBridge runs that child agent with its usual configuration.
+## Constructor options
 
-Tool names must be unique — the same `Agent`/`build_tool_map` rule LazyBridge
-uses everywhere else.
-
-## 5. Memory, sessions, and streaming
-
-### Memory
-
-LazyBridge `Memory` is the sole conversation memory. Before a run, the engine
-builds its prompt from messages already in that memory; after a successful
-run, it adds the task and response. It does not use SDK `resume`, persistent
-Claude sessions, or a parallel Claude database (unless `session_mode="runtime"`
-— see below).
-
-To keep continuity, pass the same `Memory` to the agent. To isolate a run,
-use a new `Memory` or no memory.
-
-### Session
-
-If the agent has a `Session`, the engine emits normal LazyBridge events:
-agent start/finish, tool call, tool result, and tool error, plus a
-`MODEL_RESPONSE` event shaped like `LLMEngine`'s (`provider="claude-code"`,
-token/cost usage) so `Session.usage_summary()` and any cost-report tooling
-that reads `event_type="model_response"` sees this engine's usage too.
-Existing observability consumers do not need Claude Code-specific logic.
-
-### Streaming
-
-`agent.stream(...)` forwards Agent SDK text chunks as a LazyBridge stream. At
-the end, the complete text is added to the same `Memory`, just as it is for
-`agent(...)`.
-
-### Session aliases
-
-A durable session (`persist_session=True` / `session_id=`) can be addressed by a
-name instead of a stored UUID:
-
-```python
-engine = ClaudeCodeEngine(model="haiku", reasoning_effort="low", cwd=repo, session_alias="reviewer")
-```
-
-The first run opens a durable session and records `reviewer -> session id`
-(with model and effort) in the [`SessionRegistry`](session-registry.md); a later
-engine with the same alias and `cwd` resumes it. An explicit `session_id=` wins
-and (re)binds the alias. The id is reported to the registry as soon as the SDK
-announces it, so a turn that fails or times out still leaves a usable binding;
-the alias is re-pointed if the SDK returns a new id for a resumed session.
-`session_name` is a different thing (the title tagged onto the session on disk)
-and is not affected. `engine.session_alias` exposes the name.
-
-### Using the engine as a writer
-
-The default profile offers only read tools. To let Claude create and edit files
-in `cwd`:
-
-```python
-from lazybridge import ClaudeCodeEngine, ClaudeCodePolicy, CodingAgentConfig
-
-engine = ClaudeCodeEngine(
-    cwd=repo,                                   # a resolved long path, not a Windows 8.3 short name
-    model="haiku",
-    config=CodingAgentConfig(
-        claude=ClaudeCodePolicy(permission_mode="acceptEdits", extra_tools=("Write", "Edit"))
-    ),
-    request_timeout=None,                       # see below
-)
-```
-
-Verified live: this creates a file in a fresh git repository. `extra_tools`
-is required -- `permission_mode="acceptEdits"` alone does not give the model
-`Write`/`Edit`, because the engine only offers the built-ins it derives plus
-`extra_tools`. `file_roots` defaults to `[cwd]` and confines the file tools.
-Granting `Bash` additionally requires an `approval_gate` (the engine refuses
-at construction otherwise).
-
-`request_timeout` defaults to 120 s and bounds the **whole run** (every retry
-included), so a long coding task is cut at two minutes. A writer should pass a
-larger value or `None`. `stream_idle_timeout` (90 s) only applies to `stream()`.
-
-## 6. Web and filesystem: default profile
-
-The engine's default profile is intentionally useful but read-only:
-
-| Capability | Default | Enablement | Boundary |
-| --- | --- | --- | --- |
-| Web search (`WebSearch`) | yes | `web=True` (default) | no implicit application tools |
-| Web fetch (`WebFetch`) | yes | `web=True` (default) | same as above |
-| File read (`Read`) | only with a root | `cwd=...` or `file_roots=[...]` | declared roots only |
-| File discovery (`Glob`) | only with a root | same as above | declared roots only |
-| Text search (`Grep`) | only with a root | same as above | declared roots only |
-| Shell (`Bash`) | no | not exposed | — |
-| File modifications (`Write`, `Edit`) | no | not exposed | — |
-| Native Claude Code subagents | no | not exposed | — |
-
-Example with a restricted filesystem:
-
-```python
-engine = ClaudeCodeEngine(
-    model="sonnet",
-    cwd="C:/work/project",
-    # Or, without cwd:
-    # file_roots=["C:/work/project", "C:/work/reference-docs"],
-)
-```
-
-When `cwd` is set and `file_roots` is omitted, `cwd` automatically becomes the
-only readable root. A path outside the declared roots is denied by the
-engine's permission callback. To disable web tools:
-
-```python
-ClaudeCodeEngine(web=False)
-```
-
-## 7. Engine configuration
-
-```python
-ClaudeCodeEngine(
-    model="sonnet",                 # supported Claude model alias/name
-    cwd="C:/work/project",          # optional working directory
-    system="...",                   # optional system instructions
-    max_turns=20,                    # Claude agentic-turn limit
-    file_roots=["C:/work/project"], # optional read boundaries
-    web=True,                        # WebSearch/WebFetch
-    reasoning_effort=None,           # "low"/"medium"/"high"/"xhigh"/"max"
-    thinking=None,                   # "adaptive" / "disabled" / token budget int
-    fallback_model=None,
-    session_mode="memory",           # "memory" (default) or "runtime"
-    session_name=None,
-    request_timeout=120.0,           # per-run deadline; None disables
-    stream_idle_timeout=90.0,        # idle gap before TimeoutError in stream()
-    max_retries=3,                   # transient-failure retries, exp. backoff + jitter
-    retry_delay=1.0,
-    tool_timeout=None,               # per-tool asyncio.wait_for deadline
-)
-```
-
-Retries follow the same "429/5xx/network/timeout" policy `LLMEngine` uses,
-at the coarser granularity available to an SDK/CLI-backed engine (pass/fail
-on the whole call, not individual HTTP round-trips). A missing/unreadable
-`claude` executable (`FileNotFoundError`/`PermissionError`) is treated as a
-permanent configuration problem and is **not** retried.
-
-### Claude Code model identifiers
-
-The stable model values accepted by the Claude Code CLI interface are:
-
-| Value | Meaning | Recommendation |
+| Parameter | Default | Meaning |
 | --- | --- | --- |
-| `"sonnet"` | The latest Sonnet model available to the authenticated Claude Code account. | Default. |
-| `"opus"` | The latest Opus model available to the authenticated Claude Code account. | Use for harder tasks when the plan permits it. |
-| `"haiku"` | The latest Haiku model, where it is enabled by the Claude Code runtime and account. | Fast/low-cost choice; validate on the target account. |
-| `"inherit"` | Inherit the model from a parent Claude Code agent definition. | Not useful as this engine's top-level default. |
-| A full Claude model ID | A specifically pinned model version accepted by the installed Claude Code runtime. | Use only after verifying it locally. |
+| `model` | `"sonnet"` | Runtime model alias or full ID. `opus` / `haiku` availability depends on the runtime/account. |
+| `cwd`, `system` | `None` | Working directory and system instructions. |
+| `max_turns` | `20` | Native agentic-turn cap. |
+| `file_roots` | `None` | File-tool roots; omitted with cwd means cwd alone. |
+| `web` | `True` | Exposes WebSearch and WebFetch. |
+| `reasoning_effort` | `None` | Validated: low, medium, high, xhigh, max. Runtime/model support may differ. |
+| `thinking` | `None` | adaptive, disabled, or positive integer token budget. |
+| `fallback_model` | `None` | SDK model fallback; distinct from Agent fallback. |
+| `session_mode` | `"memory"` | memory or runtime; see continuity below. |
+| `session_name` | `None` | Runtime-mode slot label, otherwise agent name. It is not a session title. |
+| `session_id`, `persist_session` | `None`, `False` | Resume native ID; keep native history across processes. An ID implies persistence. |
+| `session_alias`, `session_registry` | `None` | Named durable binding; alias implies persistence. |
+| `tag` | `"lazybridge"` | Best-effort SDK tag on a newly created durable session; None disables. |
+| `config` | default CodingAgentConfig | Native policy plus shared approval gate. |
+| `approval_gate` | `None` | Direct gate override; a different gate in config conflicts. |
+| `request_timeout` | `120.0` | Whole engine run, retries included; None disables. |
+| `stream_idle_timeout` | `90.0` | Maximum idle gap during streaming; None disables. |
+| `max_retries`, `retry_delay` | `3`, `1.0` | Transient retry budget and exponential-backoff base with jitter. |
+| `tool_timeout` | `None` | Per-application-tool deadline. |
+| `client` | AgentSdkClient | Injection boundary for offline transport tests. |
 
-The installed Agent SDK explicitly identifies `sonnet`, `opus`, `haiku`, and
-`inherit` as model aliases for agent definitions. Anthropic's public CLI
-reference currently documents only `sonnet` and `opus`, so `haiku` must be
-validated with the target CLI version and subscription before it becomes a
-production default. Do not hard-code informal names such as `"sonnet-5"` or
-`"sonnet-4.6"` — they are not documented Claude Code aliases.
+Positive deadlines/delay and nonnegative retries are checked at construction.
+Configure these on the engine when passing `Agent(engine=...)`.
+
+## Claude Code model identifiers
+
+The engine passes model strings to the installed runtime. Its default is
+sonnet; runtime and account support determine what can be selected.
+
+| Value | Meaning | How to use it |
+| --- | --- | --- |
+| sonnet | Runtime Sonnet family alias | Core's default; resolution changes over time |
+| opus | Runtime Opus family alias | Verify availability on the target account/provider |
+| haiku | Runtime Haiku family alias | Verify availability; no fixed speed or price promise |
+| A full Claude model ID | Pin a runtime-supported model version | Verify the exact ID locally; aliases are not version pins |
+| inherit | Parent-model selection in SDK sub-agent definitions | Not a recommended top-level engine model |
+
+At the time of writing, see the official
+[model configuration](https://code.claude.com/docs/en/model-config) and
+[SDK sub-agent documentation](https://platform.claude.com/docs/en/agent-sdk/subagents).
+The public CLI docs list more settings than the aliases above; this table is
+not an exhaustive runtime catalogue. Do not infer IDs such as sonnet-5 from a
+family name. Native runtime aliases are distinct from LLMEngine catalogue IDs
+and Agent.from_provider tier aliases.
+
+```python
+from lazybridge import ClaudeCodeEngine
+
+default = ClaudeCodeEngine(model="sonnet")
+alternative = ClaudeCodeEngine(model="opus", fallback_model="sonnet")
+reasoned = ClaudeCodeEngine(reasoning_effort="high", thinking="adaptive")
+budgeted = ClaudeCodeEngine(thinking=8_000)
+```
+
+fallback_model is a native SDK fallback, not the outer Agent fallback. Claude
+validates effort values and thinking shapes at construction; acceptance by a
+particular model still depends on the installed runtime.
+
+## Native reads, writes and approvals
+
+Default built-ins are WebSearch/WebFetch and, when roots are available,
+Read/Glob/Grep. There is no default Write/Edit/Bash. A writer must grant file
+tools as well as supply an approval policy:
+
+```python
+from pathlib import Path
+from lazybridge import Agent, ClaudeCodeEngine, ClaudeCodePolicy, CodingAgentConfig, TerminalApprovalGate
+
+repo = str(Path.cwd().resolve())
+gate = TerminalApprovalGate()
+config = CodingAgentConfig(
+    claude=ClaudeCodePolicy(
+        permission_mode="default",
+        preapprove_application_tools=False,
+        extra_tools=("Write", "Edit", "Bash"),
+    ),
+    approval_gate=gate,
+)
+writer = Agent(name="writer", engine=ClaudeCodeEngine(
+    cwd=repo, file_roots=[repo], config=config, request_timeout=600,
+))
+```
+
+`CodingAgentConfig.writer(gate)` configures approvals but does not add Claude
+Write/Edit/Bash. `extra_tools` exposes them; `allowed_tools` preapproves them.
+File roots are enforced by hooks on Read/Glob/Grep/Write/Edit/NotebookEdit,
+including under permissive modes. Bash can reach any path its process can:
+it requires a gate at construction, and file roots do not confine it.
+Application tools are preapproved by default; set
+`preapprove_application_tools=False` to send them through the gate too.
+
+See [Coding-agent permissions](coding-agent-config.md) for profiles, grant
+scope, settings inheritance and compaction. A reviewer profile is read-only
+but does not make arbitrary Python tools safe; it denies them unless approved.
+
+## Memory, native sessions and aliases
+
+In default memory mode, each ordinary call is primed from LazyBridge Memory.
+After a successful answer, Memory records the task/response. Persistence changes
+the history authority: on native resume, the engine does not prepend Memory
+again. Explicit Envelope context and sources continue to flow on every turn.
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from lazybridge import Agent, ClaudeCodeEngine, SessionRegistry
+
+repo = str(Path.cwd().resolve())
+# Temporary registry for this example; use a fixed file for restart continuity.
+with TemporaryDirectory() as directory:
+    registry = SessionRegistry(path=Path(directory) / "sessions.json")
+    engine = ClaudeCodeEngine(cwd=repo, session_alias="writer",
+                              session_registry=registry, tag=None)
+    Agent(name="writer", engine=engine)("Remember the word PINEAPPLE.")
+    handle = engine.session_id
+    assert handle is not None
+    resumed = ClaudeCodeEngine(cwd=repo, session_id=handle, tag=None)
+    print(Agent(name="writer", engine=resumed)("What was the word?").text())
+```
+
+For production, omit the custom registry or choose a persistent file. A later
+engine with the same alias, kind and resolved cwd resumes the stored ID.
+An explicit ID takes precedence and rebinds the alias; failures/timeouts can
+still leave a binding once the SDK reports an ID.
 
 ### Runtime session mode
 
-The default `session_mode="memory"` sends LazyBridge `Memory` as prompt
-context on every call. Set `session_mode="runtime"` to make the Claude Code
-session itself the conversation source instead:
+Use runtime mode for a conversation whose native handle is kept on one
+LazyBridge Session. It is useful when several Agent objects share a labelled
+runtime channel in the same process:
 
 ```python
-engine = ClaudeCodeEngine(
-    model="sonnet",
-    session_mode="runtime",
-    session_name="research",  # optional fixed channel inside one LazyBridge Session
-    reasoning_effort="high",
-    thinking="adaptive",
+from lazybridge import Agent, ClaudeCodeEngine, Memory, Session
+
+session, memory = Session(), Memory()
+engine = ClaudeCodeEngine(session_mode="runtime", session_name="research", tag=None)
+researcher = Agent(name="researcher", engine=engine, session=session, memory=memory)
+first = researcher("Remember the topic: deployment policy.")
+second = researcher("Explain the topic with an example.")
+assert first.ok and second.ok
+```
+
+Memory still records successful answers for application use and explicit
+handoffs such as from_memory. Envelope.context and Agent.sources flow on every
+turn. File roots and cwd remain permission inputs, not conversation identities.
+
+`session_mode="runtime"` parks the ID on the supplied LazyBridge
+Session under `claude-code:{session_name or agent_name}`. A new Session starts
+without that handle; this alone is not a cross-process registry. An explicit
+session_id wins over the parked ID. `session_name` names the slot; `tag` is
+identification metadata. SDK tagging failure warns rather than failing a turn.
+
+Durable runs and streams serialize in-process by engine/alias/native ID,
+including first turns and stream teardown. Runtime-mode channels also lock
+within an event loop. There is no cross-process transcript lock: coordinate
+callers yourself. See [SessionRegistry](session-registry.md).
+
+### Distinguishing LazyBridge sessions on disk
+
+Claude tagging is post-hoc identification, unlike Codex's creation-time
+threadSource. The engine calls the SDK tag_session API once when it creates
+a durable session. The SDK listing returns the label as .tag. An alias implies
+persistence too; an ephemeral session is not tagged. A tag is neither a
+SessionRegistry alias nor an authorization rule.
+
+```python
+from lazybridge import ClaudeCodeEngine
+
+default_label = ClaudeCodeEngine(persist_session=True)
+app_label = ClaudeCodeEngine(persist_session=True, tag="my-app")
+without_label = ClaudeCodeEngine(persist_session=True, tag=None)
+```
+
+With the SDK extra installed, this read-only listing identifies candidates for
+a retention review. It does not delete transcripts:
+
+```python
+try:
+    from claude_agent_sdk import list_sessions
+except ImportError:
+    print("Install lazybridge[claude-code] to list native sessions")
+else:
+    mine = [item for item in list_sessions() if item.tag == "lazybridge"]
+    for item in mine:
+        print(item.session_id, item.tag)
+```
+
+Before cleanup, confirm ownership, cwd and active use. Removing an alias only
+removes the registry binding; it does not delete native history. Native cleanup
+uses the installed SDK's session APIs, such as delete_session, after selecting
+specific IDs. Custom labels can separate application retention policies.
+Tagging failures warn and do not invalidate a completed answer. The official
+[session-browser walkthrough](https://platform.claude.com/cookbook/claude-agent-sdk-05-building-a-session-browser)
+documents listing, tagging and session-management operations.
+
+## Streaming, structured output and attachments
+
+`agent.stream(task)` forwards text chunks and records completed text in Memory.
+Session events cover application and native tool calls and model usage; the
+Envelope provider is `claude-code`. SDK cost is reported usage, not a promise
+about subscription charges.
+
+```python
+from pydantic import BaseModel
+from lazybridge import Agent, ClaudeCodeEngine
+
+class Status(BaseModel):
+    ready: bool
+    reason: str
+
+agent = Agent(name="status", engine=ClaudeCodeEngine(), output=Status)
+result = agent("Return ready=true and reason='review complete'.")
+assert isinstance(result.payload, Status)
+print(result.payload.reason)
+```
+
+Derivable schemas go to the SDK's native `output_format`. Agent still validates
+the returned payload and can repair parse failures. Non-derivable schemas fall
+back to post-hoc parsing; the default string output sets no format.
+
+### Multimodal input
+
+```python
+import base64
+from lazybridge import Agent, ClaudeCodeEngine, ImageContent
+
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
 )
+image = ImageContent.from_bytes(png, media_type="image/png")
+viewer = Agent(name="viewer", engine=ClaudeCodeEngine())
+result = viewer("Describe this tiny test image.", images=[image])
+assert result.ok
 ```
 
-The first call in a LazyBridge `Session` starts a clean Claude session and
-stores its ID on that `Session`. Later calls with the same engine/channel
-resume it. A new LazyBridge `Session` has no stored ID and starts cleanly
-again. `Memory` is still updated after each answer so it can be explicitly
-supplied to other agents through `from_memory(...)`, but it is not reinjected
-into the parent runtime conversation. `Envelope.context`, `Agent.sources`,
-`from_agent(...)`, and `from_memory(...)` continue to be passed on every turn.
+Local paths also work: LazyBridge reads and inlines their contents. With images,
+the SDK adapter uses an async user-message stream containing text and image
+blocks instead of a plain string prompt. Local/byte images are forwarded as inline Anthropic image blocks. URL-only
+images are dropped with a warning, and audio is not forwarded. Generated
+media is not returned as a media artifact by this engine.
 
-An explicit `file_roots` list overrides the root inferred from `cwd`. Do not
-grant broad directories for convenience — declare only directories the agent
-needs to inspect.
+## Reading the account usage budget
 
-## Distinguishing LazyBridge sessions on disk
+`await engine.usage()` and `fetch_claude_usage(model=..., cwd=..., client=...)`
+send the CLI's /usage command and parse prose into ClaudeUsageSnapshot.
+Unlike Codex's rate-limit RPC, this invokes the SDK runtime. Fields that cannot
+be parsed are None; inspect parsed/raw_text and treat missing telemetry as
+unknown. Session and weekly windows carry percentages and reset timestamps.
+Unknown timezone text leaves reset time unknown. On Windows the extra includes
+tzdata. `parse_usage_report(text)` works offline.
 
-Unlike `CodexEngine`'s `threadSource` (sent at thread creation, on the wire),
-the Agent SDK has no creation-time metadata field. It does have a public,
-post-hoc tagging API — `claude_agent_sdk.tag_session(session_id, tag,
-directory=...)`, appending a `{"type": "tag", ...}` JSONL line that
-`list_sessions()` reads back as `.tag` — and `ClaudeCodeEngine` uses it
-automatically:
+| Snapshot field | Meaning |
+| --- | --- |
+| session | Parsed current-session window, or None |
+| weekly | Windows keyed by the CLI's labels; the set is not fixed |
+| most_used() | Highest-used weekly window, or None |
+| parsed / raw_text | Whether a window matched; untouched report for diagnosis |
+| fetched_at | Time the snapshot was captured |
+
+Each UsageWindow has used_percent, resets_raw and resets_at. The parser
+resolves a yearless date relative to an aware reference time, including year
+rollover. Unknown zones and ambiguous DST times stay unparsed. A successful
+but unparseable report differs from runtime/authentication failure, which raises
+RuntimeError when fetching. CLI wording can change; do not treat None as zero.
 
 ```python
-engine = ClaudeCodeEngine(persist_session=True)                    # tag="lazybridge" (default)
-engine = ClaudeCodeEngine(persist_session=True, tag="my-app")      # a caller-specific label
-engine = ClaudeCodeEngine(persist_session=True, tag=None)          # skip tagging
+from datetime import datetime, timezone
+from lazybridge.engines.claude_code.usage import parse_usage_report
+
+snapshot = parse_usage_report(
+    "Current week (all models): 25% used - resets Oct 18, 12pm (UTC)",
+    now=datetime(2026, 10, 11, tzinfo=timezone.utc),
+)
+assert snapshot.parsed
+label, window = snapshot.most_used()
+assert label == "all models" and window.used_percent == 25
+print(window.resets_at)
 ```
 
-Tagging fires once, on the run that *creates* a durable session — not on
-every resume, since the SDK's "last tag wins" semantics make repeated calls
-redundant I/O, not idempotent no-ops. It requires `persist_session=True`
-(or an explicit `session_id`); an ephemeral session is never tagged, since
-there is nothing durable to tag. A tagging failure raises a `UserWarning`
-rather than failing the run — it is identification metadata, not something
-correctness should depend on.
+This parser example makes no SDK call. Live engine.usage() uses the SDK runtime
+to send /usage; it is not Codex's model-free account RPC and has no promised
+latency. Token counts from ordinary runs can be inspected through
+Session.usage_summary() independently of quota parsing.
 
-Finding and cleaning up tagged sessions later (`list_sessions()` has no
-server-side tag filter — filter the returned list):
+## Failures and troubleshooting
 
-```python
-from claude_agent_sdk import delete_session, list_sessions
+Transient network/timeout/429/5xx failures are retried within the run deadline.
+Missing or unreadable executables are permanent configuration failures.
+Long repository tasks need an explicit deadline; an MCP host may have a
+separate timeout. Inspect errors and any stored native handle before resuming.
 
-mine = [s for s in list_sessions() if s.tag == "lazybridge"]
-for s in mine:
-    delete_session(s.session_id)
+| Symptom | Check | Resolution |
+| --- | --- | --- |
+| claude cannot be found | PATH of the Python process and installed runtime | Follow official setup; restart the process after PATH changes |
+| Sign-in requested | Interactive CLI login in the same environment | Complete authentication and repeat a minimal smoke check |
+| File access denied | Resolved path and file_roots/cwd | Grant the intended directory; file roots do not confine Bash |
+| Tool missing | Agent tools, provider as_tools and unique names | Fix catalogue construction before changing native policy |
+| Tool failed | Signature/schema and Session tool events | Inspect the error and tool implementation |
+| Write/Edit unavailable | extra_tools versus allowed_tools | Expose the built-in and configure approval separately |
+| Bash rejected at construction | Unconfined built-in without a gate | Supply an explicit gate policy |
+| Quota parsing empty | parsed and raw_text | Treat as unknown; diagnose wording rather than invent capacity |
+| Long run times out | Whole engine and host deadlines | Set a deliberate bound and inspect learned native ID before resume |
+
+## What this integration intentionally does not do
+
+- Replace LazyBridge as the application orchestrator.
+- Run a resident/external MCP server for its in-process Python Tool adapter.
+- Grant Write/Edit/Bash by default, or expose undeclared application tools.
+- Copy CLI credentials or determine the account's billing path.
+- Create a second LazyBridge-owned native transcript database. Durable history
+  belongs to Claude's runtime; Memory and Session are separate application state.
+- Migrate native history to Codex, enforce cross-process transcript locking,
+  or turn reviewer feedback into release acceptance automatically.
+- Return generated media artifacts through this text-based adapter.
+
+## Verification and next steps
+
+```sh
+python -m pytest tests/unit/engines/claude_code/ -q
 ```
 
-## 8. Verification and troubleshooting
+Tests use fake transports. With an authenticated local runtime, these optional
+smoke checks isolate the adapter from a complete Agent call:
 
-```bash
-pytest tests/unit/engines/claude_code/ -q
+```sh
 python examples/claude_code/live_mcp_smoke.py
 python examples/claude_code/live_engine_smoke.py
 ```
 
-Unit tests do not use Claude credentials. The two example scripts make real
-requests using the local Claude Code login: `live_mcp_smoke.py` verifies the
-in-process MCP bridge directly; `live_engine_smoke.py` runs through a
-complete `lazybridge.Agent`.
+The first checks the in-process MCP bridge; the second exercises the full Agent.
+Start with claude doctor and a minimal CLI turn before investigating tool wiring.
+Structured-output and multimodal live examples are also in the same directory.
+They consume runtime resources and were not run for this documentation refresh.
 
-Common issues:
-
-- **`claude` cannot be found**: install Claude Code and ensure it is on the
-  `PATH` of the process running Python.
-- **Sign-in is requested**: start `claude` interactively and complete
-  Claude.ai authentication, then repeat the quick verification command.
-- **File access is denied**: add the correct directory to `file_roots` or set
-  `cwd` to the desired root. Do not broaden permissions with Bash or bypass
-  modes.
-- **A tool is not visible**: pass it through `Agent(tools=[...])`, confirm a
-  provider exposes `as_tools()`, and check for duplicate names.
-- **A tool fails**: the error is available to Claude and in `Session` events;
-  check the tool signature, schema, and implementation.
-
-## 9. What this integration intentionally does not do
-
-- It does not replace LazyBridge as the orchestrator.
-- It does not create separate persistent Claude memory.
-- It does not run an external or resident MCP server.
-- It does not grant filesystem write access or shell execution by default.
-- It does not expose tools that were not explicitly passed to the agent.
-
-These limits are intentional: they keep the engine replaceable, configuration
-predictable, and the security boundary small.
-
-## Structured output
-
-`Agent(output=<type>)` is enforced by the model, not by prompt discipline. The
-engine derives the JSON schema and passes it as the Agent SDK's
-`output_format` (`{"type": "json_schema", "schema": ...}`, the CLI's
-`--json-schema`); the CLI returns the validated object on
-`ResultMessage.structured_output`, so `Envelope.payload` is the parsed model.
-
-```python
-class Quote(BaseModel):
-    symbol: str
-    price: float
-
-agent = Agent(name="quoter", engine=ClaudeCodeEngine(model="sonnet"), output=Quote)
-```
-
-This is the same server-side guarantee `LLMEngine` gets from
-`StructuredOutputConfig`. Verified live (claude_agent_sdk 0.2.128) with a
-plain Pydantic schema including an optional field and a nested model
-(`$defs`) — no strict-mode rewrite needed, unlike Codex's `turn/start`
-`outputSchema`. `output=str` (the default) sets no `output_format`; if the
-schema cannot be derived, the run falls back to LazyBridge's post-hoc JSON
-parse and retry.
-
-## Reading the account's usage budget
-
-```python
-snapshot = await engine.usage()
-print(snapshot.session.used_percent, "% of the session")
-for label, window in snapshot.weekly.items():
-    print(label, window.used_percent, "%, resets", window.resets_at)
-```
-
-There is no typed field for this — verified live by scanning every message
-type of a normal run: the Agent SDK's `RateLimitEvent` arrives free on every
-run, but on a current account its `utilization` is `None`, and nothing else
-in the stream carries a percentage. The weekly figures exist in exactly one
-place: the prose Claude Code's own `/usage` slash command prints. So
-`engine.usage()` spends one small turn (~13s including process startup, no
-completion of its own since `/usage` is answered by the CLI directly) sending
-that command and parses the reply into a `ClaudeUsageSnapshot`
-(`lazybridge.engines.claude_code.usage`):
-
-- `session` — the current 5-hour-scale window.
-- `weekly` — one entry per label the CLI reports, keyed by that label
-  verbatim: `"all models"` plus, when the account has one, a per-model
-  breakdown (observed live: `"Fable"`). The key set is not fixed by this
-  library — a new label is a new dict key, not a version bump.
-- `most_used()` — the weekly window closest to its limit.
-
-Screen-scraping a CLI's human-facing text means the wording can drift, so
-every field this cannot extract is `None` rather than guessed, and
-`snapshot.parsed` says whether anything was recognised at all — `raw_text`
-always carries the untouched report underneath, for a caller that wants to
-fall back rather than trust an empty result. A reset date carries no year in
-the CLI's own text; one already in the past by more than a day is read as
-next year's, so a reading taken near 31 December does not report a window
-that already closed. A reset clause with no recognised timezone is left
-unparsed rather than assumed to be UTC or the machine's own zone.
-
-This is a different failure mode from the SDK ending the turn in error
-(authentication, no active session): that raises `RuntimeError` from
-`engine.usage()` directly, distinguishable from a successful call whose
-report just did not parse.
-
-The free function `fetch_claude_usage()` underneath takes an explicit
-`model=`/`cwd=`/`client=` for use outside an `Engine` — the standalone
-`parse_usage_report(text)` for a report captured elsewhere works with no SDK
-call at all.
-
-## Multimodal
-
-`images=` is forwarded as Anthropic image content blocks. Because a
-plain-string prompt has nowhere to carry an attachment, a run with images
-switches to the SDK's async user-message stream and sends `content` as
-`[{"type": "text", ...}, {"type": "image", ...}]`.
-
-```python
-agent("What is in this chart?", images=["C:/work/chart.png"])
-```
-
-Inline bytes only: the CLI accepts a `base64` source but rejects a `url` one,
-so URL-only images are dropped with a `UserWarning` naming the URL rather than
-being fetched behind the caller's back — pass a path or bytes and LazyBridge
-inlines them. `audio=` is never forwarded, since Claude accepts no audio
-input; it is dropped with a warning too.
-
-## See also: Codex Engine
-
-[`CodexEngine`](codex-engine.md) is the same `Engine` contract backed by the
-**Codex App Server** (`codex app-server` over JSON-RPC, not `codex exec`).
-Both engines compose identically with LazyBridge — the differences are
-documented in that guide: Codex reports no dollar cost, primes structured
-output in the prompt rather than enforcing it, and has no persistent-thread
-equivalent of `session_mode="runtime"`.
+- [Claude Code writes, Codex reviews](claude-writes-codex-reviews.md)
+- [Codex Engine](codex-engine.md) and [coding agents](coding-agents.md)
+- [LazyTools MCP/code support](https://tools.lazybridge.com/code-support/)
+- [LazyTools repository code bridge](https://tools.lazybridge.com/code-bridge/)

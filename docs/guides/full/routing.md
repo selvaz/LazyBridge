@@ -168,7 +168,7 @@ apology_agent = Agent(engine=LLMEngine("gpt-5.4-mini"), name="apology")
 log_outcome   = Agent(engine=LLMEngine("gpt-5.4-mini"), name="log_outcome")
 
 
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("search",
              output=Hits,
@@ -201,7 +201,7 @@ closer     = Agent(engine=LLMEngine("gpt-5.4-mini"), name="spam")
 archiver   = Agent(engine=LLMEngine("gpt-5.4-mini"), name="archive")
 
 
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("classify",
              output=Triage,
@@ -227,7 +227,7 @@ publisher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="publish")
 
 
 store = Store()
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("write",
              task="Draft a 200-word answer; if a 'verdict' is in the store, "
@@ -255,7 +255,9 @@ plan = Agent(
 
 # 4) Lambda escape hatch for one-off predicates — still covers BOTH branches
 #    and uses after_branches.  Lambdas don't change the safety contract.
-plan = Agent(
+classifier = Agent(engine=LLMEngine("gpt-6.1-sol"), output=Hits, name="classify")
+ranker = Agent(engine=LLMEngine("gpt-6.1-sol"), name="rank")
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("classify",
              output=Hits,
@@ -268,7 +270,7 @@ plan = Agent(
         Step("apology",     task="Apologise; suggest broader terms."),
         Step("log_outcome", task="Emit metrics."),
     ),
-    tools=[searcher, writer, apology_agent, log_outcome],
+    tools=[classifier, ranker, apology_agent, log_outcome],
 )
 
 
@@ -295,7 +297,7 @@ auto_agent       = Agent(engine=LLMEngine("gpt-5.4-mini"), name="auto")
 review_agent     = Agent(engine=LLMEngine("gpt-5.4-mini"), name="review")
 audit_agent      = Agent(engine=LLMEngine("gpt-5.4-mini"), name="audit")
 
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("classify",
              routes={
@@ -376,6 +378,6 @@ plan = Agent(
   routing is about *control flow*. They don't overlap.
 - [verify=](../mid/verify.md) — judge-and-retry around an output;
   complementary to routing for "wrong → try again" semantics.
-- *Guides → Full → Parallel plan steps* (Phase 3b) — concurrent
+- [Parallel plan steps](parallel-plan-steps.md) — concurrent
   bands have their own control flow; routing primitives don't
   apply.

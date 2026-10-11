@@ -26,32 +26,17 @@ keys on phrases like "LazyBridge agent", "Agent.chain",
 "`from_step`", "MCP server", "`HumanEngine`", "`OTelExporter`", and
 "native_tools".
 
-## Path 2 — Claude API (`/v1/skills`)
+## Path 2 — Claude API
 
-For programmatic upload (CI, custom Claude integrations):
-
-```bash
-# Build a zip the API expects.
-cd "$(python -c 'from lazybridge.skill import skill_path; print(skill_path())')"
-zip -r /tmp/lazybridge-skill.zip .
-
-# Upload via the Anthropic SDK.
-python - <<'PY'
-import anthropic
-client = anthropic.Anthropic()
-with open("/tmp/lazybridge-skill.zip", "rb") as f:
-    skill = client.skills.create(file=f, name="lazybridge")
-print(skill.id)
-PY
-```
-
-Reference the skill ID on subsequent message calls. The skill is
-loaded only when the trigger description matches; idle calls don't
-pay the token cost.
+For programmatic upload, use the current
+[Anthropic Agent Skills documentation](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview).
+The bundled directory is the input artifact; SDK upload and message parameters
+are an upstream API, not a LazyBridge contract. Follow that API's current
+version and request format rather than the removed client.skills.create example.
 
 ## Path 3 — Claude.ai (web)
 
-Claude.ai's Pro / Team plans accept skill zip uploads via the UI:
+Where the current Claude.ai account exposes skill upload:
 
 1. Build the zip as in Path 2 above (or download the release asset
    — see "Latest release" below).
@@ -72,8 +57,9 @@ The release zip and the bundled directory have identical contents
 
 ## What the skill enforces
 
-Loading the skill makes Claude follow these rules when editing
-LazyBridge code:
+The bundled skill supplies guidance when editing LazyBridge code. It does not
+enforce generated code or guarantee runtime correctness; confirm newer engine
+behavior against [the current codegen contract](codegen-contract.md):
 
 - **Canonical form first.** `Agent(engine=LLMEngine("model"), …)`
   with each constructor argument on its own line. The string-positional
@@ -93,8 +79,8 @@ LazyBridge code:
 - **Public surface only.** Imports come from `lazybridge`,
   `lazybridge.ext.*`, or the explicit
   `lazybridge.core.providers.base.BaseProvider` for custom
-  providers — never `from lazybridge.core.types import …` in
-  application code.
+  providers. CacheConfig is explicitly imported from lazybridge.core.types;
+  the old top-level re-export is deprecated.
 
 ## Verifying the skill is loaded
 
@@ -105,7 +91,11 @@ steps". A skill-equipped Claude produces
 ```python
 from lazybridge import Agent, LLMEngine, Plan, Step
 
-pipeline = Agent(
+researcher = Agent(engine=LLMEngine("gpt-6.1-sol"), name="research")
+ranker = Agent(engine=LLMEngine("gpt-6.1-sol"), name="rank")
+writer = Agent(engine=LLMEngine("gpt-6.1-sol"), name="write")
+
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         Step("rank"),

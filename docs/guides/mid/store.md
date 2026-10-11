@@ -121,7 +121,7 @@ writer = Agent(
     name="write",
 )
 
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("research", writes="hits"),   # store["hits"] = step payload
         Step("write"),
@@ -146,7 +146,7 @@ editor = Agent(
     engine=LLMEngine("gemini-3-flash-preview"),
     name="edit",
 )
-plan_with_handoff = Agent(
+plan_with_handoff = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         Step("edit", context=from_agent("research")),
@@ -197,7 +197,7 @@ print(monitor("what's the current state?").text())
 - [Memory](memory.md) — the in-prompt counterpart.
 - [Session](session.md) — observability of writes (events emitted on
   agent finish carry the auto-write metadata).
-- *Guides → Full → Checkpoint & resume* (Phase 3) — how `Plan` uses
+- [Checkpoint and resume](../full/checkpoint.md) — how `Plan` uses
   `Store` for crash-resilient pipelines.
-- *Guides → Full → Sentinels* (Phase 3) — `from_agent("name")` and
+- [Sentinels](../full/sentinels.md) — `from_agent("name")` and
   `from_step("name")` resolve against the Store at run time.

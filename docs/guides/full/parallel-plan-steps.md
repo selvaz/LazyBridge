@@ -127,7 +127,7 @@ synthesiser = Agent(engine=LLMEngine("deepseek-flash"), name="synth")
 
 # 1) Three branches → join with explicit per-branch sentinels.
 store = Store(db="monitor.sqlite")
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("search_a", parallel=True, writes="findings_a"),
         Step("search_o", parallel=True, writes="findings_o"),
@@ -149,7 +149,7 @@ plan("framework update — April 2026")
 
 
 # 2) Same shape, one-line aggregation via from_parallel_all.
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("search_a", parallel=True, writes="findings_a"),
         Step("search_o", parallel=True, writes="findings_o"),
@@ -174,6 +174,10 @@ class Report(BaseModel):
     items: list[ItemResult]
 
 
+item_processor = Agent(engine=LLMEngine("gpt-6.1-sol"), name="item", output=ItemResult)
+summariser = Agent(engine=LLMEngine("gpt-6.1-sol"), name="summary", output=Report)
+
+
 def make_pipeline(items: list[str]) -> Plan:
     branches = [
         Step(item_processor, name=f"proc_{i}", parallel=True,
@@ -190,7 +194,7 @@ def make_pipeline(items: list[str]) -> Plan:
     )
 
 
-agent = Agent(engine=make_pipeline(["AAPL", "GOOG", "MSFT"]))
+agent = Agent(name="market-scan", engine=make_pipeline(["AAPL", "GOOG", "MSFT"]))
 agent("end-of-day market scan")
 ```
 
@@ -222,8 +226,8 @@ agent("end-of-day market scan")
   failing branch's error envelope becomes the band's outcome;
   every other branch's result is discarded along with its
   `writes=`. If you need partial-success semantics, run the
-  branches as `Agent.parallel(...)` and inspect the
-  `list[Envelope]` yourself.
+  branches through `await fan.run_branches(task)` on an Agent.parallel result
+  and inspect the returned list[Envelope]. The normal call joins text in one Envelope.
 
 ## See also
 
@@ -233,7 +237,7 @@ agent("end-of-day market scan")
 - [Sentinels](sentinels.md) — `from_parallel("name")` and
   `from_parallel_all("name")` semantics.
 - [Parallel](../mid/parallel.md) — application-level scripted
-  fan-out with `list[Envelope]` return; complementary, not
+  fan-out with a labelled-text Envelope and async run_branches access; complementary, not
   redundant.
 - [Checkpoint & resume](checkpoint.md) — band-level atomicity
   drives the "next_step points to the band's first step" rule on

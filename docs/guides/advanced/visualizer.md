@@ -193,10 +193,10 @@ frontend can update its progress bar.
   Pin a port (`port=8765`) only when you need a stable URL —
   e.g. to share with a teammate over a tunnel. Two visualizers
   on the same fixed port collide.
-- **Live mode uses the live `GraphSchema`** of the session, so an
-  agent without `session=sess` doesn't appear in the topology
-  even if it runs. Pass the session to every agent you want
-  visible.
+- **Live mode uses the live `GraphSchema`** of the session. Nested tool agents
+  inherit a parent Session when they have none; direct Plan Step targets need
+  an explicit Session for their child-engine events. Pass the same Session
+  explicitly for predictable topology.
 - **Replay reconstructs a minimal graph** from event payloads —
   the result is structurally similar to but not identical with
   the live `GraphSchema`. If you need pixel-perfect topology,

@@ -1,0 +1,170 @@
+[
+  {
+    "path": "README.md",
+    "all": true
+  },
+  {
+    "path": "docs/beginners/09-plan.md",
+    "blocks": [
+      4,
+      5
+    ]
+  },
+  {
+    "path": "docs/concepts/canonical-vs-sugar.md",
+    "blocks": [
+      1,
+      2
+    ]
+  },
+  {
+    "path": "docs/concepts/layered-composition.md",
+    "blocks": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "path": "docs/concepts/mental-model.md",
+    "all": true
+  },
+  {
+    "path": "docs/concepts/progressive-complexity.md",
+    "blocks": [
+      3,
+      6,
+      9,
+      10,
+      11
+    ]
+  },
+  {
+    "path": "docs/for-llms/claude-skill.md",
+    "blocks": [
+      0
+    ]
+  },
+  {
+    "path": "docs/for-llms/codegen-contract.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/advanced/engine-protocol.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/core-vs-ext.md",
+    "blocks": [
+      2
+    ]
+  },
+  {
+    "path": "docs/guides/full/checkpoint.md",
+    "blocks": [
+      1,
+      2
+    ]
+  },
+  {
+    "path": "docs/guides/full/claude-code-engine.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/claude-writes-codex-reviews.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/codex-engine.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/coding-agent-config.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/coding-agents.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/exporters.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/full/parallel-plan-steps.md",
+    "blocks": [
+      2
+    ]
+  },
+  {
+    "path": "docs/guides/full/plan.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/full/routing.md",
+    "blocks": [
+      2
+    ]
+  },
+  {
+    "path": "docs/guides/full/sentinels.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/full/session-registry.md",
+    "all": true
+  },
+  {
+    "path": "docs/guides/full/step.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/full/supervisor.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/mid/store.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/guides/mid/verify.md",
+    "blocks": [
+      1
+    ]
+  },
+  {
+    "path": "docs/index.md",
+    "all": true
+  },
+  {
+    "path": "docs/quickstart.md",
+    "all": true
+  },
+  {
+    "path": "docs/best-python-ai-agent-frameworks.md",
+    "all": true
+  },
+  {
+    "path": "docs/comparison.md",
+    "all": true
+  },
+  {
+    "path": "docs/why.md",
+    "all": true
+  }
+]

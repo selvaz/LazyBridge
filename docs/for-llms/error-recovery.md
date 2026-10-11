@@ -29,6 +29,13 @@ This page gathers the most common shapes for quick LLM lookup.
 
 ## When the error doesn't appear in the table
 
+For coding engines, distinguish a pre-turn CodexTransportError from
+CodexTurnUncertain after a durable turn was sent. Inspect the recorded thread
+before replaying side effects. Missing CLI/authentication and missing usage
+telemetry are configuration/unknown states, not spare quota. If Claude cannot
+write, check extra_tools as well as permission mode; writer(gate) alone does
+not expose Write/Edit/Bash. See [coding agents](../guides/full/coding-agents.md).
+
 1. Read the bottom of the error message verbatim — the four-part body
    ends with a literal **fix snippet**, often the exact replacement
    line of code.

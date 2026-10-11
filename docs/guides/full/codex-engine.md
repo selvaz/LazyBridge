@@ -1,303 +1,355 @@
 # Codex Engine
 
-`CodexEngine` is a standard LazyBridge [`Engine`](../advanced/engine-protocol.md)
-that runs the model/tool loop through the locally installed **Codex** CLI
-instead of a raw provider API call. It is the OpenAI-side counterpart of
-[`ClaudeCodeEngine`](claude-code-engine.md): the application stays a normal
-`lazybridge.Agent`, and Codex is only the engine that drives it.
-
-## Scope and design
-
-The integration uses an authenticated ChatGPT/Codex account without putting an
-API key in the project. It starts no persistent service, opens no port, and
-copies no credential.
-
-LazyBridge keeps owning conversation memory and tools. For one agent run the
-engine starts **one ephemeral, read-only, approval-free thread** and exposes
-the current LazyBridge tool list to it as App Server *dynamic tools*; every
-call comes straight back to `Tool.run()`.
-
-## Durable threads
-
-`persist_thread=True` makes the thread outlive the subprocess, and
-`engine.thread_id` is then the handle another process can pick up:
-
-```python
-engine = CodexEngine(cwd=repo, persist_thread=True)
-Agent(engine, name="reviewer")("review src/parser.py")
-handle = engine.thread_id            # store it
-
-# ...later, another process entirely:
-Agent(CodexEngine(cwd=repo, thread_id=handle), name="reviewer")("and the retry path?")
-```
-
-The follow-up does not re-read what the first turn already read: Codex' own
-transcript carries it. That moves the conversation's home, so the engine also:
-
-- **stops prepending `Memory`** on a resumed thread (Codex has the history;
-  sending it again gives the model two chronologies of the same conversation).
-  `Memory` keeps recording for the application's own audit/recovery use;
-- **refuses to retry a turn lost after the request was sent**, raising
-  `CodexTurnUncertain` instead — `turn/start` is not idempotent, and the server
-  can accept a turn and then drop the connection *before answering*, so the
-  window opens at send, not at acknowledgement. Resume the thread and inspect
-  it before deciding;
-- **serialises runs per thread id** inside the process. A thread is one
-  transcript: two turns appended at once interleave.
-
-Durable threads are stored by the Codex CLI itself (they show up in its session
-history), and both processes must share the same Codex home and account.
-
-### Session aliases
-
-Instead of storing the thread id yourself, give the engine a name:
-
-```python
-engine = CodexEngine(model="gpt-6-luna", reasoning_effort="low", cwd=repo, session_alias="reviewer")
-```
-
-The first run opens a durable thread and records `reviewer -> thread id` (with
-the model and effort) in the [`SessionRegistry`](session-registry.md); any later
-engine with the same alias and `cwd` resumes that thread. An explicit
-`thread_id=` still wins and (re)binds the alias. The binding is written as soon
-as the thread id is known, including when the turn then fails. `engine.session_alias`
-exposes the name. See [Session aliases](session-registry.md) for the file format,
-renaming and the precedence rules.
-
-### Using the engine as a writer
-
-The default thread is read-only. To let Codex create and edit files in `cwd`:
-
-```python
-from lazybridge import CodexEngine, CodexPolicy, CodingAgentConfig
-
-engine = CodexEngine(
-    cwd=repo,                                   # a resolved long path, not a Windows 8.3 short name
-    model="gpt-6-luna",
-    config=CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write", approval_policy="never")),
-    request_timeout=None,                       # see below
-)
-```
-
-Verified live: this creates a file in a fresh git repository. `approval_policy="never"`
-is the unattended setting; `CodingAgentConfig.writer(gate)` uses `"on-request"`
-and routes approvals to your gate instead. A worktree needs `writable_roots=`
-for its shared `.git` directory (see `CodexPolicy`).
-
-`request_timeout` defaults to 120 s and bounds the **whole run** (every retry
-included), so a long coding task is cut at two minutes. A writer should pass a
-larger value or `None`. `stream_idle_timeout` (90 s) only applies to `stream()`.
+`CodexEngine` drives a LazyBridge Agent through `codex app-server` over JSON-RPC
+on subprocess pipes. It uses the local runtime's authentication, exposes Python
+tools as dynamic tools and returns an Envelope with provider `codex`.
+No resident server or network port is needed.
 
 ## Setup
 
-```bash
-npm install -g @openai/codex
-codex --login
+Install and authenticate the CLI using the
+[official Codex CLI instructions](https://developers.openai.com/codex/cli/).
+Run `codex` and follow its sign-in flow, or use `codex login`.
+A subscription login uses plan quota; another configured authentication can
+use a different billing path. The adapter does not copy credentials.
+
+Python 3.11 or later and the core package are sufficient; there is no Codex
+Python SDK extra:
+
+```sh
+python -m pip install "lazybridge==1.8.0"
 ```
 
-The engine does not require `codex` to be on `PATH`: it resolves `CODEX_BIN`
-first, then `PATH`, then the Codex desktop app's versioned install directory
-(`%LOCALAPPDATA%/OpenAI/Codex/bin/<hash>/codex.exe`), which the installer does
-not add to `PATH`.
+Executable lookup checks CODEX_BIN, PATH and the Windows desktop app's versioned
+install directories. Candidate selection prefers the newest stable CLI by
+version and excludes helpers; set CODEX_BIN when you need a particular binary.
 
-No Python extra is needed — unlike `lazybridge[claude-code]`, this engine has
-no SDK dependency, only the CLI.
-
-## Usage
+## Basic usage
 
 ```python
 from lazybridge import Agent, CodexEngine
 
-agent = Agent(
-    name="research",
-    engine=CodexEngine(system="Be concise."),
-    tools=[search, specialist_agent],
-)
-print(agent("Summarise the latest filing").text())
+def project_status() -> str:
+    """Return a deterministic project status."""
+    return "The draft is ready for review."
+
+agent = Agent(name="assistant", engine=CodexEngine(system="Be concise."),
+              tools=[project_status])
+print(agent("Read project_status and report the next step.").text())
 ```
 
-`CodexEngine` composes like any other engine — `tools=[...]` with a child
-agent, `Agent.chain`, `AgentPool`, `Agent.stream`, `output=<model>` — because
-those all dispatch through `Engine.run()`/`Engine.stream()` and never
-special-case the engine type.
+Functions, ToolProvider instances and named child agents use the same
+`tools=[...]` contract as Claude Code. Dynamic tool callbacks dispatch through
+Tool.run, independently of runtime MCP configuration. A native read-only sandbox
+does not sandbox Python application tools; review their side effects separately.
 
-Constructor options mirror `LLMEngine`/`ClaudeCodeEngine` where the underlying
-runtime supports them: `model`, `cwd`, `system`, `reasoning_effort`,
-`request_timeout`, `stream_idle_timeout`, `max_retries`, `retry_delay`,
-`tool_timeout`. The `system` value is sent as an App Server developer
-instruction, separately from the user task, so it retains instruction priority.
+## Why App Server rather than codex exec
 
-## Why not `codex exec`
+The adapter needs bidirectional application-tool callbacks, native thread
+control and read-only sandbox operation. It therefore uses App Server's
+JSON-RPC interface. It does not need a flag that bypasses both approvals and
+sandboxing to expose Python tools.
 
-`codex exec --json` was the obvious candidate and was rejected: it cancels
-non-interactive MCP tool calls unless `--dangerously-bypass-approvals-and-sandbox`
-is passed, and that flag also removes the read-only sandbox. `CodexEngine`
-therefore talks to `codex app-server` over JSON-RPC directly and never uses
-that bypass.
+Early integration experiments with codex exec had non-interactive MCP approval
+limitations. That historical result is not a claim that every current exec
+configuration rejects MCP. For current protocol capabilities, see the official
+[App Server documentation](https://developers.openai.com/codex/app-server).
+
+## Constructor options
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `model` | `None` | Runtime-configured model, or explicit runtime ID. No model-list validation. |
+| `cwd`, `system` | `None` | Working directory; system becomes developer instructions. |
+| `reasoning_effort` | `None` | Passed through; supported values depend on model/list. No thinking parameter. |
+| `thread_id`, `persist_thread` | `None`, `False` | Native resume handle and durable transcript; ID implies persistence. |
+| `session_alias`, `session_registry` | `None` | Named durable binding; alias implies persistence. |
+| `review_target` | `None` | Native review/start instead of an ordinary prompted turn. |
+| `thread_source` | `"lazybridge"` | Creation-time label; None omits it. |
+| `config`, `approval_gate` | default config, `None` | Native sandbox/policy and shared gate. Different direct/config gates conflict. |
+| `request_timeout`, `stream_idle_timeout` | `120.0`, `90.0` | Whole run including retries; streaming idle gap. None disables either. |
+| `max_retries`, `retry_delay` | `3`, `1.0` | Transient budget and exponential-backoff base with jitter. |
+| `tool_timeout` | `None` | Per-application-tool deadline. |
+| `client` | CodexAppServerClient | Fake transport injection for offline tests. |
+
+Deadlines/delay must be positive, retries nonnegative. See
+[Coding-agent permissions](coding-agent-config.md) for writable_roots,
+web_search, preapproval, native approval modes and compaction.
+
+## Durable threads and aliases
+
+Default calls start ephemeral threads. An ephemeral ID cannot be resumed even
+if its process just exited. Use persistence before the first turn:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from lazybridge import Agent, CodexEngine, SessionRegistry
+
+repo = str(Path.cwd().resolve())
+# Temporary registry for the demo; use a fixed file across real restarts.
+with TemporaryDirectory() as directory:
+    registry = SessionRegistry(path=Path(directory) / "sessions.json")
+    engine = CodexEngine(cwd=repo, session_alias="reviewer", session_registry=registry)
+    Agent(name="reviewer", engine=engine)("Remember the word PINEAPPLE.")
+    handle = engine.thread_id
+    assert handle is not None
+    resumed = CodexEngine(cwd=repo, thread_id=handle)
+    print(Agent(name="reviewer", engine=resumed)("What was the word?").text())
+```
+
+Without aliases, `persist_thread=True` exposes engine.thread_id for storage.
+A later engine with the same alias/kind/cwd resolves the ID; an explicit ID wins
+and rebinds it. Registry updates preserve handles learned on failed turns.
+
+On resume, native history replaces Memory priming. Memory keeps recording
+completed answers for application use; explicit context/sources still flow.
+Runs and streams queue by engine, alias and thread inside an event loop.
+There is no cross-process transcript lock: coordinate access outside the engine.
+The new subprocess re-registers dynamic tools on resume.
+
+## Repository writer and native review
+
+```python
+from pathlib import Path
+from lazybridge import Agent, CodexEngine, CodingAgentConfig, TerminalApprovalGate
+
+repo = str(Path.cwd().resolve())
+writer = Agent(name="writer", engine=CodexEngine(
+    cwd=repo, config=CodingAgentConfig.writer(TerminalApprovalGate()),
+    request_timeout=600,
+))
+reviewer = Agent(name="reviewer", engine=CodexEngine(
+    cwd=repo, config=CodingAgentConfig.reviewer(),
+    review_target={"type": "uncommittedChanges"}, persist_thread=True,
+))
+```
+
+The writer uses workspace-write/on-request. Git worktree index/refs can live
+outside cwd; the caller must resolve any required common Git directory and
+explicitly permit it with CodexPolicy.writable_roots.
+
+Native review targets are uncommittedChanges, baseBranch with branch, or commit
+with sha. `review_target` selects the native harness on every call; the ordinary
+Agent task is not sent because review/start has no prompt field. For a steered
+follow-up construct another engine with the recorded thread_id and no review_target.
+Use an ordinary prompted Agent as a verify judge, rather than native review/start.
 
 ## Protocol notes
 
-Verified against a live `codex app-server` (codex-cli 0.148.0); the
-authoritative schema comes from `codex app-server generate-json-schema --out <dir>`.
+The transport implements a subprocess protocol, not an HTTP service. Its
+request/notification fixtures cover the wire shapes used by this source version.
+Use the installed CLI's schema generator when diagnosing version differences;
+experimental dynamic-tool support can change between runtimes.
 
-- `thread/start` takes `sandbox: "read-only"` — the kebab-case `SandboxMode`
-  enum. `"readOnly"` is rejected outright with `unknown variant`.
-- `dynamicTools` on `thread/start` works but is **absent from the generated
-  schema**, so it is the field most likely to break on a Codex upgrade. The
-  test fixture asserts the exact request shape so a regression fails locally.
-- Token usage arrives only through `thread/tokenUsage/updated` notifications;
-  `turn/completed` carries none. `total` is cumulative **over the thread**, not
-  the turn (measured: 15137 after turn 1, 30292 after turn 2), so on a resumed
-  thread the engine subtracts the total reported before the turn began. `last`
-  is not used instead because it is only the final model call and would drop
-  the ones made before each tool round-trip.
-- Every notification carries `threadId`/`turnId`, and `turn/start` returns the
-  turn's id. The engine attributes usage by turn id and ignores a
-  `turn/completed` naming a different turn — on a resumed thread the server can
-  replay older ones, and taking the first would return a previous answer.
-- `thread/resume` restores a durable thread **in a different process**
-  (verified live), and accepts `dynamicTools` even though the generated schema
-  omits the field there too — a resumed thread must re-register them, since the
-  callbacks live in the new subprocess.
-- `ephemeral: true` means unresumable, not merely short-lived:
-  `thread/resume` on such a thread answers `no rollout found for thread id`.
-- **`cost_usd` is always `0.0`.** Under ChatGPT-plan auth the App Server
-  reports plan rate-limit percentages, never a per-turn price. Token counts
-  are populated, so `Session.usage_summary()` still attributes tokens per
-  agent.
-- The App Server numbers its own requests to the client from 0, independently
-  of the client's ids, so the read loop dispatches on the presence of
-  `method` rather than on the id.
-
-## Multimodal
-
-`images=` is forwarded: a URL passes through as an `image` UserInput item, and
-inline bytes are sent as a `data:` URL.
-
-```python
-agent("What is in this chart?", images=["C:/work/chart.png"])
+```text
+initialize → initialized
+thread/start (or thread/resume, re-registering dynamic tools)
+turn/start (or review/start for a native review target)
+  ↔ application-tool / native approval requests and progress notifications
+turn/completed → collect text and attributable usage → close subprocess
 ```
 
-`audio=` is **not** forwarded. The protocol has `audio`/`localAudio` variants
-and accepts them without error, but the model then reports it cannot access
-the attachment (verified live with both), so the engine drops it with a
-`UserWarning` instead of paying for an ignored attachment.
+- Native sandbox enum values are read-only, workspace-write and
+  danger-full-access. The camel-case spelling readOnly is not equivalent.
+- An ephemeral thread is unresumable. Persistence must be selected before the
+  first turn; keeping its printed ID alone does not make it durable.
+- Dynamic tools are registered again on resume because Python handlers belong
+  to the new process, not the saved transcript.
+- thread/tokenUsage/updated totals are cumulative across the thread. The client
+  subtracts the pre-turn baseline rather than using only the final model call.
+- Turn IDs distinguish new notifications from replayed completions. An older
+  turn/completed event must not finish the current request.
+- Server-to-client request IDs are independent of client IDs. The read loop
+  distinguishes a request by its method field, not just its ID.
+- RPC stdout is reserved for the protocol. This source accepts individual lines
+  up to 64 MiB and retains the newest 16 KiB of stderr, quoting a bounded excerpt
+  in failures. The limit applies to one message, not the full turn.
 
-Codex can also *produce* images — the protocol's `ThreadItem` union includes an
-`imageGeneration` item with a `savedPath`. This engine reads only the final
-`agentMessage` text, so a generated image would not reach the `Envelope`.
-Generated audio exists only in the realtime session API, not in this
-turn-based path.
+These are adapter behaviors and compatibility considerations. Validate dynamic
+tool fields against the installed runtime rather than assuming one historical
+generated schema defines a permanent protocol contract.
 
-## Structured output
+## Structured output and attachments
 
-`output=<model>` is enforced server-side via `turn/start`'s native
-`outputSchema` whenever the schema qualifies — the same guarantee
-`ClaudeCodeEngine` gets from the Agent SDK's `output_format`. `turn/start`
-only accepts OpenAI-*strict* schemas: `additionalProperties: false` on every
-object **and** `required` listing every property, which a plain Pydantic
-schema doesn't satisfy on its own (a bare schema fails the turn with
-`invalid_json_schema`). `lazybridge.core.structured.to_openai_strict_schema`
-does that rewrite: an optional property is carried into `required` only when
-it already accepts `null` as written (an `Optional[X] = None` field, a
-`Literal[..., None]`), since that's the only case where forcing it into
-`required` doesn't change what a round-trip through the model then accepts.
+```python
+from pydantic import BaseModel
+from lazybridge import Agent, CodexEngine
 
-Not every schema qualifies. The engine falls back to the old prompt-priming
-behavior — ask for the shape in the prompt, let
-`Agent._validate_and_retry`'s post-hoc repair catch drift — whenever the
-native rewrite would have to change accepted semantics instead of just
-restating them:
+class Status(BaseModel):
+    ready: bool
+    reason: str
 
-- an optional property whose own type never admits `null` (e.g.
-  `count: int = 5` — forcing it into `required` would let the model legally
-  answer `null` there, which the destination model then rejects);
-- a model with `extra="allow"` (or any object whose `additionalProperties`
-  is explicitly `true`/typed) — closing it would forbid dynamic fields the
-  destination type actually accepts;
-- a fixed-length tuple (`tuple[str, int]`, rendered as `prefixItems`) — a
-  keyword outside the strict-mode subset with no equivalent to translate it
-  into;
-- the output type's top level isn't an object (e.g. `output=list[str]`).
+agent = Agent(name="status", engine=CodexEngine(), output=Status)
+result = agent("Return ready=true and reason='review complete'.")
+assert isinstance(result.payload, Status)
+print(result.payload.reason)
+```
 
-`output=str` (the default) and `output=Any` are unaffected either way — there
-is nothing to constrain.
+Object-rooted schemas that can preserve semantics under OpenAI's strict subset
+go to native turn/start outputSchema. Objects become closed and all properties
+required; nullable optional fields can remain representable. Nonnullable defaults,
+open objects, fixed tuples or a non-object root fall back to prompt instructions
+and Agent parsing/repair. Default str/Any output sets no schema.
+
+### Multimodal input
+
+```python
+import base64
+from lazybridge import Agent, CodexEngine, ImageContent
+
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+)
+image = ImageContent.from_bytes(png, media_type="image/png")
+viewer = Agent(name="viewer", engine=CodexEngine())
+result = viewer("Describe this tiny test image.", images=[image])
+assert result.ok
+```
+
+Images use URL/data UserInput items; local paths are inlined by LazyBridge.
+URL-only inputs pass through rather than being fetched by the adapter. The
+presence of audio or image-generation variants in a protocol does not imply
+this text-turn engine supports them as input/output artifacts.
+Audio is dropped with a UserWarning. Generated images/audio are not returned
+as artifacts by this text-based adapter. Streaming forwards text through the
+client callback and commits completed text to Memory.
+
+## Usage accounting
+
+Token notifications are cumulative over the thread; the client subtracts the
+pre-turn baseline and attributes notifications by turn ID, ignoring replayed
+completion events for older turns. Codex cost_usd is 0.0 in this adapter because
+the App Server reports no per-turn price; it is not evidence that a run is free.
 
 ## Distinguishing LazyBridge threads on disk
 
-Every thread a `CodexEngine` creates is tagged with the App Server's own
-`threadSource` field (`ThreadStartParams.threadSource` — verified against the
-generated protocol schema, and observed on disk as
-`session_meta.payload.source` in a real rollout file under
-`~/.codex/sessions/...`, alongside values like `"vscode"` the interactive CLI
-sets for its own sessions):
-
 ```python
-engine = CodexEngine()                          # thread_source="lazybridge" (default)
-engine = CodexEngine(thread_source="my-app")     # a caller-specific label
-engine = CodexEngine(thread_source=None)         # omit it entirely
+from lazybridge import CodexEngine
+
+default_label = CodexEngine()
+app_label = CodexEngine(thread_source="my-app")
+without_label = CodexEngine(thread_source=None)
 ```
 
-This is creation-time metadata only — sent on `thread/start`, never
-re-sent on `thread/resume` — because the protocol has no endpoint to change
-it after a thread exists. It has no bearing on `codex resume`'s picker
-(which titles sessions from their content, not this field); it exists so a
-script can tell LazyBridge-created threads apart from interactive ones by
-grepping rollout files for `"source": "lazybridge"`, e.g. as a starting point
-for a retention/cleanup pass.
+thread_source is sent as threadSource only on creation. It lands in
+`session_meta.payload.thread_source`, not payload.source. The initialize
+handshake separately stamps originator=lazybridge. Labels help identify
+rollouts; they do not create cleanup or access-control policy. Changing a
+resuming engine's thread_source does not relabel existing history or name the
+runtime's resume-picker entry.
+
+For a retention review, inspect session_meta records in the runtime's sessions
+directory (normally under ~/.codex, or the configured runtime home). Match
+payload.thread_source and, where present, payload.originator. Do not filter the
+older guide's payload.source spelling or assume an undocumented delete command.
+Check active use and selected IDs before using the installed runtime's cleanup
+mechanism. Removing SessionRegistry bindings does not delete rollouts.
+
+This helper parses a record without opening or altering native history:
+
+```python
+import json
+
+def is_lazybridge_rollout(line: str) -> bool:
+    record = json.loads(line)
+    payload = record.get("payload", {})
+    return record.get("type") == "session_meta" and (
+        payload.get("thread_source") == "lazybridge"
+        or payload.get("originator") == "lazybridge"
+    )
+
+sample = json.dumps({"type": "session_meta", "payload": {"thread_source": "lazybridge"}})
+assert is_lazybridge_rollout(sample)
+assert not is_lazybridge_rollout('{"type": "session_meta", "payload": {"source": "interactive"}}')
+```
 
 ## Reading the subscription quota
 
-The subscription behind `CodexEngine` has a weekly quota, and it can be read
-without spending any of it. `fetch_codex_usage()` asks the App Server for
-`account/rateLimits/read` -- no thread and no turn are involved:
-
 ```python
+import asyncio
 from lazybridge.engines.codex.usage import fetch_codex_usage
 
-snapshot = await fetch_codex_usage()
-weekly = snapshot.weekly()          # the seven-day window, or None
-if weekly is not None:
-    print(weekly.used_percent, weekly.resets_at)
+async def show_quota():
+    snapshot = await fetch_codex_usage()
+    for window in snapshot.windows:
+        print(window.limit_id, window.kind, window.used_percent, window.resets_at)
+    return snapshot
+
+snapshot = asyncio.run(show_quota())
 ```
 
-Each window carries **both** a percentage and a reset time (`resets_at` is
-timezone-aware UTC, or `None` if the server did not say), and they are meant to
-be read together: 85% is comfortable on the first day of a window and critical
-on the last.
+The function reads account/rateLimits/read without a thread or model turn.
+Each is a `CodexUsageWindow` with `limit_id`, `kind`, `used_percent`, `window_duration_minutes`, `resets_at`, and `reached_type`.
+Snapshot weekly selects the seven-day bucket by duration, not array position.
+resets_at is a UTC datetime or None. Missing executable raises
+FileNotFoundError; RPC failures raise RuntimeError. Unknown/missing telemetry
+must not be treated as spare quota. snapshot.plan_type and snapshot.raw retain
+account details not modeled as windows. Percentage and reset time should be
+considered together; no fixed percentage establishes sufficient capacity for
+a job. The standalone fetch uses a 30-second default RPC timeout after startup.
+Quota routing and its benchmark belong to LazyTools; the benchmark is in progress.
 
-- `snapshot.windows` lists every bucket the account reported; an account can
-  report more than one. Each is a `CodexUsageWindow` with `limit_id`, `kind`
-  (`"primary"` or `"secondary"`), `used_percent`, `window_duration_minutes`,
-  `resets_at` and `reached_type`.
-- `snapshot.weekly(limit_id="codex")` picks the seven-day bucket by its
-  **duration** (`WEEKLY_WINDOW_MINUTES`, 10080), not by position -- `primary`
-  is not always the weekly one -- and returns `None` when there is none.
-- `snapshot.plan_type` and `snapshot.raw` (the untouched response) are there
-  for anything the dataclass does not model yet.
+## Transport failures and retry boundaries
 
-It needs a local Codex login, like the engine itself. Once the App Server
-process is actually running, `fetch_codex_usage` raises `RuntimeError` if it
-times out (30 s by default), closes the stream, or refuses the method -- an
-older `codex` binary answers "method not found". Locating or starting the
-`codex` binary itself is a separate failure mode: a `codex` CLI missing from
-`PATH`/`CODEX_BIN`/the app's install directory raises `FileNotFoundError`
-before any of that, not `RuntimeError`. A caller that gates work on the
-number must treat all of those, and a `None` from `weekly()`, as
-**unknown**, never as *plenty left*.
+CodexTransportError reports phase, PID, return code and a bounded stderr tail.
+The client retries one startup failure and, on this source baseline, one
+transport failure during thread/start or thread/resume before a turn was sent.
+A possibly created but unused thread may remain. The engine does not blindly
+replay later stateful failures.
 
-Claude Code's equivalent is different in kind: there is no typed field, so its
-figure is read out of the prose the CLI prints for `/usage` and can only be as
-reliable as that wording.
+On a durable thread, loss after turn/start was sent can raise CodexTurnUncertain:
+the turn might already have executed tools. Resume and inspect before deciding
+what to do; automatic replay can duplicate side effects. A known rejection
+differs from an uncertain accepted turn. Missing/unreadable executables are
+permanent errors, not transient retries.
 
-## Not implemented yet
+The default 120-second deadline covers all retries. Use a larger bound for
+repository work and align any MCP host deadline. No model validation or
+cross-process thread locking is implemented.
 
-- **No model validation.** `model=` is passed straight to `thread/start`
-  without checking it against the account's `model/list`, so an invalid model
-  surfaces as whatever error the App Server returns.
-- **No cross-process locking.** `persist_thread=True` serialises runs against
-  one thread id *within* a process; two processes resuming the same thread at
-  once is still on the caller to prevent.
-- **No built-in file/web tools.** Claude's `Read`/`Glob`/`Grep`/`WebSearch`
-  surface has no exposed counterpart here; Codex runs with its own read-only
-  sandbox rooted at `cwd`.
+```sh
+python -m pytest tests/unit/engines/codex/ -q
+```
+
+## Troubleshooting and verification
+
+| Symptom | Check | Resolution |
+| --- | --- | --- |
+| Executable missing | CODEX_BIN/PATH and discovered candidates | Set a known CLI path or follow official installation |
+| Startup/RPC failure | Transport phase, return code and stderr tail | Check login/version before retrying model work |
+| Invalid model or effort | Runtime-configured model and model/list | Use an advertised ID/effort; the engine does not validate availability |
+| Structured output falls back | Strict-schema representability | Keep Agent parsing/validators; do not assume every schema is native |
+| Cannot resume | Persistence on the first turn and correct cwd/ID | Start durable work deliberately; an ephemeral ID cannot be repaired by resume |
+| Native write denied | Sandbox, approval policy and writable_roots | Configure the intended workspace and Git metadata roots explicitly |
+| Python tool denied | preapprove_dynamic_tools and gate | Configure approval independently of the filesystem sandbox |
+| Long repository run cancelled | Engine deadline and host timeout | Align both limits and inspect any durable turn before replay |
+
+Optional authenticated smoke checks:
+
+```sh
+python examples/codex/live_app_server_smoke.py
+python examples/codex/live_engine_smoke.py
+```
+
+The first isolates the protocol; the second exercises Agent composition. The
+multimodal/composition scripts in the same directory cover additional paths.
+
+## What this integration intentionally does not do
+
+- Validate a model or effort against model/list at construction.
+- Lock one native thread across independent Python processes.
+- Replay a possibly accepted side-effecting turn automatically.
+- Add Claude-style file/web Tool objects; Codex uses its own native sandbox
+  and per-process web_search policy instead.
+- Migrate native history across engines or create a second transcript store.
+- Infer Git worktree metadata roots or authorize undeclared Python side effects.
+- Return generated image/audio artifacts or a per-turn dollar price absent from RPC.
+
+These tests use fake transports. Live scripts in examples/codex require an
+authenticated runtime and were not run for this docs refresh.
+
+See [coding agents](coding-agents.md),
+[Claude Code writes, Codex reviews](claude-writes-codex-reviews.md) and the
+[LazyTools code bridge](https://tools.lazybridge.com/code-bridge/) for connected
+repository work and durable results.

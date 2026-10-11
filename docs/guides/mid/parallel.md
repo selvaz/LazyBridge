@@ -203,7 +203,7 @@ for env in results:
 - [As tool](as-tool.md) — `multi.as_tool()` exposes the fan-out as
   a single `Tool` that delegates to `run()` (since 0.7.9 the
   wrapper Envelope already carries the labelled-text join).
-- *Guides → Full → Plan* (Phase 3) — `Plan` parallel bands
+- [Plan](../full/plan.md) — `Plan` parallel bands
   (`Step(..., parallel=True)`) and `from_parallel_all("name")`
   aggregation when concurrent steps must produce a single
   downstream input.

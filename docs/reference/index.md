@@ -18,13 +18,13 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 
 - [State primitives](state.md) — `Memory`, `Store`.
 - [Session & observability](session.md) — `Session`, `EventLog`,
-  `EventType`, `GraphSchema`, exporters.
+  `EventType`, `GraphSchema`, exporters and native `SessionRegistry` aliases.
 - [Guards](guards.md) — `Guard`, `ContentGuard`, `GuardChain`,
   `LLMGuard`, `GuardError`.
 
 ## Engines & orchestration
 
-- [Engines](engines.md) — `LLMEngine`, `Plan`, `Step`,
+- [Engines](engines.md) — `ClaudeCodeEngine`, `CodexEngine`, `LLMEngine`, `Plan`, `Step`,
   `PlanCompileError`, `ToolTimeoutError`, `StreamStallError`.
 - [Multi-agent graphs](multi-agent.md) — `AgentPool`, `conclude`,
   `ConcludeSignal` for dynamic, LLM-routed agent systems.
@@ -42,6 +42,6 @@ and the [Recipes](../recipes/index.md) for runnable examples.
 ## Configuration & testing
 
 - [Runtime configs & testing](configs.md) — `CacheConfig` (now under `lazybridge.core.types`) and
-  `MockAgent`.  The 0.7-era ``AgentRuntimeConfig`` /
+  `MockAgent`, plus `CodingAgentConfig`, native policies and approvals. The 0.7-era ``AgentRuntimeConfig`` /
   ``ResilienceConfig`` / ``ObservabilityConfig`` were deleted in 0.7.9;
   fleet config uses a flat-kwarg dict spread now.

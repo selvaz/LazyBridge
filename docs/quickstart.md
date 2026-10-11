@@ -1,137 +1,144 @@
 # Quickstart
 
-Five minutes from `pip install` to a running agent that calls a tool.
+Start with Claude Code, swap to Codex with the same tools and state, then add
+independent review. Python 3.11 or later is required.
 
-## 1. Install
+## Install and sign in
 
-```bash
-pip install "lazybridge[anthropic]"
+```sh
+python -m pip install "lazybridge[claude-code]==1.8.0"
 ```
 
-LazyBridge has no required provider — pick the SDK matching the model you
-want to call. Available extras: `anthropic`, `openai`, `google`, `deepseek`,
-`litellm` (for 100+ providers via LiteLLM). You can install several at once.
+Follow [Claude Code setup](guides/full/claude-code-engine.md#setup) and
+[Codex setup](guides/full/codex-engine.md#setup) to install and authenticate the
+local runtimes. Codex needs no Python SDK extra. The engines reuse runtime
+authentication: a subscription login uses plan quota, while another configured
+login may use API billing.
 
-Set the matching API key:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-## 2. Your first agent
+## Call a tool
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, ClaudeCodeEngine, Memory, Session, Store
 
-# Tier alias — picks "whatever provider X considers cheap-tier right
-# now".  Survives model-SKU renames without docs drift.  Works with
-# any of: anthropic / openai / google / deepseek.
-agent = Agent.from_provider("anthropic", tier="cheap")
-result = agent("Explain LazyBridge in one sentence.")
+def project_status() -> str:
+    """Return a deterministic status for this example."""
+    return "The draft is ready for review."
+
+state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
+agent = Agent(name="assistant", engine=ClaudeCodeEngine(system="Be concise."), **state)
+result = agent("Read project_status and report the next step.")
 print(result.text())
 ```
 
-Prefer **tier aliases** in first-contact code.  When you need to pin
-a specific model (for reproducibility, multimodal features, or
-provider-specific behaviour), use the explicit form:
+Type hints and the docstring become the tool schema. For a stable public tool
+name use `Tool.wrap(project_status, name="project_status")`. The callable form
+above is supported. `result` is an `Envelope`; `.payload` gives typed output
+when `output=` is set, and `.text()` gives a string.
+
+## Swap the engine
+
+Continue in the same Python process after the previous block:
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, CodexEngine
 
-# Pin a specific SKU when you need it.  Cheap-tier models across
-# providers (Sep 2026): claude-haiku-4-5, gpt-6-luna,
-# gemini-3-flash-preview, deepseek-flash.
-agent = Agent(engine=LLMEngine("claude-haiku-4-5"))
-result = agent("Explain LazyBridge in one sentence.")
+agent = Agent(name="assistant", engine=CodexEngine(system="Be concise."), **state)
+result = agent("Using the shared context, report the next step.")
 print(result.text())
 ```
 
-Both are complete, runnable programs — no `asyncio.run`, no event loop,
-no `@tool` decorators. The canonical shape is `Agent(engine=...)` with
-each argument on its own line: it's what every example in `examples/`
-uses, and it's what you'll extend the moment you need to configure the
-engine (`system=`, `max_turns=`, `thinking=`, …).
+The tool list, Memory, Store and observability Session stay in Python. Native
+permissions and attachment support differ. Native sessions/threads are
+engine-specific; they are not transferred by changing `engine=`. See
+[durable aliases](guides/full/session-registry.md) for cross-process continuity.
 
-A shorter form exists — `Agent("claude-opus-4-7")` is a positional
-shortcut for `Agent(engine=LLMEngine("claude-opus-4-7"))`.  It saves
-a line at the cost of hiding which engine drives the agent at the
-call site.  Stick to the canonical form while you're learning; reach
-for the shortcut only after you can write the canonical version from
-memory.
+## Add review
 
-(The bare-provider-name form `Agent("anthropic")` was removed in
-0.7.9.x because it left the model id ambiguous at request time — use
-`Agent.from_provider("anthropic", tier="…")` for tier-alias selection.)
+```python
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine
 
-Calling `agent(task)` returns an `Envelope` — LazyBridge's typed
-result wrapper that carries the payload, token / cost metadata, error
-info, and any nested sub-agent rollup. Call `.text()` to get a string.
+reviewer = Agent(name="reviewer", engine=CodexEngine(
+    system='Start with "approved" or "rejected: <reason>". Check boundary cases.',
+))
+writer = Agent(name="writer", engine=ClaudeCodeEngine(), verify=reviewer, max_verify=3)
+print(writer("Draft a function that blocks weekend deployment.").text())
+```
 
-If you'd rather drive things asynchronously, every agent also exposes
-`await agent.run(task)` and an `async for chunk in agent.stream(task)`
-streaming form. The sync call shown above is the canonical entry point.
+Three attempts means at most three writer runs, each reviewed. The final draft
+is returned even if all reviews reject it. The
+[complete collaboration guide](guides/full/claude-writes-codex-reviews.md) explains
+feedback, deterministic acceptance and repository work through LazyTools.
 
-!!! warning "Inside FastAPI / aiohttp / async workers, use `await agent.run(...)`"
-    `agent(task)` detects an already-running event loop and dispatches
-    the coroutine onto a worker thread, blocking the caller until the
-    thread finishes.  That keeps notebook ergonomics working but
-    stalls async-request handlers and burns one thread per call.
-    Use `await agent.run(task)` directly when you're already inside a
-    loop.
+## Run offline or use a provider API
 
-## 3. Add a tool
+For a credential-free example:
 
-A tool is just a normal Python function. LazyBridge inspects the
-signature, type hints, and docstring to build the schema the LLM sees —
-no second JSON definition required.
+```python
+from lazybridge.testing import MockAgent
+
+agent = MockAgent(["The draft is ready for review."], name="offline")
+assert agent("Report status").text() == "The draft is ready for review."
+```
+
+For provider APIs, install the matching extra (`anthropic`, `openai`, `google`,
+`deepseek`, `litellm`), set the provider's credentials, and construct
+`Agent.from_provider("anthropic", tier="cheap")` or `Agent(engine=LLMEngine(model))`.
+Tier aliases are catalogue choices; they are distinct from LazyTools quota routing.
+
+A provider-only installation can be explicit too:
+
+```sh
+python -m pip install "lazybridge[anthropic]==1.8.0"
+```
+
+Set ANTHROPIC_API_KEY in the environment running Python for Anthropic API calls
+(use OPENAI_API_KEY for OpenAI, GOOGLE_API_KEY for Google, or DEEPSEEK_API_KEY
+for DeepSeek). Supply your own key through your shell or secret manager, never
+commit it. Coding-runtime login and these provider API credentials are separate.
 
 ```python
 from lazybridge import Agent, LLMEngine, Tool
 
 def get_weather(city: str) -> str:
-    """Return the current weather for ``city``."""
-    # Replace with a real API call. This stub keeps the example offline.
-    return f"It's 18°C and sunny in {city}."
+    """Return a deterministic demonstration forecast, not live weather."""
+    return f"The demonstration weather in {city} is sunny."
 
-agent = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
+agent = Agent.from_provider("anthropic", tier="cheap")
+print(agent("Explain LazyBridge in one sentence.").text())
+
+# Pin a catalogue ID when a particular model behavior is required.
+weather_agent = Agent(
+    name="weather", engine=LLMEngine("claude-haiku-4-5"),
     tools=[Tool.wrap(get_weather, name="get_weather")],
 )
-result = agent("What's the weather like in Paris right now?")
-print(result.text())
+print(weather_agent("Explain the demonstration weather in Paris.").text())
 ```
 
-> The bare-function form (`tools=[get_weather]`) is supported as a
-> convenience.  Production code should prefer the explicit
-> `Tool.wrap(fn, name=...)` form: it pins the LLM-visible tool name, which
-> keeps the agent's **tool-map** (the `name → Tool` lookup the LLM
-> uses to dispatch a call) and plan-step references stable as the
-> function name
-> evolves.
+The model chooses whether to call a tool. verbose=True enables a console Session
+to inspect the loop; it does not force a tool call or guarantee an answer's wording.
+Canonical Agent(engine=...) exposes the options you will configure as the system
+grows. Agent(model_id) is shorthand for a provider engine; a bare provider name
+is ambiguous and should be replaced with Agent.from_provider(..., tier=...).
 
-The agent will decide on its own to call `get_weather("Paris")`,
-observe the result, and produce the final answer. You did not define a
-JSON schema, you did not write any orchestration code, and you did not
-lock yourself to a specific provider.
+Use `await agent.run(task)` inside async applications. `agent(task)` blocks until
+completion, including when called from an existing event loop. Engines also
+expose `agent.stream(task)` for incremental text.
 
-To watch the loop turn-by-turn, pass `verbose=True` — it's the
-equivalent of LangGraph's `graph.stream(stream_mode="updates")`.
+Continue with the [mental model](concepts/mental-model.md),
+[coding agents](guides/full/coding-agents.md), [tool guide](guides/basic/tool.md),
+[recipes](recipes/index.md), or [code generation contract](for-llms/codegen-contract.md).
 
-## 4. What to read next
+## What to read next
 
-You've now seen the whole core surface: an agent, a model, and a function
-exposed as a tool. From here:
+| Goal | Guide |
+| --- | --- |
+| Understand the composition contract | [Mental model](concepts/mental-model.md), [everything is a tool](concepts/everything-is-a-tool.md) |
+| Grow to a pipeline | [Progressive complexity](concepts/progressive-complexity.md), [Plan](guides/full/plan.md) |
+| Choose tool schemas | [Tool](guides/basic/tool.md), [tool wrapping](decisions/tool-wrapping.md) |
+| Run an end-to-end tool loop | [ReAct agent recipe](recipes/react-agent.md) |
+| Add continuity or tracing | [Memory](guides/mid/memory.md), [Store](guides/mid/store.md), [Session](guides/mid/session.md) |
+| Ask an assistant to generate code | [For LLM assistants](for-llms/index.md) |
 
-- [**Concepts → Mental model**](concepts/mental-model.md) —
-  `Agent = Engine + Tools + State` and the composition rules you'll
-  lean on.
-- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
-  the twelve rungs from this quickstart to a checkpointed production
-  pipeline.
-- [**Guides → Basic → Tool**](guides/basic/tool.md) — the three
-  schema modes (`signature` / `llm` / `hybrid`), six paths to a
-  `Tool`, and when to construct one explicitly.
-- [**Recipes → React agent**](recipes/react-agent.md) — the same
-  pattern as above, end-to-end with a real tool and a verbose run.
-- [**For LLM assistants**](for-llms/index.md) — let Claude or
-  ChatGPT generate more LazyBridge code for you.
+In an async web handler, use await agent.run directly. The synchronous helper
+waits for a worker thread when a loop is already running, which blocks the
+handler and allocates a thread per call.

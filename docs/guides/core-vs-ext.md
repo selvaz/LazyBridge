@@ -4,9 +4,9 @@ LazyBridge is split into three concentric layers:
 
 | Layer | Lives in | Holds |
 |---|---|---|
-| **Core** | `lazybridge/` (excluding the subtree below) | `Agent`, `LLMEngine`, `Plan`, `Step`, `Tool`, `Envelope`, `Memory`, `Store`, `Session`, sentinels, predicates, guards, providers |
+| **Core** | `lazybridge/` (excluding the subtree below) | `Agent`, `ClaudeCodeEngine`, `CodexEngine`, `SessionRegistry`, `LLMEngine`, `Plan`, `Step`, `Tool`, `Envelope`, `Memory`, `Store`, `Session`, sentinels, predicates, guards, providers |
 | **Framework extensions** | `lazybridge/ext/*` | OpenTelemetry, HumanEngine / SupervisorEngine, Evals, planners, visualizer, tiered approval (`TieredGate`), background delegation, durable knowledge base |
-| **Concrete tools** | sibling `lazytoolkit` package (`pip install lazytoolkit`) | connectors (Gmail, Telegram, MCP, the HTTP gateway), document readers (`read_docs`), skills (`doc_skills`) |
+| **Integration layer** | sibling `lazytoolkit` package (`import lazytools`) | MCP/connectors, code support, detached code bridge, projects, quota routing, document readers and skills; [LazyTools docs](https://tools.lazybridge.com/) |
 
 > **Moved in 0.8.** The MCP and gateway connectors (`lazybridge.ext.{mcp,gateway}`)
 > and the domain tool kits (`lazybridge.external_tools.*`) moved to the standalone
@@ -79,7 +79,7 @@ remaining `**agent_kw` flow to `Agent(...)`.
 ```python
 # lazybridge.ext.hil
 def supervisor_agent(*, tools=None, agents=None, store=None, **agent_kw):
-    return Agent(engine=SupervisorEngine(tools=tools, agents=agents, store=store), **agent_kw)
+    return Agent(name="pipeline", engine=SupervisorEngine(tools=tools, agents=agents, store=store), **agent_kw)
 ```
 
 This keeps `Agent` itself free of ext-aware code (rule 1) while still

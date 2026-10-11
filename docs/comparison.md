@@ -1,313 +1,286 @@
 # LazyBridge vs LangGraph vs CrewAI
 
-Three different frameworks, three different bets. This page gives you a
-**decision framework** for picking the right tool for your project and is
-honest about when LazyBridge *isn't* it.
-
-> The three frameworks optimise for **different things**. There's no
-> winner in the abstract — there's the one that fits *your* project's
-> shape, team, and constraints.
+These frameworks expose different interfaces for organizing work. Choose from
+the workflow, state, tool and deployment contracts your application needs.
+This page compares those contracts, without ranking ecosystem size, maturity
+or implementation cost.
 
 !!! info "Comparing more than three?"
-    This page is the focused, decision-tree head-to-head of LangGraph, CrewAI
-    and LazyBridge. For the broader category view — Pydantic AI, LlamaIndex,
-    Haystack, AutoGen, Microsoft Agent Framework and Google ADK alongside these —
-    start from [Best Python AI Agent Frameworks in 2026](best-python-ai-agent-frameworks.md).
+    For Pydantic AI, LlamaIndex, Haystack, AutoGen, Microsoft Agent Framework
+    and Google ADK, see [Best Python AI Agent Frameworks in 2026](best-python-ai-agent-frameworks.md).
 
----
+Capabilities below reflect the linked official docs at the time of writing
+(October 2026). Check the version and integrations you plan to deploy.
 
 ## What each framework optimises for
 
 ### LangGraph
 
-**Optimised for: complex, stateful, long-running agentic workflows where
-graph control is the dominant concern.**
+LangGraph exposes state, nodes, edges and a functional API. Its
+[overview](https://docs.langchain.com/oss/python/langgraph/overview) documents
+durable execution, streaming and human-in-the-loop support.
 
-LangGraph is a graph DSL. You declare nodes, edges, state schemas, and
-reducers. The framework runs your graph; the framework gives you very
-fine-grained control over what happens between nodes, when state persists,
-when to interrupt, and what to stream.
+Consider it when:
 
-It shines when:
+- Graph topology is a useful domain model for branching, cycles or fan-out.
+- You want persisted graph state and resumable human review; read its
+  [persistence](https://docs.langchain.com/oss/python/langgraph/persistence) and
+  [interrupt](https://docs.langchain.com/oss/python/langgraph/interrupts) guides.
+- Your existing model, tool and deployment integrations already fit the stack.
+- You plan to use [LangSmith](https://docs.langchain.com/langsmith/home) for
+  tracing, evaluation or deployment services.
 
-- The workflow shape is genuinely a graph — multiple entry points,
-  complex branching, cycles, fan-in/fan-out at non-trivial scales
-- You need first-class **streaming, checkpointing, and resumability** —
-  long-running agents that survive restarts, multi-day workflows, HITL
-  with persisted state
-- You're already in the **LangChain ecosystem** (300+ integrations) and
-  want continuity with `langchain_*` packages
-- **LangSmith** observability is a requirement (custom tracing UI,
-  evaluation dashboards, prompt management)
+Tradeoffs to evaluate:
 
-It costs you:
-
-- Verbose for simple cases — the graph wiring is overhead when your
-  workflow is "do A, then B, then C"
-- A learning curve — `StateGraph`, `Annotated[...]` reducers, `Send`,
-  `Command`, conditional edges, checkpointer config
-- Transitive dependencies through `langchain_core`, `langchain_*`
-  provider adapters, and any tools you wire in
+- A graph API makes topology explicit, but a simple linear task may need less
+  state and edge configuration in your application.
+- State updates and reducers need deliberate design, particularly at fan-in;
+  see the [graph API](https://docs.langchain.com/oss/python/langgraph/graph-api).
+- Dependency and deployment requirements depend on the selected model adapters,
+  tools and checkpoint backend. LangGraph does not require LangChain's agent API.
 
 ### CrewAI
 
-**Optimised for: business-style "team of experts" mental models, where
-the abstractions match how humans describe the work.**
+CrewAI describes agents through roles/goals, tasks through descriptions and
+expected outputs, and crews through sequential or hierarchical processes.
+See [agents](https://docs.crewai.com/en/concepts/agents),
+[tasks](https://docs.crewai.com/en/concepts/tasks) and
+[processes](https://docs.crewai.com/en/concepts/processes).
 
-CrewAI builds on the metaphor *role, goal, backstory*. An Agent has a
-role like "Senior Researcher". A Task has a description and an expected
-output. A Crew runs Tasks via a `Process` — sequential or hierarchical.
+Consider it when:
 
-It shines when:
+- Roles, tasks and delegation reflect the domain people discuss.
+- You want those concepts visible in the workflow definition.
+- Its [Flows](https://docs.crewai.com/en/concepts/flows) fit event-driven
+  state, routing, parallel listeners and persistence.
+- Stakeholders find role/goal/task descriptions useful during review.
 
-- The use case fits the **roles + tasks + crew** metaphor well
-  (research teams, content production, business workflows, structured
-  pipelines that map cleanly to org-chart roles)
-- You want a **strong opinion** that gives you guardrails and patterns
-  out of the box — not a kit of primitives to assemble
-- **Non-engineer stakeholders** read the agent code; the role/goal
-  metaphor is more legible than "an Agent with system prompt and tools"
+Tradeoffs to evaluate:
 
-It costs you:
-
-- Lock-in to the Crew/Task abstraction — escaping to the underlying
-  provider API isn't a smooth path
-- **No native conditional routing** — you reach for plain Python
-  branching (Step 10's CrewAI comparison)
-- **No parallel execution** of agents at the framework level — you
-  drop to `asyncio.gather`
-- HIL is limited to `human_input=True` on a Task; no web UI, no
-  typed Pydantic forms, no timeout/default story
-- The opinionated abstractions can chafe when your shape is **not** a
-  team of experts
+- Decide whether a Crew, a Flow, or a combination best expresses the workflow.
+- Translate provider-specific options through the selected model integration;
+  test any behavior your application depends on.
+- Define human approval and final acceptance explicitly. Task human input and
+  guardrails are not a substitute for application release criteria.
 
 ### LazyBridge
 
-**Optimised for: composition primitives — small, orthogonal building
-blocks that combine into any workflow shape with minimal ceremony.**
+LazyBridge separates `Agent = Engine + Tools + State`. Agent calls return an
+Envelope; composition helpers return Agents. Deterministic Plans, coding
+runtimes, provider APIs and human decisions implement the engine boundary.
 
-LazyBridge has one core abstraction (`Agent = Engine + Tools + State`)
-and a small set of composition primitives that **all return the same
-shape** — every primitive returns an Envelope, every composition returns
-an Agent.
+Consider it when:
 
-It shines when:
+- **Claude Code and Codex should be engines inside Python**, sharing the same
+  application tools, Memory, Store and observability Session.
+- One engine writes and the other reviews through `verify=`, with rejection
+  feedback bounded by `max_verify` total attempts.
+- Native sessions/threads need durable handles or `session_alias` names.
+- Agent-as-Tool recursion, linear chains, parallel joins and declared Plans
+  match your workflow's interfaces.
+- Human input or supervision should be another engine choice.
+- [LazyTools](https://tools.lazybridge.com/) should own connector/MCP and
+  repository integration, while Core owns composition.
 
-- You want **multi-provider out of the box** — change one string to
-  switch between Claude, GPT, Gemini, DeepSeek, Mistral, LM Studio
-- You want **cross-model verification** to be a one-line concern
-  (`verify=judge_agent` works with any model family — Step 6)
-- The workflow is composition-heavy but the *individual pieces* aren't
-  unusual (chain, parallel, sub-agent-as-tool, simple routing)
-- You want **minimal dependencies** (no LangChain object hierarchy, no
-  Crew opinions) and a small mental model
-- **Code review readability** matters — every LazyBridge primitive
-  reads like "what is happening" not "what graph wiring is happening"
-- HIL is a first-class engine swap, not a bolted-on flag
+Tradeoffs to evaluate:
 
-It costs you:
-
-- A **smaller community** than LangGraph or CrewAI — fewer Stack Overflow
-  answers, fewer tutorials in the wild, fewer integrations packaged
-- **No first-party observability platform** like LangSmith yet — you
-  bring your own exporters (OTel, structured logs, JSON files — all
-  built in, but no hosted UI shipped by LazyBridge)
-- **Less battle-tested** at the very-large-graph scale that LangGraph
-  was built to handle
-
----
+- Core supplies exporters rather than a first-party hosted observability UI.
+- Integrations and guarded external actions live in LazyTools, with separate
+  installation and API contracts.
+- Shared Python state does not migrate Claude's native transcript into Codex.
+  Native tools and permissions remain runtime-specific.
+- Native transcript locking is in-process; cross-process coordination is the
+  caller's responsibility. Uncertain stateful turns require inspection.
+- Plan checkpoint/resume covers declared step boundaries. It is not a general
+  durable execution service or a promise of exactly-once external side effects.
 
 ## The feature matrix at a glance
 
-The eight dimensions most projects actually weigh when choosing:
-
 | Dimension | LangGraph | CrewAI | LazyBridge |
 |---|---|---|---|
-| Core abstraction | Graph (nodes + edges + state) | Crew (agents + tasks + process) | Agent (engine + tools + state) |
-| Multi-provider | via `langchain_*` adapters | via underlying SDK | **built-in (one string)** |
-| Structured output | manual State plumbing | task `expected_output=` | **`output=PydanticModel`** |
-| Cross-model verify | manual loop | manual loop | **`verify=judge_agent`** |
-| Sub-agent composition | wrap a node | hierarchical process | **`tools=[other_agent]` / chain / parallel** |
-| Conditional routing | `add_conditional_edges` | none — plain Python | **`routes=` / `routes_by=`** |
-| Human-in-the-loop | `interrupt()` + checkpointer | `human_input=True` (terminal only) | **`HumanEngine` (terminal/web/custom)** |
-| Dependencies | langchain-core + N adapters | crewai + langchain-tools | **stdlib + pydantic + httpx** |
+| Core abstraction | State/node/edge; functional API | Agent/task/crew plus Flow | Agent/engine/tools/state |
+| Models | Selected provider integrations | Selected provider integrations | LLMEngine catalogue or local Claude/Codex runtime |
+| Structured output | Model and typed-state interfaces | Task output_pydantic/output_json | Agent output=PydanticModel; native engine schema where representable |
+| Cross-model review | Express a reviewer in workflow logic | Express a reviewer task/Flow | verify=judge with bounded feedback |
+| Sub-agent composition | Nodes/subgraphs | Delegation and hierarchical processes | tools=[named_agent], chain, parallel, Plan |
+| Conditional routing | Conditional edges/Command | Flow routing | Step routes/routes_by |
+| Human-in-the-loop | Interrupt with persisted state | Task human input and Flow/application hooks | HumanEngine, SupervisorEngine and approval gates |
+| Dependencies | Runtime plus selected integrations | Runtime plus selected integrations | Core plus selected provider/engine/extension extras |
 
-??? tip "Twelve more dimensions, for the curious"
+Sources: [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api),
+[interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts),
+[CrewAI tasks](https://docs.crewai.com/en/concepts/tasks) and
+[Flows](https://docs.crewai.com/en/concepts/flows).
 
-    Compile-time validation, built-in checkpointing, streaming, built-in
-    OTel, MCP server tools, provider-native tools (web search /
-    code-exec), parallel fan-out, sequential pipeline expression, tools
-    schema generation, simple-call line count, ecosystem size, maturity:
+??? tip "More dimensions to evaluate"
 
     | Dimension | LangGraph | CrewAI | LazyBridge |
     |---|---|---|---|
-    | Simple call | ~10 lines (StateGraph) | ~12 lines (Agent + Task + Crew) | **3 lines** |
-    | Tools (schema) | manual schema + ToolNode | `@tool` decorator | **type hints + docstring** |
-    | Sequential pipeline | linear `add_edge` graph | `Process.sequential` | **`Agent.chain`** |
-    | Parallel fan-out | `Send` + reducer State | drop to `asyncio.gather` | **`Agent.parallel`** |
-    | Compile-time validation | yes (StateGraph compile) | partial | yes (Plan compile) |
-    | Built-in checkpointing | yes (multiple backends) | no | yes (Plan checkpoint) |
-    | Streaming | yes (rich modes) | partial | yes (`agent.stream`) |
-    | Built-in OTel | via LangSmith | no | yes (`OTelExporter`) |
-    | MCP server tools | via tooling layer | via custom | **built-in (`MCP.stdio`)** |
-    | Native tools (web search etc.) | per-provider plumbing | limited | **built-in (`NativeTool.*`)** |
-    | Ecosystem | very large (LangChain) | medium | small (focused) |
-    | Maturity | high | medium-high | early but stable |
+    | Tool schemas | Tool/model integration | Tool declarations | Type hints/docstrings or explicit Tool schema |
+    | Sequential pipeline | Edges or functional workflow | Sequential process or Flow | Agent.chain or Plan |
+    | Parallel fan-out | Graph supersteps/Send | Async tasks and parallel Flow listeners | Agent.parallel or Plan bands |
+    | Structural validation | Graph compile checks | Task/Flow validation plus application checks | Plan compile; tool-map checks when bound to Agent |
+    | Persistence | Checkpointers and threads | Flow persistence | Store/checkpoint; native sessions/threads separately |
+    | Streaming | Runtime stream modes | Crew/agent streaming interfaces | agent.stream; engine-specific native events |
+    | Observability | LangSmith or instrumentation | [CrewAI tracing](https://docs.crewai.com/en/observability/tracing)/integrations | Opt-in Session; JSON/console/custom/OTel exporters |
+    | MCP | [LangChain tool integration](https://docs.langchain.com/oss/python/langchain/mcp) | [MCP tooling](https://docs.crewai.com/en/mcp/overview) | LazyTools MCP providers; Claude internal adapter |
+    | Native provider tools | Selected model integration | Selected model integration | LLMEngine.native_tools; coding-engine native policies |
+    | Coding-engine continuity | Application integration | Application integration | persist_session/persist_thread; SessionRegistry aliases |
 
-For most decisions, the eight dimensions above are enough. The decision
-tree below is a faster route to "which one" than the matrix.
+    Read the current [CrewAI crew](https://docs.crewai.com/en/concepts/crews)
+    and [Flow](https://docs.crewai.com/en/concepts/flows) docs for the selected
+    execution interface. These cells do not score implementation quality.
 
----
+## Same task, three frameworks: a linear workflow
 
-## Same task, three frameworks — concept count *(simple linear pipeline)*
+For research → write → edit, each framework can express the same behavior.
+The useful comparison is where instructions, state and transitions live.
 
-The classic three-step pipeline (research → write → edit) one last time,
-counting the **distinct concepts** a beginner has to learn:
-
-| | LangGraph | CrewAI | LazyBridge |
+| Concern | LangGraph | CrewAI | LazyBridge |
 |---|---|---|---|
-| Composition expression | `add_node × 3 + add_edge × 4 + START + END` | `Crew(agents=, tasks=, process=)` | `Agent.chain(a, b, c)` |
-| Required concepts | StateGraph, TypedDict, add_messages, Annotated reducer, nodes, edges, START, END, compile, invoke, state['messages'] plumbing | Agent, role, goal, backstory, Task, description, expected_output, context, Crew, process | Agent, LLMEngine, chain |
-| Total concept count | ~11 | ~10 | **3** |
+| Composition | Nodes with sequential edges | Tasks in a sequential Crew, or a Flow | Agent.chain(a, b, c), or explicit Plan steps |
+| Instructions | Model/node logic | Role/goal/task description | Engine system instructions and task/context |
+| Handoffs | State fields and update/reducer rules | Task context or Flow state | Envelopes, from_step and typed Step inputs |
+| Branching extension | Conditional edges/Command | Flow router/listeners | Step routes/routes_by and after_branches |
+| Review extension | Reviewer node/workflow | Reviewer task/Flow | verify= on an Agent or tool view |
 
-!!! note "What this count means"
-    This isn't about lines of code — it's about how many things a new
-    reader has to load into their head before they can change anything.
+Sources: [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+and [CrewAI processes](https://docs.crewai.com/en/concepts/processes).
 
-    **The numbers above are for a 3-stage *linear* pipeline.** For a
-    branching workflow with routing, parallel bands, and HIL, every
-    framework expands — LangGraph adds reducers and conditional edges,
-    CrewAI adds Process flavours and custom hooks, LazyBridge adds
-    `routes_by=` / `after_branches=` / `Plan` / `HumanEngine`. The
-    *gap* tends to stay roughly constant; LazyBridge doesn't stay at
-    "3 concepts" as you grow.
+There is no fixed concept-count or line-count advantage: the implementation
+depends on the selected APIs and requirements. Here is the LazyBridge linear
+shape with deterministic mock workers, runnable without credentials:
 
-    LangGraph and CrewAI **earn the extra concept count** on
-    non-trivial graphs — they're not paying for nothing.
+```python
+from lazybridge import Agent
+from lazybridge.testing import MockAgent
 
----
-
-## Choose your framework — decision tree
-
-```
-Do you need long-running, stateful, persistable workflows
-(workflows that survive restarts / span days)?
-│
-├── YES ──► LangGraph (checkpointer ecosystem is mature)
-│
-└── NO ──►  Does the team think in "role + goal + backstory" terms,
-            and the workflow shape is mostly a team-of-experts pipeline?
-            │
-            ├── YES ──► CrewAI (role metaphor is its strength)
-            │
-            └── NO ──►  Do you need:
-                        - multi-provider as a first-class concern, or
-                        - cross-model verification, or
-                        - small dependency footprint, or
-                        - composition primitives that all stay the same shape?
-                        │
-                        ├── YES (any of) ──► LazyBridge
-                        │
-                        └── NO ──────────────► Pick the one your team already knows.
-                                              Migration cost > framework choice cost.
+research = MockAgent("Sources collected", name="research")
+write = MockAgent("Draft written", name="write")
+edit = MockAgent("Draft edited", name="edit")
+pipeline = Agent.chain(research, write, edit, name="article")
+result = pipeline("Explain deployment policy")
+assert result.ok and result.text() == "Draft edited"
 ```
 
----
+Use [Plans](guides/full/plan.md) when you want explicit routing, parallel bands,
+typed handoffs or checkpoints. Both other frameworks also support workflows
+beyond this linear example.
+
+## Choose your framework: decision tree
+
+```text
+Which interface is central to your application?
+├── Explicit graph state/topology and checkpointed interrupts
+│   └── Evaluate LangGraph's graph, persistence and deployment interfaces.
+├── Roles/tasks/processes or event-driven Flows
+│   └── Evaluate CrewAI's Crew and Flow interfaces.
+└── Engines sharing recursive Tools, state and Envelopes
+    └── Evaluate LazyBridge's Plans, coding runtimes and verification.
+
+Then test your actual persistence, approval and deployment requirements.
+If several fit, existing integrations and team familiarity may decide.
+```
+
+Persistence alone does not select a winner: the frameworks persist different
+units of work. Compare restart boundaries and side-effect semantics directly.
 
 ## When LazyBridge is the wrong choice
 
-To stay credible, four cases where you should reach for something else:
+1. **You require a specific hosted observability/deployment platform.**
+   Check its supported runtimes. LazyBridge's open exporters do not themselves
+   provide a hosted UI. [LangSmith](https://docs.langchain.com/langsmith/home)
+   documents its own tracing, evaluation and deployment services.
 
-1. **You need first-party hosted observability today.**
-   LangSmith (LangChain) has the most polished platform for tracing,
-   evaluation, and prompt management. LazyBridge ships exporters
-   (OTel / JSON / console / custom callback) but no hosted UI.
+2. **Graph topology is your team's primary way to understand the system.**
+   Evaluate LangGraph's graph interface. There is no node-count threshold at
+   which a Plan becomes inappropriate; readability depends on the workflow.
 
-2. **Your workflow has > 30 nodes with complex branching.**
-   At that scale LangGraph's explicit graph DSL pays for itself.
-   LazyBridge's `Plan` can express the same thing but the
-   resulting code is denser to read.
+3. **Roles and task descriptions are your review language.**
+   Evaluate CrewAI's agent/task interfaces with the people maintaining them.
+   A stakeholder preference is a project constraint, not a framework ranking.
 
-3. **Stakeholders read the agent code.**
-   If non-engineers are reviewing the workflow definitions, CrewAI's
-   role/goal/backstory metaphor is a real win — it reads like a job
-   description.
-
-4. **You're deeply invested in the LangChain ecosystem.**
-   `langchain_*` adapters, `langchain-community` tools, LangSmith,
-   LangGraph Cloud — if you've built infrastructure on this stack,
-   the switching cost outweighs the surface-area savings.
-
-These are real cases. Be honest about whether they apply.
-
----
+4. **Your application already relies on another stack's state and integrations.**
+   Estimate migration and operational costs before switching. A shorter example
+   is not evidence of savings in a deployed application.
 
 ## Migration paths
 
-If you're already on one of the others, what does moving look like?
-
 ### From LangChain / LangGraph to LazyBridge
 
-- **Agent core:** `ChatAnthropic / ChatOpenAI + bind_tools → Agent(engine=LLMEngine(...), tools=[...])`. One-to-one mapping.
-- **Sequential graphs:** `StateGraph + add_edge × N → Agent.chain(a, b, c)`.
-- **Conditional edges:** `add_conditional_edges + router → Step(routes=)` or `routes_by=`.
-- **Tools:** `@tool` decorator → plain Python function with type hints + docstring.
-- **State:** if you used `MessagesState`, switch to `Memory`. For typed cross-step state, the `Store` + sentinels combo replaces State reducers.
-- **Watch out:** if you used LangSmith heavily, plan your observability story before migrating (OTel exporter is the recommended path).
+- **Model calls:** move instructions/options to LLMEngine, or choose a coding
+  engine. This is a conceptual mapping, not a drop-in provider-object conversion.
+- **Sequential graphs:** Agent.chain can express a linear sequence; Plan is
+  appropriate for declared data flow and routing.
+- **Conditional edges:** model the branch with Step routes/routes_by and an
+  explicit reconvergence policy. Test the translated behavior.
+- **Tools:** extract the underlying typed callable or build a Tool adapter;
+  do not assume every third-party decorated object is directly wrappable.
+- **State:** Memory holds conversation history; Store holds application records.
+  Sentinels describe Plan handoffs. These do not automatically reproduce graph
+  reducer semantics or migrate checkpoints.
+- **Observability:** choose Session/exporters and a backend before migrating
+  dashboards or acceptance checks.
 
 ### From CrewAI to LazyBridge
 
-- **Agents:** `Agent(role=..., goal=..., backstory=...)` → fold role/goal/backstory into a `system="..."` string. Often shorter.
-- **Tasks:** `Task(description=..., expected_output=..., context=[...])` → just call the agent with the input string; use `Agent.chain` for sequential, `Plan` for explicit DAG.
-- **Sequential Crews:** `Crew(process=Process.sequential)` → `Agent.chain(...)`.
-- **Hierarchical Crews:** `Process.hierarchical` → `Agent(engine=LLMEngine(...), tools=[sub_agent_1, sub_agent_2])` (sub-agent-as-tool).
-- **Tools:** CrewAI tools (and `langchain-tools` ones) are wrappable; if they were `@tool`-decorated, the underlying function works directly in LazyBridge.
+- **Agents:** translate role/goal/backstory into engine instructions where
+  appropriate; preserve requirements rather than mechanically concatenate them.
+- **Tasks:** pass task and context separately; expected_output is not itself a
+  schema. Use output= and validators for typed acceptance.
+- **Sequential Crews:** use Agent.chain or an explicit Plan.
+- **Hierarchical Crews:** named sub-agents can be Tools of a coordinating Agent.
+  This does not reproduce every delegation or manager behavior automatically.
+- **Flows:** translate events, routing and persistence deliberately; a Plan's
+  checkpoints are not a migration format for Flow state.
+- **Tools:** wrap a callable or implement an adapter. Validate argument schemas,
+  approval behavior and side effects before using it in the new workflow.
 
 ### From LazyBridge to LangGraph or CrewAI
 
-This is just as legitimate. LazyBridge isn't a religion — if your project's
-shape changes (you grow into 50-node workflows, or your team prefers
-explicit roles), the lift is small in the other direction too because
-LazyBridge agents are thin wrappers around the same provider SDKs the
-others use.
-
----
+Functions, typed outputs and explicit task/context contracts can be reused.
+Wrap Agent.run as node/task application logic, or rebuild the model/tool loop
+using the target integration. Translate Memory, Store, native IDs, checkpoints
+and Session records explicitly; migration effort depends on those contracts.
 
 ## What LazyBridge intentionally doesn't do
 
-A short list of features LazyBridge *deliberately* leaves out:
+- Core does not ship a proprietary hosted tracing/evaluation platform.
+  Use open exporters with a backend you operate or purchase.
+- Core does not own vector indexing or retrieval infrastructure. Wrap a
+  retriever as a Tool or use a LazyTools integration.
+- System instructions are Python strings; Core does not require a prompt
+  template engine. Python formatting or your chosen library can supply one.
+- Core does not ship an agent marketplace or require predefined personas.
+- Native transcript migration, cross-process transcript locks and automatic
+  replay of uncertain side-effecting turns are outside the current engine contract.
 
-- **No proprietary tracing/eval platform.** Exporters are open; the
-  hosted UI isn't part of the project. Use OTel + your favourite
-  backend (Honeycomb, Datadog, Jaeger).
-- **No first-class "memory store" abstraction beyond `Memory` + `Store`.**
-  We don't ship vector DB adapters. Bring your own retriever; wrap it
-  as a tool.
-- **No prompt template engine.** System prompts are Python strings.
-  When you need templating, `str.format` and `f-strings` are right
-  there.
-- **No agent marketplaces or pre-built personas.** Build your own
-  agents from the primitives. Less to memorise, less to keep in sync.
+## Claude Code writes, Codex reviews
 
-This list is short because the philosophy is: ship the primitives, let
-users build the rest. Each thing we *don't* ship is a thing we *won't*
-break in a future release.
+```python
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine
 
----
+reviewer = Agent(name="reviewer", engine=CodexEngine(
+    system='Return "approved" or "rejected: <reason>". Check edge cases.',
+))
+writer = Agent(name="writer", engine=ClaudeCodeEngine(), verify=reviewer, max_verify=3)
+print(writer("Draft a weekday deployment policy.").text())
+```
 
-## Summary
+This loop repairs output through feedback; exhaustion returns the final draft,
+so result.ok is not release approval. Use tests and explicit acceptance records.
+For native continuity choose persistence or [aliases](guides/full/session-registry.md).
+For repository jobs, durable tickets and opposite-engine review routing, see the
+[LazyTools code bridge](https://tools.lazybridge.com/code-bridge/).
+The quota routing benchmark is **in progress**.
 
-| Framework | Pick it when |
+## Selection guide
+
+| Framework | Evaluate when |
 |---|---|
-| **LangGraph** | Complex stateful graphs, long-running workflows with persistence, you're already in LangChain |
-| **CrewAI** | Team-of-experts metaphor fits, opinionated abstractions are an asset, stakeholders read the code |
-| **LazyBridge** | Multi-provider matters, cross-model verify matters, you want a small composition surface, minimal dependencies |
-
-You now have all the context you need to choose. The last step points
-you to where the LazyBridge docs go after this tutorial — guides,
-recipes, reference, and the topics we deliberately left for later.
-
----
+| LangGraph | Graph state, topology and checkpointed interrupts are central |
+| CrewAI | Role/task/crew or Flow interfaces match your domain |
+| LazyBridge | Coding engines, provider APIs and Plans should share Python Tools, state and bounded review |
 
 [**Get started →**](quickstart.md){ .md-button .md-button--primary }
 [Why LazyBridge](why.md){ .md-button }

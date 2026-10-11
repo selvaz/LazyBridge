@@ -189,7 +189,7 @@ assert report.passed == report.total, [
   guards for "this output must never pass" and evals for "this
   output should usually be good".
 - [Agent](../basic/agent.md) — the surface every eval runs against.
-- *Guides → Full → Testing (MockAgent)* (Phase 3) — deterministic
+- [Credential-free examples](../../for-llms/index.md) — deterministic
   agent doubles for unit tests of orchestration code that
   *contains* an agent (rather than testing the agent's response
   itself).

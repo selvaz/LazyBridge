@@ -1,5 +1,26 @@
 # Runtime configs & testing
 
+## Coding-agent policies
+
+Use these configs for the native coding runtimes. They are separate from the
+deleted generic runtime wrappers described below. See
+[permissions](../guides/full/coding-agent-config.md) for write-tool grants,
+approval scope, web search, writable roots and compaction.
+
+::: lazybridge.CodingAgentConfig
+
+::: lazybridge.ClaudeCodePolicy
+
+::: lazybridge.CodexPolicy
+
+::: lazybridge.ApprovalRequest
+
+::: lazybridge.ApprovalDecision
+
+::: lazybridge.TerminalApprovalGate
+
+## Generic runtime defaults
+
 The 0.7-era ``AgentRuntimeConfig`` / ``ResilienceConfig`` /
 ``ObservabilityConfig`` wrapper-of-flat-kwargs configs were deleted in
 0.7.9 — they bundled flat kwargs into shareable objects with a
