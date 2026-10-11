@@ -103,3 +103,15 @@ boundaries. LazyTools 0.10.1 declares Alpha. See the
 For development, install `.[test,docs]`, run `python -m pytest`, and build with
 `python -m mkdocs build --strict`. The default suite excludes live model calls
 and heavy rendering. [CONTRIBUTING](CONTRIBUTING.md) describes the checks.
+
+The longer design rationale and worked examples live in
+[Why LazyBridge](https://core.lazybridge.com/why/) (recursive pipelines,
+validation, review and exporters), the
+[comparison](https://core.lazybridge.com/comparison/), and the
+[documentation map](https://core.lazybridge.com/#design-and-documentation-map).
+This keeps the README focused while preserving those explanations in the guides.
+
+Issues and contributions are welcome through the repository. See
+[SECURITY.md](SECURITY.md) for disclosure and [LICENSE](LICENSE) for Apache 2.0
+terms. LazyBridge is designed by selvaz with Claude Code and Codex used as
+implementation partners under the owner's direction.

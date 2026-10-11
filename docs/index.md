@@ -75,6 +75,24 @@ quality, speed or savings results to report.
 - [For LLM assistants](for-llms/index.md): code generation contract and searchable corpus.
 - [Website and working projects](https://lazybridge.com/): examples of the connected workflow.
 
+## Design and documentation map
+
+Engine choice, recursive Tools and optional state keep composition explicit.
+Use deterministic Plans when control flow should be declared; use model loops
+when the worker should choose. Type hints derive tool schemas, while Envelopes
+and opt-in Session/exporters expose results and run evidence.
+
+| Need | Read next |
+| --- | --- |
+| Composition and convenience forms | [Everything is a tool](concepts/everything-is-a-tool.md), [progressive complexity](concepts/progressive-complexity.md), [canonical vs sugar](concepts/canonical-vs-sugar.md) |
+| Basic contracts | [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md), [Envelope](guides/basic/envelope.md), [native tools](guides/basic/native-tools.md) |
+| Application state and quality | [Memory](guides/mid/memory.md), [Store](guides/mid/store.md), [Session](guides/mid/session.md), [guards](guides/mid/guards.md), [verify=](guides/mid/verify.md), [evals](guides/mid/evals.md) |
+| Pipelines and human decisions | [Chain](guides/mid/chain.md), [parallel](guides/mid/parallel.md), [as tool](guides/mid/as-tool.md), [HumanEngine](guides/mid/human-engine.md), [SupervisorEngine](guides/full/supervisor.md) |
+| Deterministic production work | [Plan](guides/full/plan.md), [Step](guides/full/step.md), [sentinels](guides/full/sentinels.md), [routing](guides/full/routing.md), [parallel bands](guides/full/parallel-plan-steps.md), [checkpoint](guides/full/checkpoint.md) |
+| Runtime inspection | [Exporters](guides/full/exporters.md), [GraphSchema](guides/full/graph-schema.md), [OpenTelemetry](guides/advanced/otel.md), [Visualizer](guides/advanced/visualizer.md) |
+| Extensions and integration boundaries | [Engine protocol](guides/advanced/engine-protocol.md), [BaseProvider](guides/advanced/base-provider.md), [provider catalogue](guides/advanced/providers.md), [Plan serialization](guides/advanced/plan-serialize.md), [multimodal](guides/mid/multimodal.md), [LazyTools MCP](https://tools.lazybridge.com/mcp/) and [gateway](https://tools.lazybridge.com/gateway/) |
+| Choosing and recovering | [Decisions](decisions/index.md), [errors](errors.md), [framework comparison](comparison.md), [why](why.md) |
+
 ## Maturity
 
 This documentation targets **LazyBridge 1.8.0**, plus the post-release Codex

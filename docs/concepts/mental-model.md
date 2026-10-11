@@ -2,6 +2,15 @@
 
 An Agent composes **Engine + Tools + State** and returns an Envelope.
 
+```text
+Engine ─┐
+Tools  ─┼─→ Agent ─→ Envelope (payload, metadata, error)
+State  ─┘
+```
+
+The same decomposition applies to a single call and a nested checkpointed
+pipeline. Add tools and state when the workflow needs them.
+
 ## Engine: what decides next
 
 | Engine | Role |
@@ -32,6 +41,22 @@ MCP/gateway connectors come from
 internal MCP adapter and Codex's dynamic tools expose the same Python tools
 without requiring a separately registered MCP service.
 
+The function stays the source of truth: its signature, type hints and docstring
+derive the schema. No duplicate decorated function is required. Explicit naming
+keeps Plan targets stable when a Python function is renamed:
+
+```python
+from lazybridge import Agent, ClaudeCodeEngine, Tool
+
+def get_weather(city: str) -> str:
+    """Return a demonstration forecast; this is not a live weather service."""
+    return f"The demonstration forecast for {city} is sunny."
+
+weather = Tool.wrap(get_weather, name="weather")
+assistant = Agent(name="weather-assistant", engine=ClaudeCodeEngine(), tools=[weather])
+print(assistant("Describe the demonstration weather in Paris.").text())
+```
+
 ## State: continuity, records and observability
 
 | Primitive | Purpose | Default |
@@ -46,6 +71,30 @@ Claude native sessions and Codex threads are distinct from the observability
 Session. persist_session/persist_thread and native IDs retain runtime history
 across processes. Aliases name those IDs. Native resume omits repeated Memory
 priming, but explicit context remains available.
+
+Memory, Store and Session are optional. A one-shot Agent can use none of them,
+while every call still returns an Envelope. A Store lets several agents exchange
+structured records without relying on free-form conversation history. An
+in-memory Store disappears with the process; Store(db=...) opts into persistence.
+
+## A working agent
+
+```python
+from lazybridge import Agent, LLMEngine
+
+assistant = Agent(engine=LLMEngine("gpt-5.4-mini"), name="explainer")
+result = assistant("Explain Engine + Tools + State in one sentence.")
+print(result.text())
+```
+
+Here the engine is a provider model loop, tools are absent, and only the result
+Envelope is present as state. Agent(engine=...) makes the engine choice visible.
+Agent(model_id) is sugar for LLMEngine; see
+[canonical vs sugar](canonical-vs-sugar.md) before using shortcuts.
+
+Call agent(task) synchronously, await agent.run(task) in async applications, or
+iterate agent.stream(task) for text. A sync call blocks an existing event loop;
+use the async entry point in request handlers.
 
 ## Swap engines while keeping state
 
@@ -67,6 +116,19 @@ assert claude.session is codex.session
 Python state is shared by reference. Native history is not migrated between
 engines. Code computes results and checks deterministic acceptance; the LLM
 reads those results and proposes the next action.
+
+## Where the shorthand needs care
+
+- An Agent is not necessarily an LLM. Plan executes declared control flow;
+  models run only in steps that invoke model-driven workers.
+- A Plan is a deterministic graph, while Agent composition uses Python Tools
+  and helpers. GraphSchema provides inspection rather than replacing that API.
+- A Tool may trigger a nested Agent run. Nested usage metadata rolls up;
+  failures still need explicit application handling.
+- Application state is not necessarily durable. Store persistence, native
+  history and SessionRegistry bindings are separate choices.
+- Native tools are not Python functions. Provider capabilities and coding
+  runtime built-ins have their own permission and execution boundaries.
 
 See [coding agents](../guides/full/coding-agents.md),
 [one writes, the other reviews](../guides/full/claude-writes-codex-reviews.md),

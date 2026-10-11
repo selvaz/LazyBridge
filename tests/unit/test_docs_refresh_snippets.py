@@ -10,8 +10,12 @@ import asyncio
 import json
 import re
 import shlex
+import struct
+import sys
 import tempfile
 import tomllib
+import types
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -59,10 +63,11 @@ def sample_schema(schema, root=None):
 def offline(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    calls = {"claude": [], "codex": [], "llm": []}
+    calls = {"claude": [], "codex": [], "llm": [], "claude_attachments": []}
 
     async def claude_run(self, prompt, *, options, attachments=()):
         calls["claude"].append((prompt, options))
+        calls["claude_attachments"].append(attachments)
         native_id = options.resume or "fake-claude-session"
         if options.on_session_id:
             options.on_session_id(native_id)
@@ -127,6 +132,11 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(AgentSdkClient, "stream", forbidden)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
     monkeypatch.setattr("builtins.input", lambda *args: "continue")
+    # Native-history listing is read-only, but must not inspect the operator's
+    # real transcripts when executing the guide's retention example.
+    sdk = types.ModuleType("claude_agent_sdk")
+    sdk.list_sessions = lambda: [types.SimpleNamespace(session_id="fake-claude-session", tag="lazybridge")]
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", sdk)
     return calls
 
 
@@ -203,8 +213,73 @@ def test_refreshed_install_commands_use_real_extras_and_current_version():
                         assert project["version"] in requirement.specifier
                 elif command[:3] == ["python", "-m", "pytest"]:
                     assert (ROOT / command[3]).exists()
+                elif command[:1] == ["python"]:
+                    # Authenticated live smoke scripts are opt-in, never run
+                    # by the documentation tests; validate their checked-in path.
+                    assert len(command) == 2
+                    assert command[1].startswith(("examples/claude_code/", "examples/codex/"))
+                    assert (ROOT / command[1]).is_file()
                 else:
                     assert command == ["claude", "doctor"]
+
+
+@pytest.mark.parametrize("path", [
+    "docs/guides/full/claude-code-engine.md",
+    "docs/guides/full/codex-engine.md",
+])
+def test_restored_image_examples_reach_the_transport(path, offline):
+    """A successful text answer alone must not hide a dropped attachment."""
+    codes = FENCE.findall((ROOT / path).read_text(encoding="utf-8"))
+    code = next(code for code in codes if "ImageContent.from_bytes" in code)
+    ns = {}
+    exec(compile(code, path, "exec", dont_inherit=True), ns)
+    # Validate the fixture without requiring Pillow. Mock text transports alone
+    # would accept a damaged PNG that a real vision call might reject.
+    raw = ns["png"]
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    position = 8
+    while position < len(raw):
+        length = struct.unpack(">I", raw[position:position + 4])[0]
+        body = raw[position + 4:position + 8 + length]
+        crc = struct.unpack(">I", raw[position + 8 + length:position + 12 + length])[0]
+        assert zlib.crc32(body) == crc
+        position += length + 12
+    if "claude-code" in path:
+        attachments = offline["claude_attachments"][-1]
+    else:
+        attachments = offline["codex"][-1]["attachments"]
+    assert attachments, "Image example did not reach its native adapter"
+
+
+def test_restoration_manifest_covers_every_touched_python_fence():
+    """The restored narrative pages must execute all examples, not selected fragments."""
+    restored = {
+        "docs/best-python-ai-agent-frameworks.md", "docs/comparison.md", "docs/why.md",
+        "docs/concepts/mental-model.md", "docs/for-llms/codegen-contract.md",
+        "docs/guides/full/claude-code-engine.md", "docs/guides/full/codex-engine.md",
+        "docs/guides/full/coding-agent-config.md", "docs/guides/full/coding-agents.md",
+        "docs/index.md", "docs/quickstart.md", "README.md",
+    }
+    assert restored <= {entry["path"] for entry in MANIFEST if entry.get("all")}
+    checkpoint = next(entry for entry in MANIFEST if entry["path"].endswith("/checkpoint.md"))
+    # Block 0 is a deliberately schematic constructor signature, left untouched.
+    assert checkpoint["blocks"] == list(range(1, len(FENCE.findall(
+        (ROOT / checkpoint["path"]).read_text(encoding="utf-8")
+    ))))
+
+
+def test_llmstxt_config_excerpt_matches_the_build():
+    """The restored YAML recipe selects actual configured sections."""
+    import yaml
+
+    page = (ROOT / "docs/for-llms/llms-txt.md").read_text(encoding="utf-8")
+    code = re.search(r"^```yaml\n(.*?)^```", page, re.M | re.S).group(1)
+    excerpt = yaml.safe_load(code)["plugins"][0]["llmstxt"]
+    # BaseLoader allows the project's Python-name theme tags without executing them.
+    config = yaml.load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    configured = next(p["llmstxt"] for p in config["plugins"] if isinstance(p, dict) and "llmstxt" in p)
+    assert excerpt["full_output"] == configured["full_output"]
+    assert excerpt["sections"].items() <= configured["sections"].items()
 
 
 def test_refreshed_machine_readable_patterns_execute(offline, tmp_path):

@@ -6,6 +6,18 @@ The machine-readable companion is
 [lazybridge/llms.json](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json);
 it includes the engine, continuity and integration rules summarized here.
 
+## Always
+
+- Prefer top-level imports for core primitives and Agent(engine=...) construction.
+- Name reusable agents and pin Tool.wrap names when tool-map or Plan references
+  must survive Python refactoring. Raw typed callables are supported too.
+- Read payload for typed results and text() for text; check ok/error before use.
+- Keep model/system/native policy on the engine, and output/verify on Agent.
+- Use provider tier aliases for catalogue selection only when their current
+  mapping matches requirements; pin and validate a model ID when needed.
+- Execute generated examples with mock transports, then run appropriate
+  acceptance checks before side-effecting work.
+
 ## Canonical construction
 
 ```python
@@ -84,6 +96,82 @@ Agent.chain is a linear Plan convenience; Plan/Step supports declared routing,
 parallel bands and checkpoints. Instructions live on engines. Agent.run is the
 async entry point; agent(task) blocks in existing async loops too.
 
+### Python tools and provider-native tools
+
+```python
+from lazybridge import Agent, LLMEngine, NativeTool, Tool
+
+def search_web(query: str) -> str:
+    """Return a deterministic search fixture, not live search results."""
+    return f"Demonstration result for {query}"
+
+local = Agent(name="local-search", engine=LLMEngine("claude-opus-4-7"),
+              tools=[Tool.wrap(search_web, name="search_web")])
+native = Agent(name="native-search", engine=LLMEngine(
+    "claude-opus-4-7", native_tools=[NativeTool.WEB_SEARCH],
+))
+```
+
+The application executes local tools; the provider executes native capabilities.
+Put allow_dangerous_native_tools=True on LLMEngine if deliberately enabling
+dangerous native capabilities. Do not put native_tools on Agent.
+
+### Bounded execution defaults
+
+These example limits are choices for this workload, not universal thresholds.
+Keep inner model/tool budgets distinct from outer Agent deadlines:
+
+```python
+from lazybridge import Agent, LLMEngine
+from pydantic import BaseModel
+
+class Answer(BaseModel):
+    summary: str
+
+engine = LLMEngine(
+    "claude-opus-4-7", max_turns=8, max_retries=3,
+    request_timeout=60, tool_timeout=30, max_parallel_tools=4,
+    stream_idle_timeout=90,
+)
+bounded = Agent(name="bounded", engine=engine, output=Answer, timeout=120)
+result = bounded("Summarize the task in one sentence.")
+assert isinstance(result.payload, Answer)
+```
+
+For coding engines, use the native request/idle/tool limits in their guides.
+Choose native write exposure and approval explicitly; no timeout makes an
+unsafe tool safe. Human approvals of runtime actions and final diff acceptance
+are separate steps.
+
+### Canonical deterministic and nested patterns
+
+```python
+from lazybridge import Agent, ClaudeCodeEngine, Plan, Step, from_step
+from lazybridge.testing import MockAgent
+
+research = MockAgent("research complete", name="research")
+write = MockAgent("draft complete", name="write")
+pipe = Agent(name="pipeline", engine=Plan(
+    Step("research"), Step("write", context=from_step("research")),
+), tools=[research, write])
+assert pipe("Draft a policy").text() == "draft complete"
+
+outer = Agent(name="coordinator", engine=ClaudeCodeEngine(), tools=[pipe])
+```
+
+Agent.chain is the linear convenience; Agent.parallel joins labelled text;
+as_tool(verify=judge) supplies a verified view of a named sub-agent. For MCP
+catalogues use LazyTools providers and their explicit exposure policy, rather
+than inventing a Core MCPEngine or importing a removed connector shim.
+
+### Envelope return details
+
+Envelope carries task, context, attachments, payload, metadata and ErrorInfo.
+Nested token/cost fields supplement the current engine's usage; cost_usd alone
+is not a universal subscription charge or total-spend guarantee. Codex reports
+no per-turn price. Errors are records, not a propagated Exception object.
+Parallel branch Envelopes come from run_branches, not the ordinary join payload.
+
 ## Import map
 
 | Capability | Current import/destination |
@@ -115,6 +203,28 @@ MCP.stdio requires an explicit allow or deny policy. Coding MCP providers opt in
 - No async callable verify judge assumption; core callable judges are synchronous.
 - Do not promise cross-engine native history migration, cross-process transcript
   locks, automatic uncertain-turn replay or verification acceptance on exhaustion.
+
+## Never duplicate a tool implementation just to expose it
+
+Wrap a library's annotated function directly when its signature is suitable.
+Use signature mode for deterministic schemas; hybrid/llm modes are deliberate
+schema-generation choices with model cost and validation tradeoffs. A wrapper
+is useful for a missing output cap, provenance shape or approval boundary;
+it should call the library implementation rather than reimplement it.
+
+For shared expensive state, load once into Store and pass a key among tools.
+See [tool wrapping](../decisions/tool-wrapping.md) and
+[schema modes](../guides/basic/tool.md#schema-modes-signature-hybrid-llm).
+Use await agent.run in an async application; the blocking helper is suitable
+for synchronous scripts, not a reason to stall an async handler.
+
+## Error messages as codegen aids
+
+PlanCompileError, PlanRuntimeError and UnsupportedFeatureError often identify
+the offending step/tool/value, the expected contract and a concrete fix. Read
+the complete error before changing the code. Do not assume every exception has
+the same four-part format, or treat a suggested fix as authorization to widen
+permissions. Consult [error recovery](error-recovery.md) for runtime failures.
 
 Read [coding agents](../guides/full/coding-agents.md),
 [collaboration](../guides/full/claude-writes-codex-reviews.md),

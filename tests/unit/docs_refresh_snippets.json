@@ -65,7 +65,8 @@
   {
     "path": "docs/guides/full/checkpoint.md",
     "blocks": [
-      1
+      1,
+      2
     ]
   },
   {
@@ -152,6 +153,18 @@
   },
   {
     "path": "docs/quickstart.md",
+    "all": true
+  },
+  {
+    "path": "docs/best-python-ai-agent-frameworks.md",
+    "all": true
+  },
+  {
+    "path": "docs/comparison.md",
+    "all": true
+  },
+  {
+    "path": "docs/why.md",
     "all": true
   }
 ]

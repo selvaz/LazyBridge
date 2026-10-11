@@ -18,6 +18,31 @@ llms.json remain companion resources; the current
 [codegen contract](codegen-contract.md) and source signatures cover this refresh.
 No code-generation behavior or model context fit is guaranteed by loading a skill.
 
+## Bundled skill and machine-readable contract
+
+The skill ships with the Python package at lazybridge/skill/. Follow
+[Claude skill install](claude-skill.md) for the supported local installation
+and packaged archive paths. It describes the mental model, canonical Agent
+construction, sugar equivalents and common invalid APIs.
+
+The companion [llms.json](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json)
+provides import maps, canonical patterns and anti-patterns. Use the
+[canonical vs sugar reference](../concepts/canonical-vs-sugar.md) for convenience
+factories. Human review, source signatures and execution tests remain necessary;
+the bundled skill is guidance, not a runtime validator.
+
+## Why several surfaces?
+
+Compatible assistant environments can load reusable skill guidance. Link-aware
+consumers can retrieve relevant pages from llms.txt. Consumers that require
+inline documentation can use llms-full.txt after checking their remaining
+context budget. The codegen contract is a focused current API checklist.
+
+These formats solve different delivery problems. Neither a provider name nor
+a context-window label guarantees discovery, adherence or fit. Generated files
+update with each build; the hand-authored skill and JSON contract require
+maintenance against source as APIs change.
+
 ## Start with the engine workflow
 
 - [Coding agents](../guides/full/coding-agents.md): swap engines while preserving Python tools/state.
@@ -36,3 +61,14 @@ is maintained.
 
 See [llms.txt explained](llms-txt.md), [Claude skill install](claude-skill.md),
 [error recovery](error-recovery.md) and [reference](../reference/index.md).
+
+## A practical generation workflow
+
+1. Read the codegen contract and the guide for the selected engine.
+2. Resolve only the additional tools/state/Plan pages the task requires.
+3. Generate canonical construction with explicit names and bounded behavior.
+4. Execute examples with mock model transports before trying authenticated work.
+5. Use schema checks, deterministic tests and explicit acceptance for release.
+
+For credentials, aliases and permissions, inspect the local runtime and source
+version rather than filling gaps from a remembered training-data API.

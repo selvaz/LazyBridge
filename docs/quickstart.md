@@ -85,6 +85,41 @@ For provider APIs, install the matching extra (`anthropic`, `openai`, `google`,
 `Agent.from_provider("anthropic", tier="cheap")` or `Agent(engine=LLMEngine(model))`.
 Tier aliases are catalogue choices; they are distinct from LazyTools quota routing.
 
+A provider-only installation can be explicit too:
+
+```sh
+python -m pip install "lazybridge[anthropic]==1.8.0"
+```
+
+Set ANTHROPIC_API_KEY in the environment running Python for Anthropic API calls
+(use OPENAI_API_KEY for OpenAI, GOOGLE_API_KEY for Google, or DEEPSEEK_API_KEY
+for DeepSeek). Supply your own key through your shell or secret manager, never
+commit it. Coding-runtime login and these provider API credentials are separate.
+
+```python
+from lazybridge import Agent, LLMEngine, Tool
+
+def get_weather(city: str) -> str:
+    """Return a deterministic demonstration forecast, not live weather."""
+    return f"The demonstration weather in {city} is sunny."
+
+agent = Agent.from_provider("anthropic", tier="cheap")
+print(agent("Explain LazyBridge in one sentence.").text())
+
+# Pin a catalogue ID when a particular model behavior is required.
+weather_agent = Agent(
+    name="weather", engine=LLMEngine("claude-haiku-4-5"),
+    tools=[Tool.wrap(get_weather, name="get_weather")],
+)
+print(weather_agent("Explain the demonstration weather in Paris.").text())
+```
+
+The model chooses whether to call a tool. verbose=True enables a console Session
+to inspect the loop; it does not force a tool call or guarantee an answer's wording.
+Canonical Agent(engine=...) exposes the options you will configure as the system
+grows. Agent(model_id) is shorthand for a provider engine; a bare provider name
+is ambiguous and should be replaced with Agent.from_provider(..., tier=...).
+
 Use `await agent.run(task)` inside async applications. `agent(task)` blocks until
 completion, including when called from an existing event loop. Engines also
 expose `agent.stream(task)` for incremental text.
@@ -92,3 +127,18 @@ expose `agent.stream(task)` for incremental text.
 Continue with the [mental model](concepts/mental-model.md),
 [coding agents](guides/full/coding-agents.md), [tool guide](guides/basic/tool.md),
 [recipes](recipes/index.md), or [code generation contract](for-llms/codegen-contract.md).
+
+## What to read next
+
+| Goal | Guide |
+| --- | --- |
+| Understand the composition contract | [Mental model](concepts/mental-model.md), [everything is a tool](concepts/everything-is-a-tool.md) |
+| Grow to a pipeline | [Progressive complexity](concepts/progressive-complexity.md), [Plan](guides/full/plan.md) |
+| Choose tool schemas | [Tool](guides/basic/tool.md), [tool wrapping](decisions/tool-wrapping.md) |
+| Run an end-to-end tool loop | [ReAct agent recipe](recipes/react-agent.md) |
+| Add continuity or tracing | [Memory](guides/mid/memory.md), [Store](guides/mid/store.md), [Session](guides/mid/session.md) |
+| Ask an assistant to generate code | [For LLM assistants](for-llms/index.md) |
+
+In an async web handler, use await agent.run directly. The synchronous helper
+waits for a worker thread when a loop is already running, which blocks the
+handler and allocates a thread per call.

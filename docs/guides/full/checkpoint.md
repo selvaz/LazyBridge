@@ -174,6 +174,44 @@ print(result.payload)
 store.close()
 ```
 
+### Isolated concurrent runs
+
+For independent batches that share a Store, fork gives every run its own
+suffixed checkpoint key. Workers here are deterministic mock agents; no model
+or external side effect is involved:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+from lazybridge import Agent, Plan, Step, Store
+from lazybridge.testing import MockAgent
+
+store = Store(db="fanout.sqlite")
+load = MockAgent("prices loaded", name="load")
+run = MockAgent("trade log computed", name="run")
+score = MockAgent("score computed", name="score")
+backtest = Agent(name="backtest", engine=Plan(
+    Step(load, writes="prices"), Step(run, writes="trades"), Step(score),
+    store=store, checkpoint_key="backtest", on_concurrent="fork",
+))
+with ThreadPoolExecutor(max_workers=4) as pool:
+    results = list(pool.map(backtest, ["AAPL", "GOOG", "MSFT", "AMZN"]))
+assert len(results) == 4 and all(item.ok for item in results)
+store.close()
+```
+
+Fork isolation prevents checkpoint-key collisions; it does not isolate external
+systems called by workers. For restart resume, choose a stable unique key per
+batch with on_concurrent="fail" and resume=True. Fork and resume=True are
+incompatible because there is no single shared key to resume.
+
+### Inspecting partial state
+
+The failure/resume example above reads status, next_step, completed_steps and
+kv immediately after failure. Use those records to identify the failed boundary
+and inspect stored writes before retrying. The second run skips completed work;
+the third returns the cached done state. A checkpoint is not an external action
+rollback or a guarantee that an interrupted worker never performed a side effect.
+
 ## Pitfalls
 
 - **Changing the Plan and resuming from an old checkpoint will
