@@ -22,9 +22,9 @@ _SAMPLE_EVENT = {"event_type": "tool_call", "tool": "search", "run_id": "r1"}
 # ── EventExporter protocol ────────────────────────────────────────────────────
 
 
-def test_event_exporter_protocol():
+def test_event_exporter_protocol(tmp_path):
     assert isinstance(CallbackExporter(fn=lambda e: None), EventExporter)
-    assert isinstance(JsonFileExporter(path="/tmp/x.jsonl"), EventExporter)
+    assert isinstance(JsonFileExporter(path=tmp_path / "x.jsonl"), EventExporter)
 
 
 # ── CallbackExporter ──────────────────────────────────────────────────────────

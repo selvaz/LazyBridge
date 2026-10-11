@@ -222,13 +222,14 @@ prod("draft a one-pager on the LazyBridge audit findings")
 - **`output=SomeModel` + `.text()`** — calling `.text()` on a
   structured envelope returns the JSON dump of the payload, which is
   rarely what you want. Read `.payload` instead.
-- **`verify=` semantics** — the judge must return a verdict starting
-  with `"approved"` (case-insensitive) to accept. Anything else is
-  treated as rejection plus feedback for the next attempt. Bound the
-  loop with `max_verify=...`.
-- **`guard=` blocks the engine.** A blocked input or output produces
-  an error `Envelope` without invoking the engine — `result.ok` is
-  `False`, `result.error.type` is `"GuardError"`. Don't expect the
+- **`verify=` semantics** — recognized approval prefixes (including approved,
+  accept, allow, pass, ok, yes, good and valid) accept; unknown verdicts reject.
+  Feedback goes to context, preserving the task. max_verify counts total
+  attempts; exhaustion returns the last output even if rejected, with no
+  approval flag. See [opposite-engine review](../full/claude-writes-codex-reviews.md).
+- **`guard=` applies hard gates.** Blocked input stops before the engine;
+  blocked output is checked after the engine has run. Both produce an error
+  `Envelope`: `result.ok` is `False` and `result.error.type` is `"GuardBlocked"`. Don't expect the
   agent to "see" the rejected text and self-correct; guards are
   hard gates.
 - **`timeout=None`** (default) leaves the run unbounded. Tool calls
@@ -239,7 +240,8 @@ prod("draft a one-pager on the LazyBridge audit findings")
   error threaded into `context`. Configure compatible `output=` and
   `tools=` on both agents, or the fallback may fail differently.
 - **`output_validator=`** is a callable applied to the payload
-  *after* Pydantic validation passes (or directly when `output=str`).
+  *after* typed-output validation passes. The current implementation skips
+  this validator when `output=str`.
   Receives the payload, returns the validated payload (may
   transform). Raise to reject — the framework re-prompts up to
   `max_output_retries` times with the validator's error message
@@ -249,11 +251,10 @@ prod("draft a one-pager on the LazyBridge audit findings")
 - **`cache=True`** enables prompt caching where the provider supports
   it (Anthropic explicit, OpenAI / DeepSeek auto). Pass
   `CacheConfig(ttl="1h")` for the longer Anthropic TTL.
-- **Nested agents inherit the caller's `session=`** when they have
-  none of their own. This is what gives you transitive cost rollup
-  and a single graph view of the whole tree — pass an explicit
-  `session=None` on a sub-agent only when you genuinely want it
-  invisible.
+- **Nested tool agents inherit the caller's `session=`** when their session
+  is None, including an explicit `session=None`. A different explicit Session
+  is retained. Agents used directly as Plan Step targets need their own
+  `session=` for child-engine events; see [project patterns](../project-patterns.md#44-one-pipeline-one-session).
 - **Fleet config via dict spread** — the 0.7-era ``runtime`` /
   ``resilience`` / ``observability`` configs were deleted in 0.7.9 (they
   carried a ``flat kwarg > config object > default`` precedence game

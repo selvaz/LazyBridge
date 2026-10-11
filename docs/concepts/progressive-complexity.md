@@ -94,6 +94,10 @@ against the model and re-prompts on validation errors.
 ```python
 from lazybridge import Agent, LLMEngine, Plan, Step
 
+def web_search(query: str) -> str:
+    """Return an offline search fixture."""
+    return f"Example findings for {query}"
+
 researcher = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
     name="research",
@@ -104,7 +108,7 @@ writer = Agent(
     name="write",
 )
 
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(Step("research"), Step("write")),
     tools=[researcher, writer],
 )
@@ -161,7 +165,7 @@ different from the agent's `name=`.
 ```python
 from lazybridge import Plan, Step
 
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         Step("write"),
@@ -264,14 +268,15 @@ both.
 from lazybridge import Plan, Step, Store
 
 store    = Store(db="runs.db")
-pipeline = Agent(
+steps = [Step("research"), Step("write")]
+pipeline = Agent(name="pipeline",
     engine=Plan(*steps, store=store, checkpoint_key="ticket-42"),
-    tools=[...],
+    tools=[researcher, writer],
 )
 # crash...
-resumed = Agent(
+resumed = Agent(name="pipeline",
     engine=Plan(*steps, store=store, checkpoint_key="ticket-42", resume=True),
-    tools=[...],
+    tools=[researcher, writer],
 )
 ```
 
@@ -286,8 +291,10 @@ from lazybridge import Agent, Plan, Step
 from lazybridge.ext.hil import HumanEngine
 
 approval = Agent(engine=HumanEngine(timeout=300), name="approve")
+draft = Agent(engine=LLMEngine("gpt-6.1-sol"), name="draft")
+send = Agent(engine=LLMEngine("gpt-6.1-sol"), name="send")
 
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("draft"),
         Step("approve"),
@@ -312,7 +319,7 @@ site.
 ```python
 from lazybridge import Agent, LLMEngine, Session, JsonFileExporter
 
-session = Session(exporters=[JsonFileExporter("events.jsonl")])
+session = Session(exporters=[JsonFileExporter(path="events.jsonl")])
 agent = Agent(
     engine=LLMEngine("claude-haiku-4-5"),
     session=session,
@@ -325,7 +332,8 @@ import away.
 
 ### 12 — Custom engine / provider
 
-When you need an engine LazyBridge doesn't ship, implement `BaseEngine`.
+When you need an engine LazyBridge doesn't ship, implement the `Engine` protocol
+from `lazybridge.engines.base`.
 When you need a provider LazyBridge doesn't ship, implement `BaseProvider`.
 Both are stable extension points.
 

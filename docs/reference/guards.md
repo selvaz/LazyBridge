@@ -7,8 +7,10 @@ is the exception type some integrations raise.
 
 A guard either **allows** the value through (optionally rewriting it
 via `GuardAction.modified_text`) or **blocks** it.  Blocked input
-short-circuits the run with `Envelope.error.type == "ValueError"`
-or `"GuardBlocked"` for outputs; the agent call never raises.
+short-circuits the run with `Envelope.error.type == "GuardBlocked"`.
+Blocked output has the same error type, after the engine has run. This
+describes guards returning `GuardAction(allowed=False)`; a guard implementation
+that raises an exception can still propagate it to the caller.
 
 For narrative usage see [Guides → Mid → Guards](../guides/mid/guards.md).
 For the soft (judge-and-retry) sibling — which re-runs the engine

@@ -60,7 +60,7 @@ There are two HIL engines in `lazybridge.ext.hil`:
   a string (or fills fields). No tool calls, no agent retries —
   this engine is the lightweight variant.
 - **`SupervisorEngine`** — full REPL with tool dispatch, agent
-  retries, and store inspection. Lands in Phase 3 (Full tier);
+  retries, and store inspection. See [the full guide](../full/supervisor.md);
   reach for it when the human needs to *do work*, not just decide.
 
 ## When to use it
@@ -193,7 +193,7 @@ reviewer_web = Agent(
   human; complementary, not redundant.
 - [verify=](verify.md) — judge-and-retry placement when an LLM
   judges instead of a human.
-- *Guides → Full → SupervisorEngine* (Phase 3) — the heavier
+- [SupervisorEngine](../full/supervisor.md) — the heavier
   cousin: a full REPL with tools, agent retry, and store
   inspection.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —

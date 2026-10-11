@@ -1,5 +1,5 @@
 site_name: LazyBridge
-site_description: Zero-boilerplate multi-provider LLM composition runtime, not an agent framework. Engine + Tools + State, everything is a tool.
+site_description: Claude Code and Codex as Python agent engines. Shared tools and state, independent review and durable conversations, integrated through LazyTools.
 site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge
@@ -68,6 +68,9 @@ plugins:
   - llmstxt:
       full_output: llms-full.txt
       sections:
+        Getting started:
+          - index.md
+          - quickstart.md
         Category guides:
           - best-python-ai-agent-frameworks.md
         Concepts:
@@ -86,6 +89,8 @@ plugins:
           - why.md
         Comparison:
           - comparison.md
+        For LLM assistants:
+          - for-llms/*.md
 
 markdown_extensions:
   - admonition
@@ -121,14 +126,14 @@ markdown_extensions:
 
 extra:
   version:
-    default: "1.5.0"
+    default: "1.8.0"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lazybridge/
     - icon: fontawesome/solid/envelope
-      link: mailto:LazyBridgeLabs@gmail.com
+      link: mailto:lazybridgelabs@gmail.com
       name: Email LazyBridge Labs
 
 extra_css:
@@ -138,7 +143,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Why LazyBridge: why.md
-  - Best Python AI agent frameworks: best-python-ai-agent-frameworks.md
+  - Framework documentation: best-python-ai-agent-frameworks.md
   - Comparison: comparison.md
   - For Beginners:
       - Start here: beginners/index.md
@@ -198,6 +203,7 @@ nav:
           - Claude Code Engine: guides/full/claude-code-engine.md
           - Codex Engine: guides/full/codex-engine.md
           - Coding agents in practice: guides/full/coding-agents.md
+          - Claude Code writes, Codex reviews: guides/full/claude-writes-codex-reviews.md
           - Coding-agent permissions: guides/full/coding-agent-config.md
           - Session aliases: guides/full/session-registry.md
       - Advanced:

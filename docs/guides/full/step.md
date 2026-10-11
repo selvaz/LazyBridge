@@ -109,7 +109,7 @@ their own dedicated guide: [Routing](routing.md).
 ```python
 from pydantic import BaseModel
 
-from lazybridge import Agent, LLMEngine, Plan, Step, Store, from_prev, from_step
+from lazybridge import Agent, LLMEngine, Plan, Step, Store, Tool, from_prev, from_step
 
 
 class Hits(BaseModel):
@@ -123,6 +123,15 @@ class Ranked(BaseModel):
 def normalise(text: str) -> str:
     """Strip and lowercase — pure Python, no LLM."""
     return text.strip().lower()
+
+
+def score(text: str) -> str:
+    """Return a deterministic score for the example."""
+    return f"characters={len(text)}"
+
+
+score_tool = Tool.wrap(score, name="score")
+reviewer = Agent(engine=LLMEngine("gpt-6.1-sol"), name="review")
 
 
 searcher = Agent(
@@ -140,7 +149,7 @@ writer = Agent(
 
 
 # 1) Mixed step targets — agents, plain callables, tool names by string.
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step(searcher, name="search"),                 # Agent target
         Step(normalise, name="clean", task=from_prev), # plain callable target
@@ -174,7 +183,7 @@ competitor = Agent(
 )
 
 
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step(searcher,      name="search",  writes="hits",    output=Hits),
         Step(policy_loader, name="policy",  task="Load the 2026 acceptable-use policy."),
@@ -200,7 +209,7 @@ class Verdict(BaseModel):
 
 
 store = Store()
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step(writer, name="write",
              task="Draft a 200-word answer. If a 'verdict' is in the store, "
@@ -258,5 +267,5 @@ plan = Agent(
   rejoin points, and the `when` DSL.
 - [Store](../mid/store.md) — `writes=` lands here; `sources=[store]`
   reads it back live.
-- *Guides → Full → Parallel plan steps* (Phase 3b) — concurrent
+- [Parallel plan steps](parallel-plan-steps.md) — concurrent
   bands and `from_parallel_all` aggregation.

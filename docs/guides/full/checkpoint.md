@@ -118,10 +118,9 @@ same `checkpoint_key` at once:
 
 - **Short, cheap pipelines.** A 3-step pipeline of LLM calls under
   a few seconds doesn't benefit from the persistence overhead.
-- **Pipelines with no `writes=`.** Resume reconstructs from
-  `store["...key"]` writes — if no step writes anything, there's
-  nothing to skip on resume. Add `writes=` to the steps whose
-  outputs the rest of the pipeline depends on.
+- **Using checkpoint persistence as side-effect rollback.** Checkpoints retain
+  step history and writes, including plans without writes declarations. They
+  do not undo effects in external systems.
 - **Side effects that aren't crash-safe to repeat.** A failing
   step is retried as-is on `resume=True`; an external HTTP POST
   with no idempotency key may run twice. Gate with idempotency
@@ -130,95 +129,49 @@ same `checkpoint_key` at once:
 ## Example
 
 ```python
-from pydantic import BaseModel
+from lazybridge import Agent, Envelope, Plan, Step, Store
+from lazybridge.testing import MockAgent
 
-from lazybridge import Agent, LLMEngine, Plan, Step, Store
-
-
-class ValidationReport(BaseModel):
-    rejected_rows: list[int]
-    accepted_rows: int
-
-
-def extract_data() -> str:
-    return "..."
-
-
-def transform_records(raw: str) -> str:
-    return "..."
-
-
-def load_warehouse(clean: str) -> None:
-    pass
-
-
-extract = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="extract")
-transform = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="transform")
-validate = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="validate", output=ValidationReport)
-load = Agent(engine=LLMEngine("claude-sonnet-4-6"), name="load")
-
-
-# 1) Crash-resume across runs.
+extract = MockAgent(["raw records"], name="extract")
+transform = MockAgent(["clean records"], name="transform")
+validate = MockAgent([
+    Envelope.error_envelope(RuntimeError("temporary validation failure")),
+    "validated records",
+], name="validate")
+load = MockAgent(["loaded records"], name="load")
 store = Store(db="pipeline.sqlite")
-
 
 def build_plan() -> Agent:
     return Agent(
+        name="etl",
         engine=Plan(
-            Step("extract",   writes="raw"),
-            Step("transform", writes="clean"),
-            Step("validate",  writes="verdict"),
-            Step("load",      writes="loaded"),
-            store=store,
-            checkpoint_key="etl-2026-04-30",
-            resume=True,
+            Step(extract, writes="raw"),
+            Step(transform, writes="clean"),
+            Step(validate, writes="verdict"),
+            Step(load, writes="loaded"),
+            store=store, checkpoint_key="etl-demo", resume=True,
         ),
-        tools=[extract, transform, validate, load],
     )
 
+first = build_plan()("today's batch")
+assert not first.ok
+state = store.read("etl-demo")
+assert state["status"] == "failed"
+assert state["next_step"] == "validate"
+assert state["completed_steps"] == ["extract", "transform"]
+assert state["kv"]["clean"] == "clean records"
 
-# Run 1 — crashes during validate. status="failed", next_step="validate".
-try:
-    build_plan()("today's batch")
-except KeyboardInterrupt:
-    pass
+second = build_plan()("today's batch")
+assert second.ok
+assert extract.call_count == transform.call_count == 1
+assert validate.call_count == 2
+assert load.call_count == 1
 
-# Run 2 — resumes at validate. extract + transform are NOT re-run.
-build_plan()("today's batch")
-
-# Run 3 — plan is "done"; short-circuits and returns cached kv.
 result = build_plan()("today's batch")
-print(result.payload)   # {"raw": ..., "clean": ..., "verdict": ..., "loaded": ...}
-
-
-# 2) Concurrent fan-out runs with on_concurrent="fork".
-from concurrent.futures import ThreadPoolExecutor
-
-
-backtest = Agent(
-    engine=Plan(
-        Step(load_data,    name="load",  writes="prices"),
-        Step(run_strategy, name="run",
-             task="Execute the strategy; emit a trade log.",
-             writes="trades"),
-        Step(score_run,    name="score",
-             task="Compute Sharpe and max-drawdown."),
-        store=store,
-        checkpoint_key="backtest",
-        on_concurrent="fork",          # each run gets its own keyspace
-    ),
-    tools=[load_data, run_strategy, score_run],
-)
-with ThreadPoolExecutor(max_workers=8) as pool:
-    list(pool.map(backtest, ["AAPL", "GOOG", "MSFT", "AMZN"]))
-
-
-# 3) Inspecting partial state after a failure.
-state = store.read("etl-2026-04-30")
-print(state["status"])           # "failed"
-print(state["next_step"])        # "validate"
-print(state["completed_steps"])  # ["extract", "transform"]
-print(state["kv"]["clean"])      # the partial result
+assert result.ok
+assert validate.call_count == 2  # Cached done state; no repeated model/tool call.
+print(result.payload)
+store.close()
 ```
 
 ## Pitfalls

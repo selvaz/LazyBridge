@@ -193,5 +193,5 @@ non-dangerous alternatives.
   these; everything else still composes the same way.
 - [Envelope](envelope.md) — provider-reported costs land in
   `metadata.cost_usd` together with model-call costs.
-- *Guides → Full → Providers* (coming in Phase 3) — which native
+- [Providers catalogue](../advanced/providers.md) — which native
   tools each provider supports and the strict-mode behaviour.

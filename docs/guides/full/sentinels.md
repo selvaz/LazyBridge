@@ -59,7 +59,7 @@ step dispatch time. They cannot reach outside the current `Plan.run`:
 - `from_parallel_all("name")` — aggregator. Folds every consecutive
   `parallel=True` step starting at `name` into one envelope whose
   payload is a labelled-text join (`"[step_a]\n<text>\n\n[step_b]\n<text>"`).
-  See *Parallel plan steps* (Phase 3b) for the full mechanics.
+  See [Parallel plan steps](parallel-plan-steps.md) for the full mechanics.
 
 **Universal** — resolve at step *execution* time and work both
 inside a `Plan` and standalone:
@@ -139,7 +139,7 @@ writer = Agent(
 
 
 # 1) Mixed sentinels in a single Plan.
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         # fact_checker sees the researcher's output as task,
@@ -174,7 +174,7 @@ synthesiser = Agent(
 )
 
 
-plan2 = Agent(
+plan2 = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         Step("policy"),
@@ -200,13 +200,13 @@ standalone = Agent(
 standalone("find AI trends")
 
 # Later, in a different Plan / process, with the same store:
-later_plan = Agent(
+later_plan = Agent(name="pipeline",
     engine=Plan(
         Step("write",
              task="Write a follow-up brief based on prior research.",
              context=from_agent("research")),
     ),
-    tools=[writer],
+    tools=[researcher, writer],
     store=store,
 )
 ```
@@ -256,5 +256,5 @@ later_plan = Agent(
   and the receiver of `Step(writes=...)`.
 - [Memory](../mid/memory.md) — the conversation-history layer
   that `from_memory` reads live.
-- *Guides → Full → Parallel plan steps* (Phase 3b) —
+- [Parallel plan steps](parallel-plan-steps.md) —
   `from_parallel_all` aggregation in full.

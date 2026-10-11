@@ -46,7 +46,7 @@ agent = Agent(
 # Canonical
 from lazybridge import Agent, Plan, Step, Store
 
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("research"),
         Step("write"),
@@ -79,7 +79,7 @@ pipeline = Agent(
 )
 
 # Canonical Pattern B — Step references by name, agents in tools=
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(Step("research"), Step("write")),
     tools=[researcher, writer],
 )

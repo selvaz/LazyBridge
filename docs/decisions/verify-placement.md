@@ -46,13 +46,14 @@ Want a judge on every tool call (not output)?
 - **`verify=` is the soft sibling of Guards.** A `Guard` is a
   hard yes / no gate that ends the run on failure; `verify=`
   re-prompts with the judge's reason and retries up to
-  `max_verify` times. Pick by what should happen on failure.
+  `max_verify` total attempts. Exhaustion returns the last output even when
+  rejected, without an approval flag. Use explicit acceptance checks for a release gate.
 - **The judge contract.** Returns a string starting with
-  `"approved"` (case-insensitive) to accept; anything else is
-  rejection, and the verdict text is appended to the next
-  attempt's task as feedback.
+  `"approved"` or another recognized approval prefix (case-insensitive) to
+  accept; unknown verdicts reject. Verdict text goes into the next attempt's
+  context; the original task is unchanged.
 - **Callable judges that return `bool` don't produce feedback.**
-  Retries reuse the same task. Return a string verdict if you
+  Retries add `False` as context feedback. Return a string verdict if you
   want the feedback loop.
 - **Nested verify is allowed but expensive.** Agent-level +
   tool-level + Plan-level on the same path stacks the loops;

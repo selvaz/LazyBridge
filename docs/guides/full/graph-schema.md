@@ -111,7 +111,7 @@ pipeline from a saved graph is the caller's job — `from_dict` /
 - **Reconstructing a live pipeline from JSON.** `from_*` methods
   return descriptors only — they don't instantiate `Agent` /
   `LLMEngine` / `Plan` objects. For round-trippable Plan
-  serialisation see *Plan.to_dict* (Phase 3c — Advanced).
+  serialisation see [Plan serialization](../advanced/plan-serialize.md).
 - **Cost / token / latency aggregation.** That's
   `session.usage_summary()`, not the graph.
 
@@ -232,6 +232,6 @@ g.render("pipeline.gv")
   the graph's static topology view.
 - [As tool](../mid/as-tool.md) — every `as_tool` wrapping records
   one `EdgeType.TOOL` edge automatically.
-- *Guides → Advanced → Plan.to_dict* (Phase 3c) — round-trippable
+- [Plan serialization](../advanced/plan-serialize.md) — round-trippable
   Plan serialisation, the runnable counterpart to graph
   descriptors.

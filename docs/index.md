@@ -1,146 +1,98 @@
-﻿# LazyBridge
+# LazyBridge
 
-A zero-boilerplate, multi-provider Python framework for composing LLMs, plain
-functions, deterministic plans, humans, and external tools under one uniform
-model: **everything is a tool.**
+Build Python pipelines with **Claude Code and Codex as engines**. Swap the
+engine while keeping tools and application state; let one engine write and the
+other review. LazyBridge uses one contract: **Agent = Engine + Tools + State**.
 
 ```python
-from lazybridge import Agent
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Session, Store
 
-# Tier alias works across all 4 providers: anthropic / openai / google / deepseek.
-agent = Agent.from_provider("anthropic", tier="cheap")
-result = agent("What's the capital of France?")
+def project_status() -> str:
+    """Return this example project's status."""
+    return "The draft is ready for review."
+
+state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
+claude = Agent(name="claude", engine=ClaudeCodeEngine(), **state)
+codex = Agent(name="codex", engine=CodexEngine(), **state)
+assert claude.memory is codex.memory
+assert claude.store is codex.store
+assert claude.session is codex.session
+```
+
+With a subscription login, coding runtimes use the account's plan quota.
+The adapters reuse runtime authentication; the configured login can also use
+another billing path. Provider APIs remain available through `LLMEngine`.
+Native Claude sessions and Codex threads keep their own history: switching
+engines shares Python state, and does not migrate a native transcript.
+
+## One writes, the other reviews
+
+```python
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine
+
+reviewer = Agent(name="codex-reviewer", engine=CodexEngine(
+    system='Start with "approved" or "rejected: <reason>". Check boundary cases.',
+))
+writer = Agent(name="claude-writer", engine=ClaudeCodeEngine(),
+               verify=reviewer, max_verify=3)
+result = writer("Draft a function that blocks weekend deployment.")
 print(result.text())
 ```
 
-That's the whole framework's surface area when you start. It grows only when
-your problem grows.
+`verify=` sends the draft and original task to the reviewer, then feeds rejection
+back into the next attempt. `max_verify` counts total attempts. Exhaustion
+returns the last draft even if rejected; use tests and explicit acceptance
+records before shipping. Opposite-engine review is wired by the caller here.
 
-## What LazyBridge gives you
+[Claude Code writes, Codex reviews](guides/full/claude-writes-codex-reviews.md)
+shows the complete pattern and links to repository delegation.
 
-An agent in LazyBridge is the composition of three things — and only these three:
+## Durable conversations and connected work
 
-- **Engine** — the decision-making layer (an LLM, a deterministic `Plan`, a
-  human-in-the-loop, or your own).
-- **Tools** — every capability the agent can use. Plain Python functions,
-  other agents, MCP servers, and full pipelines all behave the same way.
-- **State** — `Memory`, `Session`, and `Store`: continuity, traceability, and
-  shared blackboard between steps.
+Use `persist_session` / `session_id` for Claude, `persist_thread` / `thread_id`
+for Codex, or `session_alias` with a [SessionRegistry](guides/full/session-registry.md).
+Keep native history distinct from `Memory`, `Store` and the observability `Session`.
 
-That's it. Whether you're writing a one-shot helper or a checkpointed
-multi-region pipeline with human approvals and OpenTelemetry traces, the
-mental model is the same.
+[LazyTools](https://tools.lazybridge.com/) is the integration layer. Its
+[code bridge](https://tools.lazybridge.com/code-bridge/) supports detached jobs,
+durable approval tickets, results and tier-based opposite-engine review.
+Its [MCP server](https://tools.lazybridge.com/mcp-server/) exposes coding and
+project tools; [projects](https://tools.lazybridge.com/projects/) hold plans,
+claims and acceptance evidence. Code computes results and renders schedules;
+deterministic checks decide whether a result may ship.
 
-## Where to go next
+Quota routing applies a deterministic tier ladder to available telemetry.
+The **quota routing benchmark is in progress**; there are no comparative
+quality, speed or savings results to report.
 
-- [**Quickstart**](quickstart.md) — install LazyBridge and run your first
-  agent in five minutes.
-- [**Ecosystem**](https://core.lazybridge.com/) — the three packages (lazybridge
-  core, lazytools capabilities, lazypulse always-on) and which one you need.
-- [**Concepts → Mental model**](concepts/mental-model.md) — Agent =
-  Engine + Tools + State, the only decomposition you need.
-- [**Concepts → Everything is a tool**](concepts/everything-is-a-tool.md) —
-  the composition rule that holds the framework together.
-- [**Concepts → Progressive complexity**](concepts/progressive-complexity.md) —
-  the twelve rungs from one-line agent to checkpointed pipeline.
-- [**Concepts → Canonical vs sugar**](concepts/canonical-vs-sugar.md) —
-  every factory function and shortcut LazyBridge ships, with its
-  canonical equivalent and any subtle differences.
-- **Guides → Basic** — one focused page per Day-1 concept:
-  [Agent](guides/basic/agent.md), [Tool](guides/basic/tool.md),
-  [Envelope](guides/basic/envelope.md),
-  [Native tools](guides/basic/native-tools.md).
-- **Guides → Mid** — twelve pages on real-app concerns:
-  [Memory](guides/mid/memory.md), [Store](guides/mid/store.md),
-  [Session](guides/mid/session.md), [Guards](guides/mid/guards.md),
-  [verify=](guides/mid/verify.md), [Chain](guides/mid/chain.md),
-  [Parallel](guides/mid/parallel.md), [As tool](guides/mid/as-tool.md),
-  [HumanEngine](guides/mid/human-engine.md), [MCP](https://tools.lazybridge.com/mcp/),
-  [Multimodal](guides/mid/multimodal.md), [Evals](guides/mid/evals.md).
-- **Guides → Full** — production guides for pipelines and runtime engines:
-  [Plan](guides/full/plan.md), [Step](guides/full/step.md),
-  [Sentinels](guides/full/sentinels.md), [Routing](guides/full/routing.md),
-  [Parallel plan steps](guides/full/parallel-plan-steps.md),
-  [Claude Code Engine](guides/full/claude-code-engine.md),
-  [Checkpoint & resume](guides/full/checkpoint.md),
-  [Exporters](guides/full/exporters.md),
-  [GraphSchema](guides/full/graph-schema.md),
-  [SupervisorEngine](guides/full/supervisor.md).
-- **Guides → Advanced** — seven pages on the extension surface:
-  [Engine protocol](guides/advanced/engine-protocol.md),
-  [BaseProvider](guides/advanced/base-provider.md),
-  [Providers catalogue](guides/advanced/providers.md),
-  [External tool gateway](https://tools.lazybridge.com/gateway/),
-  [Plan serialization](guides/advanced/plan-serialize.md),
-  [OpenTelemetry](guides/advanced/otel.md),
-  [Visualizer](guides/advanced/visualizer.md).
-- [**Recipes**](recipes/index.md) — runnable examples from the
-  `examples/` directory, embedded verbatim.
-- [**Decisions**](decisions/index.md) — nine "which one do I
-  use?" decision trees with quick-reference tables.
-- [**Reference**](reference/index.md) — auto-generated API surface
-  for every public symbol, organised by category.
-- [**Errors**](errors.md) — cause → diagnosis → fix table for
-  every framework exception and `Envelope.error.type` value.
-- [**For LLM assistants**](for-llms/index.md) — Claude Skill install,
-  `/llms.txt` index, and `/llms-full.txt` corpus dump.
+## Start here
 
-## Design principles
-
-- **Provider freedom.** Switch models or providers without rewriting
-  your architecture.
-- **Everything is a tool.** Functions, agents, plans, pipelines, MCP
-  servers, and external systems all compose through the same primitive.
-- **Zero boilerplate.** No duplicated function definitions, no manual
-  JSON schema translation, no orchestration glue you have to maintain.
-- **Progressive complexity.** Simple use cases stay simple. Complex
-  workflows are possible without changing the core mental model.
-- **Designed for humans and LLMs.** Code that's readable to a
-  reviewer is also learnable to an assistant that writes the next
-  patch.
-- **Determinism when you need it.** Drop down from autonomous LLM
-  loops to a typed, validated `Plan` whenever auditability or repeat
-  cost matters.
-- **Composability over monoliths.** Large systems emerge from small,
-  specialised components — not one overloaded prompt.
-- **Observable and debuggable.** Sessions, exporters, the Visualizer,
-  and OpenTelemetry mean you can always see what happened and why.
-
-LazyBridge is meant to feel like a bridge, not a cage.
+- [Quickstart](quickstart.md): install, call a tool, swap engines and add review.
+- [Coding agents](guides/full/coding-agents.md): engine differences and composition.
+- [Claude Code](guides/full/claude-code-engine.md) and [Codex](guides/full/codex-engine.md): setup and options.
+- [Permissions](guides/full/coding-agent-config.md): native controls and approvals.
+- [Mental model](concepts/mental-model.md), [recipes](recipes/index.md) and [reference](reference/index.md).
+- [For LLM assistants](for-llms/index.md): code generation contract and searchable corpus.
+- [Website and working projects](https://lazybridge.com/): examples of the connected workflow.
 
 ## Maturity
 
-LazyBridge is on PyPI as **Stable** starting at `1.0.1` (`Development
-Status :: 5` in PyPI metadata, `lazybridge.__stability__ = "stable"`).
-The version starts at `1.0.1`, not `1.0.0` — an earlier, incompatible
-`1.0.0` was published in April 2026 under the old `LazyAgent`/`LazyTool`
-namespace and rolled back; see [Migrating from 1.0.0](migrations/1.0-to-0.7.md)
-for that history. "Stable" means the core public API contract —
-`Agent`, `Plan`, `Tool`, `Envelope`, and the rows marked Stable below —
-will not break without a major version bump. It does not mean every
-subsystem is finished: a handful of peripheral areas remain
-Alpha/Experimental/Planned, called out explicitly below rather than
-glossed over. Breaking changes go through the migration guides under
-[`docs/migrations/`](migrations/0.7-to-0.79.md).
+This documentation targets **LazyBridge 1.8.0**, plus the post-release Codex
+transport fixes on main. The core is Stable; this does not establish a Stable
+guarantee for every engine or extension. LazyTools 0.10.1 declares Alpha.
 
-| Subsystem | Status | Notes |
-|---|---|---|
-| `Agent`, `LLMEngine`, `Tool`, `Envelope` | **Stable** | Public surface, exercised by every test path. |
-| `Plan`, `Step`, sentinels, routing | **Stable** | Compiler validates at construction; serialisation supported. |
-| `Memory`, `Store` (in-memory + SQLite) | **Stable** | API frozen; encrypted store adapter is also stable. |
-| `Session`, `EventLog`, exporters, `GraphSchema` | **Stable** | Default secret redaction enabled (`redact_secrets`). |
-| Provider adapters (Anthropic / OpenAI / Google / DeepSeek / LiteLLM / LM Studio) | **Stable** | Adapters are stable; model/price tables drift with provider releases. |
-| `Checkpoint` / `resume` | **Stable** | Verified under live adversarial/load testing (forced step failures, resume correctness, no re-billed steps). *External* side-effect rollback is still not implemented (see [Parallel plan steps](guides/full/parallel-plan-steps.md)) — that limitation is unchanged, only the internal-state contract is now Stable. |
-| Guardrails (`Guard`, `ContentGuard`, `LLMGuard`, `GuardChain`) | **Stable** | Verified under live adversarial testing, including a prompt-injection / tag-smuggling attempt against `LLMGuard`. Default rule libraries are still growing, but the behavior contract is settled. |
-| MCP / external tool gateway | **Moved** | Migrated to the `lazytoolkit` package in 0.8 (`lazytools.connectors.{mcp,gateway}`) — see [tools.lazybridge.com](https://tools.lazybridge.com). The old `lazybridge.ext.{mcp,gateway}` deprecation shims were removed in 0.9. |
-| Native tools (`NativeTool`) | **Alpha** | Provider-hosted capabilities (web search, code interpreter). Surface area changes when providers add new tools. |
-| `HumanEngine`, `SupervisorEngine` | **Alpha** | Public API stable; UX polish continues. |
-| Evals (`lazybridge.ext.evals`) | **Experimental** | Scoring helpers are stable; the runner API may consolidate. |
-| Visualizer (`lazybridge.ext.viz`) | **Experimental** | Useful for debugging; not part of the runtime path. |
-| Provider model fallback chains (`_FALLBACKS`) | **Planned** | Data tables exist; the retry path that consumes them is not implemented yet. |
-| Automatic PII redaction | **Planned** | Default redactor masks credential shapes only.  Compose your own for emails / phone numbers / SSNs. |
+| Subsystem | Status | Boundary |
+| --- | --- | --- |
+| `Agent`, `LLMEngine`, `Tool`, `Envelope`, `Plan`, `Step`, sentinels | Stable | Core public API; breaking changes require a major version. |
+| `Memory`, `Store`, `Session`, event log, exporters, `GraphSchema` | Stable | Persistence and exporters are opt-in; credential redaction is enabled by default. |
+| Provider adapters | Stable | Model catalogues and runtime capabilities change independently. |
+| Checkpoint/resume and guards | Stable | Checkpoints do not roll back external side effects. |
+| Claude Code / Codex engines, native persistence and aliases | Shipped | Runtime-specific permissions, attachments and history; no blanket engine maturity promotion. |
+| Approval, delegation and knowledge extensions | Shipped | Generic hooks; application policy remains caller-defined. |
+| MCP, code support, code bridge, projects and quota routing | LazyTools Alpha | See the integration-layer docs rather than importing removed core connectors. |
+| `NativeTool`, `HumanEngine`, `SupervisorEngine` | Alpha | See the corresponding guides for capability boundaries. |
+| Evals and Visualizer | Experimental | Extension APIs may consolidate. |
+| Provider fallback-chain tables; automatic PII redaction | Planned | Explicit `Agent(fallback=...)` works; default redaction masks credentials, not arbitrary personal data. |
 
-Post-1.0, the plan is to lift the remaining Alpha rows to Stable, ship
-the Planned items once their design is settled, and either implement or
-remove the Experimental modules based on user feedback — all as 1.x
-releases under the same stability contract, not as breaking changes.
+See the [changelog](changelog.md) and [migration history](migrations/1.0-to-0.7.md)
+for the withdrawn, incompatible April 2026 release numbered 1.0.0.

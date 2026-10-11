@@ -133,32 +133,33 @@ on close.
 from lazybridge import (
     Agent,
     CallbackExporter,
-    ConsoleExporter,
     FilteredExporter,
     JsonFileExporter,
-    LLMEngine,
+    Plan,
     Session,
+    Step,
 )
 from lazybridge.session import EventType
+from lazybridge.testing import MockAgent
 
 
-def alert_pagerduty(event: dict) -> None:
-    """Fire a PagerDuty incident for tool errors and finish events."""
-    ...
-
-
-# 1) Dev — single console exporter, blocking emit.
+# 1) Development — a console exporter and a deterministic Plan.
 sess = Session(console=True)
 agent = Agent(
-    engine=LLMEngine("gpt-5.4-mini"),
+    name="greeting",
+    engine=Plan(Step(lambda env: "hello", name="greet")),
     session=sess,
 )
-agent("hello")
+assert agent("hello").text() == "hello"
+sess.close()
 
 
-# 2) Production — batched writer + multiple exporters + filtered alerts.
-def alert_pagerduty(event: dict) -> None:
-    ...
+# 2) A batched writer, JSON file and filtered local callback.
+alerts = []
+
+def record_alert(event: dict) -> None:
+    """Capture alerts locally; replace this callback with your integration."""
+    alerts.append(event)
 
 
 sess = Session(
@@ -168,45 +169,29 @@ sess = Session(
     exporters=[
         JsonFileExporter(path="run.jsonl"),
         FilteredExporter(
-            CallbackExporter(fn=alert_pagerduty),
+            inner=CallbackExporter(fn=record_alert),
             event_types={EventType.TOOL_ERROR, EventType.AGENT_FINISH},
         ),
     ],
 )
 
-researcher = Agent(engine=LLMEngine("gpt-5.4-mini"), name="research")
-writer = Agent(engine=LLMEngine("gpt-5.4-mini"), name="write")
+researcher = MockAgent("Research complete", name="research")
+writer = MockAgent("Report complete", name="write")
 pipeline = Agent.chain(researcher, writer, session=sess)
-pipeline("AI trends")
+result = pipeline("AI trends")
+assert result.ok
 
 # Drain the writer before exit so JsonFileExporter / OTel get every
 # in-flight event.
 sess.flush()
-
-
-# 3) OpenTelemetry — install lazybridge[otel].
-from lazybridge.ext.otel import OTelExporter
-
-sess.add_exporter(OTelExporter(endpoint="http://otelcol:4318"))
-pipeline("more AI trends")
+assert alerts
 sess.close()
-
-
-# 4) Custom — a CallbackExporter feeding a Slack channel.
-def slack_post(event: dict) -> None:
-    if event["event_type"] == EventType.AGENT_FINISH:
-        post_to_slack(f"agent {event.get('agent_name')} finished")
-
-
-sess = Session(
-    exporters=[
-        FilteredExporter(
-            CallbackExporter(fn=slack_post),
-            event_types={EventType.AGENT_FINISH},
-        ),
-    ],
-)
 ```
+
+This example runs without credentials or network calls. Replace the mock
+agents with your engines and the local callback with an integration when
+ready. For a collector-backed exporter, follow the
+[OpenTelemetry guide](../advanced/otel.md).
 
 ## Pitfalls
 
@@ -246,6 +231,6 @@ sess = Session(
   `usage_summary()`.
 - [GraphSchema](graph-schema.md) — the topology view, separate
   from the event stream; populated as agents register.
-- *Guides → Advanced → OTel* (Phase 3c) — the deeper
+- [OpenTelemetry](../advanced/otel.md) — the deeper
   OpenTelemetry surface (tracer providers, custom resource
   attributes, in-memory exporters for tests).

@@ -45,12 +45,13 @@ Plan(
 
 ### Judge contract
 
-- The judge receives the agent's output text (and the original task
-  for context) and must respond with a string starting with
-  `"approved"` (case-insensitive) to accept.
-- Anything else is treated as rejection; the verdict text is
-  injected as feedback on the next retry:
-  `f"{original_task}\n\nFeedback: {judge_verdict}"`.
+- An Agent judge receives output text plus the original task. A synchronous
+  callable judge receives only output text and may return a boolean.
+- Verdict normalization accepts approval/rejection prefixes after supported
+  Markdown/label cleanup. Approval words include approved, accept, allow,
+  pass, ok, yes, good and valid; unknown verdicts reject.
+- Rejection is placed in Envelope.context as `Feedback from judge: ...`.
+  The original task, attachments and payload are preserved for the next attempt.
 - Judges may be `Agent` instances or plain callables
   (`Callable[[str], Any]`).
 
@@ -169,7 +170,7 @@ summariser = Agent(
     name="summarise",
 )
 
-plan = Agent(
+plan = Agent(name="pipeline",
     engine=Plan(
         Step(target=fetcher,    name=fetcher.name),
         Step(target=summariser, name=summariser.name),
@@ -197,7 +198,7 @@ short_writer = Agent(
   development so you know when you're hitting the cap; consider
   raising `max_verify` or relaxing the policy.
 - **Callable judges returning booleans don't produce feedback.**
-  Retries reuse the same task. Return a string verdict
+  Rejection supplies the string `False` as context feedback. Return a string verdict
   (`"approved"` or `"rejected: <reason>"`) if you want the
   feedback loop. A `bool`-returning callable is acceptable when
   the failure mode is binary and "try again" alone is enough.
@@ -216,17 +217,20 @@ short_writer = Agent(
   serialisation, not the model instance. Phrase the judge's
   policy accordingly, or write a callable judge that does
   `json.loads(...)` first.
-- **`max_verify=1` disables the retry but keeps the gate.** The
+- **`max_verify=1` disables the retry but still calls the judge.** The
   agent runs once, the judge grades, and the result is returned
   whatever the verdict. Effectively a non-blocking quality
   warning. Use a real `max_verify=2` or `3` if you actually want
   the retry semantics.
 - **Cost rollup.** Each retry is a full agent run plus a judge
-  run. With a `Session=`, the cost rollup includes every
+  run. With a `session=`, the event usage summary includes every
   attempt; check `session.usage_summary()` for the true cost
   of a verify-heavy workflow.
 
 ## See also
+
+- [Claude Code writes, Codex reviews](../full/claude-writes-codex-reviews.md)
+  — opposite-engine wiring, offline feedback/exhaustion and repository integration.
 
 - [Guards](guards.md) — the hard counterpart: blocks on policy
   failure with no retry. Pair them: hard guards for "must never

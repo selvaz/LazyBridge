@@ -1,5 +1,12 @@
 # Recipes
 
+For coding runtimes, start with
+[Claude Code writes, Codex reviews](../guides/full/claude-writes-codex-reviews.md):
+in-process verification, offline mocks and native session continuation. For
+repository jobs and MCP code-support tools, follow the
+[LazyTools code bridge](https://tools.lazybridge.com/code-bridge/) and
+[code-support docs](https://tools.lazybridge.com/code-support/).
+
 Each recipe is a runnable example from the `examples/` directory in
 the repository, embedded verbatim and walked through. Run any of
 them directly with `python examples/<file>.py` once you have the

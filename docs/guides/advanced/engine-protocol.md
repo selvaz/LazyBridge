@@ -1,7 +1,7 @@
 # Engine protocol
 
-The single abstraction every engine satisfies. `LLMEngine`, `Plan`,
-`HumanEngine`, and `SupervisorEngine` all implement it. Implement it
+The single abstraction every engine satisfies. `ClaudeCodeEngine`, `CodexEngine`,
+`LLMEngine`, `Plan`, `ReplanEngine`, `HumanEngine`, and `SupervisorEngine` implement it. Implement it
 yourself when you want LazyBridge to drive a decision-making layer
 that none of the built-ins covers — a deterministic rule engine, a
 network of human approvers, a scripted dispatcher for tests.
@@ -70,9 +70,10 @@ The engine is responsible for:
   the final text as a single chunk so `agent.stream(...)` callers
   don't break.
 
-The agent stamps `engine._agent_name = self.name` before the first
-call so the engine can tag emitted events with the wrapping agent's
-name. Read it via `getattr(self, "_agent_name", "<engine_class>")`.
+Agent binds its name in a context variable for each invocation so shared engines
+attribute concurrent events correctly. Use resolve_agent_name(engine, default)
+from lazybridge.engines.base. The _agent_name attribute is only a fallback for
+direct engine use.
 
 ## When to use it
 
@@ -106,7 +107,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from lazybridge import Agent, Envelope
-from lazybridge.engines.base import Engine
+from lazybridge.engines.base import Engine, resolve_agent_name
 from lazybridge.session import EventType
 
 
@@ -124,7 +125,7 @@ class EchoEngine:
         store: Any | None = None,
         plan_state: Any | None = None,
     ):
-        agent_name = getattr(self, "_agent_name", "echo")
+        agent_name = resolve_agent_name(self, "echo")
         if session:
             session.emit(
                 EventType.AGENT_START,
@@ -197,10 +198,9 @@ prompt path.
   — `Plan.run` and `Agent.run` may pass them positionally-by-keyword
   through the engine boundary. The protocol declares them, so
   satisfying the protocol means accepting them.
-- **`engine._agent_name` is set by the wrapping agent**, not by
-  you. Don't override it from inside the engine; read it
-  defensively (`getattr(self, "_agent_name", "<class>")`) so the
-  engine still works when invoked outside an `Agent`.
+- **Read invocation identity with resolve_agent_name.** Do not overwrite
+  _agent_name inside an engine; the context-bound name takes precedence and
+  avoids attribution races when two Agents share an engine.
 
 ## See also
 

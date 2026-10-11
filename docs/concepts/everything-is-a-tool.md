@@ -22,8 +22,9 @@ into a single concept.
 | An MCP server | `MCP.stdio(...)` or `MCP.http(...)` passed in `tools=[...]` | External tool ecosystems |
 | A pre-built JSON schema | `Tool.from_schema(name, description, parameters, func)` | OpenAPI bridges, third-party registries |
 
-In every case, the agent that consumes the tool sees the same `Tool`
-object. There is no special-case glue for "agent calls function" versus
+Python/application capabilities normalize to `Tool` objects. Provider-native
+capabilities execute server-side through `native_tools`, with a distinct schema
+and dispatch path. There is no special-case glue for "agent calls function" versus
 "agent calls another agent" versus "agent calls MCP server".
 
 ## Composition is recursive
@@ -110,10 +111,10 @@ each.
 - [Progressive complexity](progressive-complexity.md) — when "wrap the
   agent as a tool" is the right next step versus when to reach for a
   `Plan`.
-- *Guides → Tool* (coming in Phase 2) — the three schema modes
+- [Tool guide](../guides/basic/tool.md) — the three schema modes
   (`signature` / `llm` / `hybrid`) and the `Tool.from_schema` escape
   hatch.
-- *Guides → As tool* (coming in Phase 2) — the full mechanics of
+- [As tool](../guides/mid/as-tool.md) — the full mechanics of
   `agent.as_tool(...)` including the optional verifier loop.
-- *Guides → MCP* (coming in Phase 2) — connecting external tool
+- [LazyTools MCP](https://tools.lazybridge.com/mcp/) — connecting external tool
   ecosystems through stdio and HTTP transports.

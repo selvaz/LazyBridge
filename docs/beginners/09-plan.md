@@ -242,16 +242,24 @@ Plans are **compiled at construction time**, not at run time. This is a
 specific design choice with payoff:
 
 ```python
-pipeline = Agent(
-    engine=Plan(
-        Step("researcher"),
-        Step("write", task=from_step("research")),    # ← typo: "research" not "researcher"
-    ),
-    tools=[researcher, writer],
-)
-# raises PlanCompileError immediately:
-#   Unknown step reference "research" in from_step.
-#   Did you mean "researcher"?
+from lazybridge import Agent, Plan, PlanCompileError, Step, from_step
+from lazybridge.testing import MockAgent
+
+researcher = MockAgent(["Facts"], name="researcher")
+writer = MockAgent(["Brief"], name="writer")
+try:
+    pipeline = Agent(
+        name="pipeline",
+        engine=Plan(
+            Step("researcher"),
+            Step("writer", task=from_step("research")),  # Typo: no step named research.
+        ),
+        tools=[researcher, writer],
+    )
+except PlanCompileError as error:
+    print(error)  # Construction fails before any model call.
+else:
+    raise AssertionError("The invalid sentinel should have failed.")
 ```
 
 Compare with raw orchestration code where the typo silently produces a wrong
@@ -267,11 +275,26 @@ some extra tricks".
 data flow visible:
 
 ```python
-pipeline = Agent(engine=Plan(...), tools=[...], verbose=True)
-pipeline("Why are GPUs better than CPUs for training neural networks?")
+from lazybridge import Agent, Plan, Step, from_start, from_step
+from lazybridge.testing import MockAgent
+
+researcher = MockAgent(["Research bullets"], name="researcher")
+writer = MockAgent(["Answer using the research bullets"], name="writer")
+pipeline = Agent(
+    name="pipeline",
+    engine=Plan(
+        Step(researcher),
+        Step(writer, task=from_start, context=from_step("researcher")),
+    ),
+    verbose=True,
+)
+result = pipeline("Why are GPUs useful for training neural networks?")
+assert result.ok
+print(result.text())
 ```
 
-Output (abbreviated):
+Illustrative output from a provider-backed variant (the offline mocks above
+return fixed text; this is not captured benchmark evidence):
 
 ```text
 [plan ▶ pipeline  steps=2]

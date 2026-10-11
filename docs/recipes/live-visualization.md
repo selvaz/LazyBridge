@@ -22,9 +22,9 @@ The same UI replays a finished session via
   shuts down on `__exit__`. The browser tab survives the boundary;
   close it yourself.
 - **`session=sess` on every agent** — the live `GraphSchema` is
-  populated from the agents that register with the session. An
-  agent without `session=sess` is invisible in the topology even
-  if it runs.
+  populated from agents registered with the session. Nested tool agents can
+  inherit it, while direct Plan Step targets need an explicit Session for
+  their child-engine events. Explicit wiring gives predictable topology.
 - **`viz.url`** is the bound URL (`127.0.0.1:<ephemeral>` by
   default). Print it before the pipeline runs so you can switch
   to the browser before tools start firing.

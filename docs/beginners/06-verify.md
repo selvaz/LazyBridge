@@ -91,7 +91,7 @@ it must follow this two-rule contract:
 
 | The judge's reply | LazyBridge does |
 |---|---|
-| Starts with `"approved"` (case-insensitive) | Accept the draft, return the envelope |
+| Recognized approval prefix (including approved, accept, allow, pass, ok, yes, good or valid) | Accept the draft, return the envelope |
 | Anything else | Treat as rejection; inject the verdict as feedback and retry |
 
 That's it. No special schema, no JSON, no special framework. The simplest
@@ -148,8 +148,15 @@ Three things to notice:
 2. **The verdict becomes feedback.** The retry doesn't just rerun the same
    prompt — it gets `"Feedback: <verdict>"` appended, so the writer learns
    what to fix.
-3. **Costs add up.** The judge's tokens are part of `total_cost`. Set
-   `max_verify` to a value you're willing to pay for in the worst case.
+3. **Costs add up.** Session usage events account for the attempts and judge calls. Set
+   `max_verify` to a total attempt budget you're willing to run in the worst case.
+
+This trace is illustrative, not emitted verification instrumentation or a
+benchmark. Actual rejection feedback is carried in Envelope.context as
+`Feedback from judge: ...`; the original task remains unchanged. An Agent
+judge sees the task and draft, while a callable sees only draft text. After
+the attempt cap, the last draft is returned even on rejection, without an
+approval flag. See [Claude Code writes, Codex reviews](../guides/full/claude-writes-codex-reviews.md).
 
 ---
 

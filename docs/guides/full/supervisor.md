@@ -171,7 +171,7 @@ def scripted_input(prompt: str) -> str:
     return next(script)
 
 
-supervisor_for_test = Agent(
+supervisor_for_test = Agent(name="pipeline",
     engine=SupervisorEngine(
         tools=[Tool.wrap(search_web, name="search_web")],
         agents=[researcher],

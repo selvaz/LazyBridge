@@ -1,206 +1,121 @@
 # LLM codegen contract
 
-If you're an LLM assistant generating LazyBridge code from a user
-request, this page is the authoritative cheat sheet. The strict
-machine-readable form is
-[`lazybridge/llms.json`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json);
-this page is the same information annotated for human review.
+This contract targets LazyBridge 1.8.0 plus post-release transport fixes.
+Read the current source signatures; do not copy legacy LazyAgent/LazyTool APIs.
+The machine-readable companion is
+[lazybridge/llms.json](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json);
+it includes the engine, continuity and integration rules summarized here.
 
-## Always
-
-- Import from the top level: `from lazybridge import Agent, LLMEngine, Tool`.
-- Construct agents canonically: `Agent(engine=LLMEngine("..."))`.
-- Name every reusable agent — `Agent(..., name="reviewer")` — so it
-  can be referenced as a tool and so the Plan compiler can validate
-  sentinels against it.
-- Wrap plain functions explicitly: `Tool.wrap(fn, name="...")`.  Raw
-  callables still work as a convenience, but the explicit form is
-  the canonical contract.  The bare `Tool(...)` constructor is
-  available for advanced use (custom-built schemas, schema-cache
-  artefacts) — **prefer the `Tool.wrap()` factory** in new code.
-- Read `result.text()` for string output; `result.payload` for the
-  typed structured output when `output=` was set on the Agent.
-- For freshest-model quickstarts, use
-  `Agent.from_provider("anthropic", tier="top")` — the tier alias
-  resolves to whichever SKU is current.
-
-## Never
-
-- Don't use `LazyAgent`, `LazyTool`, `LazySession`, or
-  `LazyContext` — those are the 0.4-era names; current API is
-  `Agent`, `Tool.wrap()` / `Tool`, `Session`, and the
-  sentinels/`Store`/`Memory` triple.
-- Don't pass `mode="auto"` to `Tool.wrap()` or `Tool(...)` — the
-  graceful-fallback ladder was deleted in 0.7.9. Choose
-  `mode="signature"` (introspect type hints, default),
-  `mode="llm"` (delegate the schema to an LLM), or `mode="hybrid"`
-  (introspect, then have the LLM enrich).
-- Don't call `Agent.from_chain` / `from_engine` / `from_model` /
-  `from_plan` / `from_parallel` — all five aliases were deleted in
-  0.7.9. Use `Agent(engine=...)` or `Agent.chain` /
-  `Agent.parallel`.
-- Don't pass `tool_choice="parallel"` — never supported, removed
-  from the public ladder in 0.7.9.
-- Don't write JSON schemas by hand for annotated Python functions.
-  `Tool.wrap()` introspects type hints; if the introspection misses a
-  detail, override it with `mode="hybrid"` rather than rebuilding
-  the schema manually.  See
-  [Guides → Basic → Tool → Schema modes](../guides/basic/tool.md#schema-modes-signature-hybrid-llm)
-  for when each mode is appropriate and the cost / determinism
-  trade-offs.
-- Don't write a bridging class that re-declares a library function's
-  parameters just to turn it into a tool. If the function already has
-  type hints (ideally `Annotated[type, "description"]` per parameter),
-  `Tool.wrap(fn, name="...")` on the function itself is the whole
-  implementation. When several tools need the same loaded/expensive
-  state, share it via a store-key parameter (one tool loads and returns
-  the key, every other tool reads by that key) instead of each tool
-  loading its own copy. A wrapper is only justified to add something
-  the library function genuinely lacks — an LLM-context output cap, or
-  an envelope/provenance shape — and even then it should call the
-  unmodified function, not reimplement it. See
-  [Decisions → Tool wrapping](../decisions/tool-wrapping.md).
-- Don't call `MCP.stdio(...)` without `allow=` or `deny=` — it's
-  deny-by-default since 0.7.9 and will raise `ValueError`. Pass
-  `allow=["*"]` after auditing the surface, or a glob list like
-  `allow=["fs.read_*", "fs.list_*"]`.
-- Reporting has moved to the sibling package selvaz/LazyReport and is
-  not part of the LazyBridge surface.
-- Don't wrap the entry point in `asyncio.run(main())` for
-  quickstarts. `Agent.__call__` auto-detects an event loop; the
-  sync path is the normal first-contact experience.
-
-## `tools=` vs `native_tools=`
-
-These two parameters look similar and route to very different
-runtimes:
-
-| Parameter | Executor | Use for |
-|---|---|---|
-| `tools=[...]` | **LazyBridge** runs them | Python functions, sub-Agents, MCP servers, schema-backed `Tool` instances |
-| `native_tools=[...]` | **Provider** runs them | `NativeTool.WEB_SEARCH`, `NativeTool.CODE_EXECUTION`, `NativeTool.COMPUTER_USE`, etc. — server-side tools the LLM provider executes itself |
-
-Dangerous server-side tools (`CODE_EXECUTION`, `COMPUTER_USE`)
-require `allow_dangerous_native_tools=True` on the Agent. The flag
-is intentionally noisy — sandboxed code execution and computer-use
-expose a real attack surface and the opt-in is the only signal
-LazyBridge has that the operator understands the trust boundary.
-
-Side-by-side example (same task, two runtimes):
+## Canonical construction
 
 ```python
-from lazybridge import Agent, LLMEngine, NativeTool, Tool
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Session, Store
 
-# LazyBridge-executed web search via your own function.
-def search_web(query: str) -> str:
-    """Search the web — your implementation, your retry/quota policy."""
-    ...
+def project_status() -> str:
+    """Return a deterministic status."""
+    return "Ready for review."
 
-local = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    tools=[Tool.wrap(search_web, name="search_web")],
-)
-
-# Provider-executed web search via Anthropic's server-side tool.
-native = Agent(
-    engine=LLMEngine("claude-opus-4-7"),
-    native_tools=[NativeTool.WEB_SEARCH],
-)
+state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
+claude = Agent(name="claude", engine=ClaudeCodeEngine(), **state)
+codex = Agent(name="codex", engine=CodexEngine(), **state)
+assert claude.memory is codex.memory
 ```
 
-## Extension import map
+Use Agent(engine=...) and explicit names for reusable agents and Plan-backed
+pipelines. Put model/system/reasoning/native policy and engine retries/deadlines
+on the engine. For provider APIs use LLMEngine or Agent.from_provider with a tier
+alias; catalogue tiers are distinct from LazyTools quota routing.
 
-LazyBridge's framework extensions live under `lazybridge.ext.*`; the
-top-level package only re-exports core primitives. Reach for these
-imports when you need the corresponding capability:
+Plain callables auto-wrap; Tool.wrap(fn, name=...) pins a public name.
+Named Agents, Plan-backed Agents and ToolProvider instances also enter tools.
+Provider NativeTool values enter native_tools on LLMEngine. They execute
+server-side and are not interchangeable with Python tools. Dangerous provider
+capabilities require allow_dangerous_native_tools=True.
 
-| Capability | Import |
-|---|---|
-| Human-in-the-loop CLI / web UI | `from lazybridge.ext.hil import HumanEngine, human_agent` |
-| Supervisor pattern | `from lazybridge.ext.hil import SupervisorEngine, supervisor_agent` |
-| MCP servers (stdio / HTTP) | `from lazytools.connectors.mcp import MCP` |
-| OpenTelemetry exporter | `from lazybridge.ext.otel import OTelExporter` |
-| Eval harness | `from lazybridge.ext.evals import EvalSuite, EvalCase, llm_judge` |
-| Live visualizer | `from lazybridge.ext.viz import Visualizer` |
-| Blackboard planner | `from lazybridge.ext.planners import make_blackboard_planner` |
-| HTTP gateway | `from lazytools.connectors.gateway import build_app` |
-
-Reporting has moved to the sibling package selvaz/LazyReport and is
-not part of the LazyBridge surface.
-
-## Production-safe defaults
-
-Copy-paste this snippet whenever you need bounded behaviour. Each
-knob has a sensible default; explicit values make the agent
-resistant to runaway requests, infinite tool loops, and silent stream
-stalls:
+## Review and continuity
 
 ```python
-from lazybridge import Agent, LLMEngine
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine
 
-engine = LLMEngine(
-    "claude-opus-4-7",
-    max_turns=8,             # cap the inner LLM/tool loop
-    max_retries=3,           # transient-error retries (exponential backoff)
-    request_timeout=60,      # whole-request wall clock (seconds)
-    tool_timeout=30,         # per-tool wall clock (seconds)
-    max_parallel_tools=4,    # bound on concurrent tool calls
-    stream_idle_timeout=90,  # raise StreamStallError if no token in 90s
-)
-
-agent = Agent(
-    engine=engine,
-    name="my_agent",
-    tools=[...],
-    output=...,         # optional Pydantic model for structured output
-)
+reviewer = Agent(name="reviewer", engine=CodexEngine(
+    system='Return "approved" or "rejected: <reason>". Check boundary cases.',
+))
+writer = Agent(name="writer", engine=ClaudeCodeEngine(), verify=reviewer, max_verify=3)
+result = writer("Draft a weekday deployment rule with input validation.")
+print(result.text())
 ```
 
-For provider-side dangerous tools (`CODE_EXECUTION`, `COMPUTER_USE`)
-also pass `allow_dangerous_native_tools=True` on the Agent — the flag
-is intentionally noisy.
+verify is an Agent/as_tool constructor option, not a run kwarg. max_verify counts
+total attempts. Unknown verdicts reject; exhaustion returns the final draft
+with no approval flag. result.ok is execution success. Require deterministic
+tests/explicit acceptance records before shipping. The core permits any judge;
+select the opposite engine explicitly for independent review.
 
-## Canonical patterns
+Native persistence uses Claude persist_session/session_id or Codex
+persist_thread/thread_id. Both take session_alias/session_registry.
+SessionRegistry keys include kind and cwd. Explicit ID wins over an alias.
+Claude session_name is a runtime slot label, not session_alias or a title.
+Native resume omits Memory reinjection. Shared Python state does not migrate a
+native transcript. Coordinate cross-process transcript access yourself.
 
-The shortest correct shape for each common request:
+Claude writes need extra_tools as well as policy. writer(gate) does not expose
+Write/Edit/Bash. File roots confine file hooks, not Bash. Codex writes need
+workspace-write and potentially extra writable_roots for Git worktrees.
+Read-only native settings do not sandbox Python application tools.
 
-| Request | Code |
-|---|---|
-| One agent | `agent = Agent(engine=LLMEngine("claude-opus-4-7"))` |
-| Agent + function tool | `agent = Agent(engine=LLMEngine("claude-opus-4-7"), tools=[Tool.wrap(get_weather, name="get_weather")])` |
-| Sequential plan | `Agent(engine=Plan(Step("research"), Step("write")), tools=[research, write], name="pipe")` |
-| Parallel fan-out | `fan = Agent.parallel(researcher, analyst); env = fan("topic")` |
-| Linear chain | `pipe = Agent.chain(researcher, writer)` |
-| Sub-agent as tool | `Agent(engine=LLMEngine(...), tools=[other_agent])` (auto-wrapped) |
-| Sub-agent with verifier | `Agent(engine=LLMEngine(...), tools=[other_agent.as_tool(verify=judge)])` |
-| MCP server | `Agent(..., tools=[MCP.stdio("fs", command="npx", args=[...], allow=["fs.read_*"])])` |
-| Structured output | `Agent(engine=LLMEngine(...), output=Summary)` (where `Summary` is a Pydantic model) |
-
-## Envelope return contract
-
-Every `agent(...)` returns an `Envelope[T]`:
+## Return and composition contracts
 
 ```python
-result = agent("do the thing")
-result.text()             # -> str — final assistant text
-result.payload            # -> T — typed payload when output= was set; else str
-result.error              # -> Exception | None — propagated runtime failure
-result.metadata.cost_usd  # -> float — pipeline cost (rolls up across nested agents)
+from lazybridge import Agent
+from lazybridge.testing import MockAgent
+
+fan = Agent.parallel(MockAgent(["A"], name="alpha"), MockAgent(["B"], name="beta"))
+result = fan("Compare the approaches.")
+assert "[alpha]" in result.text() and "[beta]" in result.text()
+print(result.text())
 ```
 
-For `Agent.parallel(...)` post-0.7.9: the returned envelope's
-`.text()` joins each branch's text with `[branch_name]` labels,
-and `.payload` is `list[Envelope]` for typed per-branch access.
+Every agent call returns Envelope. text() returns text; payload carries the
+output type; error is ErrorInfo or None. Agent.parallel returns a labelled-text
+join in one Envelope. Use await fan.run_branches(task) for list[Envelope];
+do not assume the normal join's payload is a list.
 
-## Error messages are codegen aids
+Agent.chain is a linear Plan convenience; Plan/Step supports declared routing,
+parallel bands and checkpoints. Instructions live on engines. Agent.run is the
+async entry point; agent(task) blocks in existing async loops too.
 
-Every `PlanCompileError` / `PlanRuntimeError` /
-`UnsupportedFeatureError` carries a four-part body:
+## Import map
 
-1. What failed (step / tool / sentinel by name)
-2. What was passed (the offending value)
-3. What's expected (the valid set)
-4. **A concrete fix snippet** — usually the exact replacement code
+| Capability | Current import/destination |
+| --- | --- |
+| Coding engines/config/registry | lazybridge ClaudeCodeEngine, CodexEngine, CodingAgentConfig, SessionRegistry |
+| Human workflow | lazybridge.ext.hil |
+| Approval/delegation | lazybridge.ext.approval / lazybridge.ext.delegation |
+| Evals/planners/knowledge | lazybridge.ext.evals / planners / knowledge |
+| Observability/visualizer | lazybridge.ext.otel / viz |
+| MCP/gateway/code support | lazytools.connectors; [LazyTools docs](https://tools.lazybridge.com/) |
+| Durable repository jobs | [LazyTools code bridge](https://tools.lazybridge.com/code-bridge/) |
+| Project records/quota routing | [LazyTools projects](https://tools.lazybridge.com/projects/) and code bridge |
+| Reporting | Sibling LazyReport package |
 
-Read the bottom of the error string verbatim; the fix is the
-replacement source line.
+LazyTools distribution name is lazytoolkit, import namespace lazytools.
+Removed lazybridge.ext.mcp/gateway and external_tools shims are not valid imports.
+MCP.stdio requires an explicit allow or deny policy. Coding MCP providers opt in;
+--allow-unsafe is tool exposure, not the bridge's durable approval queue.
+
+## Avoid legacy and unsupported shapes
+
+- No LazyAgent/LazyTool/LazySession/LazyContext.
+- No Agent.from_chain/from_engine/from_model/from_plan/from_parallel.
+  Use Agent(engine=...), Agent.chain or Agent.parallel.
+- No Tool(mode="auto"); choose signature, llm or hybrid.
+- No tool_choice="parallel".
+- No system= on Agent; use the engine.
+- No BaseEngine protocol; import Engine from lazybridge.engines.base.
+- No async callable verify judge assumption; core callable judges are synchronous.
+- Do not promise cross-engine native history migration, cross-process transcript
+  locks, automatic uncertain-turn replay or verification acceptance on exhaustion.
+
+Read [coding agents](../guides/full/coding-agents.md),
+[collaboration](../guides/full/claude-writes-codex-reviews.md),
+[error recovery](error-recovery.md) and [reference](../reference/index.md).

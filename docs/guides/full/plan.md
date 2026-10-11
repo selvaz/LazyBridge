@@ -97,9 +97,9 @@ you need any of:
 - **LLM-directed dispatch** ("the model decides which agent to
   call"). Use `Agent(tools=[a, b, c])`. `Plan` is for the
   *opposite* case — explicit, declared flow.
-- **Deterministic fan-out → list of envelopes.** Use
-  [`Agent.parallel(...)`](../mid/parallel.md) — its return shape
-  is `list[Envelope]`, which a `Plan` step can't natively produce.
+- **Deterministic fan-out with per-branch envelopes.** Use
+  [`Agent.parallel(...)`](../mid/parallel.md). Its normal call returns one
+  labelled-text Envelope; `await fan.run_branches(task)` returns list[Envelope].
 
 ## Example
 
@@ -138,7 +138,7 @@ writer = Agent(
 
 
 # 1) Linear typed pipeline — search → rank → write.
-pipeline = Agent(
+pipeline = Agent(name="pipeline",
     engine=Plan(
         Step("search",
              task="Search the web for the user's topic.",
@@ -167,7 +167,7 @@ sugar_pipeline = Agent.chain(searcher, ranker, writer, name="research")
 For the full surface — typed payloads, routing, parallel bands,
 crash-resume, fan-out runs — see the dedicated guides:
 [Step](step.md), [Sentinels](sentinels.md),
-[Routing](routing.md), and the Phase 3b guides
+[Routing](routing.md), and the full guides
 *Parallel plan steps* and *Checkpoint & resume*.
 
 ## Streaming
@@ -238,9 +238,9 @@ step by step instead of waiting for one final text block. The rules:
 - [Nested pipelines](composition-patterns.md) — Plan-of-Plans,
   parallel bands of sub-pipelines, and LLM-decided dispatch over
   sub-pipelines (the horizontal counterpart to this page).
-- *Guides → Full → Parallel plan steps* (Phase 3b) — `parallel=True`
+- [Parallel plan steps](parallel-plan-steps.md) — `parallel=True`
   bands and `from_parallel_all` aggregation.
-- *Guides → Full → Checkpoint & resume* (Phase 3b) — `store=`,
+- [Checkpoint and resume](checkpoint.md) — `store=`,
   `checkpoint_key=`, `resume=True`, `on_concurrent=`.
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) —
   `Agent(engine=Plan(*steps))` vs `Agent(engine=Plan(*steps))`.

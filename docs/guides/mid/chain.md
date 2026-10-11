@@ -163,5 +163,5 @@ print(result.text())
 - [Canonical vs sugar](../../concepts/canonical-vs-sugar.md) — the
   full table mapping `Agent.chain` and friends to their canonical
   `Plan(...)` equivalents.
-- *Guides → Full → Plan* (Phase 3) — typed hand-offs, routing,
+- [Plan](../full/plan.md) — typed hand-offs, routing,
   checkpoints, and the `Step` surface in full.

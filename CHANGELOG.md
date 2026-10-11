@@ -8,6 +8,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- Realign the homepage, README, quickstart and engine guides with Claude Code /
+  Codex collaboration, durable native conversations and LazyTools integration.
+  Document verification exhaustion, write-tool grants, strict structured output,
+  current session locking and the post-1.1 engine/approval/delegation sequence.
+  Add tests executing changed Markdown examples with fake transports.
+
+### Fixed
+
+- Codex executable discovery selects the newest stable CLI by version and skips
+  helper executables (#189).
+- Codex App Server retries once on thread/start or thread/resume transport failure
+  before a turn was sent (#190); later uncertain turns are not blindly replayed.
+
 ## [1.8.0]
 
 ### Fixed

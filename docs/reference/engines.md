@@ -1,5 +1,10 @@
 # Engines
 
+ClaudeCodeEngine and CodexEngine are interchangeable engines behind the same
+Agent tools/Memory/Store/Session contract. Native transcripts, policy and schema
+support remain runtime-specific. See [coding agents](../guides/full/coding-agents.md)
+and [opposite-engine review](../guides/full/claude-writes-codex-reviews.md).
+
 `LLMEngine` is the LLM-driven tool-calling loop; `Plan` is the
 deterministic-DAG engine and `Step` is its unit; `ReplanEngine` is the
 adaptive counterpart to `Plan` for pipelines whose shape is decided at
@@ -89,6 +94,10 @@ protocol notes, and current limits.
 ::: lazybridge.CodexEngine
 
 ## Engine errors
+
+::: lazybridge.engines.codex.app_server.CodexTransportError
+
+::: lazybridge.engines.codex.app_server.CodexTurnUncertain
 
 ::: lazybridge.PlanCompileError
 

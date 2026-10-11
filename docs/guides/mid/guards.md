@@ -89,7 +89,7 @@ streaming.
 
 - **Soft preferences ("the model should generally avoid X").** Guards
   are hard gates with no feedback loop — once blocked, the run ends.
-  For "try again with feedback" semantics, use `verify=` (Phase 3).
+  For "try again with feedback" semantics, use [verify=](verify.md).
 - **Conversation-level rules that need history context.** A guard
   sees only the current task / output text, not memory. Use a
   `verify=` agent or a custom engine wrapper for stateful policies.
@@ -205,6 +205,6 @@ sanitiser = Agent(
   (`metadata` from `GuardAction` is preserved on the event payload).
 - [Agent](../basic/agent.md) — `guard=` is a first-class kwarg
   alongside `tools=`, `memory=`, `output=`.
-- *Guides → Full → verify=* (Phase 3) — different placement: a
+- [verify=](verify.md) — different placement: a
   judge wraps the agent's *output* with a retry feedback loop,
   rather than acting as a hard gate.

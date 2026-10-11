@@ -25,7 +25,19 @@ For narrative usage see [Guides → Mid → Session](../guides/mid/session.md),
 
 ## Session
 
+The observability Session is distinct from a native Claude session or Codex
+thread. Named native continuity uses SessionRegistry, keyed by engine kind,
+resolved cwd and alias. See [Session aliases](../guides/full/session-registry.md).
+
 ::: lazybridge.Session
+
+## Native session registry
+
+::: lazybridge.SessionRegistry
+
+::: lazybridge.engines.sessions.default_session_registry
+
+::: lazybridge.engines.sessions.set_default_session_registry
 
 ## Event log + types
 
