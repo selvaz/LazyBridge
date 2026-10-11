@@ -223,10 +223,13 @@ def test_refreshed_install_commands_use_real_extras_and_current_version():
                     assert command == ["claude", "doctor"]
 
 
-@pytest.mark.parametrize("path", [
-    "docs/guides/full/claude-code-engine.md",
-    "docs/guides/full/codex-engine.md",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/guides/full/claude-code-engine.md",
+        "docs/guides/full/codex-engine.md",
+    ],
+)
 def test_restored_image_examples_reach_the_transport(path, offline):
     """A successful text answer alone must not hide a dropped attachment."""
     codes = FENCE.findall((ROOT / path).read_text(encoding="utf-8"))
@@ -239,9 +242,9 @@ def test_restored_image_examples_reach_the_transport(path, offline):
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
     position = 8
     while position < len(raw):
-        length = struct.unpack(">I", raw[position:position + 4])[0]
-        body = raw[position + 4:position + 8 + length]
-        crc = struct.unpack(">I", raw[position + 8 + length:position + 12 + length])[0]
+        length = struct.unpack(">I", raw[position : position + 4])[0]
+        body = raw[position + 4 : position + 8 + length]
+        crc = struct.unpack(">I", raw[position + 8 + length : position + 12 + length])[0]
         assert zlib.crc32(body) == crc
         position += length + 12
     if "claude-code" in path:
@@ -254,18 +257,25 @@ def test_restored_image_examples_reach_the_transport(path, offline):
 def test_restoration_manifest_covers_every_touched_python_fence():
     """The restored narrative pages must execute all examples, not selected fragments."""
     restored = {
-        "docs/best-python-ai-agent-frameworks.md", "docs/comparison.md", "docs/why.md",
-        "docs/concepts/mental-model.md", "docs/for-llms/codegen-contract.md",
-        "docs/guides/full/claude-code-engine.md", "docs/guides/full/codex-engine.md",
-        "docs/guides/full/coding-agent-config.md", "docs/guides/full/coding-agents.md",
-        "docs/index.md", "docs/quickstart.md", "README.md",
+        "docs/best-python-ai-agent-frameworks.md",
+        "docs/comparison.md",
+        "docs/why.md",
+        "docs/concepts/mental-model.md",
+        "docs/for-llms/codegen-contract.md",
+        "docs/guides/full/claude-code-engine.md",
+        "docs/guides/full/codex-engine.md",
+        "docs/guides/full/coding-agent-config.md",
+        "docs/guides/full/coding-agents.md",
+        "docs/index.md",
+        "docs/quickstart.md",
+        "README.md",
     }
     assert restored <= {entry["path"] for entry in MANIFEST if entry.get("all")}
     checkpoint = next(entry for entry in MANIFEST if entry["path"].endswith("/checkpoint.md"))
     # Block 0 is a deliberately schematic constructor signature, left untouched.
-    assert checkpoint["blocks"] == list(range(1, len(FENCE.findall(
-        (ROOT / checkpoint["path"]).read_text(encoding="utf-8")
-    ))))
+    assert checkpoint["blocks"] == list(
+        range(1, len(FENCE.findall((ROOT / checkpoint["path"]).read_text(encoding="utf-8"))))
+    )
 
 
 def test_llmstxt_config_excerpt_matches_the_build():
