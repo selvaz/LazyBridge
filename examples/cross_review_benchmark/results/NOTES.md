@@ -68,3 +68,12 @@ for compatible later arms. A regraded row's `wall_seconds` remains its original
 task duration; additional grading time appears under `regrade.wall_seconds`.
 Both hashes are included for audit. The corrected results are the baseline to
 extend when the operator has Claude quota again.
+
+Repository validation: the full default pytest suite was run once after the
+feature commit: 3,093 passed, 19 skipped, 7 deselected, with one failure in the
+standalone import check for `regrade.py`. All ten benchmark contract tests passed.
+The relative import causing that failure was corrected to an absolute package
+import; the exact failed test then passed on its targeted rerun. The full suite
+was not repeated. Repository-wide Ruff lint and format checks passed (309 Python
+files). This import-only correction changes neither generation nor grading and
+does not invalidate the recorded protocol hashes.

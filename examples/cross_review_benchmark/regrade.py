@@ -9,8 +9,16 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .harness import extract_code, grade, load_rows, parse_args, protocol_hash, summary, writer_prompt
-from .tasks import TASKS
+from examples.cross_review_benchmark.harness import (
+    extract_code,
+    grade,
+    load_rows,
+    parse_args,
+    protocol_hash,
+    summary,
+    writer_prompt,
+)
+from examples.cross_review_benchmark.tasks import TASKS
 
 
 def regrade(input_path, output_path, reason, *, timeout=20):
