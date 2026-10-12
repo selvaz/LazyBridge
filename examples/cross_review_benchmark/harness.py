@@ -53,12 +53,13 @@ def writer_prompt(task):
     return WRITER_PROMPT + task.spec
 
 
-def select_tasks(selector, maximum, seed):
+def select_tasks(selector, maximum, seed, *, tasks=None):
+    tasks = TASKS if tasks is None else tasks
     names = selector.split(",")
-    known = {"all", "coding", "api"} | {t.id for t in TASKS}
+    known = {"all", "coding", "api"} | {t.id for t in tasks}
     if set(names) - known:
         raise ValueError(f"Unknown tasks: {set(names) - known}")
-    selected = [t for t in TASKS if "all" in names or t.category in names or t.id in names]
+    selected = [t for t in tasks if "all" in names or t.category in names or t.id in names]
     random.Random(seed).shuffle(selected)
     if maximum is not None and maximum < 0:
         raise ValueError("max-tasks must be nonnegative")
@@ -79,12 +80,12 @@ def subprocess_env():
     return env
 
 
-def grade(task, code, base, timeout):
+def grade(task, code, base, timeout, *, suite=None):
     """Fresh process, bounded time, no pytest config/conftest inherited from repo."""
     with tempfile.TemporaryDirectory(prefix="grade-", dir=base) as temp:
         cwd = Path(temp)
         (cwd / "candidate.py").write_text(code, encoding="utf-8")
-        (cwd / "test_hidden.py").write_text(test_source(task), encoding="utf-8")
+        (cwd / "test_hidden.py").write_text(suite.test_source(task) if suite else test_source(task), encoding="utf-8")
         (cwd / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
         try:
             proc = subprocess.run(
@@ -247,9 +248,15 @@ def make_check_tool(cwd, args, log):
 
 
 def protocol_hash(args):
+    from examples.cross_review_benchmark.suites import TASK_FILES, load_suite
+
     digest = hashlib.sha256()
     for name in ("tasks.py", "hidden_tests.py", "harness.py", "mock_fixtures.py"):
         digest.update((HERE / name).read_bytes().replace(b"\r\n", b"\n"))
+    digest.update((HERE / "suites.py").read_bytes().replace(b"\r\n", b"\n"))
+    suite = load_suite(args.suite)
+    for name in TASK_FILES:
+        digest.update((suite.directory / name).read_bytes().replace(b"\r\n", b"\n"))
     config = {
         key: getattr(args, key)
         for key in (
@@ -261,6 +268,8 @@ def protocol_hash(args):
             "model_timeout",
             "test_timeout",
             "check_timeout",
+            "suite",
+            "phase",
         )
     }
     digest.update(json.dumps(config, sort_keys=True).encode())
@@ -379,11 +388,18 @@ def runtime_info(args):
 
 
 async def run(args):
-    tasks = select_tasks(args.tasks, args.max_tasks, args.seed)
+    from examples.cross_review_benchmark.suites import TASK_FILES, directory_hash, load_suite, verify_freeze
+
+    suite = load_suite(args.suite)
+    tasks = select_tasks(args.tasks, args.max_tasks, args.seed, tasks=suite.tasks)
     arms = args.arms.split(",")
     if not arms or len(arms) != len(set(arms)) or set(arms) - ARMS.keys():
         raise ValueError("arms must be a comma-separated subset of A,B,C,D without duplicates")
     output = Path(args.output)
+    if args.phase == "calibration" and (args.suite != "v2" or arms != ["A"]):
+        raise ValueError("calibration is v2 arm A only")
+    if args.phase == "frozen":
+        verify_freeze(suite.directory)
     rows = load_rows(output)
     fingerprint = protocol_hash(args)
     if any(r.get("protocol_hash") != fingerprint for r in rows):
@@ -394,6 +410,27 @@ async def run(args):
     if all((task.id, arm) in done for task in tasks for arm in arms):
         return rows
     output.parent.mkdir(parents=True, exist_ok=True)
+    if args.phase == "calibration":
+        # Archive the exact task design BEFORE any model construction/calls.
+        snapshot = output.with_suffix(".tasks.zip")
+        if not snapshot.exists():
+            import zipfile
+
+            with zipfile.ZipFile(snapshot, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+                for name in TASK_FILES:
+                    archive.write(suite.directory / name, name)
+            output.with_suffix(".manifest.json").write_text(
+                json.dumps(
+                    {
+                        "task_sha256": directory_hash(suite.directory),
+                        "protocol_hash": fingerprint,
+                        "registered_at": datetime.now(UTC).isoformat(),
+                        "phase": args.phase,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
     gate = QuotaGate(args.quota_threshold, mock=args.mock)
     info = runtime_info(args)
     stop_reason = None
@@ -416,6 +453,9 @@ async def run(args):
                 calls, verdicts, checks = [], [], []
                 row = {
                     "task_id": task.id,
+                    "suite": args.suite,
+                    "phase": args.phase,
+                    "task_sha256": directory_hash(suite.directory),
                     "category": task.category,
                     "difficulty": task.difficulty,
                     "arm": arm,
@@ -444,9 +484,12 @@ async def run(args):
                         )
                         tool = make_check_tool(cwd, args, checks)
                         if args.mock:
-                            from .mock_fixtures import scripts
+                            if args.suite == "v1":
+                                from .mock_fixtures import scripts
 
-                            drafts, reviews = scripts(task, arm)
+                                drafts, reviews = scripts(task, arm)
+                            else:
+                                drafts, reviews = suite.scripts(task, arm)
                             writer = MockAgent(drafts)
                             judge = MockAgent(reviews) if reviewer else None
                         else:
@@ -474,7 +517,7 @@ async def run(args):
                         )
                         out = await agent.run(Envelope(task=writer_prompt(task)))
                         row["candidate_code"] = extract_code(out.text())
-                        row["grade"] = grade(task, row["candidate_code"], base, args.test_timeout)
+                        row["grade"] = grade(task, row["candidate_code"], base, args.test_timeout, suite=suite)
                         row["passed"] = row["grade"]["passed"]
                         row["error"] = row["grade"]["error"]
                 except QuotaStop as exc:
@@ -528,6 +571,8 @@ async def run(args):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--suite", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--phase", choices=("calibration", "frozen"), default="frozen")
     parser.add_argument("--arms", default="A,B,C,D")
     parser.add_argument("--tasks", default="all", help="all, coding, api, or comma-separated task IDs")
     parser.add_argument("--max-tasks", type=int)

@@ -1,237 +1,242 @@
-# Cross-provider review benchmark
+# Cross-provider review benchmark v2
 
-This example measures task-level correctness of generated Python with and without
-LazyBridge's cross-provider `verify=` loop. Publish failures as well as successes.
-The separate API section measures executable use of the real LazyBridge API,
-including invented or misused constructor parameters. It is not a general factual
-knowledge benchmark.
+This example measures whether a reviewer from another provider changes errors
+in final implementations. Publish positive and negative results. Arm A alone
+cannot establish a review effect. **Do not call ClaudeCodeEngine live until
+the operator releases its reserved quota.** Only Codex A runs during calibration.
+
+## Why v2 exists
+
+The frozen [v1 set and results](v1/README.md) had a coding ceiling:
+
+| v1 category | Codex A | Pass rate | Wilson 95% CI |
+|---|---:|---:|---:|
+| Coding | 20/20 | 100% | 83.9–100% |
+| LazyBridge API | 2/5 | 40% | 11.8–76.9% |
+
+Review cannot improve 20/20. The five API items exposed invented verification
+types/sentinel helpers and a missing required run argument, but n=5 is small.
+v1's original JSONL, same-candidate regrading audit, protocol archive and notes
+are retained unchanged in [v1/results](v1/results). Versioned v1 JSON preserves
+its specs, corrected tests and references; original top-level modules remain
+compatibility entry points. v1 task SHA-256:
+`b3fb9b526e61175fde9021f10b5c54ed8b9d01b5e2fb303503b2726b46dfbb4f`.
+Do not append new-runner records to historical generation fingerprints.
+
+v2 contains 20 harder original coding tasks, authored for this example without
+copying public benchmarks, and 25 executable API items: five unchanged v1
+anchors plus twenty new. Difficulty is a design hypothesis; report observed
+calibration and frozen baseline even when the target is missed.
+
+## Calibration and pre-registration
+
+The [protocol](v2/CALIBRATION.md) was registered before v2 generation. Targets
+are 40–70% separately: 8–14/20 coding, 10–17/25 API. Run the entire initial
+design, allow at most TWO design revisions, publish every run. Stop early only
+when both targets are met; otherwise select the latest design at the revision
+limit. Never relax a grader to accept an observed output. Strengthening a spec
+may add prewritten tests, retaining existing assertions.
+
+[v2/calibration](v2/calibration) contains every JSONL, summary, manifest and
+pre-call `*.tasks.zip` snapshot. Every record has task and protocol hashes.
+Calibration candidates never become the frozen paired baseline.
+
+<!-- v2-results-start -->
+Every calibration used all 45 items. No individual candidates or runs were discarded.
+
+| Calibration design | Coding pass rate | Wilson 95% CI | API pass rate | Wilson 95% CI |
+|---|---:|---:|---:|---:|
+| Initial | 20/20 (100.0%) | 83.9–100.0% | 11/25 (44.0%) | 26.7–62.9% |
+| Revision 1 | 19/20 (95.0%) | 76.4–99.1% | 11/25 (44.0%) | 26.7–62.9% |
+| Revision 2 | 19/20 (95.0%) | 76.4–99.1% | 12/25 (48.0%) | 30.0–66.5% |
+
+**Coding calibration missed the 40–70% target after both permitted revisions.**
+The final design still has a near ceiling; do not describe v2 as solving
+the coding difficulty problem. The expanded API set provides substantially
+more failure opportunities. The predeclared selection rule chooses the latest
+design, not the lowest-scoring run.
+
+Frozen task SHA-256: `660d9ccf90a01ec6ba59397c250c4df11ca632e25a363642bcdfe8c021d04b8a`.
+Registered at `2026-10-11T23:38:29.097123+00:00` (UTC), before the fresh A draw
+and before any B/C/D generation. [freeze.json](v2/freeze.json) records
+all calibration hashes, timestamps and the selection rule. Frozen execution
+rejects changed task files. No redesign after freezing.
+
+Fresh frozen baseline (the A sample for later paired comparisons):
+
+| Category | Arm | Pass rate | Wilson 95% CI |
+|---|---|---:|---:|
+| coding | A | 19/20 (95.0%) | 76.4–99.1% |
+| api | A | 9/25 (36.0%) | 20.2–55.5% |
+
+The fresh API score is outside the calibration target. Completed engine
+errors remain failures, and the frozen set was not redesigned in response.
+
+See [JSONL](v2/results/arm_a.jsonl), [summary](v2/results/arm_a.md),
+and [audit notes](v2/results/NOTES.md). B/C/D remain pending; no review
+effect or paired p-value can be inferred from A alone. Later arms append
+compatibly to the baseline JSONL, using this exact source checkout.
+
+Live runs request `gpt-6.1-sol`, reasoning `high`; reported models: `gpt-6.1-sol`.
+UTC generation range: `2026-10-11T21:21:28.843197+00:00` to
+`2026-10-12T00:30:41.564272+00:00`. Python 3.11.13, LazyBridge
+1.8.0, codex-cli 0.160.0, pytest 9.1.1;
+CLI-reported model IDs are not immutable weight/version identifiers.
+Claude has not run; its requested default is `sonnet`, and its reported
+model/version/date must be recorded when the operator releases quota.
+<!-- v2-results-end -->
+
+## Method
+
+| Arm | Writer | Reviewer |
+|---|---|---|
+| A | CodexEngine | none |
+| B | ClaudeCodeEngine | none |
+| C | CodexEngine | ClaudeCodeEngine |
+| D | ClaudeCodeEngine | CodexEngine |
+
+Engines use subscription runtimes. All arms receive the same signature/docstring
+and fixed writer prompt in [harness.py](harness.py). The fixed reviewer prompt
+there sees the spec and candidate, never hidden tests, and checks correctness,
+boundaries, validation, Unicode, dates, rounding and mutation. It replies
+`approved` or `rejected: <defects and correction>`. Both may run their own
+`python_check` examples against a copy of the public package. Codex native
+filesystem/shell/browser tools are disabled.
+
+C/D use real `Agent(verify=judge, max_verify=2)`: at most TWO TOTAL writer
+attempts, each reviewed. The last candidate is returned even if rejected.
+A/B have one attempt. Review adds compute and another drafting opportunity;
+this experiment lacks same-provider review and extra-draft controls and cannot
+separate those effects from reviewer quality.
+
+Each arm independently generates its first draft. Pairing compares outcomes on
+the same task, not review of an identical A/B candidate. Consequently a task
+classified as fixed or broken can reflect sampling variation as well as review.
+
+Order uses deterministic private seed `20261011`, not deterministic model
+sampling. Native model retries and format retries are disabled. Default budgets
+are 180s/model call, 20s/hidden pytest process, 5s/own check. Optional
+`lazytools.projects.quota_telemetry` checks only selected providers before
+construction/calls and stops if any used-percent window exceeds 95%.
+Unavailable telemetry emits a warning and skips the check. A never queries
+Claude telemetry. Quota stops retain partial work without marking it completed.
+
+Hidden tests grade only the final candidate in a fresh pytest subprocess against
+this checkout's actual package. Only the target function is imported; candidate
+imports cannot shadow oracle imports. Tests include mutation/error cases and
+independent brute-force/exact arithmetic where applicable. API graders use
+inert clients, MockAgent or supplied fake engines; no real provider calls.
+References and negative controls are validated before model calibration.
+
+`tasks.json` holds visible specs; `hidden_tests.json` and `mock_solutions.json`
+are evaluator-only. They are public for reproduction but never copied to model
+workspaces or inserted into prompts. `python_check` runs arbitrary host Python:
+this is cooperative isolation, not a hostile-code OS sandbox. Audit candidate
+code and tool logs before claiming contamination-free evaluation.
+
+JSONL records include pass/fail, attempts, verdicts, candidate, complete provider
+calls, own checks, wall time, errors, quota readings, requested/reported models,
+runtime versions, dates and fingerprints. Completed errors count as failures.
+Task wall times include local setup and hidden grading; they are not a
+controlled provider-latency comparison.
+Reports keep coding/API separate, use Wilson 95% intervals, and pair A/C and
+B/D on common task IDs, listing fixed/broken tasks and two-sided exact McNemar
+p. Missing arms remain pending; calibration scores never enter paired tests.
 
 ## Reproduce
 
-From the repository root, with Python 3.11+:
+From repository root with Python 3.11+ and test dependencies (`pip install -e
+".[test]"`). Install `tzdata` on Windows for the date tasks and `ruff` for
+lint/format checks. Later live B/C/D also require `pip install -e
+".[claude-code]"`, the Claude Agent SDK and authenticated Claude Code. Live A
+requires an authenticated Codex CLI. This example installs no runtime itself.
 
-```powershell
-python -m pip install -e ".[test,claude-code]"
-python -m pip install ruff
-# CI/local dry run: no authentication or provider calls, all four arms.
-python -m examples.cross_review_benchmark.harness --mock --output mock_results.jsonl
-# Codex subscription baseline only (also the initial published experiment).
-python -m examples.cross_review_benchmark.harness --arms A --output cross_review_results.jsonl
-# AFTER the operator's Claude quota reset: append the remaining arms.
-python -m examples.cross_review_benchmark.harness --arms B,C,D --output cross_review_results.jsonl
+```console
+# Entire scripted MockAgent pipeline, no model calls
+python -m examples.cross_review_benchmark.harness --suite v2 --mock --output mock-v2.jsonl
+
+# Frozen Codex baseline; resumes by skipping completed records
+python -m examples.cross_review_benchmark.harness --suite v2 --arms A --output examples/cross_review_benchmark/v2/results/arm_a.jsonl
+
+# ONLY AFTER operator releases Claude quota
+python -m examples.cross_review_benchmark.harness --suite v2 --arms B,C,D --output examples/cross_review_benchmark/v2/results/arm_a.jsonl
+
+# Budgeted smoke run in a separate file
+python -m examples.cross_review_benchmark.harness --suite v2 --arms A --tasks api --max-tasks 3 --quota-threshold 90 --output api-smoke.jsonl
+
+# v1 through shared runner into a NEW file
+python -m examples.cross_review_benchmark.harness --suite v1 --mock --output mock-v1.jsonl
 ```
 
-Live Codex requires the locally authenticated Codex CLI. Live Claude requires the
-Claude Agent SDK and locally authenticated Claude Code subscription. No API keys
-are configured by this example. The example installs no CLI automatically.
-`--mock` never constructs either live engine and never reads quota telemetry.
+`--tasks` accepts `all`, `coding`, `api` or comma-separated IDs. `--arms`,
+`--max-tasks`, models/effort and timeouts are configurable. Resume skips failures
+too and rejects malformed/duplicate data or changed mode, task files,
+runner/prompts, package code and model budgets. Use a new output for changed
+configuration. Default suite remains v1 for compatibility; explicitly select v2.
 
-Budget controls:
+Original calibration command (run_02/run_03 use distinct paths after recording
+the revised design):
 
-```powershell
-python -m examples.cross_review_benchmark.harness --arms A --tasks coding --max-tasks 3 --quota-threshold 90 --output pilot.jsonl
-python -m examples.cross_review_benchmark.harness --arms A --tasks coding_03_cent_parts,api_04_review_agent --output subset.jsonl
-python -m examples.cross_review_benchmark.harness --help
+```console
+python -m examples.cross_review_benchmark.harness --suite v2 --phase calibration --arms A --output examples/cross_review_benchmark/v2/calibration/run_01_arm_a.jsonl
+python -m examples.cross_review_benchmark.freeze <run_01.jsonl> [<run_02.jsonl> <run_03.jsonl>]
 ```
 
-`--max-tasks` limits selected task IDs, not task/arm calls. A reviewed arm can make
-two writer calls and two reviewer calls per task. All arms run serially; tasks
-are shuffled by a private `random.Random(20261011)` (override `--seed`). The seed
-controls ordering and mock behavior, **not** provider sampling. CLI runtimes do
-not expose a common deterministic generation seed.
+Published v2 is frozen. Replay old calibration snapshots in an isolated checkout
+by restoring their three JSON files; do not change the final set in place.
+Freeze refuses overwrite, incomplete/live-non-A/mixed runs or more than three.
+Task SHA-256 covers `tasks.json`, `hidden_tests.json`, `mock_solutions.json`,
+in that order: for each append UTF-8 filename, NUL, decimal byte length, NUL,
+bytes with CRLF normalized to LF. Verify with [suites.py](suites.py).
+The broader protocol hash also covers run configuration, runner and package
+Python source. The historical v1 generation archive remains reproducible.
 
-An existing JSONL is automatically resumed by `(task_id, arm)`; completed failures
-and engine errors are also skipped. To rerun them, choose a new output file and
-report it as a separate experiment. No overwrite or cherry-picking is performed.
-The protocol hash covers model configuration, seeds, timeouts, exact prompts,
-task specs, hidden tests, scripted fixtures, harness source and package Python
-source. CRLF/LF differences are normalized. Changing any of these rejects
-resumption; changing selected arms/tasks, output path or quota threshold does not.
-Malformed/truncated records and duplicate task/arm records fail explicitly.
-Do not run multiple processes against one output file.
+## Difficulty spread and API coverage
 
-To extend the **published baseline**, append later arms to the corrected log,
-using the same default model settings, after the Claude quota reset:
+| Coding task | Main interacting constraints |
+|---|---|
+| transaction_frames | Nested failure isolation, ignored-move validation, self transfers |
+| escaped_records | Escaped delimiters, quotes, LF data and terminal records |
+| capped_apportion | Two-level grouped allocation, saturation, exact remainders/ties |
+| wall_occurrences | DST gaps/both folds, half-open UTC range, half-hour transitions |
+| patch_spans | Original offsets, insertion order, overlap validation |
+| ttl_lru | Nested rollback, persistent clock/observations, expiry and LRU |
+| nested_expansion | Slicing enormous symbolic repeats, eager syntax validation |
+| ragged_walk | Retained direction, disconnected restarts, empty/ragged rows |
+| dependency_waves | Cancellation, maximum-cardinality resource-constrained waves |
+| significant_round | Exact rational quotients, ties/carry, thousands-digit coefficients |
+| escaped_glob | Eager parsing, escaped ranges, lexicographic star capture lengths |
+| rational_expression | Lazy branches, exact fractions, symbolic polynomial cancellation |
+| priority_overlay | Open/closed boundaries, singletons, infinities, label merging |
+| prefix_cents | Exact cumulative ties-to-even and signed cancellation |
+| utf8_rechunk | Split UTF-8/UTF-16, BOM preservation, whole code points, byte budgets |
+| folded_spans | Fold expansion, mark elision, multiple original boundary pairs |
+| lease_trace | Global fencing tokens, inclusive expiry, zero-duration success |
+| coupon_route | Required node subsequences, nonadjacent discounts, path tie breaks |
+| revision_log | Winning revisions, undo replay, reinsertion order, deep copies |
+| indented_records | Tab stops, ignored comments, JSON strings, nesting levels |
 
-```powershell
-python -m examples.cross_review_benchmark.harness --arms B,C,D --output examples/cross_review_benchmark/results/arm_a_regraded.jsonl
-```
+All coding items are intended harder than v1, with stateful bookkeeping,
+parsers, arithmetic and graph algorithms. API items cover Plan/Step naming,
+sentinels, round trips/checkpoints, verify/verified aliases, Store memory,
+CAS/prefix/provenance, SessionRegistry bind/rename/forget and engine aliases,
+Session events, Envelope factories/fields, Tool cloning/schema construction,
+and Codex policy/native-review options. Grading needs no live Claude engine.
 
-The quota brake uses `lazytools.projects.quota_telemetry.read_quota` if importable,
-checking **only the providers needed by the selected arm**, before construction
-and before every model call. It stops if any returned usage window is greater
-than `--quota-threshold` (default 95 percent). Missing, broken or timed-out
-telemetry produces a warning and skips the check. There is no Claude usage query
-in arm A. A mid-review stop writes `.partial.json` for audit and leaves that task
-unfinished; resume reruns it. `.status.json` records the stop reason. Provider
-transport retries are disabled at engine level; LazyBridge's Codex transport may
-still retry a failed startup before any turn was sent.
+## Limitations
 
-## Method and output
+Small n, correlated tasks, adaptive calibration on one writer, one sample per
+task/arm, two providers, small Python tasks only. API results measure executable
+LazyBridge usage, not general factual accuracy. Repeated themes and reused API
+anchors reduce effective sample size. Calibration can overfit Codex difficulty
+and favor/disfavor later reviewers. Original tasks do not guarantee the models
+have never seen package code or relevant documentation in training.
 
-| Arm | Writer | Reviewer | Maximum writer attempts |
-|---|---|---|---:|
-| A | CodexEngine | none | 1 |
-| B | ClaudeCodeEngine | none | 1 |
-| C | CodexEngine | ClaudeCodeEngine via `verify=` | 2 |
-| D | ClaudeCodeEngine | CodexEngine via `verify=` | 2 |
-
-All writers receive the identical `WRITER_PROMPT` plus the task's signature and
-docstring. The fixed reviewer system prompt is `REVIEWER_PROMPT` in [harness.py](harness.py).
-LazyBridge supplies the reviewer with the candidate source and original writer
-task in its own `Evaluate this output: ... Original task: ...` wrapper. The
-reviewer starts with `approved` or `rejected: <reason>`. On rejection the original
-writer receives only that reason as additional context. No hidden test results
-are fed back. `max_verify=2` means at most **two total attempts**, each reviewed;
-the second output is returned even if rejected. Rejection itself is not a task
-failure: final hidden pytest correctness determines pass/fail.
-
-Each task/arm has fresh engines and an ephemeral workspace/session. Codex's shell,
-unified exec, apps, plugins, browser, computer use, code host, memory, host skill
-discovery and multi-agent features are disabled through App Server config.
-Native web search is disabled. Claude has no file roots or native web tools and
-uses the engine's default empty setting sources. Both receive a `python_check`
-tool that can execute their own assertions in an isolated workspace containing
-only a copy of the public LazyBridge package. The check is logged and time-bounded.
-They can inspect that public API, so API scores measure tool-assisted API use.
-
-[tasks.py](tasks.py) contains only model-visible specs. [hidden_tests.py](hidden_tests.py)
-and [mock_fixtures.py](mock_fixtures.py) stay in the evaluator process. Hidden tests
-are materialized **after** the model finishes, in a different temporary directory.
-Each candidate is graded in a fresh pytest subprocess, without repository
-conftests, project pytest configuration or auto-loaded plugins. The subprocess
-imports LazyBridge from this checkout, irrespective of an unrelated editable
-installation. There is a hidden-test wall timeout (20 seconds by default).
-This is protocol separation for cooperative coding models, not an OS security
-sandbox for hostile code: arbitrary Python can access the host. Run unfamiliar
-models/code in an appropriately isolated VM/container. Models receive no path
-to the repository, hidden tests, reference solutions or previous results.
-“Hidden” means withheld during inference; publishing this directory deliberately
-makes tests available to humans for independent replication.
-
-JSONL includes candidate code, original prompts and retry context, writer and
-reviewer calls, verdicts, attempts, per-call envelope metadata (including reported
-model/provider), own checks, hidden pytest output, errors, time, quota readings,
-date, interpreter/platform and installed package/CLI versions. Subscription cost
-fields are not a monetary estimate. `.md` is regenerated after every completed
-record. Runtime and hidden-test errors count as failures; inspect their logs to
-distinguish infrastructure failures from wrong solutions. Pending tasks have no
-denominator. Coding and API items are never pooled in the summary.
-
-Saved outputs can be regraded without any engine or telemetry call, preserving
-the original log and all old grades in a new file. Every new row records the
-original generation protocol hash, previous grade, reason and regrade date.
-Regrading checks that specs/prompts, seed, mode and model configuration still
-match, and that the candidate equals the recorded model output. Disclose any
-changes to expectations; do not tune tests to favor a model.
-
-```powershell
-python -m examples.cross_review_benchmark.regrade --input cross_review_results.jsonl --output regraded_results.jsonl --reason "Describe the grader change"
-```
-
-The table reports pass counts/rates and Wilson 95% intervals with z=1.9599639845.
-For A/C and B/D it joins task IDs, lists baseline-fail/review-pass (“fixed”) and
-baseline-pass/review-fail (“broken”), and computes the two-sided exact McNemar
-p-value: twice the smaller Binomial(discordant_n, 0.5) tail, capped at 1. Zero
-discordances yields p=1; no paired records yields a pending comparison. The JSONL
-is the source of truth. Task lists appear in the table's Markdown comments.
-
-Mock responses cycle through four scripted scenarios by task index: correct and
-approved; wrong then repaired; correct then regressed after harmful feedback;
-wrong but approved. The pipeline executes real hidden pytest tests and the real
-Agent verification loop. Mock scores are **not model evidence**.
-
-## Original task inventory and intended difficulty
-
-Written specifically for this example; no public benchmark tasks were copied or
-consulted. Difficulty labels are prospective judgments, not calibrated scores.
-Simple cases should be reliable for a strong model; combined requirements should
-leave room for residual errors. Specs, test inputs and expected answers were frozen
-before the live baseline. The grader's import isolation was repaired after the run;
-assertions and task expectations were not changed. Both logs and the original
-protocol snapshot are published so this repair can be independently audited.
-
-| Coding item | Intended level | Principal pitfalls |
-|---|---|---|
-| gap_runs | easy | duplicate/negative runs, no mutation |
-| clipped_windows | easy | short tails, code points, bool validation |
-| cent_parts | hard | half-up cents, largest remainders, large Decimals |
-| fold_counts | medium | NFC/casefold/NFC, stable ordering |
-| utc_day | medium | offset crossing UTC date, reject naive timestamps |
-| month_anchor | hard | direct multi-month shift, leap years, bounds |
-| quiet_ranges | hard | half-open union/complement, validate empty horizon |
-| escaped_fields | medium | escape parity, empty fields, dangling escape |
-| carry_round | hard | prefix half-even rounding, cancellation, precision |
-| recent_keys | easy | hit promotion, zero capacity, bool validation |
-| braid_rows | medium | ragged alternating traversal, input mutation |
-| stable_scores | medium | NaN/infinity/zero ties, stable order |
-| near_duplicate | easy | inclusive distance, distinct indices, empty inputs |
-| path_reduce | medium | relative unmatched parents, lexical paths |
-| select_rank | easy | duplicates, invalid rank, no in-place sorting |
-| dense_labels | easy | exact Unicode comparison, empty string |
-| retry_slots | medium | inclusive budget, zeros, validation beyond stop |
-| end_match | easy | longest Unicode suffix, empty vs no match |
-| local_midnights | hard | DST, folds, skipped dates, UTC instant comparison |
-| aligned_batches | hard | negative global offsets, short first batch |
-
-Seven easy, seven medium and six hard coding tasks. Five separate API items
-exercise `Tool.wrap`, named `Plan` composition with `MockAgent`, `Envelope`
-construction, `Agent(verify=..., max_verify=...)`, and `Step` sentinel context.
-The pipeline API test observes actual `Plan` and `MockAgent` execution; merely
-returning the expected string does not pass.
-
-## Limitations and interpretation
-
-- Small n (20 coding + 5 API items), one run per task/arm and two providers. Wilson
-  intervals are descriptive; these hand-selected tasks are not a random sample of
-  all programming work. Tasks are related, so independence assumptions are weak.
-- A/C and B/D use the same specs but independent initial generations. “Fixed”
-  and “broken” are paired outcome transitions, not proof the reviewer caused that
-  exact candidate's change. There is no shared initial candidate, self-review arm,
-  same-provider review control or matched extra-compute control. Extra retries,
-  model randomness and check usage can explain changes as well as provider diversity.
-- No broad hallucination claim follows from small Python coding and API-use tasks.
-  Passing finite tests is not proof of full correctness; the suite can miss bugs.
-  The reference solutions check test consistency, not exhaustive oracle validity.
-- Engine/tool environments differ despite matched Python checks and prompts. The
-  real package is available for API checks. Subscription limits may interrupt runs.
-- Default Codex model is explicitly `gpt-6.1-sol`, reasoning `high`; Claude defaults
-  to the moving `sonnet` alias. Pin `--claude-model` to an available dated ID for a
-  later experiment, using a new JSONL if configuration changes. Compare reported
-  model metadata and execution dates: subscriptions/backends can change silently.
-- Publishing makes future training contamination possible. This first run avoids
-  copying known benchmarks but cannot prove zero overlap with private training data.
-- Two paired comparisons per category are exploratory; no multiple-comparison
-  correction or preregistered significance claim. Do not market improvements from
-  mock data or an unpaired baseline. Keep the homepage claim unsubstantiated until
-  live reviewed arms are measured, and publish any negative result.
-
-The initial live baseline scored **20/20 coding** (Wilson 95% CI 83.9%-100%) and
-**2/5 API** (11.8%-76.9%) on 2026-10-11 using `gpt-6.1-sol`, high reasoning,
-Codex CLI 0.160.0 and LazyBridge 1.8.0. All 25 candidates were regraded after the
-isolation repair; **no pass/fail outcome changed**. The coding baseline has a
-ceiling effect: C cannot improve its pass count on this run. There is no measured
-cross-provider review benefit or refutation yet, since B/C/D have not run.
-
-See [results/NOTES.md](results/NOTES.md) for execution details and failures,
-[results/arm_a_regraded.md](results/arm_a_regraded.md) for the corrected summary,
-and [results/arm_a_regraded.jsonl](results/arm_a_regraded.jsonl) for appendable data.
-The original [results/arm_a.jsonl](results/arm_a.jsonl) and
-[results/generation_protocol.zip](results/generation_protocol.zip) are retained.
-Arms B/C/D are intentionally left for the operator after the Claude quota reset.
-
-## Verification
-
-```powershell
-python -m pytest tests/unit/test_cross_review_benchmark.py -q
-python -m ruff check examples/cross_review_benchmark tests/unit/test_cross_review_benchmark.py
-python -m ruff format --check examples/cross_review_benchmark tests/unit/test_cross_review_benchmark.py
-python -m pytest
-```
-
-The harness contract tests were written and run before implementation (initial
-failure: missing benchmark module). They exercise all 100 mock task/arm records,
-all 25 reference solutions, resume protection, grader timeouts/syntax errors,
-statistics, a quota stop during verification, namespace isolation, future imports
-in own checks, and regrading provenance. The repository's default full
-suite excludes explicitly marked `live` and `heavy_render` tests.
+Subscription routing/defaults change; requested IDs are not immutable weights.
+Retain dates, reported metadata, effort and CLI/SDK/package versions. A ceiling
+or floor after allowed revisions must be reported. Wilson intervals are
+descriptive binomial intervals, with dependence/adaptation limiting inference.
+McNemar tests are exploratory, uncorrected for multiple comparisons. Finite
+hidden tests miss bugs. Binary task scores weight a wrong exception type and
+a wrong core algorithm equally; inspect the recorded failures for severity.
+No result here validates a universal marketing claim.
