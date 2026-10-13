@@ -1,0 +1,16 @@
+{
+  "session_id": "sess-8",
+  "nodes": [
+    {
+      "id": "id-1",
+      "name": "agent",
+      "provider": "anthropic",
+      "model": "m",
+      "system": null,
+      "engine_type": "",
+      "tools": [],
+      "type": "agent"
+    }
+  ],
+  "edges": []
+}

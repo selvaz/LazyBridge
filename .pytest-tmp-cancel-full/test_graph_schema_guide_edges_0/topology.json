@@ -1,0 +1,81 @@
+{
+  "session_id": "31910f8e-0c0b-4862-9947-2e618ba76c83",
+  "nodes": [
+    {
+      "id": "monitor",
+      "name": "monitor",
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "system": null,
+      "engine_type": "LLMEngine",
+      "tools": [],
+      "type": "agent"
+    },
+    {
+      "id": "orchestrator",
+      "name": "orchestrator",
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "system": null,
+      "engine_type": "LLMEngine",
+      "tools": [],
+      "type": "agent"
+    },
+    {
+      "id": "researcher",
+      "name": "researcher",
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "system": null,
+      "engine_type": "LLMEngine",
+      "tools": [],
+      "type": "agent"
+    },
+    {
+      "id": "writer",
+      "name": "writer",
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "system": null,
+      "engine_type": "LLMEngine",
+      "tools": [],
+      "type": "agent"
+    },
+    {
+      "id": "intake_router",
+      "name": "intake_router",
+      "routes": {
+        "bug": "researcher",
+        "feature": "writer"
+      },
+      "default": "researcher",
+      "type": "router"
+    }
+  ],
+  "edges": [
+    {
+      "from": "orchestrator",
+      "to": "researcher",
+      "label": "researcher",
+      "type": "tool"
+    },
+    {
+      "from": "orchestrator",
+      "to": "writer",
+      "label": "writer",
+      "type": "tool"
+    },
+    {
+      "from": "monitor",
+      "to": "orchestrator",
+      "label": "observes",
+      "type": "context"
+    },
+    {
+      "from": "orchestrator",
+      "to": "writer",
+      "label": "if publish=true",
+      "type": "router"
+    }
+  ]
+}
