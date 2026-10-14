@@ -1,0 +1,5 @@
+{
+  "task_sha256": "b3fb9b526e61175fde9021f10b5c54ed8b9d01b5e2fb303503b2726b46dfbb4f",
+  "origin": "2157a6f",
+  "note": "Exact v1 specifications, corrected hidden tests and mock references. Original generation protocol retained in results/generation_protocol.zip."
+}
