@@ -18,7 +18,7 @@ from examples.cross_review_benchmark.harness import (
     summary,
     writer_prompt,
 )
-from examples.cross_review_benchmark.tasks import TASKS
+from examples.cross_review_benchmark.suites import load_suite
 
 
 def regrade(input_path, output_path, reason, *, timeout=20):
@@ -50,12 +50,20 @@ def regrade(input_path, output_path, reason, *, timeout=20):
     ]
     if first["mock"]:
         argv.append("--mock")
+    # Grade against the suite the rows were generated with (v1 logs predate the field).
+    suite_name, phase = first.get("suite", "v1"), first.get("phase", "frozen")
+    argv += ["--suite", suite_name, "--phase", phase]
     args = parse_args(argv)
     fingerprint = protocol_hash(args)
-    inventory = {task.id: task for task in TASKS}
+    suite = load_suite(suite_name)
+    inventory = {task.id: task for task in suite.tasks}
     for row in rows:
         if row["model_config"] != models or row["seed"] != first["seed"] or row["mock"] != first["mock"]:
             raise ValueError("Incompatible model configuration, mode or seed in input")
+        if row.get("suite", "v1") != suite_name or row.get("phase", "frozen") != phase:
+            raise ValueError("Mixed suites or phases in input; regrade each separately")
+        if row["task_id"] not in inventory:
+            raise ValueError(f"Task {row['task_id']} is not in suite {suite_name}")
         task = inventory[row["task_id"]]
         calls = row["writer_calls"]
         if calls and calls[0]["prompt"] != writer_prompt(task):
@@ -79,7 +87,7 @@ def regrade(input_path, output_path, reason, *, timeout=20):
             row["protocol_hash"] = fingerprint
             started = time.perf_counter()
             if original.get("grade") is not None:
-                row["grade"] = grade(inventory[row["task_id"]], row["candidate_code"], Path(temp), timeout)
+                row["grade"] = grade(inventory[row["task_id"]], row["candidate_code"], Path(temp), timeout, suite=suite)
                 row["passed"] = row["grade"]["passed"]
                 row["error"] = row["grade"]["error"]
             # Engine errors remain failures: no fabricated candidate or new engine call.

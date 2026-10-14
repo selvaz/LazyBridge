@@ -19,6 +19,9 @@ def freeze(paths):
         raise ValueError("v2 already frozen; never overwrite registration")
     if not 1 <= len(paths) <= 3:
         raise ValueError("one initial calibration and at most two revisions")
+    # Count distinct runs, not arguments: the same calibration passed twice is not a revision.
+    if len({Path(p).resolve() for p in paths}) != len(paths):
+        raise ValueError("duplicate calibration run; each revision must be a distinct run")
     runs = []
     for path in paths:
         rows = load_rows(path)
@@ -59,6 +62,9 @@ def freeze(paths):
                 "finished_at": max(r["finished_at"] for r in rows),
             }
         )
+    # A copied file under another name is still the same run.
+    if len({(run["started_at"], run["finished_at"]) for run in runs}) != len(runs):
+        raise ValueError("duplicate calibration run; each revision must be a distinct run")
     current = directory_hash(suite.directory)
     if runs[-1]["task_sha256"] != current:
         raise ValueError("latest complete calibration must use current design")
