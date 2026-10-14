@@ -258,7 +258,10 @@ class DurableBlackboard:
                     f"REJECTED: task {task_index} is {task.get('status')}, not todo or failed -- "
                     "only a task nobody is actively working on can be cancelled."
                 )
-            task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=time.time())
+            # A failed task already closed at its failure time; cancelling only
+            # reclassifies it, so it keeps that time instead of looking new.
+            closed_at = task.get("completed_at") if task.get("status") == "failed" else None
+            task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=closed_at or time.time())
             new_doc = {**doc, "tasks": tasks}
             return new_doc, self._render(new_doc)
 

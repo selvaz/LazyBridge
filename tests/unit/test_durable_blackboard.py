@@ -261,6 +261,19 @@ def test_cancel_task_accepts_a_task_parked_after_exhausting_its_attempts():
     assert task["cancel_reason"] == "replacement task completed the work"
 
 
+def test_cancelling_a_failed_task_keeps_its_original_completion_time():
+    store = Store()
+    board = _board(store, max_attempts=1)
+    board.set_plan("shared", ["exhausted task"])
+    board.claim_next(owner="w")
+    board.mark_failed(0, "worker was interrupted", owner="w")
+    failed_at = board.snapshot().tasks[0]["completed_at"]
+
+    board.cancel_task(0, "exhausted task", "superseded")
+
+    assert board.snapshot().tasks[0]["completed_at"] == failed_at
+
+
 @pytest.mark.parametrize("terminal_status", ["done", "cancelled"])
 def test_cancel_task_refuses_done_or_already_cancelled_tasks(terminal_status):
     store = Store()
