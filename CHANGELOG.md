@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.2] — 2026-10-15
+
 ### Documentation
 
 - **The bundled skill is now a short index plus reference files.**
