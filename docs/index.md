@@ -95,8 +95,7 @@ and opt-in Session/exporters expose results and run evidence.
 
 ## Maturity
 
-This documentation targets **LazyBridge 1.8.0**, plus the post-release Codex
-transport fixes on main. The core is Stable; this does not establish a Stable
+This documentation targets **LazyBridge 1.8.1**. The core is Stable; this does not establish a Stable
 guarantee for every engine or extension. LazyTools 0.10.1 declares Alpha.
 
 | Subsystem | Status | Boundary |
