@@ -33,9 +33,9 @@ engine resumes a durable native conversation, `Memory` is no longer prepended
 ```python
 from lazybridge import Store
 
-store = Store(db="state.sqlite")        # Store() = in-memory, lost on exit
+store = Store(db="state.sqlite")  # Store() = in-memory, lost on exit
 store.write("job:2026-10-15", {"status": "done"}, agent_id="ingest")
-entry = store.read_entry("job:2026-10-15")   # value, written_at, agent_id
+entry = store.read_entry("job:2026-10-15")  # value, written_at, agent_id
 ok = store.compare_and_swap("lock:report", None, "worker-1")
 ```
 
@@ -86,8 +86,9 @@ def no_secrets(text: str) -> GuardAction:
     return GuardAction(allowed="sk-live-" not in text, message="secret detected")
 
 
-guard = GuardChain(ContentGuard(input_fn=no_secrets, output_fn=no_secrets),
-                   LLMGuard(judge_agent, "Reject requests for personal data."))
+guard = GuardChain(
+    ContentGuard(input_fn=no_secrets, output_fn=no_secrets), LLMGuard(judge_agent, "Reject requests for personal data.")
+)
 agent = Agent(engine=LLMEngine("claude-opus-5-5"), guard=guard, name="guarded")
 ```
 

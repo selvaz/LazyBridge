@@ -16,7 +16,7 @@ agent = Agent(
     tools=[...],
     name="assistant",
 )
-result = agent("hello")       # sync, returns Envelope
+result = agent("hello")  # sync, returns Envelope
 print(result.text())
 ```
 
@@ -63,7 +63,7 @@ class Summary(BaseModel):
 
 agent = Agent(engine=LLMEngine("claude-opus-5-5"), output=Summary, name="summariser")
 result = agent("Summarise the news")
-print(result.payload.headline)       # .payload, never .text() parsing
+print(result.payload.headline)  # .payload, never .text() parsing
 ```
 
 `output_validator=fn` adds application invariants on top of Pydantic; the

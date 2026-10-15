@@ -75,7 +75,7 @@ suite = EvalSuite(
     EvalCase("Capital of France?", check=contains("Paris")),
     EvalCase("Summarise the memo", check=llm_judge(judge_agent, "Is it faithful?")),
 )
-report = suite.run(agent)          # await suite.arun(agent) in async code
+report = suite.run(agent)  # await suite.arun(agent) in async code
 ```
 
 Helpers: `exact_match`, `contains`, `not_contains`, `min_length`,

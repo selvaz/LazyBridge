@@ -49,22 +49,30 @@ alias). Codex only: `review_target`, `thread_source`.
 | `CodingAgentConfig.writer(gate)` | `permission_mode="default"`, **no write tools added** | `workspace-write`, `on-request` | sent to the gate |
 
 ```python
-from lazybridge import (Agent, ClaudeCodeEngine, ClaudeCodePolicy, CodexEngine,
-                        CodingAgentConfig, TerminalApprovalGate)
+from lazybridge import Agent, ClaudeCodeEngine, ClaudeCodePolicy, CodexEngine, CodingAgentConfig, TerminalApprovalGate
 
-gate = TerminalApprovalGate()                      # dev only; production: TieredGate
-claude_writer = Agent(name="writer", engine=ClaudeCodeEngine(
-    cwd=repo, file_roots=[repo], request_timeout=600,
-    config=CodingAgentConfig(
-        claude=ClaudeCodePolicy(permission_mode="default",
-                                preapprove_application_tools=False,
-                                extra_tools=("Write", "Edit", "Bash")),
-        approval_gate=gate,
+gate = TerminalApprovalGate()  # dev only; production: TieredGate
+claude_writer = Agent(
+    name="writer",
+    engine=ClaudeCodeEngine(
+        cwd=repo,
+        file_roots=[repo],
+        request_timeout=600,
+        config=CodingAgentConfig(
+            claude=ClaudeCodePolicy(
+                permission_mode="default", preapprove_application_tools=False, extra_tools=("Write", "Edit", "Bash")
+            ),
+            approval_gate=gate,
+        ),
     ),
-))
-codex_reviewer = Agent(name="reviewer", engine=CodexEngine(
-    cwd=repo, config=CodingAgentConfig.reviewer(),
-))
+)
+codex_reviewer = Agent(
+    name="reviewer",
+    engine=CodexEngine(
+        cwd=repo,
+        config=CodingAgentConfig.reviewer(),
+    ),
+)
 ```
 
 Policy fields. `ClaudeCodePolicy`: `permission_mode` (None = auto `dontAsk` /
@@ -101,10 +109,10 @@ Rules that bite:
 ```python
 from lazybridge import Agent, CodexEngine, SessionRegistry
 
-registry = SessionRegistry()            # ~/.lazybridge/sessions.json or $LAZYBRIDGE_SESSIONS_FILE
+registry = SessionRegistry()  # ~/.lazybridge/sessions.json or $LAZYBRIDGE_SESSIONS_FILE
 engine = CodexEngine(cwd=repo, session_alias="reviewer", session_registry=registry)
 Agent(name="reviewer", engine=engine)("Remember the word PINEAPPLE.")
-print(engine.thread_id)                  # native id, bound to the alias
+print(engine.thread_id)  # native id, bound to the alias
 ```
 
 - Default runs are ephemeral and **cannot** be resumed later; choose

@@ -15,6 +15,7 @@ def get_weather(city: str) -> str:
     """Return the current weather for ``city``."""
     ...
 
+
 agent = Agent(engine=LLMEngine("claude-opus-5-5"), tools=[get_weather], name="weather")
 ```
 
@@ -60,7 +61,7 @@ from lazybridge import Agent, AgentPool, LLMEngine, conclude
 pool = AgentPool(max_depth=25)
 alice = Agent(engine=LLMEngine("claude-opus-5-5"), name="alice", tools=[pool.as_tool(), conclude])
 bob = Agent(engine=LLMEngine("claude-opus-5-5"), name="bob", tools=[pool.as_tool(), conclude])
-pool.register(alice, bob)            # after construction: breaks the cycle
+pool.register(alice, bob)  # after construction: breaks the cycle
 result = alice("...")
 ```
 
@@ -94,13 +95,13 @@ dropped; pass `strict_native_tools=True` to the provider to raise
 MCP is **not** in LazyBridge since 0.8 / 0.9 (shims removed). Use LazyTools:
 
 ```python
-from lazytools.connectors.mcp import MCP   # pip install "lazytoolkit[mcp]"
+from lazytools.connectors.mcp import MCP  # pip install "lazytoolkit[mcp]"
 
 fs = MCP.stdio(
     "fs",
     command="npx",
     args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-    allow=["fs.read_*", "fs.list_*"],      # allow= or deny= is REQUIRED
+    allow=["fs.read_*", "fs.list_*"],  # allow= or deny= is REQUIRED
 )
 docs = MCP.http("docs", "https://example.com/mcp", allow=["docs.search_*"])
 agent = Agent(engine=LLMEngine("claude-opus-5-5"), tools=[fs, docs], name="mcp_user")
