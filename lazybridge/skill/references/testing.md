@@ -29,7 +29,8 @@ It works anywhere an `Agent` does: `tools=[mock]`, `Plan(Step(mock))`,
 
 `responses` is resolved per call:
 
-1. callable `fn(env)` (sync or async), whose return is resolved again;
+1. callable `fn(env)` (sync or async): its return value is used as-is (a dict or list it returns
+   becomes the payload; it is not matched again);
 2. dict: substring of `env.task` → response, `"*"` as catch-all;
 3. list: one per call (exhaustion raises unless `cycle=True`);
 4. scalar: same every call.

@@ -83,7 +83,7 @@ from lazybridge import ContentGuard, GuardAction, GuardChain, LLMGuard
 
 
 def no_secrets(text: str) -> GuardAction:
-    return GuardAction(allowed="BEGIN PRIVATE KEY" not in text, message="secret detected")
+    return GuardAction(allowed="sk-live-" not in text, message="secret detected")
 
 
 guard = GuardChain(ContentGuard(input_fn=no_secrets, output_fn=no_secrets),

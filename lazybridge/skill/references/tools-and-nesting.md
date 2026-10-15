@@ -85,8 +85,9 @@ engine = LLMEngine("claude-opus-5-5", native_tools=[NativeTool.WEB_SEARCH])
 `COMPUTER_USE`, `IMAGE_GENERATION`, `GOOGLE_SEARCH`, `GOOGLE_MAPS`. They run
 server-side at the provider, go on the **engine** (not in `tools=`), and
 `CODE_EXECUTION` / `COMPUTER_USE` need `allow_dangerous_native_tools=True`.
-Unsupported combinations raise `UnsupportedNativeToolError`
-(`lazybridge.matrix.native_tool_support()` lists support).
+An unsupported combination (e.g. `WEB_SEARCH` with DeepSeek) emits a warning and the tool is
+dropped; pass `strict_native_tools=True` to the provider to raise
+`UnsupportedNativeToolError` instead (`lazybridge.matrix.native_tool_support()` lists support).
 
 ## MCP servers and other providers of tools
 
