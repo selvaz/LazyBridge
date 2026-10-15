@@ -3,6 +3,30 @@
 The LazyBridge Claude Skill ships *with the library*. Three install
 paths depending on which Claude surface you use.
 
+## Layout
+
+The skill uses progressive disclosure, so loading it costs little context:
+
+```text
+lazybridge/skill/
+├── SKILL.md            # short index: mental model, golden rules, routing table
+└── references/         # one file per area, read only when the task needs it
+    ├── agents-and-engines.md
+    ├── coding-engines.md
+    ├── extensions.md
+    ├── plan-and-pipelines.md
+    ├── providers-and-models.md
+    ├── sessions-and-memory.md
+    ├── testing.md
+    └── tools-and-nesting.md
+```
+
+Always install or upload the **whole directory**: `SKILL.md` routes to the
+reference files by relative path. `lazybridge.skill.skill_path()` returns the
+directory and `lazybridge.skill.reference_paths()` lists the reference files.
+Any assistant that reads skills as a folder with a `SKILL.md` (Codex reads
+`~/.codex/skills/<name>/SKILL.md`) can use the same directory.
+
 ## Path 1 — Claude Code (recommended)
 
 Symlink the bundled skill directory into your local skills folder:

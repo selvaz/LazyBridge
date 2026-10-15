@@ -1,8 +1,10 @@
 """Skill-doc drift check.
 
-Minimum-viable check around the hand-maintained
-``lazybridge/skill/SKILL.md``.  Earlier alpha shipped a fragment-based
-generator that wrote tier files (``01_basic.md`` … ``04_advanced.md``);
+Minimum-viable check around the hand-maintained skill bundle: the
+``lazybridge/skill/SKILL.md`` index plus the ``lazybridge/skill/references/*.md``
+files it routes to (progressive disclosure: the assistant loads the short
+index and reads a reference file only when the task needs that area).
+Earlier alpha shipped a fragment-based generator that wrote tier files (``01_basic.md`` … ``04_advanced.md``);
 that pipeline was retired in 0.7.9 in favour of one curated SKILL.md.
 
 Until then, ``--check`` enforces three light invariants that catch the
@@ -10,11 +12,13 @@ practical drift modes we care about:
 
 1. ``lazybridge/skill/SKILL.md`` exists and is non-empty.
 2. Every public symbol in ``lazybridge.__all__`` is mentioned somewhere
-   in ``SKILL.md`` (case-sensitive substring match against the literal
-   identifier — agent docs are written in code-fenced examples so the
-   identifier appears verbatim).
-3. ``SKILL.md`` does not still mention symbols that were deleted from
+   in the bundle (SKILL.md or a reference file; word-boundary match against
+   the literal identifier — agent docs are written in code-fenced examples
+   so the identifier appears verbatim).
+3. The bundle does not still mention symbols that were deleted from
    the public API (catches stale references after a Phase-2 deletion).
+4. Every ``references/<file>.md`` named in SKILL.md exists, and every
+   reference file on disk is named in SKILL.md (no dead routes, no orphans).
 
 Usage::
 
@@ -86,6 +90,32 @@ _SKILL_OPTIONAL: frozenset[str] = frozenset(
 def _skill_path() -> Path:
     """Return the absolute path to ``lazybridge/skill/SKILL.md``."""
     return Path(__file__).resolve().parent.parent / "skill" / "SKILL.md"
+
+
+def _references_dir() -> Path:
+    """Return the directory holding the skill's reference files."""
+    return _skill_path().parent / "references"
+
+
+def _bundle_text(skill_text: str) -> str:
+    """SKILL.md plus every reference file, in a stable order."""
+    parts = [skill_text]
+    ref_dir = _references_dir()
+    if ref_dir.is_dir():
+        for ref in sorted(ref_dir.glob("*.md")):
+            parts.append(ref.read_text(encoding="utf-8"))
+    return "\n\n".join(parts)
+
+
+def _reference_problems(skill_text: str) -> list[str]:
+    """Return dead routes (named in SKILL.md, missing on disk) and orphans
+    (on disk, never named in SKILL.md)."""
+    ref_dir = _references_dir()
+    named = set(re.findall(r"references/([A-Za-z0-9_.-]+\.md)", skill_text))
+    on_disk = {p.name for p in ref_dir.glob("*.md")} if ref_dir.is_dir() else set()
+    problems = [f"missing reference file: references/{n}" for n in sorted(named - on_disk)]
+    problems += [f"reference file not routed from SKILL.md: references/{n}" for n in sorted(on_disk - named)]
+    return problems
 
 
 def _public_symbols() -> list[str]:
@@ -164,12 +194,14 @@ def build(check: bool) -> int:
         print("lazybridge.__all__ is empty; skipping drift check.", file=sys.stderr)
         return 0
 
-    missing = _missing_from_skill(skill_text, symbols)
-    stale = _stale_in_skill(skill_text)
+    bundle = _bundle_text(skill_text)
+    missing = _missing_from_skill(bundle, symbols)
+    stale = _stale_in_skill(bundle)
+    ref_problems = _reference_problems(skill_text)
 
-    if not missing and not stale:
+    if not missing and not stale and not ref_problems:
         if not check:
-            print(f"SKILL.md OK ({len(symbols)} public symbols, no drift).")
+            print(f"Skill bundle OK ({len(symbols)} public symbols, no drift).")
         return 0
 
     if missing:
@@ -186,10 +218,13 @@ def build(check: bool) -> int:
         )
         for s in stale:
             print(f"  {s}", file=sys.stderr)
+    for problem in ref_problems:
+        print(problem, file=sys.stderr)
 
     if check:
         print(
-            "Drift detected. Update lazybridge/skill/SKILL.md or add an "
+            "Drift detected. Update lazybridge/skill/SKILL.md (or a file under "
+            "lazybridge/skill/references/) or add an "
             "intentional entry to _SKILL_OPTIONAL with a rationale.",
             file=sys.stderr,
         )
