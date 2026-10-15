@@ -8,6 +8,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- **The bundled skill is now a short index plus reference files.**
+  `lazybridge/skill/SKILL.md` (was ~700 lines) is a ~130-line index with the
+  mental model, golden rules and a routing table; the detail moved to
+  `lazybridge/skill/references/*.md` (agents and engines, plans and pipelines,
+  tools and nesting, sessions and memory, coding engines, providers and models,
+  testing, extensions), which an assistant reads only when the task needs that
+  area. Content brought up to 1.8.1: coding-engine profiles and write grants,
+  durable sessions and `SessionRegistry`, native review, approval queues,
+  background delegation, `DurableBlackboard`, knowledge base, control plane,
+  current tier aliases. Corrected stale guidance: `Plan(on_concurrent=...)`
+  accepts `"fail"`/`"fork"` (not `"queue"`), `ClaudeCodeEngine` can expose
+  `Write`/`Edit`/`Bash` through `ClaudeCodePolicy(extra_tools=...)` since 1.2.0,
+  and custom engines implement `lazybridge.engines.base.Engine` (there is no
+  `BaseEngine`). `lazybridge.skill.reference_paths()` lists the reference
+  files; the drift check (`python -m lazybridge.skill_docs._build --check`)
+  now scans the whole bundle and fails on dead or unrouted reference files.
+
 ## [1.8.1] — 2026-10-14
 
 ### Added
