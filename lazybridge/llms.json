@@ -1,6 +1,6 @@
 {
   "package": "lazybridge",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "stability": "stable",
   "maturity_note": "Stable core API; coding engines and extensions retain their documented subsystem boundaries. See the docs maturity table.",
   "homepage": "https://github.com/selvaz/LazyBridge",

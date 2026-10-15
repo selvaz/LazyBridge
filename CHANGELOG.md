@@ -8,6 +8,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.1] — 2026-10-14
+
+### Added
+
+- `examples/cross_review_benchmark/`: a reproducible cross-provider review benchmark
+  (frozen v2 suite, calibration records, regrading). Examples only; no library change.
+
 ### Changed
 
 - **`DurableBlackboard.cancel_task` accepts exhausted tasks.** A task parked

@@ -1,7 +1,7 @@
 # For LLM assistants
 
 Use the current documentation when generating LazyBridge code. This refresh
-targets 1.8.0 plus post-release Codex transport fixes, including Claude Code /
+targets 1.8.1, including the Codex transport fixes and Claude Code /
 Codex engines, native aliases and opposite-engine review.
 
 ## Available surfaces
