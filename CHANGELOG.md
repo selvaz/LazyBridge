@@ -8,6 +8,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scope Claude Code session and alias locks to the running event loop, so
+  contended durable sessions can be reused across synchronous Agent calls.
+- Enforce `file_roots` for `NotebookEdit`'s `notebook_path` in the Claude Code
+  confinement hook, including under allow rules and permissive permission modes.
+
+### Changed
+
+- `CodingAgentConfig.reviewer()` and `.writer(gate)` disable native web tools
+  by default for Claude and Codex. Pass `web=True` to either profile to opt in;
+  the bare `ClaudeCodeEngine` constructor keeps its existing web default.
+
+### Documentation
+
+- Document notebook confinement, profile web opt-in, and consumer guidance to
+  set `request_timeout=None` or at least 1800 seconds for real coding runs;
+  the timeout covers the whole run including retries.
+
 ## [1.8.2] — 2026-10-15
 
 ### Documentation

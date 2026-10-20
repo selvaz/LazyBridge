@@ -45,8 +45,16 @@ alias). Codex only: `review_target`, `thread_source`.
 | Profile | Claude | Codex | Python application tools |
 |---|---|---|---|
 | default `CodingAgentConfig()` | read/web built-ins, auto permission mode | read-only, approval `never` | preapproved |
-| `CodingAgentConfig.reviewer()` | read/web, no write extras | read-only, `never` | fail closed without a gate |
-| `CodingAgentConfig.writer(gate)` | `permission_mode="default"`, **no write tools added** | `workspace-write`, `on-request` | sent to the gate |
+| `CodingAgentConfig.reviewer()` | read, web disabled, no write extras | read-only, `never`, web search disabled | fail closed without a gate |
+| `CodingAgentConfig.writer(gate)` | `permission_mode="default"`, web disabled, **no write tools added** | `workspace-write`, `on-request`, web search disabled | sent to the gate |
+
+Both profiles default to `web=False`. Opt in explicitly with
+`CodingAgentConfig.reviewer(web=True)` or `CodingAgentConfig.writer(gate, web=True)`:
+Claude removes the `WebSearch`/`WebFetch` deny rules and Codex selects live web
+search. Claude's profile deny rules apply even with `ClaudeCodeEngine(web=True)`;
+the engine's `web=False` still omits those tools when the profile opts in.
+The compatibility profile `CodingAgentConfig()` and the bare
+`ClaudeCodeEngine` constructor retain their existing web defaults.
 
 ```python
 from lazybridge import Agent, ClaudeCodeEngine, ClaudeCodePolicy, CodexEngine, CodingAgentConfig, TerminalApprovalGate
@@ -57,7 +65,8 @@ claude_writer = Agent(
     engine=ClaudeCodeEngine(
         cwd=repo,
         file_roots=[repo],
-        request_timeout=600,
+        web=False,
+        request_timeout=None,
         config=CodingAgentConfig(
             claude=ClaudeCodePolicy(
                 permission_mode="default", preapprove_application_tools=False, extra_tools=("Write", "Edit", "Bash")
@@ -71,6 +80,7 @@ codex_reviewer = Agent(
     engine=CodexEngine(
         cwd=repo,
         config=CodingAgentConfig.reviewer(),
+        request_timeout=None,
     ),
 )
 ```
@@ -91,6 +101,10 @@ Rules that bite:
   need `extra_tools`. Granting is not preapproving (`allowed_tools` does that).
 - `file_roots` confine file hooks only. `Bash` (or any unconfinable built-in)
   without an approval gate is refused at construction (`ValueError`).
+- The `PreToolUse` confinement hook covers `Read`/`Glob`/`Grep`/`Edit`/`Write`/
+  `NotebookEdit`, including notebook edits passed via `notebook_path`. It checks
+  the first non-empty `file_path`, `notebook_path`, or `path` (otherwise `cwd`)
+  against `file_roots`, even under allow rules or permissive permission modes.
 - Native read-only sandboxes do not sandbox your Python tools.
 - `ApprovalRequest` (provider, kind = tool/command/file_change/permissions/
   user_input, name, arguments, cwd, reason, thread_id, turn_id, raw) →
@@ -125,8 +139,8 @@ print(engine.thread_id)  # native id, bound to the alias
   `default_session_registry()` / `set_default_session_registry()` in
   `lazybridge.engines`.
 - On resume the engine stops prepending `Memory`; explicit `context=` and
-  `sources=` still flow. Runs/streams serialize in-process per engine, alias
-  and id; there is **no cross-process transcript lock**.
+  `sources=` still flow. Runs/streams serialize per engine, alias and id on
+  the running event loop; there is **no cross-loop or cross-process transcript lock**.
 - Claude `session_mode="runtime"` parks the id on one LazyBridge `Session`
   (process-local); it is not a substitute for the registry.
 
@@ -158,8 +172,14 @@ without `review_target`. For a `verify=` judge use an ordinary prompted agent.
 - `CodexTurnUncertain`: a durable turn may already have run tools. Resume and
   inspect before deciding; never blindly replay side effects.
 - Missing CLI/executable is permanent, not transient.
-- Long repository tasks: raise `request_timeout` and align any MCP host
-  timeout (the default 120 s bounds all retries).
+
+### Defaults to change in real runs
+
+Consumers of coding engines should set `request_timeout=None` (or at least
+`1800` seconds) for real repository work. The default `120` seconds covers the
+whole run including retries and backoff, rather than each attempt separately.
+Align any MCP host timeout with that budget too. This is consumer guidance;
+the engine timeout defaults are unchanged.
 
 ## Outside LazyBridge
 

@@ -322,27 +322,32 @@ class CodingAgentConfig:
     approval_gate: ApprovalGate | None = None
 
     @classmethod
-    def reviewer(cls) -> CodingAgentConfig:
-        """Read-only, non-interactive profile for code review agents."""
+    def reviewer(cls, *, web: bool = False) -> CodingAgentConfig:
+        """Read-only, non-interactive review profile; web access is opt-in."""
 
         return cls(
-            claude=ClaudeCodePolicy(preapprove_application_tools=False),
-            codex=CodexPolicy(preapprove_dynamic_tools=False),
+            claude=ClaudeCodePolicy(
+                preapprove_application_tools=False,
+                disallowed_tools=() if web else ("WebSearch", "WebFetch"),
+            ),
+            codex=CodexPolicy(preapprove_dynamic_tools=False, web_search="live" if web else "disabled"),
         )
 
     @classmethod
-    def writer(cls, approval_gate: ApprovalGate) -> CodingAgentConfig:
-        """Workspace writer profile: mutations require the supplied gate."""
+    def writer(cls, approval_gate: ApprovalGate, *, web: bool = False) -> CodingAgentConfig:
+        """Workspace writer: mutations require the supplied gate; web access is opt-in."""
 
         return cls(
             claude=ClaudeCodePolicy(
                 permission_mode="default",
                 preapprove_application_tools=False,
+                disallowed_tools=() if web else ("WebSearch", "WebFetch"),
             ),
             codex=CodexPolicy(
                 sandbox="workspace-write",
                 approval_policy="on-request",
                 preapprove_dynamic_tools=False,
+                web_search="live" if web else "disabled",
             ),
             approval_gate=approval_gate,
         )

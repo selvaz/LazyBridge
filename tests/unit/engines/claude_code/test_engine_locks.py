@@ -16,6 +16,7 @@ import pytest
 from lazybridge import Envelope
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+from lazybridge.engines.coding import loop_scoped_lock
 from lazybridge.engines.sessions import SessionRegistry
 
 
@@ -114,18 +115,14 @@ def _call(engine: ClaudeCodeEngine, mode: str):
 
 
 def _locks_free(*engines: ClaudeCodeEngine) -> bool:
-    return not any(e._own_lock.locked() for e in engines) and not any(
-        lock.locked() for lock in [*ClaudeCodeEngine._session_locks.values(), *ClaudeCodeEngine._alias_locks.values()]
-    )
-
-
-@pytest.fixture(autouse=True)
-def _fresh_class_locks():
-    ClaudeCodeEngine._session_locks.clear()
-    ClaudeCodeEngine._alias_locks.clear()
-    yield
-    ClaudeCodeEngine._session_locks.clear()
-    ClaudeCodeEngine._alias_locks.clear()
+    locks = [e._own_lock for e in engines]
+    for engine in engines:
+        if engine.session_id:
+            locks.append(loop_scoped_lock(f"claude-session:{engine.session_id}"))
+        if engine._alias is not None:
+            alias = engine._alias
+            locks.append(loop_scoped_lock(f"claude-alias:{alias.kind}:{alias.scope}:{alias.alias}"))
+    return not any(lock.locked() for lock in locks)
 
 
 class TestFirstTurns:
@@ -195,7 +192,6 @@ class TestFirstTurns:
             await asyncio.gather(first, second)
 
         asyncio.run(asyncio.wait_for(first_loop(), 10))
-        ClaudeCodeEngine._session_locks.clear()  # the class-wide id locks are a known, separate limitation
         asyncio.run(asyncio.wait_for(second_loop(), 10))
         assert sdk.resumes == [None, "sess-1", "sess-1", "sess-1"]
 
@@ -229,6 +225,39 @@ class TestFirstTurns:
 
 
 class TestSharedRawId:
+    @pytest.mark.parametrize("binding", ["id", "alias"])
+    @pytest.mark.parametrize("modes", [("run", "run"), ("run", "stream"), ("stream", "run"), ("stream", "stream")])
+    def test_shared_locks_still_serialise_after_contention_in_a_previous_loop(self, tmp_path, binding, modes):
+        sdk = GatedSdk("sess-loop", early=True)
+        kwargs: dict[str, Any] = {"session_id": "sess-loop"}
+        if binding == "alias":
+            kwargs = {
+                "cwd": str(tmp_path),
+                "session_alias": "loop-probe",
+                "session_registry": SessionRegistry(tmp_path / "sessions.json"),
+            }
+        one = ClaudeCodeEngine(client=sdk, **kwargs)
+        two = ClaudeCodeEngine(client=sdk, **kwargs)
+
+        async def scenario(offset: int) -> None:
+            first = asyncio.create_task(_call(one, modes[0]))
+            await sdk.entered(offset).wait()
+            second = asyncio.create_task(_call(two, modes[1]))
+            await settle()
+            assert not second.done(), "the waiter failed or bypassed the shared lock"
+            assert len(sdk.options) == offset + 1
+            sdk.gate(offset).set()
+            await sdk.entered(offset + 1).wait()
+            sdk.gate(offset + 1).set()
+            results = await asyncio.gather(first, second)
+            for mode, result in zip(modes, results):
+                assert result.ok if mode == "run" else result == ["hi"]
+            assert _locks_free(one, two)
+
+        asyncio.run(asyncio.wait_for(scenario(0), 10))
+        asyncio.run(asyncio.wait_for(scenario(2), 10))
+        assert sdk.resumes == ([None] if binding == "alias" else ["sess-loop"]) + ["sess-loop"] * 3
+
     @pytest.mark.parametrize(
         "modes", [("stream", "stream"), ("run", "stream"), ("stream", "run"), ("run", "run")], ids="-".join
     )
