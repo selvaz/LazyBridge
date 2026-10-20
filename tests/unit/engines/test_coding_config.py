@@ -21,9 +21,11 @@ def test_reviewer_is_read_only_and_fails_closed_for_application_tools():
     config = CodingAgentConfig.reviewer()
 
     assert config.claude.preapprove_application_tools is False
+    assert set(config.claude.disallowed_tools) == {"WebSearch", "WebFetch"}
     assert config.codex.sandbox == "read-only"
     assert config.codex.approval_policy == "never"
     assert config.codex.preapprove_dynamic_tools is False
+    assert config.codex.web_search == "disabled"
     assert config.approval_gate is None
 
 
@@ -35,10 +37,31 @@ def test_writer_uses_native_on_request_profiles_and_shared_gate():
 
     assert config.claude.permission_mode == "default"
     assert config.claude.preapprove_application_tools is False
+    assert set(config.claude.disallowed_tools) == {"WebSearch", "WebFetch"}
     assert config.codex.sandbox == "workspace-write"
     assert config.codex.approval_policy == "on-request"
     assert config.codex.preapprove_dynamic_tools is False
+    assert config.codex.web_search == "disabled"
     assert config.approval_gate is gate
+
+
+@pytest.mark.parametrize("profile", ["reviewer", "writer"])
+def test_profiles_allow_explicit_web_opt_in(profile):
+    def gate(_):
+        return ApprovalDecision.allow()
+
+    config = CodingAgentConfig.reviewer(web=True) if profile == "reviewer" else CodingAgentConfig.writer(gate, web=True)
+
+    assert config.claude.disallowed_tools == ()
+    assert config.codex.web_search == "live"
+
+
+def test_compatibility_defaults_keep_web_access():
+    config = CodingAgentConfig()
+
+    assert config.claude.disallowed_tools == ()
+    assert config.codex.web_search is None
+    assert ClaudeCodeEngine().web is True
 
 
 def test_ask_approval_accepts_sync_gate_and_fails_closed_without_one():

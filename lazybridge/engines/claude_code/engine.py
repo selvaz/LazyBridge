@@ -10,7 +10,7 @@ import uuid
 import warnings
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar, get_origin
+from typing import Any, TypeVar, get_origin
 
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import (
@@ -130,8 +130,8 @@ class ClaudeCodeEngine:
 
     Resuming moves where the conversation lives, so it also stops prepending
     ``Memory`` to the prompt (Claude has the history; sending it again states
-    the same turns twice) and serialises runs per session id within the
-    process — one session is one transcript.
+    the same turns twice) and serialises runs per session id on the running
+    event loop — one session is one transcript.
 
     **Session aliases.** ``session_alias="review"`` names the durable session:
     the engine resumes whatever session that alias is bound to (for this
@@ -143,16 +143,6 @@ class ClaudeCodeEngine:
     ``persist_session``. It is unrelated to ``session_name``, which only labels
     the runtime-mode slot. Without ``session_alias`` nothing changes.
     """
-
-    #: One lock per durable session id, shared by every engine in the process:
-    #: two engines resuming the same session are the same hazard as one engine
-    #: doing it twice.
-    _session_locks: ClassVar[dict[str, asyncio.Lock]] = {}
-
-    #: One lock per session alias (kind, cwd, name), held for a whole aliased
-    #: run so a run that is still *creating* the session blocks every other
-    #: engine on the same alias until its id is published.
-    _alias_locks: ClassVar[dict[tuple[str, str, str], asyncio.Lock]] = {}
 
     def __init__(
         self,
@@ -314,6 +304,8 @@ class ClaudeCodeEngine:
         Taking the own lock unconditionally closes a hand-off hole: once the
         first turn published an id, a later call used to key straight onto the
         id lock and bypass the own lock a still-queued first call was holding.
+
+        All locks are scoped to the running event loop; see ``loop_scoped_lock``.
         """
         if not self.persist_session:
             return contextlib.nullcontext()
@@ -324,8 +316,7 @@ class ClaudeCodeEngine:
         async with self._own_lock:
             if self._alias is not None:
                 alias = self._alias
-                key = (alias.kind, alias.scope, alias.alias)
-                async with type(self)._alias_locks.setdefault(key, asyncio.Lock()):
+                async with loop_scoped_lock(f"claude-alias:{alias.kind}:{alias.scope}:{alias.alias}"):
                     self._refresh_alias()
                     async with self._id_lock():
                         yield
@@ -344,7 +335,7 @@ class ClaudeCodeEngine:
         if not self.session_id:
             yield
             return
-        async with type(self)._session_locks.setdefault(self.session_id, asyncio.Lock()):
+        async with loop_scoped_lock(f"claude-session:{self.session_id}"):
             yield
 
     def _resume_id(self, session: Any | None, agent_name: str) -> str | None:

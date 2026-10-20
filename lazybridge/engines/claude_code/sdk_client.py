@@ -185,7 +185,7 @@ class AgentSdkClient(ClaudeSdkClient):
         async def confine_file_access(
             input_data: HookInput, tool_use_id: str | None, context: HookContext
         ) -> HookJSONOutput:
-            """Enforce ``file_roots`` on every file-reading call, always.
+            """Enforce ``file_roots`` on every file access, always.
 
             This lives in a ``PreToolUse`` hook rather than in ``can_use_tool``
             because the SDK evaluates hooks *first* and consults the callback
@@ -203,7 +203,7 @@ class AgentSdkClient(ClaudeSdkClient):
             # ``PreToolUse`` matcher only, where ``tool_input`` is always the
             # tool's argument mapping.
             arguments = cast("dict[str, Any]", input_data.get("tool_input") or {})
-            path = arguments.get("file_path") or arguments.get("path") or options.cwd
+            path = arguments.get("file_path") or arguments.get("notebook_path") or arguments.get("path") or options.cwd
             if allowed_path(path):
                 return {}
             return {

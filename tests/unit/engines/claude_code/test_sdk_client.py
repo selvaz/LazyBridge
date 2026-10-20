@@ -5,10 +5,11 @@ import dataclasses
 
 import pytest
 
+from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.mcp_adapter import to_mcp_tools
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
-from lazybridge.engines.coding import ApprovalDecision
+from lazybridge.engines.coding import ApprovalDecision, CodingAgentConfig
 from lazybridge.ext.approval import Rule, TieredGate
 
 # Both tests below call AgentSdkClient._sdk_options() directly, which builds
@@ -55,6 +56,25 @@ def test_readonly_builtins_are_configured_separately_from_application_tools():
 
     assert sdk_options.tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
     assert sdk_options.permission_mode == "default"
+
+
+@pytest.mark.parametrize("profile", ["reviewer", "writer"])
+@pytest.mark.parametrize("web", [False, True])
+def test_profile_web_policy_reaches_the_sdk(tmp_path, profile, web):
+    def gate(_):
+        return ApprovalDecision.allow()
+
+    config = CodingAgentConfig.reviewer(web=web) if profile == "reviewer" else CodingAgentConfig.writer(gate, web=web)
+    if profile == "writer":
+        config = dataclasses.replace(
+            config, claude=dataclasses.replace(config.claude, extra_tools=("Write", "Edit", "Bash"))
+        )
+    engine = ClaudeCodeEngine(cwd=str(tmp_path), config=config)
+    sdk_options = AgentSdkClient._sdk_options(engine._options([], None))
+
+    assert sdk_options.disallowed_tools == ([] if web else ["WebSearch", "WebFetch"])
+    if profile == "writer":
+        assert {"Write", "Edit", "Bash"} <= set(sdk_options.tools)
 
 
 def test_output_format_reaches_the_sdk_options():
@@ -320,6 +340,46 @@ class TestFileConfinement:
 
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert "file_roots" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    @pytest.mark.parametrize("permission_mode", ["default", "acceptEdits", "bypassPermissions"])
+    @pytest.mark.parametrize("inside", [True, False])
+    def test_notebook_edit_is_confined_by_notebook_path(self, tmp_path, permission_mode, inside):
+        sdk_options = AgentSdkClient._sdk_options(
+            self._options(tmp_path, permission_mode=permission_mode, allowed_tools=("NotebookEdit",))
+        )
+        hook = _pre_tool_use_hook(sdk_options, "NotebookEdit")
+        notebook = (tmp_path if inside else tmp_path.parent) / "analysis.ipynb"
+        result = asyncio.run(
+            hook(
+                {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(notebook)}},
+                None,
+                object(),
+            )
+        )
+
+        if inside:
+            assert result == {}
+        else:
+            assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert "file_roots" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    @pytest.mark.parametrize(
+        "arguments, allowed",
+        [
+            ({"file_path": "inside.py", "notebook_path": "../outside.ipynb"}, True),
+            ({"file_path": "", "notebook_path": "../outside.ipynb", "path": "inside.py"}, False),
+            ({"file_path": "", "notebook_path": "", "path": "inside.py"}, True),
+        ],
+    )
+    def test_confinement_uses_the_first_nonempty_path(self, tmp_path, arguments, allowed):
+        sdk_options = AgentSdkClient._sdk_options(self._options(tmp_path))
+        hook = _pre_tool_use_hook(sdk_options, "NotebookEdit")
+        result = asyncio.run(hook({"tool_input": arguments}, None, object()))
+
+        if allowed:
+            assert result == {}
+        else:
+            assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_confinement_survives_a_permissive_mode(self, tmp_path):
         # bypassPermissions auto-approves everything that reaches the mode
