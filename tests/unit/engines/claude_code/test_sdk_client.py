@@ -553,3 +553,61 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
         assert closed.is_set()
 
     asyncio.run(scenario())
+
+
+class TestLongSystemPrompt:
+    """A system prompt over the threshold travels as a file, never on the command line.
+
+    Windows caps a command line at 32,767 characters; past that the CLI cannot
+    even start and the SDK reports a misleading "Claude Code not found".
+    """
+
+    def test_a_short_prompt_stays_a_string(self):
+        from lazybridge.engines.claude_code.sdk_client import _system_prompt_via_file
+
+        options = ClaudeSdkOptions(model="sonnet", system_prompt="short")
+        with _system_prompt_via_file(options) as cli_options:
+            assert cli_options.system_prompt == "short"
+
+    def test_a_long_prompt_is_written_to_a_file_that_is_removed_afterwards(self):
+        import os
+
+        from lazybridge.engines.claude_code.sdk_client import (
+            SYSTEM_PROMPT_FILE_THRESHOLD,
+            _system_prompt_via_file,
+        )
+
+        prompt = "Àccènti e regole. " * (SYSTEM_PROMPT_FILE_THRESHOLD // 10)
+        options = ClaudeSdkOptions(model="sonnet", system_prompt=prompt)
+        with _system_prompt_via_file(options) as cli_options:
+            spec = cli_options.system_prompt
+            assert spec["type"] == "file"
+            with open(spec["path"], encoding="utf-8", newline="") as handle:
+                assert handle.read() == prompt
+            sdk_options = AgentSdkClient._sdk_options(cli_options)
+            assert sdk_options.system_prompt == spec
+        assert not os.path.exists(spec["path"])
+        assert options.system_prompt == prompt
+
+    def test_run_passes_the_file_and_cleans_up_even_when_the_query_fails(self, monkeypatch):
+        import os
+
+        import claude_agent_sdk
+
+        from lazybridge.engines.claude_code.sdk_client import SYSTEM_PROMPT_FILE_THRESHOLD
+
+        seen: dict[str, object] = {}
+
+        async def failing_query(*, prompt, options):
+            seen["system_prompt"] = options.system_prompt
+            seen["existed"] = os.path.exists(options.system_prompt["path"])
+            raise RuntimeError("boom")
+            yield  # pragma: no cover - makes this an async generator
+
+        monkeypatch.setattr(claude_agent_sdk, "query", failing_query)
+        options = ClaudeSdkOptions(model="sonnet", system_prompt="x" * (SYSTEM_PROMPT_FILE_THRESHOLD + 1))
+        with pytest.raises(RuntimeError, match="boom"):
+            asyncio.run(AgentSdkClient().run("hi", options=options))
+        assert seen["existed"] is True
+        assert seen["system_prompt"]["type"] == "file"
+        assert not os.path.exists(seen["system_prompt"]["path"])

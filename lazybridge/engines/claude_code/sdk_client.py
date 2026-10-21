@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
@@ -19,6 +22,34 @@ from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_ite
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 
 logger = logging.getLogger(__name__)
+
+# The SDK passes a string system prompt on the CLI command line, and Windows
+# caps a whole command line at 32,767 characters: past that, CreateProcess
+# fails with WinError 206, which surfaces as ``FileNotFoundError`` and then as
+# the SDK's misleading "Claude Code not found". Long prompts (LazyCommittee's
+# world-document writer, ~30k+ characters) therefore go through
+# ``--system-prompt-file``. The threshold leaves room for every other argument
+# (MCP config, JSON schema, tool lists) on the same line.
+SYSTEM_PROMPT_FILE_THRESHOLD = 8_000
+
+
+@contextmanager
+def _system_prompt_via_file(options: ClaudeSdkOptions) -> Iterator[ClaudeSdkOptions]:
+    """Yield options whose long string system prompt is read from a temp file."""
+    prompt = options.system_prompt
+    if not isinstance(prompt, str) or len(prompt) <= SYSTEM_PROMPT_FILE_THRESHOLD:
+        yield options
+        return
+    fd, path = tempfile.mkstemp(prefix="lazybridge-system-", suffix=".md")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(prompt)
+        yield replace(options, system_prompt=cast(Any, {"type": "file", "path": path}))
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            logger.warning("could not remove system prompt file %s", path, exc_info=True)
 
 
 def _log_cli_stderr(line: str) -> None:
@@ -421,14 +452,15 @@ class AgentSdkClient(ClaudeSdkClient):
             raise ImportError("Claude Agent SDK is not installed") from exc
 
         final: Any | None = None
-        sdk_options = self._sdk_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
             self._prompt_stream(prompt, attachments) if self._needs_streaming_input(options, attachments) else prompt
         )
-        async for message in query(prompt=sdk_prompt, options=sdk_options):
-            self._report_session_id(options, message)
-            if isinstance(message, ResultMessage):
-                final = message
+        with _system_prompt_via_file(options) as cli_options:
+            sdk_options = self._sdk_options(cli_options)
+            async for message in query(prompt=sdk_prompt, options=sdk_options):
+                self._report_session_id(options, message)
+                if isinstance(message, ResultMessage):
+                    final = message
         if final is None:
             raise RuntimeError("Claude Agent SDK ended without a ResultMessage")
         if final.is_error:
@@ -488,48 +520,49 @@ class AgentSdkClient(ClaudeSdkClient):
             if self._needs_streaming_input(stream_options, attachments)
             else prompt
         )
-        async with closing_iter(
-            query(
-                prompt=sdk_prompt,
-                options=self._sdk_options(stream_options),
-            )
-        ) as messages:
-            async for message in messages:
-                self._report_session_id(stream_options, message)
-                if isinstance(message, StreamEvent):
-                    event = message.event
-                    if event.get("type") == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
-                            saw_text = True
-                            yield ClaudeSdkStreamEvent(text=delta["text"])
-                elif isinstance(message, ResultMessage):
-                    saw_result = True
-                    if message.is_error:
-                        detail = "; ".join(message.errors or []) or message.result or message.subtype
-                        raise ClaudeSdkRequestError(
-                            f"Claude Agent SDK failed: {detail}",
-                            status=message.api_error_status,
+        with _system_prompt_via_file(stream_options) as cli_options:
+            async with closing_iter(
+                query(
+                    prompt=sdk_prompt,
+                    options=self._sdk_options(cli_options),
+                )
+            ) as messages:
+                async for message in messages:
+                    self._report_session_id(stream_options, message)
+                    if isinstance(message, StreamEvent):
+                        event = message.event
+                        if event.get("type") == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+                                saw_text = True
+                                yield ClaudeSdkStreamEvent(text=delta["text"])
+                    elif isinstance(message, ResultMessage):
+                        saw_result = True
+                        if message.is_error:
+                            detail = "; ".join(message.errors or []) or message.result or message.subtype
+                            raise ClaudeSdkRequestError(
+                                f"Claude Agent SDK failed: {detail}",
+                                status=message.api_error_status,
+                                session_id=message.session_id,
+                            )
+                        # Some SDK/CLI versions do not emit partial text for a short
+                        # response. Yield the final response exactly once in that case.
+                        if not saw_text:
+                            final_text = (
+                                json.dumps(message.structured_output)
+                                if message.structured_output is not None
+                                else (message.result or "")
+                            )
+                            if final_text:
+                                yield ClaudeSdkStreamEvent(text=final_text)
+                        usage = message.usage or {}
+                        yield ClaudeSdkStreamEvent(
                             session_id=message.session_id,
+                            input_tokens=int(usage.get("input_tokens", 0) or 0),
+                            output_tokens=int(usage.get("output_tokens", 0) or 0),
+                            cost_usd=float(message.total_cost_usd or 0.0),
+                            final=True,
                         )
-                    # Some SDK/CLI versions do not emit partial text for a short
-                    # response. Yield the final response exactly once in that case.
-                    if not saw_text:
-                        final_text = (
-                            json.dumps(message.structured_output)
-                            if message.structured_output is not None
-                            else (message.result or "")
-                        )
-                        if final_text:
-                            yield ClaudeSdkStreamEvent(text=final_text)
-                    usage = message.usage or {}
-                    yield ClaudeSdkStreamEvent(
-                        session_id=message.session_id,
-                        input_tokens=int(usage.get("input_tokens", 0) or 0),
-                        output_tokens=int(usage.get("output_tokens", 0) or 0),
-                        cost_usd=float(message.total_cost_usd or 0.0),
-                        final=True,
-                    )
         if not saw_result:
             # Mirrors AgentSdkClient.run(): the SDK iterator ended without a
             # ResultMessage. Silently returning here would let the engine
