@@ -87,6 +87,8 @@ class TestWebUIClass:
         """Record the browser launch instead of performing it."""
         opened: list[str] = []
         monkeypatch.setattr("webbrowser.open", lambda url, *args, **kwargs: opened.append(url) or True)
+        # Exercise the launch path here (the global guard skips it under pytest).
+        monkeypatch.setattr("lazybridge.ext._browser.browser_launch_allowed", lambda: True)
         return opened
 
     def test_instantiation(self):

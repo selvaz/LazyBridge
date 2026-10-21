@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The web HIL UI and the visualizer no longer open a real browser window under pytest (`PYTEST_CURRENT_TEST`) or when `LAZYBRIDGE_NO_BROWSER=1`; the URL is still printed. Test runs had been leaving screens of tabs pointing at dead `127.0.0.1:<port>` pages. The test suite also fences `webbrowser.open*` globally.
+
+### Fixed
 
 - Scope Claude Code session and alias locks to the running event loop, so
   contended durable sessions can be reused across synchronous Agent calls.

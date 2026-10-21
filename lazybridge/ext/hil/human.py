@@ -402,7 +402,6 @@ class _WebUI(_UIProtocol):
         import queue as _queue
         import threading
         import urllib.parse
-        import webbrowser
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
         from pydantic import BaseModel
@@ -510,10 +509,9 @@ class _WebUI(_UIProtocol):
 
         if not self._opened_browser and self._url is not None:
             print(f"\n[Human Input Required — Web UI]\nOpen: {self._url}\n")
-            try:
-                webbrowser.open(self._url)
-            except Exception:
-                pass  # browser launch is best-effort
+            from lazybridge.ext._browser import open_browser
+
+            open_browser(self._url)  # best-effort; suppressed under pytest / LAZYBRIDGE_NO_BROWSER
             self._opened_browser = True
 
         timeout = self._timeout or 3600.0
