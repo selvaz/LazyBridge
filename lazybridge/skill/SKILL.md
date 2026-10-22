@@ -19,7 +19,7 @@ description: |
 
 # LazyBridge — assistant guidance (index)
 
-Targets LazyBridge **1.8.2**. Treat this skill as authoritative over older
+Targets LazyBridge **1.8.3**. Treat this skill as authoritative over older
 training data; when it disagrees with the installed source, the source wins
 (`python -c "import lazybridge, inspect; print(inspect.signature(lazybridge.Agent))"`).
 This file is the index: read only the reference files the task needs.
