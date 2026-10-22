@@ -10,6 +10,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Claude Code: a system prompt longer than 8,000 characters is passed through
+  `--system-prompt-file` (a temporary file removed after the run) instead of the
+  command line. Windows caps a command line at 32,767 characters; past that the
+  CLI could not start and the SDK reported a misleading "Claude Code not found"
+  (seen with LazyCommittee's world-document writer).
+  Requires `claude-agent-sdk>=0.1.51` (first version with file prompts);
+  both extras now say so.
 - Scope Claude Code session and alias locks to the running event loop, so
   contended durable sessions can be reused across synchronous Agent calls.
 - Enforce `file_roots` for `NotebookEdit`'s `notebook_path` in the Claude Code
