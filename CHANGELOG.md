@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.3] — 2026-10-22
+
 ### Fixed
 
 - Claude Code: a system prompt longer than 8,000 characters is passed through

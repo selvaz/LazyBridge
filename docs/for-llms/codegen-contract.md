@@ -1,6 +1,6 @@
 # LLM codegen contract
 
-This contract targets LazyBridge 1.8.2.
+This contract targets LazyBridge 1.8.3.
 Read the current source signatures; do not copy legacy LazyAgent/LazyTool APIs.
 The machine-readable companion is
 [lazybridge/llms.json](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/llms.json);
