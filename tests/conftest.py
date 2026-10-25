@@ -180,3 +180,15 @@ def mock_stream(fake_chunks):
         return_value=iter(fake_chunks),
     ) as m:
         yield m
+
+
+@pytest.fixture(autouse=True)
+def _never_open_a_real_browser(monkeypatch):
+    """No test may open a real browser window (owner saw screens of dead tabs after runs).
+
+    Production code already skips the launch under pytest (lazybridge.ext._browser);
+    this patch is the second fence for anything that calls webbrowser directly.
+    """
+    monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: True)
+    monkeypatch.setattr("webbrowser.open_new", lambda *args, **kwargs: True)
+    monkeypatch.setattr("webbrowser.open_new_tab", lambda *args, **kwargs: True)

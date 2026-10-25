@@ -14,9 +14,9 @@ Two construction paths:
 from __future__ import annotations
 
 import time
-import webbrowser
 from typing import TYPE_CHECKING, Any
 
+from lazybridge.ext._browser import open_browser
 from lazybridge.ext.viz.exporter import EventHub, HubExporter
 from lazybridge.ext.viz.replay import (
     ReplayController,
@@ -134,10 +134,7 @@ class Visualizer:
             self._replay.start()
         if self._auto_open and not self._opened:
             self._opened = True
-            try:
-                webbrowser.open(self._server.url, new=2)
-            except Exception:
-                pass
+            open_browser(self._server.url, new=2)  # suppressed under pytest / LAZYBRIDGE_NO_BROWSER
 
     def stop(self) -> None:
         if self._replay is not None:
