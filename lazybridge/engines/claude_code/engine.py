@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import random
 import time
 import uuid
@@ -28,6 +29,8 @@ from lazybridge.session import EventType
 from .mcp_adapter import to_mcp_tools
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions
 from .sdk_client import AgentSdkClient, ClaudeSdkRequestError
+
+_logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
@@ -696,6 +699,9 @@ class ClaudeCodeEngine:
             out = Envelope.error_envelope(exc, retryable=True)
         except Exception as exc:
             self._learn_session(getattr(exc, "session_id", None))
+            # The envelope keeps only type and message; log the traceback so an
+            # unexpected failure is diagnosable from the job log.
+            _logger.warning("%s run failed", agent_name, exc_info=exc)
             out = Envelope.error_envelope(exc)
         if session:
             payload = {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import random
 import time
 import uuid
@@ -29,6 +30,8 @@ from lazybridge.session import EventType
 
 from .app_server import _PRE_THREAD_PHASES, CodexAppServerClient, CodexTransportError, CodexTurnUncertain
 from .dynamic_tools import definitions, dispatcher
+
+_logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
@@ -653,6 +656,9 @@ class CodexEngine:
             self._absorb(exc.thread_id or progress.get("thread_id"))
             out = Envelope.error_envelope(exc)
         except Exception as exc:
+            # The envelope keeps only type and message; log the traceback so an
+            # unexpected failure is diagnosable from the job log.
+            _logger.warning("%s run failed", agent_name, exc_info=exc)
             out = Envelope.error_envelope(exc)
         finally:
             # Every exit, including an *external* cancellation — which is a

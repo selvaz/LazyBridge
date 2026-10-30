@@ -965,3 +965,15 @@ class TestSessionAlias:
 
         assert asyncio.run(collect()) == "streamed answer"
         assert registry.resolve("codex", tmp_path, "probe") == "thread-S"
+
+
+def test_an_unexpected_failure_logs_its_traceback(caplog):
+    client = FakeAppServer(fail_times=99, exc_factory=lambda: IndexError("list index out of range"))
+    agent = Agent(name="digest", engine=CodexEngine(client=client, max_retries=0))
+
+    with caplog.at_level("WARNING", logger="lazybridge.engines.codex.engine"):
+        result = agent("go")
+
+    assert not result.ok
+    record = next(r for r in caplog.records if "digest run failed" in r.getMessage())
+    assert record.exc_info and record.exc_info[0] is IndexError

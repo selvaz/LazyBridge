@@ -806,3 +806,19 @@ class TestSessionAlias:
         engine = self._engine(_AliasSdk(), registry, tmp_path, session_name="slot")
         assert engine.session_name == "slot"
         assert engine.session_alias == "probe"
+
+
+class _IndexErrorSdk(_PlainSdk):
+    async def run(self, prompt, *, options, attachments=()):
+        raise IndexError("list index out of range")
+
+
+def test_an_unexpected_failure_logs_its_traceback(caplog):
+    engine = ClaudeCodeEngine(client=_IndexErrorSdk(), max_retries=0)
+
+    with caplog.at_level("WARNING", logger="lazybridge.engines.claude_code.engine"):
+        result = Agent(name="digest", engine=engine)("go")
+
+    assert not result.ok
+    record = next(r for r in caplog.records if "digest run failed" in r.getMessage())
+    assert record.exc_info and record.exc_info[0] is IndexError
