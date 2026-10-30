@@ -8,10 +8,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.8.3] — 2026-10-22
+## [1.8.4] — 2026-10-30
 
 ### Fixed
-- The web HIL UI and the visualizer no longer open a real browser window under pytest (`PYTEST_CURRENT_TEST`) or when `LAZYBRIDGE_NO_BROWSER=1`; the URL is still printed. Test runs had been leaving screens of tabs pointing at dead `127.0.0.1:<port>` pages. The test suite also fences `webbrowser.open*` globally.
+- Claude Code and Codex engines log the full traceback of an unexpected run failure before converting it to an error envelope, so a crash inside a scheduled job leaves a diagnosable trace instead of only the exception message (#201).
+- The web HIL UI and the visualizer no longer open a real browser window under pytest (`PYTEST_CURRENT_TEST`) or when `LAZYBRIDGE_NO_BROWSER=1`; the URL is still printed. Test runs had been leaving screens of tabs pointing at dead `127.0.0.1:<port>` pages. The test suite also fences `webbrowser.open*` globally. (#198)
+
+## [1.8.3] — 2026-10-22
 
 ### Fixed
 
