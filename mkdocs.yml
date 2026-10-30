@@ -126,7 +126,7 @@ markdown_extensions:
 
 extra:
   version:
-    default: "1.8.3"
+    default: "1.8.4"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
