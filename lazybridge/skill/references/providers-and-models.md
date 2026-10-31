@@ -15,7 +15,7 @@ Anthropic, OpenAI, Google, DeepSeek, LM Studio (local), LiteLLM (any
 LiteLLM-routed model). Unknown strings raise `ValueError` (no silent default
 provider since 0.7.9). API keys come from the usual provider env vars.
 
-## Tier aliases (LazyBridge 1.8.4)
+## Tier aliases (LazyBridge 1.8.5)
 
 `Agent.from_provider(provider, tier="medium")` or
 `LLMEngine(tier, provider=...)`; tiers: `super_cheap`, `cheap`, `medium`,

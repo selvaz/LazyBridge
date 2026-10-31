@@ -33,7 +33,7 @@ handle approval and supervision. Every agent returns an `Envelope`.
 Python 3.11 or later:
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.8.4"
+python -m pip install "lazybridge[claude-code]==1.8.5"
 ```
 
 Install and sign in to the local coding runtimes using the
@@ -89,7 +89,7 @@ benchmark is in progress**, with no comparative metrics published here.
 
 ## Documentation and status
 
-This README targets **1.8.4**.
+This README targets **1.8.5**.
 The core public API is Stable; coding engines and extensions have their own
 boundaries. LazyTools 0.10.1 declares Alpha. See the
 [maturity table](https://core.lazybridge.com/#maturity) and [CHANGELOG](CHANGELOG.md).

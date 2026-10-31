@@ -17,7 +17,7 @@ Python 3.11 or later and the core package are sufficient; there is no Codex
 Python SDK extra:
 
 ```sh
-python -m pip install "lazybridge==1.8.4"
+python -m pip install "lazybridge==1.8.5"
 ```
 
 Executable lookup checks CODEX_BIN, PATH and the Windows desktop app's versioned
