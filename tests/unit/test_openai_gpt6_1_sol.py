@@ -17,8 +17,9 @@ def _provider() -> OpenAIProvider:
     return OpenAIProvider.__new__(OpenAIProvider)
 
 
-def test_sol_6_1_is_the_medium_and_expensive_openai_tier() -> None:
-    assert OpenAIProvider._TIER_ALIASES["medium"] == "gpt-6.1-sol"
+def test_sol_6_1_is_the_expensive_and_terra_6_1_the_medium_openai_tier() -> None:
+    assert OpenAIProvider._TIER_ALIASES["medium"] == "gpt-6.1-terra"
+    assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-6.1-sol"
     assert OpenAIProvider._TIER_ALIASES["expensive"] == "gpt-6.1-sol"
     # Other tiers are unchanged.
     assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-6-astra"

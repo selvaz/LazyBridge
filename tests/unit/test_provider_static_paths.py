@@ -204,7 +204,7 @@ def test_fallback_targets_have_pricing(provider_cls):
     "provider_cls,tier,expected_substring",
     [
         (OpenAIProvider, "top", "gpt-6-astra"),
-        (OpenAIProvider, "medium", "gpt-6.1-sol"),
+        (OpenAIProvider, "medium", "gpt-6.1-terra"),
         (OpenAIProvider, "expensive", "gpt-6.1-sol"),
         (OpenAIProvider, "cheap", "gpt-6-luna"),
         (AnthropicProvider, "top", "claude-fable-5-1"),
