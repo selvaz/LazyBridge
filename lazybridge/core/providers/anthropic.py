@@ -230,8 +230,8 @@ class AnthropicProvider(BaseProvider):
         "top": "claude-fable-5-1",
         "expensive": "claude-opus-5-5",  # second tier: near-Fable quality, ~40% of the price
         "medium": "claude-sonnet-5-5",
-        "cheap": "claude-haiku-4-5",
-        "super_cheap": "claude-haiku-4-5",
+        "cheap": "claude-haiku-5-5",
+        "super_cheap": "claude-haiku-5-5",
     }
     # Retired models (claude-3-*, claude-3-5-*, claude-opus-4-1) are kept in
     # _PRICE_TABLE for costing old transcripts but never used as fallbacks.
@@ -240,6 +240,7 @@ class AnthropicProvider(BaseProvider):
         "claude-fable-5": ["claude-opus-5-5", "claude-opus-5"],
         "claude-opus-5-5": ["claude-opus-5", "claude-sonnet-5-5"],
         "claude-opus-5": ["claude-sonnet-5-5", "claude-opus-4-8"],
+        "claude-haiku-5-5": ["claude-haiku-4-5"],
         "claude-sonnet-5-5": ["claude-sonnet-5"],
         "claude-sonnet-5": ["claude-sonnet-4-6"],
         "claude-opus-4-8": ["claude-opus-4-7", "claude-sonnet-4-6"],
@@ -393,7 +394,7 @@ class AnthropicProvider(BaseProvider):
             x in resolved for x in ("fable-5", "mythos-5", "opus-5", "sonnet-5", "opus-4-8", "opus-4-7", "opus-4-6")
         ):
             return 128_000
-        if any(x in resolved for x in ("sonnet-4-6", "haiku-4-5", "opus-4-5", "sonnet-4-5")):
+        if any(x in resolved for x in ("sonnet-4-6", "haiku-5", "haiku-4-5", "opus-4-5", "sonnet-4-5")):
             return 64_000
         if "haiku" in resolved:
             return 4_096

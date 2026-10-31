@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Anthropic `cheap`/`super_cheap` tier aliases are now `claude-haiku-5-5` (fallback `claude-haiku-4-5`); no `_PRICE_TABLE` row yet (price unverified, cost reports as unknown), max-tokens default 64k like Haiku 4.5.
 - OpenAI `medium` tier alias is now `gpt-6.1-terra` (was `gpt-6.1-sol`), completing a one-to-one tier ladder with Anthropic: small Haiku/Luna, mid Sonnet/Terra 6.1, high Opus/Sol 6.1, top Fable/Astra. `gpt-6.1-terra` has no `_PRICE_TABLE` row yet (price unverified).
 
 ### Added
