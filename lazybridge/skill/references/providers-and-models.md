@@ -24,8 +24,8 @@ a literal model id.
 
 | Provider | top | expensive | medium | cheap | super_cheap |
 |---|---|---|---|---|---|
-| anthropic | claude-fable-5-1 | claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-4-5 | claude-haiku-4-5 |
-| openai | gpt-6-astra | gpt-6.1-sol | gpt-6.1-sol | gpt-6-luna | gpt-6-luna |
+| anthropic | claude-fable-5-1 | claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-5-5 | claude-haiku-5-5 |
+| openai | gpt-6-astra | gpt-6.1-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-luna |
 | google | gemini-3.1-pro-preview | gemini-2.5-pro | gemini-3-flash-preview | gemini-3.1-flash-lite-preview | gemini-2.5-flash-lite |
 | deepseek | deepseek-v4-pro | deepseek-v4-pro | deepseek-flash | deepseek-flash | deepseek-flash |
 | lmstudio | gpt-oss-20b | gemma-4-26b-a4b | qwen3.5-14b | qwen3.5-4b | gemma-4-e2b |

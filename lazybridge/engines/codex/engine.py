@@ -26,6 +26,7 @@ from lazybridge.engines.coding import (
 )
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.model_tiers import translate_model
 from lazybridge.session import EventType
 
 from .app_server import _PRE_THREAD_PHASES, CodexAppServerClient, CodexTransportError, CodexTurnUncertain
@@ -224,7 +225,9 @@ class CodexEngine:
         session_alias: str | None = None,
         session_registry: SessionRegistry | None = None,
     ) -> None:
-        self.model, self.cwd, self.system = model, cwd, system
+        # A Claude alias/id ("sonnet", "claude-opus-5-5") is translated to the
+        # tier-equivalent OpenAI model; Codex rejects the Claude namespace.
+        self.model, self.cwd, self.system = translate_model(model, "codex"), cwd, system
         #: Caller-chosen durable name for this engine's thread — see the class
         #: docstring. ``None`` (the default) leaves thread handling untouched.
         self.session_alias = session_alias
