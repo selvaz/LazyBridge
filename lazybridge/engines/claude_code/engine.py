@@ -24,6 +24,7 @@ from lazybridge.engines.coding import (
 )
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
+from lazybridge.model_tiers import translate_model
 from lazybridge.session import EventType
 
 from .mcp_adapter import to_mcp_tools
@@ -175,7 +176,9 @@ class ClaudeCodeEngine:
         session_alias: str | None = None,
         session_registry: SessionRegistry | None = None,
     ) -> None:
-        self.model = model
+        # An OpenAI tier id ("gpt-6.1-terra") is translated to the Claude
+        # equivalent; the Claude CLI rejects the OpenAI namespace.
+        self.model = translate_model(model, "claude_code") or model
         self.cwd = cwd
         self.system = system
         self.max_turns = max_turns

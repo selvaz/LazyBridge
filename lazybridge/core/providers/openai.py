@@ -125,6 +125,8 @@ _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
     # price ($2 / $10) but a lower cache-hit rate ($0.10).
     "gpt-6.1-sol": (2.0, 0.10, 10.0),
     "gpt-6-luna": (0.10, 0.01, 0.50),
+    # gpt-6.1-terra (2026-10-31): list price not yet published/verified, so it
+    # has NO row here (cost reports as unknown rather than a guessed number).
     # GPT-5.6 (released 2026-07-09): three tiers instead of a single
     # flagship + "-pro".  "gpt-5.6" is a bare alias that routes to Sol —
     # kept last among the 5.6 rows so the more specific tier names match
@@ -331,21 +333,21 @@ class OpenAIProvider(BaseProvider):
     # want a safety net.
     default_model: str | None = None
 
-    # Tier aliases.  GPT-6 ships Astra (most capable), Sol and Luna; there is
-    # no GPT-6 Terra.  gpt-6.1-sol (successor of gpt-6-sol, still pinnable)
-    # undercuts gpt-5.6-terra on price, so it covers both "expensive" and
-    # "medium"; gpt-6-luna is cheaper than
-    # gpt-4o-mini, so it covers both "cheap" and "super_cheap".
+    # Tier aliases (one-to-one with Anthropic since 2026-10-31, see
+    # lazybridge.model_tiers): Astra = top (Fable), Sol 6.1 = expensive (Opus),
+    # Terra 6.1 = medium (Sonnet), Luna = cheap (Haiku).  gpt-6-luna is cheaper
+    # than gpt-4o-mini, so it also covers "super_cheap".
     _TIER_ALIASES = {
         "top": "gpt-6-astra",  # most capable model for hardest end-to-end work
         "expensive": "gpt-6.1-sol",
-        "medium": "gpt-6.1-sol",
+        "medium": "gpt-6.1-terra",
         "cheap": "gpt-6-luna",
         "super_cheap": "gpt-6-luna",
     }
     _FALLBACKS = {
         "gpt-6-astra": ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5"],
         "gpt-6.1-sol": ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"],
+        "gpt-6.1-terra": ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol"],
         "gpt-6-sol": ["gpt-5.6-sol", "gpt-5.6-terra"],
         "gpt-6-luna": ["gpt-5.6-luna", "gpt-4o-mini"],
         "gpt-5.6-sol": ["gpt-5.6-terra", "gpt-5.5-pro", "gpt-5.5"],
