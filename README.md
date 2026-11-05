@@ -94,10 +94,10 @@ into a Codex thread.
 - [Projects](https://tools.lazybridge.com/projects/): plans, claims, contracts and acceptance evidence in a shared Store.
 
 Its distribution is `lazytoolkit`; its Python namespace is `lazytools`. Install
-from the GitHub tag (add the `mcp` or `docs` extra as needed):
+from the GitHub tag (add the `engines` extra for Claude or tier routing):
 
 ```sh
-pip install "lazytoolkit @ git+https://github.com/selvaz/LazyTools@v0.10.6"
+pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"
 ```
 Core MCP/gateway shims were removed in 0.9. Follow the LazyTools installation
 instructions rather than importing those removed modules.

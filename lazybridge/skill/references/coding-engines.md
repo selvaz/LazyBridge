@@ -181,6 +181,51 @@ whole run including retries and backoff, rather than each attempt separately.
 Align any MCP host timeout with that budget too. This is consumer guidance;
 the engine timeout defaults are unchanged.
 
+## Coding model translation
+
+`lazybridge.model_tiers.MODEL_TIERS` maps small Haiku/Luna, mid
+Sonnet/Terra, high Opus/Sol and top Fable/Astra. `translate_model(model,
+to)` translates recognized opposite-family names to the target ladder:
+`translate_model("sonnet", "codex")` returns `gpt-6.1-terra`, and
+`translate_model("gpt-6.1-sol", "claude_code")` returns
+`claude-opus-5-5`. CodexEngine and ClaudeCodeEngine apply this at construction.
+Recognition uses Claude aliases or `claude-*` IDs containing a tier marker,
+and `gpt-*` IDs ending in a tier marker, so even an older recognized ID can
+translate. Names outside the recognized ladder and `None` pass through;
+same-family names also pass through. Validate explicit pins when exact model
+identity matters. This is separate from provider catalogue and bridge routing tiers.
+
+## Async repository jobs with LazyTools
+
+Use `ClaudeCodeEngine` or `CodexEngine` inside a Python program. For long or
+background repository work from an assistant, especially work needing human
+approvals, use the detached LazyTools code bridge. Install MCP support with:
+
+```sh
+pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"
+```
+
+The distribution is `lazytoolkit`, imported as `lazytools`; never install the
+PyPI placeholder. For `--engine claude` or `--tier`, also install the `engines`
+extra from the same tag (use `lazytoolkit[mcp,engines]`).
+
+```sh
+lazytools-code-bridge run --detach --tier writing --cwd REPO --task @brief.md --session writer --json
+lazytools-code-bridge pending --json
+lazytools-code-bridge approve APPROVAL_ID
+lazytools-code-bridge wait JOB_ID --timeout 180
+lazytools-code-bridge result JOB_ID --json
+```
+
+Retain the returned job ID; poll `pending` while waiting and approve only
+authorized tickets, or use `reject APPROVAL_ID --reason "..."`. A waiter timeout
+does not cancel the worker. `--session` names durable native history scoped to
+the repository and engine; native histories do not migrate between engines.
+Tiers `basic`, `writing`, `thinking`, `critical` route by quota; alternatively
+choose `--engine codex` or `--engine claude`. Inspect results and verify the
+repo independently. See the [bridge guide](https://tools.lazybridge.com/code-bridge/)
+for setup, routing and lifecycle details.
+
 ## Outside LazyBridge
 
 Detached repository jobs, approval tickets in chat, quota-aware model routing

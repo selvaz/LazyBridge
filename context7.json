@@ -27,6 +27,8 @@
     "For writer/reviewer loops use `Agent(..., verify=reviewer_agent, max_verify=N)`; `verify` is a constructor option, not a run kwarg.",
     "Read typed results from `result.payload` and text from `result.text()`; check `ok`/`error` on the Envelope before using it.",
     "MCP, connectors and the async coding bridge live in LazyTools, not in LazyBridge. Install it from GitHub: `pip install \"lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6\"` and import from `lazytools`. Never `pip install lazytoolkit` from PyPI: that name is a placeholder.",
-    "Do not use legacy LazyAgent / LazyTool APIs or `lazybridge.ext.mcp`; they were removed. Follow docs/for-llms/codegen-contract.md and lazybridge/llms.json."
+    "Do not use legacy LazyAgent / LazyTool APIs or `lazybridge.ext.mcp`; they were removed. Follow docs/for-llms/codegen-contract.md and lazybridge/llms.json.",
+    "Coding engines translate recognized opposite-provider model tiers via `lazybridge.model_tiers.translate_model`; unrecognized pins pass through.",
+    "For detached repository jobs and human approvals use `lazytools-code-bridge`: run --detach, poll pending, approve/reject, wait and result; install the engines extra for Claude or tier routing."
   ]
 }

@@ -41,6 +41,20 @@ These catalogue tiers are unrelated to the coding engines' model aliases
 (`sonnet`/`opus`/`haiku` for Claude Code, runtime config for Codex) and to
 LazyTools' quota-routing tiers (`basic`/`writing`/`thinking`/`critical`).
 
+## Coding model translation
+
+`lazybridge.model_tiers.MODEL_TIERS` maps small Haiku/Luna, mid
+Sonnet/Terra, high Opus/Sol and top Fable/Astra. `translate_model(model,
+to)` translates recognized opposite-family names to the target ladder:
+`translate_model("sonnet", "codex")` returns `gpt-6.1-terra`, and
+`translate_model("gpt-6.1-sol", "claude_code")` returns
+`claude-opus-5-5`. CodexEngine and ClaudeCodeEngine apply this at construction.
+Recognition uses Claude aliases or `claude-*` IDs containing a tier marker,
+and `gpt-*` IDs ending in a tier marker, so even an older recognized ID can
+translate. Names outside the recognized ladder and `None` pass through;
+same-family names also pass through. Validate explicit pins when exact model
+identity matters. This is separate from provider catalogue and bridge routing tiers.
+
 ## Thinking and effort
 
 - `LLMEngine(model, thinking=True)`, `thinking="low"` (effort shorthand) or
