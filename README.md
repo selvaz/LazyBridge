@@ -5,9 +5,21 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Build Python pipelines with **Claude Code and Codex as engines**. Swap the
-engine while keeping tools and application state; let one engine write and
-the other review. **Agent = Engine + Tools + State** is the shared contract.
+**Everything is a tool.** LazyBridge is a Python agent framework where
+functions, agents and whole pipelines plug into each other the same way, and
+the engine underneath is swappable. **Agent = Engine + Tools + State.**
+
+- **Everything is a tool.** A function, another agent or a Plan-backed
+  pipeline all enter through `tools=[...]`, so agents compose into teams
+  without glue code.
+- **Subscription or API, same agent.** Claude Code and Codex run as engines
+  next to provider APIs (Anthropic, OpenAI, Google, DeepSeek, LiteLLM). Swap
+  the engine and keep tools, memory and state. With a subscription login the
+  coding runtimes use the account's plan quota instead of per-token API billing.
+- **Fleets, not just chats.** Deterministic `Plan` DAGs with checkpoint/resume
+  and `run_many` fan-out, `Agent.parallel`, `verify=` writer/reviewer loops,
+  human-in-the-loop engines, and a durable control plane (atomic claims,
+  fencing, append-only ledger) for many workers on one machine.
 
 ```python
 from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Session, Store
@@ -22,9 +34,11 @@ codex = Agent(name="codex", engine=CodexEngine(), **state)
 assert claude.memory is codex.memory
 assert claude.store is codex.store
 assert claude.session is codex.session
+
+# An agent is a tool too: the lead can delegate to Codex.
+lead = Agent(name="lead", engine=ClaudeCodeEngine(), tools=[project_status, codex])
 ```
 
-Functions, agents and Plan-backed pipelines enter through `tools=[...]`.
 `LLMEngine` calls provider APIs; `Plan` runs a deterministic DAG; human engines
 handle approval and supervision. Every agent returns an `Envelope`.
 
