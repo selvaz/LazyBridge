@@ -81,6 +81,13 @@ All paths are relative to this skill directory (`references/<file>`).
 If a task spans several areas (e.g. "a resumable pipeline whose last step
 asks Codex to review"), read each matching file; they do not repeat each other.
 
+Coding engines translate recognized opposite-provider model tiers; use the
+LazyTools code bridge for detached repo jobs and approval tickets. See
+`references/coding-engines.md` and `references/providers-and-models.md`.
+
+pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6" (MCP; add `engines` for Claude or tier routing).
+Never install the PyPI placeholder.
+
 ## Minimal canonical example
 
 ```python

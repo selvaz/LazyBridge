@@ -57,6 +57,10 @@ Both return plain `Agent`s usable as `Step` targets. Give gates a safe
   long one call blocks; a late approval is consumed exactly once by a later
   identical request. Wire `TieredGate(..., on_record=queue.record_denial)`.
 
+For detached repository jobs and approval tickets, use the LazyTools code
+bridge described in `coding-engines.md`; in-process coding engines and the
+long-running-host delegation extension below serve Python applications.
+
 ## Background delegation — `lazybridge.ext.delegation`
 
 For long-running hosts (an agent that stays up) that hand work to Codex or

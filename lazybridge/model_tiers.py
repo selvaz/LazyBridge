@@ -14,9 +14,12 @@ top    claude-fable-5-1  (fable)   gpt-6-astra
 :func:`translate_model` maps a model name from the other provider's
 namespace into the target one, so an engine that was handed ``"sonnet"``
 while running on Codex gets ``gpt-6.1-terra`` instead of a model Codex
-rejects (and vice versa).  Names that are not part of the other provider's
-ladder (explicit pins such as ``gpt-5.6-sol`` or ``claude-sonnet-4-5``) pass
-through untouched.
+rejects (and vice versa).  A name already in the target provider's
+namespace passes through untouched (an explicit ``claude-sonnet-4-5`` pin on
+Claude Code, ``gpt-5.6-sol`` on Codex).  A name from the other provider is
+matched by its family marker (haiku/sonnet/opus/fable, luna/terra/sol/astra)
+and mapped to the same tier, older ids included: ``claude-sonnet-4-5`` handed
+to Codex becomes ``gpt-6.1-terra``.  Names with no marker pass through.
 """
 
 from __future__ import annotations
