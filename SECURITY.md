@@ -184,8 +184,10 @@ Both factories are **deny-by-default since 0.7.9** — omitting both
   restrict with a glob (`allow=["fs.read_*"]`) or a `deny=` block
   list.
 
+Install the MCP integration with `pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"`.
+
 ```python
-from lazytools.connectors.mcp import MCP  # pip install lazytoolkit (import name: lazytools)
+from lazytools.connectors.mcp import MCP
 
 # Restrict an internal stdio MCP server to read-only filesystem tools.
 fs_safe = MCP.stdio(

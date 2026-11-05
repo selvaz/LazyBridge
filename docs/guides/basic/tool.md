@@ -66,9 +66,12 @@ The rest of this page documents `tools=` only.
 LazyBridge accepts six things in `tools=[...]` and normalises them all
 to `Tool` instances at construction time:
 
+Install the MCP and document integrations with
+`pip install "lazytoolkit[mcp,docs] @ git+https://github.com/selvaz/LazyTools@v0.10.6"`.
+
 ```python
 from lazybridge import Agent, LLMEngine, Tool
-from lazytools.connectors.mcp import MCP  # pip install lazytoolkit (import name: lazytools)
+from lazytools.connectors.mcp import MCP
 from lazytools.documents import read_docs_tools
 
 agent = Agent(

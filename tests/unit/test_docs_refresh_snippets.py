@@ -211,6 +211,14 @@ def test_refreshed_install_commands_use_real_extras_and_current_version():
                         assert requirement.name == "lazybridge"
                         assert requirement.extras <= project["optional-dependencies"].keys()
                         assert project["version"] in requirement.specifier
+                elif command[:2] == ["pip", "install"]:
+                    assert len(command) == 3
+                    requirement = Requirement(command[2])
+                    assert requirement.name == "lazytoolkit"
+                    assert re.fullmatch(
+                        r"git\+https://github\.com/selvaz/LazyTools@v\d+\.\d+\.\d+",
+                        requirement.url or "",
+                    )
                 elif command[:3] == ["python", "-m", "pytest"]:
                     assert (ROOT / command[3]).exists()
                 elif command[:1] == ["python"]:

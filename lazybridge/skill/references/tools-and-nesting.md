@@ -92,10 +92,11 @@ dropped; pass `strict_native_tools=True` to the provider to raise
 
 ## MCP servers and other providers of tools
 
-MCP is **not** in LazyBridge since 0.8 / 0.9 (shims removed). Use LazyTools:
+MCP is **not** in LazyBridge since 0.8 / 0.9 (shims removed). Install LazyTools
+with `pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"`:
 
 ```python
-from lazytools.connectors.mcp import MCP  # pip install "lazytoolkit[mcp]"
+from lazytools.connectors.mcp import MCP
 
 fs = MCP.stdio(
     "fs",
