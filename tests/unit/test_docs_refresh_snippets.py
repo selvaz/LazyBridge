@@ -221,6 +221,8 @@ def test_refreshed_install_commands_use_real_extras_and_current_version():
                     )
                 elif command[:3] == ["python", "-m", "pytest"]:
                     assert (ROOT / command[3]).exists()
+                elif command[:1] == ["lazytools-code-bridge"]:
+                    assert command[1] in {"run", "pending", "approve", "wait", "result"}
                 elif command[:1] == ["python"]:
                     # Authenticated live smoke scripts are opt-in, never run
                     # by the documentation tests; validate their checked-in path.
