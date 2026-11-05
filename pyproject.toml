@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 authors = [{ name = "selvaz" }]
-keywords = ["llm", "agents", "multi-agent", "anthropic", "openai", "google", "pipeline", "tool-use"]
+keywords = ["llm", "agents", "ai-agents", "multi-agent", "agent-framework", "claude-code", "codex", "mcp", "anthropic", "openai", "google", "orchestration", "pipeline", "tool-use"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
