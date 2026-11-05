@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Fix LazyTools installation guidance to use the GitHub release tag instead of the PyPI placeholder.
+
 ## [1.8.5] — 2026-10-31
 
 ### Changed

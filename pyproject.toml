@@ -52,7 +52,7 @@ litellm   = ["litellm>=1.40.0,<2.0.0"]
 yaml      = ["pyyaml>=6.0,<7.0"]
 # The document-reading (``read_docs``) and skill (``doc_skills``) tool kits
 # moved to the sibling ``lazytoolkit`` package in 0.8; install their deps via
-# ``pip install 'lazytoolkit[docs]'``.
+# ``pip install "lazytoolkit[docs] @ git+https://github.com/selvaz/LazyTools@v0.10.6"``.
 # Reporting subsystem extracted to the sibling lazybridge-reports
 # package in 0.7.9 (see https://github.com/selvaz/LazyReport).  The
 # old [report], [pdf], [report-charts], [report-citations], and
@@ -60,7 +60,7 @@ yaml      = ["pyyaml>=6.0,<7.0"]
 # ``pip install 'lazybridge-reports[charts,citations,fallback]'``.
 otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
 # The MCP connector moved to the sibling ``lazytoolkit`` package in 0.8;
-# install it via ``pip install 'lazytoolkit[mcp]'``.
+# install it via ``pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"``.
 # At-rest encryption for Store values via EncryptedStoreAdapter.  Pulls
 # ``cryptography`` (Fernet = AES-128-CBC + HMAC-SHA256, key rotation via
 # MultiFernet).  Opt-in because cryptography is a C-extension; the rest

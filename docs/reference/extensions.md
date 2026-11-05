@@ -7,7 +7,7 @@ lazybridge` ships them by default (except `OTelExporter`, which requires the
 > **Connectors moved (0.8).** The MCP connector and the external tool gateway
 > are no longer `lazybridge.ext.*` — they moved to the
 > [LazyTools](https://tools.lazybridge.com/) package (`lazytools.connectors.{mcp,gateway}`,
-> `pip install lazytoolkit`). The old `lazybridge.ext.{mcp,gateway}` deprecation
+> `pip install "lazytoolkit @ git+https://github.com/selvaz/LazyTools@v0.10.6"`). The old `lazybridge.ext.{mcp,gateway}` deprecation
 > shims were removed in 0.9 — import from `lazytools` instead.
 
 For narrative usage see the corresponding guides:
@@ -32,7 +32,7 @@ For narrative usage see the corresponding guides:
 
 Moved to `lazytools.connectors.mcp` — see the [MCP guide](https://tools.lazybridge.com/mcp/)
 and the [LazyTools overview](https://tools.lazybridge.com/). Install with
-`pip install lazytoolkit[mcp]`.
+`pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"`.
 
 ## Evaluation framework
 
