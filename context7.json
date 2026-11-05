@@ -2,16 +2,24 @@
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "LazyBridge",
   "description": "Python agent framework where everything is a tool: Agent = Engine + Tools + State, with Claude Code, Codex and provider APIs as swappable engines.",
-  "folders": ["docs", "examples"],
+  "folders": [
+    "docs",
+    "examples"
+  ],
   "excludeFolders": [
-    "docs/_audit-2026-10.md",
     "docs/marketing",
     "docs/migrations",
     "examples/cross_review_benchmark/results",
     "tests",
     "mocks"
   ],
-  "excludeFiles": ["CHANGELOG.md", "LAZYTOOLS_EXTRACTION.md", "SUPERTOOL_PLAN.md", "IMPLEMENTATION.md"],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "LAZYTOOLS_EXTRACTION.md",
+    "SUPERTOOL_PLAN.md",
+    "IMPLEMENTATION.md",
+    "_audit-2026-10.md"
+  ],
   "rules": [
     "Install with `pip install lazybridge` (Python 3.11+). Import core primitives from the top level: `from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Plan, Step, Memory, Store, Session`.",
     "Construct agents as `Agent(name=..., engine=...)`. Model, system prompt, reasoning and native-tool policy go on the engine; `tools`, `output`, `verify`, memory/store/session go on the Agent.",
