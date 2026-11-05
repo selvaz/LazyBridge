@@ -60,7 +60,7 @@ def validate_payload_against_output_type(payload: Any, output_type: Any) -> Any:
     origin = get_origin(output_type)
     if origin is not None or isinstance(output_type, type):
         try:
-            adapter = TypeAdapter(output_type)
+            adapter: TypeAdapter[Any] = TypeAdapter(output_type)
         except (TypeError, ValueError) as exc:
             # Couldn't build an adapter (unsupported or malformed output_type) —
             # log at WARNING so the caller can diagnose the issue, then return
