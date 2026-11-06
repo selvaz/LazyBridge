@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.6] — 2026-11-06
+
 - Document coding model translation and the async LazyTools code bridge across agent-facing guidance.
 
 - Fix LazyTools installation guidance to use the GitHub release tag instead of the PyPI placeholder.
