@@ -70,9 +70,9 @@ def _run_on_new_loop(coro: Awaitable[T]) -> T:
 
     Replaces a bare ``asyncio.run()`` so the "Event loop is closed" cleanup
     noise is suppressed without hiding real errors, while otherwise mirroring
-    ``asyncio.run`` / ``asyncio.Runner.close`` shutdown semantics: cancel and
-    await pending tasks, then ``shutdown_asyncgens()`` + ``shutdown_default_executor()``,
-    then ``close()``.  The generator-shutdown step matters because several
+    ``asyncio.run`` / ``asyncio.Runner.close`` shutdown semantics for tasks and
+    async generators. The default executor is shut down without waiting, so
+    its running work may outlive the loop. The generator-shutdown step matters because several
     call sites (``Tool.run_sync``, ``Memory``, ``MockAgent``) previously called
     ``asyncio.run`` directly — skipping it would leave a partially-consumed
     async generator that owns a stream/response without running its
@@ -93,10 +93,16 @@ def _run_on_new_loop(coro: Awaitable[T]) -> T:
                 draining = [task for task in pending if task not in abandoned_tasks]
                 if draining:
                     loop.run_until_complete(asyncio.gather(*draining, return_exceptions=True))
-            # Mirror asyncio.run()'s finally block: flush async generators and
-            # the default thread-pool executor before the loop is torn down.
+            # Flush async generators before the loop is torn down.
             loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.run_until_complete(loop.shutdown_default_executor())
+            # asyncio's executor shutdown starts a helper thread and waits for
+            # it; even starting that thread can hang. Do not wait for workers.
+            # close() otherwise shuts down the same executor a second time.
+            executor = getattr(loop, "_default_executor", None)
+            if executor is not None:
+                loop._executor_shutdown_called = True  # type: ignore[attr-defined]
+                loop._default_executor = None  # type: ignore[attr-defined]
+                executor.shutdown(wait=False, cancel_futures=True)
         except Exception as exc:
             loop.call_exception_handler(
                 {
