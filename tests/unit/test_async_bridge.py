@@ -61,7 +61,7 @@ def test_executor_running_work_does_not_hold_up_teardown() -> None:
     release = threading.Event()
     finished = threading.Event()
     returned = threading.Event()
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def work() -> None:
         started.set()
@@ -75,7 +75,7 @@ def test_executor_running_work_does_not_hold_up_teardown() -> None:
     def run() -> None:
         try:
             run_coroutine_blocking(lambda: _c())
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
         finally:
             returned.set()
