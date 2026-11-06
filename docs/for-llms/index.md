@@ -1,7 +1,7 @@
 # For LLM assistants
 
 Use the current documentation when generating LazyBridge code. This refresh
-targets 1.8.5, including the cross-provider model tier table, the Codex transport fixes and Claude Code /
+targets 1.8.6, including the cross-provider model tier table, the Codex transport fixes and Claude Code /
 Codex engines, native aliases and opposite-engine review.
 
 ## Available surfaces
