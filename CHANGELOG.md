@@ -12,6 +12,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 - Fix LazyTools installation guidance to use the GitHub release tag instead of the PyPI placeholder.
 
+### Fixed
+
+- Avoid an indefinite sync bridge teardown hang by shutting down the loop's
+  default executor without starting a helper thread or waiting for workers.
+  Running executor work can continue after the bridge returns; queued work is cancelled.
+  Executor workers are non-daemon threads, so a stuck `run_in_executor` job still
+  delays interpreter exit (not the bridge call); bound such work in the job itself.
+
 ## [1.8.5] — 2026-10-31
 
 ### Changed

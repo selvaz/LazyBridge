@@ -40,6 +40,59 @@ def test_sync_context_returns_value() -> None:
     assert run_coroutine_blocking(lambda: _c()) == 42
 
 
+def test_executor_shutdown_does_not_start_a_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    starts: list[bool] = []
+
+    def fail_start(thread: threading.Thread) -> None:
+        starts.append(True)
+        raise AssertionError("teardown attempted to start a thread")
+
+    async def _c() -> int:
+        result = await asyncio.get_running_loop().run_in_executor(None, lambda: 42)
+        monkeypatch.setattr(threading.Thread, "start", fail_start)
+        return result
+
+    assert run_coroutine_blocking(lambda: _c()) == 42
+    assert not starts
+
+
+def test_executor_running_work_does_not_hold_up_teardown() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    returned = threading.Event()
+    errors: list[Exception] = []
+
+    def work() -> None:
+        started.set()
+        release.wait()
+        finished.set()
+
+    async def _c() -> None:
+        asyncio.get_running_loop().run_in_executor(None, work)
+        assert started.wait(5)
+
+    def run() -> None:
+        try:
+            run_coroutine_blocking(lambda: _c())
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            returned.set()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert returned.wait(5), "executor teardown waited for running work"
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive()
+    assert not errors
+    assert started.is_set()
+    assert finished.wait(5)
+
+
 def test_sync_context_propagates_contextvar() -> None:
     token = CVAR.set("sync-value")
     try:
