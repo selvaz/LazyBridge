@@ -546,6 +546,8 @@ class CodexAppServerClient:
                 # ``review_target`` raises here, and a request that never left
                 # the process must not count as a turn that may have run.
                 progress["turn_sent"] = True
+                if on_activity := progress.get("on_activity"):
+                    on_activity()
             result = await future
             if is_turn:
                 state.phase = "turn running"
@@ -574,6 +576,17 @@ class CodexAppServerClient:
                 while line := await process.stdout.readline():
                     message = json.loads(line)
                     method = message.get("method")
+                    if turn_sent and method is not None and progress is not None:
+                        params = message.get("params") or {}
+                        incoming_turn = params.get("turnId") or (params.get("turn") or {}).get("id")
+                        incoming_thread = params.get("threadId")
+                        on_activity = progress.get("on_activity")
+                        if (
+                            on_activity
+                            and (turn_id is None or incoming_turn in (None, turn_id))
+                            and incoming_thread in (None, active_thread)
+                        ):
+                            on_activity()
                     if method is None:
                         # A response to one of our own requests. Dispatching on
                         # the absence of "method" (rather than on "id" alone)

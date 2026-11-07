@@ -8,6 +8,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bound silence during non-streaming Codex turns with `stream_idle_timeout`,
+  cancelling the turn and reaping the App Server when it expires.
+
 ## [1.8.6] — 2026-11-06
 
 - Document coding model translation and the async LazyTools code bridge across agent-facing guidance.
