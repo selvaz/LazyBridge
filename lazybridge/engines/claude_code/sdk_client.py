@@ -53,7 +53,7 @@ def _kill_tree(process: Any) -> None:
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode:
                 logger.warning("taskkill failed for Claude process pid=%s", pid)
@@ -88,7 +88,7 @@ async def _bounded_query(prompt: Any, sdk_options: Any, idle_timeout: float | No
                 await queue.put(("message", message))
         except asyncio.CancelledError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             await queue.put(("error", exc))
         else:
             await queue.put(("end", None))
@@ -107,24 +107,60 @@ async def _bounded_query(prompt: Any, sdk_options: Any, idle_timeout: float | No
             yield value
     finally:
         if not task.done():
-            process = getattr(transport, "_process", None)
-            task.cancel()
-            done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
-            process = process or getattr(transport, "_process", None)
-            if process is not None and getattr(process, "returncode", None) is None:
-                await asyncio.to_thread(_kill_tree, process)
-            if not done:
-                done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
-            if not done:
-                logger.debug("Claude SDK cleanup did not finish after process termination")
-                abandoned_tasks.add(task)
-                # This task is deliberately detached; its pending destruction
-                # at loop shutdown is expected, not an unhandled task leak.
-                task._log_destroy_pending = False  # type: ignore[attr-defined]
-                task.add_done_callback(lambda future: None if future.cancelled() else future.exception())
+            # Run the cleanup in its own task: a second cancellation (e.g. the
+            # overall request_timeout firing while an idle-timeout cleanup is
+            # in its grace period) must not stop the kill or leave the consumer
+            # unregistered. If we are cancelled while waiting, kill immediately.
+            cleanup = asyncio.ensure_future(_cleanup_consumer(task, transport))
+            _cleanup_tasks.add(cleanup)
+            cleanup.add_done_callback(_cleanup_tasks.discard)
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                process = getattr(transport, "_process", None)
+                if process is not None and getattr(process, "returncode", None) is None:
+                    _kill_tree(process)
+                _detach(task)
+                abandoned_tasks.add(cleanup)
+                raise
         if task.done():
             with contextlib.suppress(BaseException):
                 task.result()
+
+
+#: Strong references to in-flight cleanup tasks (``abandoned_tasks`` is weak).
+_cleanup_tasks: set[asyncio.Future[None]] = set()
+
+
+def _retrieve_exception(future: asyncio.Future[Any]) -> None:
+    """Mark a detached task's exception as retrieved so asyncio does not log it."""
+    if not future.cancelled():
+        future.exception()
+
+
+def _detach(task: asyncio.Task[Any]) -> None:
+    """Leave a stuck SDK consumer behind without blocking loop teardown."""
+    if task.done():
+        return
+    logger.debug("Claude SDK cleanup did not finish after process termination")
+    abandoned_tasks.add(task)
+    # Deliberately detached; its pending destruction at loop shutdown is expected.
+    task._log_destroy_pending = False  # type: ignore[attr-defined]
+    task.add_done_callback(_retrieve_exception)
+
+
+async def _cleanup_consumer(task: asyncio.Task[Any], transport: Any) -> None:
+    """Cancel the consumer, kill the CLI if it does not stop, then detach it."""
+    process = getattr(transport, "_process", None)
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+    process = process or getattr(transport, "_process", None)
+    if process is not None and getattr(process, "returncode", None) is None:
+        await asyncio.to_thread(_kill_tree, process)
+    if not done:
+        done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+    if not done:
+        _detach(task)
 
 
 @contextmanager

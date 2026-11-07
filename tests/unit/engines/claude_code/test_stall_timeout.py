@@ -91,3 +91,16 @@ def test_fast_sdk_run(monkeypatch):
     result = Agent(engine=ClaudeCodeEngine(stream_idle_timeout=0.2, max_retries=0))("test")
     assert result.ok
     assert result.text() == "done"
+
+
+def test_request_timeout_during_idle_cleanup_still_kills(stalled_sdk):
+    # The overall timeout fires while the idle-timeout cleanup is in its grace
+    # period (0.05 idle + 0.2 grace > 0.1 request): the child must still be
+    # killed and the synchronous caller must return promptly.
+    engine = ClaudeCodeEngine(stream_idle_timeout=0.05, request_timeout=0.1, max_retries=0)
+    started = time.monotonic()
+    result = Agent(engine=engine)("test")
+    assert time.monotonic() - started < 2
+    assert not result.ok
+    assert result.error.type == "TimeoutError"
+    assert 12345 in stalled_sdk
