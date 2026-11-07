@@ -6,9 +6,12 @@ the sole optional-import boundary for the external SDK.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import warnings
 from collections.abc import AsyncIterator, Iterator
@@ -17,6 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
+from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_iter
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
@@ -31,6 +35,96 @@ logger = logging.getLogger(__name__)
 # ``--system-prompt-file``. The threshold leaves room for every other argument
 # (MCP config, JSON schema, tool lists) on the same line.
 SYSTEM_PROMPT_FILE_THRESHOLD = 8_000
+
+_CLOSE_GRACE = 0.5
+_KILL_TIMEOUT = 10.0
+
+
+def _kill_tree(process: Any) -> None:
+    """Force-stop the SDK child and, on Windows, its descendants."""
+    pid = getattr(process, "pid", None)
+    if pid is None or getattr(process, "returncode", None) is not None:
+        return
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                timeout=_KILL_TIMEOUT,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if result.returncode:
+                logger.warning("taskkill failed for Claude process pid=%s", pid)
+                with contextlib.suppress(OSError):
+                    process.kill()
+        else:
+            # The SDK does not launch the child in a separate process group.
+            process.kill()
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("Failed to kill Claude process tree (pid=%s)", pid, exc_info=True)
+        with contextlib.suppress(OSError):
+            process.kill()
+
+
+async def _bounded_query(prompt: Any, sdk_options: Any, idle_timeout: float | None) -> AsyncIterator[Any]:
+    """Consume the SDK independently so cancellation cannot pin the caller in SDK close."""
+    from claude_agent_sdk import query
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+    # query() normally constructs this itself. Supplying it explicitly lets us
+    # retain the child handle even when cancellation is stuck in query.close().
+    transport_options = sdk_options
+    if getattr(sdk_options, "can_use_tool", None):
+        transport_options = replace(sdk_options, permission_prompt_tool_name="stdio")
+    transport = SubprocessCLITransport(prompt=prompt, options=transport_options)
+    messages = query(prompt=prompt, options=sdk_options, transport=transport)
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def consume() -> None:
+        try:
+            async for message in messages:
+                await queue.put(("message", message))
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            await queue.put(("error", exc))
+        else:
+            await queue.put(("end", None))
+
+    task = asyncio.create_task(consume())
+    try:
+        while True:
+            try:
+                kind, value = await asyncio.wait_for(queue.get(), idle_timeout)
+            except TimeoutError as exc:
+                raise TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message") from exc
+            if kind == "end":
+                return
+            if kind == "error":
+                raise value
+            yield value
+    finally:
+        if not task.done():
+            process = getattr(transport, "_process", None)
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+            process = process or getattr(transport, "_process", None)
+            if process is not None and getattr(process, "returncode", None) is None:
+                await asyncio.to_thread(_kill_tree, process)
+            if not done:
+                done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+            if not done:
+                logger.debug("Claude SDK cleanup did not finish after process termination")
+                abandoned_tasks.add(task)
+                # This task is deliberately detached; its pending destruction
+                # at loop shutdown is expected, not an unhandled task leak.
+                task._log_destroy_pending = False  # type: ignore[attr-defined]
+                task.add_done_callback(lambda future: None if future.cancelled() else future.exception())
+        if task.done():
+            with contextlib.suppress(BaseException):
+                task.result()
 
 
 @contextmanager
@@ -447,7 +541,7 @@ class AgentSdkClient(ClaudeSdkClient):
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> ClaudeSdkResult:
         try:
-            from claude_agent_sdk import ResultMessage, query
+            from claude_agent_sdk import ResultMessage
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
@@ -457,10 +551,11 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(options) as cli_options:
             sdk_options = self._sdk_options(cli_options)
-            async for message in query(prompt=sdk_prompt, options=sdk_options):
-                self._report_session_id(options, message)
-                if isinstance(message, ResultMessage):
-                    final = message
+            async with closing_iter(_bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout)) as messages:
+                async for message in messages:
+                    self._report_session_id(options, message)
+                    if isinstance(message, ResultMessage):
+                        final = message
         if final is None:
             raise RuntimeError("Claude Agent SDK ended without a ResultMessage")
         if final.is_error:
@@ -508,7 +603,7 @@ class AgentSdkClient(ClaudeSdkClient):
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]:
         try:
-            from claude_agent_sdk import ResultMessage, StreamEvent, query
+            from claude_agent_sdk import ResultMessage, StreamEvent
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
@@ -522,10 +617,7 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(stream_options) as cli_options:
             async with closing_iter(
-                query(
-                    prompt=sdk_prompt,
-                    options=self._sdk_options(cli_options),
-                )
+                _bounded_query(sdk_prompt, self._sdk_options(cli_options), stream_options.stream_idle_timeout)
             ) as messages:
                 async for message in messages:
                     self._report_session_id(stream_options, message)

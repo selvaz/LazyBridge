@@ -596,6 +596,7 @@ class ClaudeCodeEngine:
             mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
             tool_observer=observe,
             include_partial_messages=partial,
+            stream_idle_timeout=self.stream_idle_timeout,
             output_format=_output_format(output_type),
             on_session_id=self._learn_session if self._alias is not None else None,
         )

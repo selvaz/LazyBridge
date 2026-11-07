@@ -8,6 +8,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bound Claude Code SDK idle waits and timeout cleanup, and terminate the Windows subprocess tree if cleanup stalls.
+
+### Known limitations
+
+- CodexEngine's non-streaming run has no idle timer; adding one is a follow-up.
+
 ## [1.8.6] — 2026-11-06
 
 - Document coding model translation and the async LazyTools code bridge across agent-facing guidance.

@@ -530,7 +530,7 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
 
     closed = asyncio.Event()
 
-    async def query(*, prompt, options):
+    async def query(*, prompt, options, transport):
         try:
             yield StreamEvent({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}})
             await asyncio.Event().wait()  # parked, as a live query would be
@@ -543,6 +543,9 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
     module.query = query
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
     monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
+    from claude_agent_sdk._internal.transport import subprocess_cli
+
+    monkeypatch.setattr(subprocess_cli, "SubprocessCLITransport", lambda **kwargs: object())
 
     async def scenario() -> None:
         turn = AgentSdkClient().stream("go", options=ClaudeSdkOptions())
@@ -598,7 +601,7 @@ class TestLongSystemPrompt:
 
         seen: dict[str, object] = {}
 
-        async def failing_query(*, prompt, options):
+        async def failing_query(*, prompt, options, transport):
             seen["system_prompt"] = options.system_prompt
             seen["existed"] = os.path.exists(options.system_prompt["path"])
             raise RuntimeError("boom")

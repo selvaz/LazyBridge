@@ -47,6 +47,7 @@ class ClaudeSdkOptions:
     mcp_server_name: str = "lazybridge"
     mcp_tools: tuple[McpTool, ...] = ()
     include_partial_messages: bool = False
+    stream_idle_timeout: float | None = None
     #: Native structured output, in the Messages API shape the Agent SDK
     #: expects: ``{"type": "json_schema", "schema": {...}}``. The SDK turns
     #: this into the CLI's ``--json-schema`` flag and returns the parsed
