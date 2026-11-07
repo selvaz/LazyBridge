@@ -515,6 +515,11 @@ class CodexAppServerClient:
 
         pending: dict[int, asyncio.Future[Any]] = {}
         completed: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        if progress is not None:
+            # Once the turn has an outcome, no further turn events can arrive:
+            # the idle clock must not run during subprocess teardown.
+            progress["turn_done"] = False
+            completed.add_done_callback(lambda _: progress.__setitem__("turn_done", True))
         #: Last cumulative ``total`` seen per turn id. Keyed rather than
         #: folded into one value because a notification can arrive *before*
         #: the ``turn/start`` response tells us which id is ours: deciding

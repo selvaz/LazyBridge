@@ -10,6 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Bound Claude Code SDK idle waits and timeout cleanup, and terminate the Windows subprocess tree if cleanup stalls.
 - Bound silence during non-streaming Codex turns with `stream_idle_timeout`,
   cancelling the turn and reaping the App Server when it expires.
 

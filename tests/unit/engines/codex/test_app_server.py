@@ -987,3 +987,18 @@ def test_idle_clock_still_trips_after_client_wait():
 
     with pytest.raises(TimeoutError, match="went idle"):
         asyncio.run(engine._run_with_idle_timeout(call, progress))
+
+
+def test_slow_teardown_after_turn_completed_is_not_an_idle_timeout(monkeypatch):
+    # Reaping the server after turn/completed can outlast stream_idle_timeout;
+    # the known successful result must win over a spurious idle timeout.
+    reap = app_server._reap
+
+    async def slow_reap(process):
+        await asyncio.sleep(0.4)
+        await reap(process)
+
+    monkeypatch.setattr(app_server, "_reap", slow_reap)
+    client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
+    result = Agent(CodexEngine(client=client, stream_idle_timeout=0.1, request_timeout=10))("go")
+    assert result.ok, result.error

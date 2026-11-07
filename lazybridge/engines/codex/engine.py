@@ -519,6 +519,10 @@ class CodexEngine:
                     # the gate, so the idle clock does not run during them.
                     if progress.get("client_waits", 0) > 0:
                         continue
+                    # The turn already has its outcome and only teardown is
+                    # left: report that outcome, not a spurious idle timeout.
+                    if progress.get("turn_done"):
+                        continue
                     raise TimeoutError(
                         f"Codex turn went idle for {self.stream_idle_timeout}s without an event "
                         "(set CodexEngine(stream_idle_timeout=...) to a higher value if needed)."
