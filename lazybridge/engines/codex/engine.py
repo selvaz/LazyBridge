@@ -514,6 +514,11 @@ class CodexEngine:
                 try:
                     await asyncio.wait_for(activity.wait(), self.stream_idle_timeout)
                 except TimeoutError as exc:
+                    # The server is waiting on us (tool call or approval gate),
+                    # not stalled: those waits are bounded by tool_timeout and
+                    # the gate, so the idle clock does not run during them.
+                    if progress.get("client_waits", 0) > 0:
+                        continue
                     raise TimeoutError(
                         f"Codex turn went idle for {self.stream_idle_timeout}s without an event "
                         "(set CodexEngine(stream_idle_timeout=...) to a higher value if needed)."
@@ -525,8 +530,8 @@ class CodexEngine:
             done, _ = await asyncio.wait((task, watcher), return_when=asyncio.FIRST_COMPLETED)
             if task in done:
                 return await task
-            await watcher
-            raise AssertionError("idle watcher returned unexpectedly")  # pragma: no cover
+            error = watcher.exception()
+            raise error if error is not None else RuntimeError("idle watcher returned unexpectedly")
         finally:
             for pending in (task, watcher):
                 if not pending.done():

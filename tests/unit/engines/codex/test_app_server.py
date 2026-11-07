@@ -949,3 +949,41 @@ class TestSpawnFailures:
             asyncio.run(asyncio.wait_for(_run_scenario("happy"), timeout=_TIMEOUT))
 
         assert len(spawns) == 1
+
+
+def test_idle_clock_paused_during_client_wait():
+    # A tool call or approval gate slower than stream_idle_timeout must not
+    # cancel the turn: the server is waiting on us, not stalled.
+    engine = CodexEngine(
+        client=CodexAppServerClient(command=(sys.executable, FIXTURE, "happy")),
+        stream_idle_timeout=0.1,
+        request_timeout=5,
+    )
+    progress: dict = {}
+
+    async def call():
+        progress["on_activity"]()  # turn sent
+        with app_server._client_wait(progress):
+            await asyncio.sleep(0.4)
+        return "ok"
+
+    assert asyncio.run(engine._run_with_idle_timeout(call, progress)) == "ok"
+    assert progress.get("client_waits") == 0
+
+
+def test_idle_clock_still_trips_after_client_wait():
+    engine = CodexEngine(
+        client=CodexAppServerClient(command=(sys.executable, FIXTURE, "happy")),
+        stream_idle_timeout=0.1,
+        request_timeout=5,
+    )
+    progress: dict = {}
+
+    async def call():
+        progress["on_activity"]()
+        with app_server._client_wait(progress):
+            await asyncio.sleep(0.2)
+        await asyncio.sleep(5)
+
+    with pytest.raises(TimeoutError, match="went idle"):
+        asyncio.run(engine._run_with_idle_timeout(call, progress))
