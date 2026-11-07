@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from lazybridge import Agent
 from lazybridge.engines.codex import app_server
 from lazybridge.engines.codex.app_server import (
     CodexAppServerClient,
@@ -13,7 +15,7 @@ from lazybridge.engines.codex.app_server import (
     CodexTransportError,
     CodexTurnUncertain,
 )
-from lazybridge.engines.codex.engine import _is_transient
+from lazybridge.engines.codex.engine import CodexEngine, _is_transient
 from lazybridge.engines.coding import ApprovalDecision
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "fake_app_server.py")
@@ -21,6 +23,34 @@ FIXTURE = str(Path(__file__).parent / "fixtures" / "fake_app_server.py")
 # Bound every subprocess test so a broken fixture or protocol regression
 # fails fast instead of hanging CI.
 _TIMEOUT = 10.0
+
+
+def test_run_idle_timeout_cancels_and_reaps_server(monkeypatch):
+    reaped = []
+    reap = app_server._reap
+
+    async def record_reap(process):
+        reaped.append(process)
+        await reap(process)
+
+    monkeypatch.setattr(app_server, "_reap", record_reap)
+    client = CodexAppServerClient(command=(sys.executable, FIXTURE, "idle_silence"))
+    agent = Agent(CodexEngine(client=client, stream_idle_timeout=0.2, request_timeout=5))
+    start = time.monotonic()
+    result = agent("go")
+    assert not result.ok
+    assert result.error.type == "TimeoutError"
+    assert "went idle" in result.error.message
+    assert time.monotonic() - start < 3
+    assert len(reaped) == 1
+    assert reaped[0].returncode is not None
+
+
+@pytest.mark.parametrize(("scenario", "idle"), [("idle_steady", 0.3), ("idle_disabled", None)])
+def test_run_idle_clock_resets_or_is_disabled(scenario, idle):
+    client = CodexAppServerClient(command=(sys.executable, FIXTURE, scenario))
+    result = Agent(CodexEngine(client=client, stream_idle_timeout=idle, request_timeout=5))("go")
+    assert result.ok
 
 
 @pytest.fixture(autouse=True)
@@ -919,3 +949,41 @@ class TestSpawnFailures:
             asyncio.run(asyncio.wait_for(_run_scenario("happy"), timeout=_TIMEOUT))
 
         assert len(spawns) == 1
+
+
+def test_idle_clock_paused_during_client_wait():
+    # A tool call or approval gate slower than stream_idle_timeout must not
+    # cancel the turn: the server is waiting on us, not stalled.
+    engine = CodexEngine(
+        client=CodexAppServerClient(command=(sys.executable, FIXTURE, "happy")),
+        stream_idle_timeout=0.1,
+        request_timeout=5,
+    )
+    progress: dict = {}
+
+    async def call():
+        progress["on_activity"]()  # turn sent
+        with app_server._client_wait(progress):
+            await asyncio.sleep(0.4)
+        return "ok"
+
+    assert asyncio.run(engine._run_with_idle_timeout(call, progress)) == "ok"
+    assert progress.get("client_waits") == 0
+
+
+def test_idle_clock_still_trips_after_client_wait():
+    engine = CodexEngine(
+        client=CodexAppServerClient(command=(sys.executable, FIXTURE, "happy")),
+        stream_idle_timeout=0.1,
+        request_timeout=5,
+    )
+    progress: dict = {}
+
+    async def call():
+        progress["on_activity"]()
+        with app_server._client_wait(progress):
+            await asyncio.sleep(0.2)
+        await asyncio.sleep(5)
+
+    with pytest.raises(TimeoutError, match="went idle"):
+        asyncio.run(engine._run_with_idle_timeout(call, progress))
