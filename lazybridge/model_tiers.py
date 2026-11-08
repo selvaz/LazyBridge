@@ -62,8 +62,11 @@ def claude_tier(model: str) -> str | None:
 
 
 def openai_tier(model: str) -> str | None:
-    """Tier of a ``gpt-*`` Luna/Terra/Sol/Astra id, else ``None``."""
+    """Tier of a ``gpt-*`` Luna/Terra/Sol/Astra id or bare alias, else ``None``."""
     name = model.strip().lower()
+    for marker, tier in _OPENAI_MARKERS:
+        if name == marker:
+            return tier
     if not name.startswith("gpt-"):
         return None
     for marker, tier in _OPENAI_MARKERS:
@@ -84,7 +87,9 @@ def translate_model(model: str | None, to: str) -> str | None:
         return None
     target = _family(to)
     if target == "openai":
-        tier = claude_tier(model)
+        # A bare OpenAI alias ("terra") expands to its full id, like Claude's
+        # CLI does for "sonnet"; Codex itself rejects the bare alias.
+        tier = claude_tier(model) or (openai_tier(model) if "-" not in model else None)
     else:
         tier = openai_tier(model)
     return MODEL_TIERS[tier][target] if tier else model

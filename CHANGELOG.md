@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.7] — 2026-11-08
+
+### Added
+
+- `python -m lazybridge.demo`: a two-minute demo that finds the available engines (DeepSeek API, Claude Code, Codex), gives each the same tool and question, then lets one write and another review with `verify=`. README and Quickstart open with it.
+
 ### Documentation
 
 - Homepage, README and site description present provider API models, Claude Code and Codex as peer, swappable engines; the opening example builds all three on shared tools and state.
