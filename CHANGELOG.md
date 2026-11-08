@@ -13,6 +13,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `python -m lazybridge.demo`: a two-minute demo that finds the available engines (DeepSeek API, Claude Code, Codex), gives each the same tool and question, then lets one write and another review with `verify=`. README and Quickstart open with it.
+- `python -m lazybridge.skill install` and `lazybridge.skill.install_skill()`: copy the bundled skill into `~/.claude/skills/lazybridge` and `~/.codex/skills/lazybridge` without a symlink, so it works on Windows without admin rights; only an earlier install of its own is replaced.
+- Runnable cards (`examples/cards/`, site section "Cards"): a research desk whose lead agent has a Plan of sub-agents and the specialists as tools (Claude Code, Codex and DeepSeek together), the same desk always on in Telegram through LazyPulse, and one-command installers for Windows, macOS and Linux.
+
+### Changed
+
+- `CodexEngine(model="terra")` and the other bare OpenAI tier aliases (`luna`, `sol`, `astra`) now expand to the full Codex model id, like `"sonnet"` does for Claude Code.
 
 ### Documentation
 
