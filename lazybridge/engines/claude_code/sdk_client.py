@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
 from lazybridge._asyncbridge import abandoned_tasks
+from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_iter
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
@@ -68,7 +69,9 @@ def _kill_tree(process: Any) -> None:
             process.kill()
 
 
-async def _bounded_query(prompt: Any, sdk_options: Any, idle_timeout: float | None) -> AsyncIterator[Any]:
+async def _bounded_query(
+    prompt: Any, sdk_options: Any, idle_timeout: float | None, tool_clock: ToolClock | None = None
+) -> AsyncIterator[Any]:
     """Consume the SDK independently so cancellation cannot pin the caller in SDK close."""
     from claude_agent_sdk import query
     from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
@@ -97,7 +100,7 @@ async def _bounded_query(prompt: Any, sdk_options: Any, idle_timeout: float | No
     try:
         while True:
             try:
-                kind, value = await asyncio.wait_for(queue.get(), idle_timeout)
+                kind, value = await wait_with_tool_clock(queue.get(), idle_timeout, tool_clock, idle=True)
             except TimeoutError as exc:
                 raise TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message") from exc
             if kind == "end":
@@ -587,7 +590,9 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(options) as cli_options:
             sdk_options = self._sdk_options(cli_options)
-            async with closing_iter(_bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout)) as messages:
+            async with closing_iter(
+                _bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout, options.tool_clock)
+            ) as messages:
                 async for message in messages:
                     self._report_session_id(options, message)
                     if isinstance(message, ResultMessage):
@@ -653,7 +658,12 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(stream_options) as cli_options:
             async with closing_iter(
-                _bounded_query(sdk_prompt, self._sdk_options(cli_options), stream_options.stream_idle_timeout)
+                _bounded_query(
+                    sdk_prompt,
+                    self._sdk_options(cli_options),
+                    stream_options.stream_idle_timeout,
+                    stream_options.tool_clock,
+                )
             ) as messages:
                 async for message in messages:
                     self._report_session_id(stream_options, message)
