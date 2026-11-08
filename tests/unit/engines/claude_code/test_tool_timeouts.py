@@ -98,7 +98,7 @@ async def test_cancellation_releases_application_tool_clock(stream):
         return await agent.run("cancel")
 
     task = asyncio.create_task(call())
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), 2)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

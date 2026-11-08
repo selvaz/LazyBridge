@@ -122,7 +122,7 @@ async def test_tool_scope_released_on_exception_and_cancellation():
             await asyncio.sleep(10)
 
     task = asyncio.create_task(wait_with_tool_clock(work(), 0.03, clock))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), 2)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

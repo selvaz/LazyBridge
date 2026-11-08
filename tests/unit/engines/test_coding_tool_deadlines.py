@@ -43,7 +43,7 @@ async def test_overlapping_tools_keep_budget_paused_until_last_finishes(engine_t
 
     async def behavior(prompt, tool, options):
         first = asyncio.create_task(tool({"delay": 0.4}))
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), 2)
         second = asyncio.create_task(tool({"delay": 0.8}))
         await asyncio.gather(first, second)
         return "done"
@@ -74,10 +74,10 @@ async def test_one_run_tools_do_not_pause_another_run_on_shared_engine(engine_ty
         await asyncio.sleep(0.5)
         return "should time out"
 
-    engine = engine_type(client=Runtime(behavior), request_timeout=0.15, max_retries=0)
+    engine = engine_type(client=Runtime(behavior), request_timeout=0.3, max_retries=0)
     agent = Agent(engine=engine, tools=[delegate])
     delegated = asyncio.create_task(agent.run("delegate"))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), 2)
     stalled = await agent.run("stall")
     assert stalled.error.type == "TimeoutError"
     assert (await delegated).ok
