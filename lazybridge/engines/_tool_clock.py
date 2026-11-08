@@ -31,7 +31,7 @@ class ToolClock:
 
     def now(self) -> float:
         """Monotonic runtime time, frozen while any application tool runs."""
-        return time.monotonic() - self.paused_seconds
+        return (self._paused_at if self.active else time.monotonic()) - self._paused_seconds
 
     def _notify(self) -> None:
         self.changed.set()
