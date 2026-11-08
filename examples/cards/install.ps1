@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $Dir = if ($env:LAZYBRIDGE_CARDS_DIR) { $env:LAZYBRIDGE_CARDS_DIR } else { Join-Path $HOME "lazybridge-cards" }
 $Raw = "https://raw.githubusercontent.com/selvaz/LazyBridge/main/examples/cards"
-$LazyBridge = "lazybridge[claude-code]==1.8.7"
+$LazyBridge = "lazybridge[claude-code,deepseek]==1.8.7"
 $LazyPulse = "lazypulse[telegram,cron] @ git+https://github.com/selvaz/LazyPulse.git@v0.5.7"
 
 function Say($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
@@ -51,6 +51,7 @@ foreach ($f in @("research_desk.py", "research_desk_pulse.py")) {
 Done. Next:
   1. Sign in once:   claude        (then /exit)
                      codex login
+     DeepSeek key:   `$env:DEEPSEEK_API_KEY="..."   (platform.deepseek.com)
   2. Card 1:         cd "$Dir"; .venv\Scripts\python research_desk.py "your question"
   3. Card 2:         `$env:TELEGRAM_TOKEN="..."; `$env:TELEGRAM_OWNER_ID="..."
                      cd "$Dir"; .venv\Scripts\python research_desk_pulse.py

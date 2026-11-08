@@ -27,21 +27,18 @@ directory and `lazybridge.skill.reference_paths()` lists the reference files.
 Any assistant that reads skills as a folder with a `SKILL.md` (Codex reads
 `~/.codex/skills/<name>/SKILL.md`) can use the same directory.
 
-## Path 1 — Claude Code (recommended)
+## Path 1 — Claude Code and Codex (recommended)
 
-Symlink the bundled skill directory into your local skills folder:
+One command, the same on Windows, macOS and Linux:
 
-```bash
-ln -s "$(python -c 'from lazybridge.skill import skill_path; print(skill_path())')" \
-      ~/.claude/skills/lazybridge
+```console
+python -m lazybridge.skill install
 ```
 
-Verify by listing your skills:
-
-```bash
-ls ~/.claude/skills/
-# should show: lazybridge → /path/to/site-packages/lazybridge/skill
-```
+It copies the bundled skill into `~/.claude/skills/lazybridge` and, if Codex
+is installed, `~/.codex/skills/lazybridge`. No symlink and no admin rights.
+Use `--to claude`, `--to codex` or `--dest DIR` to choose. Rerun it after
+upgrading LazyBridge so the skill matches the installed version.
 
 From now on, whenever Claude Code edits Python that imports from
 `lazybridge`, it picks up the skill automatically. The skill's

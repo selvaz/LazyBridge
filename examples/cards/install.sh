@@ -8,7 +8,7 @@ set -euo pipefail
 
 DIR="${LAZYBRIDGE_CARDS_DIR:-$HOME/lazybridge-cards}"
 RAW="https://raw.githubusercontent.com/selvaz/LazyBridge/main/examples/cards"
-LAZYBRIDGE="lazybridge[claude-code]==1.8.7"
+LAZYBRIDGE="lazybridge[claude-code,deepseek]==1.8.7"
 LAZYPULSE="lazypulse[telegram,cron] @ git+https://github.com/selvaz/LazyPulse.git@v0.5.7"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -44,6 +44,7 @@ cat <<MSG
 Done. Next:
   1. Sign in once:   claude        (then /exit)
                      codex login
+     DeepSeek key:   export DEEPSEEK_API_KEY=...   (platform.deepseek.com)
   2. Card 1:         cd "$DIR" && .venv/bin/python research_desk.py "your question"
   3. Card 2:         export TELEGRAM_TOKEN=...  TELEGRAM_OWNER_ID=...
                      cd "$DIR" && .venv/bin/python research_desk_pulse.py

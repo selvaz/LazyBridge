@@ -2,7 +2,7 @@
 
 A lead agent (Claude Code, Opus) has three tools:
   - research_brief: a deterministic pipeline, two web researchers in parallel,
-    then a review, then a summary;
+    then a review, then a summary written by DeepSeek over its API;
   - deep_research (Claude Code, Sonnet) and fact_check (Codex, Terra), the
     same specialists, callable directly to dig deeper.
 
@@ -16,6 +16,7 @@ from lazybridge import (
     ClaudeCodeEngine,
     CodexEngine,
     CodingAgentConfig,
+    LLMEngine,
     Plan,
     Step,
     from_parallel_all,
@@ -46,6 +47,9 @@ terra = Agent(
     engine=CodexEngine(model="terra", config=web),
 )
 
+# Writer: a token-based API model, a peer of the two coding agents
+writer = Agent(name="writer", engine=LLMEngine("deepseek-flash"))
+
 # Pipeline: research in parallel, review, summarise
 research_brief = Agent(
     name="research_brief",
@@ -55,7 +59,7 @@ research_brief = Agent(
         Step(terra, name="challenge", task=from_start, context=CHALLENGE, parallel=True),
         Step(terra, name="review", task=from_start, context=[REVIEW, from_parallel_all("support")]),
         Step(
-            sonnet,
+            writer,
             name="summary",
             task=from_start,
             context=[SUMMARY, from_parallel_all("support"), from_step("review")],

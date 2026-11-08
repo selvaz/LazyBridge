@@ -142,6 +142,10 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Cards:
+      - Overview: cards/index.md
+      - "Card 1: Research desk": cards/research-desk.md
+      - "Card 2: Always on": cards/research-desk-pulse.md
   - Why LazyBridge: why.md
   - Framework documentation: best-python-ai-agent-frameworks.md
   - Comparison: comparison.md
