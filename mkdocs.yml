@@ -1,5 +1,5 @@
 site_name: LazyBridge
-site_description: Claude Code and Codex as Python agent engines. Shared tools and state, independent review and durable conversations, integrated through LazyTools.
+site_description: Python agents and pipelines on any engine. Provider API models, Claude Code and Codex are peer, swappable engines with shared tools and state, independent review and durable conversations.
 site_url: https://core.lazybridge.com/
 repo_url: https://github.com/selvaz/LazyBridge
 repo_name: selvaz/LazyBridge

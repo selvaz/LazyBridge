@@ -1,23 +1,34 @@
 # LazyBridge
 
-Build Python pipelines with **Claude Code and Codex as engines**. Swap the
-engine while keeping tools and application state; let one engine write and the
-other review. LazyBridge uses one contract: **Agent = Engine + Tools + State**.
+Build Python agents and pipelines on **any engine**: a provider API model
+(Anthropic, OpenAI, Google, DeepSeek, LiteLLM and more), **Claude Code** or
+**Codex**. The three are peers: each is a first-class engine behind the same
+contract, **Agent = Engine + Tools + State**, so you swap one for another in one
+line and keep tools, memory and state. Use API models alone, coding runtimes
+alone, or mix them in one pipeline and let one engine write while another
+reviews.
 
 ```python
-from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Session, Store
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, LLMEngine, Memory, Session, Store
 
 def project_status() -> str:
     """Return this example project's status."""
     return "The draft is ready for review."
 
 state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
+api = Agent(name="api", engine=LLMEngine("claude-haiku-4-5"), **state)
 claude = Agent(name="claude", engine=ClaudeCodeEngine(), **state)
 codex = Agent(name="codex", engine=CodexEngine(), **state)
-assert claude.memory is codex.memory
-assert claude.store is codex.store
-assert claude.session is codex.session
+assert api.memory is claude.memory is codex.memory
+assert api.store is claude.store is codex.store
+assert api.session is claude.session is codex.session
 ```
+
+| Engine | What runs | Same `Agent`, tools and state |
+| --- | --- | --- |
+| `LLMEngine` | A provider API model, any [supported provider](guides/advanced/providers.md) | Yes |
+| `ClaudeCodeEngine` | The Claude Code runtime | Yes |
+| `CodexEngine` | The Codex runtime | Yes |
 
 With a subscription login, coding runtimes use the account's plan quota.
 The adapters reuse runtime authentication; the configured login can also use
