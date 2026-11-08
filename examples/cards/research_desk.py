@@ -77,4 +77,5 @@ desk = Agent(
 
 if __name__ == "__main__":
     question = " ".join(sys.argv[1:]) or "Should a small team start with SQLite or Postgres?"
-    print(desk(question).text())
+    result = desk(question)
+    print(result.text() if result.ok else f"failed: {result.error.message}")

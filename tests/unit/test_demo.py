@@ -6,6 +6,9 @@ from lazybridge import demo
 
 
 class _Reply:
+    ok = True
+    error = None
+
     def __init__(self, text: str) -> None:
         self._text = text
 
@@ -67,3 +70,17 @@ def test_two_engines_write_and_review(monkeypatch, capsys):
 
 def test_tool_is_deterministic():
     assert "Agent = Engine + Tools + State" in demo.lazybridge_facts()
+
+
+def test_a_failed_engine_is_reported_and_fails_the_run(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    _engines(monkeypatch, {"a": True, "b": False})
+
+    class _Failing(_FakeAgent):
+        def __call__(self, prompt):
+            return SimpleNamespace(ok=False, error=SimpleNamespace(type="TimeoutError", message="no login"))
+
+    monkeypatch.setattr(demo, "Agent", _Failing)
+    assert demo.main() == 1
+    assert "failed: TimeoutError: no login" in capsys.readouterr().out

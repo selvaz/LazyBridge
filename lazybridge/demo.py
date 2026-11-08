@@ -91,6 +91,13 @@ REVIEW = (
 )
 
 
+def show(result) -> tuple[str, bool]:
+    """Text of a result, or its error: a failed engine returns an error Envelope."""
+    if result.ok:
+        return result.text().strip(), True
+    return f"failed: {result.error.type}: {result.error.message}", False
+
+
 def available() -> list[str]:
     found = []
     for name, (check, hint, _) in ENGINES.items():
@@ -109,26 +116,30 @@ def main() -> int:
         return 1
 
     print(f"\n1) Same tool, same question, {len(names)} engine(s):\n   {QUESTION}\n")
+    all_ok = True
     for name in names:
         agent = Agent(name=name, engine=ENGINES[name][2](), tools=[lazybridge_facts])
         try:
-            print(f"   {name:<12} {agent(QUESTION).text().strip()}")
+            text, ok = show(agent(QUESTION))
         except Exception as exc:  # a broken login must not hide the other engines
-            print(f"   {name:<12} failed: {type(exc).__name__}: {exc}")
+            text, ok = f"failed: {type(exc).__name__}: {exc}", False
+        all_ok = all_ok and ok
+        print(f"   {name:<12} {text}")
 
     if len(names) < 2:
         print("\nEnable a second engine to see one write and another review.")
-        return 0
+        return 0 if all_ok else 1
     writer_name, reviewer_name = names[0], names[-1]
     print(f"\n2) {writer_name} writes, {reviewer_name} reviews (verify=):\n")
     reviewer = Agent(name=reviewer_name, engine=ENGINES[reviewer_name][2](system=REVIEW))
     writer = Agent(name=writer_name, engine=ENGINES[writer_name][2](), verify=reviewer, max_verify=2)
     try:
-        print(writer(TASK).text().strip())
+        text, ok = show(writer(TASK))
     except Exception as exc:
-        print(f"   failed: {type(exc).__name__}: {exc}")
+        text, ok = f"failed: {type(exc).__name__}: {exc}", False
+    print(text)
     print('\nSource of this demo: python -c "import lazybridge.demo as d; print(d.__file__)"')
-    return 0
+    return 0 if all_ok and ok else 1
 
 
 if __name__ == "__main__":
