@@ -43,14 +43,21 @@ if (-not (Test-Path $VPy)) {
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 Say "Claude Code CLI"
-if (Has claude) { "already installed" } else { irm https://claude.ai/install.ps1 | iex }
+if (Has claude) { "already installed" }
+else {
+    try { irm https://claude.ai/install.ps1 -ErrorAction Stop | iex }
+    catch { throw "Claude Code install failed: $($_.Exception.Message)" }
+}
 
 Say "Codex CLI"
 # Ask LazyBridge itself: it also finds the Codex desktop app's runtime, which is not on PATH.
 & $VPy -c "from lazybridge.engines.codex import codex_executable as c; c()" 2>&1 | Out-Null
 $CodexFound = ($LASTEXITCODE -eq 0)
 if ($CodexFound) { "already installed" }
-elseif (Has npm) { npm install -g @openai/codex }
+elseif (Has npm) {
+    npm install -g @openai/codex
+    if ($LASTEXITCODE -ne 0) { throw "npm install -g @openai/codex failed" }
+}
 else { "npm not found: winget install OpenJS.NodeJS.LTS, then run: npm install -g @openai/codex" }
 
 Say "Downloading the cards"
