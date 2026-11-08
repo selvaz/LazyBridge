@@ -20,6 +20,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pause coding-engine request and stream-idle clocks while application tools
+  (including sub-agents) execute; overlapping calls count once and the idle
+  window restarts after the last tool finishes. Native runtime tools still
+  count toward the unchanged timeout defaults.
 - Bound Claude Code SDK idle waits and timeout cleanup, and terminate the Windows subprocess tree if cleanup stalls.
 - Bound silence during non-streaming Codex turns with `stream_idle_timeout`,
   cancelling the turn and reaping the App Server when it expires.

@@ -104,6 +104,13 @@ print(desk("Explain the demonstration quote for EXAMPLE.").text())
 Positive deadlines/delay and nonnegative retries are checked at construction.
 Configure these on the engine when passing `Agent(engine=...)`.
 
+Time spent inside your own tools, e.g. sub-agents passed via `tools=`, does
+not count toward `request_timeout` or `stream_idle_timeout`. The request
+budget excludes intervals with at least one application tool in flight
+(overlapping calls count once); the idle window restarts when the last tool
+finishes. Native Claude Code tools such as Bash, Read and WebSearch still
+count as runtime time. Defaults remain 120 seconds and 90 seconds.
+
 ## Claude Code model identifiers
 
 The engine passes model strings to the installed runtime. Its default is

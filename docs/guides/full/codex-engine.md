@@ -76,6 +76,13 @@ Deadlines/delay must be positive, retries nonnegative. See
 [Coding-agent permissions](coding-agent-config.md) for writable_roots,
 web_search, preapproval, native approval modes and compaction.
 
+Time spent inside your own tools, e.g. sub-agents passed via `tools=`, does
+not count toward `request_timeout` or `stream_idle_timeout`. The request
+budget excludes intervals with at least one application tool in flight
+(overlapping calls count once); the idle window restarts when the last tool
+finishes. Native Codex tools such as shell and web search still count as
+runtime time. Defaults remain 120 seconds and 90 seconds.
+
 ## Durable threads and aliases
 
 Default calls start ephemeral threads. An ephemeral ID cannot be resumed even
