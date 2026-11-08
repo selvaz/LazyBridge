@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 
@@ -443,6 +444,14 @@ def main() -> None:
                     }
                 },
             }
+        )
+    elif scenario in {"idle_silence", "idle_steady", "idle_disabled"}:
+        count = 5 if scenario == "idle_steady" else 1
+        for _ in range(count):
+            write_message({"method": "item/started", "params": {"threadId": "thread-1", "turnId": "turn-1"}})
+            time.sleep(0.12 if scenario == "idle_steady" else 0.5)
+        write_message(
+            {"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}}
         )
     elif scenario == "exit_mid_turn":
         # Acknowledged turn/start, then died without ever sending

@@ -498,6 +498,51 @@ class CodexEngine:
             return await _attempt_loop()
         return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
 
+    async def _run_with_idle_timeout(self, call: Callable[[], Awaitable[_T]], progress: dict[str, Any]) -> _T:
+        if self.stream_idle_timeout is None:
+            return await self._call_with_retries(call)
+
+        activity = asyncio.Event()
+        progress["on_activity"] = activity.set
+
+        async def watch() -> None:
+            # The transport signals once the turn is sent; startup is governed
+            # by request_timeout, not the per-turn idle clock.
+            await activity.wait()
+            while True:
+                activity.clear()
+                try:
+                    await asyncio.wait_for(activity.wait(), self.stream_idle_timeout)
+                except TimeoutError as exc:
+                    # The server is waiting on us (tool call or approval gate),
+                    # not stalled: those waits are bounded by tool_timeout and
+                    # the gate, so the idle clock does not run during them.
+                    if progress.get("client_waits", 0) > 0:
+                        continue
+                    # The turn already has its outcome and only teardown is
+                    # left: report that outcome, not a spurious idle timeout.
+                    if progress.get("turn_done"):
+                        continue
+                    raise TimeoutError(
+                        f"Codex turn went idle for {self.stream_idle_timeout}s without an event "
+                        "(set CodexEngine(stream_idle_timeout=...) to a higher value if needed)."
+                    ) from exc
+
+        task = asyncio.create_task(self._call_with_retries(call))
+        watcher = asyncio.create_task(watch())
+        try:
+            done, _ = await asyncio.wait((task, watcher), return_when=asyncio.FIRST_COMPLETED)
+            if task in done:
+                return await task
+            error = watcher.exception()
+            raise error if error is not None else RuntimeError("idle watcher returned unexpectedly")
+        finally:
+            for pending in (task, watcher):
+                if not pending.done():
+                    pending.cancel()
+            await asyncio.gather(task, watcher, return_exceptions=True)
+            progress.pop("on_activity", None)
+
     def _attachments(self, env: Envelope[Any]) -> list[dict[str, Any]]:
         """Convert ``Envelope.images`` into App Server ``UserInput`` items.
 
@@ -624,7 +669,7 @@ class CodexEngine:
                 call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
                     **self._client_kwargs(env, tools, output_type, memory, observe, gate, attachments, progress)
                 )
-                result = await self._call_with_retries(call)
+                result = await self._run_with_idle_timeout(call, progress)
                 self._absorb(result.thread_id)
             if session:
                 self._emit_model_response(session, agent_name, result, run_id)

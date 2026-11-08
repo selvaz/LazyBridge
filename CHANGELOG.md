@@ -11,10 +11,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Bound Claude Code SDK idle waits and timeout cleanup, and terminate the Windows subprocess tree if cleanup stalls.
-
-### Known limitations
-
-- CodexEngine's non-streaming run has no idle timer; adding one is a follow-up.
+- Bound silence during non-streaming Codex turns with `stream_idle_timeout`,
+  cancelling the turn and reaping the App Server when it expires.
 
 ## [1.8.6] — 2026-11-06
 

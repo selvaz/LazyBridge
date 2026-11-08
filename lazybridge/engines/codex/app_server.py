@@ -247,6 +247,25 @@ class CodexRunResult:
     thread_id: str = ""
 
 
+@contextlib.contextmanager
+def _client_wait(progress: dict[str, Any] | None) -> Any:
+    """Mark a period where the App Server waits on this client (tool call, approval).
+
+    The engine's idle watcher does not trip while such a wait is in flight, and
+    the end of the wait counts as activity.
+    """
+    if progress is None:
+        yield
+        return
+    progress["client_waits"] = progress.get("client_waits", 0) + 1
+    try:
+        yield
+    finally:
+        progress["client_waits"] -= 1
+        if on_activity := progress.get("on_activity"):
+            on_activity()
+
+
 class CodexAppServerClient:
     """One ``codex app-server`` subprocess per run, torn down in ``finally``."""
 
@@ -496,6 +515,11 @@ class CodexAppServerClient:
 
         pending: dict[int, asyncio.Future[Any]] = {}
         completed: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        if progress is not None:
+            # Once the turn has an outcome, no further turn events can arrive:
+            # the idle clock must not run during subprocess teardown.
+            progress["turn_done"] = False
+            completed.add_done_callback(lambda _: progress.__setitem__("turn_done", True))
         #: Last cumulative ``total`` seen per turn id. Keyed rather than
         #: folded into one value because a notification can arrive *before*
         #: the ``turn/start`` response tells us which id is ours: deciding
@@ -546,6 +570,8 @@ class CodexAppServerClient:
                 # ``review_target`` raises here, and a request that never left
                 # the process must not count as a turn that may have run.
                 progress["turn_sent"] = True
+                if on_activity := progress.get("on_activity"):
+                    on_activity()
             result = await future
             if is_turn:
                 state.phase = "turn running"
@@ -574,6 +600,17 @@ class CodexAppServerClient:
                 while line := await process.stdout.readline():
                     message = json.loads(line)
                     method = message.get("method")
+                    if turn_sent and method is not None and progress is not None:
+                        params = message.get("params") or {}
+                        incoming_turn = params.get("turnId") or (params.get("turn") or {}).get("id")
+                        incoming_thread = params.get("threadId")
+                        on_activity = progress.get("on_activity")
+                        if (
+                            on_activity
+                            and (turn_id is None or incoming_turn in (None, turn_id))
+                            and incoming_thread in (None, active_thread)
+                        ):
+                            on_activity()
                     if method is None:
                         # A response to one of our own requests. Dispatching on
                         # the absence of "method" (rather than on "id" alone)
@@ -621,7 +658,8 @@ class CodexAppServerClient:
                     elif method == "item/tool/call":
                         params = message["params"]
                         try:
-                            result = await on_tool_call(params["tool"], params.get("arguments", {}))
+                            with _client_wait(progress):
+                                result = await on_tool_call(params["tool"], params.get("arguments", {}))
                         except Exception as exc:  # defensive protocol response
                             result = {
                                 "success": False,
@@ -640,20 +678,21 @@ class CodexAppServerClient:
                             kind, name = "file_change", str(params.get("grantRoot") or "file changes")
                         else:
                             kind, name = "permissions", "sandbox permissions"
-                        decision = await ask_approval(
-                            approval_gate,
-                            ApprovalRequest(
-                                provider="codex",
-                                kind=kind,  # type: ignore[arg-type]
-                                name=name,
-                                arguments=params,
-                                reason=params.get("reason"),
-                                cwd=params.get("cwd") or cwd,
-                                thread_id=params.get("threadId"),
-                                turn_id=params.get("turnId"),
-                                raw=params,
-                            ),
-                        )
+                        with _client_wait(progress):
+                            decision = await ask_approval(
+                                approval_gate,
+                                ApprovalRequest(
+                                    provider="codex",
+                                    kind=kind,  # type: ignore[arg-type]
+                                    name=name,
+                                    arguments=params,
+                                    reason=params.get("reason"),
+                                    cwd=params.get("cwd") or cwd,
+                                    thread_id=params.get("threadId"),
+                                    turn_id=params.get("turnId"),
+                                    raw=params,
+                                ),
+                            )
                         if kind == "permissions":
                             requested = params.get("permissions", {})
                             granted = decision.permissions if decision.permissions is not None else requested
