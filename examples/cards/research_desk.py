@@ -12,8 +12,15 @@ A lead agent (Claude Code, Opus) has three tools:
 import sys
 
 from lazybridge import (
-    Agent, ClaudeCodeEngine, CodexEngine, CodingAgentConfig,
-    Plan, Step, from_parallel_all, from_start, from_step,
+    Agent,
+    ClaudeCodeEngine,
+    CodexEngine,
+    CodingAgentConfig,
+    Plan,
+    Step,
+    from_parallel_all,
+    from_start,
+    from_step,
 )
 
 # Prompts
@@ -47,8 +54,12 @@ research_brief = Agent(
         Step(sonnet, name="support", task=from_start, context=SUPPORT, parallel=True),
         Step(terra, name="challenge", task=from_start, context=CHALLENGE, parallel=True),
         Step(terra, name="review", task=from_start, context=[REVIEW, from_parallel_all("support")]),
-        Step(sonnet, name="summary", task=from_start,
-             context=[SUMMARY, from_parallel_all("support"), from_step("review")]),
+        Step(
+            sonnet,
+            name="summary",
+            task=from_start,
+            context=[SUMMARY, from_parallel_all("support"), from_step("review")],
+        ),
     ),
 )
 

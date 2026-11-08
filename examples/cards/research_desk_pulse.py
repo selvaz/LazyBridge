@@ -11,12 +11,12 @@ research question; every weekday at 08:00 UTC it also sends a morning brief.
 
 import os
 
-from lazybridge import ClaudeCodeEngine, Store
 from lazypulse import Calendar, Cron, PulseAgent
 from lazypulse.adapters.telegram import TelegramInbox, TelegramInboxConfig, TelegramPolicy
 from lazytools.connectors.telegram import TelegramClient
-
 from research_desk import desk, sonnet, terra
+
+from lazybridge import ClaudeCodeEngine, Store
 
 # Prompts
 LEAD = (
