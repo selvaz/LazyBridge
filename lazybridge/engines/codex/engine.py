@@ -13,6 +13,7 @@ import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar, cast, get_origin
 
+from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import (
     ApprovalGate,
@@ -161,6 +162,11 @@ class CodexEngine:
     memory and tools — the engine exposes the current tool list as App Server
     *dynamic tools* and dispatches every call back to ``Tool.run()``.
 
+    Time spent inside your own application tools, e.g. sub-agents, does not
+    count toward ``request_timeout`` or ``stream_idle_timeout``. Overlapping
+    tool calls pause the request budget once; the idle window restarts after
+    the last tool finishes. Native Codex tools still count as runtime time.
+
     **Durable threads.** Pass ``persist_thread=True`` and the thread survives
     the subprocess; :attr:`thread_id` then holds a handle that a *later
     process* can resume (``CodexEngine(thread_id=...)``), so Codex keeps its
@@ -298,6 +304,7 @@ class CodexEngine:
         attachments: list[dict[str, Any]],
         progress: dict[str, Any],
         on_text: Callable[[str], Awaitable[None]] | None = None,
+        tool_clock: ToolClock | None = None,
     ) -> dict[str, Any]:
         """The one description of a client call, shared by ``run``/``stream``.
 
@@ -311,7 +318,7 @@ class CodexEngine:
             "model": self.model,
             "cwd": self.cwd,
             "dynamic_tools": definitions(tools),
-            "on_tool_call": self._tool_dispatcher(tools, observe, gate),
+            "on_tool_call": self._tool_dispatcher(tools, observe, gate, tool_clock),
             "attachments": attachments,
             "output_schema": output_schema,
             "effort": self.reasoning_effort,
@@ -434,9 +441,9 @@ class CodexEngine:
         return remembering_gate(self.approval_gate, session_approvals(session, "codex", agent_name))
 
     def _tool_dispatcher(
-        self, tools: list[Any], observe: Any, gate: ApprovalGate
+        self, tools: list[Any], observe: Any, gate: ApprovalGate, tool_clock: ToolClock | None = None
     ) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
-        dispatch = dispatcher(tools, observe, tool_timeout=self.tool_timeout)
+        dispatch = dispatcher(tools, observe, tool_timeout=self.tool_timeout, tool_clock=tool_clock)
         if self.config.codex.preapprove_dynamic_tools and not self._direct_approval_gate:
             return dispatch
 
@@ -467,7 +474,9 @@ class CodexEngine:
 
         return gated
 
-    async def _call_with_retries(self, make_call: Callable[[], Awaitable[_T]]) -> _T:
+    async def _call_with_retries(
+        self, make_call: Callable[[], Awaitable[_T]], tool_clock: ToolClock | None = None
+    ) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
 
         ``make_call`` is a thunk, not a bare coroutine, because each retry
@@ -496,11 +505,13 @@ class CodexEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
+        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
 
-    async def _run_with_idle_timeout(self, call: Callable[[], Awaitable[_T]], progress: dict[str, Any]) -> _T:
+    async def _run_with_idle_timeout(
+        self, call: Callable[[], Awaitable[_T]], progress: dict[str, Any], tool_clock: ToolClock | None = None
+    ) -> _T:
         if self.stream_idle_timeout is None:
-            return await self._call_with_retries(call)
+            return await self._call_with_retries(call, tool_clock)
 
         activity = asyncio.Event()
         progress["on_activity"] = activity.set
@@ -512,7 +523,7 @@ class CodexEngine:
             while True:
                 activity.clear()
                 try:
-                    await asyncio.wait_for(activity.wait(), self.stream_idle_timeout)
+                    await wait_with_tool_clock(activity.wait(), self.stream_idle_timeout, tool_clock, idle=True)
                 except TimeoutError as exc:
                     # The server is waiting on us (tool call or approval gate),
                     # not stalled: those waits are bounded by tool_timeout and
@@ -528,7 +539,7 @@ class CodexEngine:
                         "(set CodexEngine(stream_idle_timeout=...) to a higher value if needed)."
                     ) from exc
 
-        task = asyncio.create_task(self._call_with_retries(call))
+        task = asyncio.create_task(self._call_with_retries(call, tool_clock))
         watcher = asyncio.create_task(watch())
         try:
             done, _ = await asyncio.wait((task, watcher), return_when=asyncio.FIRST_COMPLETED)
@@ -660,6 +671,7 @@ class CodexEngine:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
         out: Envelope[Any]
         progress: dict[str, Any] = {}
+        tool_clock = ToolClock()
         try:
             observe = self._observer(session, run_id)
             gate = self._scoped_gate(session, agent_name)
@@ -667,9 +679,11 @@ class CodexEngine:
             async with self._thread_lock():
                 self._refresh_alias()
                 call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
-                    **self._client_kwargs(env, tools, output_type, memory, observe, gate, attachments, progress)
+                    **self._client_kwargs(
+                        env, tools, output_type, memory, observe, gate, attachments, progress, tool_clock=tool_clock
+                    )
                 )
-                result = await self._run_with_idle_timeout(call, progress)
+                result = await self._run_with_idle_timeout(call, progress, tool_clock)
                 self._absorb(result.thread_id)
             if session:
                 self._emit_model_response(session, agent_name, result, run_id)
@@ -756,6 +770,7 @@ class CodexEngine:
             await sink.put(chunk)
 
         progress: dict[str, Any] = {}
+        tool_clock = ToolClock()
 
         async def _run_loop() -> None:
             try:
@@ -778,6 +793,7 @@ class CodexEngine:
                                 self._attachments(env),
                                 progress,
                                 on_text=on_text,
+                                tool_clock=tool_clock,
                             )
                         )
                         self._absorb(result.thread_id)
@@ -819,7 +835,7 @@ class CodexEngine:
             while True:
                 get_call = sink.get()
                 token = (
-                    await asyncio.wait_for(get_call, timeout=self.stream_idle_timeout)
+                    await wait_with_tool_clock(get_call, self.stream_idle_timeout, tool_clock, idle=True)
                     if self.stream_idle_timeout is not None
                     else await get_call
                 )
