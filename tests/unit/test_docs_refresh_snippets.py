@@ -221,6 +221,12 @@ def test_refreshed_install_commands_use_real_extras_and_current_version():
                     )
                 elif command[:3] == ["python", "-m", "pytest"]:
                     assert (ROOT / command[3]).exists()
+                elif command[:2] == ["python", "-m"]:
+                    # Module entry points (such as the demo) are opt-in too:
+                    # validate the source without running a live provider.
+                    assert len(command) == 3
+                    module = ROOT.joinpath(*command[2].split("."))
+                    assert module.with_suffix(".py").is_file() or (module / "__main__.py").is_file()
                 elif command[:1] == ["lazytools-code-bridge"]:
                     assert command[1] in {"run", "pending", "approve", "wait", "result"}
                 elif command[:1] == ["python"]:
