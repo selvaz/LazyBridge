@@ -104,3 +104,47 @@ def test_request_timeout_during_idle_cleanup_still_kills(stalled_sdk):
     assert not result.ok
     assert result.error.type == "TimeoutError"
     assert 12345 in stalled_sdk
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.asyncio
+async def test_sdk_silence_during_application_tool_does_not_timeout(monkeypatch, stream):
+    import claude_agent_sdk
+    from claude_agent_sdk._internal.transport import subprocess_cli
+
+    class Transport:
+        def __init__(self, **kwargs):
+            self._process = None
+
+    async def slow_tool() -> str:
+        """Simulate a sub-agent."""
+        await asyncio.sleep(0.8)
+        return "done"
+
+    async def query(*, options, **kwargs):
+        # Silence before and after the tool also checks that the idle window
+        # restarts, rather than merely subtracting the tool duration.
+        await asyncio.sleep(0.2)
+        await options.mcp_tools[0].handler({})
+        await asyncio.sleep(0.2)
+        yield claude_agent_sdk.ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="session",
+            result="done",
+        )
+
+    monkeypatch.setattr(subprocess_cli, "SubprocessCLITransport", Transport)
+    monkeypatch.setattr(claude_agent_sdk, "query", query)
+    monkeypatch.setattr(sdk_client.AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
+    engine = ClaudeCodeEngine(stream_idle_timeout=0.3, request_timeout=2, max_retries=0)
+    agent = Agent(engine=engine, tools=[slow_tool])
+    if stream:
+        assert "".join([chunk async for chunk in agent.stream("delegate")]) == "done"
+    else:
+        result = await agent.run("delegate")
+        assert result.ok, result.error
+        assert result.text() == "done"

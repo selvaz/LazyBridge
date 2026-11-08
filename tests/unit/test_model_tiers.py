@@ -32,3 +32,12 @@ def test_engines_translate():
     assert CodexEngine(model=None).model is None
     assert ClaudeCodeEngine(model="gpt-6.1-sol").model == "claude-opus-5-5"
     assert ClaudeCodeEngine().model == "sonnet"
+
+
+def test_bare_openai_alias_expands_for_codex_and_maps_for_claude():
+    from lazybridge.model_tiers import translate_model
+
+    assert translate_model("terra", "codex") == "gpt-6.1-terra"
+    assert translate_model("Luna", "codex") == "gpt-6-luna"
+    assert translate_model("terra", "claude_code") == "claude-sonnet-5-5"
+    assert translate_model("o3", "codex") == "o3"

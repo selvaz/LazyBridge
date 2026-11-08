@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.engines.coding import ApprovalGate
 
 
@@ -48,6 +49,7 @@ class ClaudeSdkOptions:
     mcp_tools: tuple[McpTool, ...] = ()
     include_partial_messages: bool = False
     stream_idle_timeout: float | None = None
+    tool_clock: ToolClock | None = None
     #: Native structured output, in the Messages API shape the Agent SDK
     #: expects: ``{"type": "json_schema", "schema": {...}}``. The SDK turns
     #: this into the CLI's ``--json-schema`` flag and returns the parsed

@@ -23,6 +23,41 @@ the engine underneath is swappable. **Agent = Engine + Tools + State.**
   human-in-the-loop engines, and a durable control plane (atomic claims,
   fencing, append-only ledger) for many workers on one machine.
 
+## Try it in two minutes
+
+```sh
+python -m pip install "lazybridge[claude-code,deepseek]==1.8.7"
+python -m lazybridge.demo
+```
+
+The demo finds which engines this machine can use, gives each the same Python
+tool and question, then lets one engine write and another review. Enable any
+one of them, or all three:
+
+| Engine | Enable it |
+|---|---|
+| DeepSeek API | set `DEEPSEEK_API_KEY` (key from platform.deepseek.com) |
+| Claude Code | `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in |
+| Codex | `npm install -g @openai/codex`, then run `codex login` |
+
+```text
+Engines on this machine:
+  [x] deepseek
+  [x] claude-code
+  [x] codex
+
+1) Same tool, same question, 3 engine(s):
+   deepseek     LazyBridge treats an agent as an engine plus tools and state, where engines are swappable peers ...
+   claude-code  ...
+   codex        LazyBridge defines agents as engines plus tools and state, with swappable engines ...
+
+2) deepseek writes, codex reviews (verify=):
+print([i**2 for i in range(1, 6)])
+```
+
+The demo is one short file, [`lazybridge/demo.py`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/demo.py):
+read it to see the whole API it uses.
+
 ```python
 from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, LLMEngine, Memory, Session, Store
 
@@ -50,7 +85,7 @@ handle approval and supervision. Every agent returns an `Envelope`.
 Python 3.11 or later:
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.8.6"
+python -m pip install "lazybridge[claude-code]==1.8.7"
 ```
 
 Install and sign in to the local coding runtimes using the
@@ -111,7 +146,7 @@ benchmark is in progress**, with no comparative metrics published here.
 
 ## Documentation and status
 
-This README targets **1.8.6**.
+This README targets **1.8.7**.
 The core public API is Stable; coding engines and extensions have their own
 boundaries. LazyTools 0.10.1 declares Alpha. See the
 [maturity table](https://core.lazybridge.com/#maturity) and [CHANGELOG](CHANGELOG.md).

@@ -15,6 +15,7 @@ import contextlib
 import itertools
 import logging
 import os
+import threading
 import time
 from datetime import timedelta
 from types import SimpleNamespace
@@ -1313,8 +1314,10 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     queue = ApprovalQueue(Store())
     real_create_ticket = queue.create_ticket
     created: list[ApprovalTicket] = []
+    started = threading.Event()
 
     def _slow_create_ticket(*args, **kwargs):
+        started.set()
         time.sleep(0.15)
         ticket = real_create_ticket(*args, **kwargs)
         created.append(ticket)
@@ -1324,14 +1327,10 @@ async def test_ask_retires_the_ticket_when_cancelled_during_creation() -> None:
     channel = StoreApprovalChannel(queue, task_id="t1", poll_seconds=0.01)
 
     task = asyncio.create_task(channel.ask("please approve"))
-    # 0.06s, not 0.02s: ask() now runs claim_earlier_approval's own
-    # offloaded Store round trip BEFORE ever starting create_ticket, and
-    # that extra hop can occasionally cost a double-digit-ms jump on
-    # Windows' own scheduler granularity -- too tight a margin here let
-    # this cancellation land on THAT call instead of (as this test
-    # intends) on create_ticket's own 0.15s sleep, which never ran
-    # create_ticket at all.
-    await asyncio.sleep(0.06)
+    # Cancel only once create_ticket is really in flight: a fixed sleep
+    # raced claim_earlier_approval's own Store round trip on slow CI runners
+    # and cancelled before create_ticket ever ran.
+    assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         _ = await task

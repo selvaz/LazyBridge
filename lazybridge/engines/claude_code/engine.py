@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar, get_origin
 
+from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.base import resolve_agent_name
 from lazybridge.engines.coding import (
     ApprovalGate,
@@ -121,6 +122,11 @@ class ClaudeCodeEngine:
     It deliberately accepts the same run parameters as ``LLMEngine`` and is
     stateless at the Claude SDK layer: LazyBridge ``Memory``
     remains the one conversation memory and is updated after a successful run.
+
+    Time spent inside your own application tools, e.g. sub-agents, does not
+    count toward ``request_timeout`` or ``stream_idle_timeout``. Overlapping
+    tool calls pause the request budget once; the idle window restarts after
+    the last tool finishes. Native Claude tools still count as runtime time.
 
     **Durable sessions.** ``persist_session=True`` keeps the Claude Code
     session and exposes :attr:`session_id`; ``ClaudeCodeEngine(session_id=...)``
@@ -472,7 +478,9 @@ class ClaudeCodeEngine:
             lines.append(f"{role}: {getattr(message, 'content', '')}")
         return "\n".join(lines)
 
-    async def _idle_guarded_stream(self, agen: AsyncIterator[Any]) -> AsyncGenerator[Any, None]:
+    async def _idle_guarded_stream(
+        self, agen: AsyncIterator[Any], tool_clock: ToolClock | None = None
+    ) -> AsyncGenerator[Any, None]:
         """Yield items from ``agen``, raising on inter-chunk idle timeout.
 
         Mirrors ``LLMEngine._idle_guarded_stream``: catches a stalled SDK
@@ -488,7 +496,9 @@ class ClaudeCodeEngine:
             aiter = inner.__aiter__()
             while True:
                 try:
-                    item = await asyncio.wait_for(aiter.__anext__(), timeout=self.stream_idle_timeout)
+                    item = await wait_with_tool_clock(
+                        aiter.__anext__(), self.stream_idle_timeout, tool_clock, idle=True
+                    )
                 except StopAsyncIteration:
                     return
                 except TimeoutError as exc:
@@ -499,7 +509,9 @@ class ClaudeCodeEngine:
                     ) from exc
                 yield item
 
-    async def _call_with_retries(self, make_call: Callable[[], Awaitable[_T]]) -> _T:
+    async def _call_with_retries(
+        self, make_call: Callable[[], Awaitable[_T]], tool_clock: ToolClock | None = None
+    ) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
 
         ``make_call`` is a thunk (not a bare coroutine) because a coroutine
@@ -529,7 +541,7 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        return await asyncio.wait_for(_attempt_loop(), timeout=self.request_timeout)
+        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -564,6 +576,7 @@ class ClaudeCodeEngine:
         partial: bool = False,
         resume: str | None = None,
         gate: ApprovalGate | None = None,
+        tool_clock: ToolClock | None = None,
     ) -> ClaudeSdkOptions:
         builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
             ("WebSearch", "WebFetch") if self.web else ()
@@ -593,10 +606,11 @@ class ClaudeCodeEngine:
             approval_gate=gate if gate is not None else self.approval_gate,
             builtin_tools=builtin_tools,
             file_roots=self.file_roots,
-            mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout),
+            mcp_tools=to_mcp_tools(tools, observer=observe, tool_timeout=self.tool_timeout, tool_clock=tool_clock),
             tool_observer=observe,
             include_partial_messages=partial,
             stream_idle_timeout=self.stream_idle_timeout,
+            tool_clock=tool_clock,
             output_format=_output_format(output_type),
             on_session_id=self._learn_session if self._alias is not None else None,
         )
@@ -633,6 +647,7 @@ class ClaudeCodeEngine:
                 session.emit(event_type, payload, run_id=run_id)
 
             attachments = self._attachments(env)
+            tool_clock = ToolClock()
             async with self._session_lock():
                 self._refresh_alias()
                 # Prompt and options are built INSIDE the lock: both read
@@ -646,9 +661,10 @@ class ClaudeCodeEngine:
                     output_type=output_type,
                     resume=self._resume_id(session, agent_name),
                     gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                    tool_clock=tool_clock,
                 )
                 result = await self._call_with_retries(
-                    lambda: self._client.run(prompt, options=options, attachments=attachments)
+                    lambda: self._client.run(prompt, options=options, attachments=attachments), tool_clock
                 )
                 if self.persist_session and result.session_id:
                     # Inside the lock too: the next queued run must see it.
@@ -782,6 +798,7 @@ class ClaudeCodeEngine:
 
             input_tokens = output_tokens = 0
             cost_usd = 0.0
+            tool_clock = ToolClock()
             async with closing_iter(
                 self._idle_guarded_stream(
                     self._client.stream(
@@ -796,9 +813,11 @@ class ClaudeCodeEngine:
                             partial=True,
                             resume=self._resume_id(session, agent_name),
                             gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                            tool_clock=tool_clock,
                         ),
                         attachments=self._attachments(env),
-                    )
+                    ),
+                    tool_clock,
                 )
             ) as events:
                 async for event in events:

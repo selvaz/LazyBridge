@@ -3,10 +3,45 @@
 Start with Claude Code, swap to Codex with the same tools and state, then add
 independent review. Python 3.11 or later is required.
 
+## Try it in two minutes
+
+```sh
+python -m pip install "lazybridge[claude-code,deepseek]==1.8.7"
+python -m lazybridge.demo
+```
+
+The demo finds which engines this machine can use, gives each the same Python
+tool and question, then lets one engine write and another review. Enable any
+one of them, or all three:
+
+| Engine | Enable it |
+|---|---|
+| DeepSeek API | set `DEEPSEEK_API_KEY` (key from platform.deepseek.com) |
+| Claude Code | `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in |
+| Codex | `npm install -g @openai/codex`, then run `codex login` |
+
+```text
+Engines on this machine:
+  [x] deepseek
+  [x] claude-code
+  [x] codex
+
+1) Same tool, same question, 3 engine(s):
+   deepseek     LazyBridge treats an agent as an engine plus tools and state, where engines are swappable peers ...
+   claude-code  ...
+   codex        LazyBridge defines agents as engines plus tools and state, with swappable engines ...
+
+2) deepseek writes, codex reviews (verify=):
+print([i**2 for i in range(1, 6)])
+```
+
+The demo is one short file, [`lazybridge/demo.py`](https://github.com/selvaz/LazyBridge/blob/main/lazybridge/demo.py):
+read it to see the whole API it uses.
+
 ## Install and sign in
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.8.6"
+python -m pip install "lazybridge[claude-code]==1.8.7"
 ```
 
 Follow [Claude Code setup](guides/full/claude-code-engine.md#setup) and
@@ -88,7 +123,7 @@ Tier aliases are catalogue choices; they are distinct from LazyTools quota routi
 A provider-only installation can be explicit too:
 
 ```sh
-python -m pip install "lazybridge[anthropic]==1.8.6"
+python -m pip install "lazybridge[anthropic]==1.8.7"
 ```
 
 Set ANTHROPIC_API_KEY in the environment running Python for Anthropic API calls

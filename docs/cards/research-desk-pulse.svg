@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="lb-card-2" viewBox="0 0 820 1450" style="display:block;width:100%;height:auto" role="img" aria-labelledby="lb-card-2-title lb-card-2-desc">
+<title id="lb-card-2-title">Research desk, always on</title>
+<desc id="lb-card-2-desc">research_pulse is an always-on LazyPulse PulseAgent powered by Claude Code Opus. Owner-only Telegram messages arrive through TelegramInbox with TelegramPolicy. A Cron schedule requests a morning brief on weekdays at 08:00 UTC. Its tools are research_desk, the whole Card 1 agent containing the lead and research_brief pipeline, plus deep_research and fact_check. research_pulse replies in the same Telegram chat. Card 1's agent becomes one tool.</desc>
+<style>
+.lb-card-2 text{fill:var(--md-default-fg-color,#222);font-family:var(--md-text-font-family,system-ui),sans-serif;font-size:26px}
+.lb-card-2 .title{font-size:44px;font-weight:700;letter-spacing:-1px}
+.lb-card-2 .name{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:32px;font-weight:600}
+.lb-card-2 .code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:25px}
+.lb-card-2 .secondary{fill:var(--md-default-fg-color--light,#666)}
+.lb-card-2 .heading{font-size:32px;font-weight:600}
+.lb-card-2 .message{font-size:32px;font-weight:500}
+.lb-card-2 .panel{fill:var(--md-code-bg-color,#f5f5f5);stroke:var(--md-default-fg-color--lighter,#bbb);stroke-width:1.5}
+.lb-card-2 .box{fill:var(--md-default-bg-color,#fff);stroke:var(--md-default-fg-color--lighter,#bbb);stroke-width:1.5}
+.lb-card-2 .wire{fill:none;stroke:var(--md-default-fg-color--light,#666);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lb-card-2 .arrow{marker-end:url(#lb-card-2-arrow)}
+.lb-card-2 .arrowhead,.lb-card-2 .junction{fill:var(--md-default-fg-color--light,#666)}
+.lb-card-2 .claude{stroke:#d97757;stroke-width:5;stroke-linecap:round}
+.lb-card-2 .codex{stroke:#10a37f;stroke-width:5;stroke-linecap:round}
+.lb-card-2 .claude-dot{fill:#d97757}
+.lb-card-2 .codex-dot{fill:#10a37f}
+</style>
+<defs>
+<marker id="lb-card-2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+<path class="arrowhead" d="M1 1 9 5 1 9Z"/>
+</marker>
+</defs>
+<text class="title" x="28" y="64">Research desk, always on</text>
+<text class="secondary" x="30" y="108">LazyPulse</text>
+<rect class="panel" x="40" y="156" width="356" height="192" rx="18"/>
+<text class="heading" x="64" y="200">Telegram message</text>
+<text class="code secondary" x="64" y="242">TelegramInbox</text>
+<text x="64" y="284">Owner only</text>
+<text class="code secondary" x="64" y="326">TelegramPolicy</text>
+<rect class="panel" x="424" y="156" width="356" height="192" rx="18"/>
+<text class="heading" x="448" y="200">Cron schedule</text>
+<text x="448" y="252">Weekdays &#183; 08:00 UTC</text>
+<text class="secondary" x="448" y="299">Morning brief</text>
+<path class="wire" d="M218 348V380H602V348"/>
+<circle class="junction" cx="410" cy="380" r="4"/>
+<path class="wire arrow" d="M410 380V424"/>
+<rect class="box" x="150" y="430" width="520" height="170" rx="22"/>
+<path class="claude" d="M170 455V575"/>
+<text class="secondary" x="410" y="473" text-anchor="middle">LazyPulse &#183; PulseAgent</text>
+<text class="name" x="410" y="520" text-anchor="middle">research_pulse</text>
+<text x="410" y="568" text-anchor="middle">Claude Code &#183; Opus &#183; always on</text>
+<path class="wire arrow" d="M410 600V654"/>
+<text class="code secondary" x="432" y="640">tools</text>
+<path class="wire arrow" d="M670 515H780V1227H716"/>
+<rect class="panel" x="40" y="660" width="700" height="452" rx="24"/>
+<text class="heading" x="64" y="706">Choose a tool</text>
+<rect class="box" x="64" y="735" width="652" height="142" rx="18"/>
+<path class="claude" d="M82 758V854"/>
+<text class="name" x="104" y="777">research_desk</text>
+<text x="104" y="819">lead + research_brief pipeline</text>
+<text class="secondary" x="104" y="859">The whole Card 1 agent</text>
+<rect class="box" x="64" y="903" width="312" height="174" rx="16"/>
+<path class="claude" d="M82 927V1053"/>
+<text class="name" x="104" y="949">deep_research</text>
+<text class="secondary" x="104" y="995">Claude Code</text>
+<text x="104" y="1041">Sonnet &#183; web</text>
+<rect class="box" x="400" y="903" width="312" height="174" rx="16"/>
+<path class="codex" d="M418 927V1053"/>
+<text class="name" x="440" y="949">fact_check</text>
+<text class="secondary" x="440" y="995">Codex</text>
+<text x="440" y="1041">Terra &#183; web</text>
+<rect class="box" x="110" y="1170" width="600" height="114" rx="18"/>
+<text class="heading" x="410" y="1217" text-anchor="middle">Telegram reply</text>
+<text class="secondary" x="410" y="1260" text-anchor="middle">Back to the same Telegram chat</text>
+<text class="message" x="410" y="1351" text-anchor="middle">Card 1's agent becomes one tool</text>
+<circle class="claude-dot" cx="239" cy="1404" r="6"/>
+<text class="secondary" x="257" y="1413">Claude Code</text>
+<circle class="codex-dot" cx="471" cy="1404" r="6"/>
+<text class="secondary" x="489" y="1413">Codex</text>
+</svg>

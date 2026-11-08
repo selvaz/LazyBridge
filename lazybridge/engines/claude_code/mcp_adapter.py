@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from typing import Any, Protocol
 
+from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.tools import ToolTimeoutError, run_tool_bounded
 
 from .protocol import McpTool
@@ -53,6 +55,7 @@ def to_mcp_tools(
     *,
     observer: Callable[[str, dict[str, Any]], None] | None = None,
     tool_timeout: float | None = None,
+    tool_clock: ToolClock | None = None,
 ) -> tuple[McpTool, ...]:
     """Adapt normalised LazyBridge tools to in-process MCP tools.
 
@@ -74,7 +77,8 @@ def to_mcp_tools(
             if observer:
                 observer("call", {"tool_name": _tool.name, "arguments": arguments})
             try:
-                result = await run_tool_bounded(_tool, arguments, tool_timeout)
+                with tool_clock.tool() if tool_clock is not None else nullcontext():
+                    result = await run_tool_bounded(_tool, arguments, tool_timeout)
                 text, structured = _serialise_result(result)
                 if observer:
                     observer("result", {"tool_name": _tool.name, "result": text})

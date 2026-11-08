@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="lb-card-1" viewBox="0 0 820 1640" style="display:block;width:100%;height:auto" role="img" aria-labelledby="lb-card-1-title lb-card-1-desc">
+<title id="lb-card-1-title">Research desk</title>
+<desc id="lb-card-1-desc">A question enters research_desk, a Claude Code Opus lead agent, and a cited answer comes out. Its tools are research_brief, deep_research and fact_check. research_brief is a deterministic Plan: support uses deep_research and challenge uses fact_check in parallel; review reads both through from_parallel_all; summary, on the DeepSeek API, uses from_step to write a cited brief from support, challenge and review. The same two specialists can also be called directly by the lead.</desc>
+<style>
+.lb-card-1 text{fill:var(--md-default-fg-color,#222);font-family:var(--md-text-font-family,system-ui),sans-serif;font-size:26px}
+.lb-card-1 .title{font-size:44px;font-weight:700;letter-spacing:-1px}
+.lb-card-1 .name{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:32px;font-weight:600}
+.lb-card-1 .code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:25px}
+.lb-card-1 .secondary{fill:var(--md-default-fg-color--light,#666)}
+.lb-card-1 .heading{font-size:32px;font-weight:600}
+.lb-card-1 .message{font-size:32px;font-weight:500}
+.lb-card-1 .panel{fill:var(--md-code-bg-color,#f5f5f5);stroke:var(--md-default-fg-color--lighter,#bbb);stroke-width:1.5}
+.lb-card-1 .box{fill:var(--md-default-bg-color,#fff);stroke:var(--md-default-fg-color--lighter,#bbb);stroke-width:1.5}
+.lb-card-1 .wire{fill:none;stroke:var(--md-default-fg-color--light,#666);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lb-card-1 .arrow{marker-end:url(#lb-card-1-arrow)}
+.lb-card-1 .arrowhead,.lb-card-1 .junction{fill:var(--md-default-fg-color--light,#666)}
+.lb-card-1 .claude{stroke:#d97757;stroke-width:5;stroke-linecap:round}
+.lb-card-1 .codex{stroke:#10a37f;stroke-width:5;stroke-linecap:round}
+.lb-card-1 .claude-dot{fill:#d97757}
+.lb-card-1 .codex-dot{fill:#10a37f}
+.lb-card-1 .api{stroke:#4d6bfe;stroke-width:5;stroke-linecap:round}
+.lb-card-1 .api-dot{fill:#4d6bfe}
+</style>
+<defs>
+<marker id="lb-card-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+<path class="arrowhead" d="M1 1 9 5 1 9Z"/>
+</marker>
+</defs>
+<text class="title" x="28" y="64">Research desk</text>
+<text class="secondary" x="30" y="108">Plain Python</text>
+<rect class="panel" x="28" y="156" width="164" height="112" rx="18"/>
+<text x="110" y="222" text-anchor="middle">Question</text>
+<path class="wire arrow" d="M192 212H226"/>
+<rect class="box" x="232" y="156" width="356" height="112" rx="18"/>
+<path class="claude" d="M250 178V246"/>
+<text class="name" x="410" y="201" text-anchor="middle">research_desk</text>
+<text class="secondary" x="410" y="242" text-anchor="middle">Claude Code &#183; Opus</text>
+<path class="wire arrow" d="M588 212H622"/>
+<rect class="panel" x="628" y="156" width="164" height="112" rx="18"/>
+<text x="710" y="202" text-anchor="middle">Cited</text>
+<text x="710" y="239" text-anchor="middle">answer</text>
+<path class="wire arrow" d="M410 268V315"/>
+<text class="code secondary" x="432" y="302">tools</text>
+<rect class="panel" x="28" y="321" width="764" height="1116" rx="24"/>
+<text class="heading" x="52" y="366">Choose a tool</text>
+<rect class="box" x="48" y="390" width="724" height="800" rx="20"/>
+<text class="name" x="72" y="436">research_brief</text>
+<text class="secondary" x="72" y="478">Deterministic &#183; <tspan class="code">Agent(engine=Plan(...))</tspan></text>
+<text class="code secondary" x="410" y="529" text-anchor="middle">parallel=True</text>
+<rect class="panel" x="72" y="551" width="324" height="192" rx="16"/>
+<path class="claude" d="M90 574V719"/>
+<text class="name" x="110" y="592">support</text>
+<text class="code secondary" x="110" y="631">deep_research</text>
+<text class="secondary" x="110" y="670">Claude Code &#183; Sonnet</text>
+<text x="110" y="709">web &#183; for</text>
+<rect class="panel" x="424" y="551" width="324" height="192" rx="16"/>
+<path class="codex" d="M442 574V719"/>
+<text class="name" x="462" y="592">challenge</text>
+<text class="code secondary" x="462" y="631">fact_check</text>
+<text class="secondary" x="462" y="670">Codex &#183; Terra</text>
+<text x="462" y="709">web &#183; against</text>
+<path class="wire" d="M234 743V771H586V743"/>
+<circle class="junction" cx="410" cy="771" r="4"/>
+<path class="wire arrow" d="M410 771V813"/>
+<text class="code secondary" x="432" y="804">from_parallel_all</text>
+<rect class="panel" x="180" y="819" width="460" height="116" rx="16"/>
+<path class="codex" d="M198 842V911"/>
+<text class="name" x="410" y="862" text-anchor="middle">review</text>
+<text class="secondary" x="410" y="905" text-anchor="middle">Codex &#183; Terra &#183; reads both</text>
+<path class="wire arrow" d="M410 935V989"/>
+<text class="code secondary" x="432" y="974">from_step</text>
+<rect class="panel" x="72" y="995" width="676" height="166" rx="16"/>
+<path class="api" d="M90 1019V1137"/>
+<text class="name" x="410" y="1038" text-anchor="middle">summary</text>
+<text class="secondary" x="410" y="1077" text-anchor="middle">DeepSeek API &#183; tokens</text>
+<text x="410" y="1116" text-anchor="middle">Writes a cited brief</text>
+<text class="secondary" x="410" y="1149" text-anchor="middle">Uses support + challenge + review</text>
+<text class="secondary" x="52" y="1235">Same specialists, also called directly</text>
+<rect class="box" x="48" y="1256" width="350" height="154" rx="16"/>
+<path class="claude" d="M66 1279V1387"/>
+<text class="name" x="86" y="1299">deep_research</text>
+<text class="secondary" x="86" y="1339">Claude Code &#183; Sonnet</text>
+<text x="86" y="1379">web &#183; dig deeper</text>
+<rect class="box" x="422" y="1256" width="350" height="154" rx="16"/>
+<path class="codex" d="M440 1279V1387"/>
+<text class="name" x="460" y="1299">fact_check</text>
+<text class="secondary" x="460" y="1339">Codex &#183; Terra</text>
+<text x="460" y="1379">web &#183; check claims</text>
+<text class="message" x="410" y="1496" text-anchor="middle">an agent, or a whole pipeline,</text>
+<text class="message" x="410" y="1538" text-anchor="middle">is just a tool</text>
+<circle class="claude-dot" cx="160" cy="1594" r="6"/>
+<text class="secondary" x="178" y="1603">Claude Code</text>
+<circle class="codex-dot" cx="370" cy="1594" r="6"/>
+<text class="secondary" x="388" y="1603">Codex</text>
+<circle class="api-dot" cx="510" cy="1594" r="6"/>
+<text class="secondary" x="528" y="1603">API model</text>
+</svg>

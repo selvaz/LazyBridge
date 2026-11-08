@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from typing import Any, Protocol
 
+from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.tools import ToolTimeoutError, run_tool_bounded
 
 
@@ -53,6 +55,7 @@ def dispatcher(
     observer: Callable[[str, dict[str, Any]], None] | None = None,
     *,
     tool_timeout: float | None = None,
+    tool_clock: ToolClock | None = None,
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Create the callback App Server invokes for one dynamic tool call.
 
@@ -70,7 +73,8 @@ def dispatcher(
         if observer:
             observer("call", {"tool_name": name, "arguments": arguments})
         try:
-            result = await run_tool_bounded(tool, arguments, tool_timeout)
+            with tool_clock.tool() if tool_clock is not None else nullcontext():
+                result = await run_tool_bounded(tool, arguments, tool_timeout)
             text = _text(result)
             if observer:
                 observer("result", {"tool_name": name, "result": text})

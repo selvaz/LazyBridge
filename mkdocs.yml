@@ -126,7 +126,7 @@ markdown_extensions:
 
 extra:
   version:
-    default: "1.8.6"
+    default: "1.8.7"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/selvaz/LazyBridge
@@ -142,6 +142,10 @@ extra_css:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Cards:
+      - Overview: cards/index.md
+      - "Card 1: Research desk": cards/research-desk.md
+      - "Card 2: Always on": cards/research-desk-pulse.md
   - Why LazyBridge: why.md
   - Framework documentation: best-python-ai-agent-frameworks.md
   - Comparison: comparison.md
