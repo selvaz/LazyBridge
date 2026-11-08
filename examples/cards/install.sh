@@ -32,7 +32,8 @@ say "Claude Code CLI"
 if need claude; then echo "already installed"; else curl -fsSL https://claude.ai/install.sh | bash; fi
 
 say "Codex CLI"
-if need codex; then echo "already installed"
+# Ask LazyBridge itself: it also finds runtimes that are not on PATH.
+if "$DIR/.venv/bin/python" -c "from lazybridge.engines.codex import codex_executable as c; c()" >/dev/null 2>&1; then echo "already installed"
 elif need npm; then npm install -g @openai/codex
 else echo "npm not found: install Node.js, then run: npm install -g @openai/codex"; fi
 
