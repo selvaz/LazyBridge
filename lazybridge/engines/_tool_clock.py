@@ -89,6 +89,7 @@ async def wait_with_tool_clock(
             try:
                 await asyncio.wait_for(changed.wait(), None if clock.active else remaining)
             except TimeoutError:
+                # The window may have elapsed: loop to recheck it against the clock.
                 pass
 
     task = asyncio.ensure_future(awaitable)
