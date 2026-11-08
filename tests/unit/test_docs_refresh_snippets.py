@@ -190,7 +190,7 @@ def test_verification_feedback_exhaustion_and_shared_state(offline):
 
     ns = {}
     exec(FENCE.findall((ROOT / "docs/index.md").read_text(encoding="utf-8"))[0], ns)
-    assert set(ns["claude"]._tool_map) == set(ns["codex"]._tool_map) == {"project_status"}
+    assert set(ns["api"]._tool_map) == set(ns["claude"]._tool_map) == set(ns["codex"]._tool_map) == {"project_status"}
 
 
 def test_refreshed_install_commands_use_real_extras_and_current_version():

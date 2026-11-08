@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- Homepage, README and site description present provider API models, Claude Code and Codex as peer, swappable engines; the opening example builds all three on shared tools and state.
+
 ### Fixed
 
 - Bound Claude Code SDK idle waits and timeout cleanup, and terminate the Windows subprocess tree if cleanup stalls.

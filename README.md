@@ -12,28 +12,31 @@ the engine underneath is swappable. **Agent = Engine + Tools + State.**
 - **Everything is a tool.** A function, another agent or a Plan-backed
   pipeline all enter through `tools=[...]`, so agents compose into teams
   without glue code.
-- **Subscription or API, same agent.** Claude Code and Codex run as engines
-  next to provider APIs (Anthropic, OpenAI, Google, DeepSeek, LiteLLM). Swap
-  the engine and keep tools, memory and state. With a subscription login the
-  coding runtimes use the account's plan quota instead of per-token API billing.
+- **API, Claude Code or Codex: peer engines.** Provider API models
+  (Anthropic, OpenAI, Google, DeepSeek, LiteLLM), Claude Code and Codex are
+  all first-class engines behind the same `Agent`. Swap one for another and
+  keep tools, memory and state; use any one alone or mix them. With a
+  subscription login the coding runtimes use the account's plan quota instead
+  of per-token API billing.
 - **Fleets, not just chats.** Deterministic `Plan` DAGs with checkpoint/resume
   and `run_many` fan-out, `Agent.parallel`, `verify=` writer/reviewer loops,
   human-in-the-loop engines, and a durable control plane (atomic claims,
   fencing, append-only ledger) for many workers on one machine.
 
 ```python
-from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Session, Store
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, LLMEngine, Memory, Session, Store
 
 def project_status() -> str:
     """Return this example project's status."""
     return "The draft is ready for review."
 
 state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
+api = Agent(name="api", engine=LLMEngine("claude-haiku-4-5"), **state)
 claude = Agent(name="claude", engine=ClaudeCodeEngine(), **state)
 codex = Agent(name="codex", engine=CodexEngine(), **state)
-assert claude.memory is codex.memory
-assert claude.store is codex.store
-assert claude.session is codex.session
+assert api.memory is claude.memory is codex.memory
+assert api.store is claude.store is codex.store
+assert api.session is claude.session is codex.session
 
 # An agent is a tool too: the lead can delegate to Codex.
 lead = Agent(name="lead", engine=ClaudeCodeEngine(), tools=[project_status, codex])
