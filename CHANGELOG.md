@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 - `import lazybridge` no longer imports any provider SDK: the provider classes in `lazybridge.core.providers` load lazily on first access (PEP 562), so `from lazybridge.core.providers import AnthropicProvider` still works. Cold import on the maintainer's Windows machine: ~7.7 s -> ~1.5 s (6.4 s were the Anthropic SDK). Every job and the LazyTools MCP server start faster.
 
+### Fixed
+
+- Bare Claude Code aliases (`sonnet`, `opus`, `haiku`) now expand to the current model ids from the tier catalogue (for example `sonnet` -> `claude-sonnet-5-5`) instead of being passed through, where the Claude Code CLI resolved them to an older model. Full ids such as `claude-sonnet-5` still pass through unchanged.
+
 ## [1.8.7] — 2026-11-08
 
 ### Added

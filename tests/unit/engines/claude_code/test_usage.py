@@ -229,7 +229,7 @@ def test_engine_usage_reuses_its_own_model_cwd_and_injected_client():
     engine = ClaudeCodeEngine(model="opus", cwd="/work", client=fake)
     snapshot = anyio.run(engine.usage)
 
-    assert fake.calls[0]["options"].model == "opus"
+    assert fake.calls[0]["options"].model == "claude-opus-5-5"
     assert fake.calls[0]["options"].cwd == "/work"
     assert snapshot.weekly["all models"].used_percent == 74
 

@@ -658,7 +658,12 @@ class TestSessionAlias:
         assert sdk.resumes == [None]
         assert engine.session_id == "sess-A"
         (row,) = registry.entries()
-        assert (row["kind"], row["native_id"], row["model"], row["effort"]) == ("claude", "sess-A", "haiku", "low")
+        assert (row["kind"], row["native_id"], row["model"], row["effort"]) == (
+            "claude",
+            "sess-A",
+            "claude-haiku-5-5",
+            "low",
+        )
 
     def test_a_known_alias_is_resumed_by_a_brand_new_engine(self, registry, tmp_path):
         registry.bind("claude", tmp_path, "probe", "sess-A")
