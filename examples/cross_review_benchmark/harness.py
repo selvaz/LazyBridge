@@ -182,7 +182,13 @@ def live_engine(provider, cwd, system, args):
         )
     from lazybridge import ClaudeCodeEngine
 
-    return ClaudeCodeEngine(model=args.claude_model, web=False, file_roots=[], max_turns=12, **common)
+    return ClaudeCodeEngine(
+        model=args.claude_model,
+        web=False,
+        file_roots=[],
+        max_turns=args.claude_max_turns,
+        **common,
+    )
 
 
 class RecordingEngine:
@@ -226,6 +232,8 @@ def make_check_tool(cwd, args, log):
                 [
                     sys.executable,
                     "-I",
+                    "-X",
+                    "utf8",
                     "-c",
                     "import sys; sys.path.insert(0, 'api'); exec(compile("
                     + repr(code)
@@ -264,6 +272,7 @@ def protocol_hash(args):
             "seed",
             "codex_model",
             "claude_model",
+            "claude_max_turns",
             "codex_effort",
             "model_timeout",
             "test_timeout",
@@ -467,6 +476,7 @@ async def run(args):
                     "model_config": {
                         "codex": args.codex_model,
                         "claude": args.claude_model,
+                        "claude_max_turns": args.claude_max_turns,
                         "codex_effort": args.codex_effort,
                     },
                     "passed": False,
@@ -585,11 +595,14 @@ def parse_args(argv=None):
     )
     parser.add_argument("--codex-model", default="gpt-6.1-sol")
     parser.add_argument("--codex-effort", default="high")
-    parser.add_argument("--claude-model", default="sonnet")
+    parser.add_argument("--claude-model", default="claude-sonnet-5-5")
+    parser.add_argument("--claude-max-turns", type=int, default=40)
     parser.add_argument("--model-timeout", type=float, default=180.0)
     parser.add_argument("--test-timeout", type=float, default=20.0)
-    parser.add_argument("--check-timeout", type=float, default=5.0)
+    parser.add_argument("--check-timeout", type=float, default=20.0)
     args = parser.parse_args(argv)
+    if args.claude_max_turns <= 0:
+        parser.error("claude-max-turns must be positive")
     if not 0 <= args.quota_threshold <= 100 or any(
         n <= 0 for n in (args.model_timeout, args.test_timeout, args.check_timeout)
     ):
