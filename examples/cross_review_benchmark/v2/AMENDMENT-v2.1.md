@@ -28,3 +28,8 @@ Tasks, hidden tests, graders and Codex parameters are unchanged.
 - Under v2.1 every engine error, including a turn cap, counts as a failure.
 - Smoke before the scored run (throwaway file): api_04 and api_16, arms B and C, all four passed; 6 of 14 own checks still hit
   the 20 s check timeout (slow cold import of the API copy).
+
+## Known limitation found after the run started (10/11/2026)
+Codex could not call `python_check` in v2.1: with Codex CLI 0.166 dynamic tools go through the code-mode host, which the
+harness disabled. Codex writers (A, C) and the Codex reviewer (D) therefore had no own checks, while Claude Code did.
+Do not read v2.1 A-vs-B or C-vs-D differences as model quality alone. Fixed in v2.2 (AMENDMENT-v2.2.md).
