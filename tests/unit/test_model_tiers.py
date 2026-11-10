@@ -24,14 +24,14 @@ def test_passthrough():
     assert translate_model(None, "codex") is None
     assert translate_model("gpt-5.6-sol", "codex") == "gpt-5.6-sol"
     assert translate_model("claude-opus-5-5", "claude_code") == "claude-opus-5-5"
-    assert translate_model("sonnet", "claude_code") == "sonnet"
+    assert translate_model("claude-sonnet-5", "claude_code") == "claude-sonnet-5"
 
 
 def test_engines_translate():
     assert CodexEngine(model="sonnet").model == "gpt-6.1-terra"
     assert CodexEngine(model=None).model is None
     assert ClaudeCodeEngine(model="gpt-6.1-sol").model == "claude-opus-5-5"
-    assert ClaudeCodeEngine().model == "sonnet"
+    assert ClaudeCodeEngine().model == "claude-sonnet-5-5"
 
 
 def test_bare_openai_alias_expands_for_codex_and_maps_for_claude():
@@ -41,3 +41,13 @@ def test_bare_openai_alias_expands_for_codex_and_maps_for_claude():
     assert translate_model("Luna", "codex") == "gpt-6-luna"
     assert translate_model("terra", "claude_code") == "claude-sonnet-5-5"
     assert translate_model("o3", "codex") == "o3"
+
+
+def test_bare_claude_alias_expands_to_current_id():
+    from lazybridge.model_tiers import translate_model
+
+    assert translate_model("sonnet", "claude_code") == "claude-sonnet-5-5"
+    assert translate_model("Opus", "anthropic") == "claude-opus-5-5"
+    assert translate_model("haiku", "claude_code") == "claude-haiku-5-5"
+    assert translate_model("fable", "claude_code") == "claude-fable-5-1"
+    assert ClaudeCodeEngine(model="opus").model == "claude-opus-5-5"

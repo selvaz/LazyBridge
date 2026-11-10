@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Report the model returned by Claude Code and Codex runtimes in coding-engine metadata and session events, retaining the requested model and marking unresolved fallbacks.
+- Bare Claude Code aliases (`sonnet`, `opus`, `haiku`) now expand to the current model ids from the tier catalogue (for example `sonnet` -> `claude-sonnet-5-5`) instead of being passed through, where the Claude Code CLI resolved them to an older model. Full ids such as `claude-sonnet-5` still pass through unchanged.
 
 ## [1.8.7] — 2026-11-08
 
