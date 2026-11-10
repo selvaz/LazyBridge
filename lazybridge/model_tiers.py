@@ -91,7 +91,10 @@ def translate_model(model: str | None, to: str) -> str | None:
         # CLI does for "sonnet"; Codex itself rejects the bare alias.
         tier = claude_tier(model) or (openai_tier(model) if "-" not in model else None)
     else:
-        tier = openai_tier(model)
+        # Same rule for Claude: a bare alias ("sonnet") expands to the current
+        # full id. The Claude Code CLI resolves bare aliases on its own and has
+        # lagged behind (``sonnet`` meant Sonnet 5 after Sonnet 5.5 shipped).
+        tier = openai_tier(model) or (claude_tier(model) if "-" not in model else None)
     return MODEL_TIERS[tier][target] if tier else model
 
 
