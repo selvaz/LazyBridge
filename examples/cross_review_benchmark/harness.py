@@ -29,7 +29,11 @@ from .tasks import TASKS
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-ARMS = {"A": ("codex", None), "B": ("claude_code", None), "C": ("codex", "claude_code"), "D": ("claude_code", "codex")}
+ARMS = {
+    "A": ("codex", None), "B": ("claude_code", None),
+    "C": ("codex", "claude_code"), "D": ("claude_code", "codex"),
+    "E": ("codex", "codex"), "F": ("claude_code", "claude_code"),
+}
 WRITER_PROMPT = """Implement the specification below in Python 3.11+.
 Return only complete Python source (imports and function definitions), without prose.
 You may check your implementation with python_check using your own examples.
@@ -403,7 +407,7 @@ async def run(args):
     tasks = select_tasks(args.tasks, args.max_tasks, args.seed, tasks=suite.tasks)
     arms = args.arms.split(",")
     if not arms or len(arms) != len(set(arms)) or set(arms) - ARMS.keys():
-        raise ValueError("arms must be a comma-separated subset of A,B,C,D without duplicates")
+        raise ValueError("arms must be a comma-separated subset of A,B,C,D,E,F without duplicates")
     output = Path(args.output)
     if args.phase == "calibration" and (args.suite != "v2" or arms != ["A"]):
         raise ValueError("calibration is v2 arm A only")
@@ -583,7 +587,7 @@ def parse_args(argv=None):
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--suite", choices=("v1", "v2"), default="v1")
     parser.add_argument("--phase", choices=("calibration", "frozen"), default="frozen")
-    parser.add_argument("--arms", default="A,B,C,D")
+    parser.add_argument("--arms", default="A,B,C,D,E,F")
     parser.add_argument("--tasks", default="all", help="all, coding, api, or comma-separated task IDs")
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--seed", type=int, default=20261011)

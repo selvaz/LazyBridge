@@ -53,7 +53,7 @@ class Suite:
         scenario = self.tasks.index(task) % 4
         drafts = [good if scenario in (0, 2) else bad]
         reviews = ["approved"]
-        if arm in "CD" and scenario in (1, 2):
+        if arm in "CDEF" and scenario in (1, 2):
             drafts.append(good if scenario == 1 else bad)
             reviews = [
                 "rejected: check all specified constraints",

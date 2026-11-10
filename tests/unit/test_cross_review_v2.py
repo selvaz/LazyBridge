@@ -42,7 +42,7 @@ async def test_v2_mock_pipeline_and_version_resume(tmp_path, monkeypatch):
 
     monkeypatch.setattr(harness, "live_engine", forbidden)
     path = tmp_path / "v2.jsonl"
-    args = harness.parse_args(["--suite", "v2", "--mock", "--output", str(path)])
+    args = harness.parse_args(["--suite", "v2", "--mock", "--arms", "A,B,C,D", "--output", str(path)])
     rows = await harness.run(args)
     assert len(rows) == 180
     assert all(r["suite"] == "v2" and r["task_sha256"] for r in rows)
