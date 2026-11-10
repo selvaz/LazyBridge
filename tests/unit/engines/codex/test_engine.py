@@ -97,6 +97,20 @@ def get_quote(symbol: str) -> dict[str, str]:
     return {"symbol": symbol}
 
 
+@pytest.mark.parametrize("resolved", [None, "gpt-effective"])
+def test_model_metadata_reports_requested_and_resolved(resolved):
+    session = Session()
+    result = Agent(
+        CodexEngine(model="sonnet", client=FakeAppServer(CodexRunResult(text="ok", model=resolved))),
+        session=session,
+    )("hi")
+    assert result.metadata.model == (resolved or "sonnet")
+    assert result.metadata.requested_model == "sonnet"
+    assert result.metadata.model_resolved is bool(resolved)
+    event = session.events.query(event_type=EventType.MODEL_RESPONSE)[0]
+    assert event["payload"]["model"] == (resolved or "sonnet")
+
+
 class TestDurableThreads:
     """``persist_thread`` / ``thread_id``: Codex owns the transcript."""
 

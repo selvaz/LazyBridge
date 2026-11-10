@@ -690,7 +690,7 @@ class ClaudeCodeEngine:
                     {
                         "agent_name": agent_name,
                         "provider": "claude-code",
-                        "model": result.model or self.model,
+                        "model": result.model or self.requested_model,
                         "requested_model": self.requested_model,
                         "model_resolved": bool(result.model),
                         "input_tokens": result.input_tokens,
@@ -705,7 +705,7 @@ class ClaudeCodeEngine:
                 task=env.task,
                 payload=result.text,
                 metadata=EnvelopeMetadata(
-                    model=result.model or self.model,
+                    model=result.model or self.requested_model,
                     requested_model=self.requested_model,
                     model_resolved=bool(result.model),
                     provider="claude-code",
@@ -849,7 +849,7 @@ class ClaudeCodeEngine:
                     {
                         "agent_name": agent_name,
                         "provider": "claude-code",
-                        "model": resolved_model or self.model,
+                        "model": resolved_model or self.requested_model,
                         "requested_model": self.requested_model,
                         "model_resolved": bool(resolved_model),
                         "input_tokens": input_tokens,
