@@ -255,8 +255,8 @@ class AgentSdkClient(ClaudeSdkClient):
             model = message.model
             return model if isinstance(model, str) and model.strip() else current
         if current is None and isinstance(message, SystemMessage) and message.subtype == "init":
-            model = message.data.get("model")
-            return model if isinstance(model, str) and model.strip() else None
+            init_model = message.data.get("model")
+            return init_model if isinstance(init_model, str) and init_model.strip() else None
         return current
 
     @staticmethod
