@@ -245,6 +245,7 @@ class CodexRunResult:
     output_tokens: int = 0
     cost_usd: float = 0.0
     thread_id: str = ""
+    model: str | None = None
 
 
 @contextlib.contextmanager
@@ -840,6 +841,8 @@ class CodexAppServerClient:
                     thread_params["threadSource"] = thread_source
                 thread = await request("thread/start", thread_params)
             active_thread = thread["thread"]["id"]
+            reported_model = thread.get("model")
+            resolved_model = reported_model if isinstance(reported_model, str) and reported_model.strip() else None
             if progress is not None:
                 # Published before the turn: a durable thread that exists is
                 # worth reporting even if this call never returns a result.
@@ -909,6 +912,7 @@ class CodexAppServerClient:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 thread_id=active_thread,
+                model=resolved_model,
             )
         finally:
             reader.cancel()

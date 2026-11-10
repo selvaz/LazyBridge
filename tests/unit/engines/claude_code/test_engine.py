@@ -77,6 +77,37 @@ def get_quote(symbol: str) -> dict[str, str]:
     return {"symbol": symbol}
 
 
+@pytest.mark.parametrize("resolved", [None, "claude-sonnet-5"])
+def test_model_metadata_reports_requested_and_resolved(resolved):
+    class Client:
+        async def run(self, *args, **kwargs):
+            return ClaudeSdkResult(text="ok", model=resolved)
+
+    result = Agent(ClaudeCodeEngine(model="sonnet", client=Client()))("hi")
+    assert result.metadata.model == (resolved or "sonnet")
+    assert result.metadata.requested_model == "sonnet"
+    assert result.metadata.model_resolved is bool(resolved)
+
+
+def test_stream_model_response_uses_final_sdk_model():
+    class Client:
+        async def stream(self, *args, **kwargs):
+            yield ClaudeSdkStreamEvent(text="ok")
+            yield ClaudeSdkStreamEvent(final=True, model="claude-sonnet-5")
+
+    session = Session()
+    agent = Agent(ClaudeCodeEngine(model="sonnet", client=Client()), session=session)
+
+    async def run():
+        return [chunk async for chunk in agent.stream("hi")]
+
+    asyncio.run(run())
+    event = session.events.query(event_type=EventType.MODEL_RESPONSE)[0]["payload"]
+    assert event["model"] == "claude-sonnet-5"
+    assert event["requested_model"] == "sonnet"
+    assert event["model_resolved"] is True
+
+
 def test_engine_works_through_a_standard_agent_and_updates_memory():
     memory = Memory()
     session = Session()

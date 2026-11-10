@@ -233,6 +233,7 @@ class CodexEngine:
     ) -> None:
         # A Claude alias/id ("sonnet", "claude-opus-5-5") is translated to the
         # tier-equivalent OpenAI model; Codex rejects the Claude namespace.
+        self.requested_model = model
         self.model, self.cwd, self.system = translate_model(model, "codex"), cwd, system
         #: Caller-chosen durable name for this engine's thread — see the class
         #: docstring. ``None`` (the default) leaves thread handling untouched.
@@ -628,7 +629,9 @@ class CodexEngine:
             {
                 "agent_name": agent_name,
                 "provider": "codex",
-                "model": self.model,
+                "model": result.model or self.requested_model,
+                "requested_model": self.requested_model,
+                "model_resolved": bool(result.model),
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "cost_usd": result.cost_usd,
@@ -693,7 +696,9 @@ class CodexEngine:
                 task=env.task,
                 payload=result.text,
                 metadata=EnvelopeMetadata(
-                    model=self.model,
+                    model=result.model or self.requested_model,
+                    requested_model=self.requested_model,
+                    model_resolved=bool(result.model),
                     provider="codex",
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,

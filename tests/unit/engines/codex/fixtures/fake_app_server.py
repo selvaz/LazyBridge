@@ -147,7 +147,7 @@ def resume_main(scenario: str) -> None:
     assert "threadSource" not in params, params
     dynamic_tools = params.get("dynamicTools", [])
     assert dynamic_tools, "resume must re-register dynamic tools"
-    write_message({"id": resume["id"], "result": {"thread": {"id": "thread-1"}}})
+    write_message({"id": resume["id"], "result": {"thread": {"id": "thread-1"}, "model": "gpt-resumed"}})
     # History: 100 in / 20 out already spent on turn-1, before this turn.
     write_message(token_usage(100, 20, turn_id="turn-1"))
 
@@ -327,7 +327,7 @@ def main() -> None:
     # present it must carry through unchanged (creation-time analytics tag).
     if "threadSource" in params:
         assert params["threadSource"] == "lazybridge", params
-    write_message({"id": thread_start["id"], "result": {"thread": {"id": "thread-1"}}})
+    write_message({"id": thread_start["id"], "result": {"thread": {"id": "thread-1"}, "model": "gpt-effective"}})
 
     turn_start = read_message()
     assert turn_start["method"] == "turn/start", turn_start

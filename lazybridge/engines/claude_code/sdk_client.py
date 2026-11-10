@@ -246,6 +246,20 @@ class AgentSdkClient(ClaudeSdkClient):
     """
 
     @staticmethod
+    def _message_model(message: Any, current: str | None) -> str | None:
+        from claude_agent_sdk import AssistantMessage, SystemMessage
+
+        # Assistant responses take precedence over init, including a fallback
+        # model selected after the session was initialized. Ignore subagents.
+        if isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
+            model = message.model
+            return model if isinstance(model, str) and model.strip() else current
+        if current is None and isinstance(message, SystemMessage) and message.subtype == "init":
+            init_model = message.data.get("model")
+            return init_model if isinstance(init_model, str) and init_model.strip() else None
+        return current
+
+    @staticmethod
     async def _prompt_stream(
         prompt: str, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[dict[str, Any]]:
@@ -585,6 +599,7 @@ class AgentSdkClient(ClaudeSdkClient):
             raise ImportError("Claude Agent SDK is not installed") from exc
 
         final: Any | None = None
+        model: str | None = None
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
             self._prompt_stream(prompt, attachments) if self._needs_streaming_input(options, attachments) else prompt
         )
@@ -595,6 +610,7 @@ class AgentSdkClient(ClaudeSdkClient):
             ) as messages:
                 async for message in messages:
                     self._report_session_id(options, message)
+                    model = self._message_model(message, model)
                     if isinstance(message, ResultMessage):
                         final = message
         if final is None:
@@ -617,7 +633,7 @@ class AgentSdkClient(ClaudeSdkClient):
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
             cost_usd=float(final.total_cost_usd or 0.0),
-            model=None,
+            model=model,
         )
 
     @staticmethod
@@ -650,6 +666,7 @@ class AgentSdkClient(ClaudeSdkClient):
 
         saw_text = False
         saw_result = False
+        model: str | None = None
         stream_options = self._stream_options(options)
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
             self._prompt_stream(prompt, attachments)
@@ -667,6 +684,7 @@ class AgentSdkClient(ClaudeSdkClient):
             ) as messages:
                 async for message in messages:
                     self._report_session_id(stream_options, message)
+                    model = self._message_model(message, model)
                     if isinstance(message, StreamEvent):
                         event = message.event
                         if event.get("type") == "content_block_delta":
@@ -700,6 +718,7 @@ class AgentSdkClient(ClaudeSdkClient):
                             output_tokens=int(usage.get("output_tokens", 0) or 0),
                             cost_usd=float(message.total_cost_usd or 0.0),
                             final=True,
+                            model=model,
                         )
         if not saw_result:
             # Mirrors AgentSdkClient.run(): the SDK iterator ended without a

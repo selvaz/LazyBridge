@@ -25,6 +25,8 @@ class EnvelopeMetadata(BaseModel):
     cost_usd: float = 0.0
     latency_ms: float = 0.0
     model: str | None = None
+    requested_model: str | None = None
+    model_resolved: bool | None = None
     provider: str | None = None
     run_id: str | None = None
     # Aggregation buckets for nested agent-as-tool calls.  When Agent A

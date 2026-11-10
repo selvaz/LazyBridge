@@ -538,6 +538,10 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
             closed.set()
 
     module = types.ModuleType("claude_agent_sdk")
+    from claude_agent_sdk import AssistantMessage, SystemMessage
+
+    module.AssistantMessage = AssistantMessage
+    module.SystemMessage = SystemMessage
     module.ResultMessage = ResultMessage
     module.StreamEvent = StreamEvent
     module.query = query
@@ -556,6 +560,55 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
         assert closed.is_set()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "messages, expected",
+    [
+        ([("init", "sonnet")], "sonnet"),
+        ([("init", "sonnet"), ("assistant", "claude-sonnet-5")], "claude-sonnet-5"),
+        ([("assistant", "")], None),
+        ([], None),
+    ],
+)
+def test_sdk_captures_model_from_messages(monkeypatch, stream, messages, expected):
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage
+
+    async def fake_query(*args):
+        for kind, model in messages:
+            if kind == "init":
+                yield SystemMessage(subtype="init", data={"model": model})
+            else:
+                yield AssistantMessage(content=[], model=model)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            result="ok",
+        )
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.sdk_client._bounded_query", fake_query)
+    monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
+
+    async def run():
+        client = AgentSdkClient()
+        if stream:
+            events = [event async for event in client.stream("hi", options=ClaudeSdkOptions())]
+            return events[-1].model
+        return (await client.run("hi", options=ClaudeSdkOptions())).model
+
+    assert asyncio.run(run()) == expected
+
+
+def test_subagent_model_does_not_replace_the_main_model():
+    from claude_agent_sdk import AssistantMessage
+
+    message = AssistantMessage(content=[], model="claude-haiku", parent_tool_use_id="tool-1")
+    assert AgentSdkClient._message_model(message, "claude-sonnet-5") == "claude-sonnet-5"
 
 
 class TestLongSystemPrompt:

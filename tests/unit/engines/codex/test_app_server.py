@@ -98,6 +98,7 @@ def test_full_turn_round_trip_including_a_tool_call():
     result, chunks = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
 
     assert result.text == "AMZN is 123.45"
+    assert result.model == "gpt-effective"
     # Usage is the last cumulative ``total`` reported by
     # thread/tokenUsage/updated, not the first one nor the per-call ``last``.
     assert result.input_tokens == 55
@@ -301,6 +302,7 @@ class TestDurableThreads:
 
         assert result.text == "resumed answer"
         assert result.thread_id == "thread-1"
+        assert result.model == "gpt-resumed"
 
     def test_usage_is_this_turn_not_the_thread_total(self):
         # The fixture replays 100/20 already spent, then reports 155/27
