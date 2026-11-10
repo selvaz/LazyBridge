@@ -9,3 +9,13 @@ On tasks completed by both A and B, max(A,B) is the larger standalone pass rate;
 Sum all recorded writer and reviewer calls. Claude Code uses its reported USD cost; Codex uses the LazyBridge OpenAI list-price table and token counts, charging uncached input, cached input and output separately. If cached tokens are unavailable, charge all input at the uncached rate and label the result an upper bound. Missing usage or an unknown price makes the cost unknown. Divide total arm cost by completed rows and by passed tasks; the latter is undefined with zero passes. Costs are API-equivalent estimates; subscription users pay a flat fee.
 
 Run `python -m examples.cross_review_benchmark.cost_report RESULTS.jsonl` on a coherent v2.2 results file. Do not mix protocols or model configurations in that file; the harness enforces its protocol fingerprint when resuming.
+
+## Tool parity fix (10/11/2026, before any v2.2 row)
+A probe showed that with Codex CLI 0.166 the app's dynamic tools, including `python_check`, are reachable only through
+Codex's code-mode host (`functions.exec`). The harness disabled it (`features.code_mode_host=false`), so in v2.1 Codex
+could not call `python_check` at all ("code-mode host is disabled"): every Codex writer and reviewer worked without own
+checks, while Claude Code used them (32-38 per arm). This explains part of arm A's API-task failures and is a confound in
+all v2.1 comparisons involving Codex. v2.2 removes that override. With code mode enabled, Codex calls `python_check`
+(probe: 1 call, output 42) and can also run shell commands inside its own offline sandbox (`whoami` returned
+`CodexSandboxOffline`); Claude Code has no shell. Since `python_check` already gives both engines arbitrary Python
+execution, this residual asymmetry is recorded, not removed. The per-row `checks` log counts only `python_check` calls.

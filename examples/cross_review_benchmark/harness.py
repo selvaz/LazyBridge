@@ -165,7 +165,8 @@ class NoNativeToolsClient(CodexAppServerClient):
                 "features.multi_agent=false",
                 "features.browser_use=false",
                 "features.computer_use=false",
-                "features.code_mode_host=false",
+                # Codex CLI >= 0.16x exposes app dynamic tools (python_check) only through the
+                # code-mode host; disabling it made python_check unreachable for Codex (v2.2 fix).
                 "features.memories=false",
                 "features.skip_host_skill_discovery=true",
                 "mcp_servers={}",
