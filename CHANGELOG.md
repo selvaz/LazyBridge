@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `import lazybridge` no longer imports any provider SDK: the provider classes in `lazybridge.core.providers` load lazily on first access (PEP 562), so `from lazybridge.core.providers import AnthropicProvider` still works. Cold import on the maintainer's Windows machine: ~7.7 s -> ~1.5 s (6.4 s were the Anthropic SDK). Every job and the LazyTools MCP server start faster.
+
 ## [1.8.7] — 2026-11-08
 
 ### Added
