@@ -31,8 +31,11 @@ def call_cost(call):
     if type(cached) is not int or not 0 <= cached <= inputs:
         return None, False
     input_price, cache_price, output_price = price
-    return ((inputs - cached) * input_price + cached * (cache_price if cache_price is not None else input_price)
-            + outputs * output_price) / 1_000_000, upper
+    return (
+        (inputs - cached) * input_price
+        + cached * (cache_price if cache_price is not None else input_price)
+        + outputs * output_price
+    ) / 1_000_000, upper
 
 
 def row_cost(row):
@@ -46,18 +49,24 @@ def row_cost(row):
 
 
 def report(rows):
-    lines = ["| Arm | Passes / n | Pass rate (95% Wilson) | USD / row | USD / pass |",
-             "|---|---:|---:|---:|---:|"]
+    lines = ["| Arm | Passes / n | Pass rate (95% Wilson) | USD / row | USD / pass |", "|---|---:|---:|---:|---:|"]
     for arm in ARMS:
         group = [r for r in rows if r["arm"] == arm]
         n, passes = len(group), sum(r["passed"] for r in group)
         costs = [row_cost(row) for row in group]
-        if not n or any(cost is None for cost, _ in costs):
+        known = [(cost, upper) for cost, upper in costs if cost is not None]
+        missing = n - len(known)
+        if not known:
             per_row = per_pass = "unknown"
         else:
-            total = sum(cost for cost, _ in costs)
-            suffix = " (upper bound)" if any(upper for _, upper in costs) else ""
-            per_row = f"${total / n:.6f}{suffix}"
+            # Rows without usage (e.g. a provider timeout) are excluded from the cost
+            # average and counted, never priced as free.
+            total = sum(cost for cost, _ in known)
+            notes = (["upper bound"] if any(upper for _, upper in known) else []) + (
+                [f"{missing} row(s) without usage excluded"] if missing else []
+            )
+            suffix = f" ({'; '.join(notes)})" if notes else ""
+            per_row = f"${total / len(known):.6f}{suffix}"
             per_pass = f"${total / passes:.6f}{suffix}" if passes else "undefined (0 passes)"
         lo, hi = wilson(passes, n)
         rate = f"{passes / n:.1%} ({lo:.1%} to {hi:.1%})" if n else "pending"
@@ -66,31 +75,43 @@ def report(rows):
     by_arm = {arm: {r["task_id"]: r["passed"] for r in rows if r["arm"] == arm} for arm in ARMS}
     shared = by_arm["A"].keys() & by_arm["B"].keys()
     lines += ["", "| Comparison | Passes / paired n | Rate |", "|---|---:|---:|"]
+
     def add(label, values):
         n = len(values)
         count = sum(values)
         lines.append(f"| {label} | {count}/{n} | {count / n:.1%} |" if n else f"| {label} | 0/0 | pending |")
 
     a, b = by_arm["A"], by_arm["B"]
-    add("max(A,B) on A/B pairs", [True] * max(sum(a[t] for t in shared), sum(b[t] for t in shared))
-        + [False] * (len(shared) - max(sum(a[t] for t in shared), sum(b[t] for t in shared))))
+    add(
+        "max(A,B) on A/B pairs",
+        [True] * max(sum(a[t] for t in shared), sum(b[t] for t in shared))
+        + [False] * (len(shared) - max(sum(a[t] for t in shared), sum(b[t] for t in shared))),
+    )
     add("Oracle (A or B)", [a[t] or b[t] for t in shared])
     for arm in "CDEF":
         paired = shared & by_arm[arm].keys()
         add(f"{arm} (paired with A and B)", [by_arm[arm][t] for t in paired])
     complete = set.intersection(*(set(by_arm[arm]) for arm in ARMS))
-    lines += ["", "Primary comparisons below use the same tasks completed in all six arms.", "",
-              "| Comparison | Passes / complete n | Rate |", "|---|---:|---:|"]
+    lines += [
+        "",
+        "Primary comparisons below use the same tasks completed in all six arms.",
+        "",
+        "| Comparison | Passes / complete n | Rate |",
+        "|---|---:|---:|",
+    ]
     best = max(sum(a[t] for t in complete), sum(b[t] for t in complete))
     add("max(A,B), complete cohort", [True] * best + [False] * (len(complete) - best))
     for arm in "CDEF":
         add(f"{arm}, complete cohort", [by_arm[arm][t] for t in complete])
-    lines += ["", f"A/B failure overlap on {len(shared)} paired tasks: "
-              f"both fail {sum(not a[t] and not b[t] for t in shared)}; "
-              f"only A fails {sum(not a[t] and b[t] for t in shared)}; "
-              f"only B fails {sum(a[t] and not b[t] for t in shared)}.",
-              "Costs are API-equivalent estimates; subscription users pay a flat fee. "
-              "Unknown call costs make the entire arm cost unknown."]
+    lines += [
+        "",
+        f"A/B failure overlap on {len(shared)} paired tasks: "
+        f"both fail {sum(not a[t] and not b[t] for t in shared)}; "
+        f"only A fails {sum(not a[t] and b[t] for t in shared)}; "
+        f"only B fails {sum(a[t] and not b[t] for t in shared)}.",
+        "Costs are API-equivalent estimates; subscription users pay a flat fee. "
+        "Rows without usage data are excluded from cost averages and counted.",
+    ]
     return "\n".join(lines)
 
 
@@ -103,4 +124,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
