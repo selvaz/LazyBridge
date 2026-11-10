@@ -184,6 +184,7 @@ class ClaudeCodeEngine:
     ) -> None:
         # An OpenAI tier id ("gpt-6.1-terra") is translated to the Claude
         # equivalent; the Claude CLI rejects the OpenAI namespace.
+        self.requested_model = model
         self.model = translate_model(model, "claude_code") or model
         self.cwd = cwd
         self.system = system
@@ -690,6 +691,8 @@ class ClaudeCodeEngine:
                         "agent_name": agent_name,
                         "provider": "claude-code",
                         "model": result.model or self.model,
+                        "requested_model": self.requested_model,
+                        "model_resolved": bool(result.model),
                         "input_tokens": result.input_tokens,
                         "output_tokens": result.output_tokens,
                         "cost_usd": result.cost_usd,
@@ -703,6 +706,8 @@ class ClaudeCodeEngine:
                 payload=result.text,
                 metadata=EnvelopeMetadata(
                     model=result.model or self.model,
+                    requested_model=self.requested_model,
+                    model_resolved=bool(result.model),
                     provider="claude-code",
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
@@ -798,6 +803,7 @@ class ClaudeCodeEngine:
 
             input_tokens = output_tokens = 0
             cost_usd = 0.0
+            resolved_model = None
             tool_clock = ToolClock()
             async with closing_iter(
                 self._idle_guarded_stream(
@@ -835,6 +841,7 @@ class ClaudeCodeEngine:
                         self._remember_session(session, agent_name, event.session_id)
                         input_tokens, output_tokens = event.input_tokens, event.output_tokens
                         cost_usd = event.cost_usd
+                        resolved_model = event.model
             text = "".join(chunks)
             if session:
                 session.emit(
@@ -842,7 +849,9 @@ class ClaudeCodeEngine:
                     {
                         "agent_name": agent_name,
                         "provider": "claude-code",
-                        "model": self.model,
+                        "model": resolved_model or self.model,
+                        "requested_model": self.requested_model,
+                        "model_resolved": bool(resolved_model),
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
                         "cost_usd": cost_usd,

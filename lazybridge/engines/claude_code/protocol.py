@@ -94,6 +94,7 @@ class ClaudeSdkStreamEvent:
     output_tokens: int = 0
     cost_usd: float = 0.0
     final: bool = False
+    model: str | None = None
 
 
 class ClaudeSdkClient(Protocol):
