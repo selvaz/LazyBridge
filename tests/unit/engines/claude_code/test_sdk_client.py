@@ -604,6 +604,13 @@ def test_sdk_captures_model_from_messages(monkeypatch, stream, messages, expecte
     assert asyncio.run(run()) == expected
 
 
+def test_subagent_model_does_not_replace_the_main_model():
+    from claude_agent_sdk import AssistantMessage
+
+    message = AssistantMessage(content=[], model="claude-haiku", parent_tool_use_id="tool-1")
+    assert AgentSdkClient._message_model(message, "claude-sonnet-5") == "claude-sonnet-5"
+
+
 class TestLongSystemPrompt:
     """A system prompt over the threshold travels as a file, never on the command line.
 

@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Report the model returned by Claude Code and Codex runtimes in coding-engine metadata and session events, retaining the requested model and marking unresolved fallbacks.
+
 ## [1.8.7] — 2026-11-08
 
 ### Added
