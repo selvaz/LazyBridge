@@ -5,34 +5,42 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**Everything is a tool.** LazyBridge is a Python agent framework where
-functions, agents and whole pipelines plug into each other the same way, and
-the engine underneath is swappable. **Agent = Engine + Tools + State.**
+**No glue code. One contract. Agents, pipelines and Plans nest as tools.**
 
-- **Everything is a tool.** A function, another agent or a Plan-backed
-  pipeline all enter through `tools=[...]`, so agents compose into teams
-  without glue code.
-- **API, Claude Code or Codex: peer engines.** Provider API models
-  (Anthropic, OpenAI, Google, DeepSeek, LiteLLM), Claude Code and Codex are
-  all first-class engines behind the same `Agent`. Swap one for another and
-  keep tools, memory and state; use any one alone or mix them. With a
-  subscription login the coding runtimes use the account's plan quota instead
-  of per-token API billing.
-- **Fleets, not just chats.** Deterministic `Plan` DAGs with checkpoint/resume
-  and `run_many` fan-out, `Agent.parallel`, `verify=` writer/reviewer loops,
-  human-in-the-loop engines, and a durable control plane (atomic claims,
-  fencing, append-only ledger) for many workers on one machine.
+LazyBridge is a Python library for composing work as **Agent = Engine + Tools + State**. A function, another agent, or a Plan-backed pipeline all go in `tools=[...]`. The engine is whatever decides the next step: any supported LLM, a deterministic `Plan`, or a human (`HumanEngine`, Alpha).
 
-## Try it in two minutes
+## 30-second demo (no API keys)
+
+```sh
+python -m pip install lazybridge
+```
+
+```python
+from lazybridge import Agent, Plan, Step, from_step
+from lazybridge.testing import MockAgent
+
+research = MockAgent("Rome: 18°C, clear", name="research")
+write = MockAgent(lambda env: f"Pack a light jacket. ({env.context or env.task})", name="write")
+brief = Agent(name="brief", engine=Plan(Step("research"), Step("write", context=from_step("research"))), tools=[research, write])
+desk = Agent(name="desk", engine=Plan(Step("brief")), tools=[brief])
+print(desk("Packing brief for Rome").text())
+# Pack a light jacket. (Rome: 18°C, clear)
+```
+
+`brief` is a Plan-backed agent used as the only tool of `desk`. `write` is still a normal agent: you can call it alone, then put it back in the same `tools` list.
+
+## Install
+
+Python 3.11 or later. For the snippet above, `pip install lazybridge` is enough (current public release: **1.8.7**).
+
+For live engines, install the matching extra and credentials, then run the bundled demo:
 
 ```sh
 python -m pip install "lazybridge[claude-code,deepseek]==1.8.7"
 python -m lazybridge.demo
 ```
 
-The demo finds which engines this machine can use, gives each the same Python
-tool and question, then lets one engine write and another review. Enable any
-one of them, or all three:
+The demo finds which engines this machine can use, gives each the same Python tool and question, then lets one engine write and another review. Enable any one of them, or all three:
 
 | Engine | Enable it |
 |---|---|
@@ -77,25 +85,19 @@ assert api.session is claude.session is codex.session
 lead = Agent(name="lead", engine=ClaudeCodeEngine(), tools=[project_status, codex])
 ```
 
-`LLMEngine` calls provider APIs; `Plan` runs a deterministic DAG; human engines
-handle approval and supervision. Every agent returns an `Envelope`.
+`LLMEngine` calls provider APIs (Anthropic, OpenAI, Google, DeepSeek, LiteLLM, and more). `Plan` runs a deterministic DAG. Human engines (`HumanEngine`, `SupervisorEngine`) are Alpha. Every agent returns an `Envelope`.
 
-## Install and authenticate
-
-Python 3.11 or later:
-
-```sh
-python -m pip install "lazybridge[claude-code]==1.8.7"
-```
+With a subscription login, coding runtimes use the account's plan quota instead of per-token API billing. The adapters reuse the configured authentication and do not force a billing path. Swap one engine for another and keep tools, memory and state; a native Claude transcript still cannot migrate into a Codex thread.
 
 Install and sign in to the local coding runtimes using the
 [Claude Code guide](https://core.lazybridge.com/guides/full/claude-code-engine/)
 and [Codex guide](https://core.lazybridge.com/guides/full/codex-engine/).
-Codex needs its CLI, with no Python SDK extra. With a subscription login,
-coding runtimes use the account's plan quota; the adapters reuse the configured
-authentication and do not force a billing path. For provider APIs, install the
+Codex needs its CLI, with no Python SDK extra. For provider APIs, install the
 matching extra (`anthropic`, `openai`, `google`, `deepseek`, `litellm`) and
-configure that provider's credentials.
+configure that provider's credentials. Local models such as Ollama go through
+the `litellm` extra (`LLMEngine("litellm/...")`); LM Studio can use an
+OpenAI-compatible base URL. See the
+[providers guide](https://core.lazybridge.com/guides/advanced/providers/).
 
 ## One writes, the other reviews
 
@@ -113,19 +115,24 @@ print(result.text())
 
 `verify=` is configured on the Agent. Rejection supplies feedback for the next
 attempt; `max_verify` counts total attempts. Exhaustion returns the final draft
-even when rejected. Use deterministic tests and explicit acceptance records
-before shipping. See the full
+even when rejected. `result.ok` means the run finished without an execution
+error, not that the reviewer accepted the work. Use deterministic tests and
+explicit acceptance records before shipping. See the full
 [Claude Code writes, Codex reviews guide](https://core.lazybridge.com/guides/full/claude-writes-codex-reviews/).
 
 Native history can survive a process restart: Claude has `persist_session` /
 `session_id`, Codex has `persist_thread` / `thread_id`, and both support
 `session_alias` through `SessionRegistry`. Python `Memory`, `Store` and `Session`
-can be reused when changing engines; a native Claude transcript cannot migrate
-into a Codex thread.
+can be reused when changing engines.
 
-## LazyTools connects the work
+Deterministic `Plan` DAGs also support checkpoint/resume and `run_many` fan-out,
+alongside `Agent.parallel` and a durable control plane (atomic claims, fencing,
+an append-only ledger) for many workers on one machine.
 
-[LazyTools](https://tools.lazybridge.com/) is the integration layer:
+## LazyTools (Alpha)
+
+[LazyTools](https://tools.lazybridge.com/) is the integration layer. It is
+**Alpha**, not part of Core:
 
 - [Code bridge](https://tools.lazybridge.com/code-bridge/): detached repository jobs, durable approvals, results and tier-based opposite-engine review.
 - [MCP server](https://tools.lazybridge.com/mcp-server/): code-support tools, projects and connectors.
@@ -137,6 +144,7 @@ from the GitHub tag (add the `engines` extra for Claude or tier routing):
 ```sh
 pip install "lazytoolkit[mcp] @ git+https://github.com/selvaz/LazyTools@v0.10.6"
 ```
+
 Core MCP/gateway shims were removed in 0.9. Follow the LazyTools installation
 instructions rather than importing those removed modules.
 
@@ -148,25 +156,26 @@ benchmark is in progress**, with no comparative metrics published here.
 
 This README targets **1.8.7**.
 The core public API is Stable; coding engines and extensions have their own
-boundaries. LazyTools 0.10.1 declares Alpha. See the
+boundaries. Claude Code and Codex engines are Shipped, not under the Core
+Stable guarantee. `HumanEngine` and `SupervisorEngine` are Alpha. LazyTools
+is Alpha. See the
 [maturity table](https://core.lazybridge.com/#maturity) and [CHANGELOG](CHANGELOG.md).
 
 - [Quickstart](https://core.lazybridge.com/quickstart/)
+- [Why LazyBridge](https://core.lazybridge.com/why/) (composition, Plans, review, observability)
+- [Comparison](https://core.lazybridge.com/comparison/) and [framework guide](https://core.lazybridge.com/best-python-ai-agent-frameworks/)
 - [Coding agents and engine differences](https://core.lazybridge.com/guides/full/coding-agents/)
 - [Recipes](https://core.lazybridge.com/recipes/) and [API reference](https://core.lazybridge.com/reference/)
 - [For LLM assistants](https://core.lazybridge.com/for-llms/)
-- [Website and working projects](https://lazybridge.com/)
+- [Website](https://lazybridge.com/)
 
 For development, install `.[test,docs]`, run `python -m pytest`, and build with
 `python -m mkdocs build --strict`. The default suite excludes live model calls
 and heavy rendering. [CONTRIBUTING](CONTRIBUTING.md) describes the checks.
 
-The longer design rationale and worked examples live in
-[Why LazyBridge](https://core.lazybridge.com/why/) (recursive pipelines,
-validation, review and exporters), the
-[comparison](https://core.lazybridge.com/comparison/), and the
+The longer design rationale lives in the guides linked above, including the
 [documentation map](https://core.lazybridge.com/#design-and-documentation-map).
-This keeps the README focused while preserving those explanations in the guides.
+This keeps the README focused.
 
 Issues and contributions are welcome through the repository. See
 [SECURITY.md](SECURITY.md) for disclosure and [LICENSE](LICENSE) for Apache 2.0
