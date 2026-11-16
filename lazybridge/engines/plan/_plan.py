@@ -38,6 +38,7 @@ from lazybridge.engines.plan._types import (
     StepResult,
 )
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.sentinels import _FromStart
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
 
@@ -889,6 +890,13 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
             items = step.context if isinstance(step.context, list) else [step.context]
             for item in items:
                 ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv, tool_map)
+                # Incoming context is already the first ambient part.  An
+                # explicit ``from_start`` selects that same context, so do
+                # not append it a second time.  Literal strings and other
+                # sentinels remain additive even when their rendered values
+                # happen to be equal.
+                if isinstance(item, _FromStart):
+                    continue
                 # A resolved step carries its output in ``payload``; render it
                 # through ``text()`` so a typed ``output=`` model reaches the
                 # downstream step.  The previous ``isinstance(payload, str)``

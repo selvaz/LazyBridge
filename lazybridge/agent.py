@@ -411,6 +411,7 @@ class Agent:
         self,
         task: str | Envelope,
         *,
+        context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
@@ -423,7 +424,7 @@ class Agent:
         from lazybridge.signals import ConcludeSignal
 
         try:
-            return await self._run_as_tool(task, images=images, audio=audio)
+            return await self._run_as_tool(task, context=context, images=images, audio=audio)
         except ConcludeSignal as sig:
             return Envelope(payload=sig.message)
 
@@ -431,6 +432,7 @@ class Agent:
         self,
         task: str | Envelope,
         *,
+        context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
@@ -446,9 +448,11 @@ class Agent:
         # subclasses) that haven't set ``self.timeout``.
         timeout = getattr(self, "timeout", None)
         if timeout is None:
-            return await self._run_body(task, images=images, audio=audio)
+            return await self._run_body(task, context=context, images=images, audio=audio)
         try:
-            return await asyncio.wait_for(self._run_body(task, images=images, audio=audio), timeout=timeout)
+            return await asyncio.wait_for(
+                self._run_body(task, context=context, images=images, audio=audio), timeout=timeout
+            )
         except TimeoutError:
             # Emit a synthetic AGENT_FINISH so callers reading
             # ``session.events.query()`` see a complete trace even when
@@ -478,10 +482,11 @@ class Agent:
         self,
         task: str | Envelope,
         *,
+        context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
-        env = self._to_envelope(task, images=images, audio=audio)
+        env = self._to_envelope(task, context=context, images=images, audio=audio)
         env = self._inject_sources(env)
 
         if self.guard:
@@ -856,6 +861,7 @@ class Agent:
         self,
         task: str | Envelope,
         *,
+        context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
@@ -864,7 +870,7 @@ class Agent:
         # Memory, Plan.run_many, …) — including nest_asyncio (Jupyter/Spyder),
         # contextvars propagation, and loop-closed cleanup.  See
         # ``lazybridge._asyncbridge``.
-        return run_coroutine_blocking(lambda: self.run(task, images=images, audio=audio))
+        return run_coroutine_blocking(lambda: self.run(task, context=context, images=images, audio=audio))
 
     # ------------------------------------------------------------------
     # Tool exposure
@@ -1137,15 +1143,16 @@ class Agent:
     def _to_envelope(
         task: str | Envelope,
         *,
+        context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
     ) -> Envelope:
         """Coerce ``task`` into an :class:`Envelope`, attaching multimodal blocks.
 
         Conflict policy: when ``task`` is already an :class:`Envelope`
-        with attachments AND ``images=`` / ``audio=`` are also passed,
-        :class:`ValueError` is raised — explicit > implicit.  Pass
-        attachments through one channel only.
+        carrying a value that is also passed via ``context=``, ``images=``,
+        or ``audio=``, :class:`ValueError` is raised. Pass each value through
+        one channel only.
         """
         from lazybridge.core.types import _coerce_audio, _coerce_image
 
@@ -1153,6 +1160,12 @@ class Agent:
         coerced_audio = _coerce_audio(audio) if audio is not None else None
 
         if isinstance(task, Envelope):
+            if context is not None and task.context is not None:
+                raise ValueError(
+                    "context= passed to .run()/.__call__() but the supplied "
+                    "Envelope already carries context.  Pass context via "
+                    "exactly one channel."
+                )
             if coerced_images is not None and task.images:
                 raise ValueError(
                     "images= passed to .run()/.__call__() but the supplied "
@@ -1165,16 +1178,17 @@ class Agent:
                     "Envelope already carries audio.  Pass attachments via "
                     "exactly one channel."
                 )
-            if coerced_images is not None or coerced_audio is not None:
+            if context is not None or coerced_images is not None or coerced_audio is not None:
                 return task.model_copy(
                     update={
+                        "context": context if context is not None else task.context,
                         "images": coerced_images if coerced_images is not None else task.images,
                         "audio": coerced_audio if coerced_audio is not None else task.audio,
                     }
                 )
             return task
 
-        env = Envelope.from_task(str(task))
+        env = Envelope.from_task(str(task), context=context)
         if coerced_images is not None or coerced_audio is not None:
             return env.model_copy(update={"images": coerced_images, "audio": coerced_audio})
         return env

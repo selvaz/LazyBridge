@@ -10,6 +10,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Plan steps now inherit the context of the incoming envelope in both top-level
+  and nested Plans. Context is merged as incoming context, explicit
+  `Step.context`, then live `sources`, with blank lines between parts;
+  `context=from_start` reuses the inherited context without duplicating it.
 - `import lazybridge` no longer imports any provider SDK: the provider classes in `lazybridge.core.providers` load lazily on first access (PEP 562), so `from lazybridge.core.providers import AnthropicProvider` still works. Cold import on the maintainer's Windows machine: ~7.7 s -> ~1.5 s (6.4 s were the Anthropic SDK). Every job and the LazyTools MCP server start faster.
 
 ### Fixed

@@ -6,6 +6,7 @@ import pytest
 
 from lazybridge import Agent, Plan, Step
 from lazybridge.envelope import Envelope
+from lazybridge.sentinels import from_parallel
 from lazybridge.testing import MockAgent
 
 
@@ -76,3 +77,71 @@ async def test_top_level_plan_without_context_remains_none() -> None:
     await _run(Plan(Step(MockAgent(capture, name="worker"), name="worker")))
 
     assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_parallel_band_steps_inherit_incoming_context() -> None:
+    """Every branch in a parallel band receives the Plan's context."""
+    seen: dict[str, str | None] = {}
+
+    def capture(name: str):
+        def run(env: Envelope) -> str:
+            seen[name] = env.context
+            return f"{name} result"
+
+        return run
+
+    await _run(
+        Plan(
+            Step(MockAgent(capture("left"), name="left"), name="left", parallel=True),
+            Step(MockAgent(capture("right"), name="right"), name="right", parallel=True),
+        ),
+        context="shared brief",
+    )
+
+    assert seen == {"left": "shared brief", "right": "shared brief"}
+
+
+@pytest.mark.asyncio
+async def test_from_parallel_still_contributes_only_referenced_output() -> None:
+    """Inheritance does not make from_parallel repeat a branch's input context."""
+    seen: list[str | None] = []
+
+    def capture_join(env: Envelope) -> str:
+        seen.append(env.context)
+        return "joined"
+
+    await _run(
+        Plan(
+            Step(MockAgent("left result", name="left"), name="left", parallel=True),
+            Step(MockAgent("right result", name="right"), name="right", parallel=True),
+            Step(
+                MockAgent(capture_join, name="join"),
+                name="join",
+                context=from_parallel("left"),
+            ),
+        ),
+        context="shared brief",
+    )
+
+    assert seen == ["shared brief\n\nleft result"]
+
+
+@pytest.mark.asyncio
+async def test_agent_run_context_reaches_wrapped_plan_steps() -> None:
+    """Agent.run's context keyword enters its Plan as envelope context."""
+    seen: list[str | None] = []
+
+    def capture(env: Envelope) -> str:
+        seen.append(env.context)
+        return "done"
+
+    agent = Agent(
+        engine=Plan(Step(MockAgent(capture, name="worker"), name="worker")),
+        name="pipeline",
+    )
+
+    result = await agent.run("incoming task", context="caller context")
+
+    assert result.ok
+    assert seen == ["caller context"]

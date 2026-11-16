@@ -166,9 +166,7 @@ async def test_payloadless_envelope_falls_back_to_its_context() -> None:
         context="the original brief",
     )
 
-    # The Plan's incoming context is inherited first; the explicit
-    # ``from_start`` selection then contributes the same value again.
-    assert seen[0] == "the original brief\n\nthe original brief"
+    assert seen[0] == "the original brief"
 
 
 # ---------------------------------------------------------------------------
