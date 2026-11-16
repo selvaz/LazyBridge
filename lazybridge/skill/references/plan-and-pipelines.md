@@ -105,6 +105,11 @@ pipeline = Agent(
 
 `context=` accepts one sentinel/string or a list. Since 1.4.0 a referenced
 step contributes its output whatever its type (rendered via `Envelope.text()`).
+Every step also inherits the context on the envelope that entered its Plan.
+Context is assembled in this order: inherited envelope context, explicit
+`context=` items, then `sources=`, separated by blank lines. This inheritance
+preserves context across nested or Agent-wrapped Plans without changing task
+routing.
 
 ## Routing
 

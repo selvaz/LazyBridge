@@ -75,6 +75,12 @@ their own dedicated guide: [Routing](routing.md).
   independently and join with blank-line separators (same shape
   as `sources`); literal strings can ride along to inject fixed
   boilerplate.
+- **Incoming context is inherited** — every step begins with the context
+  from the envelope passed to its Plan. This preserves side context when a
+  Plan is nested as a step of another Plan or wrapped by an Agent. Explicit
+  `context=` items follow the inherited context, and `sources=` follow the
+  explicit items; all parts use blank-line separators. Task routing is
+  unaffected.
 - **`sources=`** — for *live-view* state that should reflect the
   most recent value at step execution time (`Store`, `Memory`,
   any object with `.text()`). Sentinels resolve once at the start
