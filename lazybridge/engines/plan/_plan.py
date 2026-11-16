@@ -38,6 +38,7 @@ from lazybridge.engines.plan._types import (
     StepResult,
 )
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.sentinels import _FromStart
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
 
@@ -871,7 +872,14 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 error=step_task_env.error,
             )
 
-        ctx_parts: list[str] = []
+        # The context on the envelope that entered this Plan is ambient to
+        # every child step.  This matters most for a Plan used as another
+        # Plan's target: task routing still follows the step's ``task=``
+        # sentinel, while the outer envelope's side context is not lost at
+        # the nested Plan boundary.  Explicit context is appended below so
+        # callers can rely on the stable order ``inherited, explicit,
+        # sources``.
+        ctx_parts: list[str] = [start_env.context] if start_env.context else []
         if step.context is not None:
             # ``context=`` accepts a single Sentinel/str OR a list of them.
             # The list form lets a step pull data from multiple upstream
@@ -882,6 +890,13 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
             items = step.context if isinstance(step.context, list) else [step.context]
             for item in items:
                 ctx_env = self._resolve_sentinel(item, prev_env, start_env, history, kv, tool_map)
+                # Incoming context is already the first ambient part.  An
+                # explicit ``from_start`` selects that same context, so do
+                # not append it a second time.  Literal strings and other
+                # sentinels remain additive even when their rendered values
+                # happen to be equal.
+                if isinstance(item, _FromStart):
+                    continue
                 # A resolved step carries its output in ``payload``; render it
                 # through ``text()`` so a typed ``output=`` model reaches the
                 # downstream step.  The previous ``isinstance(payload, str)``
