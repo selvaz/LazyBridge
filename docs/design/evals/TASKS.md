@@ -63,7 +63,7 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 - **Requirements:** R6, R7.
 - **Files:** `lazybridge/ext/evals/store.py`, `lazybridge/ext/evals/budget.py`, `tests/ext/evals/test_store.py`, `tests/ext/evals/test_budget.py`.
 - **Dependencies:** T0.
-- **Needs:** migration-versioned SQLite schema, content-addressed artifact index, transactional attempt/reservation writes, conservative token/USD/run estimates, quota-allocation validation, unknown-price behavior, and clean budget-stop states.
+- **Needs:** migration-versioned SQLite schema, content-addressed artifact index, transactional attempt/reservation writes, conservative token/USD/run estimates, a versioned per-model input/output/cached-token price table with effective date and source, quota-allocation validation, unknown-price/usage behavior, and clean budget-stop states.
 - **Executor:** cloud, Claude Code.
 - **review_by:** Codex.
 - **Checks:**
@@ -76,7 +76,7 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 - **Requirements:** R4, R5, R6, R7, R14.
 - **Files:** `lazybridge/ext/evals/runner.py`, `lazybridge/ext/evals/models.py`, additive exports in `lazybridge/ext/evals/__init__.py`, `tests/ext/evals/test_runner.py`, `tests/ext/evals/test_runner_failures.py`, `tests/ext/evals/test_resume.py`, `tests/ext/evals/test_accounting.py`.
 - **Dependencies:** T1, T2.
-- **Needs:** engine/agent adapter protocol, stable IDs and seeds, global/per-engine concurrency, timeout/retry attempt chains, crash reconciliation, usage and approval accounting, clean cancellation, and compatibility with standard and coding-agent engines without provider branching.
+- **Needs:** engine/agent adapter protocol, stable IDs and seeds, global/per-engine concurrency, timeout/retry attempt chains, crash reconciliation, and clean cancellation. Usage accounting captures engine-native measured usage (including Claude Code cache fields, Codex reasoning, and provider API usage), exact-text tokenizer estimates with error margins and a flagged four-character fallback, measured/estimated splits, writer/reviewer and nesting-level attribution, wall time, verify rounds, subscription quota percentage when exposed, approvals, and compatibility with standard and coding-agent engines without provider branching.
 - **Executor:** cloud, Codex.
 - **review_by:** Claude Code.
 - **Checks:**
@@ -112,10 +112,10 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 
 ### T6 — Implement metrics and paired comparisons
 
-- **Requirements:** R11, R12, R13.
+- **Requirements:** R11, R12, R13, and E1 analysis in R18.
 - **Files:** `lazybridge/ext/evals/metrics.py`, `lazybridge/ext/evals/compare.py`, `tests/ext/evals/test_metrics.py`, `tests/ext/evals/test_compare.py`.
 - **Dependencies:** T1.
-- **Needs:** exact combinatorial `pass@k`, declared `pass^k` selection, denominator policy, Wilson bounds, seeded task bootstrap, exact sign test, paired bootstrap, MDD calculation/report inputs, and explicit undefined states.
+- **Needs:** exact combinatorial `pass@k`, declared `pass^k` selection, denominator policy, Wilson bounds, seeded task bootstrap, exact sign test, paired bootstrap, MDD calculation/report inputs, and explicit undefined states. E1 analysis adds per-cell defect catch rate and `pass^k` intervals, cost per task/caught defect, Pareto frontier and dominated-cell classification, and preregistered non-inferiority break-even selection against frontier-writer-alone with token/USD savings.
 - **Executor:** cloud, Claude Code.
 - **review_by:** Codex; human statistical review.
 - **Checks:**
@@ -128,7 +128,7 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 - **Requirements:** R14, R15, R16.
 - **Files:** `lazybridge/ext/evals/transcripts.py`, `lazybridge/ext/evals/reporting.py`, `lazybridge/ext/evals/schema/report-v1.json`, `tests/ext/evals/test_transcripts.py`, `tests/ext/evals/test_otel.py`, `tests/ext/evals/test_reports.py`.
 - **Dependencies:** T3, T4, T5, T6.
-- **Needs:** content-addressed transcript manifests, versioned redaction, optional OTel context/exporter links, deterministic JSON, Markdown derived only from JSON model, partial/budget-stopped reports, and complete provenance/warnings.
+- **Needs:** content-addressed transcript manifests, versioned redaction, optional OTel context/exporter links, deterministic JSON, Markdown derived only from JSON model, partial/budget-stopped reports, and complete provenance/warnings. Reports preserve measured versus estimated token subtotals, model price-table date/source, list-price-equivalent subscription cost and exposed quota percentage, writer/reviewer nesting detail, verify rounds, E1 Pareto chart/table, and the plain-language “when the tandem saves money” conclusion.
 - **Executor:** cloud, Codex.
 - **review_by:** Claude Code.
 - **Checks:**
@@ -154,7 +154,7 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 - **Requirements:** R18, with R1–R17 as referenced schema contracts.
 - **Files:** `lazybridge/ext/evals/experiments.py`, `tests/ext/evals/test_experiment_manifests.py`, `tests/ext/evals/fixtures/experiments/e1.yaml`, `tests/ext/evals/fixtures/experiments/e2.yaml`, `tests/ext/evals/fixtures/experiments/e3.yaml`.
 - **Dependencies:** T3, T4, T5, T6, T7, T8.
-- **Needs:** preregistration fields, enforced experiment order/amendments, E1 arms/three trials/pairing, E2 four-engine minimum/test oracle, E3 read-only extract contract, privacy metadata, dry-run estimates, and synthetic examples without owned results.
+- **Needs:** preregistration fields, enforced experiment order/amendments, E1's 3 writer tiers × 3 review arms × 3 reviewer tiers with three trials on the same seeded tasks, canonical pruning of reviewer tiers for `none`, explicit justification for any further pruning, tier/vendor/model/price freezes, paired break-even/non-inferiority and Pareto analysis declarations, E2 four-engine minimum/test oracle, E3 read-only extract contract, privacy metadata, dry-run estimates, and synthetic examples without owned results.
 - **Executor:** cloud, Codex.
 - **review_by:** Claude Code; human statistical and privacy review.
 - **Checks:**
@@ -167,7 +167,7 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
 - **Requirements:** operational validation of R1–R18 for E1.
 - **Files:** private task-set repo only: versioned E1 manifest, source eligibility ledger, injected fixtures/ground truth, dry-run report, run database/artifacts, JSON/Markdown result reports, and preregistration/amendments.
 - **Dependencies:** T9.
-- **Needs:** approximately 50 eligible pull requests, balanced defect catalogue, three arms × three trials, same/cross-vendor configuration, weekly quota data, credentials, legal/handling review, and blinded human sample capacity. First run a synthetic smoke; approve live dispatch only if every engine estimate is at or below 10% of weekly quota and a finite hard cap is configured.
+- **Needs:** approximately 50 eligible pull requests, one balanced seeded-defect task set shared by all 21 default factorial cells (three writer tiers; no/same-vendor/cross-vendor review; three reviewer tiers where review exists), three trials per task/cell, and explicit preregistered justification for any additional pruning. Freeze tier/model/vendor assignments and the dated/source-linked input/output/cached price table. Capture per-role/per-nesting measured usage, estimation provenance and error margins for gaps, measured/estimated splits, list-price-equivalent subscription USD, exposed quota percentage, wall time, and verify rounds. Produce cell-level quality intervals and costs, Pareto/dominated results, break-even token/USD savings versus frontier-writer-alone, and “when the tandem saves money.” Weekly quota data, credentials, legal/handling review, and blinded human capacity are required. First run a synthetic smoke; approve live dispatch only if every engine estimate is at or below 10% of weekly quota and a finite hard cap is configured.
 - **Executor:** local authorized operator, Claude Code for orchestration.
 - **review_by:** Codex; human experiment owner before dispatch and before publication.
 - **Checks:**

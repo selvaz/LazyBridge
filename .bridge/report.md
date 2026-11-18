@@ -1,22 +1,21 @@
-# Evals specification task report
+# LazyBridge task report
 
-## Completed
+## Summary
 
-- Added `docs/design/evals/SPEC.md`, defining project goals, decisions D1–D3, invariants, requirements R1–R18, acceptance scenarios, exclusions, assumptions, and a requirement-to-check validation matrix.
-- Added `docs/design/evals/TASKS.md`, defining a one-PR-per-task dependency graph with requirement coverage, files, dependencies, exact checks, prerequisites, cloud/local execution, and opposite-engine review.
-- Kept the change documentation-only and used only generic references to the private task-set repository.
-- Committed each requested design document in its own commit.
+- Added decision D4 with the owner's 2026-11-18 H1/H2 hypotheses about diminishing review benefit at frontier tiers and the cheap-writer tandem break-even region.
+- Made per-trial token provenance/accounting mandatory, including engine-native measured values, explicitly qualified estimates, writer/reviewer nesting, cached and reasoning tokens, wall time, verify rounds, list-price-equivalent USD, and subscription quota reporting.
+- Recast E1 as a 21-cell default factorial design after pruning only meaningless reviewer tiers from no-review cells, with three trials on a common seeded-defect set and explicit justification required for further pruning.
+- Specified E1 cell-level confidence intervals, cost measures, Pareto/dominance reporting, and break-even/non-inferiority conclusions.
+- Updated implementation tasks and acceptance examples to cover the new schema, accounting, analysis, and reporting obligations.
 
-## Validation
+## Checks
 
-- Passed a Python consistency check confirming R1–R18 appear in the validation matrix and task plan, plus Given/When/Then acceptance vocabulary.
-- Passed a Python content check confirming both documents end in a newline and contain no machine-local paths.
-- Passed `git diff --check HEAD~2..HEAD`.
-- `pytest -q tests/test_evals.py` could not start because `pytest-asyncio` is not installed in the environment.
-- `mkdocs build --strict` could not start because `mkdocs` is not installed in the environment.
+- `git diff --check` — passed.
+- Documentation requirement assertions for D4, measured/estimated usage, factorial cells, Pareto analysis, break-even analysis, and acceptance examples — passed.
+- No executable application tests were run because this change only updates design and planning Markdown.
 
 ## Delivery
 
-- Branch: `docs/evals-spec`.
-- Document commits: `7b45bb5` and `fdc54bc`.
-- Push was attempted, but this clone has no configured `origin` remote; the branch remains committed locally for the bridge to deliver.
+- Changes were committed on the current task branch.
+- Push was attempted, but this clone has no configured Git remote or push destination; the task branch remains committed locally for the bridge to deliver.
+- Pull-request metadata was recorded with the available `make_pr` tool.
