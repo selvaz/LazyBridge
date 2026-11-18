@@ -15,7 +15,7 @@ from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, LLMEngine, Memory, 
 state = dict(tools=[project_status], memory=Memory(), store=Store(), session=Session())
 claude = Agent(name="claude", engine=ClaudeCodeEngine(), **state)
 codex = Agent(name="codex", engine=CodexEngine(), **state)
-api = Agent(name="api", engine=LLMEngine("gpt-6.1-sol"), **state)
+api = Agent(name="api", engine=LLMEngine("gpt-6.2-sol"), **state)
 ```
 
 | | `ClaudeCodeEngine` | `CodexEngine` |
@@ -187,7 +187,7 @@ the engine timeout defaults are unchanged.
 Sonnet/Terra, high Opus/Sol and top Fable/Astra. `translate_model(model,
 to)` translates recognized opposite-family names to the target ladder:
 `translate_model("sonnet", "codex")` returns `gpt-6.1-terra`, and
-`translate_model("gpt-6.1-sol", "claude_code")` returns
+`translate_model("gpt-6.2-sol", "claude_code")` returns
 `claude-opus-5-5`. CodexEngine and ClaudeCodeEngine apply this at construction.
 Recognition uses Claude aliases or `claude-*` IDs containing a tier marker,
 and `gpt-*` IDs ending in a tier marker, so even an older recognized ID can

@@ -255,8 +255,8 @@ plan = Agent(name="pipeline",
 
 # 4) Lambda escape hatch for one-off predicates — still covers BOTH branches
 #    and uses after_branches.  Lambdas don't change the safety contract.
-classifier = Agent(engine=LLMEngine("gpt-6.1-sol"), output=Hits, name="classify")
-ranker = Agent(engine=LLMEngine("gpt-6.1-sol"), name="rank")
+classifier = Agent(engine=LLMEngine("gpt-6.2-sol"), output=Hits, name="classify")
+ranker = Agent(engine=LLMEngine("gpt-6.2-sol"), name="rank")
 plan = Agent(name="pipeline",
     engine=Plan(
         Step("classify",

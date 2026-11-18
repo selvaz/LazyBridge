@@ -112,9 +112,9 @@ steps". A skill-equipped Claude produces
 ```python
 from lazybridge import Agent, LLMEngine, Plan, Step
 
-researcher = Agent(engine=LLMEngine("gpt-6.1-sol"), name="research")
-ranker = Agent(engine=LLMEngine("gpt-6.1-sol"), name="rank")
-writer = Agent(engine=LLMEngine("gpt-6.1-sol"), name="write")
+researcher = Agent(engine=LLMEngine("gpt-6.2-sol"), name="research")
+ranker = Agent(engine=LLMEngine("gpt-6.2-sol"), name="rank")
+writer = Agent(engine=LLMEngine("gpt-6.2-sol"), name="write")
 
 pipeline = Agent(name="pipeline",
     engine=Plan(
