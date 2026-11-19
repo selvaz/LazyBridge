@@ -167,7 +167,7 @@ T14 can merge after T7, T9, and T10; it does not wait for private experiment exe
 - **Requirements:** executable entry point for R1–R18 workflows.
 - **Files:** `lazybridge/ext/evals/__main__.py`, `lazybridge/ext/evals/cli.py`, `tests/ext/evals/test_cli.py`.
 - **Dependencies:** T9.
-- **Needs:** public argument parsing and command dispatch for `validate`, `estimate`, `run`, `report`, `analyze-approvals`, and `audit-privacy`; stable exit codes; actionable errors; no provider calls during `--help`, validation, or dry runs; `--help` reads no data; validation and dry runs read only the manifest and task-set paths passed explicitly on the command line (so T11 can preflight its private manifests) and never contact providers or other private stores.
+- **Needs:** public argument parsing and command dispatch for `validate`, `estimate`, `run`, `report`, `analyze-approvals`, and `audit-privacy`; stable exit codes; actionable errors; no provider calls during `--help`, validation, or dry runs; `--help` reads no data; validation and dry runs read only the manifest passed on the command line and the task-set and fixture files it references by path and digest (so T11 can preflight its private manifests) and never contact providers or other private stores.
 - **Executor:** cloud, Codex.
 - **review_by:** Claude Code.
 - **Checks:**
