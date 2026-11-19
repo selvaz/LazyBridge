@@ -63,3 +63,6 @@ pytest-tmp-*/
 # directory name in some other repository.
 tmp/
 .test-tmp/
+
+# Cloud bridge scratch output
+.bridge/
