@@ -84,9 +84,12 @@ _KNOWN_BETA_OVERRIDE_KEYS: frozenset[str] = frozenset(
 #: variant LazyBridge hasn't been updated for.
 _BETA_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*-\d{4}-\d{2}-\d{2}$")
 
-# Price per 1M tokens (input, output). Approximate; verify at console.anthropic.com/pricing.
+# Price per 1M tokens (input, output).
 # Ordering matters: more-specific keys MUST appear before less-specific ones.
 _PRICE_TABLE: dict[str, tuple[float, float]] = {
+    # Official Anthropic pricing, retrieved 2026-11-18:
+    # https://platform.claude.com/docs/en/about-claude/pricing
+    "claude-fable-5-2": (8.0, 40.0),
     # Claude 5 family (Jun-Jul 2026).  Fable 5 is Anthropic's most capable
     # generally-available model; Mythos 5 is the same underlying model
     # without Fable's safety guardrails, restricted to vetted partners
@@ -124,6 +127,7 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 # _PRICE_TABLE key, for models that don't bill the standard 10%.  This is why
 # Fable 5.1 / Mythos 5.1 keep their own rows despite sharing the family price.
 _CACHE_READ_MULTIPLIER: dict[str, float] = {
+    "claude-fable-5-2": 0.025,  # $0.20 / MTok
     "claude-fable-5-1": 0.025,  # $0.25 / MTok
     "claude-mythos-5-1": 0.025,
     "claude-opus-5-5": 0.05,  # $0.20 / MTok
@@ -131,7 +135,9 @@ _CACHE_READ_MULTIPLIER: dict[str, float] = {
 
 # Models that reject forced tool use (tool_choice "any" / "tool") with a 400.
 # Substring-matched, like the sets below.
-_NO_FORCED_TOOL_CHOICE_MODELS = frozenset({"claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5"})
+_NO_FORCED_TOOL_CHOICE_MODELS = frozenset(
+    {"claude-fable-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5"}
+)
 
 # Models where temperature/top_p/top_k are not supported (returns 400).
 # Fable 5 / Mythos 5 are adaptive-thinking-only by family design (same
@@ -221,13 +227,13 @@ class AnthropicProvider(BaseProvider):
     # Tier aliases — ``Agent.from_provider("anthropic", tier="top")``
     # resolves here.  Update this table when new models ship.
     #
-    # "top" is Fable 5.1, Anthropic's most capable generally-available model
-    # (GA 2026-09-01) — NOT Mythos 5.1, which is restricted to vetted
+    # "top" is Fable 5.2, Anthropic's most capable generally-available model
+    # — NOT Mythos, which is restricted to vetted
     # partners and unreachable with an ordinary API key.  There is no model
     # below Haiku 4.5 any more (claude-3-haiku retired 2026-04-20), so
     # "cheap" and "super_cheap" share it.
     _TIER_ALIASES = {
-        "top": "claude-fable-5-1",
+        "top": "claude-fable-5-2",
         "expensive": "claude-opus-5-5",  # second tier: near-Fable quality, ~40% of the price
         "medium": "claude-sonnet-5-5",
         "cheap": "claude-haiku-5-5",
@@ -236,6 +242,7 @@ class AnthropicProvider(BaseProvider):
     # Retired models (claude-3-*, claude-3-5-*, claude-opus-4-1) are kept in
     # _PRICE_TABLE for costing old transcripts but never used as fallbacks.
     _FALLBACKS = {
+        "claude-fable-5-2": ["claude-fable-5-1", "claude-opus-5-5"],
         "claude-fable-5-1": ["claude-fable-5", "claude-opus-5-5"],
         "claude-fable-5": ["claude-opus-5-5", "claude-opus-5"],
         "claude-opus-5-5": ["claude-opus-5", "claude-sonnet-5-5"],

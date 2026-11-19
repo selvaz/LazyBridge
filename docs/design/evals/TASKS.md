@@ -24,11 +24,11 @@ T0 (legacy contract)
  └── T2 (store/budget) ────┘                                       │
 T1 ─────────────────────────── T6 (statistics) ─────────────────────┤
 T3 + T4 + T5 + T6 + T7 + T8 ─────────────────────────────────── T9 (experiment schemas)
-T9 ── T10 (E1 dry run/local execution) ── T11 (E2 dry run/local execution) ── T12 (E3 local analysis)
-T7 + T9 ── T13 (public runner documentation/release gate)
+T9 ── T10 (public CLI) ── T11 (E1 dry run/local execution) ── T12 (E2 dry run/local execution) ── T13 (E3 local analysis)
+T7 + T9 + T10 ── T14 (public runner documentation/release gate)
 ```
 
-T13 can merge after T7 and T9; it does not wait for private experiment execution. Experiment conclusions follow the D2 order even when later preparation overlaps.
+T14 can merge after T7, T9, and T10; it does not wait for private experiment execution. Experiment conclusions follow the D2 order even when later preparation overlaps.
 
 ## 3. Pull-request tasks
 
@@ -162,11 +162,26 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
   - `ruff check lazybridge/ext/evals/experiments.py tests/ext/evals/test_experiment_manifests.py`
   - `python -c "import yaml; [yaml.safe_load(open(p, encoding='utf-8')) for p in ('tests/ext/evals/fixtures/experiments/e1.yaml','tests/ext/evals/fixtures/experiments/e2.yaml','tests/ext/evals/fixtures/experiments/e3.yaml')]"`
 
-### T10 — Prepare and execute E1 in the private task-set repo
+### T10 — Implement the public eval CLI
+
+- **Requirements:** executable entry point for R1–R18 workflows.
+- **Files:** `lazybridge/ext/evals/__main__.py`, `lazybridge/ext/evals/cli.py`, `tests/ext/evals/test_cli.py`.
+- **Dependencies:** T9.
+- **Needs:** public argument parsing and command dispatch for `validate`, `estimate`, `run`, `report`, `analyze-approvals`, and `audit-privacy`; stable exit codes; actionable errors; and no provider or private-data access during `--help`, validation, or dry runs.
+- **Executor:** cloud, Codex.
+- **review_by:** Claude Code.
+- **Checks:**
+  - `python -m lazybridge.ext.evals --help`
+  - `python -m lazybridge.ext.evals validate --help`
+  - `python -m lazybridge.ext.evals run --help`
+  - `pytest -q tests/ext/evals/test_cli.py`
+  - `ruff check lazybridge/ext/evals/cli.py lazybridge/ext/evals/__main__.py tests/ext/evals/test_cli.py`
+
+### T11 — Prepare and execute E1 in the private task-set repo
 
 - **Requirements:** operational validation of R1–R18 for E1.
 - **Files:** private task-set repo only: versioned E1 manifest, source eligibility ledger, injected fixtures/ground truth, dry-run report, run database/artifacts, JSON/Markdown result reports, and preregistration/amendments.
-- **Dependencies:** T9.
+- **Dependencies:** T10.
 - **Needs:** approximately 50 eligible pull requests, one balanced seeded-defect task set shared by all 21 default factorial cells (three writer tiers; no/same-vendor/cross-vendor review; three reviewer tiers where review exists), three trials per task/cell, and explicit preregistered justification for any additional pruning. Freeze tier/model/vendor assignments and the dated/source-linked input/output/cached price table. Capture per-role/per-nesting measured usage, estimation provenance and error margins for gaps, measured/estimated splits, list-price-equivalent subscription USD, exposed quota percentage, wall time, and verify rounds. Produce cell-level quality intervals and costs, Pareto/dominated results, break-even token/USD savings versus frontier-writer-alone, and “when the tandem saves money.” Weekly quota data, credentials, legal/handling review, and blinded human capacity are required. First run a synthetic smoke; approve live dispatch only if every engine estimate is at or below 10% of weekly quota and a finite hard cap is configured.
 - **Executor:** local authorized operator, Claude Code for orchestration.
 - **review_by:** Codex; human experiment owner before dispatch and before publication.
@@ -176,11 +191,11 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
   - `python -m lazybridge.ext.evals run experiment-e1.yaml --dry-run`
   - `python -m lazybridge.ext.evals report run.sqlite --json report.json --markdown report.md`
 
-### T11 — Prepare and execute E2 in the private task-set repo
+### T12 — Prepare and execute E2 in the private task-set repo
 
 - **Requirements:** operational validation of R1–R16 and R18 for E2.
 - **Files:** private task-set repo only: versioned E2 task/experiment manifests, test fixtures, capability declarations, dry-run report, run database/artifacts, and JSON/Markdown reports.
-- **Dependencies:** T10 complete and E1 baseline recorded; implementation may be prepared after T9.
+- **Dependencies:** T11 complete and E1 baseline recorded; implementation may be prepared after T10.
 - **Needs:** approximately 20 held-out coding tasks, deterministic test commands, at least four configured engines including coding-agent engines where available, equalized contracts/budgets, per-engine weekly quota inputs, credentials, and explicit portability exclusions.
 - **Executor:** local authorized operator, Codex for orchestration.
 - **review_by:** Claude Code; human experiment owner.
@@ -190,11 +205,11 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
   - `python -m lazybridge.ext.evals run experiment-e2.yaml --dry-run`
   - `python -m lazybridge.ext.evals report run.sqlite --json report.json --markdown report.md`
 
-### T12 — Analyze E3 approval gates in the private task-set repo
+### T13 — Analyze E3 approval gates in the private task-set repo
 
 - **Requirements:** operational validation of R14, R16, R18 for E3.
 - **Files:** private task-set repo only: extract schema/query version, redacted immutable extract or digest, inclusion/deduplication manifest, missingness audit, analysis config, and JSON/Markdown reports.
-- **Dependencies:** T11 complete and E2 baseline recorded; schema/audit preparation may begin after T9.
+- **Dependencies:** T12 complete and E2 baseline recorded; schema/audit preparation may begin after T10.
 - **Needs:** authorized read-only access to existing bridge job data, privacy review, stable job/attempt/gate keys, declared observation window, deduplication and missingness policy, and no provider credentials unless a separate validation demands them.
 - **Executor:** local authorized operator, Claude Code for analysis.
 - **review_by:** Codex; human privacy/data owner.
@@ -204,27 +219,27 @@ T13 can merge after T7 and T9; it does not wait for private experiment execution
   - `python -m lazybridge.ext.evals report run.sqlite --json report.json --markdown report.md`
   - `python -m lazybridge.ext.evals audit-privacy extract-manifest.json report.json`
 
-### T13 — Publish runner documentation and run the release gate
+### T14 — Publish runner documentation and run the release gate
 
 - **Requirements:** documentation and release evidence for R1–R18; invariants I1–I6.
 - **Files:** `docs/guides/mid/evals.md`, `docs/design/evals/SPEC.md`, `docs/design/evals/TASKS.md`, `docs/changelog.md`, and any navigation entry required by the documentation build.
-- **Dependencies:** T7, T9.
+- **Dependencies:** T7, T9, T10.
 - **Needs:** migration-free legacy examples, new manifest/runner/metric examples using synthetic data, warnings about held-out leakage and `pass@k` versus `pass^k`, budget/resume tutorial, private-data boundary, and links to JSON schema.
 - **Executor:** cloud, Codex.
 - **review_by:** Claude Code.
 - **Checks:**
-  - `pytest -q tests/ext/evals tests/test_evals.py`
+  - `pytest -q tests/ext/evals tests/unit/test_evals.py`
   - `ruff check lazybridge/ext/evals tests/ext/evals`
   - `mkdocs build --strict`
   - `python -m build`
 
 ## 4. Merge and release gates
 
-A task PR is mergeable only when its exact checks pass, its dependency PRs are merged, the opposite-engine review approves, and new behavior has executable offline coverage. T10–T12 additionally require human approval at the specified dispatch/publication gates; their private artifacts are not copied into LazyBridge.
+A task PR is mergeable only when its exact checks pass, its dependency PRs are merged, the opposite-engine review approves, and new behavior has executable offline coverage. T11–T13 additionally require human approval at the specified dispatch/publication gates; their private artifacts are not copied into LazyBridge.
 
 Before the first public runner release:
 
-1. T0–T9 and T13 are merged.
+1. T0–T10 and T14 are merged.
 2. The validation matrix in `SPEC.md` has no requirement without a passing executable check.
 3. Legacy API tests, the entire offline eval suite, lint, docs, and package build pass.
 4. A synthetic interrupted run resumes bit-for-bit at the report model level, except documented timestamps.

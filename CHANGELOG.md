@@ -10,6 +10,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Provider tiers now route OpenAI `expensive`/`top` to GPT-6.2 Sol/Astra and
+  Anthropic `top` to Claude Fable 5.2, with official token pricing and legacy
+  model ids retained for explicit selection and fallback.
 - Plan steps now inherit the context of the incoming envelope in both top-level
   and nested Plans. Context is merged as incoming context, explicit
   `Step.context`, then live `sources`, with blank lines between parts;
@@ -20,6 +23,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 - Report the model returned by Claude Code and Codex runtimes in coding-engine metadata and session events, retaining the requested model and marking unresolved fallbacks.
 - Bare Claude Code aliases (`sonnet`, `opus`, `haiku`) now expand to the current model ids from the tier catalogue (for example `sonnet` -> `claude-sonnet-5-5`) instead of being passed through, where the Claude Code CLI resolved them to an older model. Full ids such as `claude-sonnet-5` still pass through unchanged.
+
+### Documentation
+
+- README leads with a no-API-key nesting demo and labels `HumanEngine`, `SupervisorEngine`, and LazyTools as Alpha.
 
 ## [1.8.7] — 2026-11-08
 

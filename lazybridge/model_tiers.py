@@ -1,14 +1,14 @@
 """One-to-one tier correspondence between Anthropic and OpenAI coding models.
 
-Owner decision 2026-10-31 (ChatGPT "Terra 6.1" completes the OpenAI ladder):
+Current provider ladder (updated 2026-11-18):
 
 =====  ==========================  ==================
 tier   Anthropic                   OpenAI (Codex)
 =====  ==========================  ==================
 small  claude-haiku-5-5  (haiku)   gpt-6-luna
 mid    claude-sonnet-5-5 (sonnet)  gpt-6.1-terra
-high   claude-opus-5-5   (opus)    gpt-6.1-sol
-top    claude-fable-5-1  (fable)   gpt-6-astra
+high   claude-opus-5-5   (opus)    gpt-6.2-sol
+top    claude-fable-5-2  (fable)   gpt-6.2-astra
 =====  ==========================  ==================
 
 :func:`translate_model` maps a model name from the other provider's
@@ -33,8 +33,8 @@ ModelTier = Literal["small", "mid", "high", "top"]
 MODEL_TIERS: dict[str, dict[str, str]] = {
     "small": {"anthropic": "claude-haiku-5-5", "openai": "gpt-6-luna"},
     "mid": {"anthropic": "claude-sonnet-5-5", "openai": "gpt-6.1-terra"},
-    "high": {"anthropic": "claude-opus-5-5", "openai": "gpt-6.1-sol"},
-    "top": {"anthropic": "claude-fable-5-1", "openai": "gpt-6-astra"},
+    "high": {"anthropic": "claude-opus-5-5", "openai": "gpt-6.2-sol"},
+    "top": {"anthropic": "claude-fable-5-2", "openai": "gpt-6.2-astra"},
 }
 
 _CLAUDE_MARKERS = (("haiku", "small"), ("sonnet", "mid"), ("opus", "high"), ("fable", "top"))

@@ -25,8 +25,8 @@ def _provider() -> OpenAIProvider:
 
 def test_tier_aliases_route_to_gpt_6_family() -> None:
     assert OpenAIProvider._TIER_ALIASES == {
-        "top": "gpt-6-astra",
-        "expensive": "gpt-6.1-sol",
+        "top": "gpt-6.2-astra",
+        "expensive": "gpt-6.2-sol",
         "medium": "gpt-6.1-terra",
         "cheap": "gpt-6-luna",
         "super_cheap": "gpt-6-luna",

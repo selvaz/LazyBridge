@@ -20,8 +20,8 @@ Agent(engine=LLMEngine("claude-opus-5"))
 Agent(engine=LLMEngine("gpt-6-luna"))
 
 # Tier-based selection — model never appears in app code.
-Agent.from_provider("anthropic", tier="top")     # → claude-fable-5-1
-Agent.from_provider("openai",    tier="medium")  # → gpt-6.1-sol
+Agent.from_provider("anthropic", tier="top")     # → claude-fable-5-2
+Agent.from_provider("openai",    tier="medium")  # → gpt-6.1-terra
 Agent.from_provider("google",    tier="cheap")   # → gemini-3.1-flash-lite-preview
 ```
 
@@ -50,7 +50,7 @@ name (passthrough).
 
 | tier | model | ctx | max_out | $/M in | $/M out |
 |---|---|---|---|---|---|
-| `top` | `claude-fable-5-1` | 1 M | 128 K | $10.00 | $50.00 |
+| `top` | `claude-fable-5-2` | 1 M | 128 K | $8.00 | $40.00 |
 | `expensive` | `claude-opus-5-5` | 1 M | 128 K | $4.00 | $20.00 |
 | `medium` | `claude-sonnet-5-5` | 1 M | 128 K | $2.00 | $10.00 |
 | `cheap` / `super_cheap` | `claude-haiku-4-5` | 200 K | 64 K | $1.00 | $5.00 |
@@ -58,7 +58,8 @@ name (passthrough).
 Sonnet 5's launch price is now permanent (the increase to $3 / $15 was
 cancelled). `claude-3-haiku` was retired on 2026-04-20, so `super_cheap`
 now shares Haiku 4.5 with `cheap`. Cache reads bill at 10% of input,
-except Fable 5.1 / Mythos 5.1 ($0.25 / M) and Opus 5.5 ($0.20 / M).
+except Fable 5.2 ($0.20 / M), Fable 5.1 / Mythos 5.1 ($0.25 / M),
+and Opus 5.5 ($0.20 / M).
 
 Not tier-aliased: `claude-mythos-5-1` / `claude-mythos-5` ($10.00 /
 $50.00) — restricted to vetted partners (Project Glasswing), not
@@ -68,7 +69,7 @@ reachable with an ordinary API key. Older pinned ids
 for the full list. Retired models stay in the price table for costing
 old transcripts but are never used as fallbacks.
 
-- **Opus 5.5 / Fable 5.1 reject forced tool use.** `tool_choice`
+- **Opus 5.5 / Fable 5.2 / Fable 5.1 reject forced tool use.** `tool_choice`
   `"required"` / `"any"` / a tool name is a 400 on these models;
   LazyBridge sends `"auto"` instead and emits a `UserWarning`.
 
@@ -93,18 +94,14 @@ old transcripts but are never used as fallbacks.
 
 | tier | model | ctx | max_out | $/M in | $/M cached | $/M out |
 |---|---|---|---|---|---|---|
-| `top` | `gpt-6-astra` | 1.05 M | 128 K | $10.00 | $1.00 | $50.00 |
-| `expensive` / `medium` | `gpt-6.1-sol` | — | — | $2.00 | $0.10 | $10.00 |
+| `top` | `gpt-6.2-astra` | 1.05 M | 128 K | $8.00 | $0.40 | $40.00 |
+| `expensive` | `gpt-6.2-sol` | 1.05 M | 128 K | $2.00 | $0.10 | $10.00 |
+| `medium` | `gpt-6.1-terra` | — | — | — | — | — |
 | `cheap` / `super_cheap` | `gpt-6-luna` | — | — | $0.10 | $0.01 | $0.50 |
 
-GPT-6 Sol and Luna (released 2026-09-22) replace the GPT-5.6 tiers,
-and GPT-6.1 Sol is the latest workhorse: it succeeds `gpt-6-sol` at the
-same list price ($2.00 in / $10.00 out) with a $0.10 cache-hit rate.
-There is no GPT-6 Terra: Sol costs less than `gpt-5.6-terra`, so it
-covers `medium` too, and Luna costs less than `gpt-4o-mini`, so it
-covers `super_cheap`. All GPT-6-family models accept effort `max`.
-Context window and max output for `gpt-6.1-sol` are not verified and
-are not shown in the table above.
+GPT-6.2 Sol is the current workhorse and GPT-6.2 Astra is the current
+top tier. GPT-6.1 Terra remains the medium tier, while Luna covers both
+budget tiers. All GPT-6-family models accept effort `max`.
 
 Previous generation workhorse, pinnable by id: `gpt-6-sol` ($2 / $0.20
 / $10).
@@ -241,7 +238,7 @@ don't have to switch on Gemini-specific values:
   `deepseek-flash` — there's no smaller model in the lineup.
 - **Tier collapse on Anthropic / OpenAI.** `cheap` and `super_cheap`
   share one model on both (`claude-haiku-4-5`, `gpt-6-luna`), and on
-  OpenAI `expensive` and `medium` share `gpt-6.1-sol`.
+  OpenAI `expensive` and `medium` share `gpt-6.2-sol`.
 - **`gemini-2.0-flash` deprecation** lands June 1 2026; switch to
   `gemini-2.5-flash-lite` before then.
 - **Adaptive thinking ignores `budget_tokens`.** Anthropic
