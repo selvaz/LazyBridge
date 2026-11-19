@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.8] — 2026-11-19
+
 ### Changed
 
 - Provider tiers now route OpenAI `expensive`/`top` to GPT-6.2 Sol/Astra and
