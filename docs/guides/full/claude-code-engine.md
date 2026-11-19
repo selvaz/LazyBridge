@@ -10,7 +10,7 @@ Plan. Tools and application state remain LazyBridge objects.
 Use Python 3.11 or later and install the extra:
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.8.7"
+python -m pip install "lazybridge[claude-code]==1.8.8"
 claude doctor
 ```
 

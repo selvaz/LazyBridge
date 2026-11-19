@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- Design proposal for an evaluation harness (`docs/design/evals/SPEC.md`, `TASKS.md`).
+
+## [1.8.8] — 2026-11-19
+
 ### Changed
 
 - Provider tiers now route OpenAI `expensive`/`top` to GPT-6.2 Sol/Astra and
