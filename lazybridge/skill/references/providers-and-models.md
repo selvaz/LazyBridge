@@ -24,8 +24,8 @@ a literal model id.
 
 | Provider | top | expensive | medium | cheap | super_cheap |
 |---|---|---|---|---|---|
-| anthropic | claude-fable-5-1 | claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-5-5 | claude-haiku-5-5 |
-| openai | gpt-6-astra | gpt-6.1-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-luna |
+| anthropic | claude-fable-5-2 | claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-5-5 | claude-haiku-5-5 |
+| openai | gpt-6.2-astra | gpt-6.2-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-luna |
 | google | gemini-3.1-pro-preview | gemini-2.5-pro | gemini-3-flash-preview | gemini-3.1-flash-lite-preview | gemini-2.5-flash-lite |
 | deepseek | deepseek-v4-pro | deepseek-v4-pro | deepseek-flash | deepseek-flash | deepseek-flash |
 | lmstudio | gpt-oss-20b | gemma-4-26b-a4b | qwen3.5-14b | qwen3.5-4b | gemma-4-e2b |
@@ -47,7 +47,7 @@ LazyTools' quota-routing tiers (`basic`/`writing`/`thinking`/`critical`).
 Sonnet/Terra, high Opus/Sol and top Fable/Astra. `translate_model(model,
 to)` translates recognized opposite-family names to the target ladder:
 `translate_model("sonnet", "codex")` returns `gpt-6.1-terra`, and
-`translate_model("gpt-6.1-sol", "claude_code")` returns
+`translate_model("gpt-6.2-sol", "claude_code")` returns
 `claude-opus-5-5`. CodexEngine and ClaudeCodeEngine apply this at construction.
 Recognition uses Claude aliases or `claude-*` IDs containing a tier marker,
 and `gpt-*` IDs ending in a tier marker, so even an older recognized ID can

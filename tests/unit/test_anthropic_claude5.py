@@ -48,7 +48,7 @@ def _request(thinking: ThinkingConfig | None = None, structured_output=None, mod
 
 
 def test_tier_aliases_route_to_claude_5_family() -> None:
-    assert AnthropicProvider._TIER_ALIASES["top"] == "claude-fable-5-1"
+    assert AnthropicProvider._TIER_ALIASES["top"] == "claude-fable-5-2"
     assert AnthropicProvider._TIER_ALIASES["expensive"] == "claude-opus-5-5"
     assert AnthropicProvider._TIER_ALIASES["medium"] == "claude-sonnet-5-5"
     # claude-3-haiku is retired — nothing sits below Haiku 4.5 any more.

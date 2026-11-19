@@ -174,8 +174,8 @@ class Report(BaseModel):
     items: list[ItemResult]
 
 
-item_processor = Agent(engine=LLMEngine("gpt-6.1-sol"), name="item", output=ItemResult)
-summariser = Agent(engine=LLMEngine("gpt-6.1-sol"), name="summary", output=Report)
+item_processor = Agent(engine=LLMEngine("gpt-6.2-sol"), name="item", output=ItemResult)
+summariser = Agent(engine=LLMEngine("gpt-6.2-sol"), name="summary", output=Report)
 
 
 def make_pipeline(items: list[str]) -> Plan:

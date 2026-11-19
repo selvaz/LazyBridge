@@ -291,8 +291,8 @@ from lazybridge import Agent, Plan, Step
 from lazybridge.ext.hil import HumanEngine
 
 approval = Agent(engine=HumanEngine(timeout=300), name="approve")
-draft = Agent(engine=LLMEngine("gpt-6.1-sol"), name="draft")
-send = Agent(engine=LLMEngine("gpt-6.1-sol"), name="send")
+draft = Agent(engine=LLMEngine("gpt-6.2-sol"), name="draft")
+send = Agent(engine=LLMEngine("gpt-6.2-sol"), name="send")
 
 pipeline = Agent(name="pipeline",
     engine=Plan(

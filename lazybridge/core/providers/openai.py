@@ -4,7 +4,7 @@ Routes all requests through the Responses API (OpenAI's recommended path since 2
 Chat Completions is retained only for Pydantic structured output (requires beta.parse()).
 
 No implicit default model (``default_model = None``) — pass model= explicitly,
-or use ``Agent.from_provider("openai", tier="top")`` for gpt-6-astra.
+or use ``Agent.from_provider("openai", tier="top")`` for gpt-6.2-astra.
 """
 
 from __future__ import annotations
@@ -114,6 +114,10 @@ def _reasoning_effort_for_model(model: str, effort: str) -> str:
 # are billed at 2x input / 1.5x output for the session; cost values returned by
 # this table will under-count in that regime.
 _PRICE_TABLE: dict[str, tuple[float, float | None, float]] = {
+    # Standard API rates from OpenAI's official pricing page, retrieved
+    # 2026-11-18: https://developers.openai.com/api/docs/pricing
+    "gpt-6.2-astra": (8.0, 0.40, 40.0),
+    "gpt-6.2-sol": (2.0, 0.10, 10.0),
     # GPT-6 Astra (released 2026-09-03).  Cache writes are separately
     # billed by OpenAI but are not exposed in UsageStats, so this table
     # tracks the three token counters LazyBridge can observe.
@@ -334,17 +338,19 @@ class OpenAIProvider(BaseProvider):
     default_model: str | None = None
 
     # Tier aliases (one-to-one with Anthropic since 2026-10-31, see
-    # lazybridge.model_tiers): Astra = top (Fable), Sol 6.1 = expensive (Opus),
+    # lazybridge.model_tiers): Astra 6.2 = top (Fable), Sol 6.2 = expensive (Opus),
     # Terra 6.1 = medium (Sonnet), Luna = cheap (Haiku).  gpt-6-luna is cheaper
     # than gpt-4o-mini, so it also covers "super_cheap".
     _TIER_ALIASES = {
-        "top": "gpt-6-astra",  # most capable model for hardest end-to-end work
-        "expensive": "gpt-6.1-sol",
+        "top": "gpt-6.2-astra",  # most capable model for hardest end-to-end work
+        "expensive": "gpt-6.2-sol",
         "medium": "gpt-6.1-terra",
         "cheap": "gpt-6-luna",
         "super_cheap": "gpt-6-luna",
     }
     _FALLBACKS = {
+        "gpt-6.2-astra": ["gpt-6-astra", "gpt-6.2-sol", "gpt-6.1-sol"],
+        "gpt-6.2-sol": ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol"],
         "gpt-6-astra": ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5"],
         "gpt-6.1-sol": ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"],
         "gpt-6.1-terra": ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol"],

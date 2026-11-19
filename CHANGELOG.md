@@ -10,6 +10,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Provider tiers now route OpenAI `expensive`/`top` to GPT-6.2 Sol/Astra and
+  Anthropic `top` to Claude Fable 5.2, with official token pricing and legacy
+  model ids retained for explicit selection and fallback.
 - Plan steps now inherit the context of the incoming envelope in both top-level
   and nested Plans. Context is merged as incoming context, explicit
   `Step.context`, then live `sources`, with blank lines between parts;

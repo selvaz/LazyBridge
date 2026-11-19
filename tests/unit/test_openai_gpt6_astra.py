@@ -14,7 +14,7 @@ def _provider() -> OpenAIProvider:
 
 
 def test_astra_is_the_top_openai_tier() -> None:
-    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-6-astra"
+    assert OpenAIProvider._TIER_ALIASES["top"] == "gpt-6.2-astra"
 
 
 def test_astra_has_published_standard_prices() -> None:

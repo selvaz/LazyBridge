@@ -17,7 +17,7 @@
     "coding_review": "reviewer = Agent(name='reviewer', engine=CodexEngine(system='Return approved or rejected: <reason>.'))\nwriter = Agent(name='writer', engine=ClaudeCodeEngine(), verify=reviewer, max_verify=3)",
     "named_claude": "engine = ClaudeCodeEngine(session_alias='writer', session_registry=registry, cwd=repo)",
     "named_codex": "engine = CodexEngine(session_alias='reviewer', session_registry=registry, cwd=repo)",
-    "structured_output": "agent = Agent(name='structured', engine=LLMEngine('gpt-6.1-sol'), output=MyPydanticModel)",
+    "structured_output": "agent = Agent(name='structured', engine=LLMEngine('gpt-6.2-sol'), output=MyPydanticModel)",
     "sync_entry_point": "result = agent('do the thing'); result.text()",
     "async_entry_point": "result = await agent.run('do the thing'); result.text()"
   },
@@ -86,7 +86,7 @@
     "top"
   ],
   "tier_aliases_anthropic_2026_09": {
-    "top": "claude-fable-5-1",
+    "top": "claude-fable-5-2",
     "expensive": "claude-opus-5-5",
     "medium": "claude-sonnet-5-5",
     "cheap": "claude-haiku-5-5",
@@ -94,8 +94,8 @@
     "note": "claude-sonnet-5-5 (GA 2026-09-28) replaced claude-sonnet-5 as the 'medium' tier alias, same $2/$10 pricing. claude-mythos-5-1 exists (same pricing as Fable 5.1) but is restricted to vetted partners (Project Glasswing) and is deliberately not aliased to any tier.  claude-3-haiku is retired."
   },
   "tier_aliases_openai_2026_09": {
-    "top": "gpt-6-astra",
-    "expensive": "gpt-6.1-sol",
+    "top": "gpt-6.2-astra",
+    "expensive": "gpt-6.2-sol",
     "medium": "gpt-6.1-terra",
     "cheap": "gpt-6-luna",
     "super_cheap": "gpt-6-luna"
@@ -132,11 +132,11 @@
       ],
       "high": [
         "claude-opus-5-5",
-        "gpt-6.1-sol"
+        "gpt-6.2-sol"
       ],
       "top": [
-        "claude-fable-5-1",
-        "gpt-6-astra"
+        "claude-fable-5-2",
+        "gpt-6.2-astra"
       ]
     },
     "example": "translate_model('sonnet', 'codex') == 'gpt-6.1-terra'"

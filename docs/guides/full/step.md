@@ -137,7 +137,7 @@ def score(text: str) -> str:
 
 
 score_tool = Tool.wrap(score, name="score")
-reviewer = Agent(engine=LLMEngine("gpt-6.1-sol"), name="review")
+reviewer = Agent(engine=LLMEngine("gpt-6.2-sol"), name="review")
 
 
 searcher = Agent(
