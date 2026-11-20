@@ -22,6 +22,11 @@ T = TypeVar("T")
 class EnvelopeMetadata(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
+    # Prompt-cache counters, reported by the coding engines (claude-code,
+    # codex).  Claude Code: additive to ``input_tokens``.  Codex: a subset of
+    # ``input_tokens``.  See docs for the per-engine convention.
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
     cost_usd: float = 0.0
     latency_ms: float = 0.0
     model: str | None = None

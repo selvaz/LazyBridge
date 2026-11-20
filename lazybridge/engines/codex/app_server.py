@@ -246,6 +246,9 @@ class CodexRunResult:
     cost_usd: float = 0.0
     thread_id: str = ""
     model: str | None = None
+    #: OpenAI convention: a SUBSET of ``input_tokens`` (``cachedInputTokens``).
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 @contextlib.contextmanager
@@ -902,6 +905,9 @@ class CodexAppServerClient:
             baseline = max(others, key=lambda t: int(t.get("totalTokens") or 0), default={})
             input_tokens = max(int(usage.get("inputTokens") or 0) - int(baseline.get("inputTokens") or 0), 0)
             output_tokens = max(int(usage.get("outputTokens") or 0) - int(baseline.get("outputTokens") or 0), 0)
+            cache_read_input_tokens = max(
+                int(usage.get("cachedInputTokens") or 0) - int(baseline.get("cachedInputTokens") or 0), 0
+            )
             text = ""
             for item in reversed(turn.get("items", [])):
                 if item.get("type") == "agentMessage":
@@ -913,6 +919,7 @@ class CodexAppServerClient:
                 output_tokens=output_tokens,
                 thread_id=active_thread,
                 model=resolved_model,
+                cache_read_input_tokens=cache_read_input_tokens,
             )
         finally:
             reader.cancel()

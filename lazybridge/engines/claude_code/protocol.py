@@ -82,6 +82,10 @@ class ClaudeSdkResult:
     output_tokens: int = 0
     cost_usd: float = 0.0
     model: str | None = None
+    #: Anthropic convention: ``input_tokens`` EXCLUDES these two counters;
+    #: total prompt = input + cache_read + cache_creation.
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,8 @@ class ClaudeSdkStreamEvent:
     cost_usd: float = 0.0
     final: bool = False
     model: str | None = None
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 class ClaudeSdkClient(Protocol):

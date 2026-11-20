@@ -289,6 +289,18 @@ Session events cover application and native tool calls and model usage; the
 Envelope provider is `claude-code`. SDK cost is reported usage, not a promise
 about subscription charges.
 
+### Token and cache accounting
+
+`model_response` events and `Envelope.metadata`
+carry `cache_read_input_tokens` and `cache_creation_input_tokens` next to
+`input_tokens`. The convention is the Anthropic one used by
+`AnthropicProvider`: `input_tokens` is the *uncached* remainder only, and the
+cache counters are additive (total prompt = `input_tokens` +
+`cache_read_input_tokens` + `cache_creation_input_tokens`). In a multi-turn
+agent `input_tokens` is therefore often tiny. `cost_usd` is the CLI's
+`total_cost_usd`, which already prices cache reads and writes; LazyBridge does
+not recompute it.
+
 ```python
 from pydantic import BaseModel
 from lazybridge import Agent, ClaudeCodeEngine

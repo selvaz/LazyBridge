@@ -108,6 +108,55 @@ def test_stream_model_response_uses_final_sdk_model():
     assert event["model_resolved"] is True
 
 
+def test_cache_tokens_reach_model_response_and_metadata_blocking_and_stream():
+    # Realistic multi-turn shape: input_tokens is only the uncached remainder.
+    class Client:
+        async def run(self, prompt, *, options, attachments=()):
+            return ClaudeSdkResult(
+                text="ok",
+                session_id="s",
+                input_tokens=10,
+                output_tokens=250,
+                cost_usd=0.0421,
+                cache_read_input_tokens=48213,
+                cache_creation_input_tokens=9120,
+            )
+
+        async def stream(self, prompt, *, options, attachments=()):
+            yield ClaudeSdkStreamEvent(text="ok")
+            yield ClaudeSdkStreamEvent(
+                final=True,
+                input_tokens=4,
+                output_tokens=90,
+                cache_read_input_tokens=30000,
+                cache_creation_input_tokens=1500,
+            )
+
+    session = Session()
+    agent = Agent(ClaudeCodeEngine(model="sonnet", client=Client()), session=session)
+    result = agent("hi")
+    assert result.metadata.input_tokens == 10
+    assert result.metadata.cache_read_input_tokens == 48213
+    assert result.metadata.cache_creation_input_tokens == 9120
+
+    async def run():
+        return [chunk async for chunk in agent.stream("hi")]
+
+    asyncio.run(run())
+    first, second = [e["payload"] for e in session.events.query(event_type=EventType.MODEL_RESPONSE)]
+    assert (first["input_tokens"], first["cache_read_input_tokens"], first["cache_creation_input_tokens"]) == (
+        10,
+        48213,
+        9120,
+    )
+    assert first["cost_usd"] == 0.0421
+    assert (second["input_tokens"], second["cache_read_input_tokens"], second["cache_creation_input_tokens"]) == (
+        4,
+        30000,
+        1500,
+    )
+
+
 def test_engine_works_through_a_standard_agent_and_updates_memory():
     memory = Memory()
     session = Session()

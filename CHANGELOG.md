@@ -8,6 +8,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The `claude-code` and `codex` engines now report prompt-cache tokens:
+  `cache_read_input_tokens` and `cache_creation_input_tokens` appear on
+  `model_response` events and `EnvelopeMetadata`.
+  Claude Code counters are additive to `input_tokens` (Anthropic convention);
+  Codex `cachedInputTokens` is a subset of `input_tokens` (OpenAI convention).
+  Previously multi-turn runs showed only the uncached remainder as input.
+  Cost is unchanged: Claude Code's `total_cost_usd` already includes cache
+  pricing, and Codex reports no price.
+
 ### Documentation
 
 - Design proposal for an evaluation harness (`docs/design/evals/SPEC.md`, `TASKS.md`).

@@ -634,6 +634,8 @@ class AgentSdkClient(ClaudeSdkClient):
             output_tokens=int(usage.get("output_tokens", 0) or 0),
             cost_usd=float(final.total_cost_usd or 0.0),
             model=model,
+            cache_read_input_tokens=int(usage.get("cache_read_input_tokens", 0) or 0),
+            cache_creation_input_tokens=int(usage.get("cache_creation_input_tokens", 0) or 0),
         )
 
     @staticmethod
@@ -719,6 +721,8 @@ class AgentSdkClient(ClaudeSdkClient):
                             cost_usd=float(message.total_cost_usd or 0.0),
                             final=True,
                             model=model,
+                            cache_read_input_tokens=int(usage.get("cache_read_input_tokens", 0) or 0),
+                            cache_creation_input_tokens=int(usage.get("cache_creation_input_tokens", 0) or 0),
                         )
         if not saw_result:
             # Mirrors AgentSdkClient.run(): the SDK iterator ended without a

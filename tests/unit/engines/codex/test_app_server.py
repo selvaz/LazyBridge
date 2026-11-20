@@ -103,6 +103,9 @@ def test_full_turn_round_trip_including_a_tool_call():
     # thread/tokenUsage/updated, not the first one nor the per-call ``last``.
     assert result.input_tokens == 55
     assert result.output_tokens == 7
+    # ``cachedInputTokens`` is a subset of ``inputTokens`` (OpenAI convention).
+    assert result.cache_read_input_tokens == 40
+    assert result.cache_creation_input_tokens == 0
     # The App Server reports no dollar cost under ChatGPT-plan auth.
     assert result.cost_usd == 0.0
     assert chunks == ["AMZN is ", "123.45"]

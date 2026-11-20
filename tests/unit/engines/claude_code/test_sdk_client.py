@@ -604,6 +604,48 @@ def test_sdk_captures_model_from_messages(monkeypatch, stream, messages, expecte
     assert asyncio.run(run()) == expected
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_sdk_reads_cache_counters_from_result_usage(monkeypatch, stream):
+    from claude_agent_sdk import ResultMessage
+
+    # Shape captured from a Claude Code CLI ``result`` message.
+    usage = {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 9120,
+        "cache_read_input_tokens": 48213,
+        "output_tokens": 250,
+        "service_tier": "standard",
+    }
+
+    async def fake_query(*args):
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=3,
+            session_id="s",
+            result="ok",
+            total_cost_usd=0.0421,
+            usage=usage,
+        )
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.sdk_client._bounded_query", fake_query)
+    monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
+
+    async def run():
+        client = AgentSdkClient()
+        if stream:
+            return [event async for event in client.stream("hi", options=ClaudeSdkOptions())][-1]
+        return await client.run("hi", options=ClaudeSdkOptions())
+
+    out = asyncio.run(run())
+    assert out.input_tokens == 10
+    assert out.cache_read_input_tokens == 48213
+    assert out.cache_creation_input_tokens == 9120
+    assert out.cost_usd == 0.0421
+
+
 def test_subagent_model_does_not_replace_the_main_model():
     from claude_agent_sdk import AssistantMessage
 
