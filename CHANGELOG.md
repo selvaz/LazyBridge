@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.9] — 2026-11-20
+
 ### Added
 
 - The `claude-code` and `codex` engines now report prompt-cache tokens:
