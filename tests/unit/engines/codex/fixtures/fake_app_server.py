@@ -38,7 +38,7 @@ def write_message(message: dict) -> None:
     sys.stdout.flush()
 
 
-def token_usage(input_tokens: int, output_tokens: int, turn_id: str = "turn-1") -> dict:
+def token_usage(input_tokens: int, output_tokens: int, turn_id: str = "turn-1", cached: int = 0) -> dict:
     # ``total`` is cumulative over the THREAD, not the turn (verified live:
     # 15137 after turn 1, 30292 after turn 2), which is why it is tagged with
     # a turn id and why the client subtracts a baseline on a resumed thread.
@@ -51,14 +51,14 @@ def token_usage(input_tokens: int, output_tokens: int, turn_id: str = "turn-1") 
                 "total": {
                     "totalTokens": input_tokens + output_tokens,
                     "inputTokens": input_tokens,
-                    "cachedInputTokens": 0,
+                    "cachedInputTokens": cached,
                     "outputTokens": output_tokens,
                     "reasoningOutputTokens": 0,
                 },
                 "last": {
                     "totalTokens": input_tokens + output_tokens,
                     "inputTokens": input_tokens,
-                    "cachedInputTokens": 0,
+                    "cachedInputTokens": cached,
                     "outputTokens": output_tokens,
                     "reasoningOutputTokens": 0,
                 },
@@ -406,7 +406,7 @@ def main() -> None:
         write_message(token_usage(42, 3))
         write_message({"method": "item/agentMessage/delta", "params": {"delta": "AMZN is "}})
         write_message({"method": "item/agentMessage/delta", "params": {"delta": "123.45"}})
-        write_message(token_usage(55, 7))
+        write_message(token_usage(55, 7, cached=40))
 
         write_message(
             {

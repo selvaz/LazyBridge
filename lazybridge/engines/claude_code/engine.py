@@ -695,6 +695,8 @@ class ClaudeCodeEngine:
                         "model_resolved": bool(result.model),
                         "input_tokens": result.input_tokens,
                         "output_tokens": result.output_tokens,
+                        "cache_read_input_tokens": result.cache_read_input_tokens,
+                        "cache_creation_input_tokens": result.cache_creation_input_tokens,
                         "cost_usd": result.cost_usd,
                     },
                     run_id=run_id,
@@ -711,6 +713,8 @@ class ClaudeCodeEngine:
                     provider="claude-code",
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
+                    cache_read_input_tokens=result.cache_read_input_tokens,
+                    cache_creation_input_tokens=result.cache_creation_input_tokens,
                     cost_usd=result.cost_usd,
                     latency_ms=(time.monotonic() - started) * 1000,
                     run_id=run_id,
@@ -802,6 +806,7 @@ class ClaudeCodeEngine:
                     )
 
             input_tokens = output_tokens = 0
+            cache_read = cache_creation = 0
             cost_usd = 0.0
             resolved_model = None
             tool_clock = ToolClock()
@@ -840,6 +845,8 @@ class ClaudeCodeEngine:
                                 self._alias.bind(event.session_id, model=self.model, effort=self.reasoning_effort)
                         self._remember_session(session, agent_name, event.session_id)
                         input_tokens, output_tokens = event.input_tokens, event.output_tokens
+                        cache_read = event.cache_read_input_tokens
+                        cache_creation = event.cache_creation_input_tokens
                         cost_usd = event.cost_usd
                         resolved_model = event.model
             text = "".join(chunks)
@@ -854,6 +861,8 @@ class ClaudeCodeEngine:
                         "model_resolved": bool(resolved_model),
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
+                        "cache_read_input_tokens": cache_read,
+                        "cache_creation_input_tokens": cache_creation,
                         "cost_usd": cost_usd,
                     },
                     run_id=run_id,

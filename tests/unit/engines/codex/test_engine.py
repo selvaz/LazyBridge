@@ -111,6 +111,22 @@ def test_model_metadata_reports_requested_and_resolved(resolved):
     assert event["payload"]["model"] == (resolved or "sonnet")
 
 
+def test_cached_input_tokens_reach_model_response_and_metadata():
+    # Codex ``cachedInputTokens`` is a subset of ``inputTokens``.
+    session = Session()
+    fake = FakeAppServer(
+        CodexRunResult(text="ok", input_tokens=15137, output_tokens=210, cache_read_input_tokens=12800)
+    )
+    result = Agent(CodexEngine(client=fake), session=session)("hi")
+    assert result.metadata.input_tokens == 15137
+    assert result.metadata.cache_read_input_tokens == 12800
+    assert result.metadata.cache_creation_input_tokens == 0
+    payload = session.events.query(event_type=EventType.MODEL_RESPONSE)[0]["payload"]
+    assert payload["input_tokens"] == 15137
+    assert payload["cache_read_input_tokens"] == 12800
+    assert payload["cache_creation_input_tokens"] == 0
+
+
 class TestDurableThreads:
     """``persist_thread`` / ``thread_id``: Codex owns the transcript."""
 

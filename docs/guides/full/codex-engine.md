@@ -229,6 +229,14 @@ pre-turn baseline and attributes notifications by turn ID, ignoring replayed
 completion events for older turns. Codex cost_usd is 0.0 in this adapter because
 the App Server reports no per-turn price; it is not evidence that a run is free.
 
+`model_response` events and `Envelope.metadata` also
+carry `cache_read_input_tokens`, taken from the App Server's `cachedInputTokens`
+(baseline-corrected like the other counters). Codex follows the OpenAI
+convention: `input_tokens` is the *total* prompt and the cached count is a
+*subset* of it, so do not add the two. `cache_creation_input_tokens` is always 0
+because Codex reports no cache-write counter. With no per-turn price there is no
+cost to adjust.
+
 ## Distinguishing LazyBridge threads on disk
 
 ```python
