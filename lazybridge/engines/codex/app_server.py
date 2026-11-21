@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -458,7 +458,7 @@ def enter_codex_slot(holder: _SlotHolder | None) -> None:
 
 
 @contextlib.asynccontextmanager
-async def codex_concurrency_slot():
+async def codex_concurrency_slot() -> AsyncIterator[None]:
     """Hold one Codex slot for a whole engine call (cancellable wait).
 
     The engine takes it *before* its request/idle timeouts start, so time
