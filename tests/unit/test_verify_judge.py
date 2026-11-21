@@ -224,10 +224,7 @@ def _scripted_agent(**kwargs):
 @pytest.mark.asyncio
 async def test_agent_verify_context_flag_passes_sources_to_judge():
     judge = _RecordingJudge(["approved"])
-    try:
-        agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-42"], verify=judge, verify_context=True)
-    except Exception as exc:  # engine protocol differs: skip rather than fake
-        pytest.skip(f"scripted engine not accepted: {exc}")
+    agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-42"], verify=judge, verify_context=True)
     await agent.run("q")
     assert "SOURCE-TEXT-42" in judge.prompts[0]
 
@@ -235,10 +232,7 @@ async def test_agent_verify_context_flag_passes_sources_to_judge():
 @pytest.mark.asyncio
 async def test_as_tool_verify_context_includes_the_wrapped_agents_sources():
     judge = _RecordingJudge(["approved"])
-    try:
-        agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-43"])
-    except Exception as exc:
-        pytest.skip(f"scripted engine not accepted: {exc}")
+    agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-43"])
     tool = agent.as_tool("write", verify=judge, max_verify=2, verify_context=True)
     await tool.func("q")
     assert "SOURCE-TEXT-43" in judge.prompts[0]
