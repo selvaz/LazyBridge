@@ -310,8 +310,8 @@ class CodexPolicy:
     #: Scope: it selects the provider for NEW threads. A resumed durable thread
     #: keeps the provider it was created with (Codex resume semantics), and a
     #: thread created over HTTP needs the same override to resume. Ephemeral
-    #: threads (the LazyBridge default) are unaffected. With OPENAI_API_KEY set
-    #: the public API URL is used instead of the ChatGPT backend.
+    #: threads (the LazyBridge default) are unaffected. API-key logins must set
+    #: LAZYBRIDGE_CODEX_HTTP_BASE_URL=https://api.openai.com/v1 explicitly.
     transport: Literal["websocket", "http"] | None = None
     #: Token count at which Codex starts compacting this agent's history.
     #: ``None`` leaves the CLI's own default. Forwarded as the App Server's

@@ -53,10 +53,11 @@ def test_other_overrides_are_kept():
     assert overrides[0] == 'web_search="live"'
 
 
-def test_api_key_auth_uses_public_api(monkeypatch):
+def test_api_key_env_does_not_switch_the_url(monkeypatch):
+    """Codex' auth mode comes from its persisted credentials; an env key is not evidence of it."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     overrides = engine._config_overrides(CodexPolicy(transport="http"))
-    assert any(o.endswith(f'base_url="{engine.API_KEY_HTTP_BASE_URL}"') for o in overrides)
+    assert any(o.endswith(f'base_url="{engine.DEFAULT_HTTP_BASE_URL}"') for o in overrides)
 
 
 def test_base_url_cannot_inject_toml(monkeypatch):

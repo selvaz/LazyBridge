@@ -183,11 +183,11 @@ def resolve_transport(requested: str | None) -> str | None:
 def _transport_overrides(requested: str | None) -> tuple[str, ...]:
     if resolve_transport(requested) != "http":
         return ()
-    base_url = os.environ.get("LAZYBRIDGE_CODEX_HTTP_BASE_URL", "").strip() or (
-        # API-key auth goes to the public API, ChatGPT-account auth to the
-        # Codex backend (the same split Codex' built-in provider makes).
-        API_KEY_HTTP_BASE_URL if os.environ.get("OPENAI_API_KEY") else DEFAULT_HTTP_BASE_URL
-    )
+    # The default targets ChatGPT-account auth (Codex' usual login). Codex
+    # decides the auth mode from its persisted credentials, which LazyBridge
+    # does not read, so API-key users set the URL explicitly
+    # (LAZYBRIDGE_CODEX_HTTP_BASE_URL=https://api.openai.com/v1).
+    base_url = os.environ.get("LAZYBRIDGE_CODEX_HTTP_BASE_URL", "").strip() or DEFAULT_HTTP_BASE_URL
     if any(ch in base_url for ch in ('"', "\\", "\n", "\r")):
         raise ValueError("LAZYBRIDGE_CODEX_HTTP_BASE_URL must not contain quotes, backslashes or newlines")
     prefix = f"model_providers.{HTTP_PROVIDER_ID}"
