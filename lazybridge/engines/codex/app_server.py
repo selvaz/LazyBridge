@@ -369,6 +369,9 @@ class _SlotHolder:
 #: exceed the cap; documented, and the parent is idle meanwhile. Known limit:
 #: a background task started inside a turn that keeps running after the turn
 #: released its slot is not counted; start long-lived Codex work outside turns.
+#: With a cap, do not start another Codex turn from inside the loop that
+#: consumes a Codex stream: a full stream queue keeps the producer (and its
+#: slot) waiting for the consumer, which can deadlock at cap 1.
 _holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
 
 
