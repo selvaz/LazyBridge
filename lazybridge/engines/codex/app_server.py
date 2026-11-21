@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -343,53 +344,87 @@ def _client_wait(progress: dict[str, Any] | None) -> Any:
 #: are unaffected. Unset or ``0`` means unlimited (the previous behaviour).
 #: The cap is per process: separate worker processes each have their own.
 _concurrency_lock = threading.Lock()
-_concurrency_limit: int | None = None
-_concurrency_sem: threading.BoundedSemaphore | None = None
+_concurrency_active = 0
+#: ``None`` = not configured explicitly: fall back to the environment variable.
+_concurrency_explicit: int | None = None
+_concurrency_explicit_set = False
+#: True while this call chain already holds a slot. A tool callback that runs
+#: another Codex agent inherits it and proceeds instead of waiting for the
+#: slot its own parent holds (which would deadlock with a cap of 1).
+_holding_slot: contextvars.ContextVar[bool] = contextvars.ContextVar("lazybridge_codex_slot", default=False)
 
 
 def set_codex_max_concurrency(limit: int | None) -> None:
-    """Set the per-process cap on concurrent Codex App Servers (``None``/0 = unlimited)."""
-    global _concurrency_limit, _concurrency_sem
+    """Set the per-process cap on concurrent Codex App Servers.
+
+    ``None`` or ``0`` means unlimited and overrides the environment variable.
+    A new cap applies to new acquisitions; turns already running are not
+    interrupted, and no new turn starts while the active count is at or above
+    the new cap.
+    """
+    global _concurrency_explicit, _concurrency_explicit_set
     value = int(limit or 0)
     if value < 0:
         raise ValueError(f"codex max concurrency must be >= 0, got {limit!r}")
     with _concurrency_lock:
-        _concurrency_limit = value or None
-        _concurrency_sem = threading.BoundedSemaphore(value) if value else None
+        _concurrency_explicit = value or None
+        _concurrency_explicit_set = True
 
 
-def _codex_semaphore() -> threading.BoundedSemaphore | None:
-    global _concurrency_limit, _concurrency_sem
+def reset_codex_max_concurrency() -> None:
+    """Forget an explicit cap and read ``LAZYBRIDGE_CODEX_MAX_CONCURRENCY`` again (tests)."""
+    global _concurrency_explicit, _concurrency_explicit_set
     with _concurrency_lock:
-        if _concurrency_limit is None and _concurrency_sem is None:
-            raw = os.environ.get("LAZYBRIDGE_CODEX_MAX_CONCURRENCY", "").strip()
-            if raw:
-                try:
-                    value = int(raw)
-                except ValueError:
-                    _logger.warning("ignoring invalid LAZYBRIDGE_CODEX_MAX_CONCURRENCY=%r", raw)
-                    value = 0
-                if value > 0:
-                    _concurrency_limit = value
-                    _concurrency_sem = threading.BoundedSemaphore(value)
-        return _concurrency_sem
+        _concurrency_explicit = None
+        _concurrency_explicit_set = False
+
+
+def _current_cap() -> int | None:
+    if _concurrency_explicit_set:
+        return _concurrency_explicit
+    raw = os.environ.get("LAZYBRIDGE_CODEX_MAX_CONCURRENCY", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        _logger.warning("ignoring invalid LAZYBRIDGE_CODEX_MAX_CONCURRENCY=%r", raw)
+        return None
+    return value if value > 0 else None
 
 
 @contextlib.asynccontextmanager
-async def _codex_concurrency_slot():
-    """Hold one Codex slot for the whole App Server lifetime (cancellable wait)."""
-    sem = _codex_semaphore()
-    if sem is None:
+async def codex_concurrency_slot():
+    """Hold one Codex slot for the whole call (re-entrant, cancellable wait).
+
+    The engine takes the slot *before* its request/idle timeouts start, so time
+    spent queued never consumes a turn's timeout budget; the App Server client
+    takes it again only when called directly (re-entrancy makes that a no-op
+    under the engine).
+    """
+    global _concurrency_active
+    if _holding_slot.get():
         yield
         return
-    # A threading semaphore works across event loops and threads; poll so a
-    # waiting caller stays cancellable and never blocks its loop.
-    while not sem.acquire(blocking=False):
+    # Poll a counter guarded by a threading lock: works across event loops and
+    # threads, keeps the waiter cancellable, and honours cap changes at once.
+    while True:
+        with _concurrency_lock:
+            cap = _current_cap()
+            if cap is None or _concurrency_active < cap:
+                _concurrency_active += 1
+                break
         await asyncio.sleep(0.05)
+    token = _holding_slot.set(True)
     try:
         yield
     finally:
-        sem.release()
+        _holding_slot.reset(token)
+        with _concurrency_lock:
+            _concurrency_active -= 1
+
+
+_codex_concurrency_slot = codex_concurrency_slot
 
 
 class CodexAppServerClient:

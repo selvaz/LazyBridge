@@ -35,6 +35,7 @@ from .app_server import (
     CodexAppServerClient,
     CodexTransportError,
     CodexTurnUncertain,
+    codex_concurrency_slot,
     is_crash_returncode,
 )
 from .dynamic_tools import definitions, dispatcher
@@ -773,7 +774,11 @@ class CodexEngine:
                 call = lambda: self._retry_crashed_turn(  # noqa: E731
                     raw_call, progress, tools, session, run_id
                 )
-                result = await self._run_with_idle_timeout(call, progress, tool_clock)
+                # Take the Codex slot before the request/idle clocks start, so
+                # queueing behind other Codex turns never consumes this turn's
+                # timeout budget (the client re-enters the held slot for free).
+                async with codex_concurrency_slot():
+                    result = await self._run_with_idle_timeout(call, progress, tool_clock)
                 self._absorb(result.thread_id)
             if session:
                 self._emit_model_response(session, agent_name, result, run_id)
@@ -892,7 +897,8 @@ class CodexEngine:
                                 tool_clock=tool_clock,
                             )
                         )
-                        result = await self._retry_crashed_turn(raw_call, progress, tools, session, run_id)
+                        async with codex_concurrency_slot():
+                            result = await self._retry_crashed_turn(raw_call, progress, tools, session, run_id)
                         self._absorb(result.thread_id)
                     finally:
                         # Still INSIDE the lock: this task is cancelled when the
