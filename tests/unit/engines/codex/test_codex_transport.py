@@ -12,6 +12,7 @@ from lazybridge.engines.coding import CodexPolicy
 def _clean_env(monkeypatch):
     monkeypatch.delenv("LAZYBRIDGE_CODEX_TRANSPORT", raising=False)
     monkeypatch.delenv("LAZYBRIDGE_CODEX_HTTP_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
 
 def test_default_leaves_codex_transport_alone():
@@ -50,3 +51,15 @@ def test_invalid_env_rejected(monkeypatch):
 def test_other_overrides_are_kept():
     overrides = engine._config_overrides(CodexPolicy(transport="http", web_search="live"))
     assert overrides[0] == 'web_search="live"'
+
+
+def test_api_key_auth_uses_public_api(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    overrides = engine._config_overrides(CodexPolicy(transport="http"))
+    assert any(o.endswith(f'base_url="{engine.API_KEY_HTTP_BASE_URL}"') for o in overrides)
+
+
+def test_base_url_cannot_inject_toml(monkeypatch):
+    monkeypatch.setenv("LAZYBRIDGE_CODEX_HTTP_BASE_URL", 'https://x" injected="1')
+    with pytest.raises(ValueError):
+        engine._config_overrides(CodexPolicy(transport="http"))

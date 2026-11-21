@@ -307,6 +307,11 @@ class CodexPolicy:
     #: Responses WebSocket (openai/codex#36096); over HTTP the same load ran
     #: without crashes. Codex' WebSocket opt-out flag was removed upstream
     #: (openai/codex#38638), so a provider override is the supported route.
+    #: Scope: it selects the provider for NEW threads. A resumed durable thread
+    #: keeps the provider it was created with (Codex resume semantics), and a
+    #: thread created over HTTP needs the same override to resume. Ephemeral
+    #: threads (the LazyBridge default) are unaffected. With OPENAI_API_KEY set
+    #: the public API URL is used instead of the ChatGPT backend.
     transport: Literal["websocket", "http"] | None = None
     #: Token count at which Codex starts compacting this agent's history.
     #: ``None`` leaves the CLI's own default. Forwarded as the App Server's
