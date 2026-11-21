@@ -44,7 +44,7 @@ _LABEL_PREFIX = re.compile(
 #: line, closing markdown or punctuation (``APPROVED``, ``approved.``,
 #: ``pass — all claims supported``). Words after it mean a qualified verdict.
 _LABELLED_APPROVE = re.compile(
-    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\**\s*([.!,;:—–-]|$)",
+    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\**\s*([.!,;:\u2014\u2013-]|$)",
     re.IGNORECASE,
 )
 
