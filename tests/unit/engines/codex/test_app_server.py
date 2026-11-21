@@ -701,6 +701,10 @@ def _lines(path: Path) -> list[str]:
 
 
 class TestTransportFailures:
+    def test_windows_fast_fail_diagnostic_is_human_readable(self):
+        rendered = app_server._returncode_diagnostic(3221226505)
+        assert rendered == "3221226505 (0xC0000409) fast-fail/abort"
+
     def test_a_startup_failure_is_retried_once_and_the_retry_can_succeed(self, tmp_path):
         marker = tmp_path / "spawned"
 

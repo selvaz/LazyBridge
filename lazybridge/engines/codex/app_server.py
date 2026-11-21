@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import random
 import re
 import shutil
 import subprocess
+import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -59,7 +61,52 @@ _RETRYABLE_BEFORE_TURN = _PRE_THREAD_PHASES | {"thread/start", "thread/resume"}
 #: Jittered pause (seconds) before the single startup retry.
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
+_logger = logging.getLogger(__name__)
+_PRERELEASE_WARNED: set[str] = set()
+_PRERELEASE_WARNING_LOCK = threading.Lock()
 
+_WINDOWS_EXIT_MEANINGS = {
+    0xC0000409: "fast-fail/abort",
+    0xC0000005: "access violation",
+    0xC00000FD: "stack overflow",
+}
+
+
+#: Item types Codex emits at the start of EVERY turn (observed live, 0.171):
+#: the echo of our own prompt, plus reasoning, which has no side effect.
+_NON_OUTPUT_ITEM_TYPES = frozenset({"userMessage", "reasoning"})
+
+
+def _is_agent_output(message: dict[str, Any]) -> bool:
+    """True when a notification shows the agent acted or produced output.
+
+    Observed turn start (codex-cli 0.171): ``turn/started`` then
+    ``item/started`` + ``item/completed`` for the ``userMessage`` (our own
+    prompt) BEFORE the first ``agentMessage``. Counting any ``item/*`` would
+    therefore block every retry, so the prompt echo and reasoning are ignored.
+    """
+    method = message.get("method")
+    if not isinstance(method, str) or not method.startswith("item/"):
+        return False
+    item = (message.get("params") or {}).get("item")
+    if isinstance(item, dict):
+        return item.get("type") not in _NON_OUTPUT_ITEM_TYPES
+    # Deltas and approval/tool requests carry no ``item`` object.
+    return "/reasoning/" not in method
+
+
+# Exit codes that mean the child process crashed (not a clean error exit).
+_CRASH_EXIT_CODES = frozenset(_WINDOWS_EXIT_MEANINGS)
+
+
+def is_crash_returncode(returncode: int | None) -> bool:
+    """Crash-like exit: a known Windows fatal code or death by signal (< 0)."""
+    if returncode is None:
+        return False
+    return returncode < 0 or (returncode & 0xFFFFFFFF) in _CRASH_EXIT_CODES
+
+
+@lru_cache(maxsize=32)
 def _probe_codex_version(executable: str) -> str | None:
     """Read a CLI version without letting a broken install block discovery."""
     try:
@@ -74,6 +121,20 @@ def _probe_codex_version(executable: str) -> str | None:
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _display_version(executable: str) -> str:
+    return (_probe_codex_version(executable) or "unknown").strip()
+
+
+def _returncode_diagnostic(returncode: int | None) -> str:
+    if returncode is None:
+        return "unknown"
+    unsigned = returncode & 0xFFFFFFFF
+    rendered = f"{returncode} (0x{unsigned:08X})"
+    if meaning := _WINDOWS_EXIT_MEANINGS.get(unsigned):
+        rendered += f" {meaning}"
+    return rendered
 
 
 def _parse_codex_version(
@@ -188,6 +249,8 @@ class CodexTransportError(ConnectionError):
         phase: str = "",
         stderr_tail: str = "",
         turn_sent: bool = False,
+        executable: str | None = None,
+        version: str | None = None,
     ) -> None:
         super().__init__(message)
         self.pid = pid
@@ -195,6 +258,8 @@ class CodexTransportError(ConnectionError):
         self.phase = phase
         self.stderr_tail = stderr_tail
         self.turn_sent = turn_sent
+        self.executable = executable
+        self.version = version
 
 
 @dataclass
@@ -314,6 +379,33 @@ class CodexAppServerClient:
             "--strict-config",
             *(part for value in config_overrides for part in ("-c", value)),
         )
+
+    def prerelease_warning(self) -> dict[str, str] | None:
+        """Warn once when this client will launch a prerelease Codex binary."""
+        if self.command is not None:
+            return None  # caller-supplied command: not ours to probe or judge
+        try:
+            executable = self._spawn_command()[0]
+        except OSError:
+            # Discovery/spawn reports the real configuration error in run().
+            return None
+        version = _display_version(executable)
+        parsed = _parse_codex_version(version)
+        if parsed is None:
+            _logger.debug("Codex version output %r did not match the expected pattern", version)
+            return None
+        if parsed[0]:
+            return None
+        with _PRERELEASE_WARNING_LOCK:
+            if executable in _PRERELEASE_WARNED:
+                return None
+            _PRERELEASE_WARNED.add(executable)
+        message = (
+            f"Codex prerelease CLI selected: {executable} ({version}). "
+            "Use CODEX_BIN or PATH to select a stable Codex CLI."
+        )
+        _logger.warning(message)
+        return {"executable": executable, "version": version, "message": message}
 
     async def run(
         self,
@@ -466,6 +558,10 @@ class CodexAppServerClient:
             ephemeral = False
         # Off the loop: the first lookup may probe app installs with `--version`.
         command = await asyncio.to_thread(self._spawn_command, config_overrides)
+        executable = command[0]
+        version = (
+            "custom command" if self.command is not None else await asyncio.to_thread(_display_version, executable)
+        )
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -503,11 +599,14 @@ class CodexAppServerClient:
             await asyncio.wait({stderr_task}, timeout=_EXIT_GRACE / 4)
             tail = bytes(state.stderr).decode("utf-8", errors="replace").strip()
             message = (
-                f"{reason} (pid={process.pid}, returncode={returncode}, phase={state.phase}, "
+                f"{reason} (executable={executable}, version={version}, pid={process.pid}, "
+                f"returncode={_returncode_diagnostic(returncode)}, phase={state.phase}, "
                 f"turn_sent={state.turn_sent})"
             )
             if tail:
                 message += f"; stderr tail: {tail[-_STDERR_MESSAGE_CHARS:]}"
+            else:
+                message += "; stderr empty"
             return CodexTransportError(
                 message,
                 pid=process.pid,
@@ -515,6 +614,8 @@ class CodexAppServerClient:
                 phase=state.phase,
                 stderr_tail=tail,
                 turn_sent=state.turn_sent,
+                executable=executable,
+                version=version,
             )
 
         pending: dict[int, asyncio.Future[Any]] = {}
@@ -604,6 +705,8 @@ class CodexAppServerClient:
                 while line := await process.stdout.readline():
                     message = json.loads(line)
                     method = message.get("method")
+                    if progress is not None and _is_agent_output(message):
+                        progress["output_item_observed"] = True
                     if turn_sent and method is not None and progress is not None:
                         params = message.get("params") or {}
                         incoming_turn = params.get("turnId") or (params.get("turn") or {}).get("id")
@@ -660,6 +763,8 @@ class CodexAppServerClient:
                             else:
                                 future.set_result(message.get("result", {}))
                     elif method == "item/tool/call":
+                        if progress is not None:
+                            progress["tool_call_observed"] = True
                         params = message["params"]
                         try:
                             with _client_wait(progress):

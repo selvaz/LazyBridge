@@ -8,7 +8,12 @@ from pydantic import BaseModel
 
 from lazybridge import Agent, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
-from lazybridge.engines.codex.app_server import CodexRunResult
+from lazybridge.engines.codex.app_server import (
+    CodexRunResult,
+    CodexTransportError,
+    _is_agent_output,
+    is_crash_returncode,
+)
 from lazybridge.engines.codex.engine import CodexEngine
 from lazybridge.engines.coding import ApprovalDecision, CodexPolicy, CodingAgentConfig
 from lazybridge.session import EventType
@@ -95,6 +100,115 @@ class FakeAppServer:
 def get_quote(symbol: str) -> dict[str, str]:
     """Return a deterministic quote lookup."""
     return {"symbol": symbol}
+
+
+class CrashingTurnClient:
+    def __init__(self, *, observed: str | None = None) -> None:
+        self.calls = 0
+        self.observed = observed
+
+    async def run(self, *, progress, **kwargs):
+        self.calls += 1
+        progress["turn_sent"] = True
+        if self.calls == 1:
+            if self.observed:
+                progress[self.observed] = True
+            raise CodexTransportError(
+                "crashed",
+                returncode=3221226505,
+                phase="turn/start",
+                turn_sent=True,
+            )
+        return CodexRunResult(text="recovered")
+
+
+def test_crashed_turn_retry_is_opt_in_read_only_and_recorded():
+    session = Session()
+    client = CrashingTurnClient()
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1), session=session)("hello")
+
+    assert result.payload == "recovered"
+    assert client.calls == 2
+    event = session.events.query(event_type=EventType.CODEX_TURN_RETRY)[0]
+    assert event["payload"] == {
+        "reason": "Codex App Server crashed before producing output",
+        "returncode": 3221226505,
+        "attempt": 1,
+    }
+
+
+@pytest.mark.parametrize("observed", ["output_item_observed", "tool_call_observed"])
+def test_crashed_turn_is_not_retried_after_observable_activity(observed):
+    client = CrashingTurnClient(observed=observed)
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1))("hello")
+
+    assert not result.ok
+    assert client.calls == 1
+
+
+@pytest.mark.parametrize("returncode", [1, 2, 0])
+def test_clean_error_exit_is_not_retried(returncode):
+    class Client(CrashingTurnClient):
+        async def run(self, *, progress, **kwargs):
+            self.calls += 1
+            progress["turn_sent"] = True
+            raise CodexTransportError("exit", returncode=returncode, phase="turn/start", turn_sent=True)
+
+    client = Client()
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1))("hello")
+    assert not result.ok
+    assert client.calls == 1
+
+
+@pytest.mark.parametrize("returncode", [3221225477, 3221226505, 3221225725, -9, -11])
+def test_crash_like_exit_codes_are_retried(returncode):
+    assert is_crash_returncode(returncode)
+
+
+@pytest.mark.parametrize("returncode", [None, 0, 1, 2, 127])
+def test_other_exit_codes_are_not_crashes(returncode):
+    assert not is_crash_returncode(returncode)
+
+
+#: Method sequence recorded from a real turn (codex-cli 0.171, 2026-11-21).
+_OBSERVED_TURN = [
+    ("remoteControl/status/changed", None),
+    ("account/updated", None),
+    ("thread/started", None),
+    ("mcpServer/startupStatus/updated", None),
+    ("thread/status/changed", None),
+    ("turn/started", None),
+    ("item/started", "userMessage"),
+    ("item/completed", "userMessage"),
+    ("item/started", "agentMessage"),
+    ("item/agentMessage/delta", None),
+    ("item/completed", "agentMessage"),
+]
+
+
+def test_prompt_echo_does_not_count_as_output_but_agent_output_does():
+    flags = [
+        _is_agent_output({"method": m, "params": {"item": {"type": kind}} if kind else {}})
+        for m, kind in _OBSERVED_TURN
+    ]
+    assert flags == [False] * 8 + [True, True, True]
+    assert not _is_agent_output({"method": "item/reasoning/summaryTextDelta", "params": {}})
+    assert not _is_agent_output({"method": "item/started", "params": {"item": {"type": "reasoning"}}})
+    for item in ("commandExecution", "fileChange", "mcpToolCall", "webSearch"):
+        assert _is_agent_output({"method": "item/started", "params": {"item": {"type": item}}})
+    assert _is_agent_output({"method": "item/commandExecution/requestApproval", "params": {}})
+
+
+def test_crashed_turn_is_not_retried_with_write_access():
+    client = CrashingTurnClient()
+    config = CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write"))
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1, config=config))("hello")
+
+    assert not result.ok
+    assert client.calls == 1
 
 
 @pytest.mark.parametrize("resolved", [None, "gpt-effective"])
