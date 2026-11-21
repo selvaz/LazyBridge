@@ -280,3 +280,16 @@ def test_labelled_approvals_are_recognised(verdict):
 )
 def test_labelled_rejections_and_unknown_labels_fail_safe(verdict):
     assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: approve only if the dates are fixed",
+        "Decision: OK to reject",
+        "Review - approved with major issues",
+        "Status: not approved",
+    ],
+)
+def test_qualified_labelled_verdicts_fail_safe(verdict):
+    assert _is_approved(verdict) is False

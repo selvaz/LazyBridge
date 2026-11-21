@@ -40,6 +40,13 @@ _LABEL_PREFIX = re.compile(
     r"^(final\s+)?(verdict|decision|result|outcome|status|judg(e)?ment|review)\s*[:\-=]\s*",
     re.IGNORECASE,
 )
+#: After a label, an approval word counts only when it stands alone: end of
+#: line, closing markdown or punctuation (``APPROVED``, ``approved.``,
+#: ``pass — all claims supported``). Words after it mean a qualified verdict.
+_LABELLED_APPROVE = re.compile(
+    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\**\s*([.!,;:—–-]|$)",
+    re.IGNORECASE,
+)
 
 
 def _is_approved(verdict: Any) -> bool:
@@ -76,9 +83,17 @@ def _is_approved(verdict: Any) -> bool:
         stripped = line.lstrip("*>#-_ \t:.0123456789")
         # ``VERDICT: APPROVED`` / ``**Verdict:** rejected``: drop the label,
         # then any markdown left between the label and the verdict word.
+        labelled = _LABEL_PREFIX.match(stripped) is not None
         stripped = _LABEL_PREFIX.sub("", stripped, count=1).lstrip("*>#-_ \t:.")
         if not stripped:
             continue
+        if labelled:
+            # After a label the verdict word must stand alone (end of line or
+            # punctuation): "Verdict: approve only if X" or "Decision: OK to
+            # reject" are qualified, not approvals, and fail safe.
+            if _REJECT_PATTERN.match(stripped):
+                return False
+            return bool(_LABELLED_APPROVE.match(stripped))
         if _REJECT_PATTERN.match(stripped):
             return False
         # First non-blank, non-empty-after-strip line that doesn't
