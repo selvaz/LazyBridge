@@ -13,8 +13,12 @@ from lazybridge.engines.codex import app_server
 def _reset_cap(monkeypatch):
     monkeypatch.delenv("LAZYBRIDGE_CODEX_MAX_CONCURRENCY", raising=False)
     app_server.reset_codex_max_concurrency()
+    assert app_server._concurrency_active == 0, "a previous test leaked a Codex slot"
     yield
     app_server.reset_codex_max_concurrency()
+    leaked = app_server._concurrency_active
+    app_server._concurrency_active = 0
+    assert leaked == 0, f"test leaked {leaked} Codex slot(s)"
 
 
 async def _peak(n_tasks: int) -> int:
@@ -90,39 +94,36 @@ def test_explicit_unlimited_overrides_env(monkeypatch):
     assert asyncio.run(_peak(3)) == 3
 
 
-def test_second_concurrent_nested_agent_waits_for_the_cap():
+def test_nested_agents_never_deadlock_even_two_or_three_levels():
+    app_server.set_codex_max_concurrency(1)
+
+    async def level(depth):
+        async with app_server.codex_concurrency_slot():
+            if depth:
+                # a tool callback awaiting two nested agents, each nesting again
+                return sum(await asyncio.gather(level(depth - 1), level(depth - 1))) + 1
+            return 1
+
+    assert asyncio.run(asyncio.wait_for(level(2), 3)) == 7
+
+
+def test_stream_slot_released_from_another_task():
     app_server.set_codex_max_concurrency(1)
 
     async def scenario():
-        running = []
+        holder = await app_server.acquire_codex_slot()
 
-        async def nested(name):
-            async with app_server.codex_concurrency_slot():
-                running.append(name)
-                await asyncio.sleep(0.15)
-                running.remove(name)
-                return len(running)
+        async def producer():
+            app_server.enter_codex_slot(holder)
+            await asyncio.sleep(0.01)
 
-        async with app_server.codex_concurrency_slot():
-            first = asyncio.create_task(nested("a"))
-            await asyncio.sleep(0.02)
-            second = asyncio.create_task(nested("b"))
-            await asyncio.sleep(0.05)
-            assert running == ["a"]  # b waits: the parent slot is already lent to a
-            return await asyncio.wait_for(first, 2), second
+        await asyncio.create_task(producer())
+        await asyncio.create_task(asyncio.to_thread(app_server.release_codex_slot, holder))
+        # the only slot is free again
+        again = await asyncio.wait_for(app_server.acquire_codex_slot(), 1)
+        app_server.release_codex_slot(again)
 
-    others, second = asyncio.run(_run_and_cancel(scenario))
-    assert others == 0
-
-
-async def _run_and_cancel(scenario):
-    result, pending = await scenario()
-    pending.cancel()
-    try:
-        await pending
-    except asyncio.CancelledError:
-        pass
-    return result, pending
+    asyncio.run(scenario())
 
 
 def test_background_task_does_not_ride_a_released_slot():
@@ -174,12 +175,12 @@ def test_lowering_the_cap_blocks_new_turns_until_active_drop():
                 started.append(name)
                 await asyncio.sleep(hold)
 
-        a = asyncio.create_task(turn("a", 0.3))
-        b = asyncio.create_task(turn("b", 0.3))
-        await asyncio.sleep(0.05)
+        a = asyncio.create_task(turn("a", 0.8))
+        b = asyncio.create_task(turn("b", 0.8))
+        await asyncio.sleep(0.2)
         app_server.set_codex_max_concurrency(1)
         c = asyncio.create_task(turn("c", 0.0))
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
         assert started == ["a", "b"]  # c waits: 2 active >= new cap 1
         await asyncio.gather(a, b, c)
         assert started == ["a", "b", "c"]

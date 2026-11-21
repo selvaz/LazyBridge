@@ -351,19 +351,22 @@ _concurrency_explicit_set = False
 
 
 class _SlotHolder:
-    """The slot a call chain holds; inherited by tasks spawned under it."""
+    """A held slot; inherited (by reference) by tasks spawned under it."""
 
-    __slots__ = ("active", "lent")
+    __slots__ = ("active",)
 
     def __init__(self) -> None:
         self.active = True
-        self.lent = False
 
 
-#: The slot held by this call chain, if any. A context *object* (not a bool):
-#: tasks spawned while it was held keep a reference, and ``active`` turns
-#: False when the holder releases, so a late background task cannot ride on a
-#: slot that is gone.
+#: The slot held by this call chain, if any. A context *object*: tasks spawned
+#: while it was held keep a reference, and ``active`` turns False when the
+#: holder releases, so a late background task cannot ride on a slot that is
+#: gone. While it is active, Codex work started inside the chain (the client
+#: of the same call, or a nested Codex agent run from a tool callback while the
+#: parent turn is suspended waiting for that tool) runs without taking another
+#: slot: waiting would deadlock with a cap of 1. Nested agents may therefore
+#: exceed the cap; documented, and the parent is idle meanwhile.
 _holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
 
 
@@ -425,44 +428,55 @@ def _release_counted() -> None:
         _concurrency_active -= 1
 
 
+async def acquire_codex_slot() -> _SlotHolder | None:
+    """Take a slot unless this chain already holds an active one (then ``None``).
+
+    The caller must pass the result to :func:`release_codex_slot`. Installing
+    the holder in a context is separate (:func:`enter_codex_slot`) so a stream
+    can bind it to its producer task rather than to the consumer.
+    """
+    parent = _holder.get()
+    if parent is not None and parent.active:
+        return None
+    await _acquire_counted()
+    return _SlotHolder()
+
+
+def release_codex_slot(holder: _SlotHolder | None) -> None:
+    if holder is None or not holder.active:
+        return
+    holder.active = False
+    _release_counted()
+
+
+def enter_codex_slot(holder: _SlotHolder | None) -> None:
+    """Bind ``holder`` to the current context (task-local; never reset)."""
+    if holder is not None:
+        _holder.set(holder)
+
+
 @contextlib.asynccontextmanager
 async def codex_concurrency_slot():
     """Hold one Codex slot for a whole engine call (cancellable wait).
 
-    The engine takes the slot *before* its request/idle timeouts start, so time
-    queued never consumes a turn's timeout budget. A Codex agent started from a
-    tool callback of a turn that holds a slot (a nested agent) borrows that
-    slot instead of waiting for it, which would deadlock with a cap of 1; only
-    one nested agent at a time may borrow it, any further one queues normally.
+    The engine takes it *before* its request/idle timeouts start, so time
+    queued never consumes a turn's timeout budget. Re-entry inside a chain that
+    already holds an active slot does not wait (see ``_holder``).
     """
-    parent = _holder.get()
-    if parent is not None and parent.active and not parent.lent:
-        parent.lent = True
-        try:
-            yield
-        finally:
-            parent.lent = False
-        return
-    await _acquire_counted()
-    holder = _SlotHolder()
-    token = _holder.set(holder)
+    holder = await acquire_codex_slot()
+    token = _holder.set(holder) if holder is not None else None
     try:
         yield
     finally:
-        holder.active = False
-        _holder.reset(token)
-        _release_counted()
+        release_codex_slot(holder)
+        if token is not None:
+            # A generator finalised in another task cannot reset the token;
+            # the holder is already inactive, which is what matters.
+            with contextlib.suppress(ValueError):
+                _holder.reset(token)
 
 
-@contextlib.asynccontextmanager
-async def _client_slot():
-    """App Server client: reuse the engine's slot of this same call; acquire only when called directly."""
-    holder = _holder.get()
-    if holder is not None and holder.active:
-        yield
-        return
-    async with codex_concurrency_slot():
-        yield
+_client_slot = codex_concurrency_slot
 
 
 class CodexAppServerClient:
