@@ -173,3 +173,37 @@ async def test_verify_existing_approved_rejected_contract_preserved():
     result = await verify_with_retry(agent, env, judge, max_verify=3)
     assert agent.calls == 3
     assert result.payload == "ok-output"
+
+
+class _RecordingJudge:
+    """Agent-like judge that records the prompt it receives."""
+
+    def __init__(self, verdicts):
+        self.verdicts = iter(verdicts)
+        self.prompts: list[str] = []
+
+    async def run(self, prompt):
+        self.prompts.append(prompt if isinstance(prompt, str) else prompt.task)
+        return Envelope(task="judge", payload=next(self.verdicts))
+
+
+@pytest.mark.asyncio
+async def test_agent_judge_receives_the_agents_context_as_evidence():
+    agent = _FakeAgent("draft citing [1]")
+    judge = _RecordingJudge(["rejected: [1] does not say that", "approved"])
+    env = Envelope(task="q", context="[1] https://example.test/source says X")
+    await verify_with_retry(agent, env, judge, max_verify=3)
+    assert len(judge.prompts) == 2
+    for prompt in judge.prompts:
+        assert "https://example.test/source says X" in prompt
+        assert "Original task: q" in prompt
+    # The judge's own feedback is never fed back to the judge as evidence.
+    assert "Feedback from judge" not in judge.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_judge_prompt_unchanged_without_context():
+    agent = _FakeAgent()
+    judge = _RecordingJudge(["approved"])
+    await verify_with_retry(agent, Envelope.from_task("q"), judge, max_verify=2)
+    assert "Context the agent was given" not in judge.prompts[0]

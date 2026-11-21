@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `verify=` with an Agent judge: the judge now also receives the context the agent was given (for example the sources from earlier plan steps), so it can check claims against evidence instead of judging style only. The judge's own feedback is never fed back to it as evidence. Plain callable judges are unchanged.
+
 ## [1.8.9] — 2026-11-20
 
 ### Added

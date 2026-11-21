@@ -129,9 +129,18 @@ async def verify_with_retry(
             # Plain callable judge.
             verdict = verify_agent(result.text())
         else:
+            # The judge sees the same evidence the agent was given (the
+            # pristine context, never the accumulated judge feedback), so it
+            # can check claims against sources instead of judging style only.
+            evidence = (
+                f"Context the agent was given (use it as evidence):\n{original_context}\n\n"
+                if original_context
+                else ""
+            )
             verdict_env = await verify_agent.run(
                 f"Evaluate this output:\n{result.text()}\n\n"
                 f"Original task: {original_task}\n\n"
+                f"{evidence}"
                 f"Approved or rejected (with reason)?"
             )
             verdict = verdict_env.text()
