@@ -366,7 +366,9 @@ class _SlotHolder:
 #: of the same call, or a nested Codex agent run from a tool callback while the
 #: parent turn is suspended waiting for that tool) runs without taking another
 #: slot: waiting would deadlock with a cap of 1. Nested agents may therefore
-#: exceed the cap; documented, and the parent is idle meanwhile.
+#: exceed the cap; documented, and the parent is idle meanwhile. Known limit:
+#: a background task started inside a turn that keeps running after the turn
+#: released its slot is not counted; start long-lived Codex work outside turns.
 _holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
 
 

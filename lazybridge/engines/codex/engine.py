@@ -935,6 +935,11 @@ class CodexEngine:
                 raise
             else:
                 await sink.put(None)  # sentinel — loop done
+            finally:
+                # The producer owns the slot: free it as soon as the turn is over,
+                # not when the consumer next resumes (it may be awaiting other
+                # Codex work). release_codex_slot is idempotent.
+                release_codex_slot(slot)
 
         # Take the Codex slot before the consumer's idle clock starts; the
         # producer task inherits it and the client reuses it.
