@@ -47,6 +47,24 @@ _LABELLED_APPROVE = re.compile(
     r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\**\s*([.!,;:\u2014\u2013-]|$)",
     re.IGNORECASE,
 )
+#: After a labelled approval and its punctuation, a qualifier turns it into a
+#: conditional verdict (``Verdict: approved - only if the dates are fixed``),
+#: which fails safe to rejection.
+_QUALIFIER = re.compile(
+    r"^(only|if|unless|but|provided|pending|once|after|with|conditional(ly)?|subject|except|assuming|when)\b",
+    re.IGNORECASE,
+)
+
+
+def _labelled_verdict(text: str) -> bool:
+    """Verdict that follows a label: a bare approval word, nothing conditional."""
+    if _REJECT_PATTERN.match(text):
+        return False
+    match = _LABELLED_APPROVE.match(text)
+    if match is None:
+        return False
+    rest = text[match.end() :].lstrip("*_ \t.!,;:\u2014\u2013-")
+    return not _QUALIFIER.match(rest)
 
 
 def _is_approved(verdict: Any) -> bool:
@@ -72,6 +90,7 @@ def _is_approved(verdict: Any) -> bool:
         return False
     # Walk lines so a multi-line judge response (verdict + reason on
     # a separate line) is parsed by its first informative line.
+    pending_label = False
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
@@ -83,17 +102,18 @@ def _is_approved(verdict: Any) -> bool:
         stripped = line.lstrip("*>#-_ \t:.0123456789")
         # ``VERDICT: APPROVED`` / ``**Verdict:** rejected``: drop the label,
         # then any markdown left between the label and the verdict word.
-        labelled = _LABEL_PREFIX.match(stripped) is not None
+        labelled = pending_label or _LABEL_PREFIX.match(stripped) is not None
         stripped = _LABEL_PREFIX.sub("", stripped, count=1).lstrip("*>#-_ \t:.")
         if not stripped:
+            # A label alone on its line ("Verdict:") governs the next line.
+            pending_label = labelled
             continue
         if labelled:
             # After a label the verdict word must stand alone (end of line or
-            # punctuation): "Verdict: approve only if X" or "Decision: OK to
-            # reject" are qualified, not approvals, and fail safe.
-            if _REJECT_PATTERN.match(stripped):
-                return False
-            return bool(_LABELLED_APPROVE.match(stripped))
+            # punctuation, then no qualifier): "Verdict: approve only if X",
+            # "Verdict: approved - only if X" or "Decision: OK to reject" are
+            # qualified, not approvals, and fail safe.
+            return _labelled_verdict(stripped)
         if _REJECT_PATTERN.match(stripped):
             return False
         # First non-blank, non-empty-after-strip line that doesn't

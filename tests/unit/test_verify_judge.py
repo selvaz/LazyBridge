@@ -293,3 +293,31 @@ def test_labelled_rejections_and_unknown_labels_fail_safe(verdict):
 )
 def test_qualified_labelled_verdicts_fail_safe(verdict):
     assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: approved \u2014 only if the dates are fixed",
+        "Verdict: approved, but fix the dates first",
+        "Decision: pass - unless the source is retracted",
+        "VERDICT: APPROVED. Only after the second source is added.",
+        "Verdict:\napprove only if the dates are fixed",
+        "**Verdict:**\n\nrejected",
+        "Verdict:\nno",
+    ],
+)
+def test_conditional_or_split_labelled_verdicts_fail_safe(verdict):
+    assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: approved \u2014 all claims are supported by the quotes",
+        "Verdict:\nAPPROVED",
+        "**Verdict:**\n\n**APPROVED**\nEvery claim matches a quote.",
+    ],
+)
+def test_split_or_rationale_labelled_approvals_pass(verdict):
+    assert _is_approved(verdict) is True
