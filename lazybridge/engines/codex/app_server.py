@@ -72,6 +72,40 @@ _WINDOWS_EXIT_MEANINGS = {
 }
 
 
+#: Item types Codex emits at the start of EVERY turn (observed live, 0.171):
+#: the echo of our own prompt, plus reasoning, which has no side effect.
+_NON_OUTPUT_ITEM_TYPES = frozenset({"userMessage", "reasoning"})
+
+
+def _is_agent_output(message: dict[str, Any]) -> bool:
+    """True when a notification shows the agent acted or produced output.
+
+    Observed turn start (codex-cli 0.171): ``turn/started`` then
+    ``item/started`` + ``item/completed`` for the ``userMessage`` (our own
+    prompt) BEFORE the first ``agentMessage``. Counting any ``item/*`` would
+    therefore block every retry, so the prompt echo and reasoning are ignored.
+    """
+    method = message.get("method")
+    if not isinstance(method, str) or not method.startswith("item/"):
+        return False
+    item = (message.get("params") or {}).get("item")
+    if isinstance(item, dict):
+        return item.get("type") not in _NON_OUTPUT_ITEM_TYPES
+    # Deltas and approval/tool requests carry no ``item`` object.
+    return "/reasoning/" not in method
+
+
+# Exit codes that mean the child process crashed (not a clean error exit).
+_CRASH_EXIT_CODES = frozenset(_WINDOWS_EXIT_MEANINGS)
+
+
+def is_crash_returncode(returncode: int | None) -> bool:
+    """Crash-like exit: a known Windows fatal code or death by signal (< 0)."""
+    if returncode is None:
+        return False
+    return returncode < 0 or (returncode & 0xFFFFFFFF) in _CRASH_EXIT_CODES
+
+
 @lru_cache(maxsize=32)
 def _probe_codex_version(executable: str) -> str | None:
     """Read a CLI version without letting a broken install block discovery."""
@@ -348,6 +382,8 @@ class CodexAppServerClient:
 
     def prerelease_warning(self) -> dict[str, str] | None:
         """Warn once when this client will launch a prerelease Codex binary."""
+        if self.command is not None:
+            return None  # caller-supplied command: not ours to probe or judge
         try:
             executable = self._spawn_command()[0]
         except OSError:
@@ -355,7 +391,10 @@ class CodexAppServerClient:
             return None
         version = _display_version(executable)
         parsed = _parse_codex_version(version)
-        if parsed is None or parsed[0]:
+        if parsed is None:
+            _logger.debug("Codex version output %r did not match the expected pattern", version)
+            return None
+        if parsed[0]:
             return None
         with _PRERELEASE_WARNING_LOCK:
             if executable in _PRERELEASE_WARNED:
@@ -520,7 +559,9 @@ class CodexAppServerClient:
         # Off the loop: the first lookup may probe app installs with `--version`.
         command = await asyncio.to_thread(self._spawn_command, config_overrides)
         executable = command[0]
-        version = await asyncio.to_thread(_display_version, executable)
+        version = (
+            "custom command" if self.command is not None else await asyncio.to_thread(_display_version, executable)
+        )
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -664,7 +705,7 @@ class CodexAppServerClient:
                 while line := await process.stdout.readline():
                     message = json.loads(line)
                     method = message.get("method")
-                    if progress is not None and isinstance(method, str) and method.startswith("item/"):
+                    if progress is not None and _is_agent_output(message):
                         progress["output_item_observed"] = True
                     if turn_sent and method is not None and progress is not None:
                         params = message.get("params") or {}

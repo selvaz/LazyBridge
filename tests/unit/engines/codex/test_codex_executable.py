@@ -174,7 +174,16 @@ def test_no_app_cli_raises(app_installs):
     assert not calls
 
 
-def test_probe_runs_version_with_short_timeout(monkeypatch):
+@pytest.fixture
+def fresh_probe_cache():
+    # _probe_codex_version is lru_cached: a result cached for the same path by
+    # an earlier test would bypass the patched subprocess.run.
+    app_server._probe_codex_version.cache_clear()
+    yield
+    app_server._probe_codex_version.cache_clear()
+
+
+def test_probe_runs_version_with_short_timeout(monkeypatch, fresh_probe_cache):
     def run(command, **kwargs):
         assert command == ["app/codex.exe", "--version"]
         assert kwargs == {
@@ -195,7 +204,7 @@ def test_probe_runs_version_with_short_timeout(monkeypatch):
     "error",
     [OSError("cannot execute"), subprocess.CalledProcessError(1, "codex"), subprocess.TimeoutExpired("codex", 10)],
 )
-def test_probe_failures_return_none(monkeypatch, error):
+def test_probe_failures_return_none(monkeypatch, error, fresh_probe_cache):
     def run(*args, **kwargs):
         raise error
 
@@ -217,3 +226,20 @@ def test_prerelease_warning_is_emitted_once(monkeypatch, caplog):
     assert first["executable"] == "app/codex.exe"
     assert second is None
     assert caplog.text.count("Use CODEX_BIN or PATH") == 1
+
+
+def test_custom_command_skips_version_probe_and_warning(monkeypatch):
+    def boom(path):
+        raise AssertionError("must not probe a caller-supplied command")
+
+    monkeypatch.setattr(app_server, "_probe_codex_version", boom)
+    client = app_server.CodexAppServerClient(command=("my-codex", "app-server"))
+    assert client.prerelease_warning() is None
+
+
+def test_unparseable_version_is_logged_at_debug(monkeypatch, caplog):
+    monkeypatch.setattr(app_server, "codex_executable", lambda: "app/codex.exe")
+    monkeypatch.setattr(app_server, "_probe_codex_version", lambda path: "something odd")
+    with caplog.at_level("DEBUG", logger=app_server.__name__):
+        assert app_server.CodexAppServerClient().prerelease_warning() is None
+    assert "did not match the expected pattern" in caplog.text

@@ -30,7 +30,13 @@ from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.model_tiers import translate_model
 from lazybridge.session import EventType
 
-from .app_server import _PRE_THREAD_PHASES, CodexAppServerClient, CodexTransportError, CodexTurnUncertain
+from .app_server import (
+    _PRE_THREAD_PHASES,
+    CodexAppServerClient,
+    CodexTransportError,
+    CodexTurnUncertain,
+    is_crash_returncode,
+)
 from .dynamic_tools import definitions, dispatcher
 
 _logger = logging.getLogger(__name__)
@@ -197,6 +203,16 @@ class CodexEngine:
     at it. An alias implies ``persist_thread``. Without ``session_alias``
     nothing about the thread handling changes.
 
+    **Crash retry.** ``retry_crashed_turns=N`` (default 0) replays a turn on a
+    fresh App Server when the child *crashed* (Windows 0xC0000409 / 0xC0000005 /
+    0xC00000FD, or death by signal; a clean error exit is never retried) after
+    the turn was sent but before any agent output or tool call was observed.
+    The prompt echo (``userMessage``) and reasoning do not count as output.
+    Residual window: a crash between Codex starting a side effect and its
+    notification reaching our reader is invisible to that check. Retry is
+    therefore limited to ``sandbox="read-only"``, no application tools and
+    ``approval_policy="never"``, where Codex has nothing to write or call.
+
     **Native review.** ``review_target={"type": "baseBranch", "branch": "main"}``
     (or ``{"type": "uncommittedChanges"}`` / ``{"type": "commit", "sha": ...}``)
     runs Codex' own review harness instead of a prompted turn: it returns
@@ -323,10 +339,11 @@ class CodexEngine:
                 safe = (
                     attempt < self.retry_crashed_turns
                     and exc.turn_sent
-                    and exc.returncode is not None
+                    and is_crash_returncode(exc.returncode)
                     and not progress.get("output_item_observed")
                     and not progress.get("tool_call_observed")
                     and self.config.codex.sandbox == "read-only"
+                    and self.config.codex.approval_policy == "never"
                     and not tools
                 )
                 if not safe:
