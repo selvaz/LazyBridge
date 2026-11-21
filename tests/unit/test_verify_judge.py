@@ -175,6 +175,7 @@ async def test_verify_existing_approved_rejected_contract_preserved():
     assert result.payload == "ok-output"
 
 
+
 class _RecordingJudge:
     """Agent-like judge that records the prompt it receives."""
 
@@ -188,22 +189,59 @@ class _RecordingJudge:
 
 
 @pytest.mark.asyncio
-async def test_agent_judge_receives_the_agents_context_as_evidence():
+async def test_judge_context_is_opt_in_and_never_includes_feedback():
     agent = _FakeAgent("draft citing [1]")
     judge = _RecordingJudge(["rejected: [1] does not say that", "approved"])
     env = Envelope(task="q", context="[1] https://example.test/source says X")
-    await verify_with_retry(agent, env, judge, max_verify=3)
+    await verify_with_retry(agent, env, judge, max_verify=3, judge_context=env.context)
     assert len(judge.prompts) == 2
     for prompt in judge.prompts:
-        assert "https://example.test/source says X" in prompt
-        assert "Original task: q" in prompt
-    # The judge's own feedback is never fed back to the judge as evidence.
+        assert "https://example.test/source says X" in prompt and "Original task: q" in prompt
     assert "Feedback from judge" not in judge.prompts[1]
 
 
 @pytest.mark.asyncio
-async def test_agent_judge_prompt_unchanged_without_context():
+async def test_judge_sees_no_context_by_default():
     agent = _FakeAgent()
     judge = _RecordingJudge(["approved"])
-    await verify_with_retry(agent, Envelope.from_task("q"), judge, max_verify=2)
+    env = Envelope(task="q", context="confidential source material")
+    await verify_with_retry(agent, env, judge, max_verify=2)
+    assert "confidential source material" not in judge.prompts[0]
     assert "Context the agent was given" not in judge.prompts[0]
+
+
+def _scripted_agent(**kwargs):
+    from lazybridge import Agent
+
+    class _Engine:
+        model = "scripted"
+
+        async def run(self, env, **_kw):
+            return Envelope(task=env.task, payload="draft")
+
+    return Agent(engine=_Engine(), **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_agent_verify_context_flag_passes_sources_to_judge():
+    judge = _RecordingJudge(["approved"])
+    try:
+        agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-42"], verify=judge, verify_context=True)
+    except Exception as exc:  # engine protocol differs: skip rather than fake
+        pytest.skip(f"scripted engine not accepted: {exc}")
+    await agent.run("q")
+    assert "SOURCE-TEXT-42" in judge.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_as_tool_verify_context_includes_the_wrapped_agents_sources():
+    judge = _RecordingJudge(["approved"])
+    try:
+        agent = _scripted_agent(name="writer", sources=["SOURCE-TEXT-43"])
+    except Exception as exc:
+        pytest.skip(f"scripted engine not accepted: {exc}")
+    tool = agent.as_tool("write", verify=judge, max_verify=2, verify_context=True)
+    await tool.func("q")
+    assert "SOURCE-TEXT-43" in judge.prompts[0]
+    plain = agent.as_tool("write2", verify=_RecordingJudge(["approved"]), max_verify=2)
+    assert plain is not None

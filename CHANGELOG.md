@@ -10,7 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `verify=` with an Agent judge: the judge now also receives the context the agent was given (for example the sources from earlier plan steps), so it can check claims against evidence instead of judging style only. The judge's own feedback is never fed back to it as evidence. Plain callable judges are unchanged.
+- `verify_context=True` (opt-in, on `Agent(...)` and `Agent.as_tool(...)`): an Agent judge also receives the context the agent was given, including injected `sources`, so it can check claims against evidence instead of judging style only. Off by default: a judge on another provider receives that material only when you enable it. The judge's own feedback is never fed back to it as evidence; plain callable judges are unchanged.
 
 ## [1.8.9] — 2026-11-20
 

@@ -116,6 +116,7 @@ class Agent:
         guard: Any | None = None,
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
+        verify_context: bool = False,
         name: str | None = None,
         description: str | None = None,
         session: Any | None = None,
@@ -283,6 +284,8 @@ class Agent:
         self.guard = guard
         self.verify = verify
         self.max_verify = max_verify
+        # Opt-in: an Agent judge also sees the context this agent was given.
+        self.verify_context = bool(verify_context)
         self.fallback = fallback
         if self.fallback is not None:
             seen: set[int] = {id(self)}
@@ -522,7 +525,15 @@ class Agent:
             # Guard/sources have already been applied above; the engine
             # (plus structured-output validation) is what each verify
             # attempt must re-execute.
-            result = await verify_with_retry(self, env, self.verify, max_verify=self.max_verify, run=self._run_engine)
+            result = await verify_with_retry(
+                self,
+                env,
+                self.verify,
+                max_verify=self.max_verify,
+                run=self._run_engine,
+                # ``env`` already carries the injected sources here.
+                judge_context=env.context if self.verify_context else None,
+            )
         else:
             result = await self._run_engine(env)
 
@@ -883,6 +894,7 @@ class Agent:
         *,
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
+        verify_context: bool = False,
     ) -> Tool:
         """Wrap this agent as a :class:`Tool` (advanced / compatibility API).
 
@@ -954,11 +966,18 @@ class Agent:
                 from lazybridge.envelope import Envelope as _Env
 
                 env = _Env.from_task(str(task))
+                judge_context = None
+                if verify_context:
+                    # The wrapped agent injects its sources inside run(); show
+                    # the judge the same evidence without changing ``env``.
+                    inject = getattr(agent, "_inject_sources", None)
+                    judge_context = (inject(env) if inject else env).context
                 result = await verify_with_retry(
                     agent,
                     env,
                     verify,
                     max_verify=max_verify,
+                    judge_context=judge_context,
                 )
                 _store = getattr(agent, "store", None)
                 if _store is not None and result.ok and effective_name != getattr(agent, "name", None):
@@ -1011,6 +1030,7 @@ class Agent:
             guard=self.guard,
             verify=self.verify,
             max_verify=self.max_verify,
+            verify_context=self.verify_context,
             name=self.name,
             description=self.description,
             session=self.session,
