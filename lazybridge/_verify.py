@@ -86,12 +86,21 @@ async def verify_with_retry(
     *,
     max_verify: int = 3,
     run: Any = None,
+    judge_context: str | None = None,
 ) -> Any:
     """Run ``agent`` and gate its output through ``verify_agent``.
 
     If the judge rejects, retry the ORIGINAL task with the judge's
     feedback appended as context.  Up to ``max_verify`` attempts; the
     last attempt is returned as-is even if still rejected.
+
+    ``judge_context`` (opt-in, default ``None``): evidence an Agent judge
+    should see in addition to the output and the task, typically the
+    context the producing agent was given (for example sources from earlier
+    plan steps). It is never the accumulated judge feedback. Callers pass it
+    only when the user enabled ``verify_context=True``: a judge on another
+    provider then receives that material too. Plain callable judges keep
+    their text-only signature and never receive it.
 
     ``run`` overrides the coroutine used to produce each attempt
     (default: ``agent.run``).  ``Agent._run_body`` MUST pass its
@@ -129,9 +138,16 @@ async def verify_with_retry(
             # Plain callable judge.
             verdict = verify_agent(result.text())
         else:
+            # Opt-in evidence (judge_context): the context the agent was given,
+            # never the accumulated judge feedback, so a judge can check claims
+            # against sources instead of judging style only.
+            evidence = (
+                f"Context the agent was given (use it as evidence):\n{judge_context}\n\n" if judge_context else ""
+            )
             verdict_env = await verify_agent.run(
                 f"Evaluate this output:\n{result.text()}\n\n"
                 f"Original task: {original_task}\n\n"
+                f"{evidence}"
                 f"Approved or rejected (with reason)?"
             )
             verdict = verdict_env.text()
