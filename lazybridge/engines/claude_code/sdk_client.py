@@ -383,10 +383,16 @@ class AgentSdkClient(ClaudeSdkClient):
             # by an allow rule is denied outright. ``builtin_tools`` only makes
             # a tool *available*, so without these rules every granted native
             # tool (WebSearch, Read, ...) would be silently denied. Tools that
-            # need a human decision (writes/shell) are preapproved only when no
-            # approval gate is attached; ``file_roots`` still confine them.
-            gated = {"Edit", "Write", "NotebookEdit", "Bash"} if options.approval_gate is not None else set()
-            allowed.extend(t for t in options.builtin_tools if t not in gated and t not in allowed)
+            # need a human decision (anything beyond the read-only set) are
+            # preapproved only when no approval gate is attached; ``file_roots`` still confine them.
+            safe = {"Read", "Glob", "Grep", "WebSearch", "WebFetch"}
+            narrowed = {entry.split("(", 1)[0] for entry in allowed if "(" in entry}
+            for name in options.builtin_tools:
+                if options.approval_gate is not None and name not in safe:
+                    continue  # anything beyond the read-only set keeps going through the gate
+                if name in allowed or name in narrowed:
+                    continue  # never broaden a caller-supplied narrower rule
+                allowed.append(name)
         if options.preapprove_application_tools:
             allowed.extend(f"mcp__{options.mcp_server_name}__{item.name}" for item in options.mcp_tools)
 

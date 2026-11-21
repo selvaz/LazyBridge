@@ -753,3 +753,26 @@ def test_permission_denials_reach_the_tool_observer():
 
     assert seen[0][0] == "error"
     assert seen[0][1]["permission_denied"] is True and seen[0][1]["tool_name"] == "WebSearch"
+
+
+def test_dontask_does_not_broaden_a_narrower_caller_rule():
+    options = ClaudeSdkOptions(
+        permission_mode="dontAsk",
+        builtin_tools=("WebFetch", "WebSearch"),
+        allowed_tools=("WebFetch(domain:example.com)",),
+    )
+    allowed = AgentSdkClient._sdk_options(options).allowed_tools
+
+    assert "WebFetch" not in allowed and "WebFetch(domain:example.com)" in allowed
+    assert "WebSearch" in allowed
+
+
+def test_dontask_with_gate_keeps_non_readonly_extra_tools_behind_the_gate():
+    options = ClaudeSdkOptions(
+        permission_mode="dontAsk",
+        builtin_tools=("Read", "Agent", "Bash"),
+        approval_gate=lambda _: ApprovalDecision.deny(),
+    )
+    allowed = AgentSdkClient._sdk_options(options).allowed_tools
+
+    assert "Read" in allowed and "Agent" not in allowed and "Bash" not in allowed
