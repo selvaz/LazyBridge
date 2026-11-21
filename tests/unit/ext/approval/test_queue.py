@@ -1521,31 +1521,36 @@ async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
     past the configured ttl. Found by Codex review before this ever
     shipped."""
     queue = ApprovalQueue(Store())
+    # Timeline (fixed code): first notify 0.4s; one poll sleep to 0.9s; a
+    # reminder at 0.9s whose 0.4s send ends exactly at the 1.3s ttl; then
+    # the expiry notice, another 0.4s: ~1.7s. With the stale pre-reminder
+    # timestamp the loop sleeps another 0.4s after the reminder: ~2.1s.
+    # The reminder must start one notify before the ttl, otherwise the
+    # send is cut at the ttl and both versions time the same (the earlier
+    # 0.08s-scale version of this test could not tell them apart and was
+    # flaky in CI: 0.405s against a 0.4s bound).
+    notify_seconds = 0.4
+    ttl_seconds = 1.3
 
     async def slow_notify(ticket, message):
-        await asyncio.sleep(0.08)
+        await asyncio.sleep(notify_seconds)
 
     channel = StoreApprovalChannel(
         queue,
         task_id="t1",
-        poll_seconds=0.11,
-        ttl=timedelta(seconds=0.2),
+        poll_seconds=0.5,
+        ttl=timedelta(seconds=ttl_seconds),
         notify=slow_notify,
-        renotify_interval=timedelta(seconds=0.05),
+        renotify_interval=timedelta(seconds=0.1),
     )
 
     start = time.monotonic()
-    result = await asyncio.wait_for(channel.ask("please approve"), timeout=2.0)
+    result = await asyncio.wait_for(channel.ask("please approve"), timeout=10.0)
     elapsed = time.monotonic() - start
 
     assert result is False
-    # Unfixed: ~0.2s ttl + ~0.08s stale-reminder overshoot =~ 0.28s+.
-    # Fixed: close to the true 0.2s ttl, PLUS one more ~0.08s round trip
-    # through the same slow_notify for the ticket's own EXPIRY notice (a
-    # later addition -- the ticket now gets told, once, that it expired).
-    # 0.4s leaves comfortable margin on both sides without making the test
-    # flaky.
-    assert elapsed < 0.4
+    # Halfway between the fixed (~1.7s) and the unfixed (~2.1s) timings.
+    assert elapsed < ttl_seconds + 1.5 * notify_seconds
 
 
 async def test_reminder_spacing_accounts_for_notify_delivery_time() -> None:
