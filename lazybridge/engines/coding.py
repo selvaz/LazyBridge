@@ -296,6 +296,18 @@ class CodexPolicy:
     #: leaves the user's Codex configuration unchanged. Forwarded as a
     #: per-process ``-c web_search=\"<mode>\"`` override.
     web_search: Literal["disabled", "cached", "indexed", "live"] | None = None
+    #: Model transport for this agent's App Server. ``None`` follows
+    #: ``LAZYBRIDGE_CODEX_TRANSPORT`` (``websocket`` | ``http``) and otherwise
+    #: leaves Codex' default (Responses WebSocket). ``"http"`` routes the
+    #: turn over HTTP/SSE through a per-process provider override named
+    #: "OpenAI" with ``supports_websockets=false`` (ChatGPT-account auth,
+    #: ``https://chatgpt.com/backend-api/codex``; override the URL with
+    #: ``LAZYBRIDGE_CODEX_HTTP_BASE_URL``). Measured on Windows, 2026-11-21:
+    #: concurrent App Servers crashed with 0xC0000409 while opening the
+    #: Responses WebSocket (openai/codex#36096); over HTTP the same load ran
+    #: without crashes. Codex' WebSocket opt-out flag was removed upstream
+    #: (openai/codex#38638), so a provider override is the supported route.
+    transport: Literal["websocket", "http"] | None = None
     #: Token count at which Codex starts compacting this agent's history.
     #: ``None`` leaves the CLI's own default. Forwarded as the App Server's
     #: ``-c model_auto_compact_token_limit=<n>`` override, so it applies to

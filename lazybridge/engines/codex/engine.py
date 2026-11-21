@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import time
 import uuid
@@ -160,7 +161,39 @@ def _config_overrides(policy: CodexPolicy) -> tuple[str, ...]:
         overrides.append(f'web_search="{policy.web_search}"')
     if policy.auto_compact_token_limit is not None:
         overrides.append(f"model_auto_compact_token_limit={policy.auto_compact_token_limit}")
+    overrides.extend(_transport_overrides(policy.transport))
     return tuple(overrides)
+
+
+#: Provider id used for the HTTP transport override (never written to the
+#: user's config.toml; it exists only on this App Server's command line).
+HTTP_PROVIDER_ID = "lazybridge-openai-http"
+DEFAULT_HTTP_BASE_URL = "https://chatgpt.com/backend-api/codex"
+
+
+def resolve_transport(requested: str | None) -> str | None:
+    """``requested``, else ``LAZYBRIDGE_CODEX_TRANSPORT``, else ``None`` (Codex default)."""
+    value = requested or os.environ.get("LAZYBRIDGE_CODEX_TRANSPORT", "").strip().lower() or None
+    if value not in (None, "websocket", "http"):
+        raise ValueError(f"Codex transport must be 'websocket' or 'http', got {value!r}")
+    return value
+
+
+def _transport_overrides(requested: str | None) -> tuple[str, ...]:
+    if resolve_transport(requested) != "http":
+        return ()
+    base_url = os.environ.get("LAZYBRIDGE_CODEX_HTTP_BASE_URL", "").strip() or DEFAULT_HTTP_BASE_URL
+    prefix = f"model_providers.{HTTP_PROVIDER_ID}"
+    # name="OpenAI": Codex derives OpenAI-backend behaviour (headers, codex
+    # backend routes) from the provider name, so the override keeps it.
+    return (
+        f"model_provider={HTTP_PROVIDER_ID}",
+        f'{prefix}.name="OpenAI"',
+        f'{prefix}.base_url="{base_url}"',
+        f'{prefix}.wire_api="responses"',
+        f"{prefix}.requires_openai_auth=true",
+        f"{prefix}.supports_websockets=false",
+    )
 
 
 class CodexEngine:

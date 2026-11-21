@@ -10,6 +10,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Codex: `CodexPolicy(transport="http")` or `LAZYBRIDGE_CODEX_TRANSPORT=http` routes turns over HTTP/SSE through a per-process provider override (`name="OpenAI"`, `supports_websockets=false`, ChatGPT backend URL; `LAZYBRIDGE_CODEX_HTTP_BASE_URL` to change it). On Windows, concurrent App Servers crashed with 0xC0000409 while opening the Responses WebSocket (openai/codex#36096); over HTTP, 6 parallel agents ran 56 turns without a crash. The upstream WebSocket opt-out flag was removed (openai/codex#38638).
+
+### Added
+
 - Codex: process-wide cap on concurrent App Server children via `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` or `set_codex_max_concurrency(n)` (default unlimited). Concurrent App Servers crashed with 0xC0000409 in 3-10% of turns on Windows; with the cap at 1 the same reproduction ran 0 of 32 crashes. Other engines are unaffected; waiting is cancellable.
 
 ### Changed
