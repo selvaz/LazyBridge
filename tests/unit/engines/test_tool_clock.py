@@ -127,3 +127,26 @@ async def test_tool_scope_released_on_exception_and_cancellation():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert not clock.active
+
+
+@pytest.mark.parametrize("ticks_before_cancel", range(6))
+@pytest.mark.asyncio
+async def test_cancel_racing_a_clock_change_does_not_hang(ticks_before_cancel):
+    """Regression: ``wait_for`` (< 3.12) swallowed a cancel racing the event.
+
+    The deadline timer then looped forever and the caller's ``await timer``
+    never returned: a Codex run that had finished its turn hung after a tool.
+    Every relative timing of the clock change and the cancellation is tried.
+    """
+    for _ in range(20):
+        clock = ToolClock()
+        task = asyncio.ensure_future(wait_with_tool_clock(asyncio.sleep(60), 30.0, clock, idle=True))
+        for _ in range(3):
+            await asyncio.sleep(0)
+        clock.enter()  # fires ``changed``
+        for _ in range(ticks_before_cancel):
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 2)
+        clock.exit()

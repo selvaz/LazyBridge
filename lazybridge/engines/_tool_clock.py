@@ -86,11 +86,18 @@ async def wait_with_tool_clock(
             remaining = origin + timeout - clock.now()
             if not clock.active and remaining <= 0:
                 return
+            # Not ``wait_for``: before Python 3.12 it swallows a cancellation
+            # that lands in the same loop tick the awaited event fires. The
+            # timer would then loop forever and the ``await timer`` in the
+            # ``finally`` below would hang the caller (seen live as a Codex
+            # run that finished its turn and never returned). ``wait`` always
+            # propagates cancellation; a timeout just returns and is rechecked
+            # against the clock at the top of the loop.
+            waiter = asyncio.ensure_future(changed.wait())
             try:
-                await asyncio.wait_for(changed.wait(), None if clock.active else remaining)
-            except TimeoutError:
-                # The window may have elapsed: loop to recheck it against the clock.
-                pass
+                await asyncio.wait({waiter}, timeout=None if clock.active else remaining)
+            finally:
+                waiter.cancel()
 
     task = asyncio.ensure_future(awaitable)
     timer = asyncio.create_task(deadline())

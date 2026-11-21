@@ -1011,3 +1011,82 @@ def test_slow_teardown_after_turn_completed_is_not_an_idle_timeout(monkeypatch):
     client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
     result = Agent(CodexEngine(client=client, stream_idle_timeout=0.1, request_timeout=10))("go")
     assert result.ok, result.error
+
+
+# --- tool calls are served off the reader --------------------------------
+
+_TOOL_DEF = [{"type": "function", "name": "get_quote", "description": "d", "inputSchema": _QuoteTool._Def.parameters}]
+
+
+def _run_tool_scenario(scenario, on_tool_call, **kwargs):
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, scenario))
+        return await client.run(
+            prompt="quote AMZN", model=None, cwd=None, dynamic_tools=_TOOL_DEF, on_tool_call=on_tool_call, **kwargs
+        )
+
+    return asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+
+def test_notifications_are_drained_while_a_slow_tool_runs():
+    """The reader keeps consuming stdout during a tool call (no inline await)."""
+    state = {"tool_running": False, "during": 0, "total": 0}
+
+    async def slow(tool, arguments):
+        state["tool_running"] = True
+        try:
+            await asyncio.sleep(1.0)
+            return await _call_tool(tool, arguments)
+        finally:
+            state["tool_running"] = False
+
+    async def on_text(chunk):
+        state["total"] += 1
+        state["during"] += state["tool_running"]
+
+    result = _run_tool_scenario("tool_with_chatter", slow, on_text=on_text)
+
+    assert result.text == "done"
+    assert state["total"] == 4000
+    assert state["during"] > 0  # chunks were consumed while the tool was still running
+
+
+def test_turn_completed_while_a_tool_is_still_running_ends_the_turn_and_cancels_the_tool():
+    seen = {"cancelled": False}
+
+    async def never_finishes(tool, arguments):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    result = _run_tool_scenario("tool_then_complete", never_finishes)
+
+    assert result.text == "done"
+    assert seen["cancelled"]
+
+
+def test_child_exit_during_a_tool_call_fails_promptly_with_transport_error():
+    seen = {"cancelled": False}
+
+    async def never_finishes(tool, arguments):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    start = time.monotonic()
+    with pytest.raises(CodexTransportError) as caught:
+        _run_tool_scenario("tool_then_exit", never_finishes, ephemeral=True)
+
+    assert time.monotonic() - start < 10
+    assert caught.value.returncode == 7
+    assert "child-died-mid-tool" in str(caught.value)
+    assert seen["cancelled"]
+
+
+def test_fast_tool_round_trip_is_unchanged():
+    result = _run_tool_scenario("happy", _call_tool)
+    assert result.text == "AMZN is 123.45"

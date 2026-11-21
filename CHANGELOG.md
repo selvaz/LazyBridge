@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex: a run could hang forever after a dynamic tool call (about half of the runs with codex-cli 0.171). The turn had finished, but `wait_with_tool_clock` used `asyncio.wait_for`, which before Python 3.12 swallows a cancellation that lands in the same tick as a tool-clock change; the deadline timer then looped and the caller awaited it forever. It now uses `asyncio.wait`.
+- Codex: tool calls and approval requests are served in their own tasks, not inline in the App Server reader. While a tool runs, the reader keeps draining stdout and sees `turn/completed`, EOF or a child exit; a child that dies during a tool call now fails the turn promptly with `CodexTransportError`, and in-flight tool tasks are cancelled when the turn ends. The App Server has no timeout of its own for dynamic tool calls, so `CodexEngine(tool_timeout=...)` is the only bound on a tool.
+
+
 ### Added
 
 - Codex: `CodexPolicy(transport="http")` or `LAZYBRIDGE_CODEX_TRANSPORT=http` routes turns over HTTP/SSE through a per-process provider override (`name="OpenAI"`, `supports_websockets=false`, ChatGPT backend URL; `LAZYBRIDGE_CODEX_HTTP_BASE_URL` to change it). On Windows, concurrent App Servers crashed with 0xC0000409 while opening the Responses WebSocket (openai/codex#36096); over HTTP, 6 parallel agents ran 56 turns without a crash. The upstream WebSocket opt-out flag was removed (openai/codex#38638).

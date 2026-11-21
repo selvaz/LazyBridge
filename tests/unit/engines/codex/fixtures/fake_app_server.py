@@ -453,6 +453,51 @@ def main() -> None:
         write_message(
             {"method": "turn/completed", "params": {"turn": {"id": "turn-1", "status": "completed", "items": []}}}
         )
+    elif scenario in {"tool_with_chatter", "tool_then_complete", "tool_then_exit"}:
+        # A tool call the client takes a long time to answer. The server keeps
+        # emitting notifications (chatter), completes the turn, or dies while
+        # the call is still unanswered.
+        tool_call = {
+            "id": 0,
+            "method": "item/tool/call",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "callId": "exec-1",
+                "namespace": None,
+                "tool": dynamic_tools[0]["name"],
+                "arguments": {"symbol": "AMZN"},
+            },
+        }
+        final = {
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread-1",
+                "turn": {
+                    "id": "turn-1",
+                    "status": "completed",
+                    "items": [{"type": "agentMessage", "text": "done", "phase": "final_answer"}],
+                },
+            },
+        }
+        write_message(tool_call)
+        if scenario == "tool_with_chatter":
+            # More than any pipe buffer holds: only a drained stdout lets the
+            # fake reach the read below.
+            for _ in range(4000):
+                write_message({"method": "item/agentMessage/delta", "params": {"delta": "x" * 1024}})
+            tool_response = read_message()
+            assert tool_response["id"] == 0 and tool_response["result"]["success"] is True, tool_response
+            write_message(final)
+        elif scenario == "tool_then_complete":
+            time.sleep(0.2)
+            write_message(final)
+            time.sleep(30)  # the answer to the tool call never matters
+        else:
+            time.sleep(0.2)
+            sys.stderr.write("child-died-mid-tool\n")
+            sys.stderr.flush()
+            sys.exit(7)
     elif scenario == "exit_mid_turn":
         # Acknowledged turn/start, then died without ever sending
         # turn/completed — the path that hangs forever when the client has no
