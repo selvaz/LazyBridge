@@ -175,7 +175,6 @@ async def test_verify_existing_approved_rejected_contract_preserved():
     assert result.payload == "ok-output"
 
 
-
 class _RecordingJudge:
     """Agent-like judge that records the prompt it receives."""
 
