@@ -245,3 +245,13 @@ async def test_as_tool_verify_context_includes_the_wrapped_agents_sources():
     assert "SOURCE-TEXT-43" in judge.prompts[0]
     plain = agent.as_tool("write2", verify=_RecordingJudge(["approved"]), max_verify=2)
     assert plain is not None
+
+
+def test_verify_context_does_not_shift_positional_parameters():
+    import inspect
+
+    from lazybridge import Agent
+
+    params = list(inspect.signature(Agent.__init__).parameters)
+    assert params.index("verify_context") == len(params) - 1
+    assert params.index("name") == params.index("max_verify") + 1

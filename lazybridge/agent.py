@@ -116,7 +116,6 @@ class Agent:
         guard: Any | None = None,
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
-        verify_context: bool = False,
         name: str | None = None,
         description: str | None = None,
         session: Any | None = None,
@@ -171,6 +170,8 @@ class Agent:
         # auto-created.  Ignored when ``engine=`` is supplied explicitly
         # (configure ``LLMEngine(cache=...)`` directly).
         cache: bool | Any = False,
+        # Last on purpose: never shift an existing positional parameter.
+        verify_context: bool = False,
     ) -> None:
         # ``name`` is "explicit" when the caller supplied a real string
         # value (not None / blank).  Used downstream to require a name
@@ -969,7 +970,9 @@ class Agent:
                 judge_context = None
                 if verify_context:
                     # The wrapped agent injects its sources inside run(); show
-                    # the judge the same evidence without changing ``env``.
+                    # the judge the same evidence without changing ``env``. Sources
+                    # are read here and again in run(): a callable source that
+                    # changes between reads gives the judge the earlier value.
                     inject = getattr(agent, "_inject_sources", None)
                     judge_context = (inject(env) if inject else env).context
                 result = await verify_with_retry(
