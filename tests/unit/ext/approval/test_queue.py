@@ -1514,32 +1514,45 @@ async def test_message_includes_the_ticket_id_in_the_reply_commands() -> None:
     assert f"/reject {ticket.approval_id} <reason>" in message
 
 
-async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
+async def test_reminder_send_time_does_not_delay_the_ttl_check(monkeypatch) -> None:
     """The post-reminder sleep must be computed from the time AFTER that
     reminder was sent, not the stale timestamp from before it -- otherwise
     a slow (but not stalled) reminder notify pushes ask()'s return well
     past the configured ttl. Found by Codex review before this ever
     shipped."""
+    from lazybridge.ext.approval import queue as queue_module
+
     queue = ApprovalQueue(Store())
-    # Measured as a GAP, not as total elapsed time: wall-clock bounds on the
-    # whole call were flaky in CI (0.405s against 0.4s) and, at the old
+    # Checked on the sleep the loop ASKS for, not on wall-clock time: total
+    # elapsed bounds were flaky in CI (0.405s against 0.4s) and, at the old
     # scale, could not tell the fixed code from the stale-timestamp bug.
     #
     # Only the reminder is slow: it hangs until the channel cuts it at the
-    # ticket's expiry. Fixed code re-reads the clock after the reminder,
-    # finds the ticket expired and sends the expiry notice straight away
-    # (gap ~0). With the stale pre-reminder timestamp it sleeps one more
-    # poll interval first (gap ~0.3s).
-    calls: list[tuple[str, float, float]] = []
+    # ticket's expiry. Fixed code re-reads the clock after the reminder, finds
+    # the ticket already expired and asks for a ~0s sleep. With the stale
+    # pre-reminder timestamp it asks for a whole poll interval.
+    events: list[tuple[str, float]] = []
+    real_sleep = asyncio.sleep
+
+    async def recording_sleep(delay, *args, **kwargs):
+        events.append(("sleep", delay))
+        return await real_sleep(delay, *args, **kwargs)
+
+    class _AsyncioWithRecordedSleep:
+        sleep = staticmethod(recording_sleep)
+
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+    monkeypatch.setattr(queue_module, "asyncio", _AsyncioWithRecordedSleep())
 
     async def notify(ticket, message):
-        started = time.monotonic()
-        kind = "reminder" if "Still waiting" in message else "other"
-        try:
-            if kind == "reminder":
-                await asyncio.sleep(30)
-        finally:
-            calls.append((kind, started, time.monotonic()))
+        if "Still waiting" not in message:
+            return
+        # Marked at the START: the channel abandons a timed-out notifier
+        # without awaiting it, so code after the cut may run only later.
+        events.append(("reminder", 0.0))
+        await real_sleep(30)
 
     poll_seconds = 0.3
     channel = StoreApprovalChannel(
@@ -1554,12 +1567,14 @@ async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
     result = await asyncio.wait_for(channel.ask("please approve"), timeout=10.0)
 
     assert result is False
-    reminders = [i for i, call in enumerate(calls) if call[0] == "reminder"]
-    assert reminders, f"no reminder was sent: {calls}"
-    last = reminders[-1]
-    assert last + 1 < len(calls), f"no expiry notice after the last reminder: {calls}"
-    gap = calls[last + 1][1] - calls[last][2]
-    assert gap < poll_seconds / 2, f"slept {gap:.3f}s past the ticket's expiry after a reminder"
+    reminders = [i for i, event in enumerate(events) if event[0] == "reminder"]
+    assert reminders, f"no reminder was sent: {events}"
+    after = [delay for kind, delay in events[reminders[-1] + 1 :] if kind == "sleep"]
+    # The loop may return without sleeping again (expiry seen at once); if it
+    # does sleep, the request must be ~0, not a poll interval.
+    assert all(delay < poll_seconds / 10 for delay in after), (
+        f"asked to sleep {after} after a reminder that ended at the ticket's expiry"
+    )
 
 
 async def test_reminder_spacing_accounts_for_notify_delivery_time() -> None:
