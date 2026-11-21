@@ -24,6 +24,7 @@ from lazybridge.engines.coding import (
     ask_approval,
     loop_scoped_lock,
     remembering_gate,
+    serialised_gate,
     session_approvals,
 )
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
@@ -564,7 +565,9 @@ class CodexEngine:
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
-        return remembering_gate(self.approval_gate, session_approvals(session, "codex", agent_name))
+        # Serialised: server approvals and gated dynamic-tool approvals share
+        # this one gate and may be asked concurrently.
+        return serialised_gate(remembering_gate(self.approval_gate, session_approvals(session, "codex", agent_name)))
 
     def _tool_dispatcher(
         self, tools: list[Any], observe: Any, gate: ApprovalGate, tool_clock: ToolClock | None = None

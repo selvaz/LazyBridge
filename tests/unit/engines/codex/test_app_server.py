@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -1011,3 +1012,221 @@ def test_slow_teardown_after_turn_completed_is_not_an_idle_timeout(monkeypatch):
     client = CodexAppServerClient(command=(sys.executable, FIXTURE, "happy"))
     result = Agent(CodexEngine(client=client, stream_idle_timeout=0.1, request_timeout=10))("go")
     assert result.ok, result.error
+
+
+# --- tool calls are served off the reader --------------------------------
+
+_TOOL_DEF = [{"type": "function", "name": "get_quote", "description": "d", "inputSchema": _QuoteTool._Def.parameters}]
+
+
+def _run_tool_scenario(scenario, on_tool_call, **kwargs):
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, scenario))
+        return await client.run(
+            prompt="quote AMZN", model=None, cwd=None, dynamic_tools=_TOOL_DEF, on_tool_call=on_tool_call, **kwargs
+        )
+
+    return asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+
+def _run_tool_scenario_args(scenario, extra, on_tool_call):
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, scenario, extra))
+        return await client.run(
+            prompt="quote AMZN", model=None, cwd=None, dynamic_tools=_TOOL_DEF, on_tool_call=on_tool_call
+        )
+
+    return asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+
+def test_notifications_are_drained_while_a_slow_tool_runs():
+    """The reader keeps consuming stdout during a tool call (no inline await)."""
+    state = {"tool_running": False, "during": 0, "total": 0}
+
+    async def slow(tool, arguments):
+        state["tool_running"] = True
+        try:
+            await asyncio.sleep(1.0)
+            return await _call_tool(tool, arguments)
+        finally:
+            state["tool_running"] = False
+
+    async def on_text(chunk):
+        state["total"] += 1
+        state["during"] += state["tool_running"]
+
+    result = _run_tool_scenario("tool_with_chatter", slow, on_text=on_text)
+
+    assert result.text == "done"
+    assert state["total"] == 4000
+    assert state["during"] > 0  # chunks were consumed while the tool was still running
+
+
+def test_turn_completed_while_a_tool_is_still_running_ends_the_turn_and_cancels_the_tool():
+    seen = {"cancelled": False}
+
+    async def never_finishes(tool, arguments):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    result = _run_tool_scenario("tool_then_complete", never_finishes)
+
+    assert result.text == "done"
+    assert seen["cancelled"]
+
+
+def test_child_exit_during_a_tool_call_fails_promptly_with_transport_error():
+    seen = {"cancelled": False}
+
+    async def never_finishes(tool, arguments):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    start = time.monotonic()
+    with pytest.raises(CodexTransportError) as caught:
+        _run_tool_scenario("tool_then_exit", never_finishes, ephemeral=True)
+
+    assert time.monotonic() - start < 10
+    assert caught.value.returncode == 7
+    assert "child-died-mid-tool" in str(caught.value)
+    assert seen["cancelled"]
+
+
+def test_fast_tool_round_trip_is_unchanged():
+    result = _run_tool_scenario("happy", _call_tool)
+    assert result.text == "AMZN is 123.45"
+
+
+def test_overlapping_approvals_are_decided_one_at_a_time_with_their_own_answers():
+    active = {"now": 0, "max": 0}
+
+    async def gate(request):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        try:
+            await asyncio.sleep(0.2)
+            # Answer by *this* request's reason: crossed answers would show.
+            return ApprovalDecision.allow() if request.reason == "first" else ApprovalDecision.deny()
+        finally:
+            active["now"] -= 1
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "two_approvals"))
+        return await client.run(
+            prompt="x",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            sandbox="workspace-write",
+            approval_policy="on-request",
+            approval_gate=gate,
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+    assert result.text == "ok"
+    assert active["max"] == 1
+
+
+def test_a_tool_that_ignores_cancellation_cannot_hang_a_completed_turn(monkeypatch, caplog):
+    monkeypatch.setattr(app_server, "_CLIENT_TASK_TEARDOWN_GRACE", 0.3)
+
+    async def stubborn(tool, arguments):
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await asyncio.sleep(5)  # swallows cancellation and keeps going
+
+    start = time.monotonic()
+    with caplog.at_level("WARNING", logger=app_server.__name__):
+        result = _run_tool_scenario("tool_then_complete", stubborn)
+
+    assert result.text == "done"
+    assert time.monotonic() - start < 8
+    assert any("abandoning" in r.getMessage() for r in caplog.records)
+
+
+def test_no_response_is_written_after_the_turn_ended(tmp_path):
+    late = tmp_path / "late.txt"
+
+    async def swallows_cancel(tool, arguments):
+        # Swallows the cancellation and answers anyway: the client must not send it.
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.sleep(60)
+        return {"success": True, "contentItems": [{"type": "inputText", "text": "late"}]}
+
+    result = _run_tool_scenario_args("tool_late_response", str(late), swallows_cancel)
+
+    assert result.text == "done"
+    assert not late.exists() or late.read_text() == ""
+
+
+def test_a_gated_tool_approval_and_a_server_approval_share_one_serialised_gate():
+    """Tool approvals (engine gate) and server approvals must not overlap."""
+    from lazybridge.engines.codex.engine import CodexEngine as Engine
+    from lazybridge.engines.coding import ApprovalRequest, CodexPolicy, CodingAgentConfig
+
+    from .test_engine import FakeAppServer, get_quote
+
+    active = {"now": 0, "max": 0}
+    answers: dict[str, str] = {}
+
+    async def gate(request):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        try:
+            await asyncio.sleep(0.2)
+            answers[request.kind] = request.name
+            return ApprovalDecision.allow()
+        finally:
+            active["now"] -= 1
+
+    class Overlapping(FakeAppServer):
+        async def run(self, *, approval_gate=None, on_tool_call=None, dynamic_tools=(), **kwargs):
+            server_request = ApprovalRequest(provider="codex", kind="command", name="codex-shell", arguments={})
+            tool_call = on_tool_call(dynamic_tools[0]["name"], {"symbol": "AMZN"})
+            server_side = approval_gate(server_request)
+            await asyncio.gather(tool_call, server_side)
+            return self.result
+
+    agent = Agent(
+        name="gated",
+        engine=Engine(
+            client=Overlapping(),
+            config=CodingAgentConfig(codex=CodexPolicy(preapprove_dynamic_tools=False), approval_gate=gate),
+        ),
+        tools=[get_quote],
+    )
+    assert asyncio.run(agent.run("go")).ok
+    assert active["max"] == 1
+    assert answers == {"command": "codex-shell", "tool": "get_quote"}
+
+
+def test_sync_agent_call_returns_when_a_tool_ignores_cancellation(monkeypatch):
+    """Abandoned callbacks are registered with the sync bridge, not awaited at loop exit."""
+    monkeypatch.setattr(app_server, "_CLIENT_TASK_TEARDOWN_GRACE", 0.3)
+
+    async def get_quote(symbol: str) -> str:
+        """Quote."""
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                pass  # swallows every cancellation, forever
+
+    engine = CodexEngine(client=CodexAppServerClient(command=(sys.executable, FIXTURE, "tool_then_complete")))
+    agent = Agent(name="stubborn", engine=engine, tools=[get_quote])
+
+    start = time.monotonic()
+    result = agent("quote AMZN")  # synchronous: runs on its own loop
+
+    assert result.ok, result.error
+    assert time.monotonic() - start < 12

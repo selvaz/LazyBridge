@@ -18,12 +18,13 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approval
 
 ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -45,6 +46,10 @@ _STDERR_TAIL_BYTES = 16 * 1024
 _STDERR_MESSAGE_CHARS = 2000
 #: Bound on each wait during teardown and on the return-code lookup after EOF.
 _EXIT_GRACE = 2.0
+#: How long teardown waits for cancelled tool/approval callbacks to unwind.
+#: A callback that ignores cancellation or cleans up slowly is abandoned (with
+#: a warning) rather than allowed to hold a finished turn hostage.
+_CLIENT_TASK_TEARDOWN_GRACE = 3.0
 #: Short wait for a clean exit after stdin closes (the real child needs ~1s, so
 #: this usually falls through to terminate, as before) — kept small so teardown
 #: stays fast.
@@ -63,6 +68,8 @@ _RETRYABLE_BEFORE_TURN = _PRE_THREAD_PHASES | {"thread/start", "thread/resume"}
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
 _logger = logging.getLogger(__name__)
+#: Strong references to abandoned callback tasks until they finish.
+_abandoned_callbacks: set[asyncio.Task[None]] = set()
 _PRERELEASE_WARNED: set[str] = set()
 _PRERELEASE_WARNING_LOCK = threading.Lock()
 
@@ -850,7 +857,54 @@ class CodexAppServerClient:
                 else:
                     completed.set_exception(exc)
 
+        #: Server-initiated requests (tool calls, approvals) being served. They
+        #: run off the reader so it keeps draining stdout — and so notices EOF,
+        #: a child exit or ``turn/completed`` — while a tool is still running.
+        client_tasks: set[asyncio.Task[None]] = set()
+        #: Approval prompts are serialised per run: concurrent requests must not
+        #: reach a shared (terminal) gate at once, or answers could be crossed.
+        approval_lock = asyncio.Lock()
+
+        def turn_done_flag() -> bool:
+            return bool(progress is not None and progress.get("turn_done"))
+
+        async def respond(request_id: Any, result: dict[str, Any]) -> None:
+            """Answer a server request, unless nobody can use the answer any more."""
+            if process.returncode is not None or process.stdin is None or process.stdin.is_closing():
+                return  # nobody left to read it; the reader reports the exit
+            if completed.done() or turn_done_flag():
+                return  # the turn has ended: a late answer would hit a dead request
+            if (me := asyncio.current_task()) is not None and me.cancelling():
+                return  # cancelled, even if the callback swallowed the cancellation
+            try:
+                await send({"id": request_id, "result": result})
+            except CodexTransportError as exc:
+                fail_waiters(exc)
+
+        def spawn_client_task(coro: Coroutine[Any, Any, None]) -> None:
+            task = asyncio.create_task(coro)
+            client_tasks.add(task)
+
+            def done(finished: asyncio.Task[None]) -> None:
+                client_tasks.discard(finished)
+                if not finished.cancelled() and (exc := finished.exception()) is not None:
+                    fail_waiters(exc)
+
+            task.add_done_callback(done)
+
+        def cancel_client_tasks() -> None:
+            for task in list(client_tasks):
+                task.cancel()
+
         async def read_loop() -> None:
+            try:
+                await read_messages()
+            finally:
+                # The turn ended or the child went away: no response can be
+                # delivered any more, so stop serving requests.
+                cancel_client_tasks()
+
+        async def read_messages() -> None:
             nonlocal turn_id
             assert process.stdout
             try:
@@ -918,58 +972,74 @@ class CodexAppServerClient:
                         if progress is not None:
                             progress["tool_call_observed"] = True
                         params = message["params"]
-                        try:
-                            with _client_wait(progress):
-                                result = await on_tool_call(params["tool"], params.get("arguments", {}))
-                        except Exception as exc:  # defensive protocol response
-                            result = {
-                                "success": False,
-                                "contentItems": [{"type": "inputText", "text": str(exc)}],
-                            }
-                        await send({"id": message["id"], "result": result})
+                        request_id = message["id"]
+
+                        async def run_tool(params: dict[str, Any] = params, request_id: Any = request_id) -> None:
+                            try:
+                                with _client_wait(progress):
+                                    result = await on_tool_call(params["tool"], params.get("arguments", {}))
+                            except Exception as exc:  # defensive protocol response
+                                result = {
+                                    "success": False,
+                                    "contentItems": [{"type": "inputText", "text": str(exc)}],
+                                }
+                            await respond(request_id, result)
+
+                        spawn_client_task(run_tool())
                     elif method in {
                         "item/commandExecution/requestApproval",
                         "item/fileChange/requestApproval",
                         "item/permissions/requestApproval",
                     }:
                         params = message.get("params", {})
+                        request_id = message["id"]
                         if method == "item/commandExecution/requestApproval":
                             kind, name = "command", "codex-shell"
                         elif method == "item/fileChange/requestApproval":
                             kind, name = "file_change", str(params.get("grantRoot") or "file changes")
                         else:
                             kind, name = "permissions", "sandbox permissions"
-                        with _client_wait(progress):
-                            decision = await ask_approval(
-                                approval_gate,
-                                ApprovalRequest(
-                                    provider="codex",
-                                    kind=kind,  # type: ignore[arg-type]
-                                    name=name,
-                                    arguments=params,
-                                    reason=params.get("reason"),
-                                    cwd=params.get("cwd") or cwd,
-                                    thread_id=params.get("threadId"),
-                                    turn_id=params.get("turnId"),
-                                    raw=params,
-                                ),
-                            )
-                        if kind == "permissions":
-                            requested = params.get("permissions", {})
-                            granted = decision.permissions if decision.permissions is not None else requested
-                            result = {
-                                "permissions": granted if decision.action in {"allow", "allow_session"} else {},
-                                "scope": "session" if decision.action == "allow_session" else "turn",
-                            }
-                        else:
-                            native = {
-                                "allow": "accept",
-                                "allow_session": "acceptForSession",
-                                "deny": "decline",
-                                "cancel": "cancel",
-                            }[decision.action]
-                            result = {"decision": native}
-                        await send({"id": message["id"], "result": result})
+
+                        async def run_approval(
+                            params: dict[str, Any] = params,
+                            request_id: Any = request_id,
+                            kind: str = kind,
+                            name: str = name,
+                        ) -> None:
+                            with _client_wait(progress):
+                                async with approval_lock:
+                                    decision = await ask_approval(
+                                        approval_gate,
+                                        ApprovalRequest(
+                                            provider="codex",
+                                            kind=kind,  # type: ignore[arg-type]
+                                            name=name,
+                                            arguments=params,
+                                            reason=params.get("reason"),
+                                            cwd=params.get("cwd") or cwd,
+                                            thread_id=params.get("threadId"),
+                                            turn_id=params.get("turnId"),
+                                            raw=params,
+                                        ),
+                                    )
+                            if kind == "permissions":
+                                requested = params.get("permissions", {})
+                                granted = decision.permissions if decision.permissions is not None else requested
+                                result = {
+                                    "permissions": granted if decision.action in {"allow", "allow_session"} else {},
+                                    "scope": "session" if decision.action == "allow_session" else "turn",
+                                }
+                            else:
+                                native = {
+                                    "allow": "accept",
+                                    "allow_session": "acceptForSession",
+                                    "deny": "decline",
+                                    "cancel": "cancel",
+                                }[decision.action]
+                                result = {"decision": native}
+                            await respond(request_id, result)
+
+                        spawn_client_task(run_approval())
                     elif method == "item/agentMessage/delta":
                         delta = message.get("params", {}).get("delta", "")
                         if delta and on_text:
@@ -1180,6 +1250,21 @@ class CodexAppServerClient:
             )
         finally:
             reader.cancel()
+            cancel_client_tasks()
+            if client_tasks:
+                _, abandoned = await asyncio.wait(set(client_tasks), timeout=_CLIENT_TASK_TEARDOWN_GRACE)
+                if abandoned:
+                    for task in abandoned:
+                        # Same as other abandoned tasks: the synchronous bridge
+                        # must not wait for them while shutting its loop down.
+                        abandoned_tasks.add(task)
+                        _abandoned_callbacks.add(task)  # abandoned_tasks is weak
+                        task.add_done_callback(_abandoned_callbacks.discard)
+                    _logger.warning(
+                        "Codex: abandoning %d tool/approval callback(s) that did not stop within %.1fs of cancellation",
+                        len(abandoned),
+                        _CLIENT_TASK_TEARDOWN_GRACE,
+                    )
             try:
                 await reader
             except asyncio.CancelledError:
