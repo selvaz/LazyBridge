@@ -40,31 +40,32 @@ _LABEL_PREFIX = re.compile(
     r"^(final\s+)?(verdict|decision|result|outcome|status|judg(e)?ment|review)\s*[:\-=]\s*",
     re.IGNORECASE,
 )
-#: After a label, an approval word counts only when it stands alone: end of
-#: line, closing markdown or punctuation (``APPROVED``, ``approved.``,
-#: ``pass — all claims supported``). Words after it mean a qualified verdict.
+#: After a label, an approval counts only when the word stands alone on its
+#: line (``VERDICT: APPROVED``, ``**Verdict:** approved.``). Anything else on
+#: that line (``approved - only if X``, ``approved, contingent on X``) makes
+#: it a qualified verdict, which fails safe: an allowlist, not a list of
+#: qualifier words that can never be complete.
 _LABELLED_APPROVE = re.compile(
-    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)\**\s*([.!,;:\u2014\u2013-]|$)",
+    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)[*_]*[.!]?[*_]*$",
     re.IGNORECASE,
 )
-#: After a labelled approval and its punctuation, a qualifier turns it into a
-#: conditional verdict (``Verdict: approved - only if the dates are fixed``),
-#: which fails safe to rejection.
+#: A line right after a bare labelled approval that opens with a condition
+#: (``VERDICT: APPROVED`` then ``Only if the dates are fixed``) turns it into
+#: a conditional verdict. Free text cannot be parsed completely: a judge that
+#: must be exact should put the verdict alone on the first line.
 _QUALIFIER = re.compile(
-    r"^(only|if|unless|but|provided|pending|once|after|with|conditional(ly)?|subject|except|assuming|when)\b",
+    r"^(only|if|unless|but|provided|pending|once|after|conditional(ly)?|contingent|subject|except|assuming|however)\b",
     re.IGNORECASE,
 )
 
 
-def _labelled_verdict(text: str) -> bool:
-    """Verdict that follows a label: a bare approval word, nothing conditional."""
+def _labelled_verdict(text: str, next_line: str) -> bool:
+    """Verdict after a label: a bare approval word with no condition."""
     if _REJECT_PATTERN.match(text):
         return False
-    match = _LABELLED_APPROVE.match(text)
-    if match is None:
+    if _LABELLED_APPROVE.match(text.strip()) is None:
         return False
-    rest = text[match.end() :].lstrip("*_ \t.!,;:\u2014\u2013-")
-    return not _QUALIFIER.match(rest)
+    return not _QUALIFIER.match(next_line.lstrip("*>#-_ \t:."))
 
 
 def _is_approved(verdict: Any) -> bool:
@@ -90,9 +91,9 @@ def _is_approved(verdict: Any) -> bool:
         return False
     # Walk lines so a multi-line judge response (verdict + reason on
     # a separate line) is parsed by its first informative line.
+    lines = [raw.strip() for raw in text.splitlines()]
     pending_label = False
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
+    for index, line in enumerate(lines):
         if not line:
             continue
         # Strip leading markdown / punctuation / numbering so verdicts
@@ -109,11 +110,12 @@ def _is_approved(verdict: Any) -> bool:
             pending_label = labelled
             continue
         if labelled:
-            # After a label the verdict word must stand alone (end of line or
-            # punctuation, then no qualifier): "Verdict: approve only if X",
-            # "Verdict: approved - only if X" or "Decision: OK to reject" are
-            # qualified, not approvals, and fail safe.
-            return _labelled_verdict(stripped)
+            # After a label the verdict word must stand alone on its line and
+            # the next line must not open with a condition: "Verdict: approve
+            # only if X", "Verdict: approved - contingent on X" or "Decision:
+            # OK to reject" are qualified, not approvals, and fail safe.
+            following = next((rest for rest in lines[index + 1 :] if rest), "")
+            return _labelled_verdict(stripped, following)
         if _REJECT_PATTERN.match(stripped):
             return False
         # First non-blank, non-empty-after-strip line that doesn't

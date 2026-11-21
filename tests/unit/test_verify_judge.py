@@ -260,7 +260,6 @@ def test_verify_context_does_not_shift_positional_parameters():
         "**Verdict:** pass",
         "Final verdict - accepted",
         "Decision: approve",
-        "VERDICT:\nAPPROVED — all claims supported",
     ],
 )
 def test_labelled_approvals_are_recognised(verdict):
@@ -314,10 +313,26 @@ def test_conditional_or_split_labelled_verdicts_fail_safe(verdict):
 @pytest.mark.parametrize(
     "verdict",
     [
-        "Verdict: approved \u2014 all claims are supported by the quotes",
         "Verdict:\nAPPROVED",
         "**Verdict:**\n\n**APPROVED**\nEvery claim matches a quote.",
     ],
 )
 def test_split_or_rationale_labelled_approvals_pass(verdict):
     assert _is_approved(verdict) is True
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        # Anything after a labelled approval on the same line fails safe,
+        # rationale included: the allowlist is the bare word.
+        "Verdict: approved \u2014 all claims are supported by the quotes",
+        "Verdict: approved \u2014 contingent on fixing the dates",
+        "VERDICT:\nAPPROVED \u2014 all claims supported",
+        # A condition on the line after a bare labelled approval.
+        "VERDICT: APPROVED\nOnly if the dates are fixed",
+        "VERDICT: APPROVED\n\n- contingent on a second source",
+    ],
+)
+def test_labelled_approval_with_anything_attached_fails_safe(verdict):
+    assert _is_approved(verdict) is False
