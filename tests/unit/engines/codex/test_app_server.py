@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -1157,10 +1158,10 @@ def test_no_response_is_written_after_the_turn_ended(tmp_path):
     late = tmp_path / "late.txt"
 
     async def swallows_cancel(tool, arguments):
-        try:
+        # Swallows the cancellation and answers anyway: the client must not send it.
+        with contextlib.suppress(asyncio.CancelledError):
             await asyncio.sleep(60)
-        except asyncio.CancelledError:
-            return {"success": True, "contentItems": [{"type": "inputText", "text": "late"}]}
+        return {"success": True, "contentItems": [{"type": "inputText", "text": "late"}]}
 
     result = _run_tool_scenario_args("tool_late_response", str(late), swallows_cancel)
 
