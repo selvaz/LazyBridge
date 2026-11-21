@@ -83,6 +83,26 @@ async def ask_approval(gate: ApprovalGate | None, request: ApprovalRequest) -> A
     return result
 
 
+def serialised_gate(gate: ApprovalGate | None) -> ApprovalGate:
+    """Wrap ``gate`` so that prompts on it are decided one at a time.
+
+    Concurrent requests (a server approval and a gated dynamic tool, two tools
+    in flight) must not reach an interactive gate together, or one request's
+    answer could be handed to the other. One lock per wrapper, created on the
+    first call so it binds to the loop that actually uses it.
+    """
+    lock: asyncio.Lock | None = None
+
+    async def serialised(request: ApprovalRequest) -> ApprovalDecision:
+        nonlocal lock
+        if lock is None:
+            lock = asyncio.Lock()
+        async with lock:
+            return await ask_approval(gate, request)
+
+    return serialised
+
+
 #: Per-event-loop lock registries. An ``asyncio.Lock`` binds to the loop that
 #: first waits on it and raises ``RuntimeError: bound to a different event
 #: loop`` anywhere else — and every synchronous ``Agent.__call__`` runs on a
@@ -381,5 +401,6 @@ __all__ = [
     "CodingAgentConfig",
     "TerminalApprovalGate",
     "remembering_gate",
+    "serialised_gate",
     "session_approvals",
 ]

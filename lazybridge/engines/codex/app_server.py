@@ -24,6 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approval
 
 ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -67,6 +68,8 @@ _RETRYABLE_BEFORE_TURN = _PRE_THREAD_PHASES | {"thread/start", "thread/resume"}
 _STARTUP_RETRY_DELAY = (0.2, 0.6)
 
 _logger = logging.getLogger(__name__)
+#: Strong references to abandoned callback tasks until they finish.
+_abandoned_callbacks: set[asyncio.Task[None]] = set()
 _PRERELEASE_WARNED: set[str] = set()
 _PRERELEASE_WARNING_LOCK = threading.Lock()
 
@@ -1251,6 +1254,12 @@ class CodexAppServerClient:
             if client_tasks:
                 _, abandoned = await asyncio.wait(set(client_tasks), timeout=_CLIENT_TASK_TEARDOWN_GRACE)
                 if abandoned:
+                    for task in abandoned:
+                        # Same as other abandoned tasks: the synchronous bridge
+                        # must not wait for them while shutting its loop down.
+                        abandoned_tasks.add(task)
+                        _abandoned_callbacks.add(task)  # abandoned_tasks is weak
+                        task.add_done_callback(_abandoned_callbacks.discard)
                     _logger.warning(
                         "Codex: abandoning %d tool/approval callback(s) that did not stop within %.1fs of cancellation",
                         len(abandoned),

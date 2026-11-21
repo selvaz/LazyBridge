@@ -1166,3 +1166,66 @@ def test_no_response_is_written_after_the_turn_ended(tmp_path):
 
     assert result.text == "done"
     assert not late.exists() or late.read_text() == ""
+
+
+def test_a_gated_tool_approval_and_a_server_approval_share_one_serialised_gate():
+    """Tool approvals (engine gate) and server approvals must not overlap."""
+    from lazybridge.engines.codex.engine import CodexEngine as Engine
+    from lazybridge.engines.coding import ApprovalRequest, CodexPolicy, CodingAgentConfig
+
+    from .test_engine import FakeAppServer, get_quote
+
+    active = {"now": 0, "max": 0}
+    answers: dict[str, str] = {}
+
+    async def gate(request):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        try:
+            await asyncio.sleep(0.2)
+            answers[request.kind] = request.name
+            return ApprovalDecision.allow()
+        finally:
+            active["now"] -= 1
+
+    class Overlapping(FakeAppServer):
+        async def run(self, *, approval_gate=None, on_tool_call=None, dynamic_tools=(), **kwargs):
+            server_request = ApprovalRequest(provider="codex", kind="command", name="codex-shell", arguments={})
+            tool_call = on_tool_call(dynamic_tools[0]["name"], {"symbol": "AMZN"})
+            server_side = approval_gate(server_request)
+            await asyncio.gather(tool_call, server_side)
+            return self.result
+
+    agent = Agent(
+        name="gated",
+        engine=Engine(
+            client=Overlapping(),
+            config=CodingAgentConfig(codex=CodexPolicy(preapprove_dynamic_tools=False), approval_gate=gate),
+        ),
+        tools=[get_quote],
+    )
+    assert asyncio.run(agent.run("go")).ok
+    assert active["max"] == 1
+    assert answers == {"command": "codex-shell", "tool": "get_quote"}
+
+
+def test_sync_agent_call_returns_when_a_tool_ignores_cancellation(monkeypatch):
+    """Abandoned callbacks are registered with the sync bridge, not awaited at loop exit."""
+    monkeypatch.setattr(app_server, "_CLIENT_TASK_TEARDOWN_GRACE", 0.3)
+
+    async def get_quote(symbol: str) -> str:
+        """Quote."""
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                pass  # swallows every cancellation, forever
+
+    engine = CodexEngine(client=CodexAppServerClient(command=(sys.executable, FIXTURE, "tool_then_complete")))
+    agent = Agent(name="stubborn", engine=engine, tools=[get_quote])
+
+    start = time.monotonic()
+    result = agent("quote AMZN")  # synchronous: runs on its own loop
+
+    assert result.ok, result.error
+    assert time.monotonic() - start < 12
