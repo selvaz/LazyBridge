@@ -33,6 +33,39 @@ _REJECT_PATTERN = re.compile(
     r"^(reject(ed)?|denied|deny|block(ed)?|fail(ed)?|no|bad|invalid)\b",
     re.IGNORECASE,
 )
+#: A label in front of the verdict word (``VERDICT: APPROVED``,
+#: ``Decision - rejected``, ``**Result:** pass``). Only these label words
+#: are stripped, so an unrelated first word still fails safe to rejection.
+_LABEL_PREFIX = re.compile(
+    r"^(final\s+)?(verdict|decision|result|outcome|status|judg(e)?ment|review)\s*[:\-=]\s*",
+    re.IGNORECASE,
+)
+#: After a label, an approval counts only when the word stands alone on its
+#: line (``VERDICT: APPROVED``, ``**Verdict:** approved.``). Anything else on
+#: that line (``approved - only if X``, ``approved, contingent on X``) makes
+#: it a qualified verdict, which fails safe: an allowlist, not a list of
+#: qualifier words that can never be complete.
+_LABELLED_APPROVE = re.compile(
+    r"^(approve(d)?|accept(ed)?|allow(ed)?|pass(ed)?|okay|ok|yes|good|valid)[*_]*[.!]?[*_]*$",
+    re.IGNORECASE,
+)
+#: A line right after a bare labelled approval that opens with a condition
+#: (``VERDICT: APPROVED`` then ``Only if the dates are fixed``) turns it into
+#: a conditional verdict. Free text cannot be parsed completely: a judge that
+#: must be exact should put the verdict alone on the first line.
+_QUALIFIER = re.compile(
+    r"^(only|if|unless|but|provided|pending|once|after|with|conditional(ly)?|contingent|subject|except|assuming|however)\b",
+    re.IGNORECASE,
+)
+
+
+def _labelled_verdict(text: str, next_line: str) -> bool:
+    """Verdict after a label: a bare approval word with no condition."""
+    if _REJECT_PATTERN.match(text):
+        return False
+    if _LABELLED_APPROVE.match(text.strip()) is None:
+        return False
+    return not _QUALIFIER.match(next_line.lstrip("*>#-_ \t:.)0123456789"))
 
 
 def _is_approved(verdict: Any) -> bool:
@@ -58,8 +91,9 @@ def _is_approved(verdict: Any) -> bool:
         return False
     # Walk lines so a multi-line judge response (verdict + reason on
     # a separate line) is parsed by its first informative line.
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
+    lines = [raw.strip() for raw in text.splitlines()]
+    pending_label = False
+    for index, line in enumerate(lines):
         if not line:
             continue
         # Strip leading markdown / punctuation / numbering so verdicts
@@ -67,8 +101,21 @@ def _is_approved(verdict: Any) -> bool:
         # The character class mirrors LLMGuard._verdict so both judge
         # paths share the same tolerance.
         stripped = line.lstrip("*>#-_ \t:.0123456789")
+        # ``VERDICT: APPROVED`` / ``**Verdict:** rejected``: drop the label,
+        # then any markdown left between the label and the verdict word.
+        labelled = pending_label or _LABEL_PREFIX.match(stripped) is not None
+        stripped = _LABEL_PREFIX.sub("", stripped, count=1).lstrip("*>#-_ \t:.")
         if not stripped:
+            # A label alone on its line ("Verdict:") governs the next line.
+            pending_label = labelled
             continue
+        if labelled:
+            # After a label the verdict word must stand alone on its line and
+            # the next line must not open with a condition: "Verdict: approve
+            # only if X", "Verdict: approved - contingent on X" or "Decision:
+            # OK to reject" are qualified, not approvals, and fail safe.
+            following = next((rest for rest in lines[index + 1 :] if rest), "")
+            return _labelled_verdict(stripped, following)
         if _REJECT_PATTERN.match(stripped):
             return False
         # First non-blank, non-empty-after-strip line that doesn't

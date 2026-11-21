@@ -248,3 +248,93 @@ def test_verify_context_does_not_shift_positional_parameters():
     params = list(inspect.signature(Agent.__init__).parameters)
     assert params.index("verify_context") == len(params) - 1
     assert params.index("name") == params.index("max_verify") + 1
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "VERDICT: APPROVED\n\nThe revised draft addresses the concerns.",
+        "Verdict: approved",
+        "Verdict: yes",
+        "**VERDICT: APPROVED**",
+        "**Verdict:** pass",
+        "Final verdict - accepted",
+        "Decision: approve",
+    ],
+)
+def test_labelled_approvals_are_recognised(verdict):
+    assert _is_approved(verdict) is True
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "VERDICT: REJECTED\n\nTwo claims are unsupported.",
+        "**Verdict:** rejected",
+        "Decision: no",
+        "Result = fail",
+        # An unrelated label is not stripped: fail-safe rejection.
+        "Overall: approved",
+    ],
+)
+def test_labelled_rejections_and_unknown_labels_fail_safe(verdict):
+    assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: approve only if the dates are fixed",
+        "Decision: OK to reject",
+        "Review - approved with major issues",
+        "Status: not approved",
+    ],
+)
+def test_qualified_labelled_verdicts_fail_safe(verdict):
+    assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: approved \u2014 only if the dates are fixed",
+        "Verdict: approved, but fix the dates first",
+        "Decision: pass - unless the source is retracted",
+        "VERDICT: APPROVED. Only after the second source is added.",
+        "Verdict:\napprove only if the dates are fixed",
+        "**Verdict:**\n\nrejected",
+        "Verdict:\nno",
+    ],
+)
+def test_conditional_or_split_labelled_verdicts_fail_safe(verdict):
+    assert _is_approved(verdict) is False
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict:\nAPPROVED",
+        "**Verdict:**\n\n**APPROVED**\nEvery claim matches a quote.",
+    ],
+)
+def test_split_or_rationale_labelled_approvals_pass(verdict):
+    assert _is_approved(verdict) is True
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        # Anything after a labelled approval on the same line fails safe,
+        # rationale included: the allowlist is the bare word.
+        "Verdict: approved \u2014 all claims are supported by the quotes",
+        "Verdict: approved \u2014 contingent on fixing the dates",
+        "VERDICT:\nAPPROVED \u2014 all claims supported",
+        # A condition on the line after a bare labelled approval.
+        "VERDICT: APPROVED\nOnly if the dates are fixed",
+        "VERDICT: APPROVED\n\n- contingent on a second source",
+        "VERDICT: APPROVED\n1. Only if the dates are fixed",
+        "VERDICT: APPROVED\n2) With the condition that the dates are corrected",
+    ],
+)
+def test_labelled_approval_with_anything_attached_fails_safe(verdict):
+    assert _is_approved(verdict) is False

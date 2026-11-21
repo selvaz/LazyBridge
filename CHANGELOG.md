@@ -10,6 +10,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `verify=`: judge verdicts with a label prefix (`VERDICT: APPROVED`, `**Verdict:** pass`, `Decision: approve`) are now recognised, as the docstring already promised. Before, every labelled approval counted as a rejection, so verify loops that had converged kept retrying and reported "not approved". Only known label words are stripped; any other first word still fails safe to rejection.
+
+### Fixed
+
 - Codex: a run could hang forever after a dynamic tool call (about half of the runs with codex-cli 0.171). The turn had finished, but `wait_with_tool_clock` used `asyncio.wait_for`, which before Python 3.12 swallows a cancellation that lands in the same tick as a tool-clock change; the deadline timer then looped and the caller awaited it forever. It now uses `asyncio.wait`.
 - Codex: tool calls and approval requests are served in their own tasks, not inline in the App Server reader. While a tool runs, the reader keeps draining stdout and sees `turn/completed`, EOF or a child exit; a child that dies during a tool call now fails the turn promptly with `CodexTransportError`, and in-flight tool tasks are cancelled when the turn ends. The App Server has no timeout of its own for dynamic tool calls, so `CodexEngine(tool_timeout=...)` is the only bound on a tool.
 
