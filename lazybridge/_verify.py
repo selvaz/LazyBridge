@@ -33,6 +33,13 @@ _REJECT_PATTERN = re.compile(
     r"^(reject(ed)?|denied|deny|block(ed)?|fail(ed)?|no|bad|invalid)\b",
     re.IGNORECASE,
 )
+#: A label in front of the verdict word (``VERDICT: APPROVED``,
+#: ``Decision - rejected``, ``**Result:** pass``). Only these label words
+#: are stripped, so an unrelated first word still fails safe to rejection.
+_LABEL_PREFIX = re.compile(
+    r"^(final\s+)?(verdict|decision|result|outcome|status|judg(e)?ment|review)\s*[:\-=]\s*",
+    re.IGNORECASE,
+)
 
 
 def _is_approved(verdict: Any) -> bool:
@@ -67,6 +74,9 @@ def _is_approved(verdict: Any) -> bool:
         # The character class mirrors LLMGuard._verdict so both judge
         # paths share the same tolerance.
         stripped = line.lstrip("*>#-_ \t:.0123456789")
+        # ``VERDICT: APPROVED`` / ``**Verdict:** rejected``: drop the label,
+        # then any markdown left between the label and the verdict word.
+        stripped = _LABEL_PREFIX.sub("", stripped, count=1).lstrip("*>#-_ \t:.")
         if not stripped:
             continue
         if _REJECT_PATTERN.match(stripped):

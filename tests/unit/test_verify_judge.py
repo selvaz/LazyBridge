@@ -248,3 +248,35 @@ def test_verify_context_does_not_shift_positional_parameters():
     params = list(inspect.signature(Agent.__init__).parameters)
     assert params.index("verify_context") == len(params) - 1
     assert params.index("name") == params.index("max_verify") + 1
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "VERDICT: APPROVED\n\nThe revised draft addresses the concerns.",
+        "Verdict: approved",
+        "Verdict: yes",
+        "**VERDICT: APPROVED**",
+        "**Verdict:** pass",
+        "Final verdict - accepted",
+        "Decision: approve",
+        "VERDICT:\nAPPROVED — all claims supported",
+    ],
+)
+def test_labelled_approvals_are_recognised(verdict):
+    assert _is_approved(verdict) is True
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "VERDICT: REJECTED\n\nTwo claims are unsupported.",
+        "**Verdict:** rejected",
+        "Decision: no",
+        "Result = fail",
+        # An unrelated label is not stripped: fail-safe rejection.
+        "Overall: approved",
+    ],
+)
+def test_labelled_rejections_and_unknown_labels_fail_safe(verdict):
+    assert _is_approved(verdict) is False
