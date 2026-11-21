@@ -54,7 +54,7 @@ _LABELLED_APPROVE = re.compile(
 #: a conditional verdict. Free text cannot be parsed completely: a judge that
 #: must be exact should put the verdict alone on the first line.
 _QUALIFIER = re.compile(
-    r"^(only|if|unless|but|provided|pending|once|after|conditional(ly)?|contingent|subject|except|assuming|however)\b",
+    r"^(only|if|unless|but|provided|pending|once|after|with|conditional(ly)?|contingent|subject|except|assuming|however)\b",
     re.IGNORECASE,
 )
 
@@ -65,7 +65,7 @@ def _labelled_verdict(text: str, next_line: str) -> bool:
         return False
     if _LABELLED_APPROVE.match(text.strip()) is None:
         return False
-    return not _QUALIFIER.match(next_line.lstrip("*>#-_ \t:."))
+    return not _QUALIFIER.match(next_line.lstrip("*>#-_ \t:.)0123456789"))
 
 
 def _is_approved(verdict: Any) -> bool:

@@ -332,6 +332,8 @@ def test_split_or_rationale_labelled_approvals_pass(verdict):
         # A condition on the line after a bare labelled approval.
         "VERDICT: APPROVED\nOnly if the dates are fixed",
         "VERDICT: APPROVED\n\n- contingent on a second source",
+        "VERDICT: APPROVED\n1. Only if the dates are fixed",
+        "VERDICT: APPROVED\n2) With the condition that the dates are corrected",
     ],
 )
 def test_labelled_approval_with_anything_attached_fails_safe(verdict):
