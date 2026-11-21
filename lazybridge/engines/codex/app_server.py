@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -335,6 +336,154 @@ def _client_wait(progress: dict[str, Any] | None) -> Any:
             on_activity()
 
 
+#: Process-wide cap on concurrent Codex App Server children. Measured on
+#: Windows (codex-cli 0.167-0.171, 2026-11-21): concurrent App Servers crash
+#: with 0xC0000409 in 3-10% of turns while one-at-a-time runs did not crash.
+#: Set ``LAZYBRIDGE_CODEX_MAX_CONCURRENCY`` (or call
+#: :func:`set_codex_max_concurrency`) to serialise Codex turns; other engines
+#: are unaffected. Unset or ``0`` means unlimited (the previous behaviour).
+#: The cap is per process: separate worker processes each have their own.
+_concurrency_lock = threading.Lock()
+_concurrency_active = 0
+#: ``None`` = not configured explicitly: fall back to the environment variable.
+_concurrency_explicit: int | None = None
+_concurrency_explicit_set = False
+
+
+class _SlotHolder:
+    """A held slot; inherited (by reference) by tasks spawned under it."""
+
+    __slots__ = ("active",)
+
+    def __init__(self) -> None:
+        self.active = True
+
+
+#: The slot held by this call chain, if any. A context *object*: tasks spawned
+#: while it was held keep a reference, and ``active`` turns False when the
+#: holder releases, so a late background task cannot ride on a slot that is
+#: gone. While it is active, Codex work started inside the chain (the client
+#: of the same call, or a nested Codex agent run from a tool callback while the
+#: parent turn is suspended waiting for that tool) runs without taking another
+#: slot: waiting would deadlock with a cap of 1. Nested agents may therefore
+#: exceed the cap; documented, and the parent is idle meanwhile. Known limit:
+#: a background task started inside a turn that keeps running after the turn
+#: released its slot is not counted; start long-lived Codex work outside turns.
+#: With a cap, do not start another Codex turn from inside the loop that
+#: consumes a Codex stream: a full stream queue keeps the producer (and its
+#: slot) waiting for the consumer, which can deadlock at cap 1.
+_holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
+
+
+def set_codex_max_concurrency(limit: int | None) -> None:
+    """Set the per-process cap on concurrent Codex App Servers.
+
+    ``None`` or ``0`` means unlimited and overrides the environment variable.
+    A new cap applies to new acquisitions; turns already running are not
+    interrupted, and no new turn starts while the active count is at or above
+    the new cap.
+    """
+    global _concurrency_explicit, _concurrency_explicit_set
+    value = int(limit or 0)
+    if value < 0:
+        raise ValueError(f"codex max concurrency must be >= 0, got {limit!r}")
+    with _concurrency_lock:
+        _concurrency_explicit = value or None
+        _concurrency_explicit_set = True
+
+
+def reset_codex_max_concurrency() -> None:
+    """Forget an explicit cap and read ``LAZYBRIDGE_CODEX_MAX_CONCURRENCY`` again (tests)."""
+    global _concurrency_explicit, _concurrency_explicit_set
+    with _concurrency_lock:
+        _concurrency_explicit = None
+        _concurrency_explicit_set = False
+
+
+def _current_cap() -> int | None:
+    if _concurrency_explicit_set:
+        return _concurrency_explicit
+    raw = os.environ.get("LAZYBRIDGE_CODEX_MAX_CONCURRENCY", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        _logger.warning("ignoring invalid LAZYBRIDGE_CODEX_MAX_CONCURRENCY=%r", raw)
+        return None
+    return value if value > 0 else None
+
+
+async def _acquire_counted() -> None:
+    global _concurrency_active
+    # Poll a counter guarded by a threading lock: works across event loops and
+    # threads, keeps the waiter cancellable, and honours cap changes at once.
+    while True:
+        with _concurrency_lock:
+            cap = _current_cap()
+            if cap is None or _concurrency_active < cap:
+                _concurrency_active += 1
+                return
+        await asyncio.sleep(0.05)
+
+
+def _release_counted() -> None:
+    global _concurrency_active
+    with _concurrency_lock:
+        _concurrency_active -= 1
+
+
+async def acquire_codex_slot() -> _SlotHolder | None:
+    """Take a slot unless this chain already holds an active one (then ``None``).
+
+    The caller must pass the result to :func:`release_codex_slot`. Installing
+    the holder in a context is separate (:func:`enter_codex_slot`) so a stream
+    can bind it to its producer task rather than to the consumer.
+    """
+    parent = _holder.get()
+    if parent is not None and parent.active:
+        return None
+    await _acquire_counted()
+    return _SlotHolder()
+
+
+def release_codex_slot(holder: _SlotHolder | None) -> None:
+    if holder is None or not holder.active:
+        return
+    holder.active = False
+    _release_counted()
+
+
+def enter_codex_slot(holder: _SlotHolder | None) -> None:
+    """Bind ``holder`` to the current context (task-local; never reset)."""
+    if holder is not None:
+        _holder.set(holder)
+
+
+@contextlib.asynccontextmanager
+async def codex_concurrency_slot() -> AsyncIterator[None]:
+    """Hold one Codex slot for a whole engine call (cancellable wait).
+
+    The engine takes it *before* its request/idle timeouts start, so time
+    queued never consumes a turn's timeout budget. Re-entry inside a chain that
+    already holds an active slot does not wait (see ``_holder``).
+    """
+    holder = await acquire_codex_slot()
+    token = _holder.set(holder) if holder is not None else None
+    try:
+        yield
+    finally:
+        release_codex_slot(holder)
+        if token is not None:
+            # A generator finalised in another task cannot reset the token;
+            # the holder is already inactive, which is what matters.
+            with contextlib.suppress(ValueError):
+                _holder.reset(token)
+
+
+_client_slot = codex_concurrency_slot
+
+
 class CodexAppServerClient:
     """One ``codex app-server`` subprocess per run, torn down in ``finally``."""
 
@@ -497,32 +646,35 @@ class CodexAppServerClient:
         already carries the value its creating call set, and Codex has no
         endpoint to change it after the fact.
         """
+        async with _client_slot():
+            return await self._run_with_startup_retry(
+                prompt=prompt,
+                model=model,
+                cwd=cwd,
+                dynamic_tools=dynamic_tools,
+                on_tool_call=on_tool_call,
+                developer_instructions=developer_instructions,
+                on_text=on_text,
+                attachments=attachments,
+                effort=effort,
+                output_schema=output_schema,
+                sandbox=sandbox,
+                writable_roots=writable_roots,
+                approval_policy=approval_policy,
+                approval_gate=approval_gate,
+                thread_id=thread_id,
+                ephemeral=ephemeral,
+                review_target=review_target,
+                progress=progress,
+                config_overrides=config_overrides,
+                thread_source=thread_source,
+            )
+
+    async def _run_with_startup_retry(self, **kwargs: Any) -> CodexRunResult:
         for attempt in range(2):
             state = _Attempt()
             try:
-                return await self._run_once(
-                    state,
-                    prompt=prompt,
-                    model=model,
-                    cwd=cwd,
-                    dynamic_tools=dynamic_tools,
-                    on_tool_call=on_tool_call,
-                    developer_instructions=developer_instructions,
-                    on_text=on_text,
-                    attachments=attachments,
-                    effort=effort,
-                    output_schema=output_schema,
-                    sandbox=sandbox,
-                    writable_roots=writable_roots,
-                    approval_policy=approval_policy,
-                    approval_gate=approval_gate,
-                    thread_id=thread_id,
-                    ephemeral=ephemeral,
-                    review_target=review_target,
-                    progress=progress,
-                    config_overrides=config_overrides,
-                    thread_source=thread_source,
-                )
+                return await self._run_once(state, **kwargs)
             except CodexTransportError as exc:
                 if exc.turn_sent or attempt or exc.phase not in _RETRYABLE_BEFORE_TURN:
                     raise

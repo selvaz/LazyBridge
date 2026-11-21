@@ -35,7 +35,11 @@ from .app_server import (
     CodexAppServerClient,
     CodexTransportError,
     CodexTurnUncertain,
+    acquire_codex_slot,
+    codex_concurrency_slot,
+    enter_codex_slot,
     is_crash_returncode,
+    release_codex_slot,
 )
 from .dynamic_tools import definitions, dispatcher
 
@@ -773,7 +777,11 @@ class CodexEngine:
                 call = lambda: self._retry_crashed_turn(  # noqa: E731
                     raw_call, progress, tools, session, run_id
                 )
-                result = await self._run_with_idle_timeout(call, progress, tool_clock)
+                # Take the Codex slot before the request/idle clocks start, so
+                # queueing behind other Codex turns never consumes this turn's
+                # timeout budget (the client re-enters the held slot for free).
+                async with codex_concurrency_slot():
+                    result = await self._run_with_idle_timeout(call, progress, tool_clock)
                 self._absorb(result.thread_id)
             if session:
                 self._emit_model_response(session, agent_name, result, run_id)
@@ -869,6 +877,9 @@ class CodexEngine:
         tool_clock = ToolClock()
 
         async def _run_loop() -> None:
+            # Bind the stream's slot to the producer task only: Codex work the
+            # consumer starts between chunks must not ride on it.
+            enter_codex_slot(slot)
             try:
                 observe = self._observer(session, run_id)
                 gate = self._scoped_gate(session, agent_name)
@@ -924,7 +935,15 @@ class CodexEngine:
                 raise
             else:
                 await sink.put(None)  # sentinel — loop done
+            finally:
+                # The producer owns the slot: free it as soon as the turn is over,
+                # not when the consumer next resumes (it may be awaiting other
+                # Codex work). release_codex_slot is idempotent.
+                release_codex_slot(slot)
 
+        # Take the Codex slot before the consumer's idle clock starts; the
+        # producer task inherits it and the client reuses it.
+        slot = await acquire_codex_slot()
         task = asyncio.create_task(_run_loop())
         cancelled_by_us = False
         error: BaseException | None = None
@@ -967,6 +986,9 @@ class CodexEngine:
             except Exception as exc:
                 if error is None:
                     error = exc
+            finally:
+                # The producer is done (or cancelled): give the Codex slot back.
+                release_codex_slot(slot)
             # Also covers the consumer walking away mid-stream: the generator
             # is closed, the worker cancelled, and the turn it started may
             # already be committed to a durable thread.

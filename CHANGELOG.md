@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Codex: process-wide cap on concurrent App Server children via `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` or `set_codex_max_concurrency(n)` (default unlimited). Concurrent App Servers crashed with 0xC0000409 in 3-10% of turns on Windows; with the cap at 1 the same reproduction ran 0 of 32 crashes. Other engines are unaffected; waiting is cancellable.
+
 ### Changed
 
 - Codex App Server crashes now report the selected CLI path and cached version,
