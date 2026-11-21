@@ -201,3 +201,19 @@ def test_probe_failures_return_none(monkeypatch, error):
 
     monkeypatch.setattr(app_server.subprocess, "run", run)
     assert app_server._probe_codex_version("app/codex.exe") is None
+
+
+def test_prerelease_warning_is_emitted_once(monkeypatch, caplog):
+    app_server._PRERELEASE_WARNED.clear()
+    app_server._probe_codex_version.cache_clear()
+    monkeypatch.setattr(app_server, "codex_executable", lambda: "app/codex.exe")
+    monkeypatch.setattr(app_server, "_probe_codex_version", lambda path: "codex-cli 0.167.0-alpha.4.1")
+    client = app_server.CodexAppServerClient()
+
+    first = client.prerelease_warning()
+    second = client.prerelease_warning()
+
+    assert first is not None
+    assert first["executable"] == "app/codex.exe"
+    assert second is None
+    assert caplog.text.count("Use CODEX_BIN or PATH") == 1

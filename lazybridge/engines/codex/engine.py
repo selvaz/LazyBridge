@@ -219,6 +219,7 @@ class CodexEngine:
         request_timeout: float | None = 120.0,
         stream_idle_timeout: float | None = 90.0,
         max_retries: int = 3,
+        retry_crashed_turns: int = 0,
         retry_delay: float = 1.0,
         tool_timeout: float | None = None,
         config: CodingAgentConfig | None = None,
@@ -280,6 +281,9 @@ class CodexEngine:
         if max_retries < 0:
             raise ValueError(f"max_retries must be >= 0, got {max_retries!r}")
         self.max_retries = max_retries
+        if retry_crashed_turns < 0:
+            raise ValueError(f"retry_crashed_turns must be >= 0, got {retry_crashed_turns!r}")
+        self.retry_crashed_turns = retry_crashed_turns
         if retry_delay <= 0:
             raise ValueError(f"retry_delay must be > 0, got {retry_delay!r}")
         self.retry_delay = retry_delay
@@ -293,6 +297,66 @@ class CodexEngine:
         self._direct_approval_gate = approval_gate is not None
         self.approval_gate = approval_gate if approval_gate is not None else configured_gate
         self._client = client or CodexAppServerClient()
+
+    async def _emit_prerelease_warning(self, session: Any, run_id: str) -> None:
+        """Probe the selected binary and mirror its one-time warning to the event log."""
+        if not isinstance(self._client, CodexAppServerClient):
+            return
+        warning = await asyncio.to_thread(self._client.prerelease_warning)
+        if warning is not None and session:
+            session.emit(EventType.CODEX_BINARY_WARNING, warning, run_id=run_id)
+
+    async def _retry_crashed_turn(
+        self,
+        make_call: Callable[[], Awaitable[_T]],
+        progress: dict[str, Any],
+        tools: list[Any],
+        session: Any,
+        run_id: str,
+    ) -> _T:
+        """Replay only side-effect-free crashes whose turn produced nothing."""
+        attempt = 0
+        while True:
+            try:
+                return await make_call()
+            except CodexTransportError as exc:
+                safe = (
+                    attempt < self.retry_crashed_turns
+                    and exc.turn_sent
+                    and exc.returncode is not None
+                    and not progress.get("output_item_observed")
+                    and not progress.get("tool_call_observed")
+                    and self.config.codex.sandbox == "read-only"
+                    and not tools
+                )
+                if not safe:
+                    raise
+                attempt += 1
+                payload = {
+                    "reason": "Codex App Server crashed before producing output",
+                    "returncode": exc.returncode,
+                    "attempt": attempt,
+                }
+                if session:
+                    session.emit(EventType.CODEX_TURN_RETRY, payload, run_id=run_id)
+                _logger.warning(
+                    "retrying crashed Codex turn (attempt %s/%s, returncode=%s)",
+                    attempt,
+                    self.retry_crashed_turns,
+                    exc.returncode,
+                )
+                # Do not let state from the dead subprocess make the fresh
+                # attempt appear to have emitted an item before it starts.
+                for key in (
+                    "thread_id",
+                    "turn_sent",
+                    "turn_done",
+                    "rejected",
+                    "output_item_observed",
+                    "tool_call_observed",
+                    "client_waits",
+                ):
+                    progress.pop(key, None)
 
     def _client_kwargs(
         self,
@@ -678,15 +742,19 @@ class CodexEngine:
         progress: dict[str, Any] = {}
         tool_clock = ToolClock()
         try:
+            await self._emit_prerelease_warning(session, run_id)
             observe = self._observer(session, run_id)
             gate = self._scoped_gate(session, agent_name)
             attachments = self._attachments(env)
             async with self._thread_lock():
                 self._refresh_alias()
-                call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
+                raw_call = lambda: self._client.run(  # noqa: E731 - a thunk, one per retry
                     **self._client_kwargs(
                         env, tools, output_type, memory, observe, gate, attachments, progress, tool_clock=tool_clock
                     )
+                )
+                call = lambda: self._retry_crashed_turn(  # noqa: E731
+                    raw_call, progress, tools, session, run_id
                 )
                 result = await self._run_with_idle_timeout(call, progress, tool_clock)
                 self._absorb(result.thread_id)
@@ -770,6 +838,8 @@ class CodexEngine:
         if session:
             session.emit(EventType.AGENT_START, {"agent_name": agent_name, "task": env.task}, run_id=run_id)
 
+        await self._emit_prerelease_warning(session, run_id)
+
         sink: asyncio.Queue[str | None] = asyncio.Queue(maxsize=64)
         streamed = False
 
@@ -791,7 +861,7 @@ class CodexEngine:
                 async with self._thread_lock():
                     self._refresh_alias()
                     try:
-                        result = await self._client.run(
+                        raw_call = lambda: self._client.run(  # noqa: E731
                             **self._client_kwargs(
                                 env,
                                 tools,
@@ -805,6 +875,7 @@ class CodexEngine:
                                 tool_clock=tool_clock,
                             )
                         )
+                        result = await self._retry_crashed_turn(raw_call, progress, tools, session, run_id)
                         self._absorb(result.thread_id)
                     finally:
                         # Still INSIDE the lock: this task is cancelled when the

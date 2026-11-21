@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from lazybridge import Agent, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
-from lazybridge.engines.codex.app_server import CodexRunResult
+from lazybridge.engines.codex.app_server import CodexRunResult, CodexTransportError
 from lazybridge.engines.codex.engine import CodexEngine
 from lazybridge.engines.coding import ApprovalDecision, CodexPolicy, CodingAgentConfig
 from lazybridge.session import EventType
@@ -95,6 +95,62 @@ class FakeAppServer:
 def get_quote(symbol: str) -> dict[str, str]:
     """Return a deterministic quote lookup."""
     return {"symbol": symbol}
+
+
+class CrashingTurnClient:
+    def __init__(self, *, observed: str | None = None) -> None:
+        self.calls = 0
+        self.observed = observed
+
+    async def run(self, *, progress, **kwargs):
+        self.calls += 1
+        progress["turn_sent"] = True
+        if self.calls == 1:
+            if self.observed:
+                progress[self.observed] = True
+            raise CodexTransportError(
+                "crashed",
+                returncode=3221226505,
+                phase="turn/start",
+                turn_sent=True,
+            )
+        return CodexRunResult(text="recovered")
+
+
+def test_crashed_turn_retry_is_opt_in_read_only_and_recorded():
+    session = Session()
+    client = CrashingTurnClient()
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1), session=session)("hello")
+
+    assert result.payload == "recovered"
+    assert client.calls == 2
+    event = session.events.query(event_type=EventType.CODEX_TURN_RETRY)[0]
+    assert event["payload"] == {
+        "reason": "Codex App Server crashed before producing output",
+        "returncode": 3221226505,
+        "attempt": 1,
+    }
+
+
+@pytest.mark.parametrize("observed", ["output_item_observed", "tool_call_observed"])
+def test_crashed_turn_is_not_retried_after_observable_activity(observed):
+    client = CrashingTurnClient(observed=observed)
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1))("hello")
+
+    assert not result.ok
+    assert client.calls == 1
+
+
+def test_crashed_turn_is_not_retried_with_write_access():
+    client = CrashingTurnClient()
+    config = CodingAgentConfig(codex=CodexPolicy(sandbox="workspace-write"))
+
+    result = Agent(CodexEngine(client=client, retry_crashed_turns=1, config=config))("hello")
+
+    assert not result.ok
+    assert client.calls == 1
 
 
 @pytest.mark.parametrize("resolved", [None, "gpt-effective"])

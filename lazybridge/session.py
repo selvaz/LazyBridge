@@ -199,6 +199,8 @@ class EventType(StrEnum):
     # planned cancellations from genuine exceptions in dashboards and
     # alerting.  Payload mirrors ``TOOL_ERROR`` plus ``timeout_s``.
     TOOL_TIMEOUT = "tool_timeout"
+    CODEX_BINARY_WARNING = "codex_binary_warning"
+    CODEX_TURN_RETRY = "codex_turn_retry"
     # Human-in-the-loop audit trail: one event per decision a human
     # takes inside ``HumanEngine`` / ``SupervisorEngine``.  Payload:
     # ``{"agent_name": ..., "kind": "continue"|"retry"|"store"|"tool"|"input",
