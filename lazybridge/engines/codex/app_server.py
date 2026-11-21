@@ -335,6 +335,63 @@ def _client_wait(progress: dict[str, Any] | None) -> Any:
             on_activity()
 
 
+#: Process-wide cap on concurrent Codex App Server children. Measured on
+#: Windows (codex-cli 0.167-0.171, 2026-11-21): concurrent App Servers crash
+#: with 0xC0000409 in 3-10% of turns while one-at-a-time runs did not crash.
+#: Set ``LAZYBRIDGE_CODEX_MAX_CONCURRENCY`` (or call
+#: :func:`set_codex_max_concurrency`) to serialise Codex turns; other engines
+#: are unaffected. Unset or ``0`` means unlimited (the previous behaviour).
+#: The cap is per process: separate worker processes each have their own.
+_concurrency_lock = threading.Lock()
+_concurrency_limit: int | None = None
+_concurrency_sem: threading.BoundedSemaphore | None = None
+
+
+def set_codex_max_concurrency(limit: int | None) -> None:
+    """Set the per-process cap on concurrent Codex App Servers (``None``/0 = unlimited)."""
+    global _concurrency_limit, _concurrency_sem
+    value = int(limit or 0)
+    if value < 0:
+        raise ValueError(f"codex max concurrency must be >= 0, got {limit!r}")
+    with _concurrency_lock:
+        _concurrency_limit = value or None
+        _concurrency_sem = threading.BoundedSemaphore(value) if value else None
+
+
+def _codex_semaphore() -> threading.BoundedSemaphore | None:
+    global _concurrency_limit, _concurrency_sem
+    with _concurrency_lock:
+        if _concurrency_limit is None and _concurrency_sem is None:
+            raw = os.environ.get("LAZYBRIDGE_CODEX_MAX_CONCURRENCY", "").strip()
+            if raw:
+                try:
+                    value = int(raw)
+                except ValueError:
+                    _logger.warning("ignoring invalid LAZYBRIDGE_CODEX_MAX_CONCURRENCY=%r", raw)
+                    value = 0
+                if value > 0:
+                    _concurrency_limit = value
+                    _concurrency_sem = threading.BoundedSemaphore(value)
+        return _concurrency_sem
+
+
+@contextlib.asynccontextmanager
+async def _codex_concurrency_slot():
+    """Hold one Codex slot for the whole App Server lifetime (cancellable wait)."""
+    sem = _codex_semaphore()
+    if sem is None:
+        yield
+        return
+    # A threading semaphore works across event loops and threads; poll so a
+    # waiting caller stays cancellable and never blocks its loop.
+    while not sem.acquire(blocking=False):
+        await asyncio.sleep(0.05)
+    try:
+        yield
+    finally:
+        sem.release()
+
+
 class CodexAppServerClient:
     """One ``codex app-server`` subprocess per run, torn down in ``finally``."""
 
@@ -497,32 +554,35 @@ class CodexAppServerClient:
         already carries the value its creating call set, and Codex has no
         endpoint to change it after the fact.
         """
+        async with _codex_concurrency_slot():
+            return await self._run_with_startup_retry(
+                prompt=prompt,
+                model=model,
+                cwd=cwd,
+                dynamic_tools=dynamic_tools,
+                on_tool_call=on_tool_call,
+                developer_instructions=developer_instructions,
+                on_text=on_text,
+                attachments=attachments,
+                effort=effort,
+                output_schema=output_schema,
+                sandbox=sandbox,
+                writable_roots=writable_roots,
+                approval_policy=approval_policy,
+                approval_gate=approval_gate,
+                thread_id=thread_id,
+                ephemeral=ephemeral,
+                review_target=review_target,
+                progress=progress,
+                config_overrides=config_overrides,
+                thread_source=thread_source,
+            )
+
+    async def _run_with_startup_retry(self, **kwargs: Any) -> CodexRunResult:
         for attempt in range(2):
             state = _Attempt()
             try:
-                return await self._run_once(
-                    state,
-                    prompt=prompt,
-                    model=model,
-                    cwd=cwd,
-                    dynamic_tools=dynamic_tools,
-                    on_tool_call=on_tool_call,
-                    developer_instructions=developer_instructions,
-                    on_text=on_text,
-                    attachments=attachments,
-                    effort=effort,
-                    output_schema=output_schema,
-                    sandbox=sandbox,
-                    writable_roots=writable_roots,
-                    approval_policy=approval_policy,
-                    approval_gate=approval_gate,
-                    thread_id=thread_id,
-                    ephemeral=ephemeral,
-                    review_target=review_target,
-                    progress=progress,
-                    config_overrides=config_overrides,
-                    thread_source=thread_source,
-                )
+                return await self._run_once(state, **kwargs)
             except CodexTransportError as exc:
                 if exc.turn_sent or attempt or exc.phase not in _RETRYABLE_BEFORE_TURN:
                     raise
