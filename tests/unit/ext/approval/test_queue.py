@@ -1521,36 +1521,45 @@ async def test_reminder_send_time_does_not_delay_the_ttl_check() -> None:
     past the configured ttl. Found by Codex review before this ever
     shipped."""
     queue = ApprovalQueue(Store())
-    # Timeline (fixed code): first notify 0.4s; one poll sleep to 0.9s; a
-    # reminder at 0.9s whose 0.4s send ends exactly at the 1.3s ttl; then
-    # the expiry notice, another 0.4s: ~1.7s. With the stale pre-reminder
-    # timestamp the loop sleeps another 0.4s after the reminder: ~2.1s.
-    # The reminder must start one notify before the ttl, otherwise the
-    # send is cut at the ttl and both versions time the same (the earlier
-    # 0.08s-scale version of this test could not tell them apart and was
-    # flaky in CI: 0.405s against a 0.4s bound).
-    notify_seconds = 0.4
-    ttl_seconds = 1.3
+    # Measured as a GAP, not as total elapsed time: wall-clock bounds on the
+    # whole call were flaky in CI (0.405s against 0.4s) and, at the old
+    # scale, could not tell the fixed code from the stale-timestamp bug.
+    #
+    # Only the reminder is slow: it hangs until the channel cuts it at the
+    # ticket's expiry. Fixed code re-reads the clock after the reminder,
+    # finds the ticket expired and sends the expiry notice straight away
+    # (gap ~0). With the stale pre-reminder timestamp it sleeps one more
+    # poll interval first (gap ~0.3s).
+    calls: list[tuple[str, float, float]] = []
 
-    async def slow_notify(ticket, message):
-        await asyncio.sleep(notify_seconds)
+    async def notify(ticket, message):
+        started = time.monotonic()
+        kind = "reminder" if "Still waiting" in message else "other"
+        try:
+            if kind == "reminder":
+                await asyncio.sleep(30)
+        finally:
+            calls.append((kind, started, time.monotonic()))
 
+    poll_seconds = 0.3
     channel = StoreApprovalChannel(
         queue,
         task_id="t1",
-        poll_seconds=0.5,
-        ttl=timedelta(seconds=ttl_seconds),
-        notify=slow_notify,
+        poll_seconds=poll_seconds,
+        ttl=timedelta(seconds=1.0),
+        notify=notify,
         renotify_interval=timedelta(seconds=0.1),
     )
 
-    start = time.monotonic()
     result = await asyncio.wait_for(channel.ask("please approve"), timeout=10.0)
-    elapsed = time.monotonic() - start
 
     assert result is False
-    # Halfway between the fixed (~1.7s) and the unfixed (~2.1s) timings.
-    assert elapsed < ttl_seconds + 1.5 * notify_seconds
+    reminders = [i for i, call in enumerate(calls) if call[0] == "reminder"]
+    assert reminders, f"no reminder was sent: {calls}"
+    last = reminders[-1]
+    assert last + 1 < len(calls), f"no expiry notice after the last reminder: {calls}"
+    gap = calls[last + 1][1] - calls[last][2]
+    assert gap < poll_seconds / 2, f"slept {gap:.3f}s past the ticket's expiry after a reminder"
 
 
 async def test_reminder_spacing_accounts_for_notify_delivery_time() -> None:
