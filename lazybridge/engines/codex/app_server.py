@@ -348,10 +348,23 @@ _concurrency_active = 0
 #: ``None`` = not configured explicitly: fall back to the environment variable.
 _concurrency_explicit: int | None = None
 _concurrency_explicit_set = False
-#: True while this call chain already holds a slot. A tool callback that runs
-#: another Codex agent inherits it and proceeds instead of waiting for the
-#: slot its own parent holds (which would deadlock with a cap of 1).
-_holding_slot: contextvars.ContextVar[bool] = contextvars.ContextVar("lazybridge_codex_slot", default=False)
+
+
+class _SlotHolder:
+    """The slot a call chain holds; inherited by tasks spawned under it."""
+
+    __slots__ = ("active", "lent")
+
+    def __init__(self) -> None:
+        self.active = True
+        self.lent = False
+
+
+#: The slot held by this call chain, if any. A context *object* (not a bool):
+#: tasks spawned while it was held keep a reference, and ``active`` turns
+#: False when the holder releases, so a late background task cannot ride on a
+#: slot that is gone.
+_holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
 
 
 def set_codex_max_concurrency(limit: int | None) -> None:
@@ -393,19 +406,8 @@ def _current_cap() -> int | None:
     return value if value > 0 else None
 
 
-@contextlib.asynccontextmanager
-async def codex_concurrency_slot():
-    """Hold one Codex slot for the whole call (re-entrant, cancellable wait).
-
-    The engine takes the slot *before* its request/idle timeouts start, so time
-    spent queued never consumes a turn's timeout budget; the App Server client
-    takes it again only when called directly (re-entrancy makes that a no-op
-    under the engine).
-    """
+async def _acquire_counted() -> None:
     global _concurrency_active
-    if _holding_slot.get():
-        yield
-        return
     # Poll a counter guarded by a threading lock: works across event loops and
     # threads, keeps the waiter cancellable, and honours cap changes at once.
     while True:
@@ -413,18 +415,54 @@ async def codex_concurrency_slot():
             cap = _current_cap()
             if cap is None or _concurrency_active < cap:
                 _concurrency_active += 1
-                break
+                return
         await asyncio.sleep(0.05)
-    token = _holding_slot.set(True)
+
+
+def _release_counted() -> None:
+    global _concurrency_active
+    with _concurrency_lock:
+        _concurrency_active -= 1
+
+
+@contextlib.asynccontextmanager
+async def codex_concurrency_slot():
+    """Hold one Codex slot for a whole engine call (cancellable wait).
+
+    The engine takes the slot *before* its request/idle timeouts start, so time
+    queued never consumes a turn's timeout budget. A Codex agent started from a
+    tool callback of a turn that holds a slot (a nested agent) borrows that
+    slot instead of waiting for it, which would deadlock with a cap of 1; only
+    one nested agent at a time may borrow it, any further one queues normally.
+    """
+    parent = _holder.get()
+    if parent is not None and parent.active and not parent.lent:
+        parent.lent = True
+        try:
+            yield
+        finally:
+            parent.lent = False
+        return
+    await _acquire_counted()
+    holder = _SlotHolder()
+    token = _holder.set(holder)
     try:
         yield
     finally:
-        _holding_slot.reset(token)
-        with _concurrency_lock:
-            _concurrency_active -= 1
+        holder.active = False
+        _holder.reset(token)
+        _release_counted()
 
 
-_codex_concurrency_slot = codex_concurrency_slot
+@contextlib.asynccontextmanager
+async def _client_slot():
+    """App Server client: reuse the engine's slot of this same call; acquire only when called directly."""
+    holder = _holder.get()
+    if holder is not None and holder.active:
+        yield
+        return
+    async with codex_concurrency_slot():
+        yield
 
 
 class CodexAppServerClient:
@@ -589,7 +627,7 @@ class CodexAppServerClient:
         already carries the value its creating call set, and Codex has no
         endpoint to change it after the fact.
         """
-        async with _codex_concurrency_slot():
+        async with _client_slot():
             return await self._run_with_startup_retry(
                 prompt=prompt,
                 model=model,

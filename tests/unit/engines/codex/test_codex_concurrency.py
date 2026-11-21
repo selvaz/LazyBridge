@@ -22,7 +22,7 @@ async def _peak(n_tasks: int) -> int:
 
     async def job():
         nonlocal active, peak
-        async with app_server._codex_concurrency_slot():
+        async with app_server.codex_concurrency_slot():
             active += 1
             peak = max(peak, active)
             await asyncio.sleep(0.05)
@@ -61,14 +61,14 @@ def test_waiting_caller_is_cancellable():
 
     async def scenario():
         async def holder():
-            async with app_server._codex_concurrency_slot():
+            async with app_server.codex_concurrency_slot():
                 await asyncio.sleep(0.3)
 
         h = asyncio.create_task(holder())
         await asyncio.sleep(0.01)
 
         async def waiter():
-            async with app_server._codex_concurrency_slot():
+            async with app_server.codex_concurrency_slot():
                 pass
 
         w = asyncio.create_task(waiter())
@@ -78,7 +78,7 @@ def test_waiting_caller_is_cancellable():
             await w
         await h
         # the slot is free again after the holder exits
-        async with app_server._codex_concurrency_slot():
+        async with app_server.codex_concurrency_slot():
             pass
 
     asyncio.run(scenario())
@@ -90,14 +90,72 @@ def test_explicit_unlimited_overrides_env(monkeypatch):
     assert asyncio.run(_peak(3)) == 3
 
 
+def test_second_concurrent_nested_agent_waits_for_the_cap():
+    app_server.set_codex_max_concurrency(1)
+
+    async def scenario():
+        running = []
+
+        async def nested(name):
+            async with app_server.codex_concurrency_slot():
+                running.append(name)
+                await asyncio.sleep(0.15)
+                running.remove(name)
+                return len(running)
+
+        async with app_server.codex_concurrency_slot():
+            first = asyncio.create_task(nested("a"))
+            await asyncio.sleep(0.02)
+            second = asyncio.create_task(nested("b"))
+            await asyncio.sleep(0.05)
+            assert running == ["a"]  # b waits: the parent slot is already lent to a
+            return await asyncio.wait_for(first, 2), second
+
+    others, second = asyncio.run(_run_and_cancel(scenario))
+    assert others == 0
+
+
+async def _run_and_cancel(scenario):
+    result, pending = await scenario()
+    pending.cancel()
+    try:
+        await pending
+    except asyncio.CancelledError:
+        pass
+    return result, pending
+
+
+def test_background_task_does_not_ride_a_released_slot():
+    app_server.set_codex_max_concurrency(1)
+
+    async def scenario():
+        late = {}
+
+        async def background():
+            await asyncio.sleep(0.1)  # starts after the parent released
+            t0 = asyncio.get_running_loop().time()
+            async with app_server.codex_concurrency_slot():
+                late["waited"] = asyncio.get_running_loop().time() - t0
+
+        async with app_server.codex_concurrency_slot():
+            bg = asyncio.create_task(background())
+        # an unrelated turn takes the only slot before the background task asks
+        async with app_server.codex_concurrency_slot():
+            await asyncio.sleep(0.3)
+        await bg
+        return late["waited"]
+
+    assert asyncio.run(scenario()) >= 0.1
+
+
 def test_nested_call_reenters_instead_of_deadlocking():
     app_server.set_codex_max_concurrency(1)
 
     async def scenario():
-        async with app_server._codex_concurrency_slot():
+        async with app_server.codex_concurrency_slot():
             # a tool callback of the running turn starts another Codex agent
             async def nested():
-                async with app_server._codex_concurrency_slot():
+                async with app_server.codex_concurrency_slot():
                     return "ran"
 
             return await asyncio.wait_for(asyncio.create_task(nested()), 2)
@@ -112,7 +170,7 @@ def test_lowering_the_cap_blocks_new_turns_until_active_drop():
         started = []
 
         async def turn(name, hold):
-            async with app_server._codex_concurrency_slot():
+            async with app_server.codex_concurrency_slot():
                 started.append(name)
                 await asyncio.sleep(hold)
 

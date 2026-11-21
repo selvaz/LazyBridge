@@ -897,8 +897,7 @@ class CodexEngine:
                                 tool_clock=tool_clock,
                             )
                         )
-                        async with codex_concurrency_slot():
-                            result = await self._retry_crashed_turn(raw_call, progress, tools, session, run_id)
+                        result = await self._retry_crashed_turn(raw_call, progress, tools, session, run_id)
                         self._absorb(result.thread_id)
                     finally:
                         # Still INSIDE the lock: this task is cancelled when the
@@ -931,6 +930,10 @@ class CodexEngine:
             else:
                 await sink.put(None)  # sentinel — loop done
 
+        # Take the Codex slot before the consumer's idle clock starts; the
+        # producer task inherits it and the client reuses it.
+        slot = codex_concurrency_slot()
+        await slot.__aenter__()
         task = asyncio.create_task(_run_loop())
         cancelled_by_us = False
         error: BaseException | None = None
@@ -973,6 +976,9 @@ class CodexEngine:
             except Exception as exc:
                 if error is None:
                     error = exc
+            finally:
+                # The producer is done (or cancelled): give the Codex slot back.
+                await slot.__aexit__(None, None, None)
             # Also covers the consumer walking away mid-stream: the generator
             # is closed, the worker cancelled, and the turn it started may
             # already be committed to a durable thread.
