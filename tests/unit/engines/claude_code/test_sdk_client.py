@@ -709,3 +709,47 @@ class TestLongSystemPrompt:
         assert seen["existed"] is True
         assert seen["system_prompt"]["type"] == "file"
         assert not os.path.exists(seen["system_prompt"]["path"])
+
+
+def test_dontask_preapproves_granted_builtin_tools():
+    # dontAsk never consults can_use_tool, so granted built-ins need allow rules.
+    options = ClaudeSdkOptions(
+        permission_mode="dontAsk", builtin_tools=("Read", "WebSearch", "WebFetch"), file_roots=(r"C:\workspace",)
+    )
+    sdk_options = AgentSdkClient._sdk_options(options)
+
+    assert {"Read", "WebSearch", "WebFetch"} <= set(sdk_options.allowed_tools)
+    assert sdk_options.permission_mode == "dontAsk"
+
+
+def test_dontask_with_gate_does_not_preapprove_write_tools():
+    options = ClaudeSdkOptions(
+        permission_mode="dontAsk",
+        builtin_tools=("WebSearch", "Bash", "Write"),
+        approval_gate=lambda _: ApprovalDecision.allow(),
+    )
+    allowed = AgentSdkClient._sdk_options(options).allowed_tools
+
+    assert "WebSearch" in allowed
+    assert "Bash" not in allowed and "Write" not in allowed
+
+
+def test_default_mode_does_not_add_builtin_allow_rules():
+    options = ClaudeSdkOptions(builtin_tools=("WebSearch",))
+    assert AgentSdkClient._sdk_options(options).allowed_tools == []
+
+
+def test_permission_denials_reach_the_tool_observer():
+    from types import SimpleNamespace
+
+    from lazybridge.engines.claude_code.sdk_client import _report_permission_denials
+
+    seen = []
+    options = ClaudeSdkOptions(permission_mode="dontAsk", tool_observer=lambda k, p: seen.append((k, p)))
+    message = SimpleNamespace(
+        permission_denials=[{"tool_name": "WebSearch", "tool_input": {"query": "x"}, "tool_use_id": "t1"}]
+    )
+    _report_permission_denials(options, message)
+
+    assert seen[0][0] == "error"
+    assert seen[0][1]["permission_denied"] is True and seen[0][1]["tool_name"] == "WebSearch"

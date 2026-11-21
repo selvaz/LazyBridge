@@ -220,6 +220,36 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _shadow_warning_filtered = False
 
 
+def _report_permission_denials(options: ClaudeSdkOptions, message: Any) -> None:
+    """Surface CLI permission denials through the tool observer as errors.
+
+    The CLI answers a denied tool call with an error tool result the model can
+    paraphrase away, and the turn still ends successfully. The authoritative
+    list is ``ResultMessage.permission_denials``; reporting it keeps a run that
+    silently lost a tool from looking clean.
+    """
+    observer = options.tool_observer
+    if observer is None:
+        return
+    for denial in getattr(message, "permission_denials", None) or ():
+        data = denial if isinstance(denial, dict) else {}
+        name = data.get("tool_name") or "unknown"
+        try:
+            observer(
+                "error",
+                {
+                    "tool_name": name,
+                    "error": f"Permission denied for tool {name!r} (permission_mode={options.permission_mode or 'default'})",
+                    "arguments": data.get("tool_input") or {},
+                    "tool_use_id": data.get("tool_use_id"),
+                    "native": True,
+                    "permission_denied": True,
+                },
+            )
+        except Exception:  # observability must never fail the turn
+            logger.warning("tool observer raised on permission denial", exc_info=True)
+
+
 class ClaudeSdkRequestError(RuntimeError):
     """Raised when the Claude Agent SDK reports a failed run.
 
@@ -348,6 +378,15 @@ class AgentSdkClient(ClaudeSdkClient):
             tools=sdk_tools,
         )
         allowed = list(options.allowed_tools)
+        if options.permission_mode == "dontAsk":
+            # ``dontAsk`` never consults ``can_use_tool``: anything not matched
+            # by an allow rule is denied outright. ``builtin_tools`` only makes
+            # a tool *available*, so without these rules every granted native
+            # tool (WebSearch, Read, ...) would be silently denied. Tools that
+            # need a human decision (writes/shell) are preapproved only when no
+            # approval gate is attached; ``file_roots`` still confine them.
+            gated = {"Edit", "Write", "NotebookEdit", "Bash"} if options.approval_gate is not None else set()
+            allowed.extend(t for t in options.builtin_tools if t not in gated and t not in allowed)
         if options.preapprove_application_tools:
             allowed.extend(f"mcp__{options.mcp_server_name}__{item.name}" for item in options.mcp_tools)
 
@@ -613,6 +652,7 @@ class AgentSdkClient(ClaudeSdkClient):
                     model = self._message_model(message, model)
                     if isinstance(message, ResultMessage):
                         final = message
+                        _report_permission_denials(options, message)
         if final is None:
             raise RuntimeError("Claude Agent SDK ended without a ResultMessage")
         if final.is_error:
@@ -696,6 +736,7 @@ class AgentSdkClient(ClaudeSdkClient):
                                 yield ClaudeSdkStreamEvent(text=delta["text"])
                     elif isinstance(message, ResultMessage):
                         saw_result = True
+                        _report_permission_denials(stream_options, message)
                         if message.is_error:
                             detail = "; ".join(message.errors or []) or message.result or message.subtype
                             raise ClaudeSdkRequestError(
