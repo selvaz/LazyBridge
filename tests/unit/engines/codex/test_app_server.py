@@ -1028,6 +1028,16 @@ def _run_tool_scenario(scenario, on_tool_call, **kwargs):
     return asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
 
 
+def _run_tool_scenario_args(scenario, extra, on_tool_call):
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, scenario, extra))
+        return await client.run(
+            prompt="quote AMZN", model=None, cwd=None, dynamic_tools=_TOOL_DEF, on_tool_call=on_tool_call
+        )
+
+    return asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+
 def test_notifications_are_drained_while_a_slow_tool_runs():
     """The reader keeps consuming stdout during a tool call (no inline await)."""
     state = {"tool_running": False, "during": 0, "total": 0}
@@ -1090,3 +1100,69 @@ def test_child_exit_during_a_tool_call_fails_promptly_with_transport_error():
 def test_fast_tool_round_trip_is_unchanged():
     result = _run_tool_scenario("happy", _call_tool)
     assert result.text == "AMZN is 123.45"
+
+
+def test_overlapping_approvals_are_decided_one_at_a_time_with_their_own_answers():
+    active = {"now": 0, "max": 0}
+
+    async def gate(request):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        try:
+            await asyncio.sleep(0.2)
+            # Answer by *this* request's reason: crossed answers would show.
+            return ApprovalDecision.allow() if request.reason == "first" else ApprovalDecision.deny()
+        finally:
+            active["now"] -= 1
+
+    async def run():
+        client = CodexAppServerClient(command=(sys.executable, FIXTURE, "two_approvals"))
+        return await client.run(
+            prompt="x",
+            model=None,
+            cwd=None,
+            dynamic_tools=[],
+            on_tool_call=_call_tool,
+            sandbox="workspace-write",
+            approval_policy="on-request",
+            approval_gate=gate,
+        )
+
+    result = asyncio.run(asyncio.wait_for(run(), timeout=_TIMEOUT))
+
+    assert result.text == "ok"
+    assert active["max"] == 1
+
+
+def test_a_tool_that_ignores_cancellation_cannot_hang_a_completed_turn(monkeypatch, caplog):
+    monkeypatch.setattr(app_server, "_CLIENT_TASK_TEARDOWN_GRACE", 0.3)
+
+    async def stubborn(tool, arguments):
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await asyncio.sleep(5)  # swallows cancellation and keeps going
+
+    start = time.monotonic()
+    with caplog.at_level("WARNING", logger=app_server.__name__):
+        result = _run_tool_scenario("tool_then_complete", stubborn)
+
+    assert result.text == "done"
+    assert time.monotonic() - start < 8
+    assert any("abandoning" in r.getMessage() for r in caplog.records)
+
+
+def test_no_response_is_written_after_the_turn_ended(tmp_path):
+    late = tmp_path / "late.txt"
+
+    async def swallows_cancel(tool, arguments):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            return {"success": True, "contentItems": [{"type": "inputText", "text": "late"}]}
+
+    result = _run_tool_scenario_args("tool_late_response", str(late), swallows_cancel)
+
+    assert result.text == "done"
+    assert not late.exists() or late.read_text() == ""

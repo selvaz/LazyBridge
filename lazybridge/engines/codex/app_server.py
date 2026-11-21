@@ -45,6 +45,10 @@ _STDERR_TAIL_BYTES = 16 * 1024
 _STDERR_MESSAGE_CHARS = 2000
 #: Bound on each wait during teardown and on the return-code lookup after EOF.
 _EXIT_GRACE = 2.0
+#: How long teardown waits for cancelled tool/approval callbacks to unwind.
+#: A callback that ignores cancellation or cleans up slowly is abandoned (with
+#: a warning) rather than allowed to hold a finished turn hostage.
+_CLIENT_TASK_TEARDOWN_GRACE = 3.0
 #: Short wait for a clean exit after stdin closes (the real child needs ~1s, so
 #: this usually falls through to terminate, as before) — kept small so teardown
 #: stays fast.
@@ -854,11 +858,21 @@ class CodexAppServerClient:
         #: run off the reader so it keeps draining stdout — and so notices EOF,
         #: a child exit or ``turn/completed`` — while a tool is still running.
         client_tasks: set[asyncio.Task[None]] = set()
+        #: Approval prompts are serialised per run: concurrent requests must not
+        #: reach a shared (terminal) gate at once, or answers could be crossed.
+        approval_lock = asyncio.Lock()
+
+        def turn_done_flag() -> bool:
+            return bool(progress is not None and progress.get("turn_done"))
 
         async def respond(request_id: Any, result: dict[str, Any]) -> None:
-            """Answer a server request, unless the child is already gone."""
+            """Answer a server request, unless nobody can use the answer any more."""
             if process.returncode is not None or process.stdin is None or process.stdin.is_closing():
                 return  # nobody left to read it; the reader reports the exit
+            if completed.done() or turn_done_flag():
+                return  # the turn has ended: a late answer would hit a dead request
+            if (me := asyncio.current_task()) is not None and me.cancelling():
+                return  # cancelled, even if the callback swallowed the cancellation
             try:
                 await send({"id": request_id, "result": result})
             except CodexTransportError as exc:
@@ -990,20 +1004,21 @@ class CodexAppServerClient:
                             name: str = name,
                         ) -> None:
                             with _client_wait(progress):
-                                decision = await ask_approval(
-                                    approval_gate,
-                                    ApprovalRequest(
-                                        provider="codex",
-                                        kind=kind,  # type: ignore[arg-type]
-                                        name=name,
-                                        arguments=params,
-                                        reason=params.get("reason"),
-                                        cwd=params.get("cwd") or cwd,
-                                        thread_id=params.get("threadId"),
-                                        turn_id=params.get("turnId"),
-                                        raw=params,
-                                    ),
-                                )
+                                async with approval_lock:
+                                    decision = await ask_approval(
+                                        approval_gate,
+                                        ApprovalRequest(
+                                            provider="codex",
+                                            kind=kind,  # type: ignore[arg-type]
+                                            name=name,
+                                            arguments=params,
+                                            reason=params.get("reason"),
+                                            cwd=params.get("cwd") or cwd,
+                                            thread_id=params.get("threadId"),
+                                            turn_id=params.get("turnId"),
+                                            raw=params,
+                                        ),
+                                    )
                             if kind == "permissions":
                                 requested = params.get("permissions", {})
                                 granted = decision.permissions if decision.permissions is not None else requested
@@ -1233,7 +1248,14 @@ class CodexAppServerClient:
         finally:
             reader.cancel()
             cancel_client_tasks()
-            await asyncio.gather(*client_tasks, return_exceptions=True)
+            if client_tasks:
+                _, abandoned = await asyncio.wait(set(client_tasks), timeout=_CLIENT_TASK_TEARDOWN_GRACE)
+                if abandoned:
+                    _logger.warning(
+                        "Codex: abandoning %d tool/approval callback(s) that did not stop within %.1fs of cancellation",
+                        len(abandoned),
+                        _CLIENT_TASK_TEARDOWN_GRACE,
+                    )
             try:
                 await reader
             except asyncio.CancelledError:

@@ -309,8 +309,10 @@ def main() -> None:
     params = thread_start["params"]
     # Lock in the enum spelling the real CLI accepts — "readOnly" is
     # rejected live with "unknown variant `readOnly`".
-    expected_sandbox = "workspace-write" if scenario in ("command_approval", "writable_roots") else "read-only"
-    expected_approval = "on-request" if scenario == "command_approval" else "never"
+    expected_sandbox = (
+        "workspace-write" if scenario in ("command_approval", "writable_roots", "two_approvals") else "read-only"
+    )
+    expected_approval = "on-request" if scenario in ("command_approval", "two_approvals") else "never"
     assert params["sandbox"] == expected_sandbox, params
     assert params["approvalPolicy"] == expected_approval, params
     assert params["ephemeral"] is True, params
@@ -498,6 +500,64 @@ def main() -> None:
             sys.stderr.write("child-died-mid-tool\n")
             sys.stderr.flush()
             sys.exit(7)
+    elif scenario == "two_approvals":
+        # Two overlapping approval requests; each answer must be its own.
+        for request_id, reason in ((0, "first"), (1, "second")):
+            write_message(
+                {
+                    "id": request_id,
+                    "method": "item/commandExecution/requestApproval",
+                    "params": {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": f"i{request_id}",
+                        "reason": reason,
+                    },
+                }
+            )
+        answers = {}
+        for _ in range(2):
+            reply = read_message()
+            answers[reply["id"]] = reply["result"]["decision"]
+        assert answers == {0: "accept", 1: "decline"}, answers
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {"id": "turn-1", "status": "completed", "items": [{"type": "agentMessage", "text": "ok"}]}
+                },
+            }
+        )
+    elif scenario == "tool_late_response":
+        # Tool call, then the turn completes while it is unanswered. Anything
+        # the client writes afterwards is recorded in argv[2].
+        write_message(
+            {
+                "id": 0,
+                "method": "item/tool/call",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "callId": "exec-1",
+                    "namespace": None,
+                    "tool": dynamic_tools[0]["name"],
+                    "arguments": {"symbol": "AMZN"},
+                },
+            }
+        )
+        time.sleep(0.2)
+        write_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "turn": {"id": "turn-1", "status": "completed", "items": [{"type": "agentMessage", "text": "done"}]}
+                },
+            }
+        )
+        with open(sys.argv[2], "a") as late:
+            while line := sys.stdin.readline():
+                late.write(line)
+                late.flush()
     elif scenario == "exit_mid_turn":
         # Acknowledged turn/start, then died without ever sending
         # turn/completed — the path that hangs forever when the client has no
