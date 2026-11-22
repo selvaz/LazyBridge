@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.11] - 2026-11-22
+
+Delegation audit remediation (DELEGATION_AUDIT.md, #246): 7 high and 2 medium findings fixed.
+
 ### Fixed
 
 - Plan step failures are emitted as `TOOL_ERROR`; writer confirmation prompts carry a SHA-256 request-digest line; explicit `writable_roots=()` overrides configured roots; and failed child envelopes render as `Agent error (type): message`.
