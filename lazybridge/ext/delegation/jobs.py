@@ -17,7 +17,7 @@ from typing import Any
 
 from lazybridge import Store, Tool
 
-# Re-exported: callers imported current_owner_fields from this module before 1.8.11.
+# Re-exported: callers imported current_owner_fields from this module before 1.8.12.
 from lazybridge._process_owner import current_owner_fields as current_owner_fields
 from lazybridge._process_owner import owner_is_alive, record_age
 

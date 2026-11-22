@@ -8,9 +8,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.8.11] - 2026-11-22
+## [1.8.12] - 2026-11-22
 
-Delegation audit remediation (DELEGATION_AUDIT.md, #246): 7 high and 2 medium findings fixed.
+Remaining medium findings of the delegation audit (M1, M2, M5, M6; #247). Verified Agent tools used as named Plan steps keep their judge; JSON `null` for an optional delegate parameter means "omitted"; ordinary tool arguments still coerce numeric strings, delegate parameters do not.
 
 ### Fixed
 
@@ -18,6 +18,13 @@ Delegation audit remediation (DELEGATION_AUDIT.md, #246): 7 high and 2 medium fi
 - Dynamic background delegates enforce advertised required parameters and JSON types before policy checks, approval, admission, or job creation.
 - Verified Agent tools take one live-source snapshot per attempt and share exactly that evidence with the writer and reviewer.
 - Shared aliased Agent tools resolve inherited session identity per invocation instead of retaining another orchestrator's session.
+
+## [1.8.11] - 2026-11-22
+
+Delegation audit remediation (DELEGATION_AUDIT.md, #246): 7 high and 2 medium findings fixed.
+
+### Fixed
+
 - Plan step failures are emitted as `TOOL_ERROR`; writer confirmation prompts carry a SHA-256 request-digest line; explicit `writable_roots=()` overrides configured roots; and failed child envelopes render as `Agent error (type): message`.
 - Legacy Plan checkpoints and delegation jobs are automatically recoverable after a 15-minute staleness window, process creation stamps detect PID reuse, and uncertain Plan keys have a public reconciliation method.
 - Verification retries ordinary producer failures, while still stopping immediately for explicitly uncertain outcomes.
