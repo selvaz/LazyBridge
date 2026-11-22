@@ -19,7 +19,9 @@ def _process_start_time(pid: int) -> float | None:
             from ctypes import wintypes
 
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
-            handle = kernel32.OpenProcess(0x0400, False, pid)
+            # PROCESS_QUERY_LIMITED_INFORMATION: also granted for processes of
+            # other users, unlike PROCESS_QUERY_INFORMATION (0x0400).
+            handle = kernel32.OpenProcess(0x1000, False, pid)
             if not handle:
                 return None
             try:
@@ -58,7 +60,12 @@ def probe_pid(pid: int) -> bool | None:
             handle = kernel32.OpenProcess(0x1000, False, pid)
             if not handle:
                 error = ctypes.get_last_error()  # type: ignore[attr-defined]
-                return False if error == 87 else None
+                # 87 ERROR_INVALID_PARAMETER: no such process. 5 ERROR_ACCESS_DENIED:
+                # the process exists but this account may not open it -> alive, so a
+                # live owner running under another account is never reclaimed.
+                if error == 87:
+                    return False
+                return True if error == 5 else None
             try:
                 code = ctypes.c_ulong()
                 return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value == 259)
@@ -70,7 +77,10 @@ def probe_pid(pid: int) -> bool | None:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    except (PermissionError, OverflowError, OSError):
+    except PermissionError:
+        # EPERM means the process exists but belongs to another user.
+        return True
+    except (OverflowError, OSError):
         return None
     return True
 

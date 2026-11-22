@@ -183,3 +183,30 @@ def test_guarded_trace_retains_names_and_model_but_drops_payloads() -> None:
             )
         [event] = session.events.query(event_type=EventType.TOOL_CALL)
     assert event["payload"] == {"tool_name": "search", "model": "model-x", "guarded": True}
+
+
+def test_probe_pid_treats_a_process_of_another_user_as_alive(monkeypatch):
+    """EPERM / ERROR_ACCESS_DENIED mean the process exists: never reclaim it."""
+    import os
+
+    from lazybridge import _process_owner
+
+    if os.name == "nt":
+        import ctypes
+
+        class _Kernel32:
+            def OpenProcess(self, access, inherit, pid):
+                return 0
+
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: _Kernel32())
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5)
+        assert _process_owner.probe_pid(424242) is True
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 87)
+        assert _process_owner.probe_pid(424242) is False
+    else:
+
+        def _deny(pid, sig):
+            raise PermissionError
+
+        monkeypatch.setattr(os, "kill", _deny)
+        assert _process_owner.probe_pid(424242) is True
