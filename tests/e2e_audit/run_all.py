@@ -88,30 +88,32 @@ def main():
         name = script.stem
         source = WORK / name / run_id
         started = time.monotonic()
-        proc = subprocess.Popen(
-            [str(PYTHON), str(script)],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=os.name != "nt",
-        )
-        try:
-            stdout, stderr = proc.communicate(timeout=args.timeout)
-            output = stdout + stderr
-            code = proc.returncode
-        except subprocess.TimeoutExpired:
-            _kill_tree(proc)
+        # Output goes to a file, not a pipe: a descendant that outlives a
+        # timeout kill cannot block the runner, and nothing printed is lost.
+        log_path = WORK / f"{name}-{run_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8", errors="replace") as log:
+            proc = subprocess.Popen(
+                [str(PYTHON), str(script)],
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=os.name != "nt",
+            )
             try:
-                # A surviving descendant can keep the pipes open: bound the drain.
-                stdout, stderr = proc.communicate(timeout=10)
+                code = proc.wait(timeout=args.timeout)
+                timed_out = False
             except subprocess.TimeoutExpired:
-                for stream in (proc.stdout, proc.stderr):
-                    if stream is not None:
-                        stream.close()
-                stdout, stderr = "", "(output unavailable: a descendant kept the pipes open)"
-            output = f"Timed out after {args.timeout} seconds" + chr(10) + stdout + stderr
-            code = 1
+                _kill_tree(proc)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+                code = 1
+                timed_out = True
+        output = log_path.read_text(encoding="utf-8", errors="replace")
+        if timed_out:
+            output = f"Timed out after {args.timeout} seconds" + chr(10) + output
         target = destination / name
         if source.exists():
             shutil.copytree(source, target)
