@@ -211,6 +211,10 @@ class Tool:
     #: inherit it; set ``tool.validate_args = False`` to opt out.
     validate_args: bool = True
 
+    #: Source Agent for wrappers created by ``Agent.as_tool``. Plan uses
+    #: this to pass a complete Envelope; ordinary tools leave it unset.
+    agent_target: Any | None = None
+
     #: How long a cancelled async tool is given to unwind before it is
     #: abandoned too.  A well-behaved coroutine unwinds in microseconds;
     #: anything slower is doing heavy cleanup or ignoring cancellation.
@@ -730,13 +734,15 @@ def _agent_as_tool(agent: Any) -> Tool:
     _run.__name__ = agent.name or "agent"
     _run.__doc__ = agent.description or f"Run the {agent.name} agent on the given task."
 
-    return Tool(
+    tool = Tool(
         _run,
         name=agent.name or "agent",
         description=agent.description or f"Run the {agent.name} agent.",
         mode="signature",
         returns_envelope=True,
     )
+    tool.agent_target = agent
+    return tool
 
 
 def build_tool_map(

@@ -10,6 +10,7 @@ The module is private (leading underscore): no external imports.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 # Verdict normalization.  A judge — whether a plain callable returning
@@ -133,7 +134,7 @@ async def verify_with_retry(
     *,
     max_verify: int = 3,
     run: Any = None,
-    judge_context: str | None = None,
+    judge_context: str | Callable[[], str | None] | None = None,
 ) -> Any:
     """Run ``agent`` and gate its output through ``verify_agent``.
 
@@ -196,8 +197,9 @@ async def verify_with_retry(
             # Opt-in evidence (judge_context): the context the agent was given,
             # never the accumulated judge feedback, so a judge can check claims
             # against sources instead of judging style only.
+            context_snapshot = judge_context() if callable(judge_context) else judge_context
             evidence = (
-                f"Context the agent was given (use it as evidence):\n{judge_context}\n\n" if judge_context else ""
+                f"Context the agent was given (use it as evidence):\n{context_snapshot}\n\n" if context_snapshot else ""
             )
             verdict_env = await verify_agent.run(
                 f"Evaluate this output:\n{result.text()}\n\n"

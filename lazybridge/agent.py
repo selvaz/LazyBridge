@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge._asyncbridge import run_coroutine_blocking
@@ -13,6 +14,10 @@ from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
+
+
+_calling_session: ContextVar[Any | None] = ContextVar("lazybridge_calling_session", default=None)
+_session_override: ContextVar[Any | None] = ContextVar("lazybridge_session_override", default=None)
 
 
 @contextmanager
@@ -453,6 +458,7 @@ class Agent:
         context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
+        _sources_injected: bool = False,
     ) -> Envelope:
         """Run the agent without catching ``ConcludeSignal``.
 
@@ -468,9 +474,22 @@ class Agent:
         with _guarded_output() if guard else nullcontext():
             try:
                 if timeout is None:
-                    return await self._run_body(task, context=context, images=images, audio=audio)
+                    return await self._run_body(
+                        task,
+                        context=context,
+                        images=images,
+                        audio=audio,
+                        _sources_injected=_sources_injected,
+                    )
                 return await asyncio.wait_for(
-                    self._run_body(task, context=context, images=images, audio=audio), timeout=timeout
+                    self._run_body(
+                        task,
+                        context=context,
+                        images=images,
+                        audio=audio,
+                        _sources_injected=_sources_injected,
+                    ),
+                    timeout=timeout,
                 )
             except ConcludeSignal as signal:
                 if not guard:
@@ -511,9 +530,11 @@ class Agent:
         context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
+        _sources_injected: bool = False,
     ) -> Envelope:
         env = self._to_envelope(task, context=context, images=images, audio=audio)
-        env = self._inject_sources(env)
+        if not _sources_injected:
+            env = self._inject_sources(env)
 
         if self.guard:
             action = await self.guard.acheck_input(env.task or "")
@@ -622,15 +643,24 @@ class Agent:
         # are shareable objects, so an attribute stamped at construction time
         # would report whichever agent was built last.
         _name_token = bind_agent_name(self.name)
+        # An override belongs only to an agent whose session was inherited
+        # when it was mounted.  Explicitly configured descendants may execute
+        # while an inherited parent's ContextVar is still set, but must retain
+        # their own session.
+        effective_session = (
+            _session_override.get() if getattr(self, "_session_inherited", False) else None
+        ) or self.session
+        _session_token = _calling_session.set(effective_session)
         try:
             result = await self.engine.run(
                 env,
                 tools=list(self._tool_map.values()),
                 output_type=self.output,
                 memory=self.memory,
-                session=self.session,
+                session=effective_session,
             )
         finally:
+            _calling_session.reset(_session_token)
             unbind_agent_name(_name_token)
         # Structured output retry loop.  When ``output=`` declares a
         # concrete type (``SomeModel``, ``list[SomeModel]``, …) and the
@@ -982,7 +1012,15 @@ class Agent:
                 # being absorbed here.  Duck-typed doubles without it fall back
                 # to ``run``.
                 runner = getattr(agent, "_run_as_tool", agent.run)
-                result = await runner(task)
+                caller_session = _calling_session.get()
+                token = None
+                if caller_session is not None and getattr(agent, "_session_inherited", False):
+                    token = _session_override.set(caller_session)
+                try:
+                    result = await runner(task)
+                finally:
+                    if token is not None:
+                        _session_override.reset(token)
                 # Always write under the alias so from_agent("alias") can find
                 # the output regardless of agent.name.  _run_body also writes
                 # under agent.name (for standalone callers); the alias write
@@ -999,20 +1037,47 @@ class Agent:
                 from lazybridge._verify import verify_with_retry
                 from lazybridge.envelope import Envelope as _Env
 
-                env = _Env.from_task(str(task))
+                env = task if isinstance(task, _Env) else _Env.from_task(str(task))
+                evidence: str | None = None
+
+                async def run_with_snapshot(attempt_env: _Env) -> _Env:
+                    nonlocal evidence
+                    inject = getattr(agent, "_inject_sources", None)
+                    snapshot = inject(attempt_env) if inject else attempt_env
+                    evidence = snapshot.context
+                    caller_session = _calling_session.get()
+                    token = None
+                    if caller_session is not None and getattr(agent, "_session_inherited", False):
+                        token = _session_override.set(caller_session)
+                    try:
+                        # Preserve the complete agent-as-tool contract here:
+                        # timeout handling, guarded output suppression, and
+                        # ConcludeSignal propagation all live in
+                        # ``_run_as_tool``. Sources were already snapshotted,
+                        # so the private flag suppresses a second injection.
+                        runner = getattr(agent, "_run_as_tool", None)
+                        if runner is not None:
+                            return await runner(snapshot, _sources_injected=True)
+                        # Preserve support for duck-typed Agent doubles and
+                        # third-party implementations that only expose run().
+                        return await agent.run(snapshot)
+                    finally:
+                        if token is not None:
+                            _session_override.reset(token)
+
                 judge_context = None
                 if verify_context:
-                    # The wrapped agent injects its sources inside run(); show
-                    # the judge the same evidence without changing ``env``. Sources
-                    # are read here and again in run(): a callable source that
-                    # changes between reads gives the judge the earlier value.
-                    inject = getattr(agent, "_inject_sources", None)
-                    judge_context = (inject(env) if inject else env).context
+
+                    def current_evidence() -> str | None:
+                        return evidence
+
+                    judge_context = current_evidence
                 result = await verify_with_retry(
                     agent,
                     env,
                     verify,
                     max_verify=max_verify,
+                    run=run_with_snapshot,
                     judge_context=judge_context,
                 )
                 _store = getattr(agent, "store", None)
@@ -1025,7 +1090,7 @@ class Agent:
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc
 
-        return Tool(
+        tool = Tool(
             _run,
             name=effective_name,
             description=effective_desc,
@@ -1034,6 +1099,11 @@ class Agent:
             agent_memory=getattr(self, "memory", None),
             agent_store=getattr(self, "store", None),
         )
+        # Plan uses this additive marker to preserve the complete Envelope
+        # when a named step resolves back to an Agent tool.  Ordinary LLM
+        # tool calls retain the public ``task: str`` schema above.
+        tool.agent_target = self
+        return tool
 
     def definition(self) -> Any:
         """ToolDefinition for this agent — used when passed in tools=[] of another agent."""

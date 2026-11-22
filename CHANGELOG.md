@@ -14,6 +14,10 @@ Delegation audit remediation (DELEGATION_AUDIT.md, #246): 7 high and 2 medium fi
 
 ### Fixed
 
+- Named and aliased Agent targets in Plans receive the complete step envelope, preserving composed context and attachments like direct Agent targets.
+- Dynamic background delegates enforce advertised required parameters and JSON types before policy checks, approval, admission, or job creation.
+- Verified Agent tools take one live-source snapshot per attempt and share exactly that evidence with the writer and reviewer.
+- Shared aliased Agent tools resolve inherited session identity per invocation instead of retaining another orchestrator's session.
 - Plan step failures are emitted as `TOOL_ERROR`; writer confirmation prompts carry a SHA-256 request-digest line; explicit `writable_roots=()` overrides configured roots; and failed child envelopes render as `Agent error (type): message`.
 - Legacy Plan checkpoints and delegation jobs are automatically recoverable after a 15-minute staleness window, process creation stamps detect PID reuse, and uncertain Plan keys have a public reconciliation method.
 - Verification retries ordinary producer failures, while still stopping immediately for explicitly uncertain outcomes.

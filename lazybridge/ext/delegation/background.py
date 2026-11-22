@@ -47,6 +47,16 @@ _HANDLE = re.compile(r"[0-9a-zA-Z_#-]+")
 #: silently fight over who sets the engine_factory kwarg of that name.
 _RESERVED_EXTRA_PARAM_NAMES = frozenset({"model", "effort"})
 
+_JSON_TYPE_CHECKS: dict[str, Callable[[Any], bool]] = {
+    "string": lambda value: isinstance(value, str),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+    "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+    "boolean": lambda value: isinstance(value, bool),
+    "array": lambda value: isinstance(value, list),
+    "object": lambda value: isinstance(value, dict),
+    "null": lambda value: value is None,
+}
+
 
 @dataclass(frozen=True)
 class ExtraParam:
@@ -953,6 +963,28 @@ def make_background_delegate(
         unexpected = sorted(set(extra) - allowed_extra_names)
         if unexpected:
             return f"REJECTED: unexpected argument(s) {unexpected} -- this tool does not accept them"
+        missing = sorted(name for name, spec in (extra_params or {}).items() if spec.required and name not in extra)
+        if missing:
+            return f"REJECTED: missing required argument(s) {missing}"
+        # Provider tool calls commonly encode an omitted optional field as
+        # null.  Treat that representation as omission for declared optional
+        # ExtraParams, without weakening required-field or override checks.
+        extra = {
+            name: value
+            for name, value in extra.items()
+            if not (value is None and (spec := (extra_params or {}).get(name)) is not None and not spec.required)
+        }
+        for name, value in extra.items():
+            spec = (extra_params or {}).get(name)
+            if spec is None:
+                expected = "string"  # model and effort overrides
+            else:
+                expected = spec.json_type
+            check = _JSON_TYPE_CHECKS.get(expected)
+            if check is None:
+                return f"REJECTED: argument {name!r} declares unsupported JSON type {expected!r}"
+            if not check(value):
+                return f"REJECTED: argument {name!r} must be of JSON type {expected}"
         call_model = extra.pop("model", None) if accept_model_override else None
         call_effort = extra.pop("effort", None) if accept_effort_override else None
         resolved_model = call_model if call_model is not None else model
