@@ -34,6 +34,8 @@ def _typed_tool(count: int, scale: float = 1.0) -> float:
 
 def test_run_sync_coerces_string_numbers():
     tool = Tool(_typed_tool)
+    # LLMs frequently send numbers as strings — coercion must happen
+    # before the function body runs.
     assert tool.run_sync(count="3", scale="2.5") == 7.5
 
 
@@ -47,7 +49,7 @@ def test_async_run_validates_too():
     tool = Tool(_typed_tool)
 
     async def _go():
-        return await tool.run(count=4)
+        return await tool.run(count="4")
 
     assert asyncio.run(_go()) == 4.0
 
@@ -70,7 +72,7 @@ def test_kwargs_extras_survive_validation():
     assert out == {"a": 1, "extra": "x", "n": 2}
 
     tool = Tool(kw_tool)
-    assert tool.run_sync(a=1, extra="x") == (1, {"extra": "x"})
+    assert tool.run_sync(a="1", extra="x") == (1, {"extra": "x"})
 
 
 class _Point(BaseModel):
