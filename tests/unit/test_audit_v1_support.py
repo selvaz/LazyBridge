@@ -51,10 +51,11 @@ def test_llm_summary_receives_prior_summary():
         return f"summary#{len(prompts)}"
 
     mem = Memory(strategy="summary", summarizer=summarizer)
-    for i in range(11):
+    for i in range(16):  # summary's turn rule: more than 15 turns
         mem.add(f"u{i}", f"a{i}")
     assert mem._summary == "summary#1"
-    mem.add("x", "y")  # The tiny budget requires another compaction.
+    for i in range(6):  # another batch of five beyond the ten-turn window
+        mem.add(f"x{i}", f"y{i}")
     assert mem._summary == "summary#2"
     # The second summarizer call must include the first summary as
     # material to fold in.

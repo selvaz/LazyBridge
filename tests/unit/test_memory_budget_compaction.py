@@ -132,9 +132,14 @@ def test_summary_keeps_the_ten_turn_rule_and_also_honours_the_budget() -> None:
     """Backward compatible: summary still compacts after ten turns, and earlier on the budget."""
     turn_prompts: list[str] = []
     by_turns = Memory(strategy="summary", max_tokens=100_000, summarizer=lambda p: turn_prompts.append(p) or "s")
-    for index in range(11):
+    for index in range(15):
         by_turns.add(f"short {index}", "reply")
+    assert turn_prompts == [], "the summary turn rule waits for a batch beyond ten turns"
+    by_turns.add("short 15", "reply")
     assert len(turn_prompts) == 1
+    for index in range(16, 20):
+        by_turns.add(f"short {index}", "reply")
+    assert len(turn_prompts) == 1, "no summarizer call on every add after the batch"
 
     # A tiny budget: the verbatim tail alone exceeds the target, so the anti-thrash
     # rule compacts with the local extractor instead of calling the summarizer.

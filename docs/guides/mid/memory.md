@@ -12,7 +12,7 @@ from lazybridge import Memory
 Memory(
     *,
     strategy="auto",               # "auto" | "sliding" | "summary" | "none"
-    max_tokens=None,               # optional token budget that triggers compression
+    max_tokens=4000,               # token budget for "auto"/"summary" (None disables it)
     max_turns=1000,                # hard backstop on retained turns
     store=None,                    # Store — persist across process restarts
     key=None,                      # required with store= — stable identity (e.g. agent name)
@@ -44,8 +44,10 @@ Pass to an `Agent` via `memory=mem` (private to that agent) or
 
 `Memory` is "what the model should see in the next prompt". It carries
 conversation continuity across calls to the same agent (or across
-several agents that share the instance). The default `"auto"` strategy preserves its legacy no-budget behaviour.
-Set `max_tokens=` to opt into token-budget compaction.
+several agents that share the instance). The default `"auto"` strategy compacts when the remembered text exceeds
+`max_tokens` (4000 by default). `"sliding"` compacts once more than ten turns
+are stored; `"summary"` compacts by turn count in batches (more than fifteen
+turns, keeping the latest ten) and earlier when the text exceeds the budget.
 
 `max_tokens` measures the remembered text itself with a conservative
 1.3-tokens-per-word estimate. It does not use provider billing counters, so cached

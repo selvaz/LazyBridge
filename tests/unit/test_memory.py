@@ -188,9 +188,10 @@ def test_text_reflects_latest_state():
 
 
 def _force_compression_turns() -> list[tuple[str, str]]:
-    """Build a turns list long enough that strategy='summary' compresses
-    on the next add()."""
-    return [(f"user-{i}", f"assistant-{i}") for i in range(11)]
+    """Build a turns list long enough that strategy='summary' compresses:
+    its turn rule fires once more than 15 turns are stored (a batch of five
+    beyond the ten-turn verbatim window)."""
+    return [(f"user-{i}", f"assistant-{i}") for i in range(16)]
 
 
 def test_summarizer_sync_callable_is_used_verbatim():

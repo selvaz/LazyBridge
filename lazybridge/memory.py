@@ -71,6 +71,9 @@ class Memory:
     #: Recent turns are never summarized.  Besides avoiding a summary-only
     #: context, this verbatim window preserves exact identifiers and facts.
     _RECENT_TURNS = 10
+    #: "summary"'s turn rule compacts in batches: only once this many turns beyond
+    #: the verbatim window accumulate, so the summarizer is not called on every add.
+    _TURN_BATCH = 5
     _BUDGET_TARGET = 0.60
     _SUMMARY_SHARE = 0.30
 
@@ -102,9 +105,11 @@ class Memory:
         max_tokens:
             Optional approximate token budget for remembered text. Size is
             estimated as 1.3 tokens per word and is independent of provider
-            billing/cache counters. When omitted, the legacy count rules
-            apply: ``"summary"`` compacts after ten turns and ``"auto"``
-            does not compact.
+            billing/cache counters. Default 4000. ``"auto"`` and
+            ``"summary"`` compact when the stored text exceeds it;
+            ``"sliding"`` ignores it. ``None`` disables the budget
+            (``"auto"`` then never compacts; ``"summary"`` uses only its
+            turn rule).
         max_turns:
             Hard cap on retained turns after compression runs.  ``None``
             disables the cap (unbounded history — only safe for short
@@ -260,7 +265,7 @@ class Memory:
             # to ``_summary``, but read it under the lock for visibility.
             with self._lock:
                 prior_summary = self._summary
-                tail_over_target = self.max_tokens is not None and sum(
+                tail_over_target = self._uses_budget() and sum(
                     turn.token_estimate for turn in self._turns[drop_count:]
                 ) > int(self.max_tokens * self._BUDGET_TARGET)
             try:
@@ -346,7 +351,9 @@ class Memory:
         budget_exceeded = (
             self.strategy in ("auto", "summary") and self.max_tokens is not None and total > self.max_tokens
         )
-        turn_rule = self.strategy in ("sliding", "summary") and len(self._turns) > self._RECENT_TURNS
+        turn_rule = (self.strategy == "sliding" and len(self._turns) > self._RECENT_TURNS) or (
+            self.strategy == "summary" and len(self._turns) > self._RECENT_TURNS + self._TURN_BATCH
+        )
         if not budget_exceeded and not turn_rule:
             return None
         if budget_exceeded and len(self._turns) <= 2:
@@ -369,9 +376,13 @@ class Memory:
         self._compressing = True
         return head, len(head)
 
+    def _uses_budget(self) -> bool:
+        """Only "auto" and "summary" honour max_tokens; "sliding" ignores it."""
+        return self.strategy in ("auto", "summary") and self.max_tokens is not None
+
     def _cap_summary(self, summary: str) -> str:
         """Bound summaries to their budget share, preferring sentence cuts."""
-        if self.max_tokens is None:
+        if not self._uses_budget():
             return summary
         max_chars = max(1, int(self.max_tokens * self._SUMMARY_SHARE * 4))
         # Keep the fallback's marker intact even under unrealistically tiny
