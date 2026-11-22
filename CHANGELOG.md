@@ -8,34 +8,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-
-- Memory token-budget compaction is now opt-in with `max_tokens=` while the `None` default preserves the legacy ten-turn `summary` trigger and `auto` behaviour. Budget compaction uses the documented 1.3-tokens-per-word heuristic on stored text, 60% hysteresis, dynamically shrinks the verbatim tail to at least two turns, and caps summaries to prevent repeated summariser calls and oversized extractive summaries. Persisted token estimates are recalculated from text; `Memory.add(tokens=...)` remains accepted with a `DeprecationWarning` but is intentionally ignored so provider-billed tokens cannot hide remembered text from the budget.
-
-- `verify=`: judge verdicts with a label prefix (`VERDICT: APPROVED`, `**Verdict:** pass`, `Decision: approve`) are now recognised, as the docstring already promised. Before, every labelled approval counted as a rejection, so verify loops that had converged kept retrying and reported "not approved". Only known label words are stripped; any other first word still fails safe to rejection.
-
-### Fixed
-
-- Codex: a run could hang forever after a dynamic tool call (about half of the runs with codex-cli 0.171). The turn had finished, but `wait_with_tool_clock` used `asyncio.wait_for`, which before Python 3.12 swallows a cancellation that lands in the same tick as a tool-clock change; the deadline timer then looped and the caller awaited it forever. It now uses `asyncio.wait`.
-- Codex: tool calls and approval requests are served in their own tasks, not inline in the App Server reader. While a tool runs, the reader keeps draining stdout and sees `turn/completed`, EOF or a child exit; a child that dies during a tool call now fails the turn promptly with `CodexTransportError`, and in-flight tool tasks are cancelled when the turn ends. The App Server has no timeout of its own for dynamic tool calls, so `CodexEngine(tool_timeout=...)` is the only bound on a tool.
-
+## [1.8.10] - 2026-11-22
 
 ### Added
 
 - Codex: `CodexPolicy(transport="http")` or `LAZYBRIDGE_CODEX_TRANSPORT=http` routes turns over HTTP/SSE through a per-process provider override (`name="OpenAI"`, `supports_websockets=false`, ChatGPT backend URL; `LAZYBRIDGE_CODEX_HTTP_BASE_URL` to change it). On Windows, concurrent App Servers crashed with 0xC0000409 while opening the Responses WebSocket (openai/codex#36096); over HTTP, 6 parallel agents ran 56 turns without a crash. The upstream WebSocket opt-out flag was removed (openai/codex#38638).
-
-### Added
-
-- Codex: process-wide cap on concurrent App Server children via `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` or `set_codex_max_concurrency(n)` (default unlimited). Concurrent App Servers crashed with 0xC0000409 in 3-10% of turns on Windows; with the cap at 1 the same reproduction ran 0 of 32 crashes. Other engines are unaffected; waiting is cancellable.
+- Codex: process-wide cap on concurrent App Server children via `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` or `set_codex_max_concurrency(n)` (default unlimited). Other engines are unaffected; waiting is cancellable.
+- `verify_context=True` (opt-in, on `Agent(...)` and `Agent.as_tool(...)`): an Agent judge also receives the context the agent was given, including injected `sources`, so it can check claims against evidence instead of judging style only. Off by default; the judge's own feedback is never fed back to it as evidence; plain callable judges are unchanged.
 
 ### Changed
 
-- Codex App Server crashes now report the selected CLI path and cached version,
-  decoded Windows exit status, and stderr state. Bundled stable CLIs are preferred,
-  prerelease selections warn once, and an opt-in `retry_crashed_turns` policy can
-  safely restart output-free read-only turns while recording each retry.
+- Memory: `"auto"` and `"summary"` compact when the stored text exceeds `max_tokens` (default stays 4000), estimated with the documented 1.3-tokens-per-word heuristic on the stored text, so provider cache counters no longer hide remembered text. `"summary"` keeps a turn rule, now in batches (more than 15 turns, keeping the latest 10) instead of re-summarising on every turn after the tenth; `"sliding"` ignores `max_tokens`. Budget compaction targets 60% of the budget, shrinks the verbatim tail to at least two turns and caps summaries, so the summariser is not called on every add. `max_tokens=None` disables the budget. Persisted estimates are recalculated from text; `Memory.add(tokens=...)` is accepted with a `DeprecationWarning` and ignored.
+- Codex App Server crashes now report the selected CLI path and cached version, decoded Windows exit status, and stderr state. Bundled stable CLIs are preferred, prerelease selections warn once, and an opt-in `retry_crashed_turns` policy can safely restart output-free read-only turns while recording each retry.
 
-- `verify_context=True` (opt-in, on `Agent(...)` and `Agent.as_tool(...)`): an Agent judge also receives the context the agent was given, including injected `sources`, so it can check claims against evidence instead of judging style only. Off by default: a judge on another provider receives that material only when you enable it. The judge's own feedback is never fed back to it as evidence; plain callable judges are unchanged.
+### Fixed
+
+- `verify=`: judge verdicts with a label prefix (`VERDICT: APPROVED`, `**Verdict:** pass`, `Decision: approve`) are recognised. A labelled approval counts only when the verdict word stands alone on its line; same-line rationale, conditions and a condition on the next line fail safe to rejection.
+- Claude Code: in `dontAsk` mode only tools in `allowed_tools` run; granted built-in tools are now added to `allowed_tools` (read-only ones only when an approval gate is attached), and permission denials are surfaced instead of being silent.
+- Codex: a run could hang forever after a dynamic tool call (about half of the runs with codex-cli 0.171): `wait_with_tool_clock` used `asyncio.wait_for`, which before Python 3.12 swallows a cancellation landing in the same tick as a tool-clock change; it now uses `asyncio.wait`.
+- Codex: tool calls and approval requests are served in their own tasks, not inline in the App Server reader; a child that dies during a tool call now fails the turn promptly with `CodexTransportError`, and in-flight tool tasks are cancelled when the turn ends. `CodexEngine(tool_timeout=...)` is the only bound on a dynamic tool.
 
 ## [1.8.9] — 2026-11-20
 
