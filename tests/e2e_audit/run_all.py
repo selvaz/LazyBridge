@@ -24,7 +24,7 @@ BASELINES = {
     "05": ("A5 blackboard lease", "1.8.10 could lose a lease while its worker was active."),
     "06": ("A7 uncertain outcome", "1.8.10 could automatically replay an uncertain operation."),
     "07": ("A3 failed / guarded child", "1.8.10 could expose failed or denied child output."),
-    "08": ("A7 verify retry", "Ordinary-error retry behavior on 1.8.10 has not been verified."),
+    "08": ("A7 verify retry", "Ordinary-error retry may already work on 1.8.10; see the measured status above."),
     "09": ("M3 reservations", "1.8.10 could strand reservations during cancellation."),
     "10": ("A1/A2 approvals", "1.8.10 could lose permission scope or reuse a mismatched confirmation."),
     "11": ("M4 Codex slots", "1.8.10 could leave detached workers uncounted."),
@@ -34,6 +34,8 @@ BASELINES = {
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--baseline", type=Path, help="Evidence directory from a v1.8.10 run")
+    parser.add_argument("--baseline-self", action="store_true", help="This run uses v1.8.10")
     args = parser.parse_args()
     destination = EVIDENCE / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     destination.mkdir(parents=True, exist_ok=False)
@@ -99,35 +101,55 @@ def main():
             json.loads(result_path.read_text(encoding="utf-8"))
             if result_path.exists()
             else {
-                "finding": "Scenario did not produce a result",
+                "scenario": name,
+                "finding": finding,
+                "expected": "Scenario completes successfully",
+                "observed": "Scenario did not produce a result; see process.log",
                 "status": "FAIL",
                 "duration": round(time.monotonic() - started, 3),
+                "failure_kind": "startup or timeout",
             }
         )
         if code or result["status"] not in ("PASS", "SKIP"):
             failed = True
             result["status"] = "FAIL"
+        result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         rows.append((name, result, baseline))
         print(f"{name}: {result['status']} ({result['duration']}s)", flush=True)
     report = [
         "# Delegation audit end-to-end report",
         "",
-        "| Scenario | Finding | Status | Duration (s) | Evidence |",
-        "| --- | --- | --- | ---: | --- |",
+        "| Scenario | Finding | Status | Duration (s) | 1.8.10 | Evidence |",
+        "| --- | --- | --- | ---: | --- | --- |",
     ]
     for name, result, _baseline in rows:
+        if args.baseline_self:
+            baseline_result = result
+        elif args.baseline and (args.baseline / name / "result.json").exists():
+            baseline_result = json.loads((args.baseline / name / "result.json").read_text(encoding="utf-8"))
+        else:
+            baseline_result = None
+        baseline_status = baseline_result["status"] if baseline_result else "NOT RUN"
+        if baseline_result and baseline_result.get("failure_kind"):
+            baseline_status += " (startup/timeout)"
         links = " · ".join(
             f"[{label}]({name}/{label}.md)"
             for label in ("calls", "db-diff")
             if (destination / name / f"{label}.md").exists()
         )
-        report.append(f"| {name} | {result['finding']} | {result['status']} | {result['duration']} | {links} |")
+        report.append(
+            f"| {name} | {result['finding']} | {result['status']} | {result['duration']} | {baseline_status} | {links} |"
+        )
     report += [
         "",
         "## LazyBridge 1.8.10 baseline",
         "",
-        "The descriptions below are derived from the audit; this run did not execute 1.8.10.",
+        "The descriptions below are derived from the audit. The 1.8.10 column reports the supplied baseline run; "
+        "a PASS is a regression guard, not proof of a fix. Startup or timeout failures do not prove a behavioral regression. "
+        "Inspect the baseline process logs to distinguish behavioral failures from API incompatibilities.",
     ]
+    if args.baseline:
+        report.append(f"Baseline evidence directory: `{args.baseline.resolve()}`.")
     report += [f"- **{name}:** {baseline}" for name, _, baseline in rows]
     (destination / "REPORT.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(f"Evidence: {destination}")

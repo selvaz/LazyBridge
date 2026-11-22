@@ -15,6 +15,7 @@ SCRIPTS = sorted(Path(__file__).parent.glob("s[0-9][0-9]_*.py"))
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda script: script.stem)
 def test_scenario(script, tmp_path):
     env = os.environ.copy()
+    env.pop("LB_E2E_RUN_ID", None)
     env["LB_E2E_WORK"] = str(tmp_path)
     env["PYTHONPATH"] = env.get("LB_E2E_CODE_ROOT", str(Path(__file__).resolve().parents[2]))
     proc = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=120)

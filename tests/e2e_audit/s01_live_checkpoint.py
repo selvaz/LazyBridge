@@ -52,6 +52,7 @@ async def worker(directory, mode):
 
 def run(directory):
     owner = child(__file__, "hold")
+    processes = [owner]
     try:
         deadline = time.monotonic() + 15
         while not (directory / "entered").exists():
@@ -59,20 +60,23 @@ def run(directory):
             assert time.monotonic() < deadline, "owner did not enter step 2"
             time.sleep(0.05)
         contender = child(__file__, "refuse")
+        processes.append(contender)
         assert contender.wait(timeout=15) == 0, "live owner was not refused"
         owner.kill()
         owner.wait(timeout=10)
         (directory / "release").touch()
         adopter = child(__file__, "resume")
+        processes.append(adopter)
         assert adopter.wait(timeout=15) == 0, "dead owner was not adopted"
         assert (directory / "step1.txt").read_text().splitlines() == ["called"]
         with Store(db=str(directory / "checkpoint.sqlite")) as store:
             assert store.read("shared")["status"] == "done"
         return "Live owner refused; killed owner adopted; step 1 ran once; checkpoint done."
     finally:
-        if owner.poll() is None:
-            owner.kill()
-            owner.wait(timeout=10)
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
 
 
 if __name__ == "__main__":

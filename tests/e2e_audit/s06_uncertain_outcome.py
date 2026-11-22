@@ -7,42 +7,53 @@ from pathlib import Path
 from _harness import scenario
 
 from lazybridge import Agent, Envelope, Plan, Step, Store
+from lazybridge.engines.codex import CodexEngine
+from lazybridge.engines.codex.app_server import CodexRunResult, CodexTurnUncertain
 from lazybridge.engines.plan import ConcurrentPlanRunError
-from lazybridge.envelope import UncertainOutcomeError
 
 
 async def check(directory):
     counter = directory / "invocations.txt"
 
-    class Engine:
+    class Client:
         def __init__(self, label, uncertain=True):
             self.label = label
             self.uncertain = uncertain
 
-        async def run(self, env, **kwargs):
+        async def run(self, **kwargs):
             with counter.open("a", encoding="utf-8") as stream:
                 stream.write(self.label + "\n")
             if self.uncertain:
-                return Envelope.error_envelope(UncertainOutcomeError("operation may have completed"))
+                raise CodexTurnUncertain("operation may have completed", thread_id="thread", turn_id="turn")
+            return CodexRunResult(text="done", thread_id="thread")
+
+    class Fallback:
+        async def run(self, env, **kwargs):
+            with counter.open("a", encoding="utf-8") as stream:
+                stream.write("fallback\n")
             return Envelope(task=env.task, payload="done")
 
-    fallback = Agent(engine=Engine("fallback", False), name="fallback")
-    result = await Agent(engine=Engine("fallback-primary"), name="primary", fallback=fallback).run("work")
-    assert result.error and result.error.outcome_uncertain
+    def engine(client):
+        return CodexEngine(client=client, persist_thread=True, max_retries=0)
+
+    fallback = Agent(engine=Fallback(), name="fallback")
+    result = await Agent(engine=engine(Client("fallback-primary")), name="primary", fallback=fallback).run("work")
+    assert result.error and getattr(result.error, "outcome_uncertain", False)
     judgments = []
 
     def judge(text):
         judgments.append(text)
         return "rejected"
 
-    result = await Agent(engine=Engine("verified"), name="verified", verify=judge, max_verify=3).run("work")
+    result = await Agent(engine=engine(Client("verified")), name="verified", verify=judge, max_verify=3).run("work")
     assert result.error and result.error.outcome_uncertain and not judgments
     with Store(db=str(directory / "checkpoint.sqlite")) as store:
-        engine = Engine("plan")
+        client = Client("plan")
+        plan_engine = engine(client)
 
         def make_plan():
             return Plan(
-                Step(Agent(engine=engine, name="worker"), name="worker"),
+                Step(Agent(engine=plan_engine, name="worker"), name="worker"),
                 store=store,
                 checkpoint_key="checkpoint",
                 resume=True,
@@ -60,7 +71,7 @@ async def check(directory):
             raise AssertionError("uncertain checkpoint replayed")
         assert counter.read_text().splitlines() == ["fallback-primary", "verified", "plan"]
         assert plan.clear_checkpoint()
-        engine.uncertain = False
+        client.uncertain = False
         assert (await Agent(engine=make_plan(), name="plan").run("work")).ok
     assert counter.read_text().splitlines() == ["fallback-primary", "verified", "plan", "plan"]
     return "No fallback or verification retry; replay blocked until reconciliation; counters matched."

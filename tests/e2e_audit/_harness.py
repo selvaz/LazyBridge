@@ -36,6 +36,7 @@ def environment():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(CODE_ROOT)
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
 
