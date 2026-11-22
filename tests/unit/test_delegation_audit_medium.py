@@ -149,3 +149,46 @@ async def test_shared_aliased_child_uses_each_callers_session() -> None:
     starts_b = session_b.events.query(event_type=EventType.AGENT_START)
     assert any(event["payload"].get("agent_name") == "child" for event in starts_a)
     assert any(event["payload"].get("agent_name") == "child" for event in starts_b)
+
+
+@pytest.mark.asyncio
+async def test_named_verified_agent_step_runs_judge_and_publishes_alias_output() -> None:
+    store = Store()
+    judge_prompts: list[str] = []
+
+    class Judge:
+        async def run(self, prompt: str) -> Envelope:
+            judge_prompts.append(prompt)
+            return Envelope(payload="approved")
+
+    child = Agent(engine=_CaptureEngine(), name="child", store=store)
+    alias = child.as_tool("alias", verify=Judge())
+    plan = Agent(engine=Plan(Step("alias")), name="plan", tools=[alias])
+
+    result = await plan.run("task")
+
+    assert result.ok
+    assert judge_prompts
+    assert store.read("__agent_output__:alias") == "ok"
+
+
+@pytest.mark.asyncio
+async def test_explicit_session_grandchild_ignores_inherited_override() -> None:
+    caller_session, explicit_session = Session(), Session()
+    grand_engine = _CaptureEngine()
+    grand = Agent(engine=grand_engine, name="grand", session=explicit_session)
+
+    class ChildEngine:
+        model = "child"
+
+        async def run(self, env: Envelope, **_: object) -> Envelope:
+            return await grand.run(env)
+
+    child = Agent(engine=ChildEngine(), name="child")
+    parent = Agent(engine=Plan(Step("alias")), name="parent", tools=[child.as_tool("alias")], session=caller_session)
+    child.session = caller_session
+    child._session_inherited = True
+
+    await parent.run("task")
+
+    assert grand.session is explicit_session

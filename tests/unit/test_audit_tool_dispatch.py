@@ -32,11 +32,10 @@ def _typed_tool(count: int, scale: float = 1.0) -> float:
     return count * scale
 
 
-def test_run_sync_coerces_string_numbers():
+def test_run_sync_rejects_string_numbers():
     tool = Tool(_typed_tool)
-    # LLMs frequently send numbers as strings — coercion must happen
-    # before the function body runs.
-    assert tool.run_sync(count="3", scale="2.5") == 7.5
+    with pytest.raises(ToolArgumentValidationError):
+        tool.run_sync(count="3", scale="2.5")
 
 
 def test_run_sync_rejects_bad_arguments_with_readable_error():
@@ -49,9 +48,16 @@ def test_async_run_validates_too():
     tool = Tool(_typed_tool)
 
     async def _go():
-        return await tool.run(count="4")
+        return await tool.run(count=4)
 
     assert asyncio.run(_go()) == 4.0
+
+
+def test_optional_null_is_treated_as_absent_but_required_null_is_rejected():
+    tool = Tool(_typed_tool)
+    assert tool.run_sync(count=4, scale=None) == 4.0
+    with pytest.raises(ToolArgumentValidationError, match="count"):
+        tool.run_sync(count=None)
 
 
 def test_validate_args_opt_out():
@@ -72,7 +78,7 @@ def test_kwargs_extras_survive_validation():
     assert out == {"a": 1, "extra": "x", "n": 2}
 
     tool = Tool(kw_tool)
-    assert tool.run_sync(a="1", extra="x") == (1, {"extra": "x"})
+    assert tool.run_sync(a=1, extra="x") == (1, {"extra": "x"})
 
 
 class _Point(BaseModel):

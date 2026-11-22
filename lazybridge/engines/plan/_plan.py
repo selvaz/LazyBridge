@@ -1006,10 +1006,13 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 tool = tool_map.get(target)
                 if tool is None:
                     raise RuntimeError(f"Tool {target!r} not found")
-                agent_target = getattr(tool, "agent_target", None)
-                if agent_target is not None:
-                    runner = getattr(agent_target, "_run_as_tool", agent_target.run)
-                    raw = await runner(env)
+                if getattr(tool, "agent_target", None) is not None:
+                    # Agent tools have a deliberately richer wrapper than the
+                    # bare target: verification, alias output publication and
+                    # inherited-session scoping all happen there.  Plan passes
+                    # the complete Envelope directly to that wrapper so named
+                    # steps retain the same inputs as direct Agent steps.
+                    raw = await tool.func(env)
                 else:
                     task_str = env.task or env.text()
                     raw = await tool.run(

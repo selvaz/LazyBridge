@@ -698,6 +698,43 @@ def _validate_and_coerce_arguments(func: Callable[..., Any], arguments: dict[str
     Raises ToolArgumentValidationError on missing required args, unexpected
     args (when **kwargs is absent), or type/value violations.
     """
+    # Providers sometimes serialize an omitted optional argument as JSON
+    # ``null``.  For a parameter with a Python default, null means "absent"
+    # unless its annotation explicitly accepts None; dropping it lets normal
+    # default handling apply while still rejecting null for required fields.
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError, AttributeError):
+        sig = None
+    if sig is not None:
+        arguments = {
+            name: value
+            for name, value in arguments.items()
+            if not (
+                value is None and name in sig.parameters and sig.parameters[name].default is not inspect.Parameter.empty
+            )
+        }
+
+        try:
+            hints = typing.get_type_hints(func, include_extras=True)
+        except (TypeError, ValueError, AttributeError, NameError):
+            hints = {}
+
+        def expects_number(annotation: Any) -> bool:
+            origin = typing.get_origin(annotation)
+            if origin is typing.Annotated:
+                return expects_number(typing.get_args(annotation)[0])
+            if origin in (typing.Union, _types.UnionType):
+                return any(expects_number(arg) for arg in typing.get_args(annotation))
+            return annotation in (int, float)
+
+        for name, value in arguments.items():
+            if isinstance(value, str) and expects_number(hints.get(name, Any)):
+                raise ToolArgumentValidationError(
+                    f"Invalid arguments for '{func.__name__}': {name}: "
+                    "numeric strings are not accepted for integer or number parameters"
+                )
+
     model_cls = _make_arg_model(func)
     if model_cls is None:
         return arguments  # uninspectable or zero-arg — pass through

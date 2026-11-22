@@ -458,6 +458,7 @@ class Agent:
         context: str | None = None,
         images: list[Any] | None = None,
         audio: Any | None = None,
+        _sources_injected: bool = False,
     ) -> Envelope:
         """Run the agent without catching ``ConcludeSignal``.
 
@@ -473,9 +474,22 @@ class Agent:
         with _guarded_output() if guard else nullcontext():
             try:
                 if timeout is None:
-                    return await self._run_body(task, context=context, images=images, audio=audio)
+                    return await self._run_body(
+                        task,
+                        context=context,
+                        images=images,
+                        audio=audio,
+                        _sources_injected=_sources_injected,
+                    )
                 return await asyncio.wait_for(
-                    self._run_body(task, context=context, images=images, audio=audio), timeout=timeout
+                    self._run_body(
+                        task,
+                        context=context,
+                        images=images,
+                        audio=audio,
+                        _sources_injected=_sources_injected,
+                    ),
+                    timeout=timeout,
                 )
             except ConcludeSignal as signal:
                 if not guard:
@@ -629,7 +643,11 @@ class Agent:
         # are shareable objects, so an attribute stamped at construction time
         # would report whichever agent was built last.
         _name_token = bind_agent_name(self.name)
-        effective_session = _session_override.get() or self.session
+        # An override belongs only to an agent whose session was inherited
+        # when it was mounted.  Explicitly configured descendants may execute
+        # while an inherited parent's ContextVar is still set, but must retain
+        # their own session.
+        effective_session = (_session_override.get() if self._session_inherited else None) or self.session
         _session_token = _calling_session.set(effective_session)
         try:
             result = await self.engine.run(
@@ -1017,7 +1035,7 @@ class Agent:
                 from lazybridge._verify import verify_with_retry
                 from lazybridge.envelope import Envelope as _Env
 
-                env = _Env.from_task(str(task))
+                env = task if isinstance(task, _Env) else _Env.from_task(str(task))
                 evidence: str | None = None
 
                 async def run_with_snapshot(attempt_env: _Env) -> _Env:
@@ -1030,7 +1048,12 @@ class Agent:
                     if caller_session is not None and getattr(agent, "_session_inherited", False):
                         token = _session_override.set(caller_session)
                     try:
-                        return await agent._run_body(snapshot, _sources_injected=True)
+                        # Preserve the complete agent-as-tool contract here:
+                        # timeout handling, guarded output suppression, and
+                        # ConcludeSignal propagation all live in
+                        # ``_run_as_tool``. Sources were already snapshotted,
+                        # so the private flag suppresses a second injection.
+                        return await agent._run_as_tool(snapshot, _sources_injected=True)
                     finally:
                         if token is not None:
                             _session_override.reset(token)
