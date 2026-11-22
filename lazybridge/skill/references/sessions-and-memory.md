@@ -29,8 +29,10 @@ engine resumes a durable native conversation, `Memory` is no longer prepended
 (the runtime holds the history) but it keeps recording completed answers.
 For `auto` and `summary`, `max_tokens` is estimated from stored text as
 1.3 tokens per word rather than provider usage (cached text still counts).
-Compaction preserves the latest 10 turns verbatim and calls `summarizer=` only
-when the text budget is exceeded and there are older turns to compact.
+`sliding` and `summary` compact once more than 10 turns are stored (keeping the
+latest 10 verbatim); `auto` and `summary` also compact as soon as the stored text
+exceeds `max_tokens`, shrinking the verbatim tail (minimum 2 turns) to reach 60%
+of the budget. `summarizer=` is called only when a compaction runs.
 
 ## Store (durable key/value + CAS)
 

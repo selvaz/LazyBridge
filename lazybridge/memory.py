@@ -78,7 +78,7 @@ class Memory:
         self,
         *,
         strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
-        max_tokens: int | None = None,
+        max_tokens: int | None = 4000,
         max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
         key: str | None = None,
@@ -338,20 +338,21 @@ class Memory:
         if self.strategy == "auto" and self.max_tokens is None:
             return None
         total = _estimate_text_tokens(self._summary) + sum(t.token_estimate for t in self._turns)
-        # Sliding retains its count-based compatibility behaviour.  Auto and
-        # summary use the stored text budget.  All strategies keep a ten-turn
-        # verbatim window, so the turn threshold is only a secondary bound.
-        legacy_summary = self.strategy == "summary" and self.max_tokens is None
-        should_compress = (
-            self.strategy == "sliding"
-            or legacy_summary
-            or (self.strategy in ("auto", "summary") and self.max_tokens is not None and total > self.max_tokens)
+        # Sliding and summary keep their count-based rule (compress once more
+        # than ten turns are stored, keeping the latest ten verbatim). Auto
+        # and summary additionally compress as soon as the stored text exceeds
+        # the token budget; then the verbatim tail shrinks (minimum two turns)
+        # so the result fits the hysteresis target.
+        budget_exceeded = (
+            self.strategy in ("auto", "summary") and self.max_tokens is not None and total > self.max_tokens
         )
-        minimum_turns = self._RECENT_TURNS if self.max_tokens is None else 2
-        if not (should_compress and len(self._turns) > minimum_turns):
+        turn_rule = self.strategy in ("sliding", "summary") and len(self._turns) > self._RECENT_TURNS
+        if not budget_exceeded and not turn_rule:
+            return None
+        if budget_exceeded and len(self._turns) <= 2:
             return None
         keep = self._RECENT_TURNS
-        if self.max_tokens is not None:
+        if budget_exceeded:
             # Leave enough headroom that the capped summary plus verbatim
             # tail is at most the hysteresis target. A minimum of two turns
             # keeps the immediate exchange intact even for a tiny budget.

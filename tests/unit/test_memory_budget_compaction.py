@@ -30,7 +30,8 @@ def test_auto_compacts_when_remembered_text_exceeds_budget() -> None:
 
 def test_summarizer_is_called_only_when_budget_compaction_happens() -> None:
     prompts: list[str] = []
-    memory = Memory(strategy="summary", max_tokens=1000, summarizer=lambda prompt: prompts.append(prompt) or "summary")
+    # "auto" compacts only on the token budget, so it isolates the budget path.
+    memory = Memory(strategy="auto", max_tokens=1000, summarizer=lambda prompt: prompts.append(prompt) or "summary")
 
     for index in range(11):
         memory.add(f"short {index}", "reply", tokens=9999)
@@ -125,3 +126,24 @@ def test_tokens_argument_warns_and_is_ignored() -> None:
         memory.add("a long stored request", "a stored response", tokens=1)
 
     assert memory._turns[0].token_estimate > 1
+
+
+def test_summary_keeps_the_ten_turn_rule_and_also_honours_the_budget() -> None:
+    """Backward compatible: summary still compacts after ten turns, and earlier on the budget."""
+    turn_prompts: list[str] = []
+    by_turns = Memory(strategy="summary", max_tokens=100_000, summarizer=lambda p: turn_prompts.append(p) or "s")
+    for index in range(11):
+        by_turns.add(f"short {index}", "reply")
+    assert len(turn_prompts) == 1
+
+    # A tiny budget: the verbatim tail alone exceeds the target, so the anti-thrash
+    # rule compacts with the local extractor instead of calling the summarizer.
+    by_budget = Memory(strategy="summary", max_tokens=60)
+    for index in range(5):
+        by_budget.add(f"a much longer context sentence number {index} with several words", "a longer reply as well")
+    assert len(by_budget._turns) < 5, "summary must compact on the budget before ten turns"
+    assert by_budget._summary
+
+
+def test_default_memory_keeps_a_4000_token_budget() -> None:
+    assert Memory().max_tokens == 4000

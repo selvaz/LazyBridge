@@ -56,9 +56,12 @@ ordinary turn.
 
 ### Migration note
 
-`max_tokens` now distinguishes legacy behaviour from budget behaviour. Omit it
-(`None`) to keep `strategy="summary"`'s ten-turn trigger and `"auto"`'s former
-no-budget behaviour; pass a number to compact based on stored text. The legacy
+The default stays `max_tokens=4000`. `strategy="summary"` keeps its ten-turn
+trigger and now also compacts when the stored text exceeds the budget;
+`"auto"` compacts when the stored text exceeds the budget (estimated from the
+text, so cached provider input no longer hides it). Pass `max_tokens=None` to
+disable the budget: `auto` then never compacts, `summary` uses only the
+ten-turn trigger. The legacy
 `Memory.add(..., tokens=n)` parameter is still accepted but emits a
 `DeprecationWarning` and is ignored because provider usage is not stored-memory
 size. Persisted estimates are recalculated from their text when loaded.
