@@ -81,7 +81,8 @@ def main():
     for name, result, baseline in rows:
         links = ' · '.join(f'[{label}]({name}/{label}.md)' for label in ('calls', 'db-diff') if (destination / name / f'{label}.md').exists())
         report.append(f"| {name} | {result['finding']} | {result['status']} | {result['duration']} | {links} |")
-    report += ['', '## LazyBridge 1.8.10 baseline', '']
+    report += ['', '## LazyBridge 1.8.10 baseline', '',
+        'The descriptions below are derived from the audit; this run did not execute 1.8.10.']
     report += [f'- **{name}:** {baseline}' for name, _, baseline in rows]
     (destination / 'REPORT.md').write_text('\n'.join(report) + '\n', encoding='utf-8')
     print(f'Evidence: {destination}')
