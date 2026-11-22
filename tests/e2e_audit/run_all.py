@@ -102,7 +102,14 @@ def main():
             code = proc.returncode
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
-            stdout, stderr = proc.communicate()
+            try:
+                # A surviving descendant can keep the pipes open: bound the drain.
+                stdout, stderr = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                for stream in (proc.stdout, proc.stderr):
+                    if stream is not None:
+                        stream.close()
+                stdout, stderr = "", "(output unavailable: a descendant kept the pipes open)"
             output = f"Timed out after {args.timeout} seconds" + chr(10) + stdout + stderr
             code = 1
         target = destination / name

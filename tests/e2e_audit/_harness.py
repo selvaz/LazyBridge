@@ -150,16 +150,21 @@ def scenario(name, finding, expected, run):
     started = time.monotonic()
     trace = start_trace(directory)
     status = "PASS"
+    interrupted: BaseException | None = None
     try:
         observed = run(directory)
     except SkipScenario as exc:
         status = "SKIP"
         observed = str(exc)
     except Exception:
-        # KeyboardInterrupt/SystemExit propagate; the finally block still records the run.
         status = "FAIL"
         observed = traceback.format_exc()
         print(observed, file=sys.stderr, flush=True)
+    except BaseException as exc:
+        # Record an interrupted run (KeyboardInterrupt, SystemExit), then re-raise below.
+        status = "FAIL"
+        observed = f"interrupted: {type(exc).__name__}"
+        interrupted = exc
     finally:
         sys.setprofile(None)
         threading.setprofile(None)
@@ -175,4 +180,6 @@ def scenario(name, finding, expected, run):
     write_evidence(directory, before)
     (directory / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(f"{name}: {status} ({result['duration']}s)", flush=True)
+    if interrupted is not None:
+        raise interrupted
     return 0 if status in ("PASS", "SKIP") else 1
