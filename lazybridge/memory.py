@@ -265,9 +265,10 @@ class Memory:
             # to ``_summary``, but read it under the lock for visibility.
             with self._lock:
                 prior_summary = self._summary
-                tail_over_target = self._uses_budget() and sum(
+                budget = self.max_tokens if self._uses_budget() else None
+                tail_over_target = budget is not None and sum(
                     turn.token_estimate for turn in self._turns[drop_count:]
-                ) > int(self.max_tokens * self._BUDGET_TARGET)
+                ) > int(budget * self._BUDGET_TARGET)
             try:
                 # When the mandatory two-turn verbatim tail already fills
                 # the target, calling an LLM cannot create any headroom and
@@ -363,6 +364,7 @@ class Memory:
             # Leave enough headroom that the capped summary plus verbatim
             # tail is at most the hysteresis target. A minimum of two turns
             # keeps the immediate exchange intact even for a tiny budget.
+            assert self.max_tokens is not None  # budget_exceeded implies a budget
             tail_budget = max(0, int(self.max_tokens * (self._BUDGET_TARGET - self._SUMMARY_SHARE)))
             keep = 0
             used = 0
@@ -382,7 +384,7 @@ class Memory:
 
     def _cap_summary(self, summary: str) -> str:
         """Bound summaries to their budget share, preferring sentence cuts."""
-        if not self._uses_budget():
+        if not self._uses_budget() or self.max_tokens is None:
             return summary
         max_chars = max(1, int(self.max_tokens * self._SUMMARY_SHARE * 4))
         # Keep the fallback's marker intact even under unrealistically tiny
