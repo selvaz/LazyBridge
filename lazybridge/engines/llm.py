@@ -889,14 +889,7 @@ class LLMEngine:
                     payload = resp.content
 
                 if memory:
-                    # Provider usage is retained as an API-compatible hint;
-                    # Memory sizes stored text itself so cache accounting
-                    # cannot suppress compaction.
-                    memory.add(
-                        task_text,
-                        resp.content,
-                        tokens=resp.usage.input_tokens + resp.usage.output_tokens,
-                    )
+                    memory.add(task_text, resp.content)
 
                 return Envelope(
                     task=env.task,

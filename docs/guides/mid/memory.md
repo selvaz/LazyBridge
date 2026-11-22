@@ -12,7 +12,7 @@ from lazybridge import Memory
 Memory(
     *,
     strategy="auto",               # "auto" | "sliding" | "summary" | "none"
-    max_tokens=4000,               # token budget that triggers compression
+    max_tokens=None,               # optional token budget that triggers compression
     max_turns=1000,                # hard backstop on retained turns
     store=None,                    # Store — persist across process restarts
     key=None,                      # required with store= — stable identity (e.g. agent name)
@@ -22,7 +22,7 @@ Memory(
 )
 
 # Methods
-mem.add(user, assistant, *, tokens=0)   # append a turn
+mem.add(user, assistant, *, tokens=None)  # tokens= is deprecated and ignored
 mem.messages()                          # list[Message] for the LLM
 mem.text()                              # current view as a plain string (live)
 mem.clear()                             # wipe everything in process
@@ -37,23 +37,31 @@ Pass to an `Agent` via `memory=mem` (private to that agent) or
 |---|---|---|
 | `"auto"` | Sliding window + summary of older turns once `max_tokens` is exceeded | General chat, the safe default |
 | `"sliding"` | Drops oldest turns whenever > 10 are retained; works without `max_tokens` | Cheap, lossy, no LLM cost |
-| `"summary"` | Summarises older turns when remembered text exceeds `max_tokens`, using `summarizer=` (or an extractive fallback) | Higher fidelity at the cost of summariser tokens |
+| `"summary"` | Summarises older turns at 10 turns (legacy default), or when an explicit `max_tokens` is exceeded | Higher fidelity at the cost of summariser tokens |
 | `"none"` | Never compress; only `max_turns` bounds the buffer | You want full history and have explicit control over size |
 
 ## Synopsis
 
 `Memory` is "what the model should see in the next prompt". It carries
 conversation continuity across calls to the same agent (or across
-several agents that share the instance). The default `"auto"` strategy
-keeps the memory bounded without any tuning — sliding window first,
-LLM summary of the older turns once the token budget is exceeded.
+several agents that share the instance). The default `"auto"` strategy preserves its legacy no-budget behaviour.
+Set `max_tokens=` to opt into token-budget compaction.
 
 `max_tokens` measures the remembered text itself with a conservative
 characters/4 estimate. It does not use provider billing counters, so cached
-input still counts. Budget compaction requires more than 10 turns because the
-most recent 10 are always retained verbatim; this secondary turn bound keeps
-recent names, codes, and exact instructions intact. The summariser is invoked
-only when both conditions are met.
+input still counts. After budget compaction, memory targets 60% of the budget:
+the summary is capped and the verbatim tail shrinks as needed, but retains at
+least two turns. This hysteresis avoids invoking an LLM summariser on every
+ordinary turn.
+
+### Migration note
+
+`max_tokens` now distinguishes legacy behaviour from budget behaviour. Omit it
+(`None`) to keep `strategy="summary"`'s ten-turn trigger and `"auto"`'s former
+no-budget behaviour; pass a number to compact based on stored text. The legacy
+`Memory.add(..., tokens=n)` parameter is still accepted but emits a
+`DeprecationWarning` and is ignored because provider usage is not stored-memory
+size. Persisted estimates are recalculated from their text when loaded.
 
 By default `Memory` is **not** durable — the whole buffer lives in the
 agent's process and disappears when the process exits. Pass

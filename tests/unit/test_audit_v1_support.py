@@ -50,7 +50,7 @@ def test_llm_summary_receives_prior_summary():
         prompts.append(prompt)
         return f"summary#{len(prompts)}"
 
-    mem = Memory(strategy="summary", max_tokens=1, summarizer=summarizer)
+    mem = Memory(strategy="summary", summarizer=summarizer)
     for i in range(11):
         mem.add(f"u{i}", f"a{i}")
     assert mem._summary == "summary#1"

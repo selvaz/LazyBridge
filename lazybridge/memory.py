@@ -6,6 +6,7 @@ import inspect
 import math
 import re
 import threading
+import warnings
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -71,12 +72,14 @@ class Memory:
     #: Recent turns are never summarized.  Besides avoiding a summary-only
     #: context, this verbatim window preserves exact identifiers and facts.
     _RECENT_TURNS = 10
+    _BUDGET_TARGET = 0.60
+    _SUMMARY_SHARE = 0.30
 
     def __init__(
         self,
         *,
         strategy: Literal["auto", "sliding", "summary", "none"] = "auto",
-        max_tokens: int | None = 4000,
+        max_tokens: int | None = None,
         max_turns: int | None = _DEFAULT_MAX_TURNS,
         store: Any | None = None,
         key: str | None = None,
@@ -98,10 +101,11 @@ class Memory:
             ``"none"``    — no compression; only the hard ``max_turns``
             cap applies.
         max_tokens:
-            Approximate token budget for remembered text under ``"auto"``
-            and ``"summary"``.  Size is estimated as characters / 4 and is
-            independent of provider billing/cache counters.  ``None``
-            disables budget compression.
+            Optional approximate token budget for remembered text. Size is
+            estimated as characters / 4 and is independent of provider
+            billing/cache counters. When omitted, the legacy count rules
+            apply: ``"summary"`` compacts after ten turns and ``"auto"``
+            does not compact.
         max_turns:
             Hard cap on retained turns after compression runs.  ``None``
             disables the cap (unbounded history — only safe for short
@@ -192,7 +196,11 @@ class Memory:
         if loaded is None:
             return
         self._turns = [
-            _Turn(user=t["user"], assistant=t["assistant"], token_estimate=t.get("token_estimate", 0))
+            _Turn(
+                user=t["user"],
+                assistant=t["assistant"],
+                token_estimate=_estimate_turn_tokens(t["user"], t["assistant"]),
+            )
             for t in loaded["turns"]
         ]
         self._summary = loaded["summary"]
@@ -226,12 +234,14 @@ class Memory:
             session_key=self.session_key,
         )
 
-    def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
-        # ``tokens`` remains accepted for API compatibility, but provider
-        # usage is the wrong measure here: cached prompt tokens may be absent
-        # from billed input while their text is still stored in Memory.
-        del tokens
-        text_tokens = _estimate_text_tokens(f"User: {user}\nAssistant: {assistant}")
+    def add(self, user: str, assistant: str, *, tokens: int | None = None) -> None:
+        if tokens is not None:
+            warnings.warn(
+                "Memory.add(tokens=...) is deprecated and ignored; memory size is estimated from stored text",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        text_tokens = _estimate_turn_tokens(user, assistant)
         # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
             self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=text_tokens))
@@ -251,13 +261,20 @@ class Memory:
             # to ``_summary``, but read it under the lock for visibility.
             with self._lock:
                 prior_summary = self._summary
+                tail_over_target = self.max_tokens is not None and sum(
+                    turn.token_estimate for turn in self._turns[drop_count:]
+                ) > int(self.max_tokens * self._BUDGET_TARGET)
             try:
-                if self._summarizer is not None:
+                # When the mandatory two-turn verbatim tail already fills
+                # the target, calling an LLM cannot create any headroom and
+                # would repeat on every long turn. Preserve the evicted head
+                # with the bounded local extractor instead.
+                if self._summarizer is not None and not tail_over_target:
                     new_summary = self._llm_summary(head_turns, prior=prior_summary)
                 else:
                     new_summary = self._rule_summary(head_turns, prior=prior_summary)
                 with self._lock:
-                    self._summary = new_summary
+                    self._summary = self._cap_summary(new_summary)
                     # Drop the first ``drop_count`` turns; any turns
                     # appended concurrently during summarisation remain
                     # in place after the cut.
@@ -319,22 +336,45 @@ class Memory:
             return None
         if self.strategy == "none":
             return None
-        if self.strategy in ("auto", "summary") and not self.max_tokens:
+        if self.strategy == "auto" and self.max_tokens is None:
             return None
         total = _estimate_text_tokens(self._summary) + sum(t.token_estimate for t in self._turns)
         # Sliding retains its count-based compatibility behaviour.  Auto and
         # summary use the stored text budget.  All strategies keep a ten-turn
         # verbatim window, so the turn threshold is only a secondary bound.
-        should_compress = self.strategy == "sliding" or (
-            self.strategy in ("auto", "summary")
-            and self.max_tokens is not None
-            and total > self.max_tokens
+        legacy_summary = self.strategy == "summary" and self.max_tokens is None
+        should_compress = (
+            self.strategy == "sliding"
+            or legacy_summary
+            or (self.strategy in ("auto", "summary") and self.max_tokens is not None and total > self.max_tokens)
         )
-        if not (should_compress and len(self._turns) > self._RECENT_TURNS):
+        minimum_turns = self._RECENT_TURNS if self.max_tokens is None else 2
+        if not (should_compress and len(self._turns) > minimum_turns):
             return None
-        head = list(self._turns[: -self._RECENT_TURNS])  # snapshot; safe to summarise outside lock
+        keep = self._RECENT_TURNS
+        if self.max_tokens is not None:
+            # Leave enough headroom that the capped summary plus verbatim
+            # tail is at most the hysteresis target. A minimum of two turns
+            # keeps the immediate exchange intact even for a tiny budget.
+            tail_budget = max(0, int(self.max_tokens * (self._BUDGET_TARGET - self._SUMMARY_SHARE)))
+            keep = 0
+            used = 0
+            for turn in reversed(self._turns):
+                if keep >= 2 and used + turn.token_estimate > tail_budget:
+                    break
+                used += turn.token_estimate
+                keep += 1
+            keep = max(2, min(keep, len(self._turns) - 1))
+        head = list(self._turns[:-keep])  # snapshot; safe to summarise outside lock
         self._compressing = True
         return head, len(head)
+
+    def _cap_summary(self, summary: str) -> str:
+        """Bound summaries to their budget share, preferring sentence cuts."""
+        if self.max_tokens is None:
+            return summary
+        max_chars = max(1, int(self.max_tokens * self._SUMMARY_SHARE * 4))
+        return _truncate_summary(summary, max_chars=max_chars)
 
     def _llm_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.
@@ -412,7 +452,8 @@ class Memory:
         # Preserve order and exact spelling (notably named entities), while
         # bounding repeated fallback summaries.
         unique = list(dict.fromkeys(sentence for sentence in sentences if sentence))
-        return f"[Earlier conversation covered: {' '.join(unique[-20:])}]"
+        summary = f"[Earlier conversation covered: {' '.join(unique[-20:])}]"
+        return self._cap_summary(summary)
 
     def messages(self) -> list[Message]:
         """Return full message list including summary prefix if compressed."""
@@ -453,7 +494,7 @@ class Memory:
                 self._turns[-1] = _Turn(
                     user=last.user,
                     assistant=assistant,
-                    token_estimate=_estimate_text_tokens(f"User: {last.user}\nAssistant: {assistant}"),
+                    token_estimate=_estimate_turn_tokens(last.user, assistant),
                 )
             self._persist_locked()
 
@@ -469,6 +510,29 @@ class Memory:
 def _estimate_text_tokens(text: str) -> int:
     """Conservative tokenizer-free estimate for the text Memory stores."""
     return math.ceil(len(text) / 4)
+
+
+def _estimate_turn_tokens(user: str, assistant: str) -> int:
+    return _estimate_text_tokens(f"User: {user}\nAssistant: {assistant}")
+
+
+def _truncate_summary(summary: str, *, max_chars: int) -> str:
+    """Truncate at a sentence boundary when possible, with a hard cap."""
+    if len(summary) <= max_chars:
+        return summary
+    prefix = "[Earlier conversation covered: "
+    suffix = "]"
+    if summary.startswith(prefix) and summary.endswith(suffix) and max_chars > len(prefix) + len(suffix):
+        inner = _truncate_summary(summary[len(prefix) : -len(suffix)], max_chars=max_chars - len(prefix) - len(suffix))
+        return f"{prefix}{inner}{suffix}"
+    candidates = [sentence for sentence in _sentences(summary) if len(sentence) <= max_chars]
+    kept: list[str] = []
+    for sentence in candidates:
+        candidate = " ".join([*kept, sentence])
+        if len(candidate) > max_chars:
+            break
+        kept.append(sentence)
+    return " ".join(kept) if kept else summary[:max_chars]
 
 
 def _sentences(text: str) -> list[str]:
