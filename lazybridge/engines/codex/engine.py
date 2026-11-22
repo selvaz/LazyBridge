@@ -12,6 +12,7 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
+from types import EllipsisType
 from typing import Any, TypeVar, cast, get_origin
 
 from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
@@ -292,6 +293,7 @@ class CodexEngine:
         thread_source: str | None = "lazybridge",
         session_alias: str | None = None,
         session_registry: SessionRegistry | None = None,
+        _expected_alias_thread: str | EllipsisType | None = Ellipsis,
     ) -> None:
         # A Claude alias/id ("sonnet", "claude-opus-5-5") is translated to the
         # tier-equivalent OpenAI model; Codex rejects the Claude namespace.
@@ -301,6 +303,7 @@ class CodexEngine:
         #: docstring. ``None`` (the default) leaves thread handling untouched.
         self.session_alias = session_alias
         self._alias: AliasBinding | None = None
+        self._expected_alias_thread = _expected_alias_thread
         if session_alias is not None:
             self._alias = AliasBinding("codex", session_alias, cwd, session_registry)
             # An explicit id wins; otherwise adopt whatever the alias is bound to.
@@ -493,7 +496,13 @@ class CodexEngine:
         one (adopted, explicit or created) keeps it. Called inside the thread
         lock so a queued first run sees the id the run ahead of it created.
         """
-        if self._alias is not None and not self.thread_id:
+        if self._alias is None:
+            return
+        if self._expected_alias_thread is not Ellipsis:
+            expected = self._expected_alias_thread
+            if self.thread_id != expected or self._alias.known_id() != expected:
+                raise ValueError("The approved Codex session alias changed. Request approval for its current thread.")
+        elif not self.thread_id:
             known = self._alias.known_id()
             if known:
                 self.thread_id = known

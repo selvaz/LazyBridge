@@ -8,6 +8,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Plan step failures are emitted as `TOOL_ERROR`; writer confirmation prompts carry a SHA-256 request-digest line; explicit `writable_roots=()` overrides configured roots; and failed child envelopes render as `Agent error (type): message`.
+- Legacy Plan checkpoints and delegation jobs are automatically recoverable after a 15-minute staleness window, process creation stamps detect PID reuse, and uncertain Plan keys have a public reconciliation method.
+- Verification retries ordinary producer failures, while still stopping immediately for explicitly uncertain outcomes.
+- DurableBlackboard release paths clear delegation metadata and permit externally released or expired claims to close without a delegation ID.
+
+- Native permission requests reach the approval gate with their full scope. Codex applies the permissions returned by that gate.
+- Failed sub-agent envelopes surface as tool errors in Codex, Claude Code, LLMEngine, and Plan. Guarded runs emit only trace metadata and hold stream chunks until the output guard approves them.
+- Agents and verified tools stop when Codex reports an uncertain outcome. `ErrorInfo.outcome_uncertain` identifies errors that need reconciliation before replay.
+- Codex writer confirmations show the workspace, session, and writable roots and bind approval to the full delegation with a request digest. The built-in writer checks the approved alias binding before starting Codex.
+- Plan recovery respects live owners and holds checkpoints with uncertain outcomes for reconciliation. Active legacy checkpoints without an owner require operator review.
+- Standard background delegates record the owner at enqueue time. Startup recovery reclaims records whose owner has exited. Legacy records can be reconciled explicitly with `reclaim_unowned=True`.
+- Plan delegation renews a `DurableBlackboard` lease for the current job and checks the attempt ID before accepting its result. Default setup failures release only their own attempt.
+- Parallel delegation completes each outstanding reservation refund when the batch is cancelled, even during an asynchronous refund for a failed handoff.
+- Detached Codex delegates acquire their own concurrency slots. Inline children can still reuse the slot of the turn awaiting them.
+
 ## [1.8.10] - 2026-11-22
 
 ### Added

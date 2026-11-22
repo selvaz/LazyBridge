@@ -103,6 +103,11 @@ def _fresh_task(text: str) -> dict[str, Any]:
     }
 
 
+def _clear_delegation(task: dict[str, Any]) -> None:
+    for key in ("delegation_id", "delegation_active", "delegation_lease_until"):
+        task.pop(key, None)
+
+
 @dataclass(frozen=True)
 class BlackboardSnapshot:
     """Read-only view of a plan, for callers that want data instead of text."""
@@ -261,6 +266,7 @@ class DurableBlackboard:
             # A failed task already closed at its failure time; cancelling only
             # reclassifies it, so it keeps that time instead of looking new.
             closed_at = task.get("completed_at") if task.get("status") == "failed" else None
+            _clear_delegation(task)
             task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=closed_at or time.time())
             new_doc = {**doc, "tasks": tasks}
             return new_doc, self._render(new_doc)
@@ -394,6 +400,13 @@ class DurableBlackboard:
 
     # -- work -----------------------------------------------------------
 
+    def _lease_expired(self, task: dict[str, Any], now: float) -> bool:
+        deadline = task.get("delegation_lease_until")
+        if deadline is not None:
+            return now > float(deadline)
+        claimed_at = task.get("claimed_at")
+        return claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+
     def claim_next(self, owner: str | None = None) -> tuple[int, str] | None:
         """Take the next task atomically, or ``None`` when there is nothing to take.
 
@@ -416,13 +429,7 @@ class DurableBlackboard:
             # claim sitting earlier in the list.
             todo_index = next((i for i, t in enumerate(tasks) if t["status"] == "todo"), None)
             expired_index = next(
-                (
-                    i
-                    for i, t in enumerate(tasks)
-                    if t["status"] == "claimed"
-                    and t.get("claimed_at") is not None
-                    and now - float(t["claimed_at"]) > self.lease_seconds
-                ),
+                (i for i, t in enumerate(tasks) if t["status"] == "claimed" and self._lease_expired(t, now)),
                 None,
             )
             candidates = [i for i in (todo_index, expired_index) if i is not None]
@@ -430,6 +437,7 @@ class DurableBlackboard:
             if index is None:
                 return None, None
             task = tasks[index]
+            _clear_delegation(task)
             if task.get("attempts", 0) >= self.max_attempts:
                 # Out of retries: park it so the plan can finish instead of
                 # handing the same poison task out forever.
@@ -470,7 +478,13 @@ class DurableBlackboard:
         return None
 
     def claim_task(
-        self, task_index: int, expected_text: str, *, owner: str | None = None, renew: bool = False
+        self,
+        task_index: int,
+        expected_text: str,
+        *,
+        owner: str | None = None,
+        renew: bool = False,
+        delegation_id: str | None = None,
     ) -> tuple[int, str] | str:
         """Take a SPECIFIC task instead of whichever is earliest-eligible --
         for a caller that already knows which task it wants and does not
@@ -506,6 +520,9 @@ class DurableBlackboard:
         distinguish the two with ``isinstance(result, str)``, the same
         convention ``cancel_task``/``mark_done``/``mark_failed`` already use
         for their own rejections.
+
+        A delegation may attach its job ID as ``delegation_id``. That attempt
+        owns its own lease and must finish before the task can be reviewed.
         """
         holder = owner or uuid.uuid4().hex
 
@@ -532,10 +549,11 @@ class DurableBlackboard:
             # not complete: seen live on project lazyceostudio, where a
             # healthy task was driven to 'failed' at attempts=3 on purpose,
             # to escape a competitor that did not exist.
-            claimed_at = task.get("claimed_at")
-            expired = claimed_at is not None and now - float(claimed_at) > self.lease_seconds
+            expired = self._lease_expired(task, now)
             renewing = (
                 task.get("status") == "claimed"
+                and delegation_id is None
+                and task.get("delegation_id") is None
                 # owner=None means "I am not identifying myself" -- two
                 # anonymous callers are not the same caller, and must not
                 # be able to walk into each other's leases.
@@ -597,6 +615,7 @@ class DurableBlackboard:
                 task.update(claimed_at=now, renewed=True)
                 new_doc = {**doc, "tasks": tasks}
                 return new_doc, (task_index, str(task["text"]))
+            _clear_delegation(task)
             if task.get("attempts", 0) >= self.max_attempts:
                 # Same poison-task handling as claim_next: park it so the
                 # plan can finish instead of handing it out again.
@@ -614,22 +633,56 @@ class DurableBlackboard:
                 # A fresh claim is a fresh right to renew once.
                 renewed=False,
             )
+            if delegation_id is not None:
+                task.update(
+                    delegation_id=delegation_id,
+                    delegation_active=True,
+                    delegation_lease_until=now + self.lease_seconds,
+                )
             new_doc = {**doc, "tasks": tasks}
             return new_doc, (task_index, str(task["text"]))
 
         return self._mutate(apply)
 
-    def mark_done(self, task_index: int, summary: str, *, owner: str | None = None) -> str:
+    def _refresh_delegation(self, task_index: int, owner: str, delegation_id: str, *, finished: bool = False) -> bool:
+        """Extend an active attempt, or hand its result back to the owner for review."""
+
+        def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, bool]:
+            if doc is None or not 0 <= task_index < len(doc.get("tasks", ())):
+                return None, False
+            tasks = [dict(task) for task in doc["tasks"]]
+            task = tasks[task_index]
+            now = time.time()
+            if (
+                task.get("status") != "claimed"
+                or task.get("owner") != owner
+                or task.get("delegation_id") != delegation_id
+                or not task.get("delegation_active")
+                or self._lease_expired(task, now)
+            ):
+                return None, False
+            task.update(claimed_at=now, delegation_active=not finished, delegation_lease_until=now + self.lease_seconds)
+            return {**doc, "tasks": tasks}, True
+
+        return bool(self._mutate(apply))
+
+    def mark_done(
+        self, task_index: int, summary: str, *, owner: str | None = None, delegation_id: str | None = None
+    ) -> str:
         if not summary.strip():
             return "REJECTED: a 1-3 sentence summary is required."
-        return self._close(task_index, owner=owner, status="done", text=summary.strip())
+        return self._close(task_index, owner=owner, status="done", text=summary.strip(), delegation_id=delegation_id)
 
-    def mark_failed(self, task_index: int, error: str, *, owner: str | None = None) -> str:
+    def mark_failed(
+        self, task_index: int, error: str, *, owner: str | None = None, delegation_id: str | None = None
+    ) -> str:
         if not error.strip():
             return "REJECTED: an error description is required."
-        return self._close(task_index, owner=owner, status="todo", text=error.strip())
+        return self._close(task_index, owner=owner, status="todo", text=error.strip(), delegation_id=delegation_id)
 
-    def _close(self, task_index: int, *, owner: str | None, status: TaskStatus, text: str) -> str:
+    def _close(
+        self, task_index: int, *, owner: str | None, status: TaskStatus, text: str, delegation_id: str | None
+    ) -> str:
         def apply(doc: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
             if doc is None or not doc.get("tasks"):
                 return None, "REJECTED: no plan set; call set_plan first."
@@ -653,6 +706,17 @@ class DurableBlackboard:
                     f"REJECTED: task {task_index} is held by another worker — "
                     "its lease was reassigned while you were working."
                 )
+            current = task.get("delegation_id")
+            expired = current is not None and self._lease_expired(task, time.time())
+            active = bool(task.get("delegation_active")) and not expired
+            if delegation_id is not None and delegation_id != current:
+                return None, f"REJECTED: task {task_index} belongs to a different delegation attempt."
+            # External claim editors may release a delegation by clearing its
+            # active marker (or naturally allow its lease to expire). In either
+            # case the original owner may close without knowing the job id.
+            if active and (delegation_id is None or status == "done"):
+                return None, f"REJECTED: task {task_index} still has an active delegation."
+            _clear_delegation(task)
             if status == "done":
                 task.update(status="done", result=text, error="", owner=None, claimed_at=None, completed_at=time.time())
             else:

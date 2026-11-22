@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
 from lazybridge.engines.base import resolve_agent_name
-from lazybridge.engines.plan._checkpoint import _WRITE_STAMP_PREFIX, CheckpointMixin
+from lazybridge.engines.plan._checkpoint import _ACTIVE_CHECKPOINT_RUNS, _WRITE_STAMP_PREFIX, CheckpointMixin
 from lazybridge.engines.plan._compiler import PlanCompiler
 from lazybridge.engines.plan._fanout import FanoutMixin
 from lazybridge.engines.plan._resolve import ResolveMixin
@@ -37,10 +37,11 @@ from lazybridge.engines.plan._types import (
     Step,
     StepResult,
 )
-from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
+from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo, UncertainOutcomeError
 from lazybridge.sentinels import _FromStart
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
+from lazybridge.tools import _tool_error_text
 
 if TYPE_CHECKING:
     from lazybridge.memory import Memory
@@ -69,6 +70,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
         stream_buffer: int = 64,
+        adopt_unowned: bool = False,
+        owner_stale_after: float = 900.0,
     ) -> None:
         """Construct a Plan.
 
@@ -171,6 +174,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
             )
         if stream_buffer < 1:
             raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
+        if owner_stale_after < 0:
+            raise ValueError(f"owner_stale_after must be >= 0, got {owner_stale_after!r}")
         self.stream_buffer = stream_buffer
         self.steps = list(steps)
         self.max_iterations = max_iterations
@@ -179,6 +184,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         self.checkpoint_key = checkpoint_key
         self.resume = resume
         self.on_concurrent = on_concurrent
+        self.adopt_unowned = adopt_unowned
+        self.owner_stale_after = owner_stale_after
         # Validation deferred to Agent.__init__ after tools are resolved
 
     def _validate(self, tool_map: dict[str, Tool]) -> None:
@@ -265,6 +272,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
 
         result_env: Envelope[Any] | None = None
         error_msg: str | None = None
+        run_uid = uuid.uuid4().hex
+        _ACTIVE_CHECKPOINT_RUNS.add(run_uid)
         try:
             result_env = await self._run_impl(
                 env,
@@ -276,18 +285,21 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 plan_state=plan_state,
                 run_id=run_id,
                 agent_name=agent_name,
+                run_uid=run_uid,
             )
             return result_env
         except BaseException as exc:  # propagate after emitting AGENT_FINISH
             error_msg = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            _ACTIVE_CHECKPOINT_RUNS.discard(run_uid)
             if session:
                 payload: dict[str, Any] = {"agent_name": agent_name}
                 if error_msg is not None:
                     payload["error"] = error_msg
                 elif result_env is not None and result_env.error is not None:
-                    payload["error"] = result_env.error.message
+                    error = result_env.error
+                    payload["error"] = _tool_error_text(error) if error.type == "GuardBlocked" else error.message
                 elif result_env is not None:
                     payload["payload"] = (result_env.text() or "")[:500]
                 session.emit(EventType.AGENT_FINISH, payload, run_id=run_id)
@@ -304,12 +316,12 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         plan_state: PlanState | None = None,
         run_id: str,
         agent_name: str,
+        run_uid: str,
     ) -> Envelope[Any]:
         # ``run_id`` and ``agent_name`` are threaded in from ``run()`` so
         # AGENT_START/FINISH and TOOL_CALL/RESULT all share the same
         # correlation id — matches how LLMEngine and HumanEngine attach
         # their child events to the agent span.
-        run_uid = uuid.uuid4().hex  # checkpoint ownership stamp (CAS guard)
         tool_map = {t.name: t for t in tools}
         step_map = self._step_map()
 
@@ -323,10 +335,10 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         # corrupting each other.  ``last_snap`` is then threaded through
         # every save so subsequent CAS operations compare against what
         # WE last wrote (or adopted on resume).
-        last_snap = self._claim_checkpoint(effective_key, run_uid)
+        last_snap = self._claim_checkpoint(effective_key, run_uid, reuse_done=plan_state is None)
 
         # Resume: prefer explicit plan_state over store-backed checkpoint
-        checkpoint = self._load_checkpoint(effective_key) if plan_state is None else None
+        checkpoint = last_snap if self.resume and plan_state is None else None
         history: list[StepResult] = list(plan_state.history) if plan_state else []
         # Serialised twin of ``history``, maintained incrementally so each
         # checkpoint save reuses prior serialisation work instead of
@@ -401,7 +413,7 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         #     whose ``from_prev`` *is* its prior output, so it keeps
         #     ``history[-1]``.
         # Fresh runs have an empty history and fall back to ``env``.
-        resumed_status = checkpoint.get("status") if checkpoint else None
+        resumed_status = checkpoint.get("resume_status", checkpoint.get("status")) if checkpoint else None
         if history and history[-1].step_name == current_name and resumed_status in ("failed", "cancelled"):
             prev_env = history[-2].envelope if len(history) >= 2 else env
         elif history:
@@ -497,8 +509,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                     )
                     return self._aggregate_nested_metadata(paused_env, history)
 
-                # If the step errored, persist a "failed" checkpoint that
-                # points back at the same step so a future resume= retries it.
+                # Keep the failed step as the resume target. An uncertain
+                # outcome holds that checkpoint for reconciliation.
                 if result_env.error is not None:
                     last_snap = self._save_checkpoint(
                         effective_key=effective_key,
@@ -506,7 +518,7 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                         next_step=step.name,
                         kv=kv,
                         completed=completed,
-                        status="failed",
+                        status="uncertain" if result_env.error.outcome_uncertain else "failed",
                         run_uid=run_uid,
                         history_payload=history_payload,
                     )
@@ -705,6 +717,22 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         finally:
             restore_ambient_token_sink(_sink_suppress)
 
+        for outcome in raw:
+            if isinstance(outcome, UncertainOutcomeError):
+                outcome = Envelope.error_envelope(outcome)
+            if isinstance(outcome, Envelope) and outcome.error is not None and outcome.error.outcome_uncertain:
+                last_snap = self._save_checkpoint(
+                    effective_key=effective_key,
+                    last_snapshot=last_snap,
+                    next_step=group[0].name,
+                    kv=kv,
+                    completed=completed,
+                    status="uncertain",
+                    run_uid=run_uid,
+                    history_payload=history_payload,
+                )
+                return self._aggregate_nested_metadata(outcome, history), None, prev_env, last_snap
+
         # Atomicity: scan ALL branches for failure first.  If any
         # branch errored we return WITHOUT applying any writes to
         # ``kv`` / ``effective_store`` / ``history`` / ``completed``
@@ -787,7 +815,7 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         # if we crash between checkpoint and store.write, the resumed run
         # advances past the band and never retries the durable write.
         # The values still live in the checkpoint's serialised ``kv``, so
-        # Plan replay reads them correctly via ``_load_checkpoint``; only
+        # Plan replay reads them correctly from the claimed checkpoint; only
         # sidecar consumers reading the Store directly would observe the
         # gap.  See ``Plan.run`` doc above for the full contract.
         last_ok: Envelope[Any] | None = None
@@ -1033,12 +1061,18 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 raise RuntimeError(f"Cannot execute step target: {target!r}")
 
             if session:
-                result_payload: dict[str, Any] = {"step": step.name, "result": result_env.text()[:200]}
+                result_payload: dict[str, Any] = {"step": step.name}
+                if result_env.error is not None:
+                    result_payload["error"] = _tool_error_text(result_env.error)
+                    event = EventType.TOOL_ERROR
+                else:
+                    result_payload["result"] = result_env.text()[:200]
+                    event = EventType.TOOL_RESULT
                 if branch_id is not None:
                     result_payload["branch_id"] = branch_id
                 if agent_name is not None:
                     result_payload["agent_name"] = agent_name
-                session.emit(EventType.TOOL_RESULT, result_payload, run_id=run_id)
+                session.emit(event, result_payload, run_id=run_id)
             return result_env
 
         except Exception as exc:

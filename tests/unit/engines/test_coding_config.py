@@ -209,6 +209,19 @@ def test_without_a_session_the_grant_degrades_to_the_current_run():
     assert session_approvals(None, "codex", "analyst") == set()
 
 
+async def test_permission_requests_always_use_the_gates_decision():
+    request = ApprovalRequest(provider="codex", kind="permissions", name="sandbox permissions")
+    grant = ApprovalDecision("allow_session", permissions={"network": {"enabled": False}})
+    denial = ApprovalDecision.deny("Request declined")
+    decisions = iter([grant, denial])
+    approved: set[tuple[str, str]] = set()
+    scoped = remembering_gate(lambda _: next(decisions), approved)
+
+    assert await scoped(request) == grant
+    assert await scoped(request) == denial
+    assert not approved
+
+
 @pytest.mark.parametrize("engine_type", [ClaudeCodeEngine, CodexEngine])
 def test_engines_accept_approval_gate_as_a_direct_keyword(engine_type):
     async def gate(request):

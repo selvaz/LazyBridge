@@ -83,6 +83,12 @@ budget excludes intervals with at least one application tool in flight
 finishes. Native Codex tools such as shell and web search still count as
 runtime time. Defaults remain 120 seconds and 90 seconds.
 
+Set `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` to cap independent Codex turns in
+this process. A detached job launched by the delegation helpers takes its
+own slot. An inline child can reuse the slot of the turn waiting for it,
+including when the cap is one. Queueing for a slot occurs before the
+turn's request and idle timeouts start.
+
 ## Durable threads and aliases
 
 Default calls start ephemeral threads. An ephemeral ID cannot be resumed even
@@ -313,11 +319,12 @@ transport failure during thread/start or thread/resume before a turn was sent.
 A possibly created but unused thread may remain. The engine does not blindly
 replay later stateful failures.
 
-On a durable thread, loss after turn/start was sent can raise CodexTurnUncertain:
-the turn might already have executed tools. Resume and inspect before deciding
-what to do; automatic replay can duplicate side effects. A known rejection
-differs from an uncertain accepted turn. Missing/unreadable executables are
-permanent errors, not transient retries.
+On a durable thread, loss after turn/start was sent can raise `CodexTurnUncertain`.
+The turn might already have executed tools. `Agent.run()` returns an envelope
+with `error.outcome_uncertain=True` and skips verification and fallback.
+`Agent.stream()` propagates the exception. Resume and inspect the thread before
+deciding whether to repeat the operation. A known rejection is reported as a
+definitive error. Missing or unreadable executables are permanent errors.
 
 The default 120-second deadline covers all retries. Use a larger bound for
 repository work and align any MCP host deadline. No model validation or

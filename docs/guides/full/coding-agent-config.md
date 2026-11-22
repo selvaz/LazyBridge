@@ -150,6 +150,8 @@ config. Preapproving Python tools is independent of native web access.
 Generic allow_for_session grants live on the LazyBridge Session, scoped by
 (provider, agent_name) and action kind/name. Command grants also fingerprint
 a usable arguments.command string; commands without one are not cached.
+Native permission requests go to the gate, and the runtime scopes each grant
+to the subset the gate returns.
 Without a Session, grants last only for that run. allow is single-use.
 This cache does not persist through a process restart or native transcript.
 Gates that manage their own narrower scope can set manages_session_grants=True.

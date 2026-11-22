@@ -10,13 +10,18 @@ can pass the old prefixes explicitly.
 from __future__ import annotations
 
 import hashlib
-import os
-import subprocess
-import uuid
+import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from lazybridge import Store, Tool
+
+# Re-exported: callers imported current_owner_fields from this module before 1.8.11.
+from lazybridge._process_owner import current_owner_fields as current_owner_fields
+from lazybridge._process_owner import owner_is_alive, record_age
+
+_logger = logging.getLogger(__name__)
 
 #: Neutral default for the shared registry. A caller needing LazyCEO's old
 #: on-disk layout can pass ``prefix="ceo:codex-job:"`` explicitly, just as
@@ -56,112 +61,6 @@ def session_id_key(workspace_root: Path, *, prefix: str = DEFAULT_SESSION_KEY_PR
     """
     resolved = Path(workspace_root).resolve()
     return prefix + hashlib.sha256(str(resolved).encode()).hexdigest()[:16]
-
-
-#: This process's own identity for job-ownership bookkeeping (see
-#: :func:`_job_owner_is_alive`) -- a fresh uuid every time this module is
-#: imported into a running process, paired with its pid. Two different
-#: processes can share a pid over time (any OS recycles them), so pid ALONE
-#: never proves "this is the same process that wrote this record" -- only
-#: the pair does, and only for this exact process's own claim of
-#: self-identity ("is this owner me"). Liveness of a DIFFERENT (or
-#: unidentifiable) owner is checked against the real process table instead
-#: (:func:`_pid_is_running`), since there is no registry of other
-#: processes' boot ids to compare against. Promoted from LazyCEO's
-#: ``simple.agent`` module, which found this the hard way: a bare pid
-#: reused by an unrelated process made ``reclaim_interrupted`` think a dead
-#: job's owner was still alive.
-_PROCESS_BOOT_ID = str(uuid.uuid4())
-
-
-def current_owner_fields() -> dict[str, Any]:
-    """The owner stamp a long-running job's record should carry from the
-    moment its worker actually starts -- ``os.getpid()`` paired with this
-    process's own :data:`_PROCESS_BOOT_ID`. Pass the result as
-    ``owner_pid=``/``owner_boot_id=`` to :meth:`JobRegistry.write`.
-    Deliberately NOT stamped automatically by every write: a caller that
-    never cares about cross-restart liveness (most tests, a short-lived
-    CLI) should not have to see these fields in every record, and a record
-    written for bookkeeping only (e.g. a denial) was never "owned" by a
-    worker in the first place.
-    """
-    return {"owner_pid": os.getpid(), "owner_boot_id": _PROCESS_BOOT_ID}
-
-
-def _pid_is_running(pid: int, *, timeout: float = 5.0) -> bool:
-    """Best-effort liveness check for a FOREIGN owner pid.
-
-    Windows: shells out to ``tasklist`` (no ``psutil`` dependency). Any
-    other OS: ``os.kill(pid, 0)``, which sends no signal and only probes
-    whether the pid exists and is reachable.
-
-    Assumes ALIVE on any failure, timeout, or unexpected output: wrongly
-    treating a still-running writer as dead risks a second worker starting
-    on top of it (a real repository/workspace side effect duplicated),
-    which is worse than conservatively leaving a job alone for one more
-    sweep -- the same "unknown is never free capacity" direction a quota
-    brake would take for telemetry it cannot read. Promoted from LazyCEO's
-    ``simple.agent._pid_is_running``.
-    """
-    if os.name == "nt":
-        try:
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except Exception:
-            return True
-        if result.returncode != 0:
-            return True
-        output = result.stdout.strip()
-        if not output or output.upper().startswith("INFO:"):
-            return False
-        return str(pid) in output
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Exists, but owned by another user -- still alive.
-        return True
-    except Exception:
-        return True
-    return True
-
-
-def _job_owner_is_alive(raw: dict[str, Any]) -> bool:
-    """Whether the process that last claimed ownership of this job record is
-    still running.
-
-    A record with no owner stamp at all (never written with
-    ``owner_pid``/``owner_boot_id``, e.g. everything written before a
-    caller opted into :func:`current_owner_fields`) answers False -- "not
-    confirmed alive" -- which is exactly what :meth:`JobRegistry.
-    reclaim_interrupted` assumed before this field existed. Anything whose
-    ``owner_pid`` differs from this process's own is checked against the
-    real table (:func:`_pid_is_running`).
-
-    A record whose ``owner_pid`` equals THIS process's own is handled as
-    its own case, not folded into the ``_pid_is_running`` branch: only a
-    MATCHING ``owner_boot_id`` means it is actually asking about itself
-    (alive by definition -- no process-table lookup can answer that better
-    than the process itself). A matching pid with a DIFFERENT boot id means
-    pid reuse: an earlier, now-dead process happened to be handed the exact
-    pid the OS later gave this one. Falling through to ``_pid_is_running``
-    there would trivially see THIS process (it has that pid, it exists) and
-    wrongly report the old, dead owner as alive, leaving a genuinely
-    orphaned job stuck ``"running"`` forever after a restart that recycled
-    its old owner's pid. Found by Codex review before this ever shipped.
-    """
-    owner_pid = raw.get("owner_pid")
-    owner_boot_id = raw.get("owner_boot_id")
-    if not isinstance(owner_pid, int) or not isinstance(owner_boot_id, str):
-        return False
-    if owner_pid == os.getpid():
-        return owner_boot_id == _PROCESS_BOOT_ID
-    return _pid_is_running(owner_pid)
 
 
 class JobRegistry:
@@ -211,12 +110,13 @@ class JobRegistry:
         cost_unknown: bool | None = None,
         created_at: str | None = None,
         finished_at: str | None = None,
-        #: Owner stamp for cross-restart liveness -- see
-        #: :func:`current_owner_fields`/:func:`_job_owner_is_alive`. Pass
+        #: Owner stamp for startup recovery -- see
+        #: :func:`current_owner_fields` and :meth:`reclaim_interrupted`. Pass
         #: both or neither; a record with only one is treated the same as
         #: a record with no owner at all by ``reclaim_interrupted``.
         owner_pid: int | None = None,
         owner_boot_id: str | None = None,
+        owner_start_time: float | None = None,
         #: Open passthrough for a caller's OWN fields this module has never
         #: heard of (a project id, a routing decision, anything a future
         #: caller wants to attach) without forking this method's signature
@@ -265,6 +165,7 @@ class JobRegistry:
             "finished_at": finished_at,
             "owner_pid": owner_pid,
             "owner_boot_id": owner_boot_id,
+            "owner_start_time": owner_start_time,
         }
         for name, value in optional.items():
             if value is not None:
@@ -313,44 +214,29 @@ class JobRegistry:
             if self._store.compare_and_swap(key, current, {**current, **changes}):
                 return True
 
-    def reclaim_interrupted(self) -> list[str]:
-        """Mark orphaned in-progress jobs ``interrupted`` -- but only the
-        ones whose OWNER is actually dead.
+    def reclaim_interrupted(self, *, reclaim_unowned: bool = False, stale_after: float = 900.0) -> list[str]:
+        """Mark jobs owned by a dead local process as interrupted.
 
-        Meant to be called at process startup. A background asyncio Task
-        does not survive across processes, so an old ``running`` or
-        ``awaiting_approval`` record left by a process that has since
-        exited has no coroutine (or live approval wait) left to resume.
-        ``interrupted`` is more accurate than ``failed`` and avoids
-        silently presenting the job as active.
-
-        Ownership-aware: a record stamped with ``owner_pid``/
-        ``owner_boot_id`` (see :func:`current_owner_fields`) is left alone
-        when :func:`_job_owner_is_alive` confirms that process is still
-        running -- more than one process can share a ``Store`` and be
-        concurrently alive at once (the exact case the un-ownership-aware
-        version of this method could not tell apart from a genuinely dead
-        writer), and this is what makes that safe. A record with no owner
-        stamp at all answers "not confirmed alive" the same way the
-        un-ownership-aware version always treated every in-progress record,
-        so a caller that never adopts :func:`current_owner_fields` keeps
-        the exact old behaviour. Promoted from LazyCEO's
-        ``simple.agent``'s owner-aware startup recovery.
-
-        Compare-and-swap is essential regardless: a genuine old-process
-        completion (or an owner dying between the read above and this
-        write) may land between this scan and the update. A lost CAS skips
-        that job so its real ``done``/``failed`` result is never
-        clobbered.
+        Pass ``reclaim_unowned=True`` after confirming that any legacy records
+        without a process stamp have no live workers. CAS protects a terminal
+        result that arrives during the scan.
         """
         reclaimed: list[str] = []
         for key, raw in self._store.items(prefix=self._prefix):
-            if (
-                isinstance(raw, dict)
-                and raw.get("status") in ("running", "awaiting_approval")
-                and not _job_owner_is_alive(raw)
-                and self._store.compare_and_swap(key, raw, {**raw, "status": "interrupted"})
-            ):
+            if not isinstance(raw, dict) or raw.get("status") not in ("running", "awaiting_approval"):
+                continue
+            alive = owner_is_alive(raw)
+            if alive is True:
+                continue
+            if alive is None and not reclaim_unowned:
+                age = record_age(raw)
+                if age is None:
+                    entry = self._store.read_entry(key)
+                    age = time.time() - entry.written_at if entry is not None else None
+                if age is None or age < stale_after:
+                    continue
+                _logger.warning("Reclaiming stale unowned delegation job %r (age=%r seconds)", raw.get("job_id"), age)
+            if self._store.compare_and_swap(key, raw, {**raw, "status": "interrupted"}):
                 reclaimed.append(raw.get("job_id", key))
         return reclaimed
 
@@ -437,3 +323,8 @@ class JobRegistry:
 
         get_job_result.__doc__ = doc
         return Tool.wrap(get_job_result, name="get_job_result")
+
+
+def _job_owner_is_alive(record: dict[str, Any]) -> bool | None:
+    """Deprecated compatibility alias for :func:`owner_is_alive`."""
+    return owner_is_alive(record)

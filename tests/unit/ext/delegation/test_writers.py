@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 
 from lazybridge import Store
+from lazybridge.engines.sessions import SessionRegistry
+from lazybridge.ext.delegation import ExtraParam
 from lazybridge.ext.delegation.jobs import JobRegistry
 from lazybridge.ext.delegation.writers import make_claude_writer, make_codex_writer
 
@@ -80,12 +82,94 @@ async def test_codex_writer_is_confirmed_fire_and_forget(monkeypatch: pytest.Mon
 
     [job] = _jobs(store)
     assert job["status"] == "done" and job["result"] == "codex finished"
-    assert channel.prompts == ["About to delegate to Codex: implement it\n\nProceed?"]
+    [prompt] = channel.prompts
+    assert prompt.startswith("About to delegate to Codex: implement it\n\nProceed?")
+    assert f"Workspace {workspace_root.resolve()}" in prompt
+    assert "Session new thread" in prompt
+    assert "Request SHA-256 " in prompt
+    assert captured["cwd"] == str(workspace_root.resolve())
     assert captured["config"].approval_gate is gate
     assert captured["config"].codex.sandbox == "workspace-write"
     assert captured["config"].codex.approval_policy == "on-request"
     assert captured["config"].codex.preapprove_dynamic_tools is False
     assert captured["request_timeout"] is None
+
+
+async def test_codex_confirmation_binds_full_objective_workspace_and_session(tmp_path: Path) -> None:
+    prompts: list[str] = []
+
+    class Channel:
+        async def ask(self, prompt: str) -> bool:
+            prompts.append(prompt)
+            return False
+
+    tasks: set[asyncio.Task[Any]] = set()
+    tool = make_codex_writer(
+        workspace_root=tmp_path,
+        gate=_Gate(),
+        channel=Channel(),
+        registry=JobRegistry(Store()),
+        background_tasks=tasks,
+        doc="write with Codex",
+        engine_factory=lambda **_: pytest.fail("A denied request must not create an engine"),
+        extra_params={"cwd": ExtraParam()},
+        accept_session_override=True,
+    )
+    start = "a" * 2100
+    end = "b" * 1200
+    first = start + "plan A" + end
+    second = start + "plan B" + end
+    requests = [
+        (first, tmp_path / "one", "thread-a"),
+        (first, tmp_path / "one", "thread-a"),
+        (second, tmp_path / "one", "thread-a"),
+        (first, tmp_path / "two", "thread-a"),
+        (first, tmp_path / "one", "thread-b"),
+    ]
+    for objective, cwd, session in requests:
+        await tool.run(objective=objective, cwd=str(cwd), session=session)
+        await asyncio.gather(*tasks)
+
+    assert prompts[0] == prompts[1]
+    assert prompts[0].split("Request SHA-256 ")[0] == prompts[2].split("Request SHA-256 ")[0]
+    assert len({prompt.rsplit("Request SHA-256 ", 1)[1] for prompt in prompts}) == 4
+    assert f"Workspace {(tmp_path / 'two').resolve()}" in prompts[3]
+    assert "Session thread-b" in prompts[4]
+
+
+async def test_codex_declines_use_of_reassigned_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    alias_registry = SessionRegistry(tmp_path / "sessions.json")
+    alias_registry.bind("codex", tmp_path, "draft", "thread-a")
+
+    class Channel:
+        async def ask(self, prompt: str) -> bool:
+            assert "Session draft (thread-a)" in prompt
+            alias_registry.bind("codex", tmp_path, "draft", "thread-b")
+            return True
+
+    async def unexpected_call(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("The approved thread changed before the provider call")
+
+    monkeypatch.setattr("lazybridge.engines.codex.engine.CodexAppServerClient.run", unexpected_call)
+    store = Store()
+    tasks: set[asyncio.Task[Any]] = set()
+    tool = make_codex_writer(
+        workspace_root=tmp_path,
+        gate=_Gate(),
+        channel=Channel(),
+        registry=JobRegistry(store),
+        background_tasks=tasks,
+        doc="write with Codex",
+        session_alias="draft",
+        session_registry=alias_registry,
+    )
+
+    await tool.run(objective="Draft a summary")
+    await asyncio.gather(*tasks)
+
+    [job] = _jobs(store)
+    assert job["status"] == "failed"
+    assert "approved Codex session alias changed" in job["error"]
 
 
 @pytest.mark.asyncio
@@ -240,7 +324,7 @@ async def test_claude_writer_max_turns_defaults_to_60_and_is_overridable(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_codex_writer_writable_roots_reach_codex_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_codex_writer_writable_roots_reach_codex_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
     class FakeCodexEngine:
@@ -263,18 +347,18 @@ async def test_codex_writer_writable_roots_reach_codex_policy(monkeypatch: pytes
 
     store = Store()
     tool = make_codex_writer(
-        workspace_root=Path("C:/work/project"),
+        workspace_root=tmp_path / "project",
         gate=_Gate(),
         channel=Channel(),
         registry=JobRegistry(store),
         background_tasks=set(),
         doc="write with Codex",
-        writable_roots=["C:/work/.git/worktrees/project"],
+        writable_roots=[str(tmp_path / ".git" / "worktrees" / "project")],
     )
     await tool.func("implement it")
     await _drain()
 
-    assert captured["config"].codex.writable_roots == ("C:/work/.git/worktrees/project",)
+    assert captured["config"].codex.writable_roots == (str((tmp_path / ".git" / "worktrees" / "project").resolve()),)
 
 
 # ---------------------------------------------------------------------------

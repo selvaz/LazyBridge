@@ -20,6 +20,7 @@ from lazybridge.ext.delegation.background import (
     make_plan_delegate,
 )
 from lazybridge.ext.delegation.jobs import JobRegistry
+from lazybridge.ext.delegation.lifecycle import JobRunner
 from lazybridge.ext.planners.durable_blackboard import DurableBlackboard
 
 
@@ -1473,33 +1474,17 @@ async def test_parallel_delegate_refunds_all_grants_on_the_capacity_race(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_refund_and_clear_makes_a_repeated_refund_pass_a_noop() -> None:
-    """The real scenario this guards: a cancellation lands between two
-    awaits inside a batch-wide refund loop, and the outer ``except
-    BaseException`` handler re-runs the SAME loop over the SAME list to
-    make sure everything is given back. Without clearing each slot as it
-    is refunded, that second pass would refund an admission a second
-    time -- crediting a quota or restoring a one-use approval twice for a
-    single reservation. Found by Codex review before this ever shipped."""
-    from lazybridge.ext.delegation.background import _refund_and_clear
+async def test_refund_pass_preserves_one_settlement_per_reservation() -> None:
+    from lazybridge.ext.delegation.admission import _AdmissionLease
+    from lazybridge.ext.delegation.background import _refund_outstanding
 
     first, second = _FakeAdmission(allowed=True), _FakeAdmission(allowed=True)
-    admissions: list[Any] = [first, second]
+    settled = _AdmissionLease(first)
 
-    # First pass gets partway through (only index 0) before being
-    # interrupted -- exactly what a cancellation between the two awaits
-    # would leave behind.
-    await _refund_and_clear(admissions, 0)
-    assert admissions[0] is None
-    assert first.refunded == 1
+    await settled.refund()
+    await _refund_outstanding([settled, _AdmissionLease(second)])
 
-    # The outer handler re-runs the WHOLE loop regardless of how far the
-    # first pass got.
-    for i in range(len(admissions)):
-        await _refund_and_clear(admissions, i)
-
-    assert first.refunded == 1  # not refunded twice
-    assert second.refunded == 1
+    assert (first.refunded, second.refunded) == (1, 1)
 
 
 @pytest.mark.asyncio
@@ -1582,6 +1567,89 @@ async def test_parallel_delegate_refunds_admission_when_scheduling_one_objective
     # second's scheduling failed before it ever started, so it is refunded.
     assert admissions[0].released == 1 and admissions[0].refunded == 0
     assert admissions[1].refunded == 1 and admissions[1].released == 0
+
+
+@pytest.mark.parametrize("runner", [None, JobRunner()], ids=["default", "phased"])
+@pytest.mark.parametrize("operation", ["registry", "scheduler"])
+async def test_parallel_delegate_finishes_all_refunds_despite_repeated_cancellation(monkeypatch, runner, operation):
+    _install_fake_agent(monkeypatch)
+    store = Store()
+    registry = JobRegistry(store)
+    tasks = set()
+    write = registry.write
+
+    class SlowRefund:
+        allowed = True
+
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.finish = asyncio.Event()
+            self.invocations = 0
+            self.refunded = 0
+
+        async def refund(self):
+            self.invocations += 1
+            self.entered.set()
+            await self.finish.wait()
+            self.refunded += 1
+
+    started, later = _FakeAdmission(), _FakeAdmission()
+    failed, pending = SlowRefund(), SlowRefund()
+    grants = iter([started, failed, pending, later])
+
+    async def admission_gate():
+        return next(grants)
+
+    def fail_after_write(job_id, objective, **kwargs):
+        write(job_id, objective, **kwargs)
+        if objective == "failed" and kwargs["status"] == "running":
+            raise RuntimeError("registry write failed")
+
+    if operation == "registry":
+        monkeypatch.setattr(registry, "write", fail_after_write)
+    else:
+        scheduled = 0
+
+        def fail_second_schedule(tasks, coro):
+            nonlocal scheduled
+            scheduled += 1
+            if scheduled == 2:
+                raise RuntimeError("scheduler unavailable")
+            return _track(tasks, coro)
+
+        monkeypatch.setattr("lazybridge.ext.delegation.background._track", fail_second_schedule)
+    delegate = make_parallel_delegate(
+        engine_factory=object,
+        registry=registry,
+        background_tasks=tasks,
+        doc="parallel",
+        admission_gate=admission_gate,
+        job_runner=runner,
+    )
+    batch = asyncio.create_task(delegate.run(objectives=["started", "failed", "pending", "later"]))
+    try:
+        await asyncio.wait_for(failed.entered.wait(), 2)
+        batch.cancel()
+        await asyncio.sleep(0)
+        assert not batch.done()
+        failed.finish.set()
+        await asyncio.wait_for(pending.entered.wait(), 2)
+        batch.cancel()
+        await asyncio.sleep(0)
+        assert not batch.done()
+    finally:
+        failed.finish.set()
+        pending.finish.set()
+        [result] = await asyncio.wait_for(asyncio.gather(batch, return_exceptions=True), 2)
+        await asyncio.gather(*tasks)
+
+    assert isinstance(result, asyncio.CancelledError)
+    assert (started.released, started.refunded) == (1, 0)
+    assert (later.released, later.refunded) == (0, 1)
+    assert [(grant.invocations, grant.refunded) for grant in (failed, pending)] == [(1, 1), (1, 1)]
+    records = {job["objective"]: job for job in _jobs(registry, store)}
+    assert {name: record["status"] for name, record in records.items()} == {"started": "done", "failed": "failed"}
+    assert records["failed"]["execution_started"] is False
 
 
 @pytest.mark.asyncio

@@ -108,7 +108,11 @@ serialized consultant conversations, process-local capped parallel fan-out,
 and delegation linked to a [`DurableBlackboard`](#planners) task. Job
 records survive restarts only when backed by a persistent `Store`; executing
 jobs do not resume after restart, and callers should invoke
-`JobRegistry.reclaim_interrupted()` during startup.
+`JobRegistry.reclaim_interrupted()` during startup. The standard delegation
+factories stamp ownership when they create a job. Startup recovery skips live owners, but reclaims unowned legacy records
+older than the default 15-minute staleness age with a warning. Pass
+`reclaim_unowned=True` to force reconciliation after independently verifying
+a recent legacy worker has stopped.
 
 Promoted from LazyCEO's generic background-delegation infrastructure after
 live production use. Tools produced by the fire-and-forget delegation
@@ -117,6 +121,14 @@ persistent event loop. `Tool.run_sync` is unsupported because its normal
 short-lived-loop paths cancel pending background tasks when the outer call
 returns. The synchronous status/result tools built by `JobRegistry` are not
 subject to this restriction.
+
+Once a parallel job is scheduled, its worker owns the admission grant.
+If the batch is cancelled, it finishes refunding unhanded grants before
+propagating cancellation. The same refund invocation completes even when
+it awaits external bookkeeping.
+
+Detached Codex jobs scheduled through the delegation helpers acquire
+their own slot under the [Codex concurrency limit](../guides/full/codex-engine.md).
 
 ::: lazybridge.ext.delegation.JobRegistry
 
@@ -170,8 +182,8 @@ unlike `DurableBlackboard`, it does not represent task state.
 ### Replaceable delegation lifecycle (1.8)
 
 `make_background_delegate`, `make_parallel_delegate`, and `make_plan_delegate`
-accept `job_runner: JobRunner | None = None`. Omitting it preserves the existing
-worker. `JobRunner(prepare=..., register=..., execute=..., finalize=..., rollback=...)`
+accept `job_runner: JobRunner | None = None`. Plan delegation uses a default
+runner when omitted. `JobRunner(prepare=..., register=..., execute=..., finalize=..., rollback=...)`
 exposes four sync or async phases, each receiving the same `JobContext`.
 The default prepare constructs both engine and Agent; register calls
 `JobRegistry.begin_execution(job_id)` to CAS a running, unstarted record to
@@ -213,6 +225,12 @@ Combining a native id and an alias in the same factory call raises ValueError.
 The engines resolve and bind aliases through `lazybridge.engines.sessions`;
 reconstructing the writer and registry after restart resumes the saved native id.
 
+`make_codex_writer` shows the workspace, selected session, and extra writable
+roots in the approval prompt. The request digest covers the complete objective
+and resolved call options. The built-in writer uses the confirmed paths and
+checks the alias binding before launching the runtime. Custom factories own
+the resolution of settings they derive outside those call options.
+
 `make_codex_writer_engine_factory(*, workspace_root, gate, model=None, effort=None,
 session_alias=None, session_registry=None, writable_roots=None)` returns a callable
 accepting keyword `cwd`, `model`, `effort`, `session`, `session_alias`, and
@@ -231,6 +249,13 @@ repository resolution, model rules, or quota policy is supplied by these adapter
 
 ### Plan rollback and structured batch outcomes (1.8)
 
+With `DurableBlackboard`, `make_plan_delegate` records the job ID as the
+`delegation_id` of the claim. The job renews that lease during execution
+and verifies ownership before publishing a result. Lease loss requests
+cancellation and bars stale results. The valid result leaves the task claimed
+for review. To close it against the exact attempt, call
+`board.mark_done(task_index, summary, owner=owner, delegation_id=job_id)`.
+
 `make_plan_delegate(..., rollback_claim: Callable[[JobContext], Any] | None = None,
 structured_outcomes: bool = False, stop_on_refusal: bool = False)` adds an optional
 attempt-restoring callback. It receives `plan_id`, `task_index`, `job_id`,
@@ -239,18 +264,19 @@ original owner), `claimed`, `phase`, `error`, and `started`. It runs once for ea
 valid item that never starts: admission refusal, later held-back items, claim
 refusal, registration/scheduling failure, execution-CAS refusal, engine/Agent
 setup failure, or cancellation before execution. Unclaimed items need no board
-mutation; their original attempts are preserved. The callback can verify the
-expected owner, job id, and attempt count before restoring a claimed item. It
-must also refuse to release a claim if another worker is executing that same job.
-This package does not implement the caller's board ownership or restoration policy.
+mutation. To restore the prior attempt count on a `DurableBlackboard`, the
+callback must check the task's `delegation_id` against `context.job_id` in
+the same compare-and-swap that restores the claim. It must also check that
+the job has not started in another worker. Custom board implementations
+supply their own ownership and lease policies.
 
-Supplying `rollback_claim` enables the CAS runner and composes the claim hook with
-an optional `job_runner.rollback`; the latter still receives failures after real
-execution starts. Grants settle once even if rollback raises. Claim metadata is
-also persisted in the initial job record. Omitting the claim hook keeps the
-existing scheduling-failure unwind through `board.mark_failed`. A compatible board
-for the new hook provides `snapshot().tasks` with `attempts`, in addition to
-`claim_task`. The callback may be sync or async.
+Supplying `rollback_claim` composes the claim hook with `job_runner.rollback`
+when provided. The latter still receives failures after execution starts.
+Grants settle once even if rollback raises. Claim metadata is also persisted
+in the initial job record. The default runner releases claims through
+`board.mark_failed` when setup or scheduling fails before execution. A board
+using a custom claim hook provides `snapshot().tasks` with `attempts`, in
+addition to `claim_task`. The hook may be sync or async.
 
 `structured_outcomes=True` returns a JSON-compatible dictionary from the tool:
 

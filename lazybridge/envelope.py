@@ -42,10 +42,15 @@ class EnvelopeMetadata(BaseModel):
     nested_cost_usd: float = 0.0
 
 
+class UncertainOutcomeError(RuntimeError):
+    """The operation may have taken effect and needs reconciliation before replay."""
+
+
 class ErrorInfo(BaseModel):
     type: str
     message: str
     retryable: bool = False
+    outcome_uncertain: bool = False
 
 
 class Envelope(BaseModel, Generic[T]):
@@ -126,10 +131,12 @@ class Envelope(BaseModel, Generic[T]):
 
     @classmethod
     def error_envelope(cls, exc: BaseException, *, retryable: bool = False) -> Envelope:
+        outcome_uncertain = isinstance(exc, UncertainOutcomeError)
         return cls(
             error=ErrorInfo(
                 type=type(exc).__name__,
                 message=str(exc),
-                retryable=retryable,
+                retryable=retryable and not outcome_uncertain,
+                outcome_uncertain=outcome_uncertain,
             )
         )

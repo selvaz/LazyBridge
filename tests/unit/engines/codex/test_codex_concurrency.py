@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 
 import pytest
 
+from lazybridge import Envelope, Store
 from lazybridge.engines.codex import app_server
+from lazybridge.ext.delegation import JobRegistry, make_background_delegate, schedule_with_admission_release
 
 
 @pytest.fixture(autouse=True)
@@ -162,6 +165,97 @@ def test_nested_call_reenters_instead_of_deadlocking():
             return await asyncio.wait_for(asyncio.create_task(nested()), 2)
 
     assert asyncio.run(scenario()) == "ran"
+
+
+@pytest.mark.parametrize("cap", [1, 2])
+async def test_detached_delegate_owns_a_slot_after_parent_exits(cap):
+    app_server.set_codex_max_concurrency(cap)
+    attempting = asyncio.Event()
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    request = ContextVar("request", default="missing")
+    request.set("delegating request")
+    tasks = set()
+    store = Store()
+    registry = JobRegistry(store)
+
+    class WorkerEngine:
+        async def run(self, env, **kwargs):
+            attempting.set()
+            async with app_server.codex_concurrency_slot():
+                entered.set()
+                await finish.wait()
+                return Envelope(payload=request.get())
+
+    delegate = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=WorkerEngine,
+        registry=registry,
+        background_tasks=tasks,
+        notify=None,
+        doc="delegate",
+    )
+
+    async def inline():
+        async with app_server.codex_concurrency_slot():
+            return app_server._concurrency_active
+
+    outsider_attempted = asyncio.Event()
+    outsider_entered = asyncio.Event()
+
+    async def unrelated():
+        outsider_attempted.set()
+        async with app_server.codex_concurrency_slot():
+            outsider_entered.set()
+
+    outsider = None
+    try:
+        async with app_server.codex_concurrency_slot():
+            await delegate.run(objective="work in the background")
+            await asyncio.wait_for(attempting.wait(), 2)
+            assert entered.is_set() is (cap == 2)
+            assert await asyncio.wait_for(inline(), 2) == cap
+        await asyncio.wait_for(entered.wait(), 2)
+        assert app_server._concurrency_active == 1
+
+        outsider = asyncio.create_task(unrelated())
+        await asyncio.wait_for(outsider_attempted.wait(), 2)
+        assert outsider_entered.is_set() is (cap == 2)
+    finally:
+        finish.set()
+        await asyncio.gather(*tasks)
+        if outsider is not None:
+            await outsider
+
+    [record] = [value for _, value in store.items(prefix=registry._prefix)]
+    assert record["status"] == "done" and record["result"] == "delegating request"
+
+
+async def test_custom_detached_scheduler_does_not_inherit_the_parent_slot():
+    app_server.set_codex_max_concurrency(1)
+    attempting = asyncio.Event()
+    acquired = asyncio.Event()
+    tasks = set()
+
+    def custom_track(background_tasks, coro):
+        task = asyncio.create_task(coro)
+        background_tasks.add(task)
+        return task
+
+    async def detached():
+        attempting.set()
+        async with app_server.codex_concurrency_slot():
+            acquired.set()
+
+    try:
+        async with app_server.codex_concurrency_slot():
+            schedule_with_admission_release(tasks, detached(), None, track=custom_track)
+            await asyncio.wait_for(attempting.wait(), 2)
+            assert not acquired.is_set()
+    finally:
+        await asyncio.gather(*tasks)
+    assert acquired.is_set()
 
 
 def test_lowering_the_cap_blocks_new_turns_until_active_drop():

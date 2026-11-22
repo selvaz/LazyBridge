@@ -10,8 +10,11 @@ original name and signature.
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import TYPE_CHECKING, Any
 
+from lazybridge._process_owner import current_owner_fields, owner_is_alive, record_age
 from lazybridge.engines.plan._types import ConcurrentPlanRunError, StepResult
 from lazybridge.envelope import Envelope
 
@@ -25,6 +28,8 @@ if TYPE_CHECKING:
 #: which is what lets a sidecar consumer detect the crash-window staleness
 #: documented in ``Plan.__init__`` (see ``Plan.store_write_is_current``).
 _WRITE_STAMP_PREFIX = "plan-run:"
+_ACTIVE_CHECKPOINT_RUNS: set[str] = set()
+_logger = logging.getLogger(__name__)
 
 
 class CheckpointMixin:
@@ -41,6 +46,8 @@ class CheckpointMixin:
     resume: bool
     on_concurrent: str
     steps: list[Step]
+    adopt_unowned: bool
+    owner_stale_after: float
 
     @staticmethod
     def store_write_is_current(store: Store, *, checkpoint_key: str, key: str) -> bool:
@@ -207,6 +214,8 @@ class CheckpointMixin:
             "run_uid": run_uid,
             "checkpoint_version": self.CHECKPOINT_VERSION,
             "history": list(history_payload) if history_payload else [],
+            "updated_at": time.time(),
+            **current_owner_fields(),
         }
         if not store.compare_and_swap(effective_key, last_snapshot, new_snap):
             raise ConcurrentPlanRunError(
@@ -258,19 +267,28 @@ class CheckpointMixin:
             # means another run legitimately owns the key now.
             pass
 
-    def _load_checkpoint(self, effective_key: str | None) -> dict[str, Any] | None:
+    def clear_checkpoint(self, *, uncertain_only: bool = True) -> bool:
+        """Clear this Plan's checkpoint so an uncertain run can be reconciled.
+
+        By default only an ``uncertain`` checkpoint is removed. Pass
+        ``uncertain_only=False`` only after separately confirming no worker owns it.
+        """
         store = self._checkpoint_store()
-        if store is None or effective_key is None or not self.resume:
-            return None
-        saved = store.read(effective_key)
-        if not isinstance(saved, dict):
-            return None
-        return saved
+        if store is None or self.checkpoint_key is None:
+            return False
+        current = store.read(self.checkpoint_key)
+        if not isinstance(current, dict) or (uncertain_only and current.get("status") != "uncertain"):
+            return False
+        return store.compare_and_swap(
+            self.checkpoint_key, current, {**current, "status": "reconciled", "updated_at": time.time()}
+        )
 
     def _claim_checkpoint(
         self,
         effective_key: str | None,
         run_uid: str,
+        *,
+        reuse_done: bool = True,
     ) -> dict[str, Any] | None:
         """Acquire ownership of ``checkpoint_key`` for this run.
 
@@ -278,9 +296,8 @@ class CheckpointMixin:
           → CAS-write a ``status="claimed"`` placeholder up-front so
           two concurrent fresh runs collide here, before either has
           executed any step.
-        * ``resume=True`` and an in-flight checkpoint exists → adopt it,
-          stamping our ``run_uid`` via CAS so subsequent saves compare
-          against us rather than the crashed run.
+        * ``resume=True`` can adopt an inactive checkpoint under a new
+          ``run_uid``. A live or unverified active owner blocks adoption.
         * In-flight checkpoint and ``resume=False`` → raise
           :class:`ConcurrentPlanRunError`.
         """
@@ -288,6 +305,7 @@ class CheckpointMixin:
         if store is None or effective_key is None:
             return None
         existing = store.read(effective_key)
+        owner_fields = current_owner_fields()
         # Build a "claimed" placeholder snapshot.  next_step / kv /
         # completed_steps are intentionally empty — the first real
         # ``_save_checkpoint`` after the first step will overwrite via
@@ -299,6 +317,8 @@ class CheckpointMixin:
             "completed_steps": [],
             "status": "claimed",
             "run_uid": run_uid,
+            "updated_at": time.time(),
+            **owner_fields,
         }
         if not isinstance(existing, dict):
             # Fresh run — claim via CAS from "key must not exist" (None).
@@ -312,14 +332,12 @@ class CheckpointMixin:
                 )
             return claimed_snap
         status = existing.get("status")
+        if status == "uncertain":
+            raise ConcurrentPlanRunError(f"Checkpoint {effective_key!r} requires reconciliation before replay.")
         if status == "done":
-            # Prior run finished cleanly.  Two sub-cases:
-            #  * resume=True → DO NOT claim; return the done snap so the
-            #    caller short-circuits to the cached ``kv`` (this is the
-            #    documented "resume after done" no-op).
-            #  * resume=False → claim by CAS-overwriting the done snap
-            #    so concurrent fresh re-runs serialise on the same key.
-            if self.resume:
+            # Store-backed resume returns the cached result. A fresh run or
+            # explicit PlanState acquires a new claim before executing.
+            if self.resume and reuse_done:
                 return existing
             if not store.compare_and_swap(effective_key, existing, claimed_snap):
                 raise ConcurrentPlanRunError(
@@ -362,9 +380,33 @@ class CheckpointMixin:
                 f"run_uid={existing.get('run_uid')!r} (status={status!r}).  "
                 f"{hint}"
             )
-        # Adopt: CAS from the existing state to the same shape with our
-        # run_uid stamped in, so concurrent saves compare against us.
-        adopted = {**existing, "run_uid": run_uid}
+        if status in ("claimed", "running"):
+            alive = owner_is_alive(existing)
+            if alive is None:
+                age = record_age(existing)
+                if age is None:
+                    entry = store.read_entry(effective_key)
+                    age = time.time() - entry.written_at if entry is not None else None
+                if not self.adopt_unowned and (age is None or age < self.owner_stale_after):
+                    raise ConcurrentPlanRunError(f"Checkpoint {effective_key!r} has an unverified active owner.")
+                _logger.warning("Adopting unowned active checkpoint %r (age=%r seconds)", effective_key, age)
+            previous_run = existing.get("run_uid")
+            if alive and (
+                existing.get("owner_pid") != owner_fields["owner_pid"]
+                or not isinstance(previous_run, str)
+                or previous_run in _ACTIVE_CHECKPOINT_RUNS
+            ):
+                raise ConcurrentPlanRunError(f"Checkpoint {effective_key!r} is still owned by a live run.")
+
+        # A resumed failed or paused checkpoint also needs an active claim
+        # before the first step runs. Keep its old status for input restoration.
+        adopted = {
+            **existing,
+            **owner_fields,
+            "resume_status": existing.get("resume_status", status),
+            "status": "claimed",
+            "run_uid": run_uid,
+        }
         if not store.compare_and_swap(effective_key, existing, adopted):
             raise ConcurrentPlanRunError(
                 f"Lost race claiming {effective_key!r} for resume — "
