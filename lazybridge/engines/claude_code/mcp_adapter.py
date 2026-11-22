@@ -14,7 +14,8 @@ from contextlib import nullcontext
 from typing import Any, Protocol
 
 from lazybridge.engines._tool_clock import ToolClock
-from lazybridge.tools import ToolTimeoutError, run_tool_bounded
+from lazybridge.envelope import Envelope
+from lazybridge.tools import ToolTimeoutError, _tool_error_text, run_tool_bounded
 
 from .protocol import McpTool
 
@@ -79,6 +80,11 @@ def to_mcp_tools(
             try:
                 with tool_clock.tool() if tool_clock is not None else nullcontext():
                     result = await run_tool_bounded(_tool, arguments, tool_timeout)
+                if isinstance(result, Envelope) and result.error is not None:
+                    message = _tool_error_text(result.error)
+                    if observer:
+                        observer("error", {"tool_name": _tool.name, "error": message})
+                    return {"content": [{"type": "text", "text": message}], "isError": True}
                 text, structured = _serialise_result(result)
                 if observer:
                     observer("result", {"tool_name": _tool.name, "result": text})

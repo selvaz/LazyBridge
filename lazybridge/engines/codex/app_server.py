@@ -26,6 +26,7 @@ from typing import Any
 
 from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approval
+from lazybridge.envelope import UncertainOutcomeError
 
 ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -279,7 +280,7 @@ class _Attempt:
     stderr: bytearray = field(default_factory=bytearray)
 
 
-class CodexTurnUncertain(RuntimeError):
+class CodexTurnUncertain(UncertainOutcomeError):
     """A turn on a **durable** thread failed after the server accepted it.
 
     ``turn/start`` is not idempotent: once the App Server has acknowledged it,

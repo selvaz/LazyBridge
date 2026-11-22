@@ -11,11 +11,16 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from lazybridge.envelope import Envelope
+    from lazybridge.envelope import Envelope, ErrorInfo
 
 from lazybridge._asyncbridge import abandoned_tasks, run_coroutine_blocking
 from lazybridge.core.tool_schema import ToolSchemaBuilder, ToolSchemaMode
 from lazybridge.core.types import ToolDefinition
+
+
+def _tool_error_text(error: ErrorInfo) -> str:
+    message = "Blocked by the agent guard" if error.type == "GuardBlocked" else error.message
+    return f"Agent error ({error.type}): {message}"
 
 
 @runtime_checkable

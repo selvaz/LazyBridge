@@ -34,7 +34,7 @@ from lazybridge.engines.coding import (
 from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
-from lazybridge.tools import ToolTimeoutError, run_tool_bounded
+from lazybridge.tools import ToolTimeoutError, _tool_error_text, run_tool_bounded
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import BaseProvider
@@ -983,13 +983,8 @@ class LLMEngine:
                     nested_in += nm.input_tokens + nm.nested_input_tokens
                     nested_out += nm.output_tokens + nm.nested_output_tokens
                     nested_cost += nm.cost_usd + nm.nested_cost_usd
-                    content = tr.text()
-                    is_err = not tr.ok
-                    # error_envelope() sets payload=None so text() returns "".
-                    # Fall back to the ErrorInfo message so the LLM sees a
-                    # meaningful error description instead of empty content.
-                    if is_err and not content and tr.error is not None:
-                        content = f"Agent error ({tr.error.type}): {tr.error.message}"
+                    is_err = tr.error is not None
+                    content = _tool_error_text(tr.error) if tr.error is not None else tr.text()
                 elif isinstance(tr, ToolTimeoutError):
                     # Explicit timeout marker so the model can recognise
                     # cancellation distinct from a generic exception.
@@ -1234,11 +1229,15 @@ class LLMEngine:
                     )
                 return timeout_err
             if session:
-                session.emit(
-                    EventType.TOOL_RESULT,
-                    {"agent_name": agent_name, "tool": tc.name, "tool_use_id": tc.id, "result": str(result)[:500]},
-                    run_id=run_id,
-                )
+                fields = {"agent_name": agent_name, "tool": tc.name, "tool_use_id": tc.id}
+                if isinstance(result, Envelope) and result.error is not None:
+                    session.emit(
+                        EventType.TOOL_ERROR,
+                        {**fields, "type": result.error.type, "error": _tool_error_text(result.error)[:500]},
+                        run_id=run_id,
+                    )
+                else:
+                    session.emit(EventType.TOOL_RESULT, {**fields, "result": str(result)[:500]}, run_id=run_id)
             return result
         except Exception as exc:
             if session:

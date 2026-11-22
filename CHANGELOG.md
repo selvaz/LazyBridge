@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Native permission requests reach the approval gate with their full scope. Codex applies the permissions returned by that gate.
+- Failed sub-agent envelopes surface as tool errors in Codex, Claude Code, and LLMEngine. Output guard denials omit the draft, and parent tool events carry the safe error message.
+- Agents and verified tools stop when Codex reports an uncertain outcome. `ErrorInfo.outcome_uncertain` identifies errors that need reconciliation before replay.
+
 ## [1.8.10] - 2026-11-22
 
 ### Added

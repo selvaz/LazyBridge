@@ -140,6 +140,7 @@ async def verify_with_retry(
     If the judge rejects, retry the ORIGINAL task with the judge's
     feedback appended as context.  Up to ``max_verify`` attempts; the
     last attempt is returned as-is even if still rejected.
+    A failed producer run or an uncertain reviewer outcome stops the loop.
 
     ``judge_context`` (opt-in, default ``None``): evidence an Agent judge
     should see in addition to the output and the task, typically the
@@ -180,6 +181,8 @@ async def verify_with_retry(
 
     for attempt in range(max_verify):
         result = await runner(current_env)
+        if isinstance(result, Envelope) and not result.ok:
+            return result
 
         if not hasattr(verify_agent, "run"):
             # Plain callable judge.
@@ -197,7 +200,12 @@ async def verify_with_retry(
                 f"{evidence}"
                 f"Approved or rejected (with reason)?"
             )
-            verdict = verdict_env.text()
+            if isinstance(verdict_env, Envelope) and verdict_env.error is not None:
+                if verdict_env.error.outcome_uncertain:
+                    return verdict_env
+                verdict = "Reviewer returned an error"
+            else:
+                verdict = verdict_env.text()
 
         approved = _is_approved(verdict)
 

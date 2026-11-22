@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge._asyncbridge import run_coroutine_blocking
-from lazybridge.envelope import Envelope
+from lazybridge.envelope import Envelope, UncertainOutcomeError
 from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
@@ -543,7 +543,7 @@ class Agent:
         # already-processed input — but thread the primary's failure
         # mode into the fallback's ``context`` so the fallback can
         # adapt (e.g. switch tactics on rate-limit vs schema error).
-        if result.error is not None and self.fallback is not None:
+        if result.error is not None and not result.error.outcome_uncertain and self.fallback is not None:
             err = result.error
             note = f"Previous attempt failed with {err.type}: {err.message}"
             merged_context = f"{env.context}\n\n{note}" if env.context else note
@@ -563,7 +563,6 @@ class Agent:
 
                 result = Envelope(
                     task=result.task,
-                    payload=result.payload,
                     error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
                     metadata=result.metadata,
                 )
@@ -763,7 +762,7 @@ class Agent:
             async for chunk in self._stream_engine(env):
                 yield chunk
                 chunks.append(chunk)
-        except (asyncio.CancelledError, TimeoutError):
+        except (asyncio.CancelledError, TimeoutError, UncertainOutcomeError):
             raise
         except Exception as exc:
             # ``getattr`` keeps this safe for Agents built via ``__new__``

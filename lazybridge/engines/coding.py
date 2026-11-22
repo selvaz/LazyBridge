@@ -184,6 +184,8 @@ def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) 
     additionally include a fingerprint of a usable ``arguments["command"]``
     string so stable provider display names cannot widen a grant to a
     different command. Commands without such a string are never cached.
+    Permission requests go to the gate so it can grant the appropriate
+    subset. The native runtime owns any session-scoped permission grant.
 
     A gate that manages a narrower session scope and its own audit trail may
     opt out with ``manages_session_grants = True``. Caching such a gate here
@@ -194,6 +196,8 @@ def remembering_gate(gate: ApprovalGate | None, approved: set[tuple[str, str]]) 
         return gate
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        if request.kind == "permissions":
+            return await ask_approval(gate, request)
         key = (request.kind, request.name)
         if request.kind == "command":
             command = request.arguments.get("command")

@@ -8,7 +8,8 @@ from contextlib import nullcontext
 from typing import Any, Protocol
 
 from lazybridge.engines._tool_clock import ToolClock
-from lazybridge.tools import ToolTimeoutError, run_tool_bounded
+from lazybridge.envelope import Envelope
+from lazybridge.tools import ToolTimeoutError, _tool_error_text, run_tool_bounded
 
 
 class ToolLike(Protocol):
@@ -75,6 +76,11 @@ def dispatcher(
         try:
             with tool_clock.tool() if tool_clock is not None else nullcontext():
                 result = await run_tool_bounded(tool, arguments, tool_timeout)
+            if isinstance(result, Envelope) and result.error is not None:
+                text = _tool_error_text(result.error)
+                if observer:
+                    observer("error", {"tool_name": name, "error": text})
+                return {"success": False, "contentItems": [{"type": "inputText", "text": text}]}
             text = _text(result)
             if observer:
                 observer("result", {"tool_name": name, "result": text})

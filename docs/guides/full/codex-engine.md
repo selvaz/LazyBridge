@@ -313,11 +313,12 @@ transport failure during thread/start or thread/resume before a turn was sent.
 A possibly created but unused thread may remain. The engine does not blindly
 replay later stateful failures.
 
-On a durable thread, loss after turn/start was sent can raise CodexTurnUncertain:
-the turn might already have executed tools. Resume and inspect before deciding
-what to do; automatic replay can duplicate side effects. A known rejection
-differs from an uncertain accepted turn. Missing/unreadable executables are
-permanent errors, not transient retries.
+On a durable thread, loss after turn/start was sent can raise `CodexTurnUncertain`.
+The turn might already have executed tools. `Agent.run()` returns an envelope
+with `error.outcome_uncertain=True` and skips verification and fallback.
+`Agent.stream()` propagates the exception. Resume and inspect the thread before
+deciding whether to repeat the operation. A known rejection is reported as a
+definitive error. Missing or unreadable executables are permanent errors.
 
 The default 120-second deadline covers all retries. Use a larger bound for
 repository work and align any MCP host deadline. No model validation or
