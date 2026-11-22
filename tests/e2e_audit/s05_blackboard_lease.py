@@ -12,7 +12,7 @@ from lazybridge.ext.delegation import JobRegistry, make_plan_delegate
 from lazybridge.ext.planners.durable_blackboard import DurableBlackboard
 
 NAME = Path(__file__).stem
-LEASE = 0.6
+LEASE = 2.5
 
 
 async def worker(directory, mode):
