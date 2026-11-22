@@ -66,6 +66,8 @@ def main():
     run_id = destination.name
     env = environment()
     env["LB_E2E_RUN_ID"] = run_id
+    # Scenario processes are Python: make their output UTF-8 regardless of the console code page.
+    env["PYTHONIOENCODING"] = "utf-8"
     for number, (finding, baseline) in BASELINES.items():
         script = by_number.get(number)
         if script is None:
@@ -111,7 +113,13 @@ def main():
                     pass
                 code = 1
                 timed_out = True
+        # Read once the scenario has exited (or its tree was killed); output a
+        # descendant writes after that point is not captured.
         output = log_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            log_path.unlink()
+        except OSError:
+            pass  # still held by a surviving descendant; pruned with the run folders
         if timed_out:
             output = f"Timed out after {args.timeout} seconds" + chr(10) + output
         target = destination / name
