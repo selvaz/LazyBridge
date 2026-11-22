@@ -29,8 +29,10 @@ ever needing to know what either one actually gives back.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
+from collections.abc import Callable, Coroutine
 from typing import Any, Protocol, runtime_checkable
 
 _logger = logging.getLogger(__name__)
@@ -42,17 +44,30 @@ class _AdmissionLease:
     def __init__(self, decision: Any) -> None:
         self.decision = decision
         self.allowed = getattr(decision, "allowed", True)
-        self.settled = False
+        self._settlement: asyncio.Task[None] | None = None
 
     async def release(self) -> None:
-        if not self.settled:
-            self.settled = True
-            await release_admission(self.decision)
+        await self._settle(release_admission)
 
     async def refund(self) -> None:
-        if not self.settled:
-            self.settled = True
-            await refund_admission(self.decision)
+        await self._settle(refund_admission)
+
+    async def _settle(self, settle: Callable[[Any], Coroutine[Any, Any, None]]) -> None:
+        if self.decision is None:
+            return
+        if self._settlement is None:
+            self._settlement = asyncio.create_task(settle(self.decision))
+        # The hook may already have changed accounting when its next await
+        # is reached. Keep that same invocation alive through cancellation.
+        cancelled = None
+        while not self._settlement.done():
+            try:
+                await asyncio.shield(self._settlement)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        self._settlement.result()
+        if cancelled is not None:
+            raise cancelled
 
 
 @runtime_checkable

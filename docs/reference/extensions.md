@@ -122,6 +122,14 @@ short-lived-loop paths cancel pending background tasks when the outer call
 returns. The synchronous status/result tools built by `JobRegistry` are not
 subject to this restriction.
 
+Once a parallel job is scheduled, its worker owns the admission grant.
+If the batch is cancelled, it finishes refunding unhanded grants before
+propagating cancellation. The same refund invocation completes even when
+it awaits external bookkeeping.
+
+Detached Codex jobs scheduled through the delegation helpers acquire
+their own slot under the [Codex concurrency limit](../guides/full/codex-engine.md).
+
 ::: lazybridge.ext.delegation.JobRegistry
 
 ::: lazybridge.ext.delegation.make_background_delegate

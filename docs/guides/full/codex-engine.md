@@ -83,6 +83,12 @@ budget excludes intervals with at least one application tool in flight
 finishes. Native Codex tools such as shell and web search still count as
 runtime time. Defaults remain 120 seconds and 90 seconds.
 
+Set `LAZYBRIDGE_CODEX_MAX_CONCURRENCY` to cap independent Codex turns in
+this process. A detached job launched by the delegation helpers takes its
+own slot. An inline child can reuse the slot of the turn waiting for it,
+including when the cap is one. Queueing for a slot occurs before the
+turn's request and idle timeouts start.
+
 ## Durable threads and aliases
 
 Default calls start ephemeral threads. An ephemeral ID cannot be resumed even

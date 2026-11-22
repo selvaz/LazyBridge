@@ -17,6 +17,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Plan recovery respects live owners and holds checkpoints with uncertain outcomes for reconciliation. Active legacy checkpoints without an owner require operator review.
 - Standard background delegates record the owner at enqueue time. Startup recovery reclaims records whose owner has exited. Legacy records can be reconciled explicitly with `reclaim_unowned=True`.
 - Plan delegation renews a `DurableBlackboard` lease for the current job and checks the attempt ID before accepting its result. Default setup failures release only their own attempt.
+- Parallel delegation completes each outstanding reservation refund when the batch is cancelled, even during an asynchronous refund for a failed handoff.
+- Detached Codex delegates acquire their own concurrency slots. Inline children can still reuse the slot of the turn awaiting them.
 
 ## [1.8.10] - 2026-11-22
 

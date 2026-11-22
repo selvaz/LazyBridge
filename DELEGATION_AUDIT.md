@@ -40,12 +40,12 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 | --- | --- | --- |
 | M1 | Named Plan steps pass only the task string to registered agents, dropping the composed context and attachments. | Deliver the full envelope to agent targets. Cover direct, named, and aliased steps with the same context and attachments. [Plan dispatch](lazybridge/engines/plan/_plan.py) |
 | M2 | Delegate `ExtraParam` requirements and types appear in the advertised schema. Runtime dispatch accepts missing or mistyped values. | Validate arguments before policy checks, approval, or job creation. Invalid calls should leave the registry empty. [Delegate schema and dispatch](lazybridge/ext/delegation/background.py) |
-| M3 | Cancellation during parallel scheduling cleanup can strand reservations for work that never starts. | Track each reservation through handoff and settle unhanded grants with cancellation-safe, idempotent cleanup. Test cancellation during a refund after a registry failure. [Batch scheduling](lazybridge/ext/delegation/background.py) |
-| M4 | A detached Codex child can outlive its inherited concurrency slot, leaving it uncounted as other turns start. | Count detached jobs independently. Test the limit with detached and inline children, including a cap of one. [Codex slots](lazybridge/engines/codex/app_server.py) |
+| M3 | Cancellation during parallel scheduling cleanup can strand reservations for work that never starts. | **Fixed.** Ownership transfers on scheduling. The batch finishes its remaining refunds once even if cancelled repeatedly during cleanup. Tests inject registry and scheduler failures under both worker lifecycles. [Batch scheduling](lazybridge/ext/delegation/background.py) |
+| M4 | A detached Codex child can outlive its inherited concurrency slot, leaving it uncounted as other turns start. | **Fixed for detached delegation.** Workers scheduled by the delegation helpers acquire independent slots. Tests use caps of one and two and verify inline re-entry and custom scheduling. [Codex slots](lazybridge/engines/codex/app_server.py) |
 | M5 | A verified tool can read live sources twice and show the reviewer older evidence than the writer. | Share an evidence snapshot per attempt. Test a changing source and compare what the writer and reviewer receive. [Verified agent tool](lazybridge/agent.py) |
 | M6 | Aliased agent tools can use a session inherited from another orchestrator. | Resolve implicit session identity per invocation. Verify event placement with two orchestrators sharing an aliased child. [Session inheritance](lazybridge/agent.py) |
 
 ## Delivery order
 
-1. Address M3 and M4 together with cancellation and concurrency-limit regressions for detached workers.
-2. Address M1, M2, M5, and M6 through public entry points, including named Plan targets and aliased agent tools.
+1. Address M1 and M6 through named Plan targets and aliased agent tools. Exercise context and attachments, and run two orchestrators with the same child.
+2. Address M2 and M5 through delegate argument validation and a shared evidence snapshot for the writer and reviewer.

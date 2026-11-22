@@ -373,14 +373,20 @@ class _SlotHolder:
 #: gone. While it is active, Codex work started inside the chain (the client
 #: of the same call, or a nested Codex agent run from a tool callback while the
 #: parent turn is suspended waiting for that tool) runs without taking another
-#: slot: waiting would deadlock with a cap of 1. Nested agents may therefore
-#: exceed the cap; documented, and the parent is idle meanwhile. Known limit:
-#: a background task started inside a turn that keeps running after the turn
-#: released its slot is not counted; start long-lived Codex work outside turns.
+#: slot: waiting would deadlock with a cap of 1. Inline nested agents may
+#: therefore exceed the cap while the parent is idle. Detached delegation
+#: jobs start without this binding and acquire their own slot.
 #: With a cap, do not start another Codex turn from inside the loop that
 #: consumes a Codex stream: a full stream queue keeps the producer (and its
 #: slot) waiting for the consumer, which can deadlock at cap 1.
 _holder: contextvars.ContextVar[_SlotHolder | None] = contextvars.ContextVar("lazybridge_codex_slot", default=None)
+
+
+def _detached_codex_context() -> contextvars.Context:
+    """Copy task context while dropping the slot loan from an inline parent."""
+    context = contextvars.copy_context()
+    context.run(_holder.set, None)
+    return context
 
 
 def set_codex_max_concurrency(limit: int | None) -> None:

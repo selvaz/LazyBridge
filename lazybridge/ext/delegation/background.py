@@ -102,23 +102,16 @@ async def _run_with_admission_release(coro: Any, admission: Any, *, context: Job
             await release_admission(admission)
 
 
-async def _refund_and_clear(admissions: list[Any], index: int) -> None:
-    """Refund ``admissions[index]`` and set the slot to ``None``.
-
-    Makes a batch-wide "refund everything still outstanding" pass safe to
-    run MORE THAN ONCE over the same list -- an earlier partial pass
-    (refunding objectives 0..i before being cancelled, say) already
-    cleared the slots it finished, so a later pass over the whole list
-    only ever re-attempts the ones that are still actually outstanding
-    (``refund_admission(None)`` is a no-op). Without this, a cancellation
-    landing between two awaits in one refund loop, followed by this
-    function's own ``except BaseException`` catch-all re-running the SAME
-    loop, could refund one admission twice -- crediting a quota or
-    restoring a one-use approval twice for work that was only ever
-    reserved once. Found by Codex review before this ever shipped.
-    """
-    await refund_admission(admissions[index])
-    admissions[index] = None
+async def _refund_outstanding(admissions: list[_AdmissionLease | None]) -> None:
+    """Finish each batch-owned refund before propagating cancellation."""
+    cancelled = None
+    for admission in admissions:
+        try:
+            await refund_admission(admission)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+    if cancelled is not None:
+        raise cancelled
 
 
 def _schedule_with_admission_release(
@@ -141,7 +134,7 @@ def _schedule_with_admission_release(
     coroutine, silences both without running either body. Mirrors the
     promoted source's own ``_start_released``/``_releasing`` pattern.
     """
-    lease = _AdmissionLease(admission)
+    lease = admission if isinstance(admission, _AdmissionLease) else _AdmissionLease(admission)
     entered = False
 
     async def cancel_cleanup() -> None:
@@ -178,7 +171,12 @@ def _schedule_with_admission_release(
 
     wrapper = run()
     try:
-        task = (track or _track)(background_tasks, wrapper)
+        if track is None:
+            task = _track(background_tasks, wrapper)
+        else:
+            from lazybridge.engines.codex.app_server import _detached_codex_context
+
+            task = _detached_codex_context().run(track, background_tasks, wrapper)
     except BaseException:
         wrapper.close()
         coro.close()  # closing an already-closed coroutine is a no-op
@@ -262,7 +260,9 @@ def _track(background_tasks: set[asyncio.Task[Any]], coro: Any) -> asyncio.Task[
     revisit if a caller genuinely needs to invoke these tools from
     ``run_sync``. Found by Codex review before this ever shipped.
     """
-    task = asyncio.create_task(coro)
+    from lazybridge.engines.codex.app_server import _detached_codex_context
+
+    task = asyncio.create_task(coro, context=_detached_codex_context())
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
     return task
@@ -1240,159 +1240,100 @@ def make_parallel_delegate(
                 f"exceeds the process-local cap of {max_in_flight_delegate_tasks}"
             )
 
-        admissions: list[Any] = [None] * len(objectives)
-        if admission_gate is not None:
-            try:
+        admissions: list[_AdmissionLease | None] = [None] * len(objectives)
+        job_ids: list[str] = []
+        failures: list[str] = []
+        outcomes: list[dict[str, Any]] = []
+        try:
+            if admission_gate is not None:
                 for index in range(len(objectives)):
-                    admission = await admission_gate()
-                    if admission is not None and not getattr(admission, "allowed", True):
-                        # Nothing partially admitted may stay reserved once the
-                        # whole batch is held back -- every admission granted
-                        # for an EARLIER objective in this same loop is given
-                        # back before returning.
-                        for earlier in range(index):
-                            await _refund_and_clear(admissions, earlier)
-                        rejection = _admission_rejection_text(admission)
+                    decision = await admission_gate()
+                    if decision is not None and not getattr(decision, "allowed", True):
+                        rejection = _admission_rejection_text(decision)
                         return reject(
                             f"REJECTED: {rejection} (refused at objective {index + 1} of {len(objectives)}; "
                             "the whole batch was held back rather than started in part)"
                         )
-                    admissions[index] = admission
-                # Re-checked immediately before scheduling, not just once at
-                # the top of this call: admission_gate's own await can suspend
-                # for real time, during which a CONCURRENT run_parallel call on
-                # this same background_tasks set can pass the exact same
-                # capacity check and also proceed, jointly exceeding
-                # max_in_flight_delegate_tasks even though neither call's own
-                # check ever saw a violation. This narrows that window
-                # (there is still a gap between this read and the scheduling
-                # loop below) rather than closing it outright -- the module's
-                # own docstring already documents this cap as "process-local
-                # and cooperative, not a fleet-wide guarantee"; a fully atomic
-                # reservation would need a lock around the whole
-                # check-then-schedule sequence, a bigger change than this
-                # extraction takes on. Found by Codex review before this ever
-                # shipped.
+                    if decision is not None:
+                        admissions[index] = _AdmissionLease(decision)
+
                 if len(background_tasks) + len(objectives) > max_in_flight_delegate_tasks:
-                    for i in range(len(admissions)):
-                        await _refund_and_clear(admissions, i)
                     return reject(
                         f"REJECTED: {len(background_tasks)} job(s) already in flight plus {len(objectives)} new "
                         f"objective(s) exceeds the process-local cap of {max_in_flight_delegate_tasks} -- capacity "
                         "was taken by another call while admission was being checked"
                     )
-            except BaseException:
-                # admission_gate itself raised (or this coroutine was
-                # cancelled) mid-pass -- every admission already granted in
-                # THIS call is still refunded before the exception
-                # propagates; a half-run admission pass must not leak any
-                # more than a cleanly-refused one does. Reusing
-                # ``_refund_and_clear`` (not a bare ``refund_admission``)
-                # matters here specifically: this same ``except`` also
-                # catches a cancellation raised partway through one of the
-                # refund loops ABOVE, and re-running this loop over slots
-                # those already cleared is what keeps that a no-op instead
-                # of a second refund for the same grant. Found by Codex
-                # review before this ever shipped.
-                for i in range(len(admissions)):
-                    await _refund_and_clear(admissions, i)
-                raise
 
-        job_ids: list[str] = []
-        failures: list[str] = []
-        outcomes: list[dict[str, Any]] = []
-        for number, (objective, admission) in enumerate(zip(objectives, admissions, strict=True), start=1):
-            job_id = str(uuid.uuid4())
-            created_at = datetime.now(UTC).isoformat()
-            context = None
-            try:
-                registry.write(
+            for index, (objective, admission) in enumerate(zip(objectives, admissions, strict=True)):
+                number = index + 1
+                job_id = str(uuid.uuid4())
+                created_at = datetime.now(UTC).isoformat()
+                context = JobContext(
                     job_id,
                     objective,
-                    tool_name="run_parallel",
-                    status="running",
+                    "run_parallel",
+                    "a parallel Claude Code sub-agent",
+                    resolved_factory,
+                    registry,
+                    notify=notify,
                     created_at=created_at,
-                    **current_owner_fields(),
+                    admission=admission,
                 )
-                if job_runner is not None:
-                    context = JobContext(
-                        job_id,
-                        objective,
-                        "run_parallel",
-                        "a parallel Claude Code sub-agent",
-                        resolved_factory,
-                        registry,
-                        notify=notify,
-                        created_at=created_at,
-                        admission=_AdmissionLease(admission),
-                    )
-                    await _schedule_context(context, job_runner, background_tasks)
-                else:
-                    context = JobContext(
-                        job_id,
-                        objective,
-                        "run_parallel",
-                        "a parallel Claude Code sub-agent",
-                        resolved_factory,
-                        registry,
-                        created_at=created_at,
-                    )
-                    _schedule_with_admission_release(
-                        background_tasks,
-                        _run_delegate_job(
-                            job_id,
-                            objective,
-                            tool_name="run_parallel",
-                            label="a parallel Claude Code sub-agent",
-                            engine_factory=resolved_factory,
-                            registry=registry,
-                            notify=notify,
-                            created_at=created_at,
-                            context=context,
-                        ),
-                        admission,
-                        context=context,
-                    )
-            except Exception as exc:
-                # Scheduling THIS objective failed before its job ever
-                # started -- its admission (if any) is given back rather
-                # than held for an attempt that never ran, and this
-                # objective's own failure is reported without aborting the
-                # rest of the batch (objectives already scheduled above
-                # keep running). Found by Codex review before this ever
-                # shipped.
-                #
-                # NOT re-checking capacity again after this refund before
-                # scheduling the REST of the batch is a known, accepted gap
-                # in the same direction as the capacity recheck above this
-                # loop: ``refund_admission`` can itself suspend, during
-                # which another caller can take the capacity this refund
-                # just freed, and this call still schedules its remaining
-                # objectives on top of that. Closing it fully would mean
-                # re-running the whole capacity-then-admission dance per
-                # remaining objective, not just once per call -- the same
-                # "process-local and cooperative, not a fleet-wide
-                # guarantee" ceiling this module's own docstring already
-                # names, now reached from one more direction. Flagged by
-                # Codex review; left as a documented limitation rather than
-                # chased further here.
-                if context is None or not context._settled:
-                    await refund_admission(admission)
-                error = f"run_parallel scheduling failed: {exc}"
-                with contextlib.suppress(Exception):
+                try:
                     registry.write(
                         job_id,
                         objective,
-                        tool_name="run_parallel",
-                        status="failed",
-                        error=error,
+                        tool_name=context.tool_name,
+                        status="running",
                         created_at=created_at,
+                        **current_owner_fields(),
                     )
-                failures.append(f"{job_id[:8]}: {error}")
-                outcomes.append(_item_outcome(number, None, "failed", job_id=job_id, reason=error))
-                continue
-            job_ids.append(job_id[:8])
-            outcomes.append(_item_outcome(number, None, "started", job_id=job_id))
+                    if job_runner is not None:
+                        await _schedule_context(context, job_runner, background_tasks)
+                    else:
+                        _schedule_with_admission_release(
+                            background_tasks,
+                            _run_delegate_job(
+                                job_id,
+                                objective,
+                                tool_name=context.tool_name,
+                                label=context.label,
+                                engine_factory=resolved_factory,
+                                registry=registry,
+                                notify=notify,
+                                created_at=created_at,
+                                context=context,
+                            ),
+                            admission,
+                            context=context,
+                        )
+                except BaseException as exc:
+                    detail = str(exc) or type(exc).__name__
+                    error = f"run_parallel scheduling failed: {detail}"
+                    with contextlib.suppress(Exception):
+                        registry.write(
+                            job_id,
+                            objective,
+                            tool_name=context.tool_name,
+                            status="failed",
+                            error=error,
+                            execution_started=False,
+                            created_at=created_at,
+                        )
+                    if not isinstance(exc, Exception):
+                        raise
+                    await refund_admission(admission)
+                    failures.append(f"{job_id[:8]}: {error}")
+                    outcomes.append(_item_outcome(number, None, "failed", job_id=job_id, reason=error))
+                else:
+                    job_ids.append(job_id[:8])
+                    outcomes.append(_item_outcome(number, None, "started", job_id=job_id))
+
+                # A scheduled worker now owns the lease. A failed handoff
+                # only clears it after the refund has finished.
+                admissions[index] = None
+        finally:
+            await _refund_outstanding(admissions)
 
         preview = ", ".join(job_ids)
         if job_ids:
