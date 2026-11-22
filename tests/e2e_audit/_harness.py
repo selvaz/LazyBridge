@@ -9,14 +9,20 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PYTHON = Path("C:/ProgramData/spyder-6/python.exe")
-WORK = Path("D:/work/_tmp/lb-e2e")
+CODE_ROOT = Path(os.environ.get("LB_E2E_CODE_ROOT", ROOT)).resolve()
+PYTHON = Path(sys.executable)
+WORK = Path(os.environ.get("LB_E2E_WORK", Path(tempfile.gettempdir()) / "lb-e2e"))
+
+
+class SkipScenario(Exception):
+    pass
 
 
 def scenario_dir(name):
@@ -28,7 +34,7 @@ def scenario_dir(name):
 
 def environment():
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT)
+    env["PYTHONPATH"] = str(CODE_ROOT)
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
@@ -42,7 +48,7 @@ def start_trace(directory):
     import lazybridge
 
     print(f"pid={os.getpid()} lazybridge.__file__={lazybridge.__file__}", flush=True)
-    assert Path(lazybridge.__file__).resolve().is_relative_to(ROOT.resolve())
+    assert Path(lazybridge.__file__).resolve().is_relative_to(CODE_ROOT)
     path = Path(directory) / f"trace-{os.getpid()}.jsonl"
     stream = path.open("w", encoding="utf-8", buffering=1)
     depths = threading.local()
@@ -145,6 +151,9 @@ def scenario(name, finding, expected, run):
     status = "PASS"
     try:
         observed = run(directory)
+    except SkipScenario as exc:
+        status = "SKIP"
+        observed = str(exc)
     except BaseException:
         status = "FAIL"
         observed = traceback.format_exc()
@@ -164,4 +173,4 @@ def scenario(name, finding, expected, run):
     write_evidence(directory, before)
     (directory / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(f"{name}: {status} ({result['duration']}s)", flush=True)
-    return 0 if status == "PASS" else 1
+    return 0 if status in ("PASS", "SKIP") else 1

@@ -1,11 +1,12 @@
 """Check Windows process creation stamps against live and exited processes."""
 
 import asyncio
+import os
 import sys
 import time
 from pathlib import Path
 
-from _harness import child, scenario, scenario_dir, start_trace
+from _harness import SkipScenario, child, scenario, scenario_dir, start_trace
 
 from lazybridge import Agent, Plan, Step, Store
 from lazybridge._process_owner import _process_start_time, owner_is_alive
@@ -58,6 +59,8 @@ async def check(directory, process):
 
 
 def run(directory):
+    if os.name != "nt" and _process_start_time(os.getpid()) is None:
+        raise SkipScenario("Process creation stamps are unavailable on this platform")
     process = child(__file__, "sleeper")
     try:
         deadline = time.monotonic() + 15

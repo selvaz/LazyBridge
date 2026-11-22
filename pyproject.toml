@@ -127,12 +127,13 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths  = ["tests"]
 asyncio_mode = "auto"
-addopts = "-m 'not live and not heavy_render'"
+addopts = "-m 'not live and not heavy_render and not e2e'"
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten; anyio:pytest.PytestAssertRewriteWarning",
 ]
 markers = [
     "live: opt-in live tests that call real provider APIs (run with: pytest -m live)",
+    "e2e: opt-in offline end-to-end process tests (run with: pytest -m e2e)",
     "heavy_render: tests that need WeasyPrint/Quarto/Chrome — excluded from the default suite",
 ]
 

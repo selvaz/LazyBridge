@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from _harness import PYTHON, WORK, environment
 
-EVIDENCE = Path("D:/work/r2-live/evidence/lb-e2e-audit")
+EVIDENCE = Path(os.environ.get("LB_E2E_EVIDENCE", WORK / "evidence"))
 BASELINES = {
     "01": ("A4 live checkpoint takeover", "1.8.10 allowed resume to take over a live checkpoint."),
     "02": ("A4 legacy checkpoint", "1.8.10 had no owner-aware legacy reconciliation."),
@@ -103,7 +104,7 @@ def main():
                 "duration": round(time.monotonic() - started, 3),
             }
         )
-        if code or result["status"] != "PASS":
+        if code or result["status"] not in ("PASS", "SKIP"):
             failed = True
             result["status"] = "FAIL"
         rows.append((name, result, baseline))
