@@ -12,14 +12,22 @@ from lazybridge.ext.delegation import JobRegistry, make_plan_delegate
 from lazybridge.ext.planners.durable_blackboard import DurableBlackboard
 
 NAME = Path(__file__).stem
-LEASE = 2.5
+LEASE = 8.0
+STALE_LEASE = 3.0
 
 
 async def worker(directory, mode):
     class Engine:
         async def run(self, env, **kwargs):
             (directory / (mode + "-entered")).touch()
-            deadline = time.monotonic() + 15
+            # Yield until the parent has read both markers. In particular, the
+            # stale worker must not block the loop before the job ID is written.
+            deadline = time.monotonic() + 40
+            while not (directory / (mode + "-go")).exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("parent did not acknowledge worker startup")
+                await asyncio.sleep(0.03)
+            deadline = time.monotonic() + 40
             while not (directory / (mode + "-finish")).exists():
                 assert time.monotonic() < deadline
                 if mode == "stale":
@@ -30,7 +38,7 @@ async def worker(directory, mode):
             return Envelope(payload=mode + " result")
 
     with Store(db=str(directory / "board.sqlite")) as store:
-        board = DurableBlackboard(store, mode, lease_seconds=LEASE)
+        board = DurableBlackboard(store, mode, lease_seconds=STALE_LEASE if mode == "stale" else LEASE)
         tasks = set()
         tool = make_plan_delegate(
             engine_factory=Engine,
@@ -45,13 +53,13 @@ async def worker(directory, mode):
         await asyncio.gather(*list(tasks))
 
 
-def wait_for(predicate, process=None, timeout=12):
+def wait_for(predicate, process=None, timeout=25):
     deadline = time.monotonic() + timeout
     while not predicate():
-        if process is not None:
-            assert process.poll() is None, f"worker exited {process.returncode}"
+        if process is not None and process.poll() is not None and not predicate():
+            raise AssertionError(f"worker exited {process.returncode}")
         assert time.monotonic() < deadline, "timed out waiting for worker state"
-        time.sleep(0.03)
+        time.sleep(0.15)
 
 
 def run(directory):
@@ -75,6 +83,7 @@ def run(directory):
                 board = boards[mode]
                 job_id = (directory / (mode + "-job")).read_text()
                 initial = board.snapshot().tasks[0]["delegation_lease_until"]
+                (directory / (mode + "-go")).touch()
                 if mode == "renew":
                     wait_for(
                         lambda board=board, initial=initial: (
