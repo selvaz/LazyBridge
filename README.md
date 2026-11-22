@@ -31,12 +31,12 @@ print(desk("Packing brief for Rome").text())
 
 ## Install
 
-Python 3.11 or later. For the snippet above, `pip install lazybridge` is enough (current public release: **1.8.11**).
+Python 3.11 or later. For the snippet above, `pip install lazybridge` is enough (current public release: **1.8.12**).
 
 For live engines, install the matching extra and credentials, then run the bundled demo:
 
 ```sh
-python -m pip install "lazybridge[claude-code,deepseek]==1.8.11"
+python -m pip install "lazybridge[claude-code,deepseek]==1.8.12"
 python -m lazybridge.demo
 ```
 
@@ -154,7 +154,7 @@ benchmark is in progress**, with no comparative metrics published here.
 
 ## Documentation and status
 
-This README targets **1.8.11**.
+This README targets **1.8.12**.
 The core public API is Stable; coding engines and extensions have their own
 boundaries. Claude Code and Codex engines are Shipped, not under the Core
 Stable guarantee. `HumanEngine` and `SupervisorEngine` are Alpha. LazyTools
