@@ -266,6 +266,7 @@ class DurableBlackboard:
             # A failed task already closed at its failure time; cancelling only
             # reclassifies it, so it keeps that time instead of looking new.
             closed_at = task.get("completed_at") if task.get("status") == "failed" else None
+            _clear_delegation(task)
             task.update(status="cancelled", cancel_reason=reason.strip(), completed_at=closed_at or time.time())
             new_doc = {**doc, "tasks": tasks}
             return new_doc, self._render(new_doc)
@@ -706,11 +707,14 @@ class DurableBlackboard:
                     "its lease was reassigned while you were working."
                 )
             current = task.get("delegation_id")
+            expired = current is not None and self._lease_expired(task, time.time())
+            active = bool(task.get("delegation_active")) and not expired
             if delegation_id is not None and delegation_id != current:
                 return None, f"REJECTED: task {task_index} belongs to a different delegation attempt."
-            if current is not None and self._lease_expired(task, time.time()):
-                return None, f"REJECTED: task {task_index}'s delegation lease has expired."
-            if task.get("delegation_active") and (delegation_id is None or status == "done"):
+            # External claim editors may release a delegation by clearing its
+            # active marker (or naturally allow its lease to expire). In either
+            # case the original owner may close without knowing the job id.
+            if active and (delegation_id is None or status == "done"):
                 return None, f"REJECTED: task {task_index} still has an active delegation."
             _clear_delegation(task)
             if status == "done":

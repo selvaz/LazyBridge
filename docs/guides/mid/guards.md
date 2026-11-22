@@ -67,12 +67,13 @@ payload string.
 or substring `ContentGuard` runs in microseconds, an `LLMGuard` only
 fires when the cheap layer didn't decide. Saves tokens.
 
-`Agent.stream()` holds chunks until `acheck_output` approves the assembled
+`Agent.run()` applies an allowed guard's `modified_text` to the returned
+payload. `Agent.stream()` buffers all chunks until `acheck_output` approves the assembled
 response, including when a fallback supplies it. A blocked input or output
 raises `ValueError` before chunks reach the caller. A guarded child also
 withholds live tokens from a surrounding Plan stream.
 
-Session events from a guarded run keep identifiers, usage, and status.
+Session events from a guarded run keep agent, tool, model and span identifiers, usage, and status; content, arguments and output text are removed.
 Session filters content before calling custom redactors and exporters or
 writing it to the event log. The `guard_decision` event records the output
 decision. Provider transcripts and application-owned stores have their own

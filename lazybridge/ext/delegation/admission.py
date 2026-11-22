@@ -41,10 +41,11 @@ _logger = logging.getLogger(__name__)
 class _AdmissionLease:
     """Attempt-local, single settlement around an arbitrary caller decision."""
 
-    def __init__(self, decision: Any) -> None:
+    def __init__(self, decision: Any, *, settlement_timeout: float = 30.0) -> None:
         self.decision = decision
         self.allowed = getattr(decision, "allowed", True)
         self._settlement: asyncio.Task[None] | None = None
+        self.settlement_timeout = settlement_timeout
 
     async def release(self) -> None:
         await self._settle(release_admission)
@@ -60,12 +61,27 @@ class _AdmissionLease:
         # The hook may already have changed accounting when its next await
         # is reached. Keep that same invocation alive through cancellation.
         cancelled = None
+        deadline = asyncio.get_running_loop().time() + self.settlement_timeout
         while not self._settlement.done():
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                _logger.error(
+                    "admission settlement exceeded %.1f seconds; leaving hook to finish in background",
+                    self.settlement_timeout,
+                )
+                break
             try:
-                await asyncio.shield(self._settlement)
+                await asyncio.wait_for(asyncio.shield(self._settlement), remaining)
+            except TimeoutError:
+                _logger.error(
+                    "admission settlement exceeded %.1f seconds; leaving hook to finish in background",
+                    self.settlement_timeout,
+                )
+                break
             except asyncio.CancelledError as exc:
                 cancelled = exc
-        self._settlement.result()
+        if self._settlement.done():
+            self._settlement.result()
         if cancelled is not None:
             raise cancelled
 

@@ -10,12 +10,16 @@ can pass the old prefixes explicitly.
 from __future__ import annotations
 
 import hashlib
+import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from lazybridge import Store, Tool
 from lazybridge._process_owner import current_owner_fields as current_owner_fields
-from lazybridge._process_owner import owner_is_alive
+from lazybridge._process_owner import owner_is_alive, record_age
+
+_logger = logging.getLogger(__name__)
 
 #: Neutral default for the shared registry. A caller needing LazyCEO's old
 #: on-disk layout can pass ``prefix="ceo:codex-job:"`` explicitly, just as
@@ -110,6 +114,7 @@ class JobRegistry:
         #: a record with no owner at all by ``reclaim_interrupted``.
         owner_pid: int | None = None,
         owner_boot_id: str | None = None,
+        owner_start_time: float | None = None,
         #: Open passthrough for a caller's OWN fields this module has never
         #: heard of (a project id, a routing decision, anything a future
         #: caller wants to attach) without forking this method's signature
@@ -158,6 +163,7 @@ class JobRegistry:
             "finished_at": finished_at,
             "owner_pid": owner_pid,
             "owner_boot_id": owner_boot_id,
+            "owner_start_time": owner_start_time,
         }
         for name, value in optional.items():
             if value is not None:
@@ -206,7 +212,7 @@ class JobRegistry:
             if self._store.compare_and_swap(key, current, {**current, **changes}):
                 return True
 
-    def reclaim_interrupted(self, *, reclaim_unowned: bool = False) -> list[str]:
+    def reclaim_interrupted(self, *, reclaim_unowned: bool = False, stale_after: float = 900.0) -> list[str]:
         """Mark jobs owned by a dead local process as interrupted.
 
         Pass ``reclaim_unowned=True`` after confirming that any legacy records
@@ -218,8 +224,16 @@ class JobRegistry:
             if not isinstance(raw, dict) or raw.get("status") not in ("running", "awaiting_approval"):
                 continue
             alive = owner_is_alive(raw)
-            if alive is True or (alive is None and not reclaim_unowned):
+            if alive is True:
                 continue
+            if alive is None and not reclaim_unowned:
+                age = record_age(raw)
+                if age is None:
+                    entry = self._store.read_entry(key)
+                    age = time.time() - entry.written_at if entry is not None else None
+                if age is None or age < stale_after:
+                    continue
+                _logger.warning("Reclaiming stale unowned delegation job %r (age=%r seconds)", raw.get("job_id"), age)
             if self._store.compare_and_swap(key, raw, {**raw, "status": "interrupted"}):
                 reclaimed.append(raw.get("job_id", key))
         return reclaimed
@@ -307,3 +321,8 @@ class JobRegistry:
 
         get_job_result.__doc__ = doc
         return Tool.wrap(get_job_result, name="get_job_result")
+
+
+def _job_owner_is_alive(record: dict[str, Any]) -> bool | None:
+    """Deprecated compatibility alias for :func:`owner_is_alive`."""
+    return owner_is_alive(record)

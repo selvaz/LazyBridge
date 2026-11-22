@@ -70,6 +70,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         resume: bool = False,
         on_concurrent: Literal["fail", "fork"] = "fail",
         stream_buffer: int = 64,
+        adopt_unowned: bool = False,
+        owner_stale_after: float = 900.0,
     ) -> None:
         """Construct a Plan.
 
@@ -172,6 +174,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
             )
         if stream_buffer < 1:
             raise ValueError(f"stream_buffer must be >= 1, got {stream_buffer!r}")
+        if owner_stale_after < 0:
+            raise ValueError(f"owner_stale_after must be >= 0, got {owner_stale_after!r}")
         self.stream_buffer = stream_buffer
         self.steps = list(steps)
         self.max_iterations = max_iterations
@@ -180,6 +184,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
         self.checkpoint_key = checkpoint_key
         self.resume = resume
         self.on_concurrent = on_concurrent
+        self.adopt_unowned = adopt_unowned
+        self.owner_stale_after = owner_stale_after
         # Validation deferred to Agent.__init__ after tools are resolved
 
     def _validate(self, tool_map: dict[str, Tool]) -> None:

@@ -187,7 +187,7 @@ def redact_secrets(payload: dict[str, Any]) -> dict[str, Any]:
 # "argument wasn't passed at all → use the default secret redactor".
 _REDACT_UNSET: Any = object()
 _GUARDED_TRACE: ContextVar[bool] = ContextVar("lazybridge_guarded_trace", default=False)
-_GUARDED_LABELS = frozenset({"agent_name", "step", "branch_id"})
+_GUARDED_LABELS = frozenset({"agent_name", "step", "branch_id", "tool_name", "name", "model"})
 _GUARDED_METRICS = frozenset(
     {"allowed", "cancelled", "cost_usd", "input_tokens", "output_tokens", "latency_ms", "timeout_s", "turn"}
 )

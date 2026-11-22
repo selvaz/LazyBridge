@@ -107,11 +107,14 @@ checkpoint being resumed was previously paused or failed. Upgrade all Plan
 runners that share a Store before relying on this ownership check across
 rolling restarts.
 
-For an active legacy checkpoint with no process stamp, first verify that
-the old worker has stopped. For legacy or uncertain checkpoints, once
-replay is safe, compare-and-swap the observed snapshot to `status="paused"`
-while preserving its `next_step`, `kv`, and history. A normal `resume=True`
-run can then claim that checkpoint.
+An active legacy checkpoint with no process stamp is adopted with a warning
+once its last Store update is older than `owner_stale_after` (15 minutes by
+default). A recent legacy checkpoint remains protected; pass
+`adopt_unowned=True` only after independently confirming its worker stopped.
+After reconciling an uncertain outcome, call `plan.clear_checkpoint()`; this
+atomically moves that checkpoint to a resumable reconciled state while
+preserving its `next_step`, `kv`, and history. Pass `uncertain_only=False`
+only when deliberately reconciling another state.
 
 ## When to use it
 

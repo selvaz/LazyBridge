@@ -109,10 +109,10 @@ and delegation linked to a [`DurableBlackboard`](#planners) task. Job
 records survive restarts only when backed by a persistent `Store`; executing
 jobs do not resume after restart, and callers should invoke
 `JobRegistry.reclaim_interrupted()` during startup. The standard delegation
-factories stamp ownership when they create a job. Startup recovery skips
-live owners and legacy records with unknown ownership. After verifying
-that those legacy workers have stopped, call
-`JobRegistry.reclaim_interrupted(reclaim_unowned=True)` to reconcile them.
+factories stamp ownership when they create a job. Startup recovery skips live owners, but reclaims unowned legacy records
+older than the default 15-minute staleness age with a warning. Pass
+`reclaim_unowned=True` to force reconciliation after independently verifying
+a recent legacy worker has stopped.
 
 Promoted from LazyCEO's generic background-delegation infrastructure after
 live production use. Tools produced by the fire-and-forget delegation
