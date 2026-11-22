@@ -889,10 +889,9 @@ class LLMEngine:
                     payload = resp.content
 
                 if memory:
-                    # Pass this turn's marginal token count, not the
-                    # running cumulative total.  total_in+total_out is the
-                    # pipeline total across all turns; Memory's compression
-                    # threshold should be measured against per-turn cost.
+                    # Provider usage is retained as an API-compatible hint;
+                    # Memory sizes stored text itself so cache accounting
+                    # cannot suppress compaction.
                     memory.add(
                         task_text,
                         resp.content,

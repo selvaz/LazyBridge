@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import math
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -30,7 +32,7 @@ class Memory:
     LLM summarization
     -----------------
     Pass any callable (typically an ``Agent``) as ``summarizer=`` to enable
-    LLM-based compression instead of the keyword-extraction fallback::
+    LLM-based compression instead of the sentence-extraction fallback::
 
         summarizer = Agent("claude-haiku-4-5-20251001", system="Summarize conversations concisely.")
         memory = Memory(strategy="summary", summarizer=summarizer)
@@ -47,7 +49,7 @@ class Memory:
       coroutine is driven to completion (in a worker thread when
       called from inside an event loop, to avoid nested-loop errors).
 
-    If the summarizer raises, compression falls back to keyword
+    If the summarizer raises, compression falls back to complete-sentence
     extraction — never silent garbage.
     """
 
@@ -61,10 +63,14 @@ class Memory:
 
     #: Default deadline applied to LLM-summariser calls when the
     #: summariser returns a coroutine / awaitable.  A hung summariser
-    #: must never starve the agent; on timeout the keyword-extraction
+    #: must never starve the agent; on timeout the sentence-extraction
     #: fallback runs instead, never silent loss.  ``None`` disables the
     #: deadline (legacy behaviour).
     _DEFAULT_SUMMARIZER_TIMEOUT = 30.0
+
+    #: Recent turns are never summarized.  Besides avoiding a summary-only
+    #: context, this verbatim window preserves exact identifiers and facts.
+    _RECENT_TURNS = 10
 
     def __init__(
         self,
@@ -87,15 +93,15 @@ class Memory:
             (requires ``max_tokens`` to be set).
             ``"sliding"`` — compress by turn count regardless of
             ``max_tokens``; does NOT require a token budget.
-            ``"summary"`` — same trigger as ``"sliding"`` but uses the
-            LLM ``summarizer`` instead of keyword extraction.
+            ``"summary"`` — compress when the token budget is exceeded,
+            using the LLM ``summarizer`` instead of extraction.
             ``"none"``    — no compression; only the hard ``max_turns``
             cap applies.
         max_tokens:
-            Token budget for ``strategy="auto"``.  Ignored by
-            ``"sliding"`` and ``"summary"`` (they compress by turn
-            count).  ``None`` with ``strategy="auto"`` disables
-            compression entirely.
+            Approximate token budget for remembered text under ``"auto"``
+            and ``"summary"``.  Size is estimated as characters / 4 and is
+            independent of provider billing/cache counters.  ``None``
+            disables budget compression.
         max_turns:
             Hard cap on retained turns after compression runs.  ``None``
             disables the cap (unbounded history — only safe for short
@@ -124,7 +130,7 @@ class Memory:
             for accepted shapes.
         summarizer_timeout:
             Deadline (seconds) applied to async summariser calls.  On
-            timeout the keyword-extraction fallback runs and a one-shot
+            timeout the sentence-extraction fallback runs and a one-shot
             warning is emitted via :attr:`_summarizer_warned`.  ``None``
             disables the deadline.  Default: 30 s.
         """
@@ -221,18 +227,14 @@ class Memory:
         )
 
     def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
-        if tokens == 0 and (user or assistant):
-            # Estimate from word count when no real token count is supplied.
-            # English LLM tokenisers run ~1.3 tokens per word on average,
-            # so we scale the word count up to avoid undershooting the
-            # ``max_tokens`` budget.  LLMEngine passes the real count and
-            # bypasses this branch entirely; HIL and other non-LLM callers
-            # get a free estimate without changes at their call sites.
-            words = len((user + " " + assistant).split())
-            tokens = max(1, int(words * 1.3))
+        # ``tokens`` remains accepted for API compatibility, but provider
+        # usage is the wrong measure here: cached prompt tokens may be absent
+        # from billed input while their text is still stored in Memory.
+        del tokens
+        text_tokens = _estimate_text_tokens(f"User: {user}\nAssistant: {assistant}")
         # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
-            self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))
+            self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=text_tokens))
             plan = self._plan_compression()
 
         # Phase 2 — compute the summary OUTSIDE the lock so a slow or
@@ -317,22 +319,20 @@ class Memory:
             return None
         if self.strategy == "none":
             return None
-        # Only "auto" requires a token budget — "sliding" and "summary"
-        # compress by turn count and must NOT be gated on max_tokens.
-        # Gating all strategies on max_tokens would silently disable
-        # "sliding"/"summary" when max_tokens=None.
-        if self.strategy == "auto" and not self.max_tokens:
+        if self.strategy in ("auto", "summary") and not self.max_tokens:
             return None
-        total = sum(t.token_estimate for t in self._turns)
-        # "summary" compresses like "sliding" but uses LLM summarization.
-        # "sliding" always compresses when turns > window.
-        # "auto"    compresses only once token budget is exceeded.
-        should_compress = self.strategy in ("sliding", "summary") or (
-            self.strategy == "auto" and self.max_tokens is not None and total > self.max_tokens
+        total = _estimate_text_tokens(self._summary) + sum(t.token_estimate for t in self._turns)
+        # Sliding retains its count-based compatibility behaviour.  Auto and
+        # summary use the stored text budget.  All strategies keep a ten-turn
+        # verbatim window, so the turn threshold is only a secondary bound.
+        should_compress = self.strategy == "sliding" or (
+            self.strategy in ("auto", "summary")
+            and self.max_tokens is not None
+            and total > self.max_tokens
         )
-        if not (should_compress and len(self._turns) > 10):
+        if not (should_compress and len(self._turns) > self._RECENT_TURNS):
             return None
-        head = list(self._turns[:-10])  # snapshot; safe to summarise outside lock
+        head = list(self._turns[: -self._RECENT_TURNS])  # snapshot; safe to summarise outside lock
         self._compressing = True
         return head, len(head)
 
@@ -353,7 +353,7 @@ class Memory:
         ``summarizer_timeout`` (set on the Memory) is enforced when the
         summariser returns a coroutine / awaitable — the coroutine is
         wrapped in ``asyncio.wait_for``; on deadline the
-        keyword-extraction fallback runs and :attr:`_summarizer_warned`
+        sentence-extraction fallback runs and :attr:`_summarizer_warned`
         is set (one-shot warning, separate from the turn-cap
         :attr:`_overflow_warned` flag).  Sync summarisers are called
         directly and cannot be interrupted mid-call; callers that need
@@ -378,7 +378,7 @@ class Memory:
                 result = _drive_to_completion(result, timeout=self.summarizer_timeout)
             return result.text() if hasattr(result, "text") else str(result)
         except TimeoutError:
-            # Hung judge / network stall — fall back to keywords rather
+            # Hung judge / network stall — fall back to sentences rather
             # than letting the agent run sit on a stuck future.  The
             # warning is one-shot per Memory (via _summarizer_warned, a
             # separate flag from _overflow_warned) so a degenerate
@@ -389,7 +389,7 @@ class Memory:
 
                 warnings.warn(
                     f"Memory summariser exceeded summarizer_timeout="
-                    f"{self.summarizer_timeout}s; falling back to keyword "
+                    f"{self.summarizer_timeout}s; falling back to sentence "
                     f"extraction.  Raise summarizer_timeout= or pick a "
                     f"faster summariser to silence.",
                     UserWarning,
@@ -400,15 +400,19 @@ class Memory:
             return self._rule_summary(turns, prior=prior)
 
     def _rule_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
-        topics: set[str] = set()
-        # Fold the prior summary's topics in so repeated compressions
-        # accumulate instead of dropping the oldest context.
+        """Extract complete sentences rather than a lossy keyword bag."""
+        sentences: list[str] = []
         if prior:
-            topics.update(w.lower().strip(",]") for w in prior.split() if len(w.strip(",]")) > 5)
-        for t in turns:
-            words = (t.user + " " + t.assistant).split()
-            topics.update(w.lower() for w in words if len(w) > 5)
-        return f"[Earlier conversation covered: {', '.join(sorted(topics)[:20])}]"
+            previous = prior.removeprefix("[Earlier conversation covered: ").removesuffix("]")
+            sentences.extend(_sentences(previous))
+        for turn in turns:
+            sentences.extend(_sentences(turn.user))
+            sentences.extend(_sentences(turn.assistant))
+
+        # Preserve order and exact spelling (notably named entities), while
+        # bounding repeated fallback summaries.
+        unique = list(dict.fromkeys(sentence for sentence in sentences if sentence))
+        return f"[Earlier conversation covered: {' '.join(unique[-20:])}]"
 
     def messages(self) -> list[Message]:
         """Return full message list including summary prefix if compressed."""
@@ -449,7 +453,7 @@ class Memory:
                 self._turns[-1] = _Turn(
                     user=last.user,
                     assistant=assistant,
-                    token_estimate=last.token_estimate,
+                    token_estimate=_estimate_text_tokens(f"User: {last.user}\nAssistant: {assistant}"),
                 )
             self._persist_locked()
 
@@ -460,6 +464,16 @@ class Memory:
             # Persist the wipe too — otherwise a restart right after clear()
             # would reload the pre-clear state from the Store.
             self._persist_locked()
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """Conservative tokenizer-free estimate for the text Memory stores."""
+    return math.ceil(len(text) / 4)
+
+
+def _sentences(text: str) -> list[str]:
+    """Split prose at sentence boundaries without altering entity casing."""
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+|[\r\n]+", text.strip()) if part.strip()]
 
 
 def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:

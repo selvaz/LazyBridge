@@ -50,11 +50,11 @@ def test_llm_summary_receives_prior_summary():
         prompts.append(prompt)
         return f"summary#{len(prompts)}"
 
-    mem = Memory(strategy="summary", summarizer=summarizer)
+    mem = Memory(strategy="summary", max_tokens=1, summarizer=summarizer)
     for i in range(11):
         mem.add(f"u{i}", f"a{i}")
     assert mem._summary == "summary#1"
-    mem.add("x", "y")  # strategy="summary" compresses on every add past the window
+    mem.add("x", "y")  # The tiny budget requires another compaction.
     assert mem._summary == "summary#2"
     # The second summarizer call must include the first summary as
     # material to fold in.

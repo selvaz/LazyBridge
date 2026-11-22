@@ -110,7 +110,7 @@ def test_auto_under_threshold_no_compression():
 
 
 def test_auto_over_threshold_compresses():
-    m = Memory(strategy="auto", max_tokens=100)
+    m = Memory(strategy="auto", max_tokens=10)
     for i in range(15):
         m.add(f"q{i}", f"a{i}", tokens=50)
     assert len(m._turns) <= 10
@@ -200,7 +200,7 @@ def test_summarizer_sync_callable_is_used_verbatim():
         calls.append(prompt)
         return "SYNC-SUMMARY"
 
-    m = Memory(strategy="summary", summarizer=sync_sum)
+    m = Memory(strategy="summary", max_tokens=1, summarizer=sync_sum)
     for u, a in _force_compression_turns():
         m.add(u, a)
     assert len(calls) >= 1
@@ -216,7 +216,7 @@ def test_summarizer_async_callable_is_driven_to_completion():
         calls.append(prompt)
         return "ASYNC-SUMMARY"
 
-    m = Memory(strategy="summary", summarizer=async_sum)
+    m = Memory(strategy="summary", max_tokens=1, summarizer=async_sum)
     for u, a in _force_compression_turns():
         m.add(u, a)
 
@@ -231,7 +231,7 @@ def test_summarizer_async_callable_raising_falls_back_to_keywords():
     async def async_boom(prompt: str) -> str:
         raise RuntimeError("upstream down")
 
-    m = Memory(strategy="summary", summarizer=async_boom)
+    m = Memory(strategy="summary", max_tokens=1, summarizer=async_boom)
     for u, a in _force_compression_turns():
         m.add(u, a)
     # Rule fallback prefix — compression didn't just die.
