@@ -45,7 +45,7 @@ def _kill_tree(proc: subprocess.Popen[str]) -> None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
-            pass
+            pass  # the process group already exited
     proc.kill()
 
 
@@ -110,7 +110,7 @@ def main():
                 try:
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    pass
+                    pass  # reported as a timeout below; the log keeps what was written
                 code = 1
                 timed_out = True
         # Read once the scenario has exited (or its tree was killed); output a
@@ -187,9 +187,11 @@ def main():
         "",
         "## LazyBridge 1.8.10 baseline",
         "",
-        "The descriptions below are derived from the audit. The 1.8.10 column reports the supplied baseline run; "
-        "a PASS is a regression guard, not proof of a fix. Startup or timeout failures do not prove a behavioral regression. "
-        "Inspect the baseline process logs to distinguish behavioral failures from API incompatibilities.",
+        (
+            "The descriptions below are derived from the audit. The 1.8.10 column reports the supplied baseline run; "
+            "a PASS is a regression guard, not proof of a fix. Startup or timeout failures do not prove a behavioral "
+            "regression. Inspect the baseline process logs to distinguish behavioral failures from API incompatibilities."
+        ),
     ]
     if args.baseline:
         report.append(f"Baseline evidence directory: `{args.baseline.resolve()}`.")
