@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -29,6 +30,23 @@ BASELINES = {
     "10": ("A1/A2 approvals", "1.8.10 could lose permission scope or reuse a mismatched confirmation."),
     "11": ("M4 Codex slots", "1.8.10 could leave detached workers uncounted."),
 }
+
+
+def _kill_tree(proc: subprocess.Popen[str]) -> None:
+    """Stop a timed-out scenario and every process it started."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    proc.kill()
 
 
 def main():
@@ -70,14 +88,22 @@ def main():
         name = script.stem
         source = WORK / name / run_id
         started = time.monotonic()
+        proc = subprocess.Popen(
+            [str(PYTHON), str(script)],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=os.name != "nt",
+        )
         try:
-            proc = subprocess.run(
-                [str(PYTHON), str(script)], env=env, capture_output=True, text=True, timeout=args.timeout
-            )
-            output = proc.stdout + proc.stderr
+            stdout, stderr = proc.communicate(timeout=args.timeout)
+            output = stdout + stderr
             code = proc.returncode
-        except subprocess.TimeoutExpired as exc:
-            output = f"Timed out after {args.timeout} seconds: {exc}"
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            stdout, stderr = proc.communicate()
+            output = f"Timed out after {args.timeout} seconds" + chr(10) + stdout + stderr
             code = 1
         target = destination / name
         if source.exists():

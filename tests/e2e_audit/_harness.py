@@ -155,7 +155,8 @@ def scenario(name, finding, expected, run):
     except SkipScenario as exc:
         status = "SKIP"
         observed = str(exc)
-    except BaseException:
+    except Exception:
+        # KeyboardInterrupt/SystemExit propagate; the finally block still records the run.
         status = "FAIL"
         observed = traceback.format_exc()
         print(observed, file=sys.stderr, flush=True)
