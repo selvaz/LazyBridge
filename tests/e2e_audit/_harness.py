@@ -17,6 +17,11 @@ PYTHON = Path('C:/ProgramData/spyder-6/python.exe')
 WORK = Path('D:/work/_tmp/lb-e2e')
 
 
+def scenario_dir(name):
+    run_id = os.environ.get('LB_E2E_RUN_ID')
+    return WORK / name / run_id if run_id else WORK / name
+
+
 def environment():
     env = os.environ.copy()
     env['PYTHONPATH'] = str(ROOT)
@@ -100,7 +105,7 @@ def write_evidence(directory, before):
 
 
 def scenario(name, finding, expected, run):
-    directory = WORK / name
+    directory = scenario_dir(name)
     directory.mkdir(parents=True, exist_ok=True)
     before = snapshot(directory)
     started = time.monotonic()

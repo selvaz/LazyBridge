@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-from _harness import WORK, child, scenario, start_trace
+from _harness import child, scenario, scenario_dir, start_trace
 from lazybridge import Store
 from lazybridge.ext.delegation import JobRegistry, make_background_delegate
 
@@ -13,7 +13,7 @@ NAME = Path(__file__).stem
 
 class BlockingEngine:
     async def run(self, env, **kwargs):
-        (WORK / NAME / 'worker-ready').touch()
+        (scenario_dir(NAME) / 'worker-ready').touch()
         await asyncio.Event().wait()
 
 
@@ -60,7 +60,7 @@ def run(directory):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        directory = WORK / NAME
+        directory = scenario_dir(NAME)
         stream = start_trace(directory)
         try:
             asyncio.run(owner(directory))

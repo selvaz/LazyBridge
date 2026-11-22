@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-from _harness import WORK, child, scenario, start_trace
+from _harness import child, scenario, scenario_dir, start_trace
 from lazybridge import Agent, Plan, Step, Store
 from lazybridge._process_owner import _process_start_time, owner_is_alive
 from lazybridge.engines.plan import ConcurrentPlanRunError
@@ -62,7 +62,7 @@ def run(directory):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        directory = WORK / NAME
+        directory = scenario_dir(NAME)
         stream = start_trace(directory)
         (directory / 'sleeper-ready').touch()
         try:
