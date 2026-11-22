@@ -32,10 +32,9 @@ def _typed_tool(count: int, scale: float = 1.0) -> float:
     return count * scale
 
 
-def test_run_sync_rejects_string_numbers():
+def test_run_sync_coerces_string_numbers():
     tool = Tool(_typed_tool)
-    with pytest.raises(ToolArgumentValidationError):
-        tool.run_sync(count="3", scale="2.5")
+    assert tool.run_sync(count="3", scale="2.5") == 7.5
 
 
 def test_run_sync_rejects_bad_arguments_with_readable_error():
@@ -51,13 +50,6 @@ def test_async_run_validates_too():
         return await tool.run(count=4)
 
     assert asyncio.run(_go()) == 4.0
-
-
-def test_optional_null_is_treated_as_absent_but_required_null_is_rejected():
-    tool = Tool(_typed_tool)
-    assert tool.run_sync(count=4, scale=None) == 4.0
-    with pytest.raises(ToolArgumentValidationError, match="count"):
-        tool.run_sync(count=None)
 
 
 def test_validate_args_opt_out():

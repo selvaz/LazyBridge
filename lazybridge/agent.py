@@ -647,7 +647,9 @@ class Agent:
         # when it was mounted.  Explicitly configured descendants may execute
         # while an inherited parent's ContextVar is still set, but must retain
         # their own session.
-        effective_session = (_session_override.get() if self._session_inherited else None) or self.session
+        effective_session = (
+            _session_override.get() if getattr(self, "_session_inherited", False) else None
+        ) or self.session
         _session_token = _calling_session.set(effective_session)
         try:
             result = await self.engine.run(
@@ -1053,7 +1055,12 @@ class Agent:
                         # ConcludeSignal propagation all live in
                         # ``_run_as_tool``. Sources were already snapshotted,
                         # so the private flag suppresses a second injection.
-                        return await agent._run_as_tool(snapshot, _sources_injected=True)
+                        runner = getattr(agent, "_run_as_tool", None)
+                        if runner is not None:
+                            return await runner(snapshot, _sources_injected=True)
+                        # Preserve support for duck-typed Agent doubles and
+                        # third-party implementations that only expose run().
+                        return await agent.run(snapshot)
                     finally:
                         if token is not None:
                             _session_override.reset(token)

@@ -53,6 +53,7 @@ async def test_plan_agent_targets_receive_the_same_complete_envelope(target_kind
         ({}, "missing required"),
         ({"repo": 7}, "must be of JSON type string"),
         ({"repo": "ok", "attempts": True}, "must be of JSON type integer"),
+        ({"repo": "ok", "attempts": "3"}, "must be of JSON type integer"),
     ],
 )
 async def test_delegate_rejects_invalid_extra_params_before_side_effects(
@@ -80,6 +81,29 @@ async def test_delegate_rejects_invalid_extra_params_before_side_effects(
 
     assert message in result
     assert policy_calls == []
+    assert store.items(prefix="delegation:job:") == []
+
+
+@pytest.mark.asyncio
+async def test_delegate_treats_null_optional_extra_param_as_omitted(tmp_path) -> None:
+    store = Store(db=str(tmp_path / "jobs.db"))
+    policy_calls: list[dict[str, object]] = []
+    tool = make_background_delegate(
+        tool_name="delegate",
+        label="worker",
+        engine_factory=lambda **_: object(),
+        registry=JobRegistry(store),
+        background_tasks=set(),
+        notify=None,
+        doc="delegate",
+        extra_params={"attempts": ExtraParam(json_type="integer")},
+        guard=lambda _objective, values: policy_calls.append(values) or "REJECTED: stop after validation",
+    )
+
+    result = await tool.func("work", attempts=None)
+
+    assert result == "REJECTED: stop after validation"
+    assert policy_calls == [{}]
     assert store.items(prefix="delegation:job:") == []
 
 

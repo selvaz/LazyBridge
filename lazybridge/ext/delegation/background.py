@@ -966,6 +966,14 @@ def make_background_delegate(
         missing = sorted(name for name, spec in (extra_params or {}).items() if spec.required and name not in extra)
         if missing:
             return f"REJECTED: missing required argument(s) {missing}"
+        # Provider tool calls commonly encode an omitted optional field as
+        # null.  Treat that representation as omission for declared optional
+        # ExtraParams, without weakening required-field or override checks.
+        extra = {
+            name: value
+            for name, value in extra.items()
+            if not (value is None and (spec := (extra_params or {}).get(name)) is not None and not spec.required)
+        }
         for name, value in extra.items():
             spec = (extra_params or {}).get(name)
             if spec is None:
