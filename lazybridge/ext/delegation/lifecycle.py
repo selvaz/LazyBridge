@@ -107,7 +107,8 @@ def _finalize(context: JobContext) -> None:
         changes["error"] = result.error.message if result.error else "unknown error"
     if result.ok or cost:
         changes["cost_usd"] = cost
-    context.registry.update(context.job_id, changes, expected_started=True)
+    if not context.registry.update(context.job_id, changes, expected_started=True):
+        return
     if result.ok:
         message = (
             f"{context.label} job {context.job_id[:8]} done: {context.objective[:100]}\n\n{elide(changes['result'])}"

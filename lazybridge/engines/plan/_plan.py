@@ -41,6 +41,7 @@ from lazybridge.envelope import Envelope, EnvelopeMetadata, ErrorInfo, Uncertain
 from lazybridge.sentinels import _FromStart
 from lazybridge.session import EventType
 from lazybridge.signals import ConcludeSignal
+from lazybridge.tools import _tool_error_text
 
 if TYPE_CHECKING:
     from lazybridge.memory import Memory
@@ -291,7 +292,8 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 if error_msg is not None:
                     payload["error"] = error_msg
                 elif result_env is not None and result_env.error is not None:
-                    payload["error"] = result_env.error.message
+                    error = result_env.error
+                    payload["error"] = _tool_error_text(error) if error.type == "GuardBlocked" else error.message
                 elif result_env is not None:
                     payload["payload"] = (result_env.text() or "")[:500]
                 session.emit(EventType.AGENT_FINISH, payload, run_id=run_id)
@@ -1053,12 +1055,18 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 raise RuntimeError(f"Cannot execute step target: {target!r}")
 
             if session:
-                result_payload: dict[str, Any] = {"step": step.name, "result": result_env.text()[:200]}
+                result_payload: dict[str, Any] = {"step": step.name}
+                if result_env.error is not None:
+                    result_payload["error"] = _tool_error_text(result_env.error)
+                    event = EventType.TOOL_ERROR
+                else:
+                    result_payload["result"] = result_env.text()[:200]
+                    event = EventType.TOOL_RESULT
                 if branch_id is not None:
                     result_payload["branch_id"] = branch_id
                 if agent_name is not None:
                     result_payload["agent_name"] = agent_name
-                session.emit(EventType.TOOL_RESULT, result_payload, run_id=run_id)
+                session.emit(event, result_payload, run_id=run_id)
             return result_env
 
         except Exception as exc:

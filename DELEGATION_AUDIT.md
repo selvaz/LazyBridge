@@ -16,7 +16,7 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ### A3 — Propagate a denied or failed result as an error
 
-**Tool boundary fixed on this branch.** Codex, Claude Code, and `LLMEngine` now report failed child envelopes as tool errors. Parent tool events use the same error representation. Output guard denials remove the draft from the returned envelope, and the adapters give the parent a generic guard error. Follow-up work should apply the same disclosure policy to child-engine traces emitted before the guard decision. Tests cover provider error flags, parent events, and guard results. [Agent guard](lazybridge/agent.py) · [LLMEngine](lazybridge/engines/llm.py) · [Codex tools](lazybridge/engines/codex/dynamic_tools.py) · [Claude Code adapter](lazybridge/engines/claude_code/mcp_adapter.py)
+**Fixed for tool results, Session traces, and token streams.** Codex, Claude Code, `LLMEngine`, and Plan report failed child envelopes as tool errors. Output guard denials omit the draft and surface a generic guard error to the parent. Session filters guarded traces before custom redactors, persistence, and exporters. Guarded calls suppress ambient tokens and explicit guarded streams hold their chunks until review, including on fallback. A regression pauses a guarded writer inside a streaming Plan and checks that the draft stays private throughout. [Agent guard](lazybridge/agent.py) · [Session](lazybridge/session.py) · [Plan](lazybridge/engines/plan/_plan.py)
 
 ### A4 — Prevent takeover of a live Plan checkpoint
 
@@ -24,7 +24,7 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ### A5 — Keep a blackboard claim valid for the worker's lifetime
 
-**Pre-start rollback fixed.** The default plan runner releases the board claim after a factory or Agent setup failure. A live worker can still outlast a `DurableBlackboard` claim and let another attempt start. Link the job to a unique claim attempt, renew its lease, and fence rollback and result publication. Validate lease expiry and stale completion with independently controlled workers. [Plan delegation](lazybridge/ext/delegation/background.py) · [DurableBlackboard](lazybridge/ext/planners/durable_blackboard.py)
+**Fixed for delegation through `DurableBlackboard`.** The board stamps each claim with the job ID and its lease deadline. The runner renews that attempt during execution and validates it before accepting the result for review. Default setup rollback targets the same attempt. Shared-SQLite tests cover renewal across expiry intervals, cancellation on lease loss, and stale completion and rollback after reassignment to the same owner. Custom hooks that mutate board state must compare the job ID in their own CAS. [Plan delegation](lazybridge/ext/delegation/background.py) · [DurableBlackboard](lazybridge/ext/planners/durable_blackboard.py)
 
 ### A6 — Preserve live jobs during startup recovery
 
@@ -47,6 +47,5 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ## Delivery order
 
-1. Finish A3 by applying the output guard's disclosure policy to child-engine traces emitted before the decision.
-2. Finish A5 with attempt ownership on the board. Exercise lease renewal, stale completion, cancellation, and restart against a shared SQLite database.
-3. Add the runtime regressions in M1–M6 through public entry points, including the common cases of a named Plan target and an aliased agent tool.
+1. Address M3 and M4 together with cancellation and concurrency-limit regressions for detached workers.
+2. Address M1, M2, M5, and M6 through public entry points, including named Plan targets and aliased agent tools.

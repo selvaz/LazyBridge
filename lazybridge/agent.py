@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, cast
 
 from lazybridge._asyncbridge import run_coroutine_blocking
@@ -12,6 +13,19 @@ from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
+
+
+@contextmanager
+def _guarded_output() -> Iterator[None]:
+    from lazybridge.core.streaming import restore_ambient_token_sink, suppress_ambient_token_sink
+    from lazybridge.session import _guarded_trace
+
+    with _guarded_trace():
+        sink_token = suppress_ambient_token_sink()
+        try:
+            yield
+        finally:
+            restore_ambient_token_sink(sink_token)
 
 
 class Agent:
@@ -447,40 +461,46 @@ class Agent:
         raised inside must propagate past this level up to the originating
         top-level :meth:`run`.
         """
-        # ``getattr`` with a default keeps this backwards-compatible for
-        # Agents constructed via ``Agent.__new__`` (test helpers, custom
-        # subclasses) that haven't set ``self.timeout``.
-        timeout = getattr(self, "timeout", None)
-        if timeout is None:
-            return await self._run_body(task, context=context, images=images, audio=audio)
-        try:
-            return await asyncio.wait_for(
-                self._run_body(task, context=context, images=images, audio=audio), timeout=timeout
-            )
-        except TimeoutError:
-            # Emit a synthetic AGENT_FINISH so callers reading
-            # ``session.events.query()`` see a complete trace even when
-            # the engine's own AGENT_FINISH was skipped by the
-            # ``CancelledError`` propagation (BaseException, not caught
-            # by the engine's ``except Exception``).
-            session = getattr(self, "session", None)
-            if session is not None and hasattr(session, "emit"):
-                from lazybridge.session import EventType
+        from lazybridge.signals import ConcludeSignal
 
-                try:
-                    session.emit(
-                        EventType.AGENT_FINISH,
-                        {
-                            "agent_name": self.name,
-                            "error": f"Agent.run() exceeded timeout={timeout}s",
-                            "cancelled": True,
-                        },
-                    )
-                except Exception:
-                    # Session is best-effort here; never let observability
-                    # mask the underlying timeout.
-                    pass
-            return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
+        timeout = getattr(self, "timeout", None)
+        guard = getattr(self, "guard", None)
+        with _guarded_output() if guard else nullcontext():
+            try:
+                if timeout is None:
+                    return await self._run_body(task, context=context, images=images, audio=audio)
+                return await asyncio.wait_for(
+                    self._run_body(task, context=context, images=images, audio=audio), timeout=timeout
+                )
+            except ConcludeSignal as signal:
+                if not guard:
+                    raise
+                result = await self._apply_output_guard(Envelope(payload=signal.message))
+                if not result.ok:
+                    return result
+                if result.payload == signal.message:
+                    raise
+                raise ConcludeSignal(result.text()) from None
+            except TimeoutError:
+                if timeout is None:
+                    raise
+                # Pair the engine's start event if cancellation skipped its finish.
+                session = getattr(self, "session", None)
+                if session is not None and hasattr(session, "emit"):
+                    from lazybridge.session import EventType
+
+                    try:
+                        session.emit(
+                            EventType.AGENT_FINISH,
+                            {
+                                "agent_name": self.name,
+                                "error": f"Agent.run() exceeded timeout={timeout}s",
+                                "cancelled": True,
+                            },
+                        )
+                    except Exception:
+                        pass
+                return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
 
     async def _run_body(
         self,
@@ -557,15 +577,7 @@ class Agent:
             result = await self.fallback.run(fallback_env)
 
         if self.guard and result.ok:
-            action = await self.guard.acheck_output(result.text())
-            if not action.allowed:
-                from lazybridge.envelope import ErrorInfo
-
-                result = Envelope(
-                    task=result.task,
-                    error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
-                    metadata=result.metadata,
-                )
+            result = await self._apply_output_guard(result)
 
         # Write last output to shared store so from_agent("name") can read it.
         # Only written on success — failed runs do not overwrite the last good output.
@@ -575,6 +587,29 @@ class Agent:
 
             _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, result.text())
 
+        return result
+
+    async def _apply_output_guard(self, result: Envelope) -> Envelope:
+        from lazybridge.envelope import ErrorInfo
+        from lazybridge.session import EventType
+
+        guard = self.guard
+        assert guard is not None
+        action = await guard.acheck_output(result.text())
+        if self.session is not None:
+            self.session.emit(
+                EventType.GUARD_DECISION,
+                {"agent_name": self.name, "allowed": action.allowed},
+                run_id=result.metadata.run_id,
+            )
+        if not action.allowed:
+            return Envelope(
+                task=result.task,
+                error=ErrorInfo(type="GuardBlocked", message=action.message or "Output blocked"),
+                metadata=result.metadata,
+            )
+        if action.modified_text is not None:
+            return result.model_copy(update={"payload": action.modified_text})
         return result
 
     async def _run_engine(self, env: Envelope) -> Envelope:
@@ -719,11 +754,9 @@ class Agent:
         **Guard enforcement.** ``self.guard`` is checked via
         ``acheck_input`` before the first token is emitted — a blocked
         input raises :class:`ValueError`; a modified input replaces the
-        task sent to the provider.  When the stream completes,
-        ``acheck_output`` runs on the accumulated text: a block raises
-        :class:`ValueError` *after* the tokens have been delivered
-        (streaming is irrevocable) and skips the Store write, so
-        consumers that buffer the stream can still discard it.
+        task sent to the provider. For a guarded agent, chunks are held
+        until ``acheck_output`` approves the accumulated text. A block raises
+        :class:`ValueError` and skips the Store write.
 
         **Fallback.** When the engine fails before the first token is
         emitted and ``fallback=`` is configured, the fallback agent's
@@ -739,65 +772,64 @@ class Agent:
 
         **Not applied in streaming** (use :meth:`run` when you need
         them): ``verify=`` and ``output=`` validation — tokens are
-        emitted as they arrive, so there is no pre-delivery result to
-        judge or validate.
+        emitted as they arrive for agents without a guard.
 
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
-        env = self._to_envelope(task, images=images, audio=audio)
-        env = self._inject_sources(env)
+        guard = self.guard
+        with _guarded_output() if guard else nullcontext():
+            env = self._inject_sources(self._to_envelope(task, images=images, audio=audio))
+            if guard:
+                action = await guard.acheck_input(env.task or "")
+                if not action.allowed:
+                    raise ValueError(action.message or "Blocked by guard")
+                if action.modified_text is not None:
+                    env = env.model_copy(update={"task": action.modified_text, "payload": action.modified_text})
 
-        # Apply input guard before the first token is emitted.  A blocked
-        # task must never reach the provider even in streaming mode.
-        if self.guard:
-            action = await self.guard.acheck_input(env.task or "")
-            if not action.allowed:
-                raise ValueError(action.message or "Blocked by guard")
-            if action.modified_text is not None:
-                env = env.model_copy(update={"task": action.modified_text, "payload": action.modified_text})
-
-        chunks: list[str] = []
-        try:
-            async for chunk in self._stream_engine(env):
-                yield chunk
-                chunks.append(chunk)
-        except (asyncio.CancelledError, TimeoutError, UncertainOutcomeError):
-            raise
-        except Exception as exc:
-            # ``getattr`` keeps this safe for Agents built via ``__new__``
-            # (test helpers, custom subclasses) that haven't set fallback.
-            fallback = getattr(self, "fallback", None)
-            if chunks or fallback is None:
+            chunks: list[str] = []
+            used_fallback = False
+            try:
+                async for chunk in self._stream_engine(env):
+                    if not guard:
+                        yield chunk
+                    chunks.append(chunk)
+            except (asyncio.CancelledError, TimeoutError, UncertainOutcomeError):
                 raise
-            # Primary engine failed before any token reached the consumer:
-            # hand over to the fallback's own stream() pipeline — same
-            # contract as run(), with the failure mode threaded into the
-            # fallback's context so it can adapt.
-            note = f"Previous attempt failed with {type(exc).__name__}: {exc}"
-            merged_context = f"{env.context}\n\n{note}" if env.context else note
-            fallback_env: Envelope[Any] = Envelope(
-                task=env.task,
-                context=merged_context,
-                images=env.images,
-                audio=env.audio,
-                payload=env.payload,
-            )
-            async for chunk in fallback.stream(fallback_env):
+            except Exception as exc:
+                fallback = getattr(self, "fallback", None)
+                if chunks or fallback is None:
+                    raise
+                note = f"Previous attempt failed with {type(exc).__name__}: {exc}"
+                merged_context = f"{env.context}\n\n{note}" if env.context else note
+                used_fallback = True
+                async for chunk in fallback.stream(env.model_copy(update={"context": merged_context})):
+                    if guard:
+                        chunks.append(chunk)
+                    else:
+                        yield chunk
+                if not guard:
+                    return
+
+            text = "".join(chunks)
+            if guard:
+                result = await self._apply_output_guard(Envelope(payload=text))
+                if result.error is not None:
+                    raise ValueError(result.error.message)
+                if result.payload != text:
+                    text = result.text()
+                    chunks = [text]
+
+            _store = getattr(self, "store", None)
+            if not used_fallback and _store is not None and getattr(self, "name", None) and chunks:
+                from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
+
+                _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, text)
+
+        # Exit the task-local trace scope before yielding to the consumer.
+        if guard:
+            for chunk in chunks:
                 yield chunk
-            return  # the fallback ran its own guard / store pipeline
-
-        text = "".join(chunks)
-        if self.guard:
-            action = await self.guard.acheck_output(text)
-            if not action.allowed:
-                raise ValueError(action.message or "Output blocked by guard")
-
-        _store = getattr(self, "store", None)
-        if _store is not None and getattr(self, "name", None) and chunks:
-            from lazybridge.sentinels import _AGENT_OUTPUT_KEY_PREFIX
-
-            _store.write(_AGENT_OUTPUT_KEY_PREFIX + self.name, text)
 
     async def _stream_engine(self, env: Envelope) -> AsyncGenerator[str, None]:
         """Drive ``engine.stream`` with total-deadline timeout and cleanup.

@@ -47,6 +47,7 @@ session.graph                      # GraphSchema — agent topology, auto-popula
 | Member | Emitted by |
 |---|---|
 | `AGENT_START` / `AGENT_FINISH` | every `Agent` run, including nested |
+| `GUARD_DECISION` | output guard decisions, with the `allowed` flag |
 | `LOOP_STEP` | each iteration of an `LLMEngine` tool-calling loop |
 | `MODEL_REQUEST` / `MODEL_RESPONSE` | every provider call |
 | `TOOL_CALL` / `TOOL_RESULT` / `TOOL_ERROR` | every tool dispatch |
@@ -190,7 +191,7 @@ sess.add_exporter(OTelExporter(endpoint="http://otelcol:4318"))
   auto-closes) before querying.
 - **`on_full="drop"` was the pre-1.0.x default.** The new
   `"hybrid"` default holds critical events
-  (`AGENT_*` / `TOOL_*` / `HIL_DECISION`) and only drops cheap
+  (`AGENT_*` / `TOOL_*` / `GUARD_DECISION` / `HIL_DECISION`) and only drops cheap
   telemetry (`LOOP_STEP` / `MODEL_REQUEST` / `MODEL_RESPONSE`)
   under saturation. Set `on_full="block"` if you need every event,
   no exceptions; set `on_full="drop"` to opt back into the old

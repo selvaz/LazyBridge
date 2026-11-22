@@ -241,6 +241,13 @@ repository resolution, model rules, or quota policy is supplied by these adapter
 
 ### Plan rollback and structured batch outcomes (1.8)
 
+With `DurableBlackboard`, `make_plan_delegate` records the job ID as the
+`delegation_id` of the claim. The job renews that lease during execution
+and verifies ownership before publishing a result. Lease loss requests
+cancellation and bars stale results. The valid result leaves the task claimed
+for review. To close it against the exact attempt, call
+`board.mark_done(task_index, summary, owner=owner, delegation_id=job_id)`.
+
 `make_plan_delegate(..., rollback_claim: Callable[[JobContext], Any] | None = None,
 structured_outcomes: bool = False, stop_on_refusal: bool = False)` adds an optional
 attempt-restoring callback. It receives `plan_id`, `task_index`, `job_id`,
@@ -249,10 +256,11 @@ original owner), `claimed`, `phase`, `error`, and `started`. It runs once for ea
 valid item that never starts: admission refusal, later held-back items, claim
 refusal, registration/scheduling failure, execution-CAS refusal, engine/Agent
 setup failure, or cancellation before execution. Unclaimed items need no board
-mutation; their original attempts are preserved. The callback can verify the
-expected owner, job id, and attempt count before restoring a claimed item. It
-must also refuse to release a claim if another worker is executing that same job.
-This package does not implement the caller's board ownership or restoration policy.
+mutation. To restore the prior attempt count on a `DurableBlackboard`, the
+callback must check the task's `delegation_id` against `context.job_id` in
+the same compare-and-swap that restores the claim. It must also check that
+the job has not started in another worker. Custom board implementations
+supply their own ownership and lease policies.
 
 Supplying `rollback_claim` composes the claim hook with `job_runner.rollback`
 when provided. The latter still receives failures after execution starts.

@@ -67,9 +67,16 @@ payload string.
 or substring `ContentGuard` runs in microseconds, an `LLMGuard` only
 fires when the cheap layer didn't decide. Saves tokens.
 
-`Agent.stream()` enforces guards too — `acheck_input` runs before the
-first token; a blocked task raises `ValueError` instead of silently
-streaming.
+`Agent.stream()` holds chunks until `acheck_output` approves the assembled
+response, including when a fallback supplies it. A blocked input or output
+raises `ValueError` before chunks reach the caller. A guarded child also
+withholds live tokens from a surrounding Plan stream.
+
+Session events from a guarded run keep identifiers, usage, and status.
+Session filters content before calling custom redactors and exporters or
+writing it to the event log. The `guard_decision` event records the output
+decision. Provider transcripts and application-owned stores have their own
+retention policies.
 
 ## When to use it
 
@@ -195,14 +202,12 @@ sanitiser = Agent(
   Subsequent guards never run, including their side-effect-free
   observations. Don't rely on a downstream guard to "also see" the
   blocked input.
-- **Streaming respects guards.** `agent.stream(task)` raises
-  `ValueError` on a blocked input rather than yielding silently.
-  Catch it explicitly in streaming UIs.
+- **Guarded streams wait for review.** The first chunk reaches the consumer
+  after generation and output review complete.
 
 ## See also
 
-- [Session](session.md) — guard outcomes are emitted as events
-  (`metadata` from `GuardAction` is preserved on the event payload).
+- [Session](session.md) — filter and export run events.
 - [Agent](../basic/agent.md) — `guard=` is a first-class kwarg
   alongside `tools=`, `memory=`, `output=`.
 - [verify=](verify.md) — different placement: a

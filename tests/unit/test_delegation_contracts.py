@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,8 +13,10 @@ from lazybridge.engines.codex import CodexEngine
 from lazybridge.engines.codex.app_server import CodexTurnUncertain
 from lazybridge.engines.codex.dynamic_tools import dispatcher
 from lazybridge.envelope import ErrorInfo
+from lazybridge.exporters import CallbackExporter
 from lazybridge.guardrails import ContentGuard, GuardAction
 from lazybridge.session import EventType
+from lazybridge.signals import conclude
 from lazybridge.testing import MockAgent
 
 
@@ -83,6 +86,109 @@ async def test_output_guard_returns_no_draft() -> None:
     assert result.error is not None
     assert result.error.type == "GuardBlocked"
     assert result.payload is None
+
+
+async def test_guarded_plan_step_keeps_draft_out_of_stream_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = "Unpublished draft"
+    awaiting_review = asyncio.Event()
+    review = asyncio.Event()
+    exported = []
+    redactor_inputs = []
+
+    class Review(ContentGuard):
+        async def acheck_output(self, text: str) -> GuardAction:
+            assert text == draft
+            awaiting_review.set()
+            await review.wait()
+            return GuardAction.block(f"Review rejected {draft}")
+
+    async def fake_loop(env, *, session, run_id, _stream_sink, **kwargs):
+        session.emit(EventType.MODEL_RESPONSE, {"content": draft, "input_tokens": 1, "output_tokens": 2}, run_id=run_id)
+        if _stream_sink is not None:
+            await _stream_sink.put(draft)
+        return Envelope(task=env.task, payload=draft)
+
+    def redact(payload):
+        redactor_inputs.append(payload)
+        return payload
+
+    engine = LLMEngine("fake", provider="fake")
+    monkeypatch.setattr(engine, "_loop", fake_loop)
+    chunks = []
+    with Session(redact=redact, exporters=[CallbackExporter(fn=exported.append)]) as session:
+        writer = Agent(name="writer", engine=engine, guard=Review(), session=session)
+        parent = Agent(name="parent", engine=Plan(Step(writer)), session=session)
+
+        async def consume():
+            async for chunk in parent.stream("Draft a summary"):
+                chunks.append(chunk)
+
+        pending = asyncio.create_task(consume())
+        try:
+            await asyncio.wait_for(awaiting_review.wait(), 2.0)
+            session.emit(EventType.MODEL_RESPONSE, {"content": "Unrelated response"})
+            assert not chunks
+            assert "Unrelated response" in str(exported)
+            assert draft not in str(exported)
+        finally:
+            review.set()
+            await asyncio.wait_for(pending, 2.0)
+        rows = session.events.query()
+        [decision] = session.events.query(event_type=EventType.GUARD_DECISION)
+        [parent_error] = session.events.query(event_type=EventType.TOOL_ERROR)
+
+    assert draft not in str((chunks, exported, rows, redactor_inputs))
+    assert any(row["payload"].get("output_tokens") == 2 for row in rows)
+    assert decision["payload"]["allowed"] is False
+    assert parent_error["payload"]["error"] == "Agent error (GuardBlocked): Blocked by the agent guard"
+
+
+async def test_guarded_stream_applies_parent_guard_to_fallback_before_yield() -> None:
+    class BrokenStream:
+        async def stream(self, *args, **kwargs):
+            raise RuntimeError("provider down")
+            yield
+
+    class GoodStream:
+        async def stream(self, *args, **kwargs):
+            yield "private fallback draft"
+
+    fallback = Agent(name="fallback", engine=GoodStream())
+    primary = Agent(
+        name="primary",
+        engine=BrokenStream(),
+        fallback=fallback,
+        guard=ContentGuard(output_fn=lambda _: GuardAction.block("Review denied")),
+    )
+
+    with pytest.raises(ValueError, match="Review denied"):
+        async for chunk in primary.stream("Draft a summary"):
+            pytest.fail(f"Guard should have withheld {chunk!r}")
+
+
+async def test_guarded_conclude_cannot_publish_denied_message() -> None:
+    async def finish(task: str) -> str:
+        return conclude("Unpublished draft")
+
+    guarded = Agent(
+        name="writer",
+        engine=Plan(Step(finish)),
+        guard=ContentGuard(output_fn=lambda _: GuardAction.block("Review denied")),
+    )
+    result = await guarded.run("Draft a summary")
+    assert result.error is not None and result.error.type == "GuardBlocked"
+    assert result.payload is None
+
+
+async def test_output_guard_publishes_the_rewritten_text() -> None:
+    writer = Agent(
+        name="writer",
+        engine=Plan(Step(MockAgent("Unpublished draft", name="draft"))),
+        guard=ContentGuard(output_fn=lambda _: GuardAction.modify("Approved summary")),
+    )
+
+    assert (await writer.run("Draft a summary")).text() == "Approved summary"
+    assert [chunk async for chunk in writer.stream("Draft a summary")] == ["Approved summary"]
 
 
 @pytest.mark.parametrize("as_tool", [False, True], ids=["agent", "tool"])

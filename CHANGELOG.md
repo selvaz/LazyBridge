@@ -11,12 +11,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Native permission requests reach the approval gate with their full scope. Codex applies the permissions returned by that gate.
-- Failed sub-agent envelopes surface as tool errors in Codex, Claude Code, and LLMEngine. Output guard denials omit the draft, and parent tool events carry the safe error message.
+- Failed sub-agent envelopes surface as tool errors in Codex, Claude Code, LLMEngine, and Plan. Guarded runs emit only trace metadata and hold stream chunks until the output guard approves them.
 - Agents and verified tools stop when Codex reports an uncertain outcome. `ErrorInfo.outcome_uncertain` identifies errors that need reconciliation before replay.
 - Codex writer confirmations show the workspace, session, and writable roots and bind approval to the full delegation with a request digest. The built-in writer checks the approved alias binding before starting Codex.
 - Plan recovery respects live owners and holds checkpoints with uncertain outcomes for reconciliation. Active legacy checkpoints without an owner require operator review.
 - Standard background delegates record the owner at enqueue time. Startup recovery reclaims records whose owner has exited. Legacy records can be reconciled explicitly with `reclaim_unowned=True`.
-- Default plan delegation releases the board claim when setup fails before execution.
+- Plan delegation renews a `DurableBlackboard` lease for the current job and checks the attempt ID before accepting its result. Default setup failures release only their own attempt.
 
 ## [1.8.10] - 2026-11-22
 

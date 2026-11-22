@@ -96,6 +96,7 @@ def test_eventlog_hybrid_critical_events_default_set() -> None:
     expected = {
         "agent_start",
         "agent_finish",
+        "guard_decision",
         "tool_call",
         "tool_result",
         "tool_error",

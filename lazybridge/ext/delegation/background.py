@@ -34,6 +34,7 @@ from lazybridge.ext.delegation.admission import (
 )
 from lazybridge.ext.delegation.jobs import JobRegistry
 from lazybridge.ext.delegation.lifecycle import JobContext, JobRunner
+from lazybridge.ext.planners.durable_blackboard import DurableBlackboard
 
 # Matches the consultant handles emitted in practice: hex/dashes plus the
 # ``repo#id`` shape used by Codex. Deliberately narrower than ``\S+`` so it
@@ -1446,6 +1447,48 @@ def _item_outcome(
     return {"item_number": item_number, "task_index": task_index, "status": status, "job_id": job_id, "reason": reason}
 
 
+def _with_plan_lease(runner: JobRunner, board: DurableBlackboard, owner: str) -> JobRunner:
+    def refresh(context: JobContext, *, finished: bool = False) -> None:
+        assert context.task_index is not None
+        if not board._refresh_delegation(context.task_index, owner, context.job_id, finished=finished):
+            raise RuntimeError("Plan delegation lease expired or moved to another attempt")
+
+    async def register(context: JobContext) -> Any:
+        refresh(context)
+        registered = runner.register(context)
+        if inspect.isawaitable(registered):
+            registered = await registered
+            if registered is True:
+                context.registered = True
+                refresh(context)
+        return registered
+
+    async def renew(context: JobContext) -> None:
+        interval = min(30.0, board.lease_seconds / 3)
+        while True:
+            await asyncio.sleep(interval)
+            refresh(context)
+
+    async def execute(context: JobContext) -> Any:
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                renewal = tasks.create_task(renew(context))
+                try:
+                    return await _maybe_await_value(runner.execute(context))
+                finally:
+                    renewal.cancel()
+        except ExceptionGroup as error:
+            if len(error.exceptions) == 1:
+                raise error.exceptions[0] from None
+            raise
+
+    def finalize(context: JobContext) -> Any:
+        refresh(context, finished=True)
+        return runner.finalize(context)
+
+    return replace(runner, register=register, execute=execute, finalize=finalize)
+
+
 def make_plan_delegate(
     *,
     engine_factory: Callable[[], Any] | None = None,
@@ -1494,22 +1537,33 @@ def make_plan_delegate(
 
     base_runner = job_runner or JobRunner()
     custom_lifecycle = job_runner is not None or rollback_claim is not None
+    durable_board = board if isinstance(board, DurableBlackboard) else None
 
     async def rollback(context: JobContext) -> None:
         try:
-            if not context.started:
+            if context.started:
+                if durable_board is not None and context.task_index is not None:
+                    durable_board._refresh_delegation(context.task_index, owner, context.job_id, finished=True)
+            else:
                 if rollback_claim is not None:
                     await _maybe_await_value(rollback_claim(context))
                 elif context.claimed:
                     reason = str(context.error or "") or "worker did not start"
-                    board.mark_failed(context.task_index, reason, owner=owner)
+                    if durable_board is not None and context.task_index is not None:
+                        durable_board.mark_failed(context.task_index, reason, owner=owner, delegation_id=context.job_id)
+                    else:
+                        board.mark_failed(context.task_index, reason, owner=owner)
         finally:
             if base_runner.rollback is not None:
                 await _maybe_await_value(base_runner.rollback(context))
 
     selected_runner = (
-        replace(base_runner, rollback=rollback) if rollback_claim is not None or job_runner is None else job_runner
+        replace(base_runner, rollback=rollback)
+        if rollback_claim is not None or job_runner is None or durable_board is not None
+        else job_runner
     )
+    if durable_board is not None:
+        selected_runner = _with_plan_lease(selected_runner, durable_board, owner)
 
     def capture_attempts(context: JobContext) -> None:
         if rollback_claim is not None:
@@ -1629,7 +1683,10 @@ def make_plan_delegate(
                         continue
                 context.phase = "claim"
                 capture_attempts(context)
-                claimed = board.claim_task(index, text, owner=owner)
+                if durable_board is not None:
+                    claimed = durable_board.claim_task(index, text, owner=owner, delegation_id=context.job_id)
+                else:
+                    claimed = board.claim_task(index, text, owner=owner)
                 if isinstance(claimed, str):
                     record(number, index, "refused", claimed)
                     if stop_on_refusal:
@@ -1639,7 +1696,13 @@ def make_plan_delegate(
                     continue
                 context.claimed = True
                 context.phase = "schedule"
-                extra = {"attempts_before": context.attempts_before, "claim_owner": owner} if rollback_claim else None
+                extra: dict[str, Any] = {}
+                if rollback_claim is not None:
+                    extra["attempts_before"] = context.attempts_before
+                if durable_board is not None:
+                    extra["delegation_id"] = context.job_id
+                if extra:
+                    extra["claim_owner"] = owner
                 registry.write(
                     context.job_id,
                     objective,

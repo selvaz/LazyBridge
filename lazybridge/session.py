@@ -10,8 +10,11 @@ import threading
 import time
 import uuid
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any, Literal
 
 from lazybridge.graph import GraphSchema
@@ -183,11 +186,43 @@ def redact_secrets(payload: dict[str, Any]) -> dict[str, Any]:
 # value (user opted out of redaction), so we need a third state for
 # "argument wasn't passed at all → use the default secret redactor".
 _REDACT_UNSET: Any = object()
+_GUARDED_TRACE: ContextVar[bool] = ContextVar("lazybridge_guarded_trace", default=False)
+_GUARDED_LABELS = frozenset({"agent_name", "step", "branch_id"})
+_GUARDED_METRICS = frozenset(
+    {"allowed", "cancelled", "cost_usd", "input_tokens", "output_tokens", "latency_ms", "timeout_s", "turn"}
+)
+
+
+@contextmanager
+def _guarded_trace() -> Iterator[None]:
+    token = _GUARDED_TRACE.set(True)
+    try:
+        yield
+    finally:
+        _GUARDED_TRACE.reset(token)
+
+
+def _guarded_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    safe = {
+        key: value
+        for key, value in payload.items()
+        if (key in _GUARDED_LABELS and type(value) is str)
+        or (key in _GUARDED_METRICS and type(value) in (bool, int, float))
+    }
+    # Preserve tool span correlation without publishing a provider-supplied ID.
+    tool_use_id = payload.get("tool_use_id")
+    if isinstance(tool_use_id, str):
+        safe["tool_use_id"] = sha256(tool_use_id.encode("utf-8", errors="surrogatepass")).hexdigest()
+    if payload.get("error") is not None:
+        safe["error"] = "Error in a guarded run"
+    safe["guarded"] = True
+    return safe
 
 
 class EventType(StrEnum):
     AGENT_START = "agent_start"
     AGENT_FINISH = "agent_finish"
+    GUARD_DECISION = "guard_decision"
     LOOP_STEP = "loop_step"
     MODEL_REQUEST = "model_request"
     MODEL_RESPONSE = "model_response"
@@ -222,6 +257,7 @@ DEFAULT_CRITICAL_EVENT_TYPES: frozenset[str] = frozenset(
     {
         EventType.AGENT_START.value,
         EventType.AGENT_FINISH.value,
+        EventType.GUARD_DECISION.value,
         EventType.TOOL_ERROR.value,
         EventType.TOOL_TIMEOUT.value,
         EventType.TOOL_CALL.value,
@@ -843,6 +879,8 @@ class Session:
         *,
         run_id: str | None = None,
     ) -> None:
+        if _GUARDED_TRACE.get():
+            payload = _guarded_payload(payload)
         if self._redact:
             # Validate the redactor — two failure modes:
             #   (a) it raises
