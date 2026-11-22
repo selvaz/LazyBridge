@@ -499,6 +499,8 @@ class Agent:
                             },
                         )
                     except Exception:
+                        # Best-effort trace event: a failing session must not
+                        # replace the timeout error returned below.
                         pass
                 return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
 

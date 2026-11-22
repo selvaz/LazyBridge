@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import os
 import time
 import uuid
@@ -16,8 +17,6 @@ def _process_start_time(pid: int) -> float | None:
     """Return a stable process creation stamp, or ``None`` if unavailable."""
     if os.name == "nt":
         try:
-            from ctypes import wintypes
-
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
             # PROCESS_QUERY_LIMITED_INFORMATION: also granted for processes of
             # other users, unlike PROCESS_QUERY_INFORMATION (0x0400).
@@ -25,7 +24,7 @@ def _process_start_time(pid: int) -> float | None:
             if not handle:
                 return None
             try:
-                values = [wintypes.FILETIME() for _ in range(4)]
+                values = [ctypes.wintypes.FILETIME() for _ in range(4)]
                 if not kernel32.GetProcessTimes(handle, *(ctypes.byref(value) for value in values)):
                     return None
                 creation = values[0]

@@ -1308,6 +1308,8 @@ def make_parallel_delegate(
                             context=context,
                         )
                 except BaseException as exc:
+                    # Record the failed handoff even on cancellation; anything that
+                    # is not an Exception is re-raised after the job record is written.
                     detail = str(exc) or type(exc).__name__
                     error = f"run_parallel scheduling failed: {detail}"
                     with contextlib.suppress(Exception):
