@@ -10,6 +10,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Memory token-budget compaction is now opt-in with `max_tokens=` while the `None` default preserves the legacy ten-turn `summary` trigger and `auto` behaviour. Budget compaction uses the documented 1.3-tokens-per-word heuristic on stored text, 60% hysteresis, dynamically shrinks the verbatim tail to at least two turns, and caps summaries to prevent repeated summariser calls and oversized extractive summaries. Persisted token estimates are recalculated from text; `Memory.add(tokens=...)` remains accepted with a `DeprecationWarning` but is intentionally ignored so provider-billed tokens cannot hide remembered text from the budget.
+
 - `verify=`: judge verdicts with a label prefix (`VERDICT: APPROVED`, `**Verdict:** pass`, `Decision: approve`) are now recognised, as the docstring already promised. Before, every labelled approval counted as a rejection, so verify loops that had converged kept retrying and reported "not approved". Only known label words are stripped; any other first word still fails safe to rejection.
 
 ### Fixed

@@ -112,7 +112,7 @@ def test_auto_under_threshold_no_compression():
 def test_auto_over_threshold_compresses():
     m = Memory(strategy="auto", max_tokens=100)
     for i in range(15):
-        m.add(f"q{i}", f"a{i}", tokens=50)
+        m.add(f"q{i} " + "question " * 5, f"a{i} " + "answer " * 5, tokens=50)
     assert len(m._turns) <= 10
 
 
@@ -188,9 +188,10 @@ def test_text_reflects_latest_state():
 
 
 def _force_compression_turns() -> list[tuple[str, str]]:
-    """Build a turns list long enough that strategy='summary' compresses
-    on the next add()."""
-    return [(f"user-{i}", f"assistant-{i}") for i in range(11)]
+    """Build a turns list long enough that strategy='summary' compresses:
+    its turn rule fires once more than 15 turns are stored (a batch of five
+    beyond the ten-turn verbatim window)."""
+    return [(f"user-{i}", f"assistant-{i}") for i in range(16)]
 
 
 def test_summarizer_sync_callable_is_used_verbatim():

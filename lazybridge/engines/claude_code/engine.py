@@ -702,7 +702,7 @@ class ClaudeCodeEngine:
                     run_id=run_id,
                 )
             if memory is not None:
-                memory.add(env.task or "", result.text, tokens=result.input_tokens + result.output_tokens)
+                memory.add(env.task or "", result.text)
             out = Envelope(
                 task=env.task,
                 payload=result.text,
@@ -868,7 +868,7 @@ class ClaudeCodeEngine:
                     run_id=run_id,
                 )
             if memory is not None:
-                memory.add(env.task or "", text, tokens=input_tokens + output_tokens)
+                memory.add(env.task or "", text)
             if session:
                 session.emit(
                     EventType.AGENT_FINISH,

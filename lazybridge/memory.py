@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import re
 import threading
+import warnings
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -30,7 +32,7 @@ class Memory:
     LLM summarization
     -----------------
     Pass any callable (typically an ``Agent``) as ``summarizer=`` to enable
-    LLM-based compression instead of the keyword-extraction fallback::
+    LLM-based compression instead of the sentence-extraction fallback::
 
         summarizer = Agent("claude-haiku-4-5-20251001", system="Summarize conversations concisely.")
         memory = Memory(strategy="summary", summarizer=summarizer)
@@ -47,7 +49,7 @@ class Memory:
       coroutine is driven to completion (in a worker thread when
       called from inside an event loop, to avoid nested-loop errors).
 
-    If the summarizer raises, compression falls back to keyword
+    If the summarizer raises, compression falls back to complete-sentence
     extraction — never silent garbage.
     """
 
@@ -61,10 +63,19 @@ class Memory:
 
     #: Default deadline applied to LLM-summariser calls when the
     #: summariser returns a coroutine / awaitable.  A hung summariser
-    #: must never starve the agent; on timeout the keyword-extraction
+    #: must never starve the agent; on timeout the sentence-extraction
     #: fallback runs instead, never silent loss.  ``None`` disables the
     #: deadline (legacy behaviour).
     _DEFAULT_SUMMARIZER_TIMEOUT = 30.0
+
+    #: Recent turns are never summarized.  Besides avoiding a summary-only
+    #: context, this verbatim window preserves exact identifiers and facts.
+    _RECENT_TURNS = 10
+    #: "summary"'s turn rule compacts in batches: only once this many turns beyond
+    #: the verbatim window accumulate, so the summarizer is not called on every add.
+    _TURN_BATCH = 5
+    _BUDGET_TARGET = 0.60
+    _SUMMARY_SHARE = 0.30
 
     def __init__(
         self,
@@ -87,15 +98,18 @@ class Memory:
             (requires ``max_tokens`` to be set).
             ``"sliding"`` — compress by turn count regardless of
             ``max_tokens``; does NOT require a token budget.
-            ``"summary"`` — same trigger as ``"sliding"`` but uses the
-            LLM ``summarizer`` instead of keyword extraction.
+            ``"summary"`` — compress when the token budget is exceeded,
+            using the LLM ``summarizer`` instead of extraction.
             ``"none"``    — no compression; only the hard ``max_turns``
             cap applies.
         max_tokens:
-            Token budget for ``strategy="auto"``.  Ignored by
-            ``"sliding"`` and ``"summary"`` (they compress by turn
-            count).  ``None`` with ``strategy="auto"`` disables
-            compression entirely.
+            Optional approximate token budget for remembered text. Size is
+            estimated as 1.3 tokens per word and is independent of provider
+            billing/cache counters. Default 4000. ``"auto"`` and
+            ``"summary"`` compact when the stored text exceeds it;
+            ``"sliding"`` ignores it. ``None`` disables the budget
+            (``"auto"`` then never compacts; ``"summary"`` uses only its
+            turn rule).
         max_turns:
             Hard cap on retained turns after compression runs.  ``None``
             disables the cap (unbounded history — only safe for short
@@ -124,7 +138,7 @@ class Memory:
             for accepted shapes.
         summarizer_timeout:
             Deadline (seconds) applied to async summariser calls.  On
-            timeout the keyword-extraction fallback runs and a one-shot
+            timeout the sentence-extraction fallback runs and a one-shot
             warning is emitted via :attr:`_summarizer_warned`.  ``None``
             disables the deadline.  Default: 30 s.
         """
@@ -186,7 +200,11 @@ class Memory:
         if loaded is None:
             return
         self._turns = [
-            _Turn(user=t["user"], assistant=t["assistant"], token_estimate=t.get("token_estimate", 0))
+            _Turn(
+                user=t["user"],
+                assistant=t["assistant"],
+                token_estimate=_estimate_turn_tokens(t["user"], t["assistant"]),
+            )
             for t in loaded["turns"]
         ]
         self._summary = loaded["summary"]
@@ -220,19 +238,17 @@ class Memory:
             session_key=self.session_key,
         )
 
-    def add(self, user: str, assistant: str, *, tokens: int = 0) -> None:
-        if tokens == 0 and (user or assistant):
-            # Estimate from word count when no real token count is supplied.
-            # English LLM tokenisers run ~1.3 tokens per word on average,
-            # so we scale the word count up to avoid undershooting the
-            # ``max_tokens`` budget.  LLMEngine passes the real count and
-            # bypasses this branch entirely; HIL and other non-LLM callers
-            # get a free estimate without changes at their call sites.
-            words = len((user + " " + assistant).split())
-            tokens = max(1, int(words * 1.3))
+    def add(self, user: str, assistant: str, *, tokens: int | None = None) -> None:
+        if tokens is not None:
+            warnings.warn(
+                "Memory.add(tokens=...) is deprecated and ignored; memory size is estimated from stored text",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        text_tokens = _estimate_turn_tokens(user, assistant)
         # Phase 1 — append + decide whether to compress, under the lock.
         with self._lock:
-            self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=tokens))
+            self._turns.append(_Turn(user=user, assistant=assistant, token_estimate=text_tokens))
             plan = self._plan_compression()
 
         # Phase 2 — compute the summary OUTSIDE the lock so a slow or
@@ -249,13 +265,21 @@ class Memory:
             # to ``_summary``, but read it under the lock for visibility.
             with self._lock:
                 prior_summary = self._summary
+                budget = self.max_tokens if self._uses_budget() else None
+                tail_over_target = budget is not None and sum(
+                    turn.token_estimate for turn in self._turns[drop_count:]
+                ) > int(budget * self._BUDGET_TARGET)
             try:
-                if self._summarizer is not None:
+                # When the mandatory two-turn verbatim tail already fills
+                # the target, calling an LLM cannot create any headroom and
+                # would repeat on every long turn. Preserve the evicted head
+                # with the bounded local extractor instead.
+                if self._summarizer is not None and not tail_over_target:
                     new_summary = self._llm_summary(head_turns, prior=prior_summary)
                 else:
                     new_summary = self._rule_summary(head_turns, prior=prior_summary)
                 with self._lock:
-                    self._summary = new_summary
+                    self._summary = self._cap_summary(new_summary)
                     # Drop the first ``drop_count`` turns; any turns
                     # appended concurrently during summarisation remain
                     # in place after the cut.
@@ -317,24 +341,66 @@ class Memory:
             return None
         if self.strategy == "none":
             return None
-        # Only "auto" requires a token budget — "sliding" and "summary"
-        # compress by turn count and must NOT be gated on max_tokens.
-        # Gating all strategies on max_tokens would silently disable
-        # "sliding"/"summary" when max_tokens=None.
-        if self.strategy == "auto" and not self.max_tokens:
+        if self.strategy == "auto" and self.max_tokens is None:
             return None
-        total = sum(t.token_estimate for t in self._turns)
-        # "summary" compresses like "sliding" but uses LLM summarization.
-        # "sliding" always compresses when turns > window.
-        # "auto"    compresses only once token budget is exceeded.
-        should_compress = self.strategy in ("sliding", "summary") or (
-            self.strategy == "auto" and self.max_tokens is not None and total > self.max_tokens
+        total = _estimate_text_tokens(self._summary) + sum(t.token_estimate for t in self._turns)
+        # Sliding and summary keep their count-based rule (compress once more
+        # than ten turns are stored, keeping the latest ten verbatim). Auto
+        # and summary additionally compress as soon as the stored text exceeds
+        # the token budget; then the verbatim tail shrinks (minimum two turns)
+        # so the result fits the hysteresis target.
+        budget_exceeded = (
+            self.strategy in ("auto", "summary") and self.max_tokens is not None and total > self.max_tokens
         )
-        if not (should_compress and len(self._turns) > 10):
+        turn_rule = (self.strategy == "sliding" and len(self._turns) > self._RECENT_TURNS) or (
+            self.strategy == "summary" and len(self._turns) > self._RECENT_TURNS + self._TURN_BATCH
+        )
+        if not budget_exceeded and not turn_rule:
             return None
-        head = list(self._turns[:-10])  # snapshot; safe to summarise outside lock
+        if budget_exceeded and len(self._turns) <= 2:
+            return None
+        keep = self._RECENT_TURNS
+        if budget_exceeded:
+            # Leave enough headroom that the capped summary plus verbatim
+            # tail is at most the hysteresis target. A minimum of two turns
+            # keeps the immediate exchange intact even for a tiny budget.
+            assert self.max_tokens is not None  # budget_exceeded implies a budget
+            tail_budget = max(0, int(self.max_tokens * (self._BUDGET_TARGET - self._SUMMARY_SHARE)))
+            keep = 0
+            used = 0
+            for turn in reversed(self._turns):
+                if keep >= 2 and used + turn.token_estimate > tail_budget:
+                    break
+                used += turn.token_estimate
+                keep += 1
+            keep = max(2, min(keep, len(self._turns) - 1))
+        head = list(self._turns[:-keep])  # snapshot; safe to summarise outside lock
         self._compressing = True
         return head, len(head)
+
+    def _uses_budget(self) -> bool:
+        """Only "auto" and "summary" honour max_tokens; "sliding" ignores it."""
+        return self.strategy in ("auto", "summary") and self.max_tokens is not None
+
+    def _cap_summary(self, summary: str) -> str:
+        """Bound summaries to their budget share, preferring sentence cuts."""
+        if not self._uses_budget() or self.max_tokens is None:
+            return summary
+        max_chars = max(1, int(self.max_tokens * self._SUMMARY_SHARE * 4))
+        # Keep the fallback's marker intact even under unrealistically tiny
+        # budgets: callers use it to distinguish extractive recovery from an
+        # LLM-produced summary after a timeout or error.
+        if summary.startswith("[Earlier conversation covered:"):
+            max_chars = max(max_chars, len("[Earlier conversation covered: ]"))
+        capped = _truncate_summary(summary, max_chars=max_chars)
+        # The trigger estimates words, not characters: also bound the word-based
+        # estimate, otherwise a summary of many short words can stay over its
+        # share and force a new compaction (and summarizer call) on every add.
+        budget_share = max(1, int(self.max_tokens * self._SUMMARY_SHARE))
+        words = capped.split()
+        while words and _estimate_text_tokens(" ".join(words)) > budget_share:
+            words = words[: max(1, int(len(words) * 0.9))] if len(words) > 1 else []
+        return " ".join(words) if words != capped.split() else capped
 
     def _llm_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.
@@ -353,7 +419,7 @@ class Memory:
         ``summarizer_timeout`` (set on the Memory) is enforced when the
         summariser returns a coroutine / awaitable — the coroutine is
         wrapped in ``asyncio.wait_for``; on deadline the
-        keyword-extraction fallback runs and :attr:`_summarizer_warned`
+        sentence-extraction fallback runs and :attr:`_summarizer_warned`
         is set (one-shot warning, separate from the turn-cap
         :attr:`_overflow_warned` flag).  Sync summarisers are called
         directly and cannot be interrupted mid-call; callers that need
@@ -378,7 +444,7 @@ class Memory:
                 result = _drive_to_completion(result, timeout=self.summarizer_timeout)
             return result.text() if hasattr(result, "text") else str(result)
         except TimeoutError:
-            # Hung judge / network stall — fall back to keywords rather
+            # Hung judge / network stall — fall back to sentences rather
             # than letting the agent run sit on a stuck future.  The
             # warning is one-shot per Memory (via _summarizer_warned, a
             # separate flag from _overflow_warned) so a degenerate
@@ -389,7 +455,7 @@ class Memory:
 
                 warnings.warn(
                     f"Memory summariser exceeded summarizer_timeout="
-                    f"{self.summarizer_timeout}s; falling back to keyword "
+                    f"{self.summarizer_timeout}s; falling back to sentence "
                     f"extraction.  Raise summarizer_timeout= or pick a "
                     f"faster summariser to silence.",
                     UserWarning,
@@ -400,15 +466,20 @@ class Memory:
             return self._rule_summary(turns, prior=prior)
 
     def _rule_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
-        topics: set[str] = set()
-        # Fold the prior summary's topics in so repeated compressions
-        # accumulate instead of dropping the oldest context.
+        """Extract complete sentences rather than a lossy keyword bag."""
+        sentences: list[str] = []
         if prior:
-            topics.update(w.lower().strip(",]") for w in prior.split() if len(w.strip(",]")) > 5)
-        for t in turns:
-            words = (t.user + " " + t.assistant).split()
-            topics.update(w.lower() for w in words if len(w) > 5)
-        return f"[Earlier conversation covered: {', '.join(sorted(topics)[:20])}]"
+            previous = prior.removeprefix("[Earlier conversation covered: ").removesuffix("]")
+            sentences.extend(_sentences(previous))
+        for turn in turns:
+            sentences.extend(_sentences(turn.user))
+            sentences.extend(_sentences(turn.assistant))
+
+        # Preserve order and exact spelling (notably named entities), while
+        # bounding repeated fallback summaries.
+        unique = list(dict.fromkeys(sentence for sentence in sentences if sentence))
+        summary = f"[Earlier conversation covered: {' '.join(unique[-20:])}]"
+        return self._cap_summary(summary)
 
     def messages(self) -> list[Message]:
         """Return full message list including summary prefix if compressed."""
@@ -449,7 +520,7 @@ class Memory:
                 self._turns[-1] = _Turn(
                     user=last.user,
                     assistant=assistant,
-                    token_estimate=last.token_estimate,
+                    token_estimate=_estimate_turn_tokens(last.user, assistant),
                 )
             self._persist_locked()
 
@@ -460,6 +531,41 @@ class Memory:
             # Persist the wipe too — otherwise a restart right after clear()
             # would reload the pre-clear state from the Store.
             self._persist_locked()
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """Estimate stored text with the documented tokenizer-free heuristic."""
+    words = len(text.split())
+    return max(1, int(words * 1.3)) if words else 0
+
+
+def _estimate_turn_tokens(user: str, assistant: str) -> int:
+    # Labels are added only when rendering; budget the caller's stored fields.
+    return _estimate_text_tokens(f"{user} {assistant}")
+
+
+def _truncate_summary(summary: str, *, max_chars: int) -> str:
+    """Truncate at a sentence boundary when possible, with a hard cap."""
+    if len(summary) <= max_chars:
+        return summary
+    prefix = "[Earlier conversation covered: "
+    suffix = "]"
+    if summary.startswith(prefix) and summary.endswith(suffix) and max_chars > len(prefix) + len(suffix):
+        inner = _truncate_summary(summary[len(prefix) : -len(suffix)], max_chars=max_chars - len(prefix) - len(suffix))
+        return f"{prefix}{inner}{suffix}"
+    candidates = [sentence for sentence in _sentences(summary) if len(sentence) <= max_chars]
+    kept: list[str] = []
+    for sentence in candidates:
+        candidate = " ".join([*kept, sentence])
+        if len(candidate) > max_chars:
+            break
+        kept.append(sentence)
+    return " ".join(kept) if kept else summary[:max_chars]
+
+
+def _sentences(text: str) -> list[str]:
+    """Split prose at sentence boundaries without altering entity casing."""
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+|[\r\n]+", text.strip()) if part.strip()]
 
 
 def _drive_to_completion(awaitable: Any, *, timeout: float | None = None) -> Any:

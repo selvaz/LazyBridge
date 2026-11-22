@@ -146,24 +146,22 @@ def test_memory_add_auto_estimates_tokens_triggers_compression():
         compressed.append(text)
         return "[summary]"
 
-    mem = Memory(strategy="auto", max_tokens=5, summarizer=_fake_summarizer)
-    # Add 12 turns with 6-word content each → total ≈ 72 words >> max_tokens=5
+    mem = Memory(strategy="auto", max_tokens=80, summarizer=_fake_summarizer)
+    # Add 12 turns with 6-word content each → about 93 estimated tokens.
     # Compression fires after > 10 turns once the budget is exceeded.
     for _ in range(12):
         mem.add("hello world foo bar baz", "a")
     assert compressed, "Auto compression should trigger once turns > 10 and tokens > max"
 
 
-def test_memory_add_explicit_tokens_stored_as_is():
-    """When tokens= is explicitly provided, the word-count estimation must be
-    skipped and the caller's value used verbatim."""
+def test_memory_add_explicit_tokens_is_deprecated_and_ignored():
+    """Provider usage must not hide stored text from the memory budget."""
     from lazybridge.memory import Memory
 
     mem = Memory()
-    mem.add("one two three four five", "", tokens=42)
-    # 5 words → word-count estimate would be 6 (incl. empty assistant " ")
-    # but explicit tokens=42 must be stored
-    assert mem._turns[-1].token_estimate == 42, "Explicit tokens=42 must not be overridden by word-count estimate"
+    with pytest.warns(DeprecationWarning, match="deprecated and ignored"):
+        mem.add("one two three four five", "", tokens=42)
+    assert mem._turns[-1].token_estimate == 6
 
 
 def test_memory_add_no_estimation_for_empty_content():

@@ -829,7 +829,7 @@ class CodexEngine:
             if session:
                 self._emit_model_response(session, agent_name, result, run_id)
             if memory is not None:
-                memory.add(env.task or "", result.text, tokens=result.input_tokens + result.output_tokens)
+                memory.add(env.task or "", result.text)
             out = Envelope(
                 task=env.task,
                 payload=result.text,
@@ -964,7 +964,7 @@ class CodexEngine:
                 if session:
                     self._emit_model_response(session, agent_name, result, run_id)
                 if memory is not None:
-                    memory.add(env.task or "", result.text, tokens=result.input_tokens + result.output_tokens)
+                    memory.add(env.task or "", result.text)
             except asyncio.CancelledError:
                 raise
             except BaseException:

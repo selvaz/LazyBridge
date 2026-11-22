@@ -12,7 +12,7 @@ from lazybridge import Memory
 Memory(
     *,
     strategy="auto",               # "auto" | "sliding" | "summary" | "none"
-    max_tokens=4000,               # token budget that triggers compression
+    max_tokens=4000,               # token budget for "auto"/"summary" (None disables it)
     max_turns=1000,                # hard backstop on retained turns
     store=None,                    # Store — persist across process restarts
     key=None,                      # required with store= — stable identity (e.g. agent name)
@@ -22,7 +22,7 @@ Memory(
 )
 
 # Methods
-mem.add(user, assistant, *, tokens=0)   # append a turn
+mem.add(user, assistant, *, tokens=None)  # tokens= is deprecated and ignored
 mem.messages()                          # list[Message] for the LLM
 mem.text()                              # current view as a plain string (live)
 mem.clear()                             # wipe everything in process
@@ -37,16 +37,39 @@ Pass to an `Agent` via `memory=mem` (private to that agent) or
 |---|---|---|
 | `"auto"` | Sliding window + summary of older turns once `max_tokens` is exceeded | General chat, the safe default |
 | `"sliding"` | Drops oldest turns whenever > 10 are retained; works without `max_tokens` | Cheap, lossy, no LLM cost |
-| `"summary"` | Compresses whenever > 10 turns are retained, using `summarizer=` (or a keyword-extraction fallback) | Higher fidelity at the cost of summariser tokens |
+| `"summary"` | Summarises older turns once more than 15 are stored (keeping the latest 10), or earlier when `max_tokens` is exceeded | Higher fidelity at the cost of summariser tokens |
 | `"none"` | Never compress; only `max_turns` bounds the buffer | You want full history and have explicit control over size |
 
 ## Synopsis
 
 `Memory` is "what the model should see in the next prompt". It carries
 conversation continuity across calls to the same agent (or across
-several agents that share the instance). The default `"auto"` strategy
-keeps the memory bounded without any tuning — sliding window first,
-LLM summary of the older turns once the token budget is exceeded.
+several agents that share the instance). The default `"auto"` strategy compacts when the remembered text exceeds
+`max_tokens` (4000 by default). `"sliding"` compacts once more than ten turns
+are stored; `"summary"` compacts by turn count in batches (more than fifteen
+turns, keeping the latest ten) and earlier when the text exceeds the budget.
+
+`max_tokens` measures the remembered text itself with a conservative
+1.3-tokens-per-word estimate. It does not use provider billing counters, so cached
+input still counts. After budget compaction, memory targets 60% of the budget:
+the summary is capped and the verbatim tail shrinks as needed, but retains at
+least two turns. This hysteresis avoids invoking an LLM summariser on every
+ordinary turn.
+
+### Migration note
+
+The default stays `max_tokens=4000`. `strategy="summary"` keeps a turn
+trigger (now in batches: more than 15 turns, keeping the latest 10, instead of
+re-summarising on every turn after the tenth) and also compacts when the
+stored text exceeds the budget;
+`"auto"` compacts when the stored text exceeds the budget (estimated from the
+text, so cached provider input no longer hides it). Pass `max_tokens=None` to
+disable the budget: `auto` then never compacts, `summary` uses only its turn
+trigger. `"sliding"` with a configured `summarizer=` still summarises on every
+add once more than ten turns are stored, as before. The legacy
+`Memory.add(..., tokens=n)` parameter is still accepted but emits a
+`DeprecationWarning` and is ignored because provider usage is not stored-memory
+size. Persisted estimates are recalculated from their text when loaded.
 
 By default `Memory` is **not** durable — the whole buffer lives in the
 agent's process and disappears when the process exits. Pass
@@ -172,8 +195,8 @@ support_2("any update?")           # still has order #4821 in context
 ## Pitfalls
 
 - **`strategy="summary"` without a `summarizer=`** falls back to
-  keyword extraction — bounded, but lossy. Pass a cheap agent for
-  production-quality summaries.
+  extractive complete sentences, preserving named entities better than a
+  keyword list. Pass a cheap agent for more concise production summaries.
 - **`memory.clear()`** wipes everything *including* the in-process
   summary. With `store=` set, the wipe is persisted too — a restart
   right after `clear()` comes back empty, not with the pre-clear state.
@@ -197,7 +220,7 @@ support_2("any update?")           # still has order #4821 in context
   reference for diagnostics, copy the string.
 - **Sync summarisers can't be cancelled mid-call.** Only async
   summarisers (`async def` or returning a coroutine) honour
-  `summarizer_timeout`. On timeout the keyword fallback runs.
+  `summarizer_timeout`. On timeout the sentence-extraction fallback runs.
 - **Compression happens outside the internal lock**, so concurrent
   `add()` calls keep progressing while a slow summariser is in
   flight. This means a memory snapshot taken *during* compression may
