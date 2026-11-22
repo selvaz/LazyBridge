@@ -1006,12 +1006,17 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 tool = tool_map.get(target)
                 if tool is None:
                     raise RuntimeError(f"Tool {target!r} not found")
-                task_str = env.task or env.text()
-                raw = await tool.run(
-                    **{"task": task_str}
-                    if "task" in tool.definition().parameters.get("properties", {})
-                    else _first_arg_kwargs(tool, task_str)
-                )
+                agent_target = getattr(tool, "agent_target", None)
+                if agent_target is not None:
+                    runner = getattr(agent_target, "_run_as_tool", agent_target.run)
+                    raw = await runner(env)
+                else:
+                    task_str = env.task or env.text()
+                    raw = await tool.run(
+                        **{"task": task_str}
+                        if "task" in tool.definition().parameters.get("properties", {})
+                        else _first_arg_kwargs(tool, task_str)
+                    )
                 # Preserve the inner Envelope (agent-as-tool) so metadata
                 # survives the step boundary; otherwise wrap the raw value.
                 if isinstance(raw, Envelope):
